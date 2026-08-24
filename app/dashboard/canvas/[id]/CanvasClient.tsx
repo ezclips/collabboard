@@ -96,6 +96,10 @@ import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowl
 import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
+import { KnowledgeSourceReferenceProvider } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import { buildKnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import type { KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
 import {
@@ -1592,6 +1596,29 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     return () => { cancelled = true; };
   }, [sourceReferenceScopeKey, sourceReferenceTargetKey, supabase]);
+
+  // ==========================================================================
+  // P6J-F6-B2 -- source navigation request (Note -> exact document/page)
+  // ==========================================================================
+  // A request is consumed at most once by the reader, so re-opening the same
+  // source needs a genuinely new id rather than a re-delivered old object.
+  const knowledgeSourceRequestIdRef = useRef(0);
+  const [knowledgeSourceOpenRequest, setKnowledgeSourceOpenRequest] =
+    useState<KnowledgeSourceOpenRequest | null>(null);
+
+  // A request belongs to the scope that produced it. Clearing on scope change
+  // is what stops an old board's source from opening inside a new one.
+  useEffect(() => {
+    setKnowledgeSourceOpenRequest(null);
+  }, [sourceReferenceScopeKey]);
+
+  const requestKnowledgeSourceOpen = useCallback((reference: SourceReference) => {
+    if (!sourceReferenceScopeKey) return;
+    knowledgeSourceRequestIdRef.current += 1;
+    setKnowledgeSourceOpenRequest(
+      buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference),
+    );
+  }, [sourceReferenceScopeKey]);
 
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
@@ -6670,6 +6697,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }
 
   return (
+    <KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId}>
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
@@ -6699,6 +6727,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
               onCreateNoteFromKnowledgePage={handleCreateNoteFromKnowledgePage}
+              knowledgeSourceOpenRequest={knowledgeSourceOpenRequest}
             />
           </div>
         )}
@@ -6723,6 +6752,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         />
 
         <CanvasModals
+          onOpenSourceReference={requestKnowledgeSourceOpen}
           isNoteEditorOpen={isNoteEditorOpen}
           setIsNoteEditorOpen={setIsNoteEditorOpen}
           isLinkEditorOpen={isLinkEditorOpen}
@@ -9361,6 +9391,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       {/* New Post Ghost Drag Element */}
       <GhostDragElement newPostDragState={newPostDragState} />
     </div >
+    </KnowledgeSourceReferenceProvider>
   );
   // === END RENDER REGION (JSX ONLY) ===
 }

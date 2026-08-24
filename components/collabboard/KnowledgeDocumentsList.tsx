@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import type { KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
@@ -28,6 +29,12 @@ export interface KnowledgeDocumentsListProps {
   onClose?: () => void;
   /** Forwarded verbatim to the page reader; absent when the viewer cannot create posts. */
   onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
+  /**
+   * P6J-F6-B2. A Note asking for its exact source. Handled at most once per
+   * requestId, so closing the modal and reopening it manually never replays
+   * the last source.
+   */
+  sourceOpenRequest?: KnowledgeSourceOpenRequest | null;
 }
 
 interface KnowledgeListEntry {
@@ -40,7 +47,14 @@ interface KnowledgeListEntry {
 
 type ListPhase = 'loading' | 'loaded' | 'error';
 
-interface KnowledgeDetailsState { entry: KnowledgeListEntry; pages: readonly KnowledgeDocumentDetailPage[]; loading: boolean; error: boolean; }
+interface KnowledgeDetailsState {
+  entry: KnowledgeListEntry;
+  pages: readonly KnowledgeDocumentDetailPage[];
+  loading: boolean;
+  error: boolean;
+  /** Navigation state only -- never written back to source_references. */
+  initialPageNumber?: number;
+}
 
 interface KnowledgeSearchResult { documentId: string; originalFilename: string; pageStart: number; pageEnd: number; text: string; }
 type SearchPhase = 'idle' | 'loading' | 'loaded' | 'error';
@@ -167,7 +181,7 @@ function subscribeToKnowledgeWarm(boardId: string): KnowledgeWarmSubscription {
  * No client-side role gating: whatever the server returns is rendered, so
  * read-only collaborators see the same list an editor does.
  */
-export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onCreateNoteFromPage }: KnowledgeDocumentsListProps) {
+export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onCreateNoteFromPage, sourceOpenRequest = null }: KnowledgeDocumentsListProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [phase, setPhase] = useState<ListPhase>('loading');
@@ -181,6 +195,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const warmReleaseRef = useRef<(() => void) | null>(null);
   const queuedSearchRef = useRef<string | null>(null);
   const executeSearchRef = useRef<(query: string) => void>(() => undefined);
+  const handledSourceRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!boardId) return;
@@ -312,21 +327,68 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     setSearchPhase('idle');
   };
 
-  const openDetails = async (entry: KnowledgeListEntry) => {
+  /**
+   * The document's own response is the better source of its display metadata
+   * than whatever the caller happened to hold: the pages endpoint already
+   * returns id, filename and page count, so opening by id alone is fully
+   * supported and a stale or synthesized entry gets corrected on arrival.
+   */
+  function hydrateEntry(entry: KnowledgeListEntry, value: unknown): KnowledgeListEntry {
+    if (!value || typeof value !== 'object') return entry;
+    const record = value as Record<string, unknown>;
+    // Identity is never overwritten from the payload -- the id we asked for is
+    // the id we show.
+    return {
+      ...entry,
+      originalFilename: typeof record.originalFilename === 'string' && record.originalFilename.length > 0
+        ? record.originalFilename
+        : entry.originalFilename,
+      pageCount: typeof record.pageCount === 'number' && Number.isInteger(record.pageCount) && record.pageCount > 0
+        ? record.pageCount
+        : entry.pageCount,
+    };
+  }
+
+  const openDetails = async (entry: KnowledgeListEntry, initialPageNumber?: number) => {
     if (!boardId) return;
-    setDetails({ entry, pages: [], loading: true, error: false });
+    setDetails({ entry, pages: [], loading: true, error: false, initialPageNumber });
     try {
       const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(entry.id)}/pages`);
-      const payload = await response.json().catch(() => null) as { pages?: unknown } | null;
+      const payload = await response.json().catch(() => null) as { pages?: unknown; document?: unknown } | null;
       if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('details unavailable');
       const pages = payload.pages.filter((page): page is KnowledgeDocumentDetailPage => (
         !!page && typeof page === 'object' && typeof (page as KnowledgeDocumentDetailPage).pageNumber === 'number' && typeof (page as KnowledgeDocumentDetailPage).text === 'string'
       ));
-      setDetails({ entry, pages, loading: false, error: false });
+      setDetails({ entry: hydrateEntry(entry, payload.document), pages, loading: false, error: false, initialPageNumber });
     } catch {
       setDetails((current) => current?.entry.id === entry.id ? { ...current, loading: false, error: true } : current);
     }
   };
+
+  /**
+   * Opens a source by DOCUMENT ID. Identity is the id and only the id: two
+   * sources can share a filename, so a name-based lookup would open the wrong
+   * document. A known list entry is reused when present purely to show a
+   * filename sooner; the request still decides which document loads.
+   */
+  const openDetailsByDocumentId = (documentId: string, initialPageNumber?: number) => {
+    const known = entries.find((candidate) => candidate.id === documentId);
+    void openDetails(
+      known ?? { id: documentId, originalFilename: '', pageCount: null, processingStatus: null, statusLabel: null },
+      initialPageNumber,
+    );
+  };
+
+  // Each requestId is acted on at most once. Without this latch, closing the
+  // modal and reopening it by hand would replay the last source the user
+  // clicked, which is not what reopening a library means.
+  useEffect(() => {
+    if (!boardId || !sourceOpenRequest) return;
+    if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;
+    handledSourceRequestRef.current = sourceOpenRequest.requestId;
+    openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId, sourceOpenRequest]);
 
   const closeSurface = () => {
     setDetails(null);
@@ -381,6 +443,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             pages={details.pages}
             loading={details.loading}
             error={details.error}
+            initialPageNumber={details.initialPageNumber}
             onBack={() => setDetails(null)}
             onCreateNoteFromPage={onCreateNoteFromPage}
           />

@@ -21,6 +21,9 @@ import DocumentCardContent from "./DocumentCardContent";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 import { IMAGE_CROP_TO_GRID_HEIGHT_PX } from "@/components/collabboard/canvas/engine/utils";
 import { useScrollbarLane } from "./useScrollbarLane";
+import { BookOpen } from "lucide-react";
+import { useKnowledgeSourceReferencesForPadlet } from "./KnowledgeSourceReferenceContext";
+import { knowledgeSourceCardLabel } from "@/lib/domain/knowledge/knowledgeSourceNavigation";
 
 type CellStyle = {
     bg?: string;
@@ -1085,6 +1088,35 @@ export default function PostCardContent({
                 }}
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(decodeHtmlEntities(rawContent || "")) }}
             />
+            <KnowledgeSourceMarker padletId={padlet.id} />
+        </div>
+    );
+}
+
+/**
+ * P6J-F6-B2 -- the card's provenance marker.
+ *
+ * Deliberately NON-INTERACTIVE. It lives inside the TEXT/DEFAULT wrapper's
+ * `pointer-events-none` region, which is load-bearing for canvas drag: making
+ * this clickable would swallow the drag gesture on every source-linked Note.
+ * The clickable affordance lives in the Note editor instead.
+ *
+ * Renders nothing when the Note has no references -- including when the
+ * reference read failed, since that yields an empty index.
+ */
+function KnowledgeSourceMarker({ padletId }: { padletId: string }) {
+    const references = useKnowledgeSourceReferencesForPadlet(padletId);
+    const label = knowledgeSourceCardLabel(references);
+    if (label === null) return null;
+
+    return (
+        <div
+            data-knowledge-source-marker="true"
+            className="mt-1.5 flex items-center gap-1 text-[10px] leading-none text-gray-400"
+            title={label}
+        >
+            <BookOpen className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{label}</span>
         </div>
     );
 }

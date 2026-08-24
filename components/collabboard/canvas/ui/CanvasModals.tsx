@@ -36,9 +36,17 @@ import {
   normalizeAIContent,
 } from '@/lib/ai/normalize-ai-content';
 import { toast } from 'sonner';
+import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
+import { useKnowledgeSourceReferencesForPadlet } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 export interface CanvasModalsProps {
+  /**
+   * P6J-F6-B2. The only source-navigation surface this component gets: it
+   * resolves the edited Note's references from the read-only context and
+   * forwards a click. No fetching, no Supabase, no persistence here.
+   */
+  onOpenSourceReference?: (reference: SourceReference) => void;
   // Editor open/close
   isNoteEditorOpen: boolean;
   setIsNoteEditorOpen: (v: boolean) => void;
@@ -137,7 +145,15 @@ export default function CanvasModals({
   handleDetachChildFromFreeformContainer,
   handleDeleteChildFromContainer,
   fetchData, updatePadletById,
+  onOpenSourceReference,
 }: CanvasModalsProps) {
+  // P6J-F6-B2 -- the edited Note's provenance, read from the board index.
+  // A brand-new Note has the sentinel id 'new' and no row yet, so it can
+  // never carry references; passing that sentinel through would key the
+  // lookup on a non-id.
+  const noteSourceReferences = useKnowledgeSourceReferencesForPadlet(
+    padletToEdit?.id && padletToEdit.id !== 'new' ? String(padletToEdit.id) : null,
+  );
   // Derive locked mode/subtype for regeneration — only lock when an existing
   // structured envelope is present (i.e. editing an existing AI card, not new).
   const existingAIContent = extractAIContentFromPadletMetadata(padletToEdit?.metadata);
@@ -204,6 +220,8 @@ export default function CanvasModals({
           initialCommentTitleStyle={padletToEdit?.metadata?.commentTitleStyle as any}
           currentUserId={user?.id || 'anon'}
           currentUserName={user?.email?.split('@')[0] || 'You'}
+          sourceReferences={noteSourceReferences}
+          onOpenSourceReference={onOpenSourceReference}
           onSave={saveNote}
         />
       </div>

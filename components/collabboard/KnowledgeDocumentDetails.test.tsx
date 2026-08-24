@@ -40,6 +40,35 @@ async function settle() {
   });
 }
 
+/** Mounts with explicit props so B2 can vary initialPageNumber/loading. */
+function mountWith(props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>>) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => {
+    root!.render(
+      <KnowledgeDocumentDetails
+        originalFilename="EMG_checklist.pdf"
+        pageCount={2}
+        pages={pages}
+        loading={false}
+        error={false}
+        onBack={vi.fn()}
+        {...props}
+      />,
+    );
+  });
+  return host!;
+}
+
+/** The page section a scrollIntoView call was made on, if any. */
+function scrolledPageNumbers(): string[] {
+  const calls = (HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock.instances ?? [];
+  return (calls as HTMLElement[])
+    .map((element) => element?.getAttribute?.('data-page-number'))
+    .filter((value): value is string => typeof value === 'string');
+}
+
 function setSearch(container: HTMLElement, value: string) {
   const input = container.querySelector('input[type="search"]') as HTMLInputElement;
   act(() => {
@@ -129,5 +158,109 @@ describe('KnowledgeDocumentDetails local text search', () => {
     const back = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
     act(() => back.click());
     expect(onBack).toHaveBeenCalledOnce();
+  });
+});
+
+// ============================================================================
+// P6J-F6-B2 -- opening the reader on an exact page
+// ============================================================================
+describe('KnowledgeDocumentDetails source page targeting', () => {
+  it('A: does not scroll anywhere when no page was requested', async () => {
+    mountWith({});
+    await settle();
+
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('B: scrolls the requested page into view', async () => {
+    const container = mountWith({ initialPageNumber: 2 });
+    await settle();
+
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    // The page that scrolled is the one that was asked for, not merely "a page".
+    expect(scrolledPageNumbers()).toContain('2');
+    expect(scrolledPageNumbers()).not.toContain('1');
+    expect(container.querySelector('[data-page-number="2"]')).not.toBeNull();
+  });
+
+  it('B2: targets page 1 as readily as any other', async () => {
+    mountWith({ initialPageNumber: 1 });
+    await settle();
+
+    expect(scrolledPageNumbers()).toEqual(['1']);
+  });
+
+  it('C: an out-of-range page neither throws nor scrolls something unrelated', async () => {
+    expect(() => mountWith({ initialPageNumber: 99 })).not.toThrow();
+    await settle();
+
+    // The reader still opened; it simply stayed where it was.
+    expect(host!.textContent).toContain('Page 1');
+    expect(scrolledPageNumbers()).toEqual([]);
+  });
+
+  it('C2: a page requested before the pages arrive is honoured once they do', async () => {
+    mountWith({ initialPageNumber: 2, pages: [], loading: true });
+    await settle();
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => {
+      root!.render(
+        <KnowledgeDocumentDetails
+          originalFilename="EMG_checklist.pdf"
+          pageCount={2}
+          pages={pages}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          initialPageNumber={2}
+        />,
+      );
+    });
+    await settle();
+
+    expect(scrolledPageNumbers()).toContain('2');
+  });
+
+  it('D: a multi-page reference targets its pageStart -- the caller passes only that', async () => {
+    // pageStart 1, pageEnd 2: the reader is told 1 and never interprets a range.
+    mountWith({ initialPageNumber: 1 });
+    await settle();
+
+    expect(scrolledPageNumbers()).toEqual(['1']);
+  });
+
+  it('E: an active search match stays authoritative over the source page', async () => {
+    const container = mountWith({ initialPageNumber: 1 });
+    await settle();
+    (HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    setSearch(container, 'second');
+    await settle();
+
+    // Search scrolls its own <mark>, and the page-target effect stands down
+    // rather than yanking the view back to page 1.
+    expect(container.querySelectorAll('mark')).toHaveLength(1);
+    expect(scrolledPageNumbers()).not.toContain('1');
+  });
+
+  it('E2: existing search navigation still works with no page requested', async () => {
+    const container = mountWith({});
+    setSearch(container, 'pdf');
+    await settle();
+
+    expect(container.textContent).toContain('3 matches');
+    expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
+  });
+
+  it('F: the page target is navigation only -- no fetch, no highlight, no geometry', async () => {
+    mountWith({ initialPageNumber: 2 });
+    await settle();
+
+    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    const source = fs.readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8');
+    for (const forbidden of ['charStart', 'charEnd', 'locator', 'bbox', 'quoteHash']) {
+      expect(source).not.toContain(forbidden);
+    }
   });
 });

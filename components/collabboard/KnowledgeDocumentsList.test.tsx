@@ -1197,3 +1197,191 @@ describe('P6J-F5 create Note from a source page', () => {
     expect(onCreate).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================================
+// P6J-F6-B2 -- opening a Note's exact source
+// ============================================================================
+// Identity is the document id throughout. Two sources can share a filename, so
+// a name-based lookup would open the wrong document.
+describe('P6J-F6-B2 source-open requests', () => {
+  const SOURCE_A = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const SOURCE_B = 'bbbbbbbb-2222-4222-8222-222222222222';
+
+  function pagesFor(documentId: string, originalFilename: string, pageCount = 3) {
+    return jsonResponse({
+      document: { id: documentId, originalFilename, pageCount },
+      pages: Array.from({ length: pageCount }, (_, index) => ({
+        pageNumber: index + 1,
+        text: `${originalFilename} body for page ${index + 1}`,
+      })),
+    });
+  }
+
+  function withDocuments(documents: unknown[], pageBodies: Record<string, Response | (() => Response)>) {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
+      const pageMatch = url.match(/\/knowledge\/([^/]+)\/pages$/);
+      if (pageMatch) {
+        const body = pageBodies[pageMatch[1]];
+        if (!body) return jsonResponse({ error: 'Not found' }, 404);
+        return typeof body === 'function' ? body() : body;
+      }
+      return jsonResponse({ documents });
+    });
+  }
+
+  async function renderWithRequest(request: unknown, documents: unknown[] = []) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <KnowledgeDocumentsList refreshToken={0} isOpen onClose={vi.fn()} sourceOpenRequest={request as never} />,
+      );
+    });
+    await settle();
+    return host!;
+  }
+
+  async function rerenderWithRequest(request: unknown, isOpen = true) {
+    await act(async () => {
+      root!.render(
+        <KnowledgeDocumentsList refreshToken={0} isOpen={isOpen} onClose={vi.fn()} sourceOpenRequest={request as never} />,
+      );
+    });
+    await settle();
+  }
+
+  function pageRequests() {
+    return fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => /\/pages$/.test(url));
+  }
+
+  it('A: opens the reader on the requested document id', async () => {
+    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
+
+    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 2, pageEnd: 2 });
+
+    expect(pageRequests()).toHaveLength(1);
+    expect(pageRequests()[0]).toBe(`/api/boards/${BOARD_ID}/knowledge/${SOURCE_A}/pages`);
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+  });
+
+  it('B: hands the reader the requested page as its scroll target', async () => {
+    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
+
+    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 3, pageEnd: 3 });
+
+    // The reader marks each page, and the target one is present to scroll to.
+    expect(container.querySelector('[data-page-number="3"]')).not.toBeNull();
+    expect(componentCode).toContain('initialPageNumber={details.initialPageNumber}');
+    expect(componentCode).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart)');
+  });
+
+  it('C: hydrates the header from the document the endpoint returned', async () => {
+    // Not in the board list at all: everything shown must come from the response.
+    withDocuments([], { [SOURCE_A]: pagesFor(SOURCE_A, 'Sammelmappe1.pdf', 4) });
+
+    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
+
+    expect(container.textContent).toContain('Sammelmappe1.pdf');
+    expect(container.textContent).toContain('4 pages');
+    // Never fabricated from the id.
+    expect(container.textContent).not.toContain(SOURCE_A);
+  });
+
+  it('D: two documents sharing a filename resolve by id, not by name', async () => {
+    withDocuments(
+      [doc({ id: SOURCE_A, originalFilename: 'Good.pdf' }), doc({ id: SOURCE_B, originalFilename: 'Good.pdf' })],
+      {
+        [SOURCE_A]: pagesFor(SOURCE_A, 'Good.pdf'),
+        [SOURCE_B]: pagesFor(SOURCE_B, 'Good.pdf'),
+      },
+    );
+
+    // Dispatch only AFTER the board list has loaded, so both same-named
+    // entries are present and an id-keyed lookup genuinely differs from a
+    // name-keyed one. Requesting before the list loads would resolve through
+    // the synthesized fallback and prove nothing.
+    const container = await renderWithRequest(null);
+    expect(container.textContent).toContain('Good.pdf');
+    await rerenderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_B, pageStart: 1, pageEnd: 1 });
+
+    // The requested id is the one fetched; the identical name never decides.
+    expect(pageRequests()).toEqual([`/api/boards/${BOARD_ID}/knowledge/${SOURCE_B}/pages`]);
+    expect(container.textContent).toContain('Good.pdf body for page 1');
+  });
+
+  it('E: a request is acted on once, not on every re-render', async () => {
+    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
+    const request = { requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 };
+
+    await renderWithRequest(request);
+    await rerenderWithRequest(request);
+    await rerenderWithRequest(request);
+
+    expect(pageRequests()).toHaveLength(1);
+  });
+
+  it('F: clicking the same source again opens it again under a new request id', async () => {
+    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: () => pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
+
+    await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
+    expect(pageRequests()).toHaveLength(1);
+
+    // Same document, same page -- only the id differs.
+    await rerenderWithRequest({ requestId: 2, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
+
+    expect(pageRequests()).toHaveLength(2);
+  });
+
+  it('G: reopening the modal by hand does not replay the last handled source', async () => {
+    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: () => pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
+    const request = { requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 };
+
+    await renderWithRequest(request);
+    expect(pageRequests()).toHaveLength(1);
+
+    // Close, then reopen with the same stale request object still in place.
+    await rerenderWithRequest(request, false);
+    await rerenderWithRequest(request, true);
+
+    expect(pageRequests()).toHaveLength(1);
+  });
+
+  it('H: with no request, the list behaves exactly as before', async () => {
+    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
+
+    const container = await renderWithRequest(null);
+
+    expect(pageRequests()).toHaveLength(0);
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    const view = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'View text');
+    expect(view).toBeDefined();
+
+    await act(async () => { view!.click(); });
+    await settle();
+    expect(pageRequests()).toEqual([`/api/boards/${BOARD_ID}/knowledge/${SOURCE_A}/pages`]);
+  });
+
+  it('I: a failed source document reuses the existing reader error state', async () => {
+    withDocuments([], { });
+
+    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
+
+    // No bespoke broken-citation modal, no throw.
+    expect(container.textContent).toContain('Extracted text unavailable.');
+  });
+
+  it('J: source opening adds no endpoint and no filename-keyed lookup', async () => {
+    // One pages endpoint, reused -- not a second fetch implementation.
+    expect((componentCode.match(/\/pages`\)/g) ?? []).length).toBe(1);
+    // The document lookup is keyed on id. A filename-keyed find would open the
+    // wrong one of two same-named sources.
+    expect(componentCode).toContain('const known = entries.find((candidate) => candidate.id === documentId)');
+    expect(componentCode).not.toMatch(/find\([^)]*originalFilename/);
+    expect(componentCode).not.toMatch(/filter\([^)]*originalFilename/);
+  });
+});

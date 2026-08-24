@@ -27,6 +27,12 @@ export interface KnowledgeDocumentDetailsProps {
    * capability the canvas toolbar itself is gated on decides this.
    */
   onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
+  /**
+   * P6J-F6-B2. Page-level navigation only -- scroll the page into view once,
+   * when the reader was opened from a Note's source. No highlight, no
+   * geometry, no char offsets.
+   */
+  initialPageNumber?: number;
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
@@ -96,10 +102,16 @@ export default function KnowledgeDocumentDetails({
   error,
   onBack,
   onCreateNoteFromPage,
+  initialPageNumber,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const activeMatchRef = useRef<HTMLElement | null>(null);
+  const pagesContainerRef = useRef<HTMLDivElement | null>(null);
+  // The source page is scrolled to once per request. Re-running it on every
+  // render would fight the search-match scroll below, which stays authoritative
+  // for whatever the reader is doing after arrival.
+  const scrolledToPageRef = useRef<number | null>(null);
   const matches = useMemo(() => findMatches(pages, query), [pages, query]);
   const pageSummary = pageCountSummary(pageCount, pages.length, loading);
 
@@ -110,6 +122,28 @@ export default function KnowledgeDocumentDetails({
   useEffect(() => {
     activeMatchRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [activeMatchIndex, matches]);
+
+  // A different request resets the latch so the same page can be targeted again.
+  useEffect(() => {
+    scrolledToPageRef.current = null;
+  }, [initialPageNumber]);
+
+  useEffect(() => {
+    // Integer-only, which is both a correctness check and what keeps the
+    // selector below free of anything that needs escaping.
+    if (initialPageNumber === undefined || !Number.isInteger(initialPageNumber)) return;
+    if (loading || pages.length === 0) return;
+    if (scrolledToPageRef.current === initialPageNumber) return;
+    // An active search is the more specific intent; let its own scroll win.
+    if (matches.length > 0) return;
+    const target = pagesContainerRef.current?.querySelector(
+      `[data-page-number="${initialPageNumber}"]`,
+    );
+    // A page the document does not have simply leaves the reader where it
+    // opened -- never an error, never a jump to an unrelated page.
+    scrolledToPageRef.current = initialPageNumber;
+    if (target instanceof HTMLElement) target.scrollIntoView?.({ block: 'start' });
+  }, [initialPageNumber, loading, pages, matches.length]);
 
   const moveMatch = (delta: number) => {
     if (matches.length === 0) return;
@@ -163,9 +197,9 @@ export default function KnowledgeDocumentDetails({
       ) : pages.length === 0 ? (
         <p className="text-[11px] text-gray-500">No extracted text available.</p>
       ) : (
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+        <div ref={pagesContainerRef} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
           {pages.map((page, pageIndex) => (
-            <section key={page.pageNumber}>
+            <section key={page.pageNumber} data-page-number={page.pageNumber}>
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <h3 className="text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
                 {onCreateNoteFromPage && documentId ? (

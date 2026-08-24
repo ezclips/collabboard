@@ -20,6 +20,11 @@ function sourceOf(relativePath: string): string {
 const canvasClient = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const postCardContent = sourceOf('components/collabboard/PostCardContent.tsx');
 const noteEditor = sourceOf('components/collabboard/editors/NoteEditor.tsx');
+const canvasModals = sourceOf('components/collabboard/canvas/ui/CanvasModals.tsx');
+const canvasSidebar = sourceOf('components/collabboard/canvas/ui/CanvasSidebar.tsx');
+const documentsList = sourceOf('components/collabboard/KnowledgeDocumentsList.tsx');
+const documentDetails = sourceOf('components/collabboard/KnowledgeDocumentDetails.tsx');
+const referenceContext = sourceOf('components/collabboard/KnowledgeSourceReferenceContext.tsx');
 
 /** A window starting at an anchor, failing loudly when the anchor is gone. */
 function after(source: string, anchor: string, count = 900): string {
@@ -309,6 +314,19 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
       expect(elseBranch).not.toContain('knowledgeReadGenerationRef');
     });
 
+    it('W: the scope-clear effect is declared BEFORE the reference-load effect', () => {
+      const clearDeps = canvasClient.indexOf('}, [sourceReferenceScopeKey]);');
+      const loadDeps = canvasClient.indexOf('}, [sourceReferenceScopeKey, sourceReferenceTargetKey, supabase]);');
+
+      expect(clearDeps).toBeGreaterThan(-1);
+      expect(loadDeps).toBeGreaterThan(-1);
+      // React runs effect bodies in declaration order. If these were swapped,
+      // the load would capture generation N and the clear would immediately
+      // bump to N+1, so every post-scope-change load would be discarded as
+      // stale and the index would never populate.
+      expect(clearDeps).toBeLessThan(loadDeps);
+    });
+
     it('V: no source-reference realtime subscription was introduced', () => {
       const block = readBlock();
       for (const forbidden of ['postgres_changes', '.channel(', 'removeChannel']) {
@@ -332,5 +350,191 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     // The index exists but is not handed to UI yet -- that is F6-B2.
     expect(canvasClient).not.toContain('sourceReferences={');
     expect(canvasClient).not.toContain('sourceReferencesByPadletId={');
+  });
+});
+
+// ============================================================================
+// P6J-F6-B2 -- visible provenance and source navigation
+// ============================================================================
+describe('P6J-F6-B2 source marker and navigation wiring', () => {
+  it('A: CanvasClient is still the only owner of the reference index', () => {
+    // The provider carries the owner's value; it never holds state of its own.
+    expect(canvasClient).toContain('<KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId}>');
+    expect(referenceContext).not.toContain('useState');
+    expect(referenceContext).not.toContain('listReferencesByTargetPadletIds');
+  });
+
+  it('B: the provider is read-only and reaches no data layer', () => {
+    for (const forbidden of ['fetch(', '@supabase', 'supabaseBrowser', 'getSupabaseAdmin', 'createClient(']) {
+      expect(referenceContext).not.toContain(forbidden);
+    }
+    // Reuses the existing domain accessor rather than re-deriving buckets.
+    expect(referenceContext).toContain('knowledgeSourceReferencesFor(index, padletId)');
+  });
+
+  it('C: PostCardContent reads the context and performs no read of its own', () => {
+    expect(postCardContent).toContain('useKnowledgeSourceReferencesForPadlet(padletId)');
+    expect(postCardContent).toContain('knowledgeSourceCardLabel(references)');
+    for (const forbidden of ['fetch(', '@supabase', 'listReferencesByTargetPadletIds', 'source_references']) {
+      expect(postCardContent).not.toContain(forbidden);
+    }
+  });
+
+  it('D: the card marker is non-interactive', () => {
+    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 900);
+
+    expect(marker).toContain('data-knowledge-source-marker="true"');
+    // No click surface of any kind: the clickable affordance is the editor's.
+    for (const forbidden of ['onClick', 'onPointerDown', 'onMouseDown', '<button', '<a ', 'pointer-events-auto', 'role="button"']) {
+      expect(marker).not.toContain(forbidden);
+    }
+  });
+
+  it('E: the marker renders inside the untouched pointer-events-none wrapper', () => {
+    const branch = after(postCardContent, '<div className="select-none pointer-events-none">', 1200);
+    const wrapper = branch.indexOf('<div className="select-none pointer-events-none">');
+    const marker = branch.indexOf('<KnowledgeSourceMarker padletId={padlet.id} />');
+
+    // The drag-critical wrapper still exists and still encloses the marker.
+    expect(wrapper).toBeGreaterThan(-1);
+    expect(marker).toBeGreaterThan(wrapper);
+    expect(branch.slice(wrapper, marker)).not.toContain('pointer-events-auto');
+  });
+
+  it('E2: nothing renders when the Note has no references', () => {
+    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 900);
+
+    // A failed reference read yields an empty index, so this is also the
+    // read-failure behaviour: no marker, no error.
+    expect(marker).toContain('if (label === null) return null;');
+  });
+
+  it('F: CanvasModals resolves the edited Note references, excluding a new Note', () => {
+    const resolve = after(canvasModals, 'const noteSourceReferences = useKnowledgeSourceReferencesForPadlet(', 320);
+
+    expect(resolve).toContain("padletToEdit?.id && padletToEdit.id !== 'new' ? String(padletToEdit.id) : null");
+    expect(canvasModals).toContain('sourceReferences={noteSourceReferences}');
+    expect(canvasModals).toContain('onOpenSourceReference={onOpenSourceReference}');
+  });
+
+  it('G: NoteEditor is presentational -- it never reads or writes provenance', () => {
+    expect(noteEditor).toContain('sourceReferences?: readonly SourceReference[];');
+    expect(noteEditor).toContain('onOpenSourceReference?: (reference: SourceReference) => void;');
+    for (const forbidden of ['fetch(', '@supabase', 'supabaseBrowser', 'source_references', 'listReferencesByTargetPadletId']) {
+      expect(noteEditor).not.toContain(forbidden);
+    }
+  });
+
+  it('G2: a source click only requests navigation', () => {
+    const control = after(noteEditor, 'data-knowledge-source-control="true"', 700);
+
+    expect(control).toContain('onOpenSourceReference?.(reference)');
+    // Never a save, a content change, or a close.
+    for (const forbidden of ['onSave', 'setTitle', 'setContent', 'onClose', 'handleSaveAndClose']) {
+      expect(control).not.toContain(forbidden);
+    }
+  });
+
+  it('G3: multiple references render one control each, keyed by reference id', () => {
+    const list = after(noteEditor, '{sourceReferences.length > 0 && (', 1400);
+
+    expect(list).toContain('sourceReferences.map((reference, index) =>');
+    // Row identity is the row id, so two citations of one document stay apart.
+    expect(list).toContain('key={reference.id}');
+    expect(list).toContain('knowledgeSourceEditorLabel(reference, index, sourceReferences.length)');
+  });
+
+  it('H: a source click becomes a request carrying document id and page range', () => {
+    const request = after(canvasClient, 'const requestKnowledgeSourceOpen = useCallback(', 520);
+
+    expect(request).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference)');
+    expect(canvasClient).toContain('onOpenSourceReference={requestKnowledgeSourceOpen}');
+  });
+
+  it('I: every click mints a new request id so the same source can reopen', () => {
+    const request = after(canvasClient, 'const requestKnowledgeSourceOpen = useCallback(', 520);
+    const bump = request.indexOf('knowledgeSourceRequestIdRef.current += 1;');
+    const build = request.indexOf('buildKnowledgeSourceOpenRequest(');
+
+    expect(bump).toBeGreaterThan(-1);
+    // Advanced before the request is built, so no two requests share an id.
+    expect(build).toBeGreaterThan(bump);
+  });
+
+  it('J: a request is refused and cleared outside the current board/auth scope', () => {
+    const request = after(canvasClient, 'const requestKnowledgeSourceOpen = useCallback(', 520);
+
+    expect(request).toContain('if (!sourceReferenceScopeKey) return;');
+    // The same hardened scope signal B1H clears the index on.
+    expect(canvasClient).toContain('setKnowledgeSourceOpenRequest(null);');
+    const clear = after(canvasClient, 'setKnowledgeSourceOpenRequest(null);', 120);
+    expect(clear).toContain('}, [sourceReferenceScopeKey]);');
+  });
+
+  it('K: CanvasSidebar still owns knowledgeOpen', () => {
+    expect(canvasSidebar).toContain('const [knowledgeOpen, setKnowledgeOpen] = useState(false);');
+    // The normal trigger is untouched; the request only opens the same modal.
+    expect(canvasSidebar).toContain('onClick={() => setKnowledgeOpen(true)}');
+    expect(canvasSidebar).toContain('if (knowledgeSourceOpenRequest) setKnowledgeOpen(true);');
+    expect(canvasClient).not.toContain('const [knowledgeOpen');
+  });
+
+  it('L: the reader opens by document id, once per request id', () => {
+    expect(documentsList).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart)');
+    expect(documentsList).toContain('const known = entries.find((candidate) => candidate.id === documentId)');
+    // Handled-once latch, so a manual reopen never replays a stale request.
+    expect(documentsList).toContain('if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;');
+    expect(documentsList).not.toMatch(/find\([^)]*originalFilename/);
+  });
+
+  it('M: the reader receives the page target and nothing finer', () => {
+    expect(documentsList).toContain('initialPageNumber={details.initialPageNumber}');
+    expect(documentDetails).toContain('initialPageNumber?: number;');
+    expect(documentDetails).toContain('data-page-number={page.pageNumber}');
+    // Page-level only: no highlight geometry anywhere in the reader.
+    for (const forbidden of ['charStart', 'charEnd', 'locator', 'bbox', 'quoteHash', 'quoteText']) {
+      expect(documentDetails).not.toContain(forbidden);
+    }
+  });
+
+  it('N: the scheduler is untouched and gains no marker', () => {
+    const scheduler = sourceOf('components/canvas/StandaloneSchedulerCanvas.tsx');
+
+    for (const forbidden of ['KnowledgeSourceMarker', 'useKnowledgeSourceReferencesForPadlet', 'knowledgeSourceCardLabel']) {
+      expect(scheduler).not.toContain(forbidden);
+    }
+  });
+
+  it('O: no source -> Note navigation was added anywhere', () => {
+    for (const source of [canvasClient, noteEditor, documentsList, documentDetails, referenceContext]) {
+      for (const forbidden of ['Used in Notes', 'listReferencesBySourceDocumentId', 'scrollToPadlet', 'centerOnPadlet']) {
+        expect(source).not.toContain(forbidden);
+      }
+    }
+    // openPadlet stays exactly the pre-existing share-link path (?openPadlet=id),
+    // untouched by B2 and never repurposed as a source backlink.
+    expect(canvasClient).toContain('if (!openPadletId || openPadletHandledRef.current || padlets.length === 0) return;');
+    expect(canvasClient).not.toContain('openPadletId={');
+  });
+
+  it('P: provenance still never reaches a padlet row or its metadata', () => {
+    const request = after(canvasClient, 'const requestKnowledgeSourceOpen = useCallback(', 520);
+
+    for (const forbidden of ['setPadlets(', 'metadata:', 'updatePadletById']) {
+      expect(request).not.toContain(forbidden);
+    }
+    for (const source of [postCardContent, noteEditor, referenceContext]) {
+      expect(source).not.toContain('sourceReferences:');
+    }
+  });
+
+  it('Q: B2 introduces no elevated authority and no new endpoint', () => {
+    for (const source of [postCardContent, noteEditor, canvasModals, canvasSidebar, referenceContext]) {
+      for (const forbidden of ['getSupabaseAdmin', 'service_role', 'SERVICE_ROLE', '@supabase/']) {
+        expect(source).not.toContain(forbidden);
+      }
+    }
+    // The reader still speaks only to the endpoints it already used.
+    expect((documentsList.match(/fetch\(/g) ?? []).length).toBe(4);
   });
 });

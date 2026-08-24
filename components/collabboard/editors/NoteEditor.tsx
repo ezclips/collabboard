@@ -9,7 +9,9 @@ import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
 import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
-import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
+import { Palette, PenTool, X, Strikethrough, Trash2, BookOpen } from 'lucide-react';
+import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
+import { knowledgeSourceEditorLabel } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import { ColorPickerContent } from '../ColorPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { contrastIconColor } from '../shells/CardShell';
@@ -108,6 +110,13 @@ interface NoteEditorProps {
   // convention as every other canonical caller (ClipartCardDraftModal.tsx,
   // FreeformPadletCards.tsx).
   accessMode?: CommentAccessMode;
+  /**
+   * P6J-F6-B2. Presentational only: resolved by CanvasModals from the board
+   * index and handed over already loaded. This editor never reads the
+   * database and never writes provenance.
+   */
+  sourceReferences?: readonly SourceReference[];
+  onOpenSourceReference?: (reference: SourceReference) => void;
 }
 
 // PATCH-152 §22.6 (Route D2): a stable module-level reference so an omitted
@@ -115,6 +124,8 @@ interface NoteEditorProps {
 // effect below compares this reference, and an unstable one would wipe
 // locally added detached comments on the very next render.
 const EMPTY_DETACHED_COMMENTS: NonNullable<NoteEditorProps['initialDetachedComments']> = [];
+/** Same stable-reference rule, for the source list. */
+const EMPTY_SOURCE_REFERENCES: readonly SourceReference[] = [];
 
 export default function NoteEditor({
   initialTitle = '',
@@ -131,6 +142,8 @@ export default function NoteEditor({
   onClose,
   isOpen,
   accessMode = 'manage',
+  sourceReferences = EMPTY_SOURCE_REFERENCES,
+  onOpenSourceReference,
 }: NoteEditorProps) {
   const panels = useShellPanels();
   const [title, setTitle] = useState(initialTitle);
@@ -857,6 +870,35 @@ export default function NoteEditor({
                         {emoji}
                       </span>
                     ))}
+                  </div>
+                )}
+
+                {/* P6J-F6-B2 -- clickable provenance. Navigation only: it never
+                    saves, edits, or closes the editor. Rows are keyed by
+                    reference id, so two citations of one document stay
+                    distinct. */}
+                {sourceReferences.length > 0 && (
+                  <div className="border-t border-gray-100 px-3 pt-1.5 pb-2">
+                    <div className="flex flex-col gap-0.5">
+                      {sourceReferences.map((reference, index) => (
+                        <button
+                          key={reference.id}
+                          type="button"
+                          data-knowledge-source-control="true"
+                          className="flex items-center gap-1 rounded px-0.5 py-0.5 text-left text-[11px] leading-none text-blue-700 hover:bg-blue-50 hover:text-blue-900"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onOpenSourceReference?.(reference);
+                          }}
+                        >
+                          <BookOpen className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">
+                            {knowledgeSourceEditorLabel(reference, index, sourceReferences.length)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

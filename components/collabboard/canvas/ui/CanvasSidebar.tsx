@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MoreVertical } from 'lucide-react';
 import KnowledgeDocumentsList from '@/components/collabboard/KnowledgeDocumentsList';
 import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import type { KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +55,12 @@ interface CanvasSidebarProps {
    * request; the canvas controller owns placement and every write.
    */
   onCreateNoteFromKnowledgePage?: (request: KnowledgeSourcePageRequest) => void;
+  /**
+   * P6J-F6-B2. A Note's source affordance asks to open the Knowledge reader
+   * on an exact document/page. The sidebar still owns `knowledgeOpen`; this
+   * only opens it and forwards the request.
+   */
+  knowledgeSourceOpenRequest?: KnowledgeSourceOpenRequest | null;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -81,6 +88,7 @@ export default function CanvasSidebar({
   handleToolClick,
   onBack,
   onCreateNoteFromKnowledgePage,
+  knowledgeSourceOpenRequest = null,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -96,6 +104,12 @@ export default function CanvasSidebar({
   // Bumped by the uploader so the read surface refetches instead of polling.
   const [knowledgeRefreshToken, setKnowledgeRefreshToken] = useState(0);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+
+  // Opening is all this does: KnowledgeDocumentsList decides whether the
+  // request is new, so a stale one can never re-open the reader by itself.
+  useEffect(() => {
+    if (knowledgeSourceOpenRequest) setKnowledgeOpen(true);
+  }, [knowledgeSourceOpenRequest]);
   // The tool an overflow item selected, dispatched only once the dropdown has
   // finished closing (see onCloseAutoFocus below).
   const pendingToolRef = useRef<string | null>(null);
@@ -268,6 +282,7 @@ export default function CanvasSidebar({
       <KnowledgePdfUploader ref={knowledgePdfUploaderRef} onKnowledgeChanged={handleKnowledgeChanged} />
       <KnowledgeDocumentsList
         refreshToken={knowledgeRefreshToken}
+        sourceOpenRequest={knowledgeSourceOpenRequest}
         isOpen={knowledgeOpen}
         onClose={() => setKnowledgeOpen(false)}
         onCreateNoteFromPage={onCreateNoteFromKnowledgePage
