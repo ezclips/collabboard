@@ -100,13 +100,6 @@ function publicResults(results: readonly { similarity: number; chunkId: string; 
   return results.map(({ similarity: _similarity, ...result }) => result);
 }
 
-function logSimilarityDiagnostic(results: readonly { similarity: number }[]): void {
-  console.info('[KNOWLEDGE-SEARCH-SIMILARITY]', {
-    resultCount: results.length,
-    results: results.map((result, index) => ({ rank: index + 1, similarity: result.similarity })),
-  });
-}
-
 export function createKnowledgeQueryService(dependencies: KnowledgeQueryServiceDependencies) {
   const rateLimiter = dependencies.rateLimiter ?? new InMemoryKnowledgeQueryRateLimiter();
   return async function handleKnowledgeQuery(
@@ -139,7 +132,6 @@ export function createKnowledgeQueryService(dependencies: KnowledgeQueryServiceD
         limit: Math.min(body.limit ?? DEFAULT_LIMIT, MAX_LIMIT),
         minSimilarity: MIN_SIMILARITY,
       });
-      logSimilarityDiagnostic(results);
       return { status: 200, body: { results: publicResults(results) } };
     } catch { return response(503, 'service_unavailable'); }
   };
