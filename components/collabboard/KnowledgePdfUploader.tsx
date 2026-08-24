@@ -48,6 +48,7 @@ type UploadNotice = {
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_ATTEMPTS = 60;
+const SUCCESS_NOTICE_MS = 5_000;
 
 function apiPath(boardId: string) {
   return `/api/boards/${encodeURIComponent(boardId)}/knowledge`;
@@ -198,6 +199,18 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
   }), [busy]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  /**
+   * Only terminal success self-dismisses; info still means work in flight and
+   * error is the one thing worth leaving on screen. Keying on the notice object
+   * makes staleness structurally impossible: replacing a notice runs this
+   * cleanup first, so a superseded timer is cleared before it can fire.
+   */
+  useEffect(() => {
+    if (notice?.tone !== 'success') return;
+    const timeout = window.setTimeout(() => setNotice(null), SUCCESS_NOTICE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
 
   const handleFile = async (file: File) => {
     if (!boardId || busy) return;

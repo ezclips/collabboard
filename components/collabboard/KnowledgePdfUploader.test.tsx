@@ -238,3 +238,160 @@ describe('P6D upload notifies the Knowledge read surface', () => {
     await act(async () => root.unmount());
   });
 });
+
+// P6J-D2: only a terminal success self-dismisses. Info still means work is in
+// flight and error is the one outcome worth leaving on screen, so both must
+// survive the success window.
+describe('P6J-D2 completed upload notice auto-dismiss', () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    originalFetch = globalThis.fetch;
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalThis.fetch = originalFetch;
+  });
+
+  function uploadedPayload() {
+    return jsonResponse({
+      id: DOCUMENT_ID,
+      boardId: BOARD_ID,
+      originalFilename: 'lesson.pdf',
+      processingStatus: 'uploaded',
+    }, 201);
+  }
+
+  function notice(host: HTMLElement) {
+    return host.querySelector('[data-knowledge-pdf-status]');
+  }
+
+  async function advance(ms: number) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  }
+
+  async function mountAndUpload(respond: (init?: RequestInit) => Promise<Response>) {
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => respond(init)) as unknown as typeof globalThis.fetch;
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => { root.render(<KnowledgePdfUploader />); });
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await advance(0);
+    return { host, root, input };
+  }
+
+  function terminal(status: 'ready' | 'failed' | 'processing') {
+    return async (init?: RequestInit) => (init?.method === 'POST'
+      ? uploadedPayload()
+      : jsonResponse({ documents: [summary(status)] }));
+  }
+
+  it('shows the ready notice immediately and clears it at exactly 5000ms', async () => {
+    const { host, root } = await mountAndUpload(terminal('ready'));
+
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('success');
+    expect(notice(host)?.textContent).toContain('lesson.pdf is ready.');
+
+    await advance(4_999);
+    expect(notice(host)).not.toBeNull();
+
+    await advance(1);
+    expect(notice(host)).toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
+  it('clears the background-processing success notice at 5000ms', async () => {
+    const { host, root } = await mountAndUpload(terminal('processing'));
+
+    // 60 attempts at a 2s interval means 59 waits before polling gives up.
+    await advance(59 * 2_000);
+    await advance(0);
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('success');
+    expect(notice(host)?.textContent).toContain('Processing is continuing in the background.');
+
+    await advance(4_999);
+    expect(notice(host)).not.toBeNull();
+
+    await advance(1);
+    expect(notice(host)).toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
+  it('keeps the processing failure notice beyond the success window', async () => {
+    const { host, root } = await mountAndUpload(terminal('failed'));
+
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('error');
+
+    await advance(10_000);
+
+    expect(notice(host)).not.toBeNull();
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('error');
+    expect(notice(host)?.textContent).toContain('Processing lesson.pdf failed.');
+
+    await act(async () => root.unmount());
+  });
+
+  it('keeps the in-flight processing notice beyond the success window', async () => {
+    const { host, root } = await mountAndUpload(terminal('processing'));
+
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('info');
+    expect(notice(host)?.textContent).toContain('Processing lesson.pdf…');
+
+    await advance(10_000);
+
+    expect(notice(host)).not.toBeNull();
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('info');
+    expect(notice(host)?.textContent).toContain('Processing lesson.pdf…');
+
+    await act(async () => root.unmount());
+  });
+
+  it('does not let an expiring success timer clear a newer notice', async () => {
+    let stallUpload = false;
+    const never = new Promise<Response>(() => undefined);
+    const { host, root, input } = await mountAndUpload(async (init) => {
+      if (init?.method === 'POST') return stallUpload ? never : uploadedPayload();
+      return jsonResponse({ documents: [summary('ready')] });
+    });
+    expect(notice(host)?.textContent).toContain('lesson.pdf is ready.');
+
+    await advance(3_000);
+    stallUpload = true;
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('info');
+
+    // Past the first notice's original 5000ms expiry.
+    await advance(3_000);
+
+    expect(notice(host)).not.toBeNull();
+    expect(notice(host)?.getAttribute('data-knowledge-pdf-status')).toBe('info');
+
+    await act(async () => root.unmount());
+  });
+
+  it('cancels the pending success timer on unmount', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { host, root } = await mountAndUpload(terminal('ready'));
+      expect(notice(host)).not.toBeNull();
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      await act(async () => root.unmount());
+
+      expect(vi.getTimerCount()).toBe(0);
+      await advance(10_000);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
