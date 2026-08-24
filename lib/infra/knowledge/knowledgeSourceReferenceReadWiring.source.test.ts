@@ -29,7 +29,7 @@ function after(source: string, anchor: string, count = 900): string {
 }
 
 const REFERENCE_STATE = 'const [sourceReferencesByPadletId, setSourceReferencesByPadletId] =';
-const readBlock = () => after(canvasClient, REFERENCE_STATE, 3000);
+const readBlock = () => after(canvasClient, REFERENCE_STATE, 4200);
 const persistBlock = () => after(canvasClient, 'const persistKnowledgeSourceReference = useCallback(async (', 2400);
 
 describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
@@ -76,15 +76,15 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     }
   });
 
-  it('F: the read waits for a resolved session before asking', () => {
+  it('F: the read waits for a resolved, authenticated, board-scoped session', () => {
     const block = readBlock();
-    const gate = block.indexOf('if (!sessionReady) return;');
+    const gate = block.indexOf('if (!sourceReferenceScopeKey) return;');
     const request = block.indexOf('listReferencesByTargetPadletIds');
 
     expect(gate).toBeGreaterThan(-1);
-    // The gate precedes the request, and the effect re-runs when it resolves.
+    // The gate precedes the request, and the effect re-runs when scope resolves.
     expect(request).toBeGreaterThan(gate);
-    expect(block).toContain('}, [sessionReady, sourceReferenceTargetKey, supabase]);');
+    expect(block).toContain('}, [sourceReferenceScopeKey, sourceReferenceTargetKey, supabase]);');
   });
 
   it('G: the trigger is a stable id-set key, not full padlet object identity', () => {
@@ -111,11 +111,14 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
   it('H: a stale in-flight result cannot overwrite a newer post set', () => {
     const block = readBlock();
     const request = block.indexOf('await reader.listReferencesByTargetPadletIds');
-    const guard = block.indexOf('if (cancelled) return;');
+    const guard = block.indexOf('if (isStale()) return;');
     const commit = block.indexOf('setSourceReferencesByPadletId(buildKnowledgeSourceReferenceIndex(result.value))');
 
     expect(block).toContain('let cancelled = false;');
     expect(block).toContain('return () => { cancelled = true; };');
+    // Cancellation is one of the two staleness reasons -- see the B1H suite
+    // below for the mutation-generation half.
+    expect(block).toContain('cancelled || startedAtMutation !== knowledgeReadGenerationRef.current');
     // The guard sits between awaiting the result and committing it.
     expect(guard).toBeGreaterThan(request);
     expect(commit).toBeGreaterThan(guard);
@@ -197,7 +200,122 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     }
     expect(persistBlock()).not.toContain('setPadlets(');
     // The index is transient read state, held only in this one hook.
-    expect((canvasClient.match(/setSourceReferencesByPadletId\(/g) ?? []).length).toBe(5);
+    // Empty-target clear, failure clear, load commit, catch clear, scope clear,
+    // and the optimistic upsert.
+    expect((canvasClient.match(/setSourceReferencesByPadletId\(/g) ?? []).length).toBe(6);
+  });
+
+  // ==========================================================================
+  // P6J-F6-B1H -- scope clearing, no anonymous read, optimistic-race guard
+  // ==========================================================================
+  describe('hardened lifecycle', () => {
+    const scopeKey = () => after(canvasClient, 'const sourceReferenceScopeKey =', 260);
+    const clearEffect = () => after(canvasClient, 'const knowledgeReadGenerationRef = useRef(0);', 420);
+
+    it('N: scope is board identity AND authenticated user identity together', () => {
+      const scope = scopeKey();
+
+      // Both halves, and only when the session has actually resolved.
+      expect(scope).toContain('sessionReady && canvasId && user?.id');
+      expect(scope).toContain('`${canvasId}:${user.id}`');
+      // Null scope is what the load gate refuses on.
+      expect(scope).toContain(': null;');
+    });
+
+    it('O: a resolved-but-signed-out session yields no scope, so no query', () => {
+      const block = readBlock();
+      const gate = block.indexOf('if (!sourceReferenceScopeKey) return;');
+      const request = block.indexOf('await reader.listReferencesByTargetPadletIds');
+
+      // Without a user id the scope key is null and the effect returns before
+      // constructing a reader at all -- no anonymous read is ever issued.
+      expect(gate).toBeGreaterThan(-1);
+      expect(block.indexOf('new SupabaseKnowledgeSourceReferenceReader(')).toBeGreaterThan(gate);
+      expect(request).toBeGreaterThan(gate);
+      // The old latched-forever gate must not be what guards this.
+      expect(block).not.toContain('if (!sessionReady) return;');
+    });
+
+    it('P: a scope change clears the index in its own effect', () => {
+      const clear = clearEffect();
+
+      expect(clear).toContain('setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX)');
+      // Keyed on the scope itself, so a board switch or a user switch clears --
+      // never on a coincidental padlet-id difference.
+      expect(clear).toContain('}, [sourceReferenceScopeKey]);');
+    });
+
+    it('Q: the same scope change also retires any request already in flight', () => {
+      const clear = clearEffect();
+      const bump = clear.indexOf('knowledgeReadGenerationRef.current += 1;');
+      const wipe = clear.indexOf('setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX)');
+
+      expect(bump).toBeGreaterThan(-1);
+      // Bumped with the clear, so an old-scope load cannot re-populate after it.
+      expect(wipe).toBeGreaterThan(bump);
+      expect(canvasClient).toContain('const knowledgeReadGenerationRef = useRef(0);');
+    });
+
+    it('R: a load captures the mutation generation BEFORE awaiting', () => {
+      const block = readBlock();
+      const capture = block.indexOf('const startedAtMutation = knowledgeReadGenerationRef.current;');
+      const request = block.indexOf('await reader.listReferencesByTargetPadletIds');
+
+      expect(capture).toBeGreaterThan(-1);
+      // Captured at effect-run time, which is strictly before the request.
+      expect(capture).toBeLessThan(request);
+      expect(block).toContain('const isStale = () => cancelled || startedAtMutation !== knowledgeReadGenerationRef.current;');
+    });
+
+    it('S: the captured generation is re-checked before the index is replaced', () => {
+      const block = readBlock();
+      const request = block.indexOf('await reader.listReferencesByTargetPadletIds');
+      const check = block.indexOf('if (isStale()) return;');
+      const commit = block.indexOf('setSourceReferencesByPadletId(buildKnowledgeSourceReferenceIndex(result.value))');
+      const failureClear = block.indexOf('console.warn(\'Knowledge source references unavailable:');
+
+      // Between awaiting and committing -- both the success and failure paths.
+      expect(check).toBeGreaterThan(request);
+      expect(commit).toBeGreaterThan(check);
+      expect(failureClear).toBeGreaterThan(check);
+      // The unexpected-throw fallback is guarded by the same predicate, so it
+      // cannot wipe an optimistic upsert either.
+      expect(block).toContain('if (!isStale()) setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);');
+    });
+
+    it('T: a successful write advances the generation before it upserts', () => {
+      const block = persistBlock();
+      const okGate = block.indexOf('if (!response.ok) throw new Error(');
+      const bump = block.indexOf('knowledgeReadGenerationRef.current += 1;');
+      const upsert = block.indexOf('upsertKnowledgeSourceReference(current, created)');
+
+      // Only inside the `if (created)` success branch, after the 2xx gate.
+      expect(bump).toBeGreaterThan(okGate);
+      expect(bump).toBeGreaterThan(block.indexOf('if (created) {'));
+      // Advanced FIRST: an in-flight load whose snapshot predates this row is
+      // invalidated before the row is added, so it cannot commit over it.
+      expect(bump).toBeLessThan(upsert);
+    });
+
+    it('U: the generation is advanced only by a real local mutation', () => {
+      // Two sites total: the scope clear and the successful-write upsert.
+      // Anything else advancing it would silently discard valid loads.
+      expect((canvasClient.match(/knowledgeReadGenerationRef\.current \+= 1;/g) ?? []).length).toBe(2);
+      const failure = persistBlock().slice(persistBlock().indexOf('} catch (err) {'));
+      expect(failure).not.toContain('knowledgeReadGenerationRef');
+      // The unparseable-2xx branch does not advance it either: nothing was
+      // added locally, so an in-flight load is still valid.
+      const elseBranch = persistBlock().slice(persistBlock().indexOf('} else {'), persistBlock().indexOf('} catch (err) {'));
+      expect(elseBranch).not.toContain('knowledgeReadGenerationRef');
+    });
+
+    it('V: no source-reference realtime subscription was introduced', () => {
+      const block = readBlock();
+      for (const forbidden of ['postgres_changes', '.channel(', 'removeChannel']) {
+        expect(block).not.toContain(forbidden);
+      }
+      expect(canvasClient).not.toContain("table: 'source_references'");
+    });
   });
 
   it('M: B1 adds no read or fetch to any card or editor UI', () => {

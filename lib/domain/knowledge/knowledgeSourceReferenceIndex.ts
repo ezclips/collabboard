@@ -19,7 +19,7 @@ export type KnowledgeSourceReferenceIndex = ReadonlyMap<string, readonly SourceR
  * then `id`. Re-applying it locally means an optimistically inserted reference
  * lands where a reload would have put it, instead of merely at the end.
  */
-function compareReferences(a: SourceReference, b: SourceReference): number {
+export function compareKnowledgeSourceReferences(a: SourceReference, b: SourceReference): number {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
   if (a.id !== b.id) return a.id < b.id ? -1 : 1;
   return 0;
@@ -43,7 +43,7 @@ export function buildKnowledgeSourceReferenceIndex(
     else index.set(key, [reference]);
   }
 
-  for (const bucket of index.values()) bucket.sort(compareReferences);
+  for (const bucket of index.values()) bucket.sort(compareKnowledgeSourceReferences);
 
   return index;
 }
@@ -69,7 +69,7 @@ export function upsertKnowledgeSourceReference(
   const bucket = (replaced
     ? existing.map((current) => (current.id === reference.id ? reference : current))
     : [...existing, reference]
-  ).sort(compareReferences);
+  ).sort(compareKnowledgeSourceReferences);
 
   const next = new Map(index);
   next.set(key, bucket);
@@ -114,6 +114,11 @@ export function parseKnowledgeSourceReference(value: unknown): SourceReference |
 
   if (!id || !targetPadletId || !sourceDocumentId || !createdAt) return null;
   if (pageStart === null || pageEnd === null) return null;
+  // The same minimum range invariants the write command checks before insert
+  // and the table's CHECK constraints hold afterwards. A citation cannot begin
+  // before page 1 or end before it started, so a payload claiming otherwise is
+  // not a reference this index will carry into a badge.
+  if (pageStart < 1 || pageEnd < pageStart) return null;
 
   return {
     id: asSourceReferenceId(id),

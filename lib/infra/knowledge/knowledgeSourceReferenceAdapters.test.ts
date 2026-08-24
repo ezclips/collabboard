@@ -61,6 +61,37 @@ function setup(result: { data: unknown[] | null; error: unknown } | Error) {
   return { reader: new SupabaseKnowledgeSourceReferenceReader(client), calls, client, table, query };
 }
 
+/**
+ * Same recorder, but each successive query resolves with the next result, so a
+ * chunked read can be given a different outcome per chunk. The last entry
+ * repeats if more queries are issued than results were supplied.
+ */
+function setupSequence(results: Array<{ data: unknown[] | null; error: unknown }>) {
+  const calls = {
+    select: [] as string[],
+    eq: [] as Array<[string, string]>,
+    in: [] as Array<[string, readonly string[]]>,
+    order: [] as Array<[string, { ascending: boolean }]>,
+    from: [] as string[],
+  };
+  let issued = 0;
+  const query = {
+    eq: vi.fn((column: string, value: string) => { calls.eq.push([column, value]); return query; }),
+    in: vi.fn((column: string, values: readonly string[]) => { calls.in.push([column, values]); return query; }),
+    order: vi.fn((column: string, options: { ascending: boolean }) => { calls.order.push([column, options]); return query; }),
+    then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => {
+      const result = results[Math.min(issued, results.length - 1)];
+      issued += 1;
+      return Promise.resolve(result).then(resolve, reject);
+    },
+  };
+  const table = { select: vi.fn((columns: string) => { calls.select.push(columns); return query; }) };
+  const client = {
+    from: vi.fn((name: string) => { calls.from.push(name); return table; }),
+  } as unknown as KnowledgeSourceReferenceSupabaseClient;
+  return { reader: new SupabaseKnowledgeSourceReferenceReader(client), calls, client };
+}
+
 describe('P6J-F3 Supabase source reference reader', () => {
   it('selects the source reference projection from source_references only', async () => {
     const state = setup({ data: [row()], error: null });
@@ -239,6 +270,115 @@ describe('P6J-F6 batch source reference read', () => {
     expect(state.calls.select).toHaveLength(1);
     expect(state.calls.in).toHaveLength(1);
     expect(state.calls.in[0]).toEqual(['target_padlet_id', targets]);
+  });
+
+  // ==========================================================================
+  // P6J-F6-B1H -- bounded transport
+  // ==========================================================================
+  // PostgREST encodes `.in(...)` into the GET query string, so the id list is
+  // chunked. The invariant is no longer "one query" but "a bounded number of
+  // queries, never one per Note".
+  describe('bounded chunking', () => {
+    const ids = (count: number) => Array.from(
+      { length: count },
+      (_, index) => `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`,
+    );
+
+    it.each([
+      [0, 0], [1, 1], [50, 1], [100, 1], [101, 2], [200, 2], [201, 3], [300, 3],
+    ])('issues %i queries worth of requests for %i unique targets', async (count, expectedQueries) => {
+      const state = setup({ data: [], error: null });
+
+      await state.reader.listReferencesByTargetPadletIds(ids(count).map(asPostId));
+
+      expect(state.calls.in).toHaveLength(expectedQueries);
+      expect(state.calls.from).toHaveLength(expectedQueries);
+      // Bounded, not per-Note: 300 targets cost 3 requests, not 300.
+      expect(state.calls.eq).toEqual([]);
+    });
+
+    it('keeps every chunk within the transport bound and every id exactly once', async () => {
+      const state = setup({ data: [], error: null });
+      const targets = ids(250);
+
+      await state.reader.listReferencesByTargetPadletIds(targets.map(asPostId));
+
+      const sent = state.calls.in.flatMap(([, chunk]) => chunk);
+      for (const [column, chunk] of state.calls.in) {
+        expect(column).toBe('target_padlet_id');
+        expect(chunk.length).toBeLessThanOrEqual(100);
+        expect(chunk.length).toBeGreaterThan(0);
+      }
+      // No id dropped, none asked for twice.
+      expect(sent).toHaveLength(250);
+      expect(new Set(sent).size).toBe(250);
+      expect([...sent].sort()).toEqual([...targets].sort());
+    });
+
+    it('deduplicates before chunking rather than after', async () => {
+      const state = setup({ data: [], error: null });
+      // 150 slots, but only 75 distinct targets: one chunk, not two.
+      const distinct = ids(75);
+
+      await state.reader.listReferencesByTargetPadletIds([...distinct, ...distinct].map(asPostId));
+
+      expect(state.calls.in).toHaveLength(1);
+      expect(state.calls.in[0][1]).toHaveLength(75);
+    });
+
+    it('orders globally across chunks, not merely within each one', async () => {
+      // The second chunk carries a row older than anything in the first.
+      const state = setupSequence([
+        { data: [row({ id: 'reference-2', created_at: '2026-08-24T10:00:00.000Z' })], error: null },
+        { data: [row({ id: 'reference-1', created_at: '2026-08-24T09:00:00.000Z' })], error: null },
+      ]);
+
+      const result = await state.reader.listReferencesByTargetPadletIds(ids(150).map(asPostId));
+
+      expect(state.calls.in).toHaveLength(2);
+      expect(result.ok && result.value.map((reference) => reference.id)).toEqual(['reference-1', 'reference-2']);
+    });
+
+    it('breaks ties by id across chunks too', async () => {
+      const sameInstant = '2026-08-24T09:00:00.000Z';
+      const state = setupSequence([
+        { data: [row({ id: 'reference-b', created_at: sameInstant })], error: null },
+        { data: [row({ id: 'reference-a', created_at: sameInstant })], error: null },
+      ]);
+
+      const result = await state.reader.listReferencesByTargetPadletIds(ids(150).map(asPostId));
+
+      expect(result.ok && result.value.map((reference) => reference.id)).toEqual(['reference-a', 'reference-b']);
+    });
+
+    it('fails whole rather than partial when a later chunk errors, and stops there', async () => {
+      const state = setupSequence([
+        { data: [row({ id: 'reference-1' })], error: null },
+        { data: null, error: { code: '42501', message: 'permission denied for table source_references' } },
+        { data: [row({ id: 'reference-3' })], error: null },
+      ]);
+
+      const result = await state.reader.listReferencesByTargetPadletIds(ids(250).map(asPostId));
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.error.code).toBe('unavailable');
+      expect(result.ok === false && result.error.message).toBe('Could not read the source references');
+      expect(result.ok === false && result.error.message).not.toContain('permission denied');
+      // The third chunk is never requested: sequential, early stop.
+      expect(state.calls.in).toHaveLength(2);
+    });
+
+    it('surfaces no rows at all from the chunks that had already succeeded', async () => {
+      const state = setupSequence([
+        { data: [row({ id: 'reference-1' })], error: null },
+        { data: null, error: { code: '08006', message: 'connection failure' } },
+      ]);
+
+      const result = await state.reader.listReferencesByTargetPadletIds(ids(150).map(asPostId));
+
+      // A partial list would render as "these Notes have no sources".
+      expect(result.ok).toBe(false);
+    });
   });
 
   it('collapses duplicate target ids before building the filter', async () => {

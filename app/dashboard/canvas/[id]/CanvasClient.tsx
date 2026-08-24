@@ -1527,9 +1527,32 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     [padlets],
   );
 
+  // Provenance belongs to one board, read by one signed-in user. Both halves
+  // are the scope. `sessionReady` alone is not enough: it latches true on first
+  // resolution and stays true through a sign-out, so gating on it would let a
+  // signed-out page keep the previous user's references and issue anonymous
+  // reads that can only ever return nothing.
+  const sourceReferenceScopeKey = sessionReady && canvasId && user?.id
+    ? `${canvasId}:${user.id}`
+    : null;
+
+  // Counts local reference mutations. A batch load that began before the most
+  // recent successful write is stale even though nothing cancelled it: its
+  // snapshot predates a row we already know exists, so committing it would drop
+  // the just-created reference until the next reload.
+  const knowledgeReadGenerationRef = useRef(0);
+
+  // Clearing is its own effect so it happens ON the scope change rather than
+  // whenever the next load happens to resolve. Bumping the generation in the
+  // same pass retires any request still in flight for the old scope.
   useEffect(() => {
-    // An unresolved session would read as an anonymous user and see nothing.
-    if (!sessionReady) return;
+    knowledgeReadGenerationRef.current += 1;
+    setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
+  }, [sourceReferenceScopeKey]);
+
+  useEffect(() => {
+    // No scope, no read: session unresolved, signed out, or no board.
+    if (!sourceReferenceScopeKey) return;
 
     const targetIds = sourceReferenceTargetKey.length > 0 ? sourceReferenceTargetKey.split(',') : [];
     if (targetIds.length === 0) {
@@ -1538,16 +1561,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     let cancelled = false;
+    const startedAtMutation = knowledgeReadGenerationRef.current;
+    // Stale two ways: the scope moved on, or a newer local write already added
+    // a row this snapshot never saw.
+    const isStale = () => cancelled || startedAtMutation !== knowledgeReadGenerationRef.current;
+
     const load = async () => {
       const reader = new SupabaseKnowledgeSourceReferenceReader(
         // The board's own authenticated browser client. No admin client, no
         // service role: RLS stays the read boundary.
         supabase as unknown as KnowledgeSourceReferenceSupabaseClient,
       );
-      // ONE query for the whole board, never one per Note.
+      // Bounded batched reads for the whole board -- never one per Note.
       const result = await reader.listReferencesByTargetPadletIds(targetIds.map(asPostId));
-      // A slower earlier request must not overwrite a newer post set.
-      if (cancelled) return;
+      if (isStale()) return;
       if (!result.ok) {
         // Provenance is supplementary UI: a failed read costs badges, not the
         // board. No toast, no throw, and only the stable developer-facing
@@ -1560,11 +1587,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
 
     void load().catch(() => {
-      if (!cancelled) setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
+      if (!isStale()) setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
     });
 
     return () => { cancelled = true; };
-  }, [sessionReady, sourceReferenceTargetKey, supabase]);
+  }, [sourceReferenceScopeKey, sourceReferenceTargetKey, supabase]);
 
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
@@ -1599,6 +1626,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           .catch(() => null),
       );
       if (created) {
+        // Advance the generation FIRST: any batch read already in flight took
+        // its snapshot before this row existed, so it must not be allowed to
+        // commit over the upsert that follows.
+        knowledgeReadGenerationRef.current += 1;
         // Without this the new Note carries no visible provenance until the
         // board is reloaded -- there is no source_references realtime channel.
         setSourceReferencesByPadletId((current) => upsertKnowledgeSourceReference(current, created));

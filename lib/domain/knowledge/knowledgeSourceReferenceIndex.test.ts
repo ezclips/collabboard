@@ -245,5 +245,26 @@ describe('P6J-F6 knowledge source reference index', () => {
     it('rejects non-integer pages rather than indexing a fractional citation', () => {
       expect(parseKnowledgeSourceReference({ ...body, pageStart: 1.5 })).toBeNull();
     });
+
+    // P6J-F6-B1H: the same minimum range invariants the write command enforces
+    // before insert and the table's CHECK constraints hold afterwards. Without
+    // these a well-typed but impossible payload would reach a badge as "p. 5-2".
+    it.each([
+      ['page zero', { pageStart: 0, pageEnd: 0 }],
+      ['negative start', { pageStart: -1, pageEnd: 3 }],
+      ['negative start and end', { pageStart: -5, pageEnd: -2 }],
+      ['inverted range', { pageStart: 5, pageEnd: 2 }],
+      ['end below a valid start', { pageStart: 2, pageEnd: 1 }],
+    ])('rejects %s', (_label, pages) => {
+      expect(parseKnowledgeSourceReference({ ...body, ...pages })).toBeNull();
+    });
+
+    it.each([
+      ['the first page', { pageStart: 1, pageEnd: 1 }],
+      ['a single later page', { pageStart: 3, pageEnd: 3 }],
+      ['a valid span', { pageStart: 3, pageEnd: 5 }],
+    ])('accepts %s', (_label, pages) => {
+      expect(parseKnowledgeSourceReference({ ...body, ...pages })).toMatchObject(pages);
+    });
   });
 });

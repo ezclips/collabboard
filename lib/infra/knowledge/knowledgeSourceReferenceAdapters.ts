@@ -9,6 +9,7 @@ import type {
   KnowledgeSourceLocator,
   SourceReference,
 } from '../../domain/knowledge/knowledgePersistence';
+import { compareKnowledgeSourceReferences } from '../../domain/knowledge/knowledgeSourceReferenceIndex';
 
 interface SupabaseErrorLike {
   readonly code?: string;
@@ -89,6 +90,13 @@ function toSourceReference(row: SourceReferenceRow): SourceReference {
 /** One shape for both reads: neither may leak provider text to the caller. */
 const UNAVAILABLE_MESSAGE = 'Could not read the source references';
 
+/**
+ * Target ids per batched request. Chosen so the encoded filter stays well
+ * inside common proxy URL limits: 100 UUIDs is roughly 3.7KB of query string.
+ * Internal to this adapter -- callers still hand over the whole board.
+ */
+const MAX_TARGET_IDS_PER_REFERENCE_QUERY = 100;
+
 export class SupabaseKnowledgeSourceReferenceReader
 implements Pick<KnowledgeRepository, 'listReferencesByTargetPadletId' | 'listReferencesByTargetPadletIds'> {
   constructor(private readonly client: KnowledgeSourceReferenceSupabaseClient) {}
@@ -116,9 +124,13 @@ implements Pick<KnowledgeRepository, 'listReferencesByTargetPadletId' | 'listRef
   }
 
   /**
-   * Exactly one query for the whole target set, which is the entire reason this
-   * method exists: the single-target read called in a loop would put one request
-   * on the wire per Note on the board.
+   * Bounded batched read for a whole board: a fixed number of targets per
+   * request, never one request per Note.
+   *
+   * The bound exists because PostgREST encodes `.in(...)` into the GET query
+   * string, so an unbounded id list becomes an unbounded URL -- a 200-post
+   * board would push roughly 7.5KB of filter past common 8KB proxy limits. Two
+   * bounded requests are cheap; one rejected oversized request is not.
    */
   async listReferencesByTargetPadletIds(
     targetPadletIds: readonly PostId[],
@@ -128,23 +140,33 @@ implements Pick<KnowledgeRepository, 'listReferencesByTargetPadletId' | 'listRef
     const uniqueIds = Array.from(new Set<string>(targetPadletIds));
     if (uniqueIds.length === 0) return ok([]);
 
+    const references: SourceReference[] = [];
     try {
-      const { data, error } = await this.client
-        .from('source_references')
-        .select(SOURCE_REFERENCE_COLUMNS)
-        .in('target_padlet_id', uniqueIds)
-        // Same total order as the single-target read, so a Note's citations
-        // read identically whichever of the two loaded them.
-        .order('created_at', { ascending: true })
-        .order('id', { ascending: true });
+      for (let offset = 0; offset < uniqueIds.length; offset += MAX_TARGET_IDS_PER_REFERENCE_QUERY) {
+        const chunk = uniqueIds.slice(offset, offset + MAX_TARGET_IDS_PER_REFERENCE_QUERY);
+        const { data, error } = await this.client
+          .from('source_references')
+          .select(SOURCE_REFERENCE_COLUMNS)
+          .in('target_padlet_id', chunk)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (error) {
-        return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause: error }));
+        // Sequential, and a failed chunk stops here: the remaining chunks are
+        // never requested and the caller gets an error rather than a partial
+        // board that would read as "these Notes have no sources".
+        if (error) {
+          return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause: error }));
+        }
+
+        for (const row of data ?? []) references.push(toSourceReference(row));
       }
-
-      return ok((data ?? []).map(toSourceReference));
     } catch (cause) {
       return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause }));
     }
+
+    // Each chunk is ordered, which is not the same as the whole set being
+    // ordered: a later chunk can hold a row older than anything in the first.
+    // One global sort restores the single-target read's total order.
+    return ok(references.sort(compareKnowledgeSourceReferences));
   }
 }
