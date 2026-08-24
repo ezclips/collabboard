@@ -18,6 +18,17 @@ export interface KnowledgeDocumentDetailsProps {
 
 type TextMatch = { pageIndex: number; start: number; end: number };
 
+/**
+ * A source opened from a semantic result arrives with no pageCount, so counting
+ * the not-yet-loaded pages would claim "0 pages" about a document we simply have
+ * not read yet. Absent knowledge is rendered as no claim at all.
+ */
+function pageCountSummary(pageCount: number | null, pageLength: number, loading: boolean): string | null {
+  if (pageCount !== null) return pageCount === 1 ? '1 page' : `${pageCount} pages`;
+  if (loading || pageLength === 0) return null;
+  return pageLength === 1 ? '1 page' : `${pageLength} pages`;
+}
+
 function findMatches(pages: readonly KnowledgeDocumentDetailPage[], query: string): TextMatch[] {
   const needle = query.toLowerCase();
   if (!needle) return [];
@@ -75,6 +86,7 @@ export default function KnowledgeDocumentDetails({
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const activeMatchRef = useRef<HTMLElement | null>(null);
   const matches = useMemo(() => findMatches(pages, query), [pages, query]);
+  const pageSummary = pageCountSummary(pageCount, pages.length, loading);
 
   useEffect(() => {
     setActiveMatchIndex(0);
@@ -102,9 +114,9 @@ export default function KnowledgeDocumentDetails({
         <h2 className="truncate text-sm font-medium text-gray-800" title={originalFilename}>
           {originalFilename}
         </h2>
-        <p className="text-[11px] text-gray-500">
-          {pageCount === 1 ? '1 page' : `${pageCount ?? pages.length} pages`}
-        </p>
+        {pageSummary !== null ? (
+          <p className="text-[11px] text-gray-500">{pageSummary}</p>
+        ) : null}
       </div>
 
       <div className="mb-3">

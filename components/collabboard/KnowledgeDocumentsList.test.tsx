@@ -955,6 +955,44 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).not.toContain('empty.pdf');
   });
 
+  it('claims no page count while a source opened from search is still loading', async () => {
+    const pagesResponse = deferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.includes('/knowledge/search')) {
+        return Promise.resolve(jsonResponse({ results: [
+          { documentId: 'doc-slow', originalFilename: 'Slow.pdf', pageStart: 1, pageEnd: 1, text: 'excerpt' },
+        ] }));
+      }
+      if (url.endsWith('/pages')) return pagesResponse.promise;
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    await searchThen(container, 'slow');
+
+    // Open the source but leave /pages unresolved: pageCount is unknown here.
+    await act(async () => {
+      searchResultButtons(container)[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushMicrotasks();
+
+    expect(container.textContent).toContain('Loading extracted text…');
+    expect(container.textContent).not.toContain('0 pages');
+    expect(container.textContent).not.toMatch(/\d+\s+pages?/);
+
+    pagesResponse.resolve(jsonResponse({
+      document: { id: 'doc-slow', originalFilename: 'Slow.pdf', pageCount: 1 },
+      pages: [{ pageNumber: 1, text: 'the only page' }],
+    }));
+    await settle();
+
+    expect(container.textContent).not.toContain('Loading extracted text…');
+    expect(container.textContent).toContain('1 page');
+    expect(container.textContent).not.toContain('0 pages');
+    expect(container.textContent).toContain('the only page');
+  });
+
   it('exposes each semantic result as a single keyboard-reachable control', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [] }))
