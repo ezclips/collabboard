@@ -414,7 +414,7 @@ describe('P6D Knowledge documents read surface', () => {
     expect(Object.keys(searchCall[1])).toEqual(['method', 'headers', 'body', 'signal']);
   });
 
-  it('renders safe result metadata while preserving the PDF list', async () => {
+  it('renders safe result metadata and replaces the PDF list during search', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -440,8 +440,8 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).toContain('Good.pdf');
     expect(container.textContent).toContain('Page 1');
     expect(container.textContent).toContain('<b>Evacuation</b>');
-    expect(container.textContent).toContain('EMG_checklist.pdf');
-    expect(container.textContent).toContain('View text');
+    expect(container.textContent).not.toContain('EMG_checklist.pdf');
+    expect(container.textContent).not.toContain('View text');
     expect(container.querySelector('[data-knowledge-search-results] li')).not.toBeNull();
     expect(container.querySelector('[data-knowledge-search-results] li p:last-child')?.className).toContain('line-clamp-4');
     expect(container.querySelector('b')).toBeNull();
@@ -717,6 +717,115 @@ describe('P6D Knowledge documents read surface', () => {
     warm.resolve(jsonResponse({ ok: true }));
     await settle();
     expect(searchBodies).toHaveLength(0);
+  });
+
+  // P6J-D1: the modal has two presentation modes. Typing alone stays in
+  // document mode; an explicit search replaces the list rather than stacking a
+  // search state on top of PDFs that are not results.
+  it('keeps the PDF list visible while typing before an explicit search', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+
+    typeIntoSearch(container, 'evacuation');
+    await settle();
+
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    expect(container.textContent).toContain('View text');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(0);
+  });
+
+  it('hides the PDF list while a search is loading', async () => {
+    const pending = deferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      if (String(input).includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (String(input).includes('/knowledge/search')) return pending.promise;
+      return Promise.resolve(jsonResponse({ documents: [doc()] }));
+    });
+    const container = await renderList();
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+
+    typeIntoSearch(container, 'evacuation');
+    await submitSearch(container);
+
+    expect(container.textContent).toContain('Searching Knowledge…');
+    expect(container.textContent).not.toContain('EMG_checklist.pdf');
+    expect(container.textContent).not.toContain('View text');
+  });
+
+  it('hides the PDF list when a search returns no matches', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ results: [] }));
+    const container = await renderList();
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+
+    typeIntoSearch(container, 'xylophone repair invoices');
+    await submitSearch(container);
+
+    expect(container.textContent).toContain('No matching Knowledge found.');
+    expect(container.textContent).not.toContain('EMG_checklist.pdf');
+    expect(container.textContent).not.toContain('View text');
+  });
+
+  it('hides the PDF list when the search fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'upstream secret' }, 502));
+    const container = await renderList();
+
+    typeIntoSearch(container, 'evacuation');
+    await submitSearch(container);
+
+    expect(container.textContent).toContain('Knowledge search unavailable.');
+    expect(container.textContent).not.toContain('EMG_checklist.pdf');
+    expect(container.textContent).not.toContain('View text');
+    expect(container.textContent).not.toContain('upstream secret');
+  });
+
+  it('restores the PDF list when the search input is cleared, without researching', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ results: [] }));
+    const container = await renderList();
+    typeIntoSearch(container, 'xylophone repair invoices');
+    await submitSearch(container);
+    expect(container.textContent).toContain('No matching Knowledge found.');
+    const searchCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search')).length;
+
+    typeIntoSearch(container, '');
+    await settle();
+
+    expect(container.textContent).not.toContain('No matching Knowledge found.');
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    expect(container.textContent).toContain('View text');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(searchCalls);
+  });
+
+  it('does not cancel a queued warm search when the input is cleared during warming', async () => {
+    const warm = deferred<Response>();
+    const searchBodies: Record<string, unknown>[] = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) return warm.promise;
+      if (String(input).includes('/knowledge/search')) {
+        searchBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Promise.resolve(jsonResponse({ results: [] }));
+      }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    typeIntoSearch(container, 'queued query');
+    await submitSearch(container);
+
+    typeIntoSearch(container, '');
+    await settle();
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+
+    expect(searchBodies).toEqual([{ query: 'queued query' }]);
   });
 
   it('keeps a shared prewarm flight alive across a StrictMode mount/cleanup/remount cycle', async () => {

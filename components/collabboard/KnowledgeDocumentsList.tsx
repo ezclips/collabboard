@@ -293,6 +293,21 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     void executeSearch(query);
   };
 
+  /**
+   * Clearing the field leaves search mode and restores the document list. The
+   * `searchPhase === 'idle'` guard is what keeps this away from B2: a query
+   * queued behind a pending warm is still `idle`, so ordinary typing can never
+   * cancel or rewrite that queued intent.
+   */
+  const changeSearchQuery = (value: string) => {
+    setSearchQuery(value);
+    if (value.trim().length > 0 || searchPhase === 'idle') return;
+    searchGenerationRef.current += 1;
+    searchControllerRef.current?.abort();
+    setSearchResults([]);
+    setSearchPhase('idle');
+  };
+
   const openDetails = async (entry: KnowledgeListEntry) => {
     if (!boardId) return;
     setDetails({ entry, pages: [], loading: true, error: false });
@@ -371,7 +386,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                 aria-label="Search Knowledge"
                 placeholder="Search across PDFs…"
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => changeSearchQuery(event.target.value)}
                 className="min-w-0 flex-1 rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
               />
               <button
@@ -398,7 +413,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
               </ul>
             ) : null}
 
-            {phase === 'error' ? (
+            {searchPhase !== 'idle' ? null : phase === 'error' ? (
               <p className="mt-2 text-[11px] text-gray-500">Knowledge documents unavailable.</p>
             ) : entries.length > 0 ? (
               <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
