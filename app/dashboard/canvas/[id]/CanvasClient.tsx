@@ -5821,13 +5821,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     try {
       await insertPostOrThrow(containerPadlet);
       await insertPostOrThrow(childPadlet);
-      completeSourceReferenceForDraft(childId, drawingPendingDraft as { kind?: string; sourceReference?: KnowledgeSourceReferenceDraft });
+      // This draft may have arrived through a DrawingLayout rebuild, which
+      // carries `type` but drops `kind`, so the kind-gated finaliser silently
+      // refused it and the Note lost its provenance. On this path the transient
+      // sourceReference is itself the authoritative signal: only a
+      // source-created Note ever carries one.
+      const droppedSourceReference = (drawingPendingDraft as { sourceReference?: KnowledgeSourceReferenceDraft }).sourceReference;
+      if (droppedSourceReference) void persistKnowledgeSourceReference(childId, droppedSourceReference);
     } catch (err: any) {
       console.error('Failed to create drawing container with image:', err?.message || err?.code || err?.details || err, { posX, posY });
       toast.error('Failed to create container');
       setPadlets(prev => prev.filter(p => p.id !== containerId && p.id !== childId));
     }
-  }, [canvasId, drawingPendingDraft, insertPostOrThrow, padlets]);
+  }, [canvasId, drawingPendingDraft, insertPostOrThrow, padlets, persistKnowledgeSourceReference]);
 
   const handleDrawingAddToExisting = useCallback(() => {
     setDrawingContainerPromptOpen(false);

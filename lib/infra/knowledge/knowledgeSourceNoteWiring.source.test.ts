@@ -160,17 +160,22 @@ describe('P6J-F5 source note wiring', () => {
     expect(after(canvasClient, 'const handleCreateNewContainerWithDraft', 3000)).toContain('completeSourceReferenceForDraft(childData.id, currentDraft)');
     // Scheduler ghost drop onto an empty slot.
     expect(after(canvasClient, 'const placeDraftInNewSchedulerContainer', 2600)).toContain('completeSourceReferenceForDraft(postId, draft)');
-    // Drawing "new container".
-    expect(after(canvasClient, 'const handleDrawingNewContainer', 3200)).toContain('completeSourceReferenceForDraft(childId,');
+    // Drawing "new container": provenance-gated, not kind-gated (see the F5-B2
+    // suite below for why the kind-gated finaliser cannot serve this path).
+    expect(after(canvasClient, 'const handleDrawingNewContainer', 3600)).toContain('void persistKnowledgeSourceReference(childId, droppedSourceReference)');
     // Drawing "add to existing": provenance travels on the dropped payload
     // itself (see the dedicated F5-B1 suite below).
     const drawingAdd = after(canvasClient, 'const handleDrawingLayoutAddPadlet', 1600);
     expect(drawingAdd).toContain('const created = await addDrawingLayoutPadlet(newPadlet, newId)');
     expect(drawingAdd).toContain('if (created && droppedSourceReference) void persistKnowledgeSourceReference(newId, droppedSourceReference)');
 
-    // Six deferred-placement commit sites, plus the drawing ghost's own
-    // consume-once completion and the direct-save callback in usePadletSave.
-    expect((canvasClient.match(/\n\s*completeSourceReferenceForDraft\(/g) ?? []).length).toBe(6);
+    // Five kind-gated deferred-placement sites; both Drawing paths complete on
+    // provenance presence instead, and the direct save reports through
+    // usePadletSave's callback.
+    expect((canvasClient.match(/\n\s*completeSourceReferenceForDraft\(/g) ?? []).length).toBe(5);
+    // Three direct persists: the shared finaliser's own, plus the two Drawing
+    // paths whose rebuilt payloads have no `kind` to gate on.
+    expect((canvasClient.match(/void persistKnowledgeSourceReference\(/g) ?? []).length).toBe(3);
   });
 
   it('K: ordinary Note creation carries no source reference at all', () => {
@@ -297,6 +302,100 @@ describe('P6J-F5 source note wiring', () => {
       expect(b).not.toHaveProperty('sourceReference');
       expect(JSON.stringify(b)).not.toContain('SOURCE-A');
       expect((c.sourceReference as { sourceDocumentId: string }).sourceDocumentId).toBe('SOURCE-C');
+    });
+  });
+
+  // ==========================================================================
+  // P6J-F5-B2 -- Drawing "new container" after an empty-canvas ghost drop
+  // ==========================================================================
+  // A ghost dropped on empty canvas is rebuilt by DrawingLayout, re-enters the
+  // container prompt, and is stored as drawingPendingDraft. That rebuild keeps
+  // `type` and the provenance but drops `kind`, so the kind-gated finaliser
+  // silently refused it: the Note was created and its source link vanished with
+  // no error. Completion on this path keys off provenance presence instead.
+  describe('drawing new-container completion', () => {
+    const newContainer = () => after(canvasClient, 'const handleDrawingNewContainer', 3600);
+
+    /** The payload shape DrawingLayout actually hands back, derived from its source. */
+    function rebuiltPayload(sourceDocumentId: string | null) {
+      const canvasDrop = after(drawingLayout, 'const item = JSON.parse(libData);', 1200);
+      // Verified against the real rebuild: `kind` is not among the forwarded keys.
+      expect(canvasDrop).toContain("type: (item.type || item.kind || 'note')");
+      expect(canvasDrop).not.toMatch(/\n\s+kind:/);
+      expect(canvasDrop).toContain('...(item.sourceReference ? { sourceReference: item.sourceReference } : {})');
+      return {
+        type: 'note',
+        title: 'a.pdf',
+        content: '',
+        metadata: { forceContainerPrompt: true },
+        ...(sourceDocumentId
+          ? { sourceReference: { sourceDocumentId, pageStart: 3, pageEnd: 3, quoteText: 'page three' } }
+          : {}),
+      } as Record<string, unknown>;
+    }
+
+    it('proves the rebuilt payload is kind-less yet still carries provenance', () => {
+      const payload = rebuiltPayload('SOURCE-A');
+
+      expect('kind' in payload).toBe(false);
+      expect(payload.sourceReference).toEqual({
+        sourceDocumentId: 'SOURCE-A', pageStart: 3, pageEnd: 3, quoteText: 'page three',
+      });
+      // This is exactly why a kind test cannot serve this path and a provenance
+      // test can -- the defect and its fix, side by side.
+      expect((payload as { kind?: string }).kind === 'note').toBe(false);
+      expect(Boolean(payload.sourceReference)).toBe(true);
+    });
+
+    it('completes on provenance presence, never on kind', () => {
+      const body = newContainer();
+      const completion = body.slice(body.indexOf('await insertPostOrThrow(childPadlet)'));
+
+      expect(completion).toContain('const droppedSourceReference = (drawingPendingDraft as { sourceReference?: KnowledgeSourceReferenceDraft }).sourceReference');
+      expect(completion).toContain('if (droppedSourceReference) void persistKnowledgeSourceReference(childId, droppedSourceReference)');
+      // The kind-gated finaliser is gone from this handler: it could never
+      // admit a rebuilt payload, and leaving it would double-complete.
+      expect(completion).not.toContain('completeSourceReferenceForDraft');
+      expect(completion).not.toContain('kind');
+    });
+
+    it('persists exactly once, after the child insert, with the real child id', () => {
+      const body = newContainer();
+      const containerInsert = body.indexOf('await insertPostOrThrow(containerPadlet)');
+      const childInsert = body.indexOf('await insertPostOrThrow(childPadlet)');
+      const persist = body.indexOf('void persistKnowledgeSourceReference(childId, droppedSourceReference)');
+
+      expect(containerInsert).toBeGreaterThan(-1);
+      expect(childInsert).toBeGreaterThan(containerInsert);
+      // Strictly after the child row exists.
+      expect(persist).toBeGreaterThan(childInsert);
+      expect((body.match(/persistKnowledgeSourceReference\(/g) ?? []).length).toBe(1);
+      // The child Note is the target -- never its container.
+      expect(body).not.toContain('persistKnowledgeSourceReference(containerId');
+      expect(body).toContain('const childId = crypto.randomUUID()');
+    });
+
+    it('skips a failed child insert and a payload with no provenance', () => {
+      const body = newContainer();
+      // Both inserts throw on failure, and the completion sits inside the same
+      // try, so a failed child can never reach it.
+      const tryIndex = body.indexOf('try {');
+      const catchIndex = body.indexOf('} catch');
+      const persist = body.indexOf('void persistKnowledgeSourceReference(childId, droppedSourceReference)');
+      expect(persist).toBeGreaterThan(tryIndex);
+      expect(persist).toBeLessThan(catchIndex);
+      // And the guard is presence, so a provenance-free rebuild does nothing.
+      expect(rebuiltPayload(null)).not.toHaveProperty('sourceReference');
+      expect(body).toContain('if (droppedSourceReference)');
+    });
+
+    it('keeps the child row free of provenance', () => {
+      const body = newContainer();
+      const childRow = body.slice(body.indexOf('const childPadlet'), body.indexOf('setPadlets(prev => [...prev, containerPadlet, childPadlet])'));
+
+      // The row is built from named fields, so nothing spreads provenance in.
+      expect(childRow).not.toContain('sourceReference');
+      expect(childRow).toContain('metadata: { ...childMetadata, parentId: containerId }');
     });
   });
 
