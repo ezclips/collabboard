@@ -1498,10 +1498,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // and it is deliberately left in place: deleting the user's brand-new Note to
   // tidy up a link failure would destroy work to protect metadata.
   const [sourceNoteReference, setSourceNoteReference] = useState<KnowledgeSourceReferenceDraft | null>(null);
-  // Drawing's "add to existing container" hands the draft to a drag ghost whose
-  // drop payload is rebuilt field by field, so provenance cannot ride it. The
-  // controller owns both ends of that hop, so it keeps the draft here instead.
-  const drawingGhostSourceReferenceRef = useRef<KnowledgeSourceReferenceDraft | null>(null);
 
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
@@ -5549,6 +5545,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const handleDrawingLayoutAddPadlet = useCallback(async (postData: any) => {
     const { forceContainerPrompt: _forceContainerPrompt, ...cleanMetadata } = postData.metadata || {};
+    // Provenance belongs to THIS dropped payload alone. A payload without it
+    // gets no source reference, whatever happened to any earlier ghost.
+    const droppedSourceReference = (postData as { sourceReference?: KnowledgeSourceReferenceDraft }).sourceReference ?? null;
     const newId = crypto.randomUUID();
     const rawPositionX = postData.x_position ?? postData.position_x ?? 0;
     const rawPositionY = postData.y_position ?? postData.position_y ?? 0;
@@ -5565,13 +5564,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     delete newPadlet.x_position;
     delete newPadlet.y_position;
     delete newPadlet.canvas_id;
+    // Transient transport only -- it must never reach a padlets column.
+    delete newPadlet.sourceReference;
     setPadlets(prev => [...prev, newPadlet as any]);
 
     const created = await addDrawingLayoutPadlet(newPadlet, newId);
-    // Consume-once: the pending source draft belongs to exactly one dropped ghost.
-    const pendingSource = drawingGhostSourceReferenceRef.current;
-    drawingGhostSourceReferenceRef.current = null;
-    if (created && pendingSource) void persistKnowledgeSourceReference(newId, pendingSource);
+    if (created && droppedSourceReference) void persistKnowledgeSourceReference(newId, droppedSourceReference);
     return created;
   }, [canvasId, setPadlets, addDrawingLayoutPadlet, persistKnowledgeSourceReference]);
 
@@ -5833,11 +5831,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const handleDrawingAddToExisting = useCallback(() => {
     setDrawingContainerPromptOpen(false);
-    // The ghost's drop payload is rebuilt field by field inside DrawingLayout,
-    // so provenance is held here instead and consumed once on the way in.
-    const pendingKind = (drawingPendingDraft as { kind?: string } | null)?.kind;
-    const pendingSource = (drawingPendingDraft as { sourceReference?: KnowledgeSourceReferenceDraft } | null)?.sourceReference;
-    drawingGhostSourceReferenceRef.current = pendingKind === 'note' && pendingSource ? pendingSource : null;
+    // Provenance rides the ghost itself (spread below and serialised into the
+    // drop payload), so no controller-held value can outlive an abandoned ghost.
     const ghost = drawingPendingDraft
       ? {
           ...drawingPendingDraft,
@@ -7575,12 +7570,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onDeleteOverlayPadlets={handleDrawingLayoutDeleteOverlayPadlets}
                 onOpenDocument={openDocumentFromPreview}
                 ghostDraft={drawingGhostDraft}
-                onGhostDraftDropped={() => {
-                  // An abandoned ghost must not leave provenance behind for the
-                  // next unrelated drop.
-                  drawingGhostSourceReferenceRef.current = null;
-                  setDrawingGhostDraft(null);
-                }}
+                onGhostDraftDropped={() => setDrawingGhostDraft(null)}
                 drawingAppStateRef={drawingAppStateRef}
                 drawingExcalidrawAPIRef={drawingExcalidrawAPIRef}
                 onDrawingViewportChange={setDrawingViewport}

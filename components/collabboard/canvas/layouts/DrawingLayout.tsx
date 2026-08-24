@@ -3,7 +3,17 @@
 
 import React, { useState, useEffect, useCallback, useContext, useRef, useMemo, useLayoutEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import type { CanvasLine, Padlet } from '@/types/collabboard';
+import type { CanvasLine, Padlet, PendingPostDraft } from '@/types/collabboard';
+
+/**
+ * P6J-F5-B1. A drop payload may carry transient source provenance belonging to
+ * THAT dropped draft. It travels with the payload and nothing else: it is never
+ * written to a padlet column or into metadata, and a payload without it must
+ * produce no source reference at all.
+ */
+type DrawingPostDraft = Partial<Padlet> & {
+  sourceReference?: PendingPostDraft['sourceReference'];
+};
 import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
 import {
@@ -755,7 +765,7 @@ type DrawingEmbeddableCardProps = {
   appStateRef: React.RefObject<any>;
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onUpdatePadletStrict: (id: string, updates: Partial<Padlet>) => Promise<void>;
-  onAddPadlet: (postData: Partial<Padlet>) => Promise<Padlet | null>;
+  onAddPadlet: (postData: DrawingPostDraft) => Promise<Padlet | null>;
   onDeletePadlet?: (id: string) => Promise<void>;
   canvasId: string;
   currentUserId?: string;
@@ -1069,7 +1079,7 @@ export function DrawingEmbeddableCard({
 
   const createAndLinkChildToContainer = async (
     containerId: string,
-    postData: Partial<Padlet>,
+    postData: DrawingPostDraft,
   ): Promise<Padlet | null> => {
     const created = await onAddPadlet(postData);
     if (!created) return null;
@@ -1151,6 +1161,8 @@ export function DrawingEmbeddableCard({
           metadata: { parentId: padlet.id } as any,
           width: libData.width || 300,
           height: libData.height || 200,
+          // Transient, and only when THIS payload carries it.
+          ...(libData.sourceReference ? { sourceReference: libData.sourceReference } : {}),
         });
       } : undefined}
     >
@@ -1515,7 +1527,7 @@ interface DrawingLayoutProps {
   padlets: Padlet[];
   canvasLines: CanvasLine[];
   padletsLoaded?: boolean;
-  onAddPadlet: (postData: Partial<Padlet>) => Promise<Padlet | null>;
+  onAddPadlet: (postData: DrawingPostDraft) => Promise<Padlet | null>;
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onUpdatePadletStrict: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onDeletePadlet?: (id: string) => Promise<void>;
@@ -4597,6 +4609,8 @@ export default function DrawingLayout({
               width: item.width || 320,
               height: item.height || 280,
               metadata: { ...cleanMeta, forceContainerPrompt: true },
+              // Transient, and only when THIS payload carries it.
+              ...(item.sourceReference ? { sourceReference: item.sourceReference } : {}),
             });
           } else if (svgData) {
             const svg = JSON.parse(svgData);

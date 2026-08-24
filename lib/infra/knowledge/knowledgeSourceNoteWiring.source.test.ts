@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildKnowledgeSourceNoteDraft } from '../../domain/knowledge/knowledgeSourceNoteDraft';
 
 /**
  * P6J-F5 governance seam. CanvasClient is a 9k-line legacy controller with six
@@ -24,6 +25,7 @@ const padletSave = sourceOf('hooks/canvas/usePadletSave.ts');
 const gridSave = sourceOf('hooks/canvas/useGridPadletSave.ts');
 const details = sourceOf('components/collabboard/KnowledgeDocumentDetails.tsx');
 const sidebar = sourceOf('components/collabboard/canvas/ui/CanvasSidebar.tsx');
+const drawingLayout = sourceOf('components/collabboard/canvas/layouts/DrawingLayout.tsx');
 
 /** Everything between an anchor and the next `count` characters of source. */
 function after(source: string, anchor: string, count = 900): string {
@@ -160,13 +162,11 @@ describe('P6J-F5 source note wiring', () => {
     expect(after(canvasClient, 'const placeDraftInNewSchedulerContainer', 2600)).toContain('completeSourceReferenceForDraft(postId, draft)');
     // Drawing "new container".
     expect(after(canvasClient, 'const handleDrawingNewContainer', 3200)).toContain('completeSourceReferenceForDraft(childId,');
-    // Drawing "add to existing": the ghost's drop payload is rebuilt elsewhere,
-    // so the controller carries the draft and consumes it exactly once.
-    expect(after(canvasClient, 'const handleDrawingAddToExisting', 900)).toContain('drawingGhostSourceReferenceRef.current =');
-    const drawingAdd = after(canvasClient, 'const handleDrawingLayoutAddPadlet', 1400);
+    // Drawing "add to existing": provenance travels on the dropped payload
+    // itself (see the dedicated F5-B1 suite below).
+    const drawingAdd = after(canvasClient, 'const handleDrawingLayoutAddPadlet', 1600);
     expect(drawingAdd).toContain('const created = await addDrawingLayoutPadlet(newPadlet, newId)');
-    expect(drawingAdd).toContain('drawingGhostSourceReferenceRef.current = null');
-    expect(drawingAdd).toContain('if (created && pendingSource)');
+    expect(drawingAdd).toContain('if (created && droppedSourceReference) void persistKnowledgeSourceReference(newId, droppedSourceReference)');
 
     // Six deferred-placement commit sites, plus the drawing ghost's own
     // consume-once completion and the direct-save callback in usePadletSave.
@@ -189,6 +189,115 @@ describe('P6J-F5 source note wiring', () => {
     // Editing an existing Note never reports a creation.
     const update = after(padletSave, '} else if (padletToEdit) {', 700);
     expect(update).not.toContain('onSourceNoteCreated');
+  });
+
+  // ==========================================================================
+  // P6J-F5-B1 -- Drawing ghost provenance isolation
+  // ==========================================================================
+  // The original F5-B implementation parked the draft in a controller ref while
+  // the ghost was in flight. An abandoned ghost then left that value live, and
+  // the next unrelated library drop consumed it -- a durable source_references
+  // row pointing at the wrong post. Provenance now travels ON the dropped
+  // payload, so there is no carrier left to go stale.
+  describe('drawing ghost provenance', () => {
+    const drawingAdd = () => after(canvasClient, 'const handleDrawingLayoutAddPadlet', 1600);
+
+    it('carries provenance on the ghost payload itself', () => {
+      // The ghost serialises the whole draft, so the field rides the drop.
+      expect(drawingLayout).toContain("e.dataTransfer.setData('application/collabboard-library', JSON.stringify(ghostDraft))");
+      // Both payload rebuilds forward it, each keyed to its OWN parsed payload.
+      expect(drawingLayout).toContain('...(libData.sourceReference ? { sourceReference: libData.sourceReference } : {})');
+      expect(drawingLayout).toContain('...(item.sourceReference ? { sourceReference: item.sourceReference } : {})');
+      // A payload without the field contributes no key at all.
+      expect(drawingLayout).not.toMatch(/sourceReference:\s*(libData|item)\.sourceReference\s*\|\|/);
+      expect(drawingLayout).toContain("sourceReference?: PendingPostDraft['sourceReference']");
+    });
+
+    it('resolves provenance only from the payload currently being dropped', () => {
+      const body = drawingAdd();
+      expect(body).toContain('const droppedSourceReference = (postData as { sourceReference?: KnowledgeSourceReferenceDraft }).sourceReference ?? null');
+      // The only NAMED provenance carriers this handler may mention are the
+      // local derived from postData and the persistence helper. Any other
+      // identifier -- a ref, a module value, a captured state variable -- is
+      // exactly the defect this correction removes.
+      const carriers = body.match(/\b[A-Za-z_$][A-Za-z0-9_$]*SourceReference[A-Za-z0-9_$]*\b/g) ?? [];
+      expect(carriers.length).toBeGreaterThan(0);
+      const allowed = new Set(['droppedSourceReference', 'persistKnowledgeSourceReference', 'KnowledgeSourceReferenceDraft']);
+      expect([...new Set(carriers)].filter((name) => !allowed.has(name))).toEqual([]);
+    });
+
+    it('leaves no controller-held fallback anywhere in the controller', () => {
+      // The whole class of defect: any ref/module value remembering a draft.
+      expect(canvasClient).not.toContain('drawingGhostSourceReferenceRef');
+      expect(canvasClient).not.toMatch(/useRef<[^>]*KnowledgeSourceReferenceDraft/);
+      expect(canvasClient).not.toMatch(/[A-Za-z0-9_]*[sS]ourceReference[A-Za-z0-9_]*\.current/);
+      // The one retained piece of source state belongs to the open editor and
+      // is cleared whenever it closes.
+      expect(canvasClient).toMatch(/if \(!isNoteEditorOpen\) setSourceNoteReference\(null\);/);
+    });
+
+    it('persists only after a real created row, using that row id', () => {
+      const body = drawingAdd();
+      const createdIndex = body.indexOf('const created = await addDrawingLayoutPadlet(newPadlet, newId)');
+      const persistIndex = body.indexOf('persistKnowledgeSourceReference(newId, droppedSourceReference)');
+      expect(createdIndex).toBeGreaterThan(-1);
+      // Strictly after the insert, and guarded on it having produced a row.
+      expect(persistIndex).toBeGreaterThan(createdIndex);
+      expect(body).toContain('if (created && droppedSourceReference)');
+      // Never a placeholder identity.
+      expect(body).not.toContain("persistKnowledgeSourceReference('new'");
+      expect(body).not.toContain('persistKnowledgeSourceReference(droppedSourceReference.sourceDocumentId');
+    });
+
+    it('never lets provenance reach the padlet row', () => {
+      const body = drawingAdd();
+      expect(body).toContain('delete newPadlet.sourceReference');
+      const deleteIndex = body.indexOf('delete newPadlet.sourceReference');
+      const insertIndex = body.indexOf('await addDrawingLayoutPadlet');
+      expect(deleteIndex).toBeGreaterThan(-1);
+      // Stripped before the row is ever written.
+      expect(insertIndex).toBeGreaterThan(deleteIndex);
+      expect(drawingLayout).not.toMatch(/metadata:\s*\{[^}]*sourceReference/);
+    });
+
+    it('survives the ghost payload JSON round trip byte for byte', () => {
+      // The ghost crosses a dataTransfer boundary as JSON, so the draft must be
+      // plain serialisable data -- a non-serialisable field would vanish here.
+      const draft = buildKnowledgeSourceNoteDraft({
+        sourceDocumentId: 'doc-source-a',
+        originalFilename: 'a.pdf',
+        pageNumber: 3,
+        pageText: '  spaced\r\nquote  ',
+      }).sourceReference;
+
+      const ghost = { kind: 'note', title: 'a.pdf', content: '', metadata: {}, sourceReference: draft };
+      const roundTripped = JSON.parse(JSON.stringify(ghost)) as { sourceReference: typeof draft };
+
+      expect(roundTripped.sourceReference).toEqual(draft);
+      expect(roundTripped.sourceReference.quoteText).toBe('  spaced\r\nquote  ');
+      expect(Object.keys(roundTripped.sourceReference).sort()).toEqual([
+        'pageEnd', 'pageStart', 'quoteText', 'sourceDocumentId',
+      ]);
+    });
+
+    it('isolates three drafts with no shared carrier between them', () => {
+      // A -> SOURCE-A, B (no provenance) -> nothing, C -> SOURCE-C. The forward
+      // is a conditional spread off each payload, so B can produce no key even
+      // when it is processed between A and C.
+      const forward = (payload: Record<string, unknown>) => ({
+        title: 'x',
+        ...(payload.sourceReference ? { sourceReference: payload.sourceReference } : {}),
+      });
+
+      const a = forward({ sourceReference: { sourceDocumentId: 'SOURCE-A', pageStart: 1, pageEnd: 1, quoteText: null } });
+      const b = forward({});
+      const c = forward({ sourceReference: { sourceDocumentId: 'SOURCE-C', pageStart: 2, pageEnd: 2, quoteText: null } });
+
+      expect((a.sourceReference as { sourceDocumentId: string }).sourceDocumentId).toBe('SOURCE-A');
+      expect(b).not.toHaveProperty('sourceReference');
+      expect(JSON.stringify(b)).not.toContain('SOURCE-A');
+      expect((c.sourceReference as { sourceDocumentId: string }).sourceDocumentId).toBe('SOURCE-C');
+    });
   });
 
   it('exposes the page action only with a real document id and a create capability', () => {
