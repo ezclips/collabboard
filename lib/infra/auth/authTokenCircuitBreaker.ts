@@ -21,7 +21,10 @@
  * (not cached at construction), so a second breaker instance left running by
  * Next.js Fast Refresh (a stale module evaluation whose GoTrueClient still
  * has live timers) observes a backoff written by a newer instance instead of
- * hammering the provider on its own stale schedule.
+ * hammering the provider on its own stale schedule. Clearing that timestamp is
+ * monotonic (AUTH-H1H): a request that finishes late may only remove the
+ * backoff it started with, never a newer active one written meanwhile by
+ * another breaker or another tab sharing the same storage.
  *
  * Concurrent refresh requests for the same session are coalesced: only the
  * first reaches the network, and every caller gets its own `Response.clone()`
@@ -134,10 +137,31 @@ export const createAuthTokenCircuitBreaker = ({
     }
 
     const inFlight = (async () => {
+      // What this request is entitled to clear later. It has already passed the
+      // gate above, so this is an expired value or nothing at all.
+      const observedBackoffUntil = readBackoffUntil(storage);
       const response = await fetchImpl(input, init);
-      const nextBackoffUntil = response.status === 429 ? nowFn() + backoffMs : 0;
-      localBackoffUntil = nextBackoffUntil;
-      writeBackoffUntil(storage, nextBackoffUntil);
+
+      if (response.status === 429) {
+        const until = nowFn() + backoffMs;
+        localBackoffUntil = until;
+        writeBackoffUntil(storage, until);
+        return response;
+      }
+
+      // AUTH-H1H: clearing is monotonic. Another breaker -- a second tab, or a
+      // client Fast Refresh left running -- may have written a NEWER active
+      // backoff while this request was in flight. Erasing it because *this*
+      // older request happened to succeed would re-open the refresh storm the
+      // backoff exists to stop, so re-read and stand down in that case.
+      const persistedBackoffUntil = readBackoffUntil(storage);
+      const persistedIsNewerAndActive =
+        persistedBackoffUntil > observedBackoffUntil && persistedBackoffUntil > nowFn();
+
+      if (!persistedIsNewerAndActive) {
+        localBackoffUntil = 0;
+        writeBackoffUntil(storage, 0);
+      }
       return response;
     })();
 

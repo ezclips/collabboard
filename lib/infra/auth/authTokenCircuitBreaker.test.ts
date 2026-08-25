@@ -312,3 +312,137 @@ describe('AUTH-H1 refresh/password distinction and coalescing', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+// ============================================================================
+// AUTH-H1H -- the persisted backoff clears monotonically
+// ============================================================================
+// Two tabs (or a Fast-Refresh leftover client) share one localStorage. An
+// older refresh that resolves late must not erase a newer active backoff
+// written meanwhile by another breaker -- doing so re-opens the storm the
+// backoff exists to stop. The observed 2026-08-25 incident interleaved
+// `refresh_token_not_found` 400s with 429s, which is exactly this shape.
+describe('AUTH-H1H monotonic backoff clearing', () => {
+  const notFoundResponse = () =>
+    new Response('{"error_code":"refresh_token_not_found"}', { status: 400 });
+
+  /** A fetch whose response this test releases by hand. */
+  function deferredFetch() {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    const fetchImpl = vi.fn(() => pending);
+    return { fetchImpl, release: (r: Response) => release(r) };
+  }
+
+  async function raceLateResponseAgainstNewer429(lateResponse: Response) {
+    const storage = makeStorage();
+    let now = 1000;
+    const nowFn = () => now;
+
+    const older = deferredFetch();
+    const breakerB = createAuthTokenCircuitBreaker({ fetchImpl: older.fetchImpl, storage, nowFn });
+
+    const fetchA = vi.fn(async () => rateLimitedResponse());
+    const breakerA = createAuthTokenCircuitBreaker({ fetchImpl: fetchA, storage, nowFn });
+
+    // 1. B's refresh is in flight and unresolved.
+    const bPromise = breakerB(TOKEN_URL, refreshInit('token-b'));
+    await Promise.resolve();
+    expect(older.fetchImpl).toHaveBeenCalledTimes(1);
+
+    // 2-4. A is rate-limited and writes a NEWER active backoff.
+    now = 2000;
+    await breakerA(TOKEN_URL, refreshInit('token-a'));
+    const writtenByA = Number(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY]);
+    expect(writtenByA).toBe(2000 + AUTH_TOKEN_BACKOFF_MS);
+
+    // 5. Only now does B's older request come back.
+    now = 2500;
+    older.release(lateResponse);
+    await bPromise;
+
+    return { storage, breakerB, fetchB: older.fetchImpl, writtenByA };
+  }
+
+  it('M1 (BLOCKING): a late SUCCESS must not erase another breaker\'s newer active backoff', async () => {
+    const { storage, breakerB, fetchB, writtenByA } = await raceLateResponseAgainstNewer429(okResponse());
+
+    // 6. A's backoff survives B's stale success.
+    expect(Number(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY])).toBe(writtenByA);
+
+    // 7. B's next refresh short-circuits locally with zero network.
+    fetchB.mockClear();
+    const next = await breakerB(TOKEN_URL, refreshInit('token-b'));
+    expect(next.status).toBe(429);
+    expect(await next.json()).toMatchObject({ code: 'client_backoff_active' });
+    expect(fetchB).not.toHaveBeenCalled();
+  });
+
+  it('M2 (BLOCKING): a late non-429 error (refresh_token_not_found) must not erase it either', async () => {
+    const { storage, breakerB, fetchB, writtenByA } = await raceLateResponseAgainstNewer429(notFoundResponse());
+
+    expect(Number(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY])).toBe(writtenByA);
+
+    fetchB.mockClear();
+    const next = await breakerB(TOKEN_URL, refreshInit('token-b'));
+    expect(next.status).toBe(429);
+    expect(fetchB).not.toHaveBeenCalled();
+  });
+
+  it('M3: an EXPIRED stored backoff is still cleared by a successful refresh', async () => {
+    // Hardening must not make the backoff permanent.
+    const storage = makeStorage({ [AUTH_TOKEN_BACKOFF_STORAGE_KEY]: '1500' });
+    const fetchImpl = vi.fn(async () => okResponse());
+    const guarded = createAuthTokenCircuitBreaker({ fetchImpl, storage, nowFn: () => 9000 });
+
+    const res = await guarded(TOKEN_URL, refreshInit('token'));
+
+    expect(res.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY]).toBe('0');
+  });
+
+  it('M4: with no competing writer, a request still clears the stale value it started with', async () => {
+    const storage = makeStorage({ [AUTH_TOKEN_BACKOFF_STORAGE_KEY]: '1500' });
+    let now = 4000;
+    const fetchImpl = vi.fn(async () => okResponse());
+    const guarded = createAuthTokenCircuitBreaker({ fetchImpl, storage, nowFn: () => now });
+
+    await guarded(TOKEN_URL, refreshInit('token'));
+    expect(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY]).toBe('0');
+
+    // And a breaker may still clear a backoff it wrote itself, once expired.
+    fetchImpl.mockResolvedValueOnce(rateLimitedResponse());
+    await guarded(TOKEN_URL, refreshInit('token'));
+    expect(Number(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY])).toBe(4000 + AUTH_TOKEN_BACKOFF_MS);
+
+    now = 4000 + AUTH_TOKEN_BACKOFF_MS + 1;
+    fetchImpl.mockResolvedValueOnce(okResponse());
+    await guarded(TOKEN_URL, refreshInit('token'));
+    expect(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY]).toBe('0');
+  });
+
+  it('M5: a newer but already-EXPIRED persisted value does not block clearing', async () => {
+    // Only a newer *active* backoff is protected; an expired one is garbage.
+    const storage = makeStorage();
+    let now = 1000;
+    const older = deferredFetch();
+    const breakerB = createAuthTokenCircuitBreaker({
+      fetchImpl: older.fetchImpl, storage, nowFn: () => now, backoffMs: 500,
+    });
+    const breakerA = createAuthTokenCircuitBreaker({
+      fetchImpl: vi.fn(async () => rateLimitedResponse()), storage, nowFn: () => now, backoffMs: 500,
+    });
+
+    const bPromise = breakerB(TOKEN_URL, refreshInit('token-b'));
+    await Promise.resolve();
+
+    now = 2000;
+    await breakerA(TOKEN_URL, refreshInit('token-a')); // writes 2500
+
+    now = 9000; // well past 2500 -- A's backoff has expired
+    older.release(okResponse());
+    await bPromise;
+
+    expect(storage.dump()[AUTH_TOKEN_BACKOFF_STORAGE_KEY]).toBe('0');
+  });
+});
