@@ -563,6 +563,30 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
     }
   });
 
+  // B3H: the backlink useMemo originally sat below CanvasClient's early
+  // returns, so the loading render ran one fewer hook than the loaded render
+  // and React aborted every board with "Rendered more hooks than during the
+  // previous render". Ordering is the invariant, so ordering is what is pinned.
+  it('K1b: derives Knowledge backlinks before CanvasClient early returns so hook order is stable across loading transitions', () => {
+    const hook = canvasClient.indexOf('const knowledgeSourceBacklinkIndex = useMemo(');
+    expect(hook, 'backlink useMemo not found in CanvasClient').toBeGreaterThanOrEqual(0);
+
+    // Every conditional return that can end a render before the hooks below it.
+    for (const earlyReturn of [
+      'if (!hasMounted || loading)',
+      'if (!canvasId) return <div',
+      'if (error || !canvas) return <div',
+    ]) {
+      const guard = canvasClient.indexOf(earlyReturn);
+      expect(guard, `early return not found: ${earlyReturn}`).toBeGreaterThanOrEqual(0);
+      expect(hook, `backlink hook must precede \`${earlyReturn}\``).toBeLessThan(guard);
+    }
+
+    // One unconditional call site: a second copy would reintroduce the
+    // imbalance this guard exists to prevent.
+    expect((canvasClient.match(/const knowledgeSourceBacklinkIndex = useMemo\(/g) ?? []).length).toBe(1);
+  });
+
   it('K2: no document-keyed or page-keyed server capability was introduced', () => {
     for (const source of [canvasClient, documentsList, documentDetails, referenceContext, backlinks]) {
       for (const forbidden of [

@@ -1598,6 +1598,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return () => { cancelled = true; };
   }, [sourceReferenceScopeKey, sourceReferenceTargetKey, supabase]);
 
+  // P6J-F6-B3 -- reverse provenance (document -> citing Notes), DISPLAY ONLY.
+  // A pure inversion of rows B1 already loaded and RLS already authorized: no
+  // request, no route, no second stored copy. Derived here because this is the
+  // one place holding BOTH halves -- the reference index and the posts. Must
+  // stay ABOVE the `loading`/`!canvasId`/`!canvas` early returns: below them it
+  // skipped the loading render, so the loaded render ran one extra hook and
+  // React aborted the whole canvas (B3H).
+  const knowledgeSourceBacklinkIndex = useMemo(
+    () => buildKnowledgeSourceBacklinkIndex(
+      Array.from(sourceReferencesByPadletId.values()).flat(),
+      padlets,
+    ),
+    [sourceReferencesByPadletId, padlets],
+  );
+
   // ==========================================================================
   // P6J-F6-B2 -- source navigation request (Note -> exact document/page)
   // ==========================================================================
@@ -6643,18 +6658,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * and the eventual save takes whatever placement path this layout already
    * uses for a toolbar Note.
    */
-  // P6J-F6-B3 -- reverse provenance (document -> citing Notes), DISPLAY ONLY.
-  // A pure inversion of rows B1 already loaded and RLS already authorized: no
-  // request, no route, no second stored copy. Derived here because this is the
-  // one place holding BOTH halves -- the reference index and the posts.
-  const knowledgeSourceBacklinkIndex = useMemo(
-    () => buildKnowledgeSourceBacklinkIndex(
-      Array.from(sourceReferencesByPadletId.values()).flat(),
-      padlets,
-    ),
-    [sourceReferencesByPadletId, padlets],
-  );
-
   const handleCreateNoteFromKnowledgePage = (request: KnowledgeSourcePageRequest) => {
     // The same capability the creation toolbar itself is gated on.
     if (!canUseCanvasToolbar) return;
