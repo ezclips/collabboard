@@ -2,6 +2,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import {
+  knowledgeSourceBacklinkTargets,
+  knowledgeSourceBacklinkTargetsOnPage,
+} from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
+import type { KnowledgeSourceBacklink } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 
 export interface KnowledgeDocumentDetailPage {
   pageNumber: number;
@@ -93,6 +99,35 @@ function highlightedText(
   return nodes;
 }
 
+/**
+ * P6J-F6-B3 -- reverse provenance, DISPLAY ONLY.
+ *
+ * Plain text in a list: no button, anchor, handler or pointer cursor. It must
+ * not look clickable, because clicking does nothing until B3N. The target id
+ * rides along as a data attribute so identity stays the padlet id even though
+ * the visible text is a label.
+ */
+function UsedInNotes({ scope, targets }: { scope: 'document' | 'page'; targets: readonly KnowledgeSourceBacklink[] }) {
+  if (targets.length === 0) return null;
+  return (
+    <div data-knowledge-used-in-notes={scope} className="mt-1">
+      <p className="text-[11px] font-medium text-gray-500">Used in Notes · {targets.length}</p>
+      <ul className="mt-0.5 space-y-0.5">
+        {targets.map((target) => (
+          <li
+            key={target.targetPadletId}
+            data-knowledge-backlink-target={target.targetPadletId}
+            className="truncate pl-2 text-[11px] text-gray-600"
+            title={target.label}
+          >
+            {target.label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function KnowledgeDocumentDetails({
   documentId,
   originalFilename,
@@ -114,6 +149,14 @@ export default function KnowledgeDocumentDetails({
   const scrolledToPageRef = useRef<number | null>(null);
   const matches = useMemo(() => findMatches(pages, query), [pages, query]);
   const pageSummary = pageCountSummary(pageCount, pages.length, loading);
+  // Identity is the document id, never the filename: two documents may share a
+  // filename, and a name-keyed lookup would attribute one's Notes to the other.
+  // Read from the board index CanvasClient owns -- no request of its own.
+  const documentBacklinks = useKnowledgeSourceBacklinksForDocument(documentId);
+  const documentTargets = useMemo(
+    () => knowledgeSourceBacklinkTargets(documentBacklinks),
+    [documentBacklinks],
+  );
 
   useEffect(() => {
     setActiveMatchIndex(0);
@@ -166,6 +209,7 @@ export default function KnowledgeDocumentDetails({
         {pageSummary !== null ? (
           <p className="text-[11px] text-gray-500">{pageSummary}</p>
         ) : null}
+        <UsedInNotes scope="document" targets={documentTargets} />
       </div>
 
       <div className="mb-3">
@@ -201,7 +245,14 @@ export default function KnowledgeDocumentDetails({
           {pages.map((page, pageIndex) => (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
               <div className="mb-1 flex items-baseline justify-between gap-2">
-                <h3 className="text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
+                <div className="min-w-0">
+                  <h3 className="text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
+                  {/* Citations covering THIS page (pageStart <= n <= pageEnd). */}
+                  <UsedInNotes
+                    scope="page"
+                    targets={knowledgeSourceBacklinkTargetsOnPage(documentBacklinks, page.pageNumber)}
+                  />
+                </div>
                 {onCreateNoteFromPage && documentId ? (
                   <button
                     type="button"

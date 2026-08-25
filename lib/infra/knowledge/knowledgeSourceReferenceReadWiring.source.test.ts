@@ -358,8 +358,11 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
 // ============================================================================
 describe('P6J-F6-B2 source marker and navigation wiring', () => {
   it('A: CanvasClient is still the only owner of the reference index', () => {
-    // The provider carries the owner's value; it never holds state of its own.
-    expect(canvasClient).toContain('<KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId}>');
+    // The provider carries the owner's values; it never holds state of its own.
+    // B3 added the derived `backlinks` prop to this same tag -- still one owner.
+    expect(canvasClient).toContain(
+      '<KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex}>',
+    );
     expect(referenceContext).not.toContain('useState');
     expect(referenceContext).not.toContain('listReferencesByTargetPadletIds');
   });
@@ -507,7 +510,10 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
 
   it('O: no source -> Note navigation was added anywhere', () => {
     for (const source of [canvasClient, noteEditor, documentsList, documentDetails, referenceContext]) {
-      for (const forbidden of ['Used in Notes', 'listReferencesBySourceDocumentId', 'scrollToPadlet', 'centerOnPadlet']) {
+      // 'Used in Notes' moved to the B3 suite below: it is now expected in the
+      // reader, and forbidden everywhere else. Navigation stays forbidden in
+      // all five until B3N.
+      for (const forbidden of ['listReferencesBySourceDocumentId', 'scrollToPadlet', 'centerOnPadlet']) {
         expect(source).not.toContain(forbidden);
       }
     }
@@ -536,5 +542,116 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     }
     // The reader still speaks only to the endpoints it already used.
     expect((documentsList.match(/fetch\(/g) ?? []).length).toBe(4);
+  });
+});
+
+// ============================================================================
+// P6J-F6-B3 -- reverse provenance ("Used in Notes"), DISPLAY ONLY
+// ============================================================================
+describe('P6J-F6-B3 used-in-notes wiring', () => {
+  const backlinks = sourceOf('lib/domain/knowledge/knowledgeSourceBacklinks.ts');
+
+  it('K: the reverse view is derived in memory, with no new read of any kind', () => {
+    const derivation = after(canvasClient, 'const knowledgeSourceBacklinkIndex = useMemo(', 420);
+
+    // Built from the two things CanvasClient already holds -- nothing fetched.
+    expect(derivation).toContain('buildKnowledgeSourceBacklinkIndex(');
+    expect(derivation).toContain('Array.from(sourceReferencesByPadletId.values()).flat()');
+    expect(derivation).toContain('[sourceReferencesByPadletId, padlets],');
+    for (const forbidden of ['fetch(', 'await ', 'reader.', 'supabase']) {
+      expect(derivation, `derivation must stay free of ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('K2: no document-keyed or page-keyed server capability was introduced', () => {
+    for (const source of [canvasClient, documentsList, documentDetails, referenceContext, backlinks]) {
+      for (const forbidden of [
+        'listReferencesBySourceDocumentId',
+        'listReferencesByDocument',
+        'knowledge/references?',
+        "from('source_references')",
+        'getSupabaseAdmin',
+        'service_role',
+      ]) {
+        expect(source).not.toContain(forbidden);
+      }
+    }
+    // The reader's endpoint count is unchanged from B2.
+    expect((documentsList.match(/fetch\(/g) ?? []).length).toBe(4);
+    // And the reader still performs no read of its own for backlinks.
+    expect(documentDetails).not.toContain('fetch(');
+    expect(documentDetails).toContain('useKnowledgeSourceBacklinksForDocument(documentId)');
+  });
+
+  it('K3: the domain helper is pure -- no React, no network, no persistence', () => {
+    for (const forbidden of ['react', 'useMemo', 'fetch(', '@supabase', 'localStorage', 'document.']) {
+      expect(backlinks, `backlinks helper must stay free of ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('the context extension stays inert and stores nothing of its own', () => {
+    expect(referenceContext).toContain('useKnowledgeSourceBacklinksForDocument');
+    for (const forbidden of ['useState', 'useEffect', 'fetch(', '@supabase', 'supabaseBrowser']) {
+      expect(referenceContext).not.toContain(forbidden);
+    }
+  });
+
+  it('Notes are identified by the canonical padlet type, never by rendered text', () => {
+    expect(backlinks).toContain("KNOWLEDGE_BACKLINK_NOTE_TYPES: readonly string[] = ['note', 'text']");
+    // Type is the only classifier: no heuristic on what a card happens to show.
+    for (const forbidden of ['innerText', 'textContent', 'metadata', 'file_url']) {
+      expect(backlinks).not.toContain(forbidden);
+    }
+  });
+
+  it('L: the backlink UI is display-only -- no navigation wiring exists yet', () => {
+    const marker = after(documentDetails, 'function UsedInNotes(', 1100);
+
+    // The rendered rows are plain list items.
+    expect(marker).toContain('data-knowledge-used-in-notes={scope}');
+    expect(marker).toContain('<li');
+    for (const forbidden of [
+      'onClick', 'onPointerDown', 'onMouseDown', '<button', '<a ', 'href',
+      'role="button"', 'tabIndex', 'cursor-pointer',
+    ]) {
+      expect(marker, `backlink row must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('L2: B3 adds no selection, editor or canvas-navigation callback anywhere', () => {
+    for (const source of [documentDetails, documentsList, referenceContext, backlinks]) {
+      for (const forbidden of [
+        'setSelectedPadletId',
+        'openPadletInTypeEditor',
+        'openPadlet=',
+        'scrollIntoView(',
+        'querySelector(\'[data-padlet',
+        'onOpenTargetPadlet',
+        'onOpenBacklink',
+      ]) {
+        expect(source, `${forbidden} belongs to B3N, not B3`).not.toContain(forbidden);
+      }
+    }
+    // CanvasSidebar gained no backlink callback: B3 never crosses back to the canvas.
+    expect(canvasSidebar).not.toContain('Backlink');
+    expect(canvasSidebar).not.toContain('UsedInNotes');
+  });
+
+  it('L3: only the reader renders the backlink UI', () => {
+    expect(documentDetails).toContain('Used in Notes');
+    for (const source of [canvasClient, noteEditor, documentsList, canvasModals, canvasSidebar, postCardContent]) {
+      expect(source).not.toContain('Used in Notes');
+    }
+  });
+
+  it('provenance still never reaches a padlet row, and B2 markers are untouched', () => {
+    const derivation = after(canvasClient, 'const knowledgeSourceBacklinkIndex = useMemo(', 420);
+
+    for (const forbidden of ['setPadlets(', 'updatePadletById', 'metadata:']) {
+      expect(derivation).not.toContain(forbidden);
+    }
+    // B2's forward marker and its single call site are unchanged.
+    expect(postCardContent).toContain('export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {');
+    expect((canvasClient.match(/setSourceReferencesByPadletId\(/g) ?? []).length).toBe(6);
   });
 });

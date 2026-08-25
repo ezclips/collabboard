@@ -93,6 +93,7 @@ import {
   upsertKnowledgeSourceReference,
 } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
@@ -6642,6 +6643,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * and the eventual save takes whatever placement path this layout already
    * uses for a toolbar Note.
    */
+  // P6J-F6-B3 -- reverse provenance (document -> citing Notes), DISPLAY ONLY.
+  // A pure inversion of rows B1 already loaded and RLS already authorized: no
+  // request, no route, no second stored copy. Derived here because this is the
+  // one place holding BOTH halves -- the reference index and the posts.
+  const knowledgeSourceBacklinkIndex = useMemo(
+    () => buildKnowledgeSourceBacklinkIndex(
+      Array.from(sourceReferencesByPadletId.values()).flat(),
+      padlets,
+    ),
+    [sourceReferencesByPadletId, padlets],
+  );
+
   const handleCreateNoteFromKnowledgePage = (request: KnowledgeSourcePageRequest) => {
     // The same capability the creation toolbar itself is gated on.
     if (!canUseCanvasToolbar) return;
@@ -6697,7 +6710,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }
 
   return (
-    <KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId}>
+    <KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex}>
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
