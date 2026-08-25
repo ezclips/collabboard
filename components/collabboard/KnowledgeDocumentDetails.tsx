@@ -1,7 +1,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import type {
+  KnowledgeSourcePageRequest,
+  KnowledgeSourceTextSelection,
+} from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
 import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import {
   knowledgeSourceBacklinkDocumentRows,
@@ -47,6 +51,78 @@ export interface KnowledgeDocumentDetailsProps {
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
+
+/**
+ * P6J-F6-B4-B2B. One page's captured browser selection, already proved against
+ * that page's canonical text. Transient UI state only: it is never persisted,
+ * never put in the URL, never sent to Supabase, and never highlight geometry.
+ */
+type CapturedPageSelection = KnowledgeSourceTextSelection & { readonly pageNumber: number };
+
+/** Marks the one element whose text is the exact-span coordinate space. */
+const PAGE_TEXT_ROOT = 'data-knowledge-page-text-root';
+
+function pageTextRootOf(node: Node | null, container: HTMLElement): HTMLElement | null {
+  const element = node instanceof Element ? node : node?.parentElement ?? null;
+  const root = element?.closest(`[${PAGE_TEXT_ROOT}]`) ?? null;
+  // Inside this reader, and inside a page paragraph -- headings, labels,
+  // buttons and backlink rows are not part of any coordinate space.
+  return root instanceof HTMLElement && container.contains(root) ? root : null;
+}
+
+/**
+ * Maps a DOM Range onto page-relative UTF-16 offsets, and refuses anything it
+ * cannot prove.
+ *
+ * The local search renderer splits a page across plain text nodes and <mark>
+ * elements, so Range.startOffset/endOffset are NODE-local and meaningless as
+ * page coordinates. Measuring a range that begins at the paragraph's own start
+ * is what makes the result page-relative, and `String.length` is UTF-16 by
+ * definition -- a surrogate pair counts as the two units the server indexes by.
+ */
+function captureExactSelection(
+  container: HTMLElement | null,
+  pages: readonly KnowledgeDocumentDetailPage[],
+): CapturedPageSelection | null {
+  if (!container) return null;
+  const selection = typeof window === 'undefined' ? null : window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
+  // Always ordered start-to-end, so a backwards drag yields the same range.
+  const range = selection.getRangeAt(0);
+  if (range.collapsed) return null;
+
+  // BOTH endpoints must sit in the SAME page. A cross-page or partly-outside
+  // selection is not an exact span and is never salvaged into one.
+  const root = pageTextRootOf(range.startContainer, container);
+  if (root === null || pageTextRootOf(range.endContainer, container) !== root) return null;
+
+  const pageNumber = Number(root.getAttribute(PAGE_TEXT_ROOT));
+  const page = pages.find((candidate) => candidate.pageNumber === pageNumber);
+  if (!page) return null;
+  // Fail closed if anything visible was injected into the paragraph: the
+  // offsets below index this exact string and nothing else.
+  if (root.textContent !== page.text) return null;
+
+  const measure = root.ownerDocument.createRange();
+  measure.selectNodeContents(root);
+  measure.setEnd(range.startContainer, range.startOffset);
+  const charStart = measure.toString().length;
+  // Re-anchored at the paragraph start: both offsets are measured from there.
+  measure.selectNodeContents(root);
+  measure.setEnd(range.endContainer, range.endOffset);
+  const charEnd = measure.toString().length;
+  const selectedText = range.toString();
+
+  // Half-open [start, end), inside the page, and not empty.
+  if (charStart < 0 || charStart >= charEnd || charEnd > page.text.length) return null;
+  // Refused here rather than sent and rejected: the server caps the quote too.
+  if (selectedText.length > MAX_SOURCE_REFERENCE_QUOTE_LENGTH) return null;
+  // The check that matters. The coordinates must already describe exactly what
+  // the user selected, with no trimming or normalisation on either side --
+  // the server repeats this comparison against its own stored page.
+  if (page.text.slice(charStart, charEnd) !== selectedText) return null;
+  return { pageNumber, charStart, charEnd, selectedText };
+}
 
 /**
  * A source opened from a semantic result arrives with no pageCount, so counting
@@ -160,6 +236,7 @@ export default function KnowledgeDocumentDetails({
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const [capturedSelection, setCapturedSelection] = useState<CapturedPageSelection | null>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
   const pagesContainerRef = useRef<HTMLDivElement | null>(null);
   // The source page is scrolled to once per request. Re-running it on every
@@ -177,9 +254,29 @@ export default function KnowledgeDocumentDetails({
     [documentBacklinks],
   );
 
+  /**
+   * Re-proved against the CURRENT page text on every render, so replaced or
+   * refreshed page data can never emit coordinates mapped against text that is
+   * no longer on screen. Staleness degrades to "no selection", never to a wrong
+   * span.
+   */
+  const activeSelection = useMemo(() => {
+    if (capturedSelection === null) return null;
+    const page = pages.find((candidate) => candidate.pageNumber === capturedSelection.pageNumber);
+    if (!page) return null;
+    const stillExact = page.text.slice(capturedSelection.charStart, capturedSelection.charEnd)
+      === capturedSelection.selectedText;
+    return stillExact ? capturedSelection : null;
+  }, [capturedSelection, pages]);
+
   useEffect(() => {
     setActiveMatchIndex(0);
   }, [query]);
+
+  // A different document is a different coordinate space entirely.
+  useEffect(() => {
+    setCapturedSelection(null);
+  }, [documentId]);
 
   useEffect(() => {
     activeMatchRef.current?.scrollIntoView?.({ block: 'nearest' });
@@ -206,6 +303,18 @@ export default function KnowledgeDocumentDetails({
     scrolledToPageRef.current = initialPageNumber;
     if (target instanceof HTMLElement) target.scrollIntoView?.({ block: 'start' });
   }, [initialPageNumber, loading, pages, matches.length]);
+
+  /**
+   * The selection is captured when the user finishes making it, NOT when they
+   * click the action: a click's own mousedown collapses the browser selection,
+   * so reading it in the click handler would find nothing. Buttons are excluded
+   * for the same reason -- mouseup runs before click, and consuming the
+   * selection there would clear it exactly when the action is about to use it.
+   */
+  const handleSelectionSettled = (event: React.SyntheticEvent) => {
+    if (event.target instanceof Element && event.target.closest('button')) return;
+    setCapturedSelection(captureExactSelection(pagesContainerRef.current, pages));
+  };
 
   const moveMatch = (delta: number) => {
     if (matches.length === 0) return;
@@ -260,8 +369,17 @@ export default function KnowledgeDocumentDetails({
       ) : pages.length === 0 ? (
         <p className="text-[11px] text-gray-500">No extracted text available.</p>
       ) : (
-        <div ref={pagesContainerRef} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-          {pages.map((page, pageIndex) => (
+        <div
+          ref={pagesContainerRef}
+          onMouseUp={handleSelectionSettled}
+          onKeyUp={handleSelectionSettled}
+          className="max-h-[60vh] space-y-4 overflow-y-auto pr-1"
+        >
+          {pages.map((page, pageIndex) => {
+            // Only the page the selection actually lives on offers the exact
+            // action; every other page keeps its ordinary one.
+            const pageSelection = activeSelection?.pageNumber === page.pageNumber ? activeSelection : null;
+            return (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <div className="min-w-0">
@@ -276,7 +394,9 @@ export default function KnowledgeDocumentDetails({
                 {onCreateNoteFromPage && documentId ? (
                   <button
                     type="button"
-                    aria-label={`Create Note from page ${page.pageNumber}`}
+                    aria-label={pageSelection
+                      ? `Create Note from selection on page ${page.pageNumber}`
+                      : `Create Note from page ${page.pageNumber}`}
                     className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                     onClick={() => onCreateNoteFromPage({
                       // The document's real identity, never its filename.
@@ -284,17 +404,27 @@ export default function KnowledgeDocumentDetails({
                       originalFilename,
                       pageNumber: page.pageNumber,
                       pageText: page.text,
+                      // Read from validated state, never from the browser here.
+                      selection: pageSelection === null ? null : {
+                        charStart: pageSelection.charStart,
+                        charEnd: pageSelection.charEnd,
+                        selectedText: pageSelection.selectedText,
+                      },
                     })}
                   >
-                    Create Note
+                    {pageSelection ? 'Create Note from selection' : 'Create Note'}
                   </button>
                 ) : null}
               </div>
-              <p className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700">
+              <p
+                {...{ [PAGE_TEXT_ROOT]: page.pageNumber }}
+                className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700"
+              >
                 {highlightedText(page.text, pageIndex, matches.filter((match) => match.pageIndex === pageIndex), matches[activeMatchIndex], activeMatchRef)}
               </p>
             </section>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

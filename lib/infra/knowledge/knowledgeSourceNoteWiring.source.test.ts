@@ -115,12 +115,19 @@ describe('P6J-F5 source note wiring', () => {
     expect(helper).not.toContain('supabase');
   });
 
-  it('G: sends exactly the five client-owned body fields', () => {
-    const body = after(canvasClient, 'body: JSON.stringify({', 420);
-    for (const allowed of ['targetPadletId', 'sourceDocumentId', 'pageStart', 'pageEnd', 'quoteText']) {
+  it('G: sends exactly the eight client-owned body fields', () => {
+    // B4-B2B: the char offsets and the selected text became client input, so
+    // the window is three fields longer than the F5 body it started as.
+    const body = after(canvasClient, 'body: JSON.stringify({', 640);
+    for (const allowed of ['targetPadletId', 'sourceDocumentId', 'pageStart', 'pageEnd', 'quoteText',
+      'charStart', 'charEnd', 'selectedText']) {
       expect(body, allowed).toContain(allowed);
     }
-    for (const forbidden of ['boardId', 'userId', 'quoteHash', 'charStart', 'charEnd', 'locator', 'createdAt']) {
+    // Identity, the hash and the locator remain server-owned and unreachable.
+    // 'id' is deliberately not substring-checked here -- it occurs inside
+    // targetPadletId and sourceDocumentId; the route suite's exact key-set
+    // assertion is what pins id and createdAt out of the command input.
+    for (const forbidden of ['boardId', 'userId', 'quoteHash', 'locator', 'createdAt']) {
       expect(body, forbidden).not.toContain(forbidden);
     }
   });
@@ -134,7 +141,9 @@ describe('P6J-F5 source note wiring', () => {
   });
 
   it('I: a failed reference keeps the Note and only tells the user', () => {
-    const helper = after(canvasClient, 'const persistKnowledgeSourceReference', 1500);
+    // Window only: the failure path itself is byte-for-byte unchanged, but the
+    // B4-B2B body pushed the catch block past the original 1500.
+    const helper = after(canvasClient, 'const persistKnowledgeSourceReference', 1900);
     const failure = helper.slice(helper.indexOf('} catch'));
     expect(failure).toContain('toast.error');
     expect(failure).toContain('Note created, but source link could not be saved');
@@ -280,9 +289,13 @@ describe('P6J-F5 source note wiring', () => {
 
       expect(roundTripped.sourceReference).toEqual(draft);
       expect(roundTripped.sourceReference.quoteText).toBe('  spaced\r\nquote  ');
+      // Widened at B4-B2B. Still an EXACT key set: a page-only draft carries
+      // the three span fields as explicit nulls, which survive the JSON round
+      // trip, and nothing server-owned ever joins them.
       expect(Object.keys(roundTripped.sourceReference).sort()).toEqual([
-        'pageEnd', 'pageStart', 'quoteText', 'sourceDocumentId',
+        'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText', 'selectedText', 'sourceDocumentId',
       ]);
+      expect(roundTripped.sourceReference).toMatchObject({ charStart: null, charEnd: null, selectedText: null });
     });
 
     it('isolates three drafts with no shared carrier between them', () => {

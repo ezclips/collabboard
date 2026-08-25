@@ -353,7 +353,8 @@ describe('P6J-F6-B3 Used in Notes', () => {
     act(() => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(created).toEqual([
-      { sourceDocumentId: DOC_A, originalFilename: SHARED_FILENAME, pageNumber: 2, pageText: 'Page two body.' },
+      // selection stays null at B4-B2B: no text was selected before the click.
+      { sourceDocumentId: DOC_A, originalFilename: SHARED_FILENAME, pageNumber: 2, pageText: 'Page two body.', selection: null },
     ]);
     expect(targetIdsIn(pageBlock(host, 2))).toEqual([N1]);
   });

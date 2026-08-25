@@ -1105,6 +1105,8 @@ describe('P6J-F5 create Note from a source page', () => {
       pageNumber: 2,
       // Byte-exact: whitespace and CRLF are evidence, not formatting.
       pageText: '  spaced\r\nlines  ',
+      // B4-B2B: no text was selected, so this stays the page-only request.
+      selection: null,
     });
   });
 

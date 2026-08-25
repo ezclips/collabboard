@@ -259,8 +259,337 @@ describe('KnowledgeDocumentDetails source page targeting', () => {
 
     expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     const source = fs.readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8');
-    for (const forbidden of ['charStart', 'charEnd', 'locator', 'bbox', 'quoteHash']) {
+    // B4-B2B added exact-span CAPTURE, so char offsets now legitimately appear
+    // here. Highlight geometry and server-owned fields still must not.
+    for (const forbidden of ['locator', 'bbox', 'quoteHash']) {
       expect(source).not.toContain(forbidden);
     }
+  });
+});
+
+// ============================================================================
+// P6J-F6-B4-B2B -- capturing an exact text selection inside one page
+// ============================================================================
+
+const EMOJI_PAGES = [{ pageNumber: 1, text: 'a😀b alpha\nbeta' }];
+
+function pageRoot(container: HTMLElement, pageNumber: number): HTMLElement {
+  return container.querySelector(`[data-knowledge-page-text-root="${pageNumber}"]`) as HTMLElement;
+}
+
+function createNoteButton(container: HTMLElement, pageNumber: number): HTMLButtonElement {
+  const section = container.querySelector(`[data-page-number="${pageNumber}"]`)!;
+  return Array.from(section.querySelectorAll('button'))
+    .find((button) => button.textContent?.startsWith('Create Note')) as HTMLButtonElement;
+}
+
+/** Puts a real DOM Range on the document's real Selection. */
+function selectRange(start: Node, startOffset: number, end: Node, endOffset: number) {
+  const range = document.createRange();
+  range.setStart(start, startOffset);
+  range.setEnd(end, endOffset);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+/** The mouseup that ends a drag, dispatched where the pointer was released. */
+function finishSelectionOn(element: Element) {
+  act(() => {
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+}
+
+function mountReader(props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {}) {
+  const onCreateNoteFromPage = vi.fn();
+  const container = mountWith({ documentId: 'doc-1', onCreateNoteFromPage, ...props });
+  return { container, onCreateNoteFromPage };
+}
+
+function clickCreateNote(container: HTMLElement, pageNumber: number) {
+  act(() => createNoteButton(container, pageNumber).click());
+}
+
+describe('KnowledgeDocumentDetails exact selection capture', () => {
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('A: with no selection the action stays page-only', () => {
+    const { container, onCreateNoteFromPage } = mountReader();
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
+
+    clickCreateNote(container, 1);
+
+    expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: pages[0].text,
+      selection: null,
+    });
+  });
+
+  it('B: a valid selection arms only the page it was made on', () => {
+    const { container } = mountReader();
+    const root = pageRoot(container, 1);
+
+    // 'safety' -- page-relative [4,10).
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from selection on page 1');
+    // Page 2 is untouched by a selection that does not live there.
+    expect(createNoteButton(container, 2).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
+  });
+
+  it('C: clicking the armed action emits the exact captured span', () => {
+    const { container, onCreateNoteFromPage } = mountReader();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    clickCreateNote(container, 1);
+
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: pages[0].text,
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+    });
+    expect(pages[0].text.slice(4, 10)).toBe('safety');
+  });
+
+  it('C: the other page still emits a page-only request while page 1 is armed', () => {
+    const { container, onCreateNoteFromPage } = mountReader();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    clickCreateNote(container, 2);
+
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toMatchObject({ pageNumber: 2, selection: null });
+  });
+
+  it('C: a mouseup on the action button never consumes the selection', () => {
+    const { container } = mountReader();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    // mouseup fires BEFORE click, and the click's own mousedown has already
+    // collapsed the browser selection by then.
+    window.getSelection()!.removeAllRanges();
+    finishSelectionOn(createNoteButton(container, 1));
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+  });
+
+  it('D: a selection crossing text -> <mark> -> text maps to page coordinates', async () => {
+    const { container, onCreateNoteFromPage } = mountReader();
+    // Real search output, not hand-built DOM: this is the production shape.
+    setSearch(container, 'pdf');
+    await settle();
+    const root = pageRoot(container, 1);
+    expect(root.querySelectorAll('mark')).toHaveLength(2);
+    // [<mark>PDF</mark>, ' safety ', <mark>PDF</mark>, '\nLiteral...']
+    expect(root.childNodes).toHaveLength(4);
+
+    // Start one unit into the FIRST mark, end seven units into the trailing
+    // plain text node -- three node boundaries apart.
+    selectRange(root.childNodes[0].firstChild!, 1, root.childNodes[3], 7);
+    finishSelectionOn(root);
+
+    clickCreateNote(container, 1);
+
+    const { selection } = onCreateNoteFromPage.mock.calls[0][0];
+    expect(selection).toEqual({ charStart: 1, charEnd: 21, selectedText: 'DF safety PDF\nLitera' });
+    // Node-local offsets were 1 and 7; the page-relative ones are 1 and 21.
+    expect(pages[0].text.slice(selection.charStart, selection.charEnd)).toBe(selection.selectedText);
+  });
+
+  it('E: a selection wholly inside a <mark> maps correctly', async () => {
+    const { container, onCreateNoteFromPage } = mountReader();
+    setSearch(container, 'pdf');
+    await settle();
+    const root = pageRoot(container, 1);
+
+    // The SECOND mark, at page [11,14): take its first two units.
+    selectRange(root.childNodes[2].firstChild!, 0, root.childNodes[2].firstChild!, 2);
+    finishSelectionOn(root);
+
+    clickCreateNote(container, 1);
+
+    expect(onCreateNoteFromPage.mock.calls[0][0].selection).toEqual({
+      charStart: 11, charEnd: 13, selectedText: 'PD',
+    });
+  });
+
+  it('F: offsets are UTF-16 code units, so a non-BMP character counts as two', () => {
+    const { container, onCreateNoteFromPage } = mountReader({ pages: EMOJI_PAGES, pageCount: 1 });
+    const root = pageRoot(container, 1);
+
+    // 'a😀' -- the emoji is a surrogate pair, so this ends at 3, not 2.
+    selectRange(root.firstChild!, 0, root.firstChild!, 3);
+    finishSelectionOn(root);
+    clickCreateNote(container, 1);
+
+    const { selection } = onCreateNoteFromPage.mock.calls[0][0];
+    expect(selection).toEqual({ charStart: 0, charEnd: 3, selectedText: 'a😀' });
+    // Exactly JavaScript String.slice coordinates.
+    expect(EMOJI_PAGES[0].text.slice(0, 3)).toBe('a😀');
+    expect(selection.selectedText.length).toBe(3);
+    expect(Array.from(selection.selectedText)).toHaveLength(2);
+  });
+
+  it('G: whitespace and newlines are captured exactly, with no trimming', () => {
+    const { container, onCreateNoteFromPage } = mountReader({ pages: EMOJI_PAGES, pageCount: 1 });
+    const root = pageRoot(container, 1);
+
+    // ' alpha\nbeta' -- leading space and an embedded newline.
+    const start = EMOJI_PAGES[0].text.indexOf(' alpha');
+    selectRange(root.firstChild!, start, root.firstChild!, EMOJI_PAGES[0].text.length);
+    finishSelectionOn(root);
+    clickCreateNote(container, 1);
+
+    const { selection } = onCreateNoteFromPage.mock.calls[0][0];
+    expect(selection.selectedText).toBe(' alpha\nbeta');
+    expect(selection.selectedText).not.toBe(selection.selectedText.trim());
+    expect(EMOJI_PAGES[0].text.slice(selection.charStart, selection.charEnd)).toBe(selection.selectedText);
+  });
+
+  it('H: a selection spanning two pages captures nothing', () => {
+    const { container, onCreateNoteFromPage } = mountReader();
+
+    selectRange(pageRoot(container, 1).firstChild!, 4, pageRoot(container, 2).firstChild!, 3);
+    finishSelectionOn(pageRoot(container, 2));
+
+    // Neither page is armed, and neither invented a one-page span.
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 2).textContent).toBe('Create Note');
+    clickCreateNote(container, 1);
+    expect(onCreateNoteFromPage.mock.calls[0][0].selection).toBeNull();
+  });
+
+  it('I: a selection reaching outside the page paragraph captures nothing', () => {
+    const { container } = mountReader();
+    const heading = container.querySelector('[data-page-number="1"] h3')!;
+
+    // Starts in the "Page 1" heading and ends in the canonical text.
+    selectRange(heading.firstChild!, 0, pageRoot(container, 1).firstChild!, 6);
+    finishSelectionOn(container.querySelector('[data-page-number="1"]')!);
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('J: a collapsed selection captures nothing and clears a prior capture', () => {
+    const { container } = mountReader();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+
+    selectRange(root.firstChild!, 4, root.firstChild!, 4);
+    finishSelectionOn(root);
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('K: replacing the document or its page text drops the stale capture', () => {
+    const { container } = mountReader();
+    const textRoot = pageRoot(container, 1);
+    selectRange(textRoot.firstChild!, 4, textRoot.firstChild!, 10);
+    finishSelectionOn(textRoot);
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+
+    // Same coordinates, different text underneath them.
+    act(() => {
+      root!.render(
+        <KnowledgeDocumentDetails
+          documentId="doc-1"
+          originalFilename="EMG_checklist.pdf"
+          pageCount={2}
+          pages={[{ pageNumber: 1, text: 'completely different text here' }, pages[1]]}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onCreateNoteFromPage={vi.fn()}
+        />,
+      );
+    });
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('K: a different document id clears the capture even at identical coordinates', () => {
+    const { container } = mountReader();
+    const textRoot = pageRoot(container, 1);
+    selectRange(textRoot.firstChild!, 4, textRoot.firstChild!, 10);
+    finishSelectionOn(textRoot);
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+
+    act(() => {
+      root!.render(
+        <KnowledgeDocumentDetails
+          documentId="doc-2"
+          originalFilename="other.pdf"
+          pageCount={2}
+          pages={pages}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onCreateNoteFromPage={vi.fn()}
+        />,
+      );
+    });
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('L: text injected into the paragraph fails the capture closed', () => {
+    const { container } = mountReader();
+    const root = pageRoot(container, 1);
+    // A later UI change that adds visible text would invalidate every offset.
+    act(() => { root.appendChild(document.createTextNode(' INJECTED')); });
+    expect(root.textContent).not.toBe(pages[0].text);
+
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('M: selecting text makes no network request at all', () => {
+    const { container } = mountReader();
+    const root = pageRoot(container, 1);
+
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('N: local search still works normally alongside a live capture', async () => {
+    const { container } = mountReader();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    setSearch(container, 'pdf');
+    await settle();
+
+    expect(container.textContent).toContain('3 matches');
+    expect(container.querySelectorAll('mark')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
+    // Re-rendering with <mark> nodes does not corrupt the stored capture: it is
+    // re-proved against the page text, which did not change.
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
   });
 });

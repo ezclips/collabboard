@@ -494,9 +494,17 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     expect(documentsList).toContain('initialPageNumber={details.initialPageNumber}');
     expect(documentDetails).toContain('initialPageNumber?: number;');
     expect(documentDetails).toContain('data-page-number={page.pageNumber}');
-    // Page-level only: no highlight geometry anywhere in the reader.
-    for (const forbidden of ['charStart', 'charEnd', 'locator', 'bbox', 'quoteHash', 'quoteText']) {
+    // B4-B2B added exact-span CAPTURE here, so char offsets are now legitimate
+    // in this file. Geometry and server-owned fields still are not.
+    for (const forbidden of ['locator', 'bbox', 'quoteHash', 'quoteText']) {
       expect(documentDetails).not.toContain(forbidden);
+    }
+    // The boundary that replaces the retired offset prohibition: RENDERING a
+    // persisted span is B4-B3's, not B2B's. The reader captures selections and
+    // must not yet resolve or draw stored ones, so it consumes neither the
+    // B4-B1 resolver nor any stored reference.
+    for (const forbidden of ['knowledgeSourceSpanResolver', 'resolveKnowledgeSourceSpan', 'useKnowledgeSourceReferencesForPadlet']) {
+      expect(documentDetails, forbidden).not.toContain(forbidden);
     }
   });
 
