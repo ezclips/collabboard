@@ -32,7 +32,7 @@ import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionP
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
-import PostCardContent from '@/components/collabboard/PostCardContent';
+import PostCardContent, { KnowledgeSourceMarker } from '@/components/collabboard/PostCardContent';
 import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMenu';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
@@ -3935,6 +3935,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
               {/* Generic / Note Display (Default) */}
               {(!['link', 'todo', 'table', 'container', 'drawing', 'ai-component'].includes(padlet.type) && !padlet.file_url?.includes('https://')) && (
+                <>
                 <div
                   className="text-gray-800 text-xs prose prose-sm break-words tiptap"
                   style={{
@@ -4028,6 +4029,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     }
                   }}
                 />
+                {/* P6J-F6-B2H: this branch hand-writes its own Note markup and
+                    never reaches PostCardContent, so the shared marker is
+                    mounted here too. Display-only, exactly as on every other
+                    layout -- the editor keeps the interactive Source control. */}
+                <KnowledgeSourceMarker padletId={padlet.id} />
+                </>
               )}
 
               {/* Reactions Row -- same template as the Image post's own

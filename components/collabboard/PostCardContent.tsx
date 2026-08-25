@@ -1103,8 +1103,12 @@ export default function PostCardContent({
  *
  * Renders nothing when the Note has no references -- including when the
  * reference read failed, since that yields an empty index.
+ *
+ * Exported (P6J-F6-B2H) so the freeform renderer, which hand-writes its own
+ * generic/Note markup instead of routing through PostCardContent, mounts this
+ * SAME marker rather than growing a second formatting implementation.
  */
-function KnowledgeSourceMarker({ padletId }: { padletId: string }) {
+export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {
     const references = useKnowledgeSourceReferencesForPadlet(padletId);
     const label = knowledgeSourceCardLabel(references);
     if (label === null) return null;
