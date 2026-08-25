@@ -15,11 +15,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const BOARD_ID = '11111111-1111-4111-8111-111111111111';
+vi.mock('next/navigation', () => ({ useParams: () => ({ id: BOARD_ID }) }));
+
 import KnowledgeDocumentDetails from './KnowledgeDocumentDetails';
+import KnowledgeDocumentsList from './KnowledgeDocumentsList';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
 import { EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import {
   buildKnowledgeSourceBacklinkIndex,
+  isKnowledgeBacklinkNote,
   type KnowledgeBacklinkPost,
 } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
@@ -74,11 +79,13 @@ function render({
   posts,
   documentId = DOC_A,
   originalFilename = SHARED_FILENAME,
+  onOpenBacklinkTarget,
 }: {
   references: readonly SourceReference[];
   posts: readonly KnowledgeBacklinkPost[];
   documentId?: string;
   originalFilename?: string;
+  onOpenBacklinkTarget?: (targetPadletId: string) => void;
 }): HTMLDivElement {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -97,6 +104,7 @@ function render({
           loading={false}
           error={false}
           onBack={() => undefined}
+          onOpenBacklinkTarget={onOpenBacklinkTarget}
         />
       </KnowledgeSourceReferenceProvider>,
     );
@@ -257,7 +265,7 @@ describe('P6J-F6-B3 Used in Notes', () => {
     expect(documentBlock(container)!.textContent).not.toContain(N1);
   });
 
-  it('L: backlinks are DISPLAY ONLY -- nothing clickable, nothing focusable', () => {
+  it('L: without a navigation callback the rows stay display-only, as in B3', () => {
     const container = render({
       references: [reference(N1, DOC_A, 2)],
       posts: [note(N1, 'Display only')],
@@ -348,5 +356,278 @@ describe('P6J-F6-B3 Used in Notes', () => {
       { sourceDocumentId: DOC_A, originalFilename: SHARED_FILENAME, pageNumber: 2, pageText: 'Page two body.' },
     ]);
     expect(targetIdsIn(pageBlock(host, 2))).toEqual([N1]);
+  });
+});
+
+// ============================================================================
+// P6J-F6-B3N -- clicking a backlink opens the live Note
+// ============================================================================
+
+const rowFor = (scope: Element | null, targetPadletId: string): HTMLButtonElement | null =>
+  scope?.querySelector(`[data-knowledge-backlink-target="${targetPadletId}"] button`) ?? null;
+
+const clickRow = (scope: Element | null, targetPadletId: string) => {
+  const button = rowFor(scope, targetPadletId)!;
+  expect(button, `no clickable row for ${targetPadletId}`).toBeTruthy();
+  act(() => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+};
+
+describe('P6J-F6-B3N backlink navigation', () => {
+  it('A: a document-level click emits the target padlet id, never the label', () => {
+    const opened: string[] = [];
+    const container = render({
+      references: [reference(N1, DOC_A, 2)],
+      posts: [note(N1, 'A note with a distinctive title')],
+      onOpenBacklinkTarget: (id) => opened.push(id),
+    });
+
+    clickRow(documentBlock(container), N1);
+
+    expect(opened).toEqual([N1]);
+    // The visible text is not what travelled.
+    expect(opened).not.toContain('A note with a distinctive title');
+  });
+
+  it('B: a page-level click emits exactly the same stable id', () => {
+    const opened: string[] = [];
+    const container = render({
+      references: [reference(N1, DOC_A, 2)],
+      posts: [note(N1, 'Same note both ways')],
+      onOpenBacklinkTarget: (id) => opened.push(id),
+    });
+
+    clickRow(pageBlock(container, 2), N1);
+    clickRow(documentBlock(container), N1);
+
+    expect(opened).toEqual([N1, N1]);
+  });
+
+  it('C: look-alike Notes each open themselves, never the other', () => {
+    const opened: string[] = [];
+    const container = render({
+      references: [reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)],
+      // Identical title AND body: only the id can tell them apart.
+      posts: [note(N1, 'Identical', '<p>same</p>'), note(N2, 'Identical', '<p>same</p>')],
+      onOpenBacklinkTarget: (id) => opened.push(id),
+    });
+
+    clickRow(documentBlock(container), N1);
+    expect(opened).toEqual([N1]);
+
+    clickRow(documentBlock(container), N2);
+    expect(opened).toEqual([N1, N2]);
+  });
+
+  it('D: two Notes sharing the PDF filename are distinguished by page hints', () => {
+    const opened: string[] = [];
+    const container = render({
+      references: [reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)],
+      posts: [note(N1, SHARED_FILENAME), note(N2, SHARED_FILENAME)],
+      onOpenBacklinkTarget: (id) => opened.push(id),
+    });
+
+    const texts = Array.from(documentBlock(container)!.querySelectorAll('[data-knowledge-backlink-target]'))
+      .map((row) => row.textContent);
+    expect(texts).toEqual([`${SHARED_FILENAME} · p. 1`, `${SHARED_FILENAME} · p. 2`]);
+    // Distinguishable to the eye, still addressed by id.
+    expect(targetIdsIn(documentBlock(container))).toEqual([N1, N2]);
+    clickRow(documentBlock(container), N2);
+    expect(opened).toEqual([N2]);
+    // And no UUID was shown to achieve it.
+    expect(documentBlock(container)!.textContent).not.toContain(N1);
+    expect(documentBlock(container)!.textContent).not.toContain(N2);
+  });
+
+  it('F: one Note citing several ranges stays a single row covering both', () => {
+    const container = render({
+      references: [reference(N1, DOC_A, 1), reference(N1, DOC_A, 3, 4), reference(N2, DOC_A, 5)],
+      posts: [note(N1, SHARED_FILENAME), note(N2, SHARED_FILENAME)],
+      onOpenBacklinkTarget: () => undefined,
+    });
+
+    expect(documentBlock(container)!.textContent).toContain('Used in Notes · 2');
+    expect(rowFor(documentBlock(container), N1)!.textContent).toBe(`${SHARED_FILENAME} · pp. 1, 3–4`);
+    expect(targetIdsIn(documentBlock(container))).toEqual([N1, N2]);
+  });
+
+  it('G: page-level rows keep the plain label -- the Page heading carries the page', () => {
+    const container = render({
+      references: [reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)],
+      posts: [note(N1, SHARED_FILENAME), note(N2, SHARED_FILENAME)],
+      onOpenBacklinkTarget: () => undefined,
+    });
+
+    expect(rowFor(pageBlock(container, 2), N2)!.textContent).toBe(SHARED_FILENAME);
+    expect(rowFor(pageBlock(container, 2), N2)!.textContent).not.toContain('p. 2');
+    expect(targetIdsIn(pageBlock(container, 2))).toEqual([N2]);
+  });
+
+  it('N: a row is a real, keyboard-reachable button once navigation exists', () => {
+    const opened: string[] = [];
+    const container = render({
+      references: [reference(N1, DOC_A, 2)],
+      posts: [note(N1, 'Reachable')],
+      onOpenBacklinkTarget: (id) => opened.push(id),
+    });
+
+    const button = rowFor(documentBlock(container), N1)!;
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    // Not removed from the tab order, and not a div pretending to be a control.
+    expect(button.getAttribute('tabindex')).toBeNull();
+    expect(button.className).toContain('cursor-pointer');
+    expect(button.className).toContain('focus-visible:');
+
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    // Enter on a focused button is a click in the DOM's own semantics.
+    act(() => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(opened).toEqual([N1]);
+  });
+
+  it('L: clicking a backlink issues no request of any kind', () => {
+    const fetchSpy = vi.fn();
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    try {
+      const container = render({
+        references: [reference(N1, DOC_A, 2)],
+        posts: [note(N1, 'No fetch on click')],
+        onOpenBacklinkTarget: () => undefined,
+      });
+      clickRow(documentBlock(container), N1);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  // J (CanvasClient resolves by id and fails closed) is pinned at the source in
+  // the governance suite's L4 -- CanvasClient is the whole board and cannot be
+  // mounted here. K's predicate is behavioural, so it is exercised directly.
+  it('K: the Note predicate the handler guards with excludes every non-Note target', () => {
+    // The same function CanvasClient calls, exercised directly.
+    for (const type of ['drawing', 'file', 'card', 'image', 'link', 'table', 'todo', 'container']) {
+      expect(isKnowledgeBacklinkNote({ id: N1, type }), `${type} must not be openable`).toBe(false);
+    }
+    for (const type of ['note', 'text']) {
+      expect(isKnowledgeBacklinkNote({ id: N1, type })).toBe(true);
+    }
+  });
+
+  it('M: clicking a backlink changes no URL and pushes no history entry', () => {
+    const before = window.location.href;
+    const pushState = vi.spyOn(window.history, 'pushState');
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    try {
+      const container = render({
+        references: [reference(N1, DOC_A, 2)],
+        posts: [note(N1, 'Stays put')],
+        onOpenBacklinkTarget: () => undefined,
+      });
+      clickRow(documentBlock(container), N1);
+
+      expect(window.location.href).toBe(before);
+      expect(pushState).not.toHaveBeenCalled();
+      expect(replaceState).not.toHaveBeenCalled();
+    } finally {
+      pushState.mockRestore();
+      replaceState.mockRestore();
+    }
+  });
+});
+
+// ============================================================================
+// P6J-F6-B3N -- the transition, through the REAL Knowledge surface
+// ============================================================================
+describe('P6J-F6-B3N Knowledge close/navigate transition', () => {
+  const DOCUMENT = {
+    id: DOC_A,
+    boardId: BOARD_ID,
+    originalFilename: SHARED_FILENAME,
+    mimeType: 'application/pdf',
+    fileSizeBytes: 1024,
+    pageCount: PAGES.length,
+    processingStatus: 'ready',
+    createdAt: '2026-08-21T00:00:00.000Z',
+    updatedAt: '2026-08-21T00:00:02.000Z',
+  };
+
+  function jsonResponse(body: unknown) {
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  /** Mounts the real list, opens the real reader, and logs the callback order. */
+  async function openReader() {
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
+      if (url.includes('/pages')) return jsonResponse({ document: DOCUMENT, pages: PAGES });
+      return jsonResponse({ documents: [DOCUMENT] });
+    }) as unknown as typeof fetch;
+
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    const view = (isOpen: boolean) => (
+      <KnowledgeSourceReferenceProvider
+        index={EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX}
+        backlinks={buildKnowledgeSourceBacklinkIndex([reference(N1, DOC_A, 2)], [note(N1, 'Cited note')])}
+      >
+        <KnowledgeDocumentsList
+          isOpen={isOpen}
+          onClose={() => calls.push('close')}
+          onOpenBacklinkTarget={(targetPadletId) => calls.push(`navigate:${targetPadletId}`)}
+        />
+      </KnowledgeSourceReferenceProvider>
+    );
+
+    await act(async () => { root!.render(view(true)); });
+    // The list has loaded; open the document's text.
+    const viewText = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent === 'View text')!;
+    expect(viewText, 'the document did not reach the list').toBeTruthy();
+    await act(async () => { viewText.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    return { calls, view, restore: () => { globalThis.fetch = originalFetch; } };
+  }
+
+  it('H: Knowledge closes FIRST, then the canvas is asked to open the Note', async () => {
+    const { calls, restore } = await openReader();
+    try {
+      const surface = document.querySelector('[data-knowledge-documents="true"]')!;
+      const button = surface.querySelector(`[data-knowledge-backlink-target="${N1}"] button`) as HTMLButtonElement;
+      expect(button, 'the reader rendered no clickable backlink').toBeTruthy();
+
+      await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+      // Order is the contract: the modal must not still be over the Note.
+      expect(calls).toEqual(['close', `navigate:${N1}`]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('I: reopening Knowledge by hand replays nothing', async () => {
+    const { calls, view, restore } = await openReader();
+    try {
+      const button = document.querySelector(`[data-knowledge-backlink-target="${N1}"] button`) as HTMLButtonElement;
+      await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(calls).toEqual(['close', `navigate:${N1}`]);
+
+      // Close for real, then reopen the library the way a user would.
+      await act(async () => { root!.render(view(false)); });
+      await act(async () => { root!.render(view(true)); });
+
+      // No stored request, so nothing to re-fire -- and the reader is back at
+      // the library rather than the document it last showed.
+      expect(calls).toEqual(['close', `navigate:${N1}`]);
+      expect(document.querySelector('[data-knowledge-used-in-notes]')).toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

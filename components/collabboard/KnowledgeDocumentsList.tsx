@@ -35,6 +35,11 @@ export interface KnowledgeDocumentsListProps {
    * the last source.
    */
   sourceOpenRequest?: KnowledgeSourceOpenRequest | null;
+  /**
+   * P6J-F6-B3N. Forwarded to the canvas after this surface closes. Nothing is
+   * stored -- one direct user event, so reopening by hand replays nothing.
+   */
+  onOpenBacklinkTarget?: (targetPadletId: string) => void;
 }
 
 interface KnowledgeListEntry {
@@ -181,7 +186,7 @@ function subscribeToKnowledgeWarm(boardId: string): KnowledgeWarmSubscription {
  * No client-side role gating: whatever the server returns is rendered, so
  * read-only collaborators see the same list an editor does.
  */
-export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onCreateNoteFromPage, sourceOpenRequest = null }: KnowledgeDocumentsListProps) {
+export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onCreateNoteFromPage, sourceOpenRequest = null, onOpenBacklinkTarget }: KnowledgeDocumentsListProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [phase, setPhase] = useState<ListPhase>('loading');
@@ -446,6 +451,14 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             initialPageNumber={details.initialPageNumber}
             onBack={() => setDetails(null)}
             onCreateNoteFromPage={onCreateNoteFromPage}
+            onOpenBacklinkTarget={onOpenBacklinkTarget
+              ? (targetPadletId) => {
+                // Close first, then hand the canvas the target: the reader is a
+                // modal over the board, so the Note must not open behind it.
+                closeSurface();
+                onOpenBacklinkTarget(targetPadletId);
+              }
+              : undefined}
           />
         ) : (
           <>

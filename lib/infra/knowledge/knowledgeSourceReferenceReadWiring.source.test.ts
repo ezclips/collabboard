@@ -628,21 +628,32 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
     }
   });
 
-  it('L: the backlink UI is display-only -- no navigation wiring exists yet', () => {
-    const marker = after(documentDetails, 'function UsedInNotes(', 1100);
+  // B3N retired B3's display-only prohibition: the rows are controls now. What
+  // survives from B3 is the property that actually mattered underneath it --
+  // the row is addressed by padlet id, and the visible text addresses nothing.
+  it('L: a backlink row is a real button that emits the target id, not its text', () => {
+    const marker = after(documentDetails, 'function UsedInNotes(', 1400);
 
-    // The rendered rows are plain list items.
     expect(marker).toContain('data-knowledge-used-in-notes={scope}');
-    expect(marker).toContain('<li');
-    for (const forbidden of [
-      'onClick', 'onPointerDown', 'onMouseDown', '<button', '<a ', 'href',
-      'role="button"', 'tabIndex', 'cursor-pointer',
-    ]) {
+    // Identity still rides on the row itself, independent of what it renders.
+    expect(marker).toContain('data-knowledge-backlink-target={row.targetPadletId}');
+    // A real control, not a div wearing a click handler.
+    expect(marker).toContain('<button');
+    expect(marker).toContain('type="button"');
+    // The id is what travels. `displayText` is presentation and must never be
+    // the argument -- two Notes can render identical text.
+    expect(marker).toContain('onOpen(row.targetPadletId)');
+    expect(marker, 'the row must not emit its visible text').not.toContain('onOpen(row.displayText)');
+    expect(marker).not.toContain('onOpen(row.label)');
+    // Interaction stays inside the mounted canvas: no URL navigation, ever.
+    for (const forbidden of ['<a ', 'href', 'router.', 'openPadlet=']) {
       expect(marker, `backlink row must not contain ${forbidden}`).not.toContain(forbidden);
     }
   });
 
-  it('L2: B3 adds no selection, editor or canvas-navigation callback anywhere', () => {
+  it('L2: only CanvasClient resolves a backlink target; every other layer forwards it', () => {
+    // The reader emits an id, the list closes and forwards, the context and the
+    // domain helper stay out of it entirely. None of them may navigate.
     for (const source of [documentDetails, documentsList, referenceContext, backlinks]) {
       for (const forbidden of [
         'setSelectedPadletId',
@@ -650,15 +661,54 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
         'openPadlet=',
         'scrollIntoView(',
         'querySelector(\'[data-padlet',
-        'onOpenTargetPadlet',
-        'onOpenBacklink',
+        'padlets.find',
       ]) {
-        expect(source, `${forbidden} belongs to B3N, not B3`).not.toContain(forbidden);
+        expect(source, `${forbidden} belongs to CanvasClient, not this layer`).not.toContain(forbidden);
       }
     }
-    // CanvasSidebar gained no backlink callback: B3 never crosses back to the canvas.
-    expect(canvasSidebar).not.toContain('Backlink');
+
+    // The list closes Knowledge BEFORE handing the target on: the reader is a
+    // modal over the board, so the Note must not open behind it.
+    const forward = after(documentsList, 'onOpenBacklinkTarget={onOpenBacklinkTarget', 400);
+    expect(forward.indexOf('closeSurface();'), 'closeSurface() missing from the forward')
+      .toBeGreaterThanOrEqual(0);
+    expect(forward.indexOf('closeSurface();'))
+      .toBeLessThan(forward.indexOf('onOpenBacklinkTarget(targetPadletId);'));
+
+    // CanvasSidebar is plumbing: it forwards the callback and owns nothing.
+    expect(canvasSidebar).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
+    for (const forbidden of [
+      'padlets.find', 'setSelectedPadletId', 'openPadletInTypeEditor', 'useState<string',
+    ]) {
+      expect(canvasSidebar, `CanvasSidebar must not ${forbidden}`).not.toContain(forbidden);
+    }
+    // And it still renders none of the backlink UI itself.
     expect(canvasSidebar).not.toContain('UsedInNotes');
+  });
+
+  // B3N's navigation handler: the four things that make the click safe.
+  it('L4: CanvasClient resolves by id, fails closed, and reuses the existing editor', () => {
+    const handler = after(canvasClient, 'const openKnowledgeBacklinkTarget = (targetPadletId: string) => {', 500);
+
+    // Resolved against the board already loaded -- never fetched, never by name.
+    expect(handler).toContain('padlets.find((padlet) => padlet.id === targetPadletId)');
+    // A vanished target and a non-Note target both stop here.
+    expect(handler).toContain('if (!target || !isKnowledgeBacklinkNote(target)) return;');
+    // Then the pre-existing primitives, unchanged.
+    expect(handler).toContain('setSelectedPadletId(target.id);');
+    expect(handler).toContain('openPadletInTypeEditor(target);');
+
+    for (const forbidden of [
+      'fetch(', 'supabase', 'await ', 'setPadlets(', 'updatePadletById',
+      'scrollIntoView', 'querySelector', 'router.', 'openPadlet=', '.title', '.label',
+    ]) {
+      expect(handler, `B3N navigation must stay free of ${forbidden}`).not.toContain(forbidden);
+    }
+    // Not a hook. B3's outage came from adding one below the early returns, and
+    // this deliberately needs none.
+    for (const hook of ['useMemo', 'useCallback', 'useEffect', 'useState']) {
+      expect(handler, `the handler must not be or call ${hook}`).not.toContain(hook);
+    }
   });
 
   it('L3: only the reader renders the backlink UI', () => {

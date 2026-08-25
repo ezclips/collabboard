@@ -61,6 +61,11 @@ interface CanvasSidebarProps {
    * only opens it and forwards the request.
    */
   knowledgeSourceOpenRequest?: KnowledgeSourceOpenRequest | null;
+  /**
+   * P6J-F6-B3N. Pure plumbing: the sidebar neither resolves the target nor
+   * remembers it. The reader closes itself; the canvas opens the Note.
+   */
+  onOpenBacklinkTarget?: (targetPadletId: string) => void;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -89,6 +94,7 @@ export default function CanvasSidebar({
   onBack,
   onCreateNoteFromKnowledgePage,
   knowledgeSourceOpenRequest = null,
+  onOpenBacklinkTarget,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -285,6 +291,7 @@ export default function CanvasSidebar({
         sourceOpenRequest={knowledgeSourceOpenRequest}
         isOpen={knowledgeOpen}
         onClose={() => setKnowledgeOpen(false)}
+        onOpenBacklinkTarget={onOpenBacklinkTarget}
         onCreateNoteFromPage={onCreateNoteFromKnowledgePage
           ? (request) => {
             setKnowledgeOpen(false);

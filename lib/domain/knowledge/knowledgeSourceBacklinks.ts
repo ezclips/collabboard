@@ -173,3 +173,99 @@ export function knowledgeSourceBacklinkTargetsOnPage(
     backlinks.filter((backlink) => knowledgeBacklinkCoversPage(backlink, pageNumber)),
   );
 }
+
+/** An inclusive span of pages, after overlapping citations have been coalesced. */
+export interface KnowledgeBacklinkPageRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * P6J-F6-B3N -- one rendered row. `targetPadletId` stays the only identity;
+ * `displayText` is presentation and must never decide what gets opened.
+ */
+export interface KnowledgeSourceBacklinkRow {
+  readonly targetPadletId: string;
+  readonly label: string;
+  readonly displayText: string;
+}
+
+/**
+ * Every page range one Note cites in this document, sorted and coalesced --
+ * touching spans included, so p.1 plus p.2 reads as one `pp. 1–2` rather than a
+ * list that looks like two separate citations.
+ */
+export function knowledgeBacklinkRangesForTarget(
+  backlinks: readonly KnowledgeSourceBacklink[],
+  targetPadletId: string,
+): readonly KnowledgeBacklinkPageRange[] {
+  const ranges = backlinks
+    .filter((backlink) => backlink.targetPadletId === targetPadletId)
+    .map((backlink) => ({ start: backlink.pageStart, end: backlink.pageEnd }))
+    .sort((a, b) => (a.start - b.start) || (a.end - b.end));
+
+  const merged: KnowledgeBacklinkPageRange[] = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end + 1) {
+      if (range.end > last.end) merged[merged.length - 1] = { start: last.start, end: range.end };
+      continue;
+    }
+    merged.push(range);
+  }
+  return merged;
+}
+
+/** `p. 2`, `pp. 2–4`, `pp. 1, 3–4`. Empty for a Note with no ranges. */
+export function formatKnowledgeBacklinkPageHint(
+  ranges: readonly KnowledgeBacklinkPageRange[],
+): string {
+  if (ranges.length === 0) return '';
+  const parts = ranges.map((range) => (
+    range.start === range.end ? `${range.start}` : `${range.start}–${range.end}`
+  ));
+  const plural = ranges.length > 1 || ranges[0].start !== ranges[0].end;
+  return `${plural ? 'pp.' : 'p.'} ${parts.join(', ')}`;
+}
+
+/**
+ * Document-level rows, with a page hint appended ONLY where two Notes would
+ * otherwise read identically -- a source-created Note inherits the PDF's
+ * filename as its title, so two Notes citing one document legitimately render
+ * the same label (runtime B3 hit exactly that). The hint tells them apart for
+ * the reader; it takes no part in identifying either.
+ */
+export function knowledgeSourceBacklinkDocumentRows(
+  backlinks: readonly KnowledgeSourceBacklink[],
+): readonly KnowledgeSourceBacklinkRow[] {
+  const targets = knowledgeSourceBacklinkTargets(backlinks);
+  const labelCounts = new Map<string, number>();
+  for (const target of targets) {
+    labelCounts.set(target.label, (labelCounts.get(target.label) ?? 0) + 1);
+  }
+
+  return targets.map((target) => {
+    const hint = (labelCounts.get(target.label) ?? 0) > 1
+      ? formatKnowledgeBacklinkPageHint(
+        knowledgeBacklinkRangesForTarget(backlinks, target.targetPadletId),
+      )
+      : '';
+    return {
+      targetPadletId: target.targetPadletId,
+      label: target.label,
+      displayText: hint.length > 0 ? `${target.label} · ${hint}` : target.label,
+    };
+  });
+}
+
+/** Page-level rows: under a `Page N` heading already, so no hint is added. */
+export function knowledgeSourceBacklinkPageRows(
+  backlinks: readonly KnowledgeSourceBacklink[],
+  pageNumber: number,
+): readonly KnowledgeSourceBacklinkRow[] {
+  return knowledgeSourceBacklinkTargetsOnPage(backlinks, pageNumber).map((target) => ({
+    targetPadletId: target.targetPadletId,
+    label: target.label,
+    displayText: target.label,
+  }));
+}

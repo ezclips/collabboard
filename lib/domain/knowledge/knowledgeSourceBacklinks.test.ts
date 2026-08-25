@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildKnowledgeSourceBacklinkIndex,
+  formatKnowledgeBacklinkPageHint,
   isKnowledgeBacklinkNote,
+  knowledgeBacklinkRangesForTarget,
+  knowledgeSourceBacklinkDocumentRows,
+  knowledgeSourceBacklinkPageRows,
   knowledgeBacklinkCoversPage,
   knowledgeBacklinkLabel,
   knowledgeSourceBacklinkTargets,
@@ -263,5 +267,169 @@ describe('purity', () => {
 
     expect(JSON.stringify(Array.from(buildKnowledgeSourceBacklinkIndex(references, posts))))
       .toBe(JSON.stringify(Array.from(buildKnowledgeSourceBacklinkIndex(references, posts))));
+  });
+});
+
+// ==========================================================================
+// P6J-F6-B3N -- page hints that disambiguate rows reading alike
+// ==========================================================================
+
+/** Two Notes that both inherited the same PDF filename as their title. */
+const SAME_NAME = 'Sammelmappe1.pdf';
+const TWIN_1 = post(N1, 'text', SAME_NAME);
+const TWIN_2 = post(N2, 'text', SAME_NAME);
+
+describe('page hint formatting', () => {
+  it('E: renders a single page as `p. N`', () => {
+    expect(formatKnowledgeBacklinkPageHint([{ start: 2, end: 2 }])).toBe('p. 2');
+  });
+
+  it('E: renders a single span as `pp. N–M`', () => {
+    expect(formatKnowledgeBacklinkPageHint([{ start: 2, end: 4 }])).toBe('pp. 2–4');
+  });
+
+  it('renders disjoint ranges compactly, plural even when each part is one page', () => {
+    expect(formatKnowledgeBacklinkPageHint([{ start: 1, end: 1 }, { start: 3, end: 4 }]))
+      .toBe('pp. 1, 3–4');
+    expect(formatKnowledgeBacklinkPageHint([{ start: 1, end: 1 }, { start: 5, end: 5 }]))
+      .toBe('pp. 1, 5');
+  });
+
+  it('has no hint to render for a Note with no ranges', () => {
+    expect(formatKnowledgeBacklinkPageHint([])).toBe('');
+  });
+});
+
+describe('range collection for one target', () => {
+  it('F: keeps a Note\'s disjoint citations separate', () => {
+    const backlinks = forDocument(
+      [reference(N1, DOC_A, 1), reference(N1, DOC_A, 3, 4)],
+      [NOTE_1],
+      DOC_A,
+    );
+
+    expect(knowledgeBacklinkRangesForTarget(backlinks, N1)).toEqual([
+      { start: 1, end: 1 },
+      { start: 3, end: 4 },
+    ]);
+  });
+
+  it('coalesces duplicate, overlapping and touching citations', () => {
+    const backlinks = forDocument(
+      [reference(N1, DOC_A, 2), reference(N1, DOC_A, 2), reference(N1, DOC_A, 3, 5), reference(N1, DOC_A, 4)],
+      [NOTE_1],
+      DOC_A,
+    );
+
+    expect(knowledgeBacklinkRangesForTarget(backlinks, N1)).toEqual([{ start: 2, end: 5 }]);
+  });
+
+  it('sorts out-of-order citations before merging', () => {
+    const backlinks = forDocument(
+      [reference(N1, DOC_A, 7), reference(N1, DOC_A, 1, 2)],
+      [NOTE_1],
+      DOC_A,
+    );
+
+    expect(knowledgeBacklinkRangesForTarget(backlinks, N1)).toEqual([
+      { start: 1, end: 2 },
+      { start: 7, end: 7 },
+    ]);
+  });
+
+  it('never borrows another Note\'s ranges', () => {
+    const backlinks = forDocument(
+      [reference(N1, DOC_A, 1), reference(N2, DOC_A, 9)],
+      [NOTE_1, NOTE_2],
+      DOC_A,
+    );
+
+    expect(knowledgeBacklinkRangesForTarget(backlinks, N1)).toEqual([{ start: 1, end: 1 }]);
+    expect(knowledgeBacklinkRangesForTarget(backlinks, N2)).toEqual([{ start: 9, end: 9 }]);
+  });
+});
+
+describe('document-level rows', () => {
+  it('D: distinguishes two identically labelled Notes by their own pages', () => {
+    const rows = knowledgeSourceBacklinkDocumentRows(
+      forDocument([reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)], [TWIN_1, TWIN_2], DOC_A),
+    );
+
+    expect(rows.map((row) => row.displayText)).toEqual([
+      `${SAME_NAME} · p. 1`,
+      `${SAME_NAME} · p. 2`,
+    ]);
+    // Identity is untouched by the hint.
+    expect(rows.map((row) => row.targetPadletId)).toEqual([N1, N2]);
+    expect(rows.every((row) => row.label === SAME_NAME)).toBe(true);
+  });
+
+  it('leaves a unique label alone -- no hint where nothing is ambiguous', () => {
+    const rows = knowledgeSourceBacklinkDocumentRows(
+      forDocument([reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)], [NOTE_1, NOTE_2], DOC_A),
+    );
+
+    expect(rows.map((row) => row.displayText)).toEqual(['First note', 'Second note']);
+    expect(rows.every((row) => row.displayText === row.label)).toBe(true);
+  });
+
+  it('F: a Note citing several ranges appears once, and its hint covers all of them', () => {
+    const rows = knowledgeSourceBacklinkDocumentRows(
+      forDocument(
+        [reference(N1, DOC_A, 1), reference(N1, DOC_A, 3, 4), reference(N2, DOC_A, 6)],
+        [TWIN_1, TWIN_2],
+        DOC_A,
+      ),
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({
+      targetPadletId: N1,
+      label: SAME_NAME,
+      displayText: `${SAME_NAME} · pp. 1, 3–4`,
+    });
+    expect(rows[1].displayText).toBe(`${SAME_NAME} · p. 6`);
+  });
+
+  it('collapses one Note\'s repeated citations into a single row', () => {
+    const rows = knowledgeSourceBacklinkDocumentRows(
+      forDocument([reference(N1, DOC_A, 2), reference(N1, DOC_A, 2)], [NOTE_1], DOC_A),
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].targetPadletId).toBe(N1);
+  });
+
+  it('renders nothing for a document nothing cites', () => {
+    expect(knowledgeSourceBacklinkDocumentRows(forDocument([], [NOTE_1], DOC_A))).toEqual([]);
+    expect(knowledgeSourceBacklinkDocumentRows(
+      forDocument([reference(N1, DOC_B, 2)], [NOTE_1], DOC_A),
+    )).toEqual([]);
+  });
+});
+
+describe('page-level rows', () => {
+  it('G: keeps the base label -- the Page heading already says the page', () => {
+    const backlinks = forDocument(
+      [reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)],
+      [TWIN_1, TWIN_2],
+      DOC_A,
+    );
+
+    const rows = knowledgeSourceBacklinkPageRows(backlinks, 2);
+    expect(rows).toEqual([{ targetPadletId: N2, label: SAME_NAME, displayText: SAME_NAME }]);
+    // The other twin stays on its own page.
+    expect(knowledgeSourceBacklinkPageRows(backlinks, 1).map((row) => row.targetPadletId)).toEqual([N1]);
+  });
+
+  it('still filters by the inclusive citation range', () => {
+    const backlinks = forDocument([reference(N1, DOC_A, 2, 4)], [NOTE_1], DOC_A);
+
+    for (const page of [2, 3, 4]) {
+      expect(knowledgeSourceBacklinkPageRows(backlinks, page).map((row) => row.targetPadletId)).toEqual([N1]);
+    }
+    for (const page of [1, 5]) {
+      expect(knowledgeSourceBacklinkPageRows(backlinks, page)).toEqual([]);
+    }
   });
 });

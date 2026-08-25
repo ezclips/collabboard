@@ -93,7 +93,7 @@ import {
   upsertKnowledgeSourceReference,
 } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
-import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
+import { buildKnowledgeSourceBacklinkIndex, isKnowledgeBacklinkNote } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
@@ -6627,6 +6627,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     requestOpenDocument(post, destination);
   };
 
+  /**
+   * P6J-F6-B3N. Opens the live Note a Knowledge backlink names.
+   *
+   * Not a hook -- B3's outage came from adding one below the early returns, and
+   * this needs none. Resolution is by padlet id against the board already
+   * loaded: no fetch, no cross-board lookup, and never a match on the row's
+   * visible text. A target that vanished between render and click, or that is
+   * not a Note, fails closed and simply does nothing.
+   */
+  const openKnowledgeBacklinkTarget = (targetPadletId: string) => {
+    const target = padlets.find((padlet) => padlet.id === targetPadletId);
+    if (!target || !isKnowledgeBacklinkNote(target)) return;
+    setSelectedPadletId(target.id);
+    openPadletInTypeEditor(target);
+  };
+
   const openPadletTargetFromContextMenu = (post: Padlet) => {
     if (post.type === 'image') {
       window.setTimeout(() => {
@@ -6744,6 +6760,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBack={() => router.push('/dashboard')}
               onCreateNoteFromKnowledgePage={handleCreateNoteFromKnowledgePage}
               knowledgeSourceOpenRequest={knowledgeSourceOpenRequest}
+              onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
             />
           </div>
         )}

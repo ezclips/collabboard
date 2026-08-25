@@ -4,10 +4,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import {
-  knowledgeSourceBacklinkTargets,
-  knowledgeSourceBacklinkTargetsOnPage,
+  knowledgeSourceBacklinkDocumentRows,
+  knowledgeSourceBacklinkPageRows,
 } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
-import type { KnowledgeSourceBacklink } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
+import type { KnowledgeSourceBacklinkRow } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 
 export interface KnowledgeDocumentDetailPage {
   pageNumber: number;
@@ -39,6 +39,11 @@ export interface KnowledgeDocumentDetailsProps {
    * geometry, no char offsets.
    */
   initialPageNumber?: number;
+  /**
+   * P6J-F6-B3N. Asks the canvas to open one citing Note, by padlet id. Absent
+   * outside a canvas, which is what keeps the rows non-interactive there.
+   */
+  onOpenBacklinkTarget?: (targetPadletId: string) => void;
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
@@ -100,27 +105,40 @@ function highlightedText(
 }
 
 /**
- * P6J-F6-B3 -- reverse provenance, DISPLAY ONLY.
+ * P6J-F6-B3 reverse provenance, made navigable by B3N.
  *
- * Plain text in a list: no button, anchor, handler or pointer cursor. It must
- * not look clickable, because clicking does nothing until B3N. The target id
- * rides along as a data attribute so identity stays the padlet id even though
- * the visible text is a label.
+ * A row is a real button only where the surface was handed a navigation
+ * callback; without one it stays B3's plain text, so a reader mounted outside
+ * a canvas never offers an action that cannot work. Either way the target id
+ * rides on the row as a data attribute -- the visible text is never looked up.
  */
-function UsedInNotes({ scope, targets }: { scope: 'document' | 'page'; targets: readonly KnowledgeSourceBacklink[] }) {
-  if (targets.length === 0) return null;
+function UsedInNotes({ scope, rows, onOpen }: {
+  scope: 'document' | 'page';
+  rows: readonly KnowledgeSourceBacklinkRow[];
+  onOpen?: (targetPadletId: string) => void;
+}) {
+  if (rows.length === 0) return null;
   return (
     <div data-knowledge-used-in-notes={scope} className="mt-1">
-      <p className="text-[11px] font-medium text-gray-500">Used in Notes · {targets.length}</p>
+      <p className="text-[11px] font-medium text-gray-500">Used in Notes · {rows.length}</p>
       <ul className="mt-0.5 space-y-0.5">
-        {targets.map((target) => (
-          <li
-            key={target.targetPadletId}
-            data-knowledge-backlink-target={target.targetPadletId}
-            className="truncate pl-2 text-[11px] text-gray-600"
-            title={target.label}
-          >
-            {target.label}
+        {rows.map((row) => (
+          <li key={row.targetPadletId} data-knowledge-backlink-target={row.targetPadletId} className="min-w-0">
+            {onOpen ? (
+              <button
+                type="button"
+                // The id, never the row's text: two Notes can read identically.
+                onClick={() => onOpen(row.targetPadletId)}
+                title={row.displayText}
+                className="block w-full cursor-pointer truncate rounded pl-2 text-left text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+              >
+                {row.displayText}
+              </button>
+            ) : (
+              <span className="block truncate pl-2 text-[11px] text-gray-600" title={row.displayText}>
+                {row.displayText}
+              </span>
+            )}
           </li>
         ))}
       </ul>
@@ -138,6 +156,7 @@ export default function KnowledgeDocumentDetails({
   onBack,
   onCreateNoteFromPage,
   initialPageNumber,
+  onOpenBacklinkTarget,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -153,8 +172,8 @@ export default function KnowledgeDocumentDetails({
   // filename, and a name-keyed lookup would attribute one's Notes to the other.
   // Read from the board index CanvasClient owns -- no request of its own.
   const documentBacklinks = useKnowledgeSourceBacklinksForDocument(documentId);
-  const documentTargets = useMemo(
-    () => knowledgeSourceBacklinkTargets(documentBacklinks),
+  const documentRows = useMemo(
+    () => knowledgeSourceBacklinkDocumentRows(documentBacklinks),
     [documentBacklinks],
   );
 
@@ -209,7 +228,7 @@ export default function KnowledgeDocumentDetails({
         {pageSummary !== null ? (
           <p className="text-[11px] text-gray-500">{pageSummary}</p>
         ) : null}
-        <UsedInNotes scope="document" targets={documentTargets} />
+        <UsedInNotes scope="document" rows={documentRows} onOpen={onOpenBacklinkTarget} />
       </div>
 
       <div className="mb-3">
@@ -250,7 +269,8 @@ export default function KnowledgeDocumentDetails({
                   {/* Citations covering THIS page (pageStart <= n <= pageEnd). */}
                   <UsedInNotes
                     scope="page"
-                    targets={knowledgeSourceBacklinkTargetsOnPage(documentBacklinks, page.pageNumber)}
+                    rows={knowledgeSourceBacklinkPageRows(documentBacklinks, page.pageNumber)}
+                    onOpen={onOpenBacklinkTarget}
                   />
                 </div>
                 {onCreateNoteFromPage && documentId ? (
