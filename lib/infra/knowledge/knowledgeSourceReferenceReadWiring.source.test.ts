@@ -499,12 +499,40 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     for (const forbidden of ['locator', 'bbox', 'quoteHash', 'quoteText']) {
       expect(documentDetails).not.toContain(forbidden);
     }
-    // The boundary that replaces the retired offset prohibition: RENDERING a
-    // persisted span is B4-B3's, not B2B's. The reader captures selections and
-    // must not yet resolve or draw stored ones, so it consumes neither the
-    // B4-B1 resolver nor any stored reference.
+    // This prohibition did NOT expire at B4-B3; it changed meaning from "not
+    // yet" to "not here". The reader now renders persisted spans, but it never
+    // resolves them itself -- it delegates to the pure domain module, which is
+    // the only consumer of the B4-B1 resolver. Keeping the guard pins that
+    // layering; deleting it would have retired real protection for nothing.
     for (const forbidden of ['knowledgeSourceSpanResolver', 'resolveKnowledgeSourceSpan', 'useKnowledgeSourceReferencesForPadlet']) {
       expect(documentDetails, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('M2: B4-B3 highlight rendering is a pure read of the index already in memory', () => {
+    // The reader projects the existing context and derives spans through the
+    // pure module. Both are in-memory: nothing here can load or store.
+    expect(documentDetails).toContain('useKnowledgeSourceReferencesForDocument(documentId)');
+    expect(documentDetails).toContain('knowledgeSourceHighlightSegments(documentSourceReferences, page.pageNumber, page.text)');
+    expect(documentDetails).toContain('data-knowledge-source-highlight');
+    for (const forbidden of ['fetch(', 'supabase', 'createClient', '/api/', '.insert(', '.update(', '.delete(', '.upsert(', '.rpc(']) {
+      expect(documentDetails, forbidden).not.toContain(forbidden);
+    }
+
+    // The projection is a memo over the EXISTING context, not a second context
+    // and not new state. Two contexts existed before B4-B3; there are still two.
+    expect(referenceContext).toContain('export function useKnowledgeSourceReferencesForDocument');
+    expect(referenceContext).toContain('useContext(KnowledgeSourceReferenceContext)');
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(2);
+    for (const forbidden of ['fetch(', 'supabase', 'useState', 'useEffect', '.insert(', '.update(']) {
+      expect(referenceContext, forbidden).not.toContain(forbidden);
+    }
+
+    // Resolver consumption lives in the pure module, and only there.
+    const highlights = sourceOf('lib/domain/knowledge/knowledgeSourceHighlights.ts');
+    expect(highlights).toContain("from './knowledgeSourceSpanResolver'");
+    for (const forbidden of ['react', 'fetch(', 'supabase', 'locator', 'bbox']) {
+      expect(highlights.toLowerCase(), forbidden).not.toContain(forbidden);
     }
   });
 

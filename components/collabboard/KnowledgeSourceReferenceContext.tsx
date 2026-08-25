@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import {
   EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX,
+  compareKnowledgeSourceReferences,
   knowledgeSourceReferencesFor,
 } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
@@ -75,6 +76,37 @@ export function useKnowledgeSourceReferencesForPadlet(
     const references = knowledgeSourceReferencesFor(index, padletId);
     return references.length > 0 ? references : NO_REFERENCES;
   }, [index, padletId]);
+}
+
+/**
+ * P6J-F6-B4-B3 -- every citation OF one document, whichever Note made it.
+ *
+ * A projection of the index already in memory, nothing more: no request, no
+ * second context, no module-level cache, and the supplied index is never
+ * mutated. The reader needs this direction because a highlight belongs to a
+ * page of a source, while the index is keyed by the citing padlet.
+ *
+ * Rows are NOT collapsed. Two Notes citing the same span are two citations, and
+ * an overlap of two must be able to report a count of two.
+ */
+export function useKnowledgeSourceReferencesForDocument(
+  documentId: string | null | undefined,
+): readonly SourceReference[] {
+  const index = useContext(KnowledgeSourceReferenceContext);
+  return useMemo(() => {
+    if (!documentId) return NO_REFERENCES;
+    const found: SourceReference[] = [];
+    for (const references of index.values()) {
+      for (const reference of references) {
+        if (String(reference.sourceDocumentId) === documentId) found.push(reference);
+      }
+    }
+    if (found.length === 0) return NO_REFERENCES;
+    // Map iteration order is bucket-insertion order; re-apply the index's own
+    // createdAt/id ordering so the reader never depends on that accident.
+    found.sort(compareKnowledgeSourceReferences);
+    return found;
+  }, [index, documentId]);
 }
 
 /**

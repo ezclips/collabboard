@@ -6,6 +6,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeDocumentDetails from './KnowledgeDocumentDetails';
+import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
+import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
 const pages = [
   { pageNumber: 1, text: 'PDF safety PDF\nLiteral [brackets] and (parentheses).' },
@@ -591,5 +594,289 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     // Re-rendering with <mark> nodes does not corrupt the stored capture: it is
     // re-proved against the page text, which did not change.
     expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+  });
+});
+
+// ============================================================================
+// P6J-F6-B4-B3 -- rendering persisted exact source spans
+// ============================================================================
+
+const DOC_ID = 'doc-1';
+const PAGE_ONE = pages[0].text;
+let referenceSequence = 0;
+
+/** A stored citation of this document. Defaults to a pre-B4 page-only row. */
+function sourceRef(overrides: Partial<SourceReference> = {}): SourceReference {
+  referenceSequence += 1;
+  return {
+    id: `ref-${referenceSequence}`,
+    targetPadletId: `padlet-${referenceSequence}`,
+    sourceDocumentId: DOC_ID,
+    pageStart: 1,
+    pageEnd: 1,
+    quoteText: null,
+    quoteHash: null,
+    charStart: null,
+    charEnd: null,
+    locator: null,
+    createdAt: '2026-08-24T00:00:00.000Z',
+    ...overrides,
+  } as unknown as SourceReference;
+}
+
+/** An exact span on page 1 whose quote genuinely matches its offsets. */
+const exactRef = (start: number, end: number, overrides: Partial<SourceReference> = {}) =>
+  sourceRef({ charStart: start, charEnd: end, quoteText: PAGE_ONE.slice(start, end), ...overrides });
+
+function mountWithReferences(
+  references: readonly SourceReference[],
+  props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {},
+) {
+  const onCreateNoteFromPage = vi.fn();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => {
+    root!.render(
+      // The REAL provider and the REAL index CanvasClient builds -- nothing
+      // between the stored rows and the DOM is stubbed.
+      <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(references)}>
+        <KnowledgeDocumentDetails
+          documentId={DOC_ID}
+          originalFilename="EMG_checklist.pdf"
+          pageCount={2}
+          pages={pages}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onCreateNoteFromPage={onCreateNoteFromPage}
+          {...props}
+        />
+      </KnowledgeSourceReferenceProvider>,
+    );
+  });
+  return { container: host!, onCreateNoteFromPage };
+}
+
+const highlightsIn = (container: HTMLElement): HTMLElement[] =>
+  Array.from(container.querySelectorAll('[data-knowledge-source-highlight="true"]'));
+
+const highlightTexts = (container: HTMLElement) => highlightsIn(container).map((node) => node.textContent);
+
+function remount() {
+  if (root) act(() => root!.unmount());
+  root = null;
+  host?.remove();
+  host = null;
+}
+
+describe('KnowledgeDocumentDetails persisted source highlights', () => {
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('T: with no references the reader renders exactly as before', () => {
+    const { container } = mountWithReferences([]);
+
+    expect(highlightsIn(container)).toHaveLength(0);
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+    expect(container.querySelectorAll('mark')).toHaveLength(0);
+  });
+
+  it('U: a valid persisted exact reference marks exactly its text', () => {
+    const { container } = mountWithReferences([exactRef(4, 10)]);
+
+    expect(highlightTexts(container)).toEqual(['safety']);
+    expect(PAGE_ONE.slice(4, 10)).toBe('safety');
+    expect(highlightsIn(container)[0].getAttribute('data-knowledge-source-highlight-count')).toBe('1');
+    // Only the citing page is affected.
+    expect(pageRoot(container, 2).querySelectorAll('[data-knowledge-source-highlight]')).toHaveLength(0);
+  });
+
+  it('V: a legacy page-only reference whose quote is the page marks nothing', () => {
+    const { container } = mountWithReferences([sourceRef({ quoteText: PAGE_ONE })]);
+
+    // The invariant B4 exists to protect: no retroactive whole-page highlight.
+    expect(highlightsIn(container)).toHaveLength(0);
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+  });
+
+  it('V: a legitimate full-page exact span DOES mark the whole page', () => {
+    const { container } = mountWithReferences([exactRef(0, PAGE_ONE.length)]);
+
+    expect(highlightTexts(container)).toEqual([PAGE_ONE]);
+  });
+
+  it('W: a drifted reference is recovered at its unique quote', () => {
+    // Offsets say [0,6); the quote says 'Literal', which occurs exactly once.
+    const drifted = sourceRef({ charStart: 0, charEnd: 6, quoteText: 'Literal' });
+
+    const { container } = mountWithReferences([drifted]);
+
+    expect(highlightTexts(container)).toEqual(['Literal']);
+    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('X: ambiguous or missing quotes mark nothing', () => {
+    for (const quoteText of ['PDF', 'not-on-this-page']) {
+      const { container } = mountWithReferences([sourceRef({ charStart: 0, charEnd: 6, quoteText })]);
+      expect(highlightsIn(container), quoteText).toHaveLength(0);
+      remount();
+    }
+  });
+
+  it('Y: two overlapping references report a count of two on the overlap only', () => {
+    const { container } = mountWithReferences([exactRef(4, 10), exactRef(7, 14)]);
+
+    const marked = highlightsIn(container);
+    expect(marked.map((node) => [node.textContent, node.getAttribute('data-knowledge-source-highlight-count')]))
+      .toEqual([['saf', '1'], ['ety', '2'], [' PDF', '1']]);
+    // The decisive invariant: overlapping text is rendered ONCE.
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+  });
+
+  it('Z: identical spans from two references render one run with a count of two', () => {
+    const { container } = mountWithReferences([exactRef(4, 10), exactRef(4, 10)]);
+
+    expect(highlightTexts(container)).toEqual(['safety']);
+    expect(highlightsIn(container)[0].getAttribute('data-knowledge-source-highlight-count')).toBe('2');
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+  });
+
+  it('AA: a search match overlapping a source span keeps the search count', async () => {
+    // [0,6) covers the first 'PDF' match at [0,3).
+    const { container } = mountWithReferences([exactRef(0, 6)]);
+
+    setSearch(container, 'pdf');
+    await settle();
+
+    expect(container.textContent).toContain('3 matches');
+    expect(container.querySelectorAll('mark')).toHaveLength(3);
+    // The overlapping match stays ONE <mark>, carrying the source marker too.
+    const first = container.querySelectorAll('mark')[0];
+    expect(first.textContent).toBe('PDF');
+    expect(first.getAttribute('data-knowledge-source-highlight')).toBe('true');
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+  });
+
+  it('AB: active-search behaviour is unchanged alongside source highlights', async () => {
+    const { container } = mountWithReferences([exactRef(0, 6)]);
+    setSearch(container, 'pdf');
+    await settle();
+
+    expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
+    expect(container.querySelector('mark[data-active-match="true"]')?.textContent).toBe('PDF');
+    const next = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Next')!;
+    act(() => next.click());
+    expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
+  });
+
+  it('AC: clearing the search leaves the persisted highlight in place', async () => {
+    const { container } = mountWithReferences([exactRef(4, 10)]);
+
+    setSearch(container, 'pdf');
+    await settle();
+    expect(highlightsIn(container).length).toBeGreaterThan(0);
+
+    setSearch(container, '');
+    await settle();
+
+    expect(highlightTexts(container)).toEqual(['safety']);
+    expect(container.querySelectorAll('mark')).toHaveLength(0);
+  });
+
+  it('AD: highlights are never nested inside one another', async () => {
+    const { container } = mountWithReferences([exactRef(0, 6), exactRef(4, 12)]);
+    setSearch(container, 'pdf');
+    await settle();
+
+    expect(container.querySelector('mark mark')).toBeNull();
+    expect(container.querySelector('[data-knowledge-source-highlight] [data-knowledge-source-highlight]')).toBeNull();
+    expect(container.querySelector('mark [data-knowledge-source-highlight]')).toBeNull();
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+  });
+
+  it('AE: a persisted highlight alone never arms the selection action', () => {
+    const { container } = mountWithReferences([exactRef(4, 10)]);
+
+    // Persisted provenance and a live browser selection are different things.
+    expect(highlightsIn(container)).toHaveLength(1);
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
+  });
+
+  it('AF: a B2B selection crossing a highlight boundary still maps exactly', () => {
+    const { container, onCreateNoteFromPage } = mountWithReferences([exactRef(4, 10)]);
+    const textRoot = pageRoot(container, 1);
+    // ['PDF ', <span>safety</span>, rest] -- three node boundaries.
+    expect(textRoot.childNodes).toHaveLength(3);
+
+    // Page [2,12): starts in plain text, crosses the highlight, ends after it.
+    selectRange(textRoot.childNodes[0], 2, textRoot.childNodes[2], 2);
+    finishSelectionOn(textRoot);
+    clickCreateNote(container, 1);
+
+    expect(onCreateNoteFromPage.mock.calls[0][0].selection).toEqual({
+      charStart: 2, charEnd: 12, selectedText: PAGE_ONE.slice(2, 12),
+    });
+    expect(PAGE_ONE.slice(2, 12)).toBe('F safety P');
+  });
+
+  it('AG: a B2B selection entirely inside a highlight still maps exactly', () => {
+    const { container, onCreateNoteFromPage } = mountWithReferences([exactRef(4, 10)]);
+    const textRoot = pageRoot(container, 1);
+
+    selectRange(textRoot.childNodes[1].firstChild!, 1, textRoot.childNodes[1].firstChild!, 5);
+    finishSelectionOn(textRoot);
+    clickCreateNote(container, 1);
+
+    expect(onCreateNoteFromPage.mock.calls[0][0].selection).toEqual({
+      charStart: 5, charEnd: 9, selectedText: 'afet',
+    });
+  });
+
+  it('AH: the canonical page root text survives every rendering combination', async () => {
+    const combinations: Array<readonly SourceReference[]> = [
+      [],
+      [exactRef(4, 10)],
+      [exactRef(0, 6)],
+      [exactRef(4, 10), exactRef(7, 14)],
+      [sourceRef({ quoteText: PAGE_ONE })],
+      [sourceRef({ charStart: 0, charEnd: 6, quoteText: 'Literal' })],
+    ];
+    for (const references of combinations) {
+      const { container } = mountWithReferences(references);
+      expect(pageRoot(container, 1).textContent, `plain ${references.length}`).toBe(PAGE_ONE);
+      setSearch(container, 'pdf');
+      await settle();
+      // Search and source together, still exactly the canonical string.
+      expect(pageRoot(container, 1).textContent, `searched ${references.length}`).toBe(PAGE_ONE);
+      expect(pageRoot(container, 2).textContent).toBe(pages[1].text);
+      remount();
+    }
+  });
+
+  it('AI: rendering persisted highlights makes no network request', () => {
+    mountWithReferences([exactRef(4, 10), exactRef(7, 14), sourceRef({ quoteText: PAGE_ONE })]);
+
+    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('AJ: without a document id nothing resolves and no action is offered', () => {
+    const { container } = mountWithReferences([exactRef(4, 10)], { documentId: undefined });
+
+    expect(highlightsIn(container)).toHaveLength(0);
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+    expect(createNoteButton(container, 1)).toBeUndefined();
+  });
+
+  it('AJ: references for a different document never leak into this reader', () => {
+    const other = exactRef(4, 10, {
+      sourceDocumentId: 'some-other-document' as SourceReference['sourceDocumentId'],
+    });
+
+    const { container } = mountWithReferences([other]);
+
+    expect(highlightsIn(container)).toHaveLength(0);
   });
 });

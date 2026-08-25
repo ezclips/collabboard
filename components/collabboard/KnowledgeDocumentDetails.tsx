@@ -6,7 +6,12 @@ import type {
   KnowledgeSourceTextSelection,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
-import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import {
+  useKnowledgeSourceBacklinksForDocument,
+  useKnowledgeSourceReferencesForDocument,
+} from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
+import type { KnowledgeSourceHighlightSegment } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
 import {
   knowledgeSourceBacklinkDocumentRows,
   knowledgeSourceBacklinkPageRows,
@@ -107,7 +112,10 @@ function captureExactSelection(
   measure.selectNodeContents(root);
   measure.setEnd(range.startContainer, range.startOffset);
   const charStart = measure.toString().length;
-  // Re-anchored at the paragraph start: both offsets are measured from there.
+  // Defensive, not a fix: `setEnd` moves `start` only when the new end precedes
+  // it, and this range always starts at the paragraph while both boundaries lie
+  // inside it -- so the hazard cannot arise here. Re-anchoring keeps the two
+  // measurements independent of each other regardless.
   measure.selectNodeContents(root);
   measure.setEnd(range.endContainer, range.endOffset);
   const charEnd = measure.toString().length;
@@ -152,23 +160,82 @@ function findMatches(pages: readonly KnowledgeDocumentDetailPage[], query: strin
   });
 }
 
+/** Distinct citations overlapping a run, by real reference id. */
+function sourceCountOver(
+  segments: readonly KnowledgeSourceHighlightSegment[],
+  start: number,
+  end: number,
+): number {
+  const ids = new Set<string>();
+  for (const segment of segments) {
+    if (segment.end <= start || segment.start >= end) continue;
+    for (const span of segment.spans) ids.add(span.referenceId);
+  }
+  return ids.size;
+}
+
+/**
+ * Renders one page as a flat sequence of pieces, each substring emitted exactly
+ * once and in order, so `textContent` still reconstructs `page.text` verbatim.
+ * That is not cosmetic: B4-B2B measures selection offsets against this very
+ * text, and a duplicated or reordered piece would silently move every
+ * subsequent coordinate.
+ *
+ * Search wins where the two overlap. A match stays ONE <mark>, which keeps the
+ * yellow/blue visuals, the active-match ref and every existing search
+ * assertion exactly as they were; an overlapping citation rides along as a data
+ * marker on that same element rather than splitting it.
+ */
 function highlightedText(
   text: string,
-  pageIndex: number,
   pageMatches: readonly TextMatch[],
   activeMatch: TextMatch | undefined,
   activeRef: React.MutableRefObject<HTMLElement | null>,
+  sourceSegments: readonly KnowledgeSourceHighlightSegment[],
 ) {
   const nodes: React.ReactNode[] = [];
+
+  // Outside a search match the citations decide the cuts.
+  const pushUnmatched = (start: number, end: number) => {
+    if (end <= start) return;
+    if (sourceSegments.length === 0) {
+      nodes.push(<React.Fragment key={`text-${start}`}>{text.slice(start, end)}</React.Fragment>);
+      return;
+    }
+    for (const segment of sourceSegments) {
+      const from = Math.max(segment.start, start);
+      const to = Math.min(segment.end, end);
+      if (from >= to) continue;
+      const piece = text.slice(from, to);
+      if (segment.spans.length === 0) {
+        nodes.push(<React.Fragment key={`text-${from}`}>{piece}</React.Fragment>);
+        continue;
+      }
+      nodes.push(
+        <span
+          key={`source-${from}`}
+          data-knowledge-source-highlight="true"
+          data-knowledge-source-highlight-count={segment.spans.length}
+          className="rounded-sm bg-sky-100"
+        >
+          {piece}
+        </span>,
+      );
+    }
+  };
+
   let cursor = 0;
   pageMatches.forEach((match) => {
-    if (match.start > cursor) nodes.push(<React.Fragment key={`text-${cursor}`}>{text.slice(cursor, match.start)}</React.Fragment>);
+    pushUnmatched(cursor, match.start);
     const active = match === activeMatch;
+    const sources = sourceCountOver(sourceSegments, match.start, match.end);
     nodes.push(
       <mark
         key={`match-${match.start}`}
         ref={active ? activeRef : undefined}
         data-active-match={active ? 'true' : undefined}
+        data-knowledge-source-highlight={sources > 0 ? 'true' : undefined}
+        data-knowledge-source-highlight-count={sources > 0 ? sources : undefined}
         className={active ? 'rounded bg-blue-300 text-gray-900 ring-2 ring-blue-500' : 'rounded bg-yellow-200 text-gray-900'}
       >
         {text.slice(match.start, match.end)}
@@ -176,7 +243,7 @@ function highlightedText(
     );
     cursor = match.end;
   });
-  if (cursor < text.length) nodes.push(<React.Fragment key={`text-${cursor}`}>{text.slice(cursor)}</React.Fragment>);
+  pushUnmatched(cursor, text.length);
   return nodes;
 }
 
@@ -253,6 +320,21 @@ export default function KnowledgeDocumentDetails({
     () => knowledgeSourceBacklinkDocumentRows(documentBacklinks),
     [documentBacklinks],
   );
+  // P6J-F6-B4-B3. The same in-memory index CanvasClient already loaded, read in
+  // the other direction. No request of its own, and nothing stored: the spans
+  // are derived at render time and thrown away.
+  const documentSourceReferences = useKnowledgeSourceReferencesForDocument(documentId);
+  // Keyed by page number rather than index so it survives reordering, and
+  // deliberately independent of `query` -- typing in the search box must not
+  // re-resolve every citation on every keystroke.
+  const sourceSegmentsByPage = useMemo(() => {
+    const byPage = new Map<number, readonly KnowledgeSourceHighlightSegment[]>();
+    if (documentSourceReferences.length === 0) return byPage;
+    for (const page of pages) {
+      byPage.set(page.pageNumber, knowledgeSourceHighlightSegments(documentSourceReferences, page.pageNumber, page.text));
+    }
+    return byPage;
+  }, [documentSourceReferences, pages]);
 
   /**
    * Re-proved against the CURRENT page text on every render, so replaced or
@@ -420,7 +502,13 @@ export default function KnowledgeDocumentDetails({
                 {...{ [PAGE_TEXT_ROOT]: page.pageNumber }}
                 className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700"
               >
-                {highlightedText(page.text, pageIndex, matches.filter((match) => match.pageIndex === pageIndex), matches[activeMatchIndex], activeMatchRef)}
+                {highlightedText(
+                  page.text,
+                  matches.filter((match) => match.pageIndex === pageIndex),
+                  matches[activeMatchIndex],
+                  activeMatchRef,
+                  sourceSegmentsByPage.get(page.pageNumber) ?? [],
+                )}
               </p>
             </section>
             );
