@@ -41,6 +41,9 @@ vi.mock('@/components/collabboard/RowColumnContainerCard', () => ({
 }));
 vi.mock('@/components/collabboard/PostCardContent', () => ({
   default: () => <div data-test-post-content />,
+  // P6J-F6-B2H: the freeform generic/Note branch now imports this named export
+  // directly. Rendering nothing keeps this suite's handle counts unchanged.
+  KnowledgeSourceMarker: () => null,
 }));
 
 import FreeformPadletCards from '@/components/collabboard/canvas/ui/FreeformPadletCards';
