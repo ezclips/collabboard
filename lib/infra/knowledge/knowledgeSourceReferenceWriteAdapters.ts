@@ -25,7 +25,8 @@ interface SupabaseErrorLike {
 type SingleResult<TRow> = { data: TRow | null; error: SupabaseErrorLike | null };
 
 interface SingleRowQuery<TRow> {
-  eq(column: string, value: string): SingleRowQuery<TRow>;
+  /** `number` admits page_number; every other filter here is a uuid string. */
+  eq(column: string, value: string | number): SingleRowQuery<TRow>;
   maybeSingle(): Promise<SingleResult<TRow>>;
 }
 
@@ -41,6 +42,7 @@ interface SourceDocumentRow {
   readonly processing_status: string;
 }
 interface TargetPadletRow { readonly board_id: string }
+interface PageTextRow { readonly text: string }
 
 interface SourceReferenceRow {
   readonly id: string;
@@ -57,9 +59,9 @@ interface SourceReferenceRow {
 }
 
 /**
- * The exact V1 column set. `id` and `created_at` are omitted so the database
- * defaults own them; the three advanced-provenance columns are pinned to null
- * because highlight geometry is not writable until a later phase.
+ * `id` and `created_at` are omitted so the database defaults own them. The char
+ * offsets carry B4-B2A's server-validated span; `locator` stays pinned to null
+ * because highlight geometry is still not writable.
  */
 interface SourceReferenceInsertRow {
   readonly target_padlet_id: string;
@@ -68,8 +70,8 @@ interface SourceReferenceInsertRow {
   readonly page_end: number;
   readonly quote_text: string | null;
   readonly quote_hash: string | null;
-  readonly char_start: null;
-  readonly char_end: null;
+  readonly char_start: number | null;
+  readonly char_end: number | null;
   readonly locator: null;
 }
 
@@ -92,6 +94,7 @@ export interface KnowledgeSourceReferenceWriteSupabaseClient {
   from(table: 'board_collaborators'): ReadTable<CollaboratorRow>;
   from(table: 'knowledge_documents'): ReadTable<SourceDocumentRow>;
   from(table: 'padlets'): ReadTable<TargetPadletRow>;
+  from(table: 'knowledge_pages'): ReadTable<PageTextRow>;
   from(table: 'source_references'): SourceReferenceWriteTable;
 }
 
@@ -186,6 +189,33 @@ implements KnowledgeSourceReferenceValidationRepository {
       return err(unavailable(cause));
     }
   }
+
+  /**
+   * The canonical text of one page, returned verbatim -- no trimming and no
+   * normalisation, because char offsets index exactly these code units.
+   *
+   * Board authority is not re-checked here: the caller has already proven the
+   * document belongs to the authorized board, and this runs under the same
+   * authenticated client, so RLS still applies.
+   */
+  async findPageText(
+    documentId: KnowledgeDocumentId,
+    pageNumber: number,
+  ): Promise<Result<string | null, DomainError>> {
+    try {
+      const { data, error } = await this.client
+        .from('knowledge_pages')
+        .select('text')
+        .eq('document_id', documentId)
+        .eq('page_number', pageNumber)
+        .maybeSingle();
+      if (error) return err(unavailable(error));
+      if (data === null) return ok(null);
+      return ok(data.text);
+    } catch (cause) {
+      return err(unavailable(cause));
+    }
+  }
 }
 
 function toSourceReference(row: SourceReferenceRow): SourceReference {
@@ -220,8 +250,8 @@ export class SupabaseKnowledgeSourceReferenceWriter implements KnowledgeSourceRe
           page_end: row.pageEnd,
           quote_text: row.quoteText,
           quote_hash: row.quoteHash,
-          char_start: null,
-          char_end: null,
+          char_start: row.charStart,
+          char_end: row.charEnd,
           locator: null,
         })
         .select(SOURCE_REFERENCE_COLUMNS)

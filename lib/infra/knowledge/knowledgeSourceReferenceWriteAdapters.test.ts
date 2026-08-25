@@ -187,6 +187,8 @@ describe('P6J-F4-A source reference write adapters', () => {
         pageEnd: 3,
         quoteText: 'a quoted passage',
         quoteHash: 'server-hash',
+        charStart: null,
+        charEnd: null,
       });
 
       const entry = state.table('source_references')[0];
@@ -217,7 +219,7 @@ describe('P6J-F4-A source reference write adapters', () => {
 
       const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 3,
-        quoteText: 'a quoted passage', quoteHash: 'server-hash',
+        quoteText: 'a quoted passage', quoteHash: 'server-hash', charStart: null, charEnd: null,
       });
 
       expect(result).toEqual({ ok: true, value: {
@@ -238,7 +240,7 @@ describe('P6J-F4-A source reference write adapters', () => {
     it('maps insert failures to unavailable without provider text', async () => {
       const queryError = setup({ source_references: { data: null, error: { message: 'violates row-level security policy' } } });
       const first = await new SupabaseKnowledgeSourceReferenceWriter(queryError.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null,
+        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
       });
       expect(first.ok === false && first.error.code).toBe('unavailable');
       expect(first.ok === false && first.error.message).toBe('Could not write the source reference');
@@ -246,7 +248,7 @@ describe('P6J-F4-A source reference write adapters', () => {
 
       const thrown = setup({ source_references: new Error('network down') });
       const second = await new SupabaseKnowledgeSourceReferenceWriter(thrown.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null,
+        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
       });
       expect(second.ok === false && second.error.code).toBe('unavailable');
       expect(second.ok === false && second.error.message).not.toContain('network down');
@@ -257,7 +259,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       const client = state.client as unknown as Record<string, unknown>;
 
       await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null,
+        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
       });
 
       for (const method of ['rpc', 'storage', 'auth', 'channel']) {
@@ -268,6 +270,131 @@ describe('P6J-F4-A source reference write adapters', () => {
       for (const method of ['update', 'delete', 'upsert']) {
         expect(table[method]).toBeUndefined();
       }
+    });
+  });
+
+  // ==========================================================================
+  // P6J-F6-B4-B2A -- canonical page read and validated offset persistence
+  // ==========================================================================
+  describe('canonical page text', () => {
+    const PAGE = 'prefix 😀 alpha\nbeta suffix';
+
+    it('S: queries knowledge_pages by document and page number, selecting only text', async () => {
+      const state = setup({ knowledge_pages: { data: { text: PAGE }, error: null } });
+
+      await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
+        .findPageText(DOCUMENT, 2);
+
+      const entry = state.table('knowledge_pages')[0];
+      expect(entry.select).toBe('text');
+      expect(entry.eq).toEqual([['document_id', DOCUMENT], ['page_number', 2]]);
+      expect(state.calls.map((call) => call.table)).toEqual(['knowledge_pages']);
+    });
+
+    it('T: returns the stored text verbatim, with no trimming or normalisation', async () => {
+      const raw = '  padded\r\n\ttabbed  ';
+      const state = setup({ knowledge_pages: { data: { text: raw }, error: null } });
+
+      const result = await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
+        .findPageText(DOCUMENT, 1);
+
+      expect(result).toEqual({ ok: true, value: raw });
+    });
+
+    it('T: a missing page resolves to null rather than empty text', async () => {
+      const state = setup({ knowledge_pages: { data: null, error: null } });
+
+      const result = await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
+        .findPageText(DOCUMENT, 99);
+
+      expect(result).toEqual({ ok: true, value: null });
+    });
+
+    it('U: maps a query error or a throw to the stable unavailable failure', async () => {
+      const queryError = setup({ knowledge_pages: { data: null, error: { message: 'violates row-level security policy' } } });
+      const first = await new SupabaseKnowledgeSourceReferenceValidationRepository(queryError.client)
+        .findPageText(DOCUMENT, 1);
+      expect(first.ok === false && first.error.code).toBe('unavailable');
+      expect(first.ok === false && first.error.message).not.toContain('row-level security');
+
+      const thrown = setup({ knowledge_pages: new Error('network down') });
+      const second = await new SupabaseKnowledgeSourceReferenceValidationRepository(thrown.client)
+        .findPageText(DOCUMENT, 1);
+      expect(second.ok === false && second.error.code).toBe('unavailable');
+      expect(second.ok === false && second.error.message).not.toContain('network down');
+    });
+
+    it('Y: the page read is a SELECT -- no mutation capability is added', async () => {
+      const state = setup({ knowledge_pages: { data: { text: PAGE }, error: null } });
+
+      await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
+        .findPageText(DOCUMENT, 1);
+
+      const table = (state.client.from as unknown as ReturnType<typeof vi.fn>)
+        .mock.results[0].value as Record<string, unknown>;
+      for (const method of ['update', 'delete', 'upsert']) {
+        expect(table[method]).toBeUndefined();
+      }
+      const client = state.client as unknown as Record<string, unknown>;
+      for (const method of ['rpc', 'storage', 'auth']) {
+        expect(client[method]).toBeUndefined();
+      }
+    });
+  });
+
+  describe('exact-span insert', () => {
+    const insertedSpanRow = {
+      id: 'reference-2',
+      target_padlet_id: PADLET,
+      source_document_id: DOCUMENT,
+      page_start: 2,
+      page_end: 2,
+      quote_text: 'alpha',
+      quote_hash: 'server-hash',
+      char_start: 10,
+      char_end: 15,
+      locator: null,
+      created_at: '2026-08-24T00:00:00.000Z',
+    };
+
+    it('V/X: persists the validated offsets and still pins locator to null', async () => {
+      const state = setup({ source_references: { data: insertedSpanRow, error: null } });
+
+      await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
+        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 2,
+        quoteText: 'alpha', quoteHash: 'server-hash', charStart: 10, charEnd: 15,
+      });
+
+      const row = state.table('source_references')[0].insert as Record<string, unknown>;
+      expect(row).toMatchObject({ char_start: 10, char_end: 15, quote_text: 'alpha', locator: null });
+      expect(row).not.toHaveProperty('selectedText');
+      expect(row).not.toHaveProperty('selected_text');
+    });
+
+    it('V: maps the returned exact-span row onto the domain shape', async () => {
+      const state = setup({ source_references: { data: insertedSpanRow, error: null } });
+
+      const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
+        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 2,
+        quoteText: 'alpha', quoteHash: 'server-hash', charStart: 10, charEnd: 15,
+      });
+
+      expect(result.ok && result.value.charStart).toBe(10);
+      expect(result.ok && result.value.charEnd).toBe(15);
+      expect(result.ok && result.value.locator).toBeNull();
+    });
+
+    it('W/X: a page-only insert still writes null offsets and a null locator', async () => {
+      const pageOnlyRow = { ...insertedSpanRow, char_start: null, char_end: null };
+      const state = setup({ source_references: { data: pageOnlyRow, error: null } });
+
+      await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
+        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 3,
+        quoteText: 'a quoted passage', quoteHash: 'server-hash', charStart: null, charEnd: null,
+      });
+
+      const row = state.table('source_references')[0].insert as Record<string, unknown>;
+      expect(row).toMatchObject({ char_start: null, char_end: null, locator: null });
     });
   });
 });

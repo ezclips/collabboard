@@ -32,6 +32,9 @@ interface SourceReferenceRequestBody {
   readonly pageStart: number;
   readonly pageEnd: number;
   readonly quoteText: string | null;
+  readonly charStart: number | null;
+  readonly charEnd: number | null;
+  readonly selectedText: string | null;
 }
 
 const INVALID = 'Invalid source reference';
@@ -61,13 +64,26 @@ function parseBody(value: unknown): SourceReferenceRequestBody | null {
   if (typeof body.pageStart !== 'number') return null;
   if (typeof body.pageEnd !== 'number') return null;
   if (body.quoteText !== null && typeof body.quoteText !== 'string') return null;
+  // B4-B2A fields. Absent and explicit null are both "not supplied", which is
+  // what keeps every pre-B4 request body valid unchanged; anything else must be
+  // the right primitive, so "4", {} and [] are structural rejections.
+  if (!isNullableNumber(body.charStart) || !isNullableNumber(body.charEnd)) return null;
+  if (body.selectedText !== undefined && body.selectedText !== null
+    && typeof body.selectedText !== 'string') return null;
   return {
     targetPadletId: body.targetPadletId,
     sourceDocumentId: body.sourceDocumentId,
     pageStart: body.pageStart,
     pageEnd: body.pageEnd,
     quoteText: body.quoteText,
+    charStart: typeof body.charStart === 'number' ? body.charStart : null,
+    charEnd: typeof body.charEnd === 'number' ? body.charEnd : null,
+    selectedText: typeof body.selectedText === 'string' ? body.selectedText : null,
   };
+}
+
+function isNullableNumber(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'number';
 }
 
 function publicReference(reference: SourceReference) {
@@ -116,8 +132,10 @@ export function createKnowledgeSourceReferencePostHandler(
     let result: Result<SourceReference, DomainError>;
     try {
       // Built field by field: identity comes from the route and the session, so
-      // a body carrying boardId, userId, quoteHash, char offsets or a locator
-      // cannot reach the domain command at all.
+      // a body carrying boardId, userId, quoteHash, a locator, an id or a
+      // createdAt cannot reach the domain command at all. The char offsets and
+      // selected text ARE caller input from B4-B2A on -- every semantic rule
+      // about them, and the canonical quote itself, stays server-side.
       result = await session.createSourceReference({
         boardId: asBoardId(id),
         userId: asUserId(session.userId),
@@ -126,6 +144,9 @@ export function createKnowledgeSourceReferencePostHandler(
         pageStart: body.pageStart,
         pageEnd: body.pageEnd,
         quoteText: body.quoteText,
+        charStart: body.charStart,
+        charEnd: body.charEnd,
+        selectedText: body.selectedText,
       });
     } catch {
       return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });

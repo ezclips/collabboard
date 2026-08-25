@@ -144,9 +144,11 @@ describe('P6J-F4-B source reference write route', () => {
 
     expect(response.status).toBe(201);
     const input = state.createSourceReference.mock.calls[0][0] as unknown as Record<string, unknown>;
-    // Exactly the seven intended fields, nothing carried over from the body.
+    // Exactly the ten intended fields. char offsets and selected text became
+    // caller input at B4-B2A; identity, hash and locator never can.
     expect(Object.keys(input).sort()).toEqual([
-      'boardId', 'pageEnd', 'pageStart', 'quoteText', 'sourceDocumentId', 'targetPadletId', 'userId',
+      'boardId', 'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText',
+      'selectedText', 'sourceDocumentId', 'targetPadletId', 'userId',
     ]);
     expect(input.boardId).toBe(BOARD_ID);
     expect(input.userId).toBe(USER_ID);
@@ -154,7 +156,7 @@ describe('P6J-F4-B source reference write route', () => {
     for (const injected of ['ATTACKER-BOARD', 'ATTACKER-USER', 'ATTACKER-HASH', 'ATTACKER-ID', 'ATTACKER-DATE', 'injected']) {
       expect(serialized, injected).not.toContain(injected);
     }
-    for (const key of ['quoteHash', 'charStart', 'charEnd', 'locator', 'id', 'createdAt']) {
+    for (const key of ['quoteHash', 'locator', 'id', 'createdAt']) {
       expect(input).not.toHaveProperty(key);
     }
   });
@@ -216,5 +218,78 @@ describe('P6J-F4-B source reference write route', () => {
     await state.handler(request(body({ boardId: 'ATTACKER-BOARD' })), context);
 
     expect((state.createSourceReference.mock.calls[0][0] as unknown as Record<string, unknown>).boardId).toBe(BOARD_ID);
+  });
+
+  // ==========================================================================
+  // P6J-F6-B4-B2A -- exact-span request fields
+  // ==========================================================================
+
+  const commandInput = (state: ReturnType<typeof setup>) =>
+    state.createSourceReference.mock.calls[0][0] as unknown as Record<string, unknown>;
+
+  it('Z1: a pre-B4 body still succeeds, with the new fields normalised to null', async () => {
+    const state = setup();
+
+    const { response } = await post(state, body());
+
+    expect(response.status).toBe(201);
+    expect(commandInput(state)).toMatchObject({ charStart: null, charEnd: null, selectedText: null });
+  });
+
+  it('Z2: an exact-span body forwards the offsets and the selected text verbatim', async () => {
+    const state = setup();
+
+    const { response } = await post(state, body({
+      quoteText: null, charStart: 10, charEnd: 15, selectedText: 'alpha',
+    }));
+
+    expect(response.status).toBe(201);
+    expect(commandInput(state)).toMatchObject({
+      charStart: 10, charEnd: 15, selectedText: 'alpha', quoteText: null,
+    });
+  });
+
+  it('Z3: explicit nulls are accepted and mean "not supplied"', async () => {
+    const state = setup();
+
+    const { response } = await post(state, body({ charStart: null, charEnd: null, selectedText: null }));
+
+    expect(response.status).toBe(201);
+    expect(commandInput(state)).toMatchObject({ charStart: null, charEnd: null, selectedText: null });
+  });
+
+  it('Z4: wrong-typed new fields are a structural 400 before the command runs', async () => {
+    const cases: Record<string, unknown>[] = [
+      { charStart: '4' },
+      { charEnd: '8' },
+      { charStart: {} },
+      { charEnd: [] },
+      { charStart: true },
+      { selectedText: 123 },
+      { selectedText: {} },
+    ];
+    for (const override of cases) {
+      const state = setup();
+
+      const { response, json } = await post(state, body(override));
+
+      expect(response.status, JSON.stringify(override)).toBe(400);
+      expect(json).toEqual({ error: 'Invalid source reference' });
+      expect(state.createSourceReference).not.toHaveBeenCalled();
+    }
+  });
+
+  it('Z6: an exact-span reference is returned with numeric offsets, page-only with nulls', async () => {
+    const span = setup({ result: ok({ ...reference, quoteText: 'alpha', charStart: 10, charEnd: 15 }) });
+    const spanResponse = await post(span, body({ quoteText: null, charStart: 10, charEnd: 15, selectedText: 'alpha' }));
+    expect(spanResponse.json).toMatchObject({
+      reference: { charStart: 10, charEnd: 15, quoteText: 'alpha', locator: null },
+    });
+
+    const pageOnly = setup();
+    const pageOnlyResponse = await post(pageOnly, body());
+    expect(pageOnlyResponse.json).toMatchObject({
+      reference: { charStart: null, charEnd: null },
+    });
   });
 });
