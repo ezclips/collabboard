@@ -29,6 +29,7 @@ import {
   createUpdatePostMetadataBestEffortCommand,
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
+import { isPersistedCanvasPostVisible } from '@/lib/domain/canvas/postHydrationVisibility';
 import { createCreateSectionsCommand } from '@/lib/domain/canvas/sections';
 import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import {
@@ -218,27 +219,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       }
 
       setSections(nextSections);
-      if (nextPadlets.length > 0) {
-        // Filter out empty note/text padlets
-        const validPadlets = nextPadlets.filter(p => {
-          if (p.type === 'note' || p.type === 'text') {
-            // Robust check: strip HTML tags, HTML entities like &nbsp;, and whitespace
-            const strippedContent = p.content
-              ? p.content
-                .replace(/<[^>]*>/g, '') // Remove tags
-                .replace(/&nbsp;/g, ' ') // Replace non-breaking space with space
-                .replace(/&#160;/g, ' ') // Replace code for nbsp
-                .trim()
-              : '';
-            const hasContent = strippedContent.length > 0;
-            return hasContent;
-          }
-          return true;
-        });
-        setPadlets(validPadlets);
-      } else {
-        setPadlets([]);
-      }
+      // ENG-CANVAS-HYDRATION-H1: ghost cleanup now asks the shared domain
+      // policy, which keeps a note/text post whose TITLE is meaningful even
+      // when its body is deliberately blank. The former inline content-only
+      // predicate discarded such posts during hydration.
+      setPadlets(nextPadlets.filter(isPersistedCanvasPostVisible));
       // Normalize: rows written before the layer_plane column existed arrive as null.
       // Treat them as 'front' at runtime; the DB default handles new inserts.
       setLines((lineData || []).map(l => ({
