@@ -12,8 +12,11 @@ import {
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import {
   useKnowledgeSourceBacklinksForDocument,
+  useKnowledgeSourceNoteColors,
   useKnowledgeSourceReferencesForDocument,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
+import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
 import type { KnowledgeSourceHighlightSegment } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
 import {
@@ -83,6 +86,11 @@ interface PageSourceInteraction {
   readonly eligibleTargets: ReadonlySet<string>;
   /** Absent outside a canvas, which keeps every piece non-interactive. */
   readonly onActivate: ((targets: readonly string[]) => void) | null;
+  /**
+   * P6J-F8-B3 -- the board's Note colours. Empty means every highlight keeps
+   * its neutral sky styling, which is also what a non-canvas surface gets.
+   */
+  readonly noteColors: KnowledgeSourceNoteColors;
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
@@ -291,10 +299,16 @@ function highlightedText(
           interaction.onActivate!(targets);
         };
 
+      // P6J-F8-B3. The domain resolver owns every rule -- validity, default
+      // white, and disagreement between the Notes covering this run. A null
+      // simply leaves the neutral class below untouched.
+      const tint = knowledgeSourceHighlightColor(segment.spans, interaction.noteColors);
+
       nodes.push(
         <span
           key={`source-${from}`}
           ref={anchorHere ? interaction.navigationRef : undefined}
+          style={tint ? { backgroundColor: tint.backgroundColor } : undefined}
           data-knowledge-source-highlight="true"
           data-knowledge-source-highlight-count={segment.spans.length}
           data-knowledge-source-navigation-target={isArrival ? 'true' : undefined}
@@ -311,7 +325,11 @@ function highlightedText(
             : undefined}
           className={[
             'rounded-sm',
-            isArrival ? 'bg-sky-200 ring-1 ring-sky-400' : 'bg-sky-100',
+            // The tint replaces the neutral background and nothing else: the
+            // arrival ring is navigation feedback, not decoration, so a
+            // coloured Note must never cost the reader its "you are here".
+            tint ? '' : (isArrival ? 'bg-sky-200' : 'bg-sky-100'),
+            isArrival ? 'ring-1 ring-sky-400' : '',
             activate ? 'cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400' : '',
           ].filter(Boolean).join(' ')}
         >
@@ -428,6 +446,8 @@ export default function KnowledgeDocumentDetails({
   // the other direction. No request of its own, and nothing stored: the spans
   // are derived at render time and thrown away.
   const documentSourceReferences = useKnowledgeSourceReferencesForDocument(documentId);
+  // P6J-F8-B3 -- read-only Note colours, already derived by the board's owner.
+  const noteColors = useKnowledgeSourceNoteColors();
   // Keyed by page number rather than index so it survives reordering, and
   // deliberately independent of `query` -- typing in the search box must not
   // re-resolve every citation on every keystroke.
@@ -590,6 +610,7 @@ export default function KnowledgeDocumentDetails({
     navigationRef: sourceNavigationRef,
     eligibleTargets,
     onActivate: onOpenBacklinkTarget ? activateSourceTargets : null,
+    noteColors,
   };
 
   const moveMatch = (delta: number) => {

@@ -16,6 +16,7 @@ import type {
   KnowledgeSourceBacklinkIndex,
 } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
+import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 
 /**
  * Read-only access to the board's source-reference index.
@@ -41,29 +42,54 @@ const KnowledgeSourceBacklinkContext = createContext<KnowledgeSourceBacklinkInde
   EMPTY_KNOWLEDGE_SOURCE_BACKLINK_INDEX,
 );
 
+/**
+ * P6J-F8-B3 -- padlet id -> its stored `metadata.cardColor`. Carried on the
+ * same provider for the same reason as the other two: CanvasClient already
+ * holds the posts, and the reader must not grow a second way to reach them.
+ * Transport only -- nothing here validates, defaults or writes a colour.
+ */
+const KnowledgeSourceNoteColorContext = createContext<KnowledgeSourceNoteColors>(new Map());
+
 /** Stable empty result so a padlet with no references never re-renders on identity. */
 const NO_REFERENCES: readonly SourceReference[] = [];
 const NO_BACKLINKS: readonly KnowledgeSourceBacklink[] = [];
+const NO_NOTE_COLORS: KnowledgeSourceNoteColors = new Map();
 
 export function KnowledgeSourceReferenceProvider({
   index,
   backlinks = EMPTY_KNOWLEDGE_SOURCE_BACKLINK_INDEX,
+  noteColors = NO_NOTE_COLORS,
   children,
 }: {
   index: KnowledgeSourceReferenceIndex;
   /** Optional so a surface that only needs forward provenance stays unchanged. */
   backlinks?: KnowledgeSourceBacklinkIndex;
+  /** Optional: omitting it leaves every highlight on its neutral styling. */
+  noteColors?: KnowledgeSourceNoteColors;
   children: React.ReactNode;
 }) {
-  // Both indexes are already new Maps only when they actually changed, so this
+  // All three are already new Maps only when they actually changed, so this
   // passes the owner's values straight through rather than copying them.
   return (
     <KnowledgeSourceReferenceContext.Provider value={index}>
       <KnowledgeSourceBacklinkContext.Provider value={backlinks}>
-        {children}
+        <KnowledgeSourceNoteColorContext.Provider value={noteColors}>
+          {children}
+        </KnowledgeSourceNoteColorContext.Provider>
       </KnowledgeSourceBacklinkContext.Provider>
     </KnowledgeSourceReferenceContext.Provider>
   );
+}
+
+/**
+ * The board's Note colours, for read-time highlight tinting only.
+ *
+ * Returns the owner's own Map. A surface outside the provider reads as "no
+ * colours", which is the same neutral result as a board where nobody has
+ * coloured anything.
+ */
+export function useKnowledgeSourceNoteColors(): KnowledgeSourceNoteColors {
+  return useContext(KnowledgeSourceNoteColorContext);
 }
 
 /** Every reference on one padlet, in the index's own createdAt/id order. */

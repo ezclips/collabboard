@@ -361,10 +361,12 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
 describe('P6J-F6-B2 source marker and navigation wiring', () => {
   it('A: CanvasClient is still the only owner of the reference index', () => {
     // The provider carries the owner's values; it never holds state of its own.
-    // B3 added the derived `backlinks` prop to this same tag -- still one owner.
+    // F6-B3 added the derived `backlinks` prop to this same tag and F8-B3 added
+    // `noteColors` -- three derived values, still exactly one owner and one tag.
     expect(canvasClient).toContain(
-      '<KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex}>',
+      '<KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex} noteColors={knowledgeSourceNoteColors}>',
     );
+    expect((canvasClient.match(/<KnowledgeSourceReferenceProvider/g) ?? []).length).toBe(1);
     expect(referenceContext).not.toContain('useState');
     expect(referenceContext).not.toContain('listReferencesByTargetPadletIds');
   });
@@ -580,10 +582,11 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     }
 
     // The projection is a memo over the EXISTING context, not a second context
-    // and not new state. Two contexts existed before B4-B3; there are still two.
+    // and not new state. B4-B3 added none; F8-B3 added exactly one, for Note
+    // colour transport, bringing the total to three and no further.
     expect(referenceContext).toContain('export function useKnowledgeSourceReferencesForDocument');
     expect(referenceContext).toContain('useContext(KnowledgeSourceReferenceContext)');
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(2);
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(3);
     for (const forbidden of ['fetch(', 'supabase', 'useState', 'useEffect', '.insert(', '.update(']) {
       expect(referenceContext, forbidden).not.toContain(forbidden);
     }
@@ -881,8 +884,9 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
     ]) {
       expect(documentDetails, forbidden).not.toContain(forbidden);
     }
-    // Still two Knowledge source contexts; interaction introduced no third.
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(2);
+    // Interaction introduced no context of its own. The third is F8-B3's Note
+    // colour transport, and it carries no state either.
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(3);
   });
 
   it('target identity comes from the resolved spans, never from the DOM count attribute', () => {
@@ -1010,6 +1014,33 @@ describe('P6J-F8-B2 source excerpt boundaries', () => {
     for (const forbidden of ['fetch(', '@supabase', 'react', 'source_references', 'useState']) {
       expect(cardExcerpt, `the excerpt module must not contain ${forbidden}`).not.toContain(forbidden);
     }
+  });
+
+  it('B3: the highlight colour module is pure -- no data layer, no framework', () => {
+    const highlightColor = sourceOf('lib/domain/knowledge/knowledgeSourceHighlightColor.ts');
+    for (const forbidden of ['fetch(', '@supabase', 'react', 'useState', 'useEffect']) {
+      expect(highlightColor, `the colour module must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('B3: the reader renders colour and never writes it', () => {
+    // metadata.cardColor keeps its one existing owner. A renderer that could
+    // PATCH a padlet would be a second colour authority by another name.
+    for (const forbidden of ['commitPadletMeta', 'updatePadletMetadata', "from('padlets'", 'from("padlets"', 'fetch(']) {
+      expect(documentDetails, `the reader must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+    // The gate lives in the domain module, not inline in the reader's JSX.
+    expect(documentDetails).toContain('knowledgeSourceHighlightColor(segment.spans, interaction.noteColors)');
+    expect(documentDetails).not.toContain('cardColor');
+  });
+
+  it('B3: the provider still only transports what its owner derived', () => {
+    // It must not READ a post to decide a colour -- CanvasClient derives the
+    // map, the provider only carries it.
+    for (const forbidden of ['useState', 'useEffect', 'fetch(', '@supabase', '.metadata', 'padlets']) {
+      expect(referenceContext, `the provider must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+    expect(referenceContext).toContain('export function useKnowledgeSourceNoteColors');
   });
 
   it('B2 introduces no second reference reader anywhere on the card path', () => {

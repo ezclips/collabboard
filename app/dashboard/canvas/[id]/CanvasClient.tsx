@@ -1619,6 +1619,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     [sourceReferencesByPadletId, padlets],
   );
 
+  // P6J-F8-B3 -- Note colours for read-time source-highlight tinting, DISPLAY
+  // ONLY. A projection of posts already in memory: no request, no second copy,
+  // and emphatically no write -- `metadata.cardColor` keeps its one existing
+  // owner (the card colour control), and a Note without one simply gets no
+  // entry rather than a defaulted white. Sits beside the backlink index and
+  // ABOVE the early returns for the same B3H hook-ordering reason.
+  const knowledgeSourceNoteColors = useMemo(() => new Map<string, string>(
+    padlets
+      .map((padlet) => [
+        padlet.id,
+        (padlet.metadata as { cardColor?: unknown } | null | undefined)?.cardColor,
+      ] as const)
+      .filter((entry): entry is readonly [string, string] =>
+        typeof entry[1] === 'string' && entry[1].length > 0),
+  ), [padlets]);
+
   // ==========================================================================
   // P6J-F6-B2 -- source navigation request (Note -> exact document/page)
   // ==========================================================================
@@ -6863,7 +6879,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }
 
   return (
-    <KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex}>
+    <KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex} noteColors={knowledgeSourceNoteColors}>
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">

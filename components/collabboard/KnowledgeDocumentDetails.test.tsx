@@ -1533,3 +1533,205 @@ describe('P6J-F8-B1 source clip chip', () => {
     expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
   });
 });
+
+// ============================================================================
+// P6J-F8-B3 -- source highlights wearing the citing Note's card colour
+// ============================================================================
+function mountWithNoteColors(
+  references: readonly SourceReference[],
+  noteColors: ReadonlyMap<string, string>,
+  props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {},
+) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => {
+    root!.render(
+      // Real provider, real index, real domain resolver -- only the colour map
+      // is supplied, exactly as CanvasClient derives it from its own posts.
+      <KnowledgeSourceReferenceProvider
+        index={buildKnowledgeSourceReferenceIndex(references)}
+        noteColors={noteColors}
+      >
+        <KnowledgeDocumentDetails
+          documentId={DOC_ID}
+          originalFilename="EMG_checklist.pdf"
+          pageCount={2}
+          pages={pages}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          {...props}
+        />
+      </KnowledgeSourceReferenceProvider>,
+    );
+  });
+  return host!;
+}
+
+const b3PageRoot = (container: HTMLElement, page: number) =>
+  container.querySelector(`[data-knowledge-page-text-root="${page}"]`) as HTMLElement;
+
+/** Inline backgroundColor actually applied to each source highlight. */
+const tintsIn = (container: HTMLElement) =>
+  highlightsIn(container).map((node) => node.style.backgroundColor);
+
+const overlapIn = (container: HTMLElement) =>
+  highlightsIn(container).find((node) => node.getAttribute('data-knowledge-source-highlight-count') === '2');
+
+/** Ids are branded nominal types with no runtime component, hence the casts. */
+const b3Exact = (start: number, end: number, note: string) =>
+  exactRef(start, end, { targetPadletId: note } as unknown as Partial<SourceReference>);
+
+/** A page-only citation of page 1 by one Note: no offsets, whole-page quote. */
+const b3PageOnly = (note: string) =>
+  sourceRef({ targetPadletId: note, quoteText: PAGE_ONE } as unknown as Partial<SourceReference>);
+
+describe('P6J-F8-B3 source highlight colour', () => {
+  it('a coloured Note tints its own source highlight', () => {
+    const container = mountWithNoteColors(
+      [b3Exact(0, 3, 'note-a')],
+      new Map([['note-a', '#dbeafe']]),
+    );
+    const [highlight] = highlightsIn(container);
+
+    expect(highlight.textContent).toBe('PDF');
+    // jsdom normalises the inline value to rgb().
+    expect(highlight.style.backgroundColor).toBe('rgb(219, 234, 254)');
+    // The neutral class is dropped, so the tint is not merely overriding it.
+    expect(highlight.className).not.toContain('bg-sky-100');
+  });
+
+  it('an uncoloured Note keeps the existing neutral styling and no inline colour', () => {
+    const container = mountWithNoteColors(
+      [b3Exact(0, 3, 'note-a')],
+      new Map(),
+    );
+    const [highlight] = highlightsIn(container);
+
+    expect(highlight.style.backgroundColor).toBe('');
+    expect(highlight.className).toContain('bg-sky-100');
+  });
+
+  it('a default-white Note stays neutral rather than painting the highlight white', () => {
+    const container = mountWithNoteColors(
+      [b3Exact(0, 3, 'note-a')],
+      new Map([['note-a', '#ffffff']]),
+    );
+    const [highlight] = highlightsIn(container);
+
+    expect(highlight.style.backgroundColor).toBe('');
+    expect(highlight.className).toContain('bg-sky-100');
+  });
+
+  it('an overlap between Notes wanting DIFFERENT colours falls back to neutral', () => {
+    // The middle run is covered by both citations; no single background can
+    // honestly stand for both Notes, so it must not take either colour.
+    const container = mountWithNoteColors(
+      [
+        b3Exact(0, 10, 'note-a'),
+        b3Exact(4, 14, 'note-b'),
+      ],
+      new Map([['note-a', '#dbeafe'], ['note-b', '#fee2e2']]),
+    );
+    const overlap = overlapIn(container);
+
+    expect(overlap).toBeDefined();
+    expect(overlap!.style.backgroundColor).toBe('');
+    expect(overlap!.className).toContain('bg-sky-100');
+    // The unshared runs still carry their own Note's colour.
+    expect(tintsIn(container)).toContain('rgb(219, 234, 254)');
+    expect(tintsIn(container)).toContain('rgb(254, 226, 226)');
+  });
+
+  it('an overlap between Notes sharing one colour keeps that colour', () => {
+    const container = mountWithNoteColors(
+      [
+        b3Exact(0, 10, 'note-a'),
+        b3Exact(4, 14, 'note-b'),
+      ],
+      new Map([['note-a', '#dcfce7'], ['note-b', '#dcfce7']]),
+    );
+
+    expect(overlapIn(container)!.style.backgroundColor).toBe('rgb(220, 252, 231)');
+  });
+
+  it('an overlap of one coloured and one uncoloured Note falls back to neutral', () => {
+    const container = mountWithNoteColors(
+      [
+        b3Exact(0, 10, 'note-a'),
+        b3Exact(4, 14, 'note-b'),
+      ],
+      new Map([['note-a', '#dbeafe']]),
+    );
+    const overlap = overlapIn(container);
+
+    expect(overlap!.style.backgroundColor).toBe('');
+    expect(overlap!.className).toContain('bg-sky-100');
+  });
+
+  it('a tinted arrival highlight keeps its ring and navigation identity', () => {
+    const reference = b3Exact(0, 3, 'note-a');
+    const container = mountWithNoteColors(
+      [reference],
+      new Map([['note-a', '#dbeafe']]),
+      { initialSourceReferenceId: String(reference.id) },
+    );
+    const arrival = container.querySelector('[data-knowledge-source-navigation-target="true"]') as HTMLElement;
+
+    expect(arrival).not.toBeNull();
+    expect(arrival.style.backgroundColor).toBe('rgb(219, 234, 254)');
+    // Arrival feedback is navigation, not decoration: colour never costs it.
+    expect(arrival.className).toContain('ring-1');
+    expect(arrival.className).toContain('ring-sky-400');
+  });
+
+  it('SEARCH highlights keep their own styling regardless of Note colours', () => {
+    // Load-bearing boundary: <mark> is the search class, not a source class.
+    const container = mountWithNoteColors(
+      [b3Exact(0, 3, 'note-a')],
+      new Map([['note-a', '#dbeafe']]),
+    );
+    setSearch(container, 'PDF');
+
+    const marks = Array.from(container.querySelectorAll('mark'));
+    expect(marks.length).toBeGreaterThan(0);
+    for (const mark of marks) {
+      expect(mark.style.backgroundColor).toBe('');
+      expect(mark.className).toMatch(/bg-yellow-200|bg-blue-300/);
+    }
+  });
+
+  it('a page-only citation gets no highlight and therefore no colour', () => {
+    const container = mountWithNoteColors(
+      [b3PageOnly('note-a')],
+      new Map([['note-a', '#dbeafe']]),
+    );
+
+    expect(highlightsIn(container)).toHaveLength(0);
+    expect(b3PageRoot(container, 1).querySelector('[style]')).toBeNull();
+  });
+
+  it('tinting never alters the canonical page text', () => {
+    // B4-B2B measures selection offsets against this exact string; a colour may
+    // not add, hide or reorder a single character of it.
+    const container = mountWithNoteColors(
+      [
+        b3Exact(0, 10, 'note-a'),
+        b3Exact(4, 14, 'note-b'),
+      ],
+      new Map([['note-a', '#dbeafe'], ['note-b', '#fee2e2']]),
+    );
+
+    expect(b3PageRoot(container, 1).textContent).toBe(pages[0].text);
+    expect(b3PageRoot(container, 2).textContent).toBe(pages[1].text);
+  });
+
+  it('a reader mounted without noteColors behaves exactly as before', () => {
+    const { container } = mountWithReferences([b3Exact(0, 3, 'note-a')]);
+    const [highlight] = highlightsIn(container);
+
+    expect(highlight.style.backgroundColor).toBe('');
+    expect(highlight.className).toContain('bg-sky-100');
+  });
+});
