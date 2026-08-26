@@ -223,3 +223,102 @@ describe('P6J-F6-B2H shared marker rendering (freeform contract)', () => {
     expect(container.querySelector('button, a, [role="button"], [tabindex]')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// P6J-F8-B2 -- the read-only source excerpt, rendered by the SAME component
+// ---------------------------------------------------------------------------
+
+/** An exact-span citation: offsets present, quote server-derived from the page. */
+function exactSpanReference(quoteText: string, id = 'ref-1'): SourceReference {
+  return {
+    ...reference(id, 2, 2, '2026-01-01T00:00:00.000Z'),
+    quoteText,
+    quoteHash: 'hash',
+    charStart: 1329,
+    charEnd: 1329 + quoteText.length,
+  } as unknown as SourceReference;
+}
+
+const EXCERPT = '[data-knowledge-source-excerpt]';
+const MARKER = '[data-knowledge-source-marker]';
+
+describe('P6J-F8-B2 card source excerpt', () => {
+  it('an exact-span citation shows its canonical text on the card', () => {
+    const container = mountMarker([exactSpanReference('Opening are prime examples')]);
+    const excerpt = container.querySelector(EXCERPT);
+
+    expect(excerpt).not.toBeNull();
+    expect(excerpt!.textContent).toBe('Opening are prime examples');
+  });
+
+  it('the excerpt is a SIBLING of the marker, and the marker still reads its label alone', () => {
+    const container = mountMarker([exactSpanReference('Opening are prime examples')]);
+    const excerpt = container.querySelector(EXCERPT)!;
+    const marker = container.querySelector(MARKER)!;
+
+    // Structural, not textual: nesting would silently fold provenance text into
+    // the label element every other surface reads.
+    expect(marker.contains(excerpt)).toBe(false);
+    expect(excerpt.contains(marker)).toBe(false);
+    expect(excerpt.parentElement).toBe(marker.parentElement);
+    // The B2 contract, unchanged: the marker's own text is exactly its label.
+    expect(marker.textContent).toBe('Source · p. 2');
+  });
+
+  it('a page-only citation shows NO excerpt but keeps its Source marker', () => {
+    // Page-only rows carry a client-supplied whole page as their quote. The
+    // card must fail closed on the text while provenance stays visible.
+    const pageOnly = {
+      ...reference('ref-1', 1, 1, '2026-01-01T00:00:00.000Z'),
+      quoteText: 'A'.repeat(1591),
+    } as unknown as SourceReference;
+    const container = mountMarker([pageOnly]);
+
+    expect(container.querySelector(EXCERPT)).toBeNull();
+    expect(container.querySelector(MARKER)!.textContent).toBe('Source · p. 1');
+    expect(container.textContent).not.toContain('AAAA');
+  });
+
+  it('HTML-shaped source text is rendered as literal characters, never parsed', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const container = mountMarker([exactSpanReference(hostile)]);
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector(EXCERPT)!.textContent).toBe(hostile);
+    // The angle brackets survived as text rather than becoming an element.
+    expect(container.innerHTML).toContain('&lt;img');
+  });
+
+  it('a Note with no citation renders neither excerpt nor marker', () => {
+    const container = mountMarker([]);
+
+    expect(container.querySelector(EXCERPT)).toBeNull();
+    expect(container.querySelector(MARKER)).toBeNull();
+    expect(container.textContent).toBe('');
+  });
+
+  it('a citation belonging to another padlet produces nothing on this card', () => {
+    const container = mountMarker(
+      [exactSpanReference('Opening are prime examples')],
+      'f1a5c1d0-0000-4000-8000-00000000ffff',
+    );
+
+    expect(container.querySelector(EXCERPT)).toBeNull();
+    expect(container.querySelector(MARKER)).toBeNull();
+  });
+
+  it('two citations show the collapsed label and no excerpt', () => {
+    const container = mountMarker([
+      exactSpanReference('First quote', 'ref-1'),
+      exactSpanReference('Second quote', 'ref-2'),
+    ]);
+
+    expect(container.querySelector(EXCERPT)).toBeNull();
+    expect(container.querySelector(MARKER)!.textContent).toBe('2 sources');
+  });
+
+  it('the excerpt adds no interactive element', () => {
+    const container = mountMarker([exactSpanReference('Opening are prime examples')]);
+    expect(container.querySelector('button, a, [role="button"], [tabindex]')).toBeNull();
+  });
+});

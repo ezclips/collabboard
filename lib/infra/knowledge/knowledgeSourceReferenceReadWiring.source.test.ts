@@ -979,3 +979,44 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
     }
   });
 });
+
+// ============================================================================
+// P6J-F8-B2 -- the read-only source excerpt
+// ============================================================================
+const cardExcerpt = sourceOf('lib/domain/knowledge/knowledgeSourceCardExcerpt.ts');
+
+describe('P6J-F8-B2 source excerpt boundaries', () => {
+  it('the excerpt renders as text -- no HTML pipeline reaches it', () => {
+    // Canonical PDF text is not markup, and the row it comes from is writable
+    // by any board editor: parsing it as HTML would be both wrong and a
+    // rendering path for text this component never authored.
+    const marker = after(postCardContent, 'export function KnowledgeSourceMarker(', 900);
+
+    expect(marker).toContain('{excerpt.text}');
+    for (const forbidden of ['dangerouslySetInnerHTML', 'DOMPurify', 'decodeHtmlEntities', 'innerHTML']) {
+      expect(marker, `the excerpt must not reach ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('the eligibility gate lives in the domain, not inline in JSX', () => {
+    // One owner for "may this be shown", so a second render site cannot grow a
+    // looser copy of the rule.
+    expect(postCardContent).toContain('knowledgeSourceCardExcerpt(references)');
+    expect(postCardContent).not.toContain('quoteText');
+    expect(postCardContent).not.toContain('charStart');
+  });
+
+  it('the excerpt module is pure -- no data layer, no component framework', () => {
+    for (const forbidden of ['fetch(', '@supabase', 'react', 'source_references', 'useState']) {
+      expect(cardExcerpt, `the excerpt module must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('B2 introduces no second reference reader anywhere on the card path', () => {
+    for (const forbidden of ['fetch(', '@supabase', 'listReferencesByTargetPadletIds', 'source_references']) {
+      expect(postCardContent, forbidden).not.toContain(forbidden);
+    }
+    // CanvasClient remains the one owner that loads them.
+    expect(canvasClient).toContain('new SupabaseKnowledgeSourceReferenceReader(');
+  });
+});

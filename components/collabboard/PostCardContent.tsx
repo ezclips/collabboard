@@ -24,6 +24,7 @@ import { useScrollbarLane } from "./useScrollbarLane";
 import { BookOpen } from "lucide-react";
 import { useKnowledgeSourceReferencesForPadlet } from "./KnowledgeSourceReferenceContext";
 import { knowledgeSourceCardLabel } from "@/lib/domain/knowledge/knowledgeSourceNavigation";
+import { knowledgeSourceCardExcerpt } from "@/lib/domain/knowledge/knowledgeSourceCardExcerpt";
 
 type CellStyle = {
     bg?: string;
@@ -1094,6 +1095,16 @@ export default function PostCardContent({
 }
 
 /**
+ * P6J-F8-B2 -- height, not payload: the domain layer caps how much stored quote
+ * reaches the DOM at all, and this caps how much of it the card spends space on.
+ */
+const SOURCE_EXCERPT_CLAMP: React.CSSProperties = {
+    display: "-webkit-box",
+    WebkitLineClamp: 4,
+    WebkitBoxOrient: "vertical",
+};
+
+/**
  * P6J-F6-B2 -- the card's provenance marker.
  *
  * Deliberately NON-INTERACTIVE. It lives inside the TEXT/DEFAULT wrapper's
@@ -1107,20 +1118,36 @@ export default function PostCardContent({
  * Exported (P6J-F6-B2H) so the freeform renderer, which hand-writes its own
  * generic/Note markup instead of routing through PostCardContent, mounts this
  * SAME marker rather than growing a second formatting implementation.
+ *
+ * P6J-F8-B2 renders the source excerpt as a SIBLING above it, never a child: the
+ * marker's own text stays exactly its label, and the excerpt stays display-only
+ * text that no editor, save payload or Note body ever sees.
  */
 export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {
     const references = useKnowledgeSourceReferencesForPadlet(padletId);
     const label = knowledgeSourceCardLabel(references);
+    const excerpt = knowledgeSourceCardExcerpt(references);
     if (label === null) return null;
 
     return (
-        <div
-            data-knowledge-source-marker="true"
-            className="mt-1.5 flex items-center gap-1 text-[10px] leading-none text-gray-400"
-            title={label}
-        >
-            <BookOpen className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
-            <span className="truncate">{label}</span>
-        </div>
+        <>
+            {excerpt && (
+                <div
+                    data-knowledge-source-excerpt="true"
+                    className="mt-1.5 overflow-hidden break-words border-l-2 border-gray-200 pl-1.5 text-[10px] italic leading-snug text-gray-500"
+                    style={SOURCE_EXCERPT_CLAMP}
+                >
+                    {excerpt.text}
+                </div>
+            )}
+            <div
+                data-knowledge-source-marker="true"
+                className="mt-1.5 flex items-center gap-1 text-[10px] leading-none text-gray-400"
+                title={label}
+            >
+                <BookOpen className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">{label}</span>
+            </div>
+        </>
     );
 }
