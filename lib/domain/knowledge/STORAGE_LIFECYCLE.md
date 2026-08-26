@@ -26,6 +26,30 @@ deterministic: 1-based pages, no random suffix, no signed URL, never the user's
 filename, and UUID-only ids — anything else yields no path rather than being
 sanitised into a different valid one.
 
+### Raster model (P6J-F9-A1b)
+
+`workers/knowledge-pdf/pdfPageRaster.ts` exists but is **not yet wired into
+ingest** — A1c owns invoking it and uploading its output. It renders
+worker-side only, through PDF.js on the `@napi-rs/canvas` backend: WebP at
+quality 80 on an opaque `#FFFFFF` background (a PDF page is paper; undrawn area
+must not read as transparent), at
+`scale = min(2, 2000 / widthPoints, 2000 / heightPoints)` computed purely from
+intrinsic PDF points — never magnified past 2×, never from a device pixel
+ratio, CSS pixel, drawer width or browser viewport. At most 2000 × 2000 and
+4,000,000 px per page and 400,000,000 px per document; a page breaching a limit
+is skipped, never clamped into an arbitrary image. Pages render one at a time
+with a 20s timeout. The derivative path is unchanged.
+
+**Rotation, and what F9-B must not get wrong.** Derivatives apply the page's
+intrinsic rotation, matching what a PDF viewer shows. But
+`knowledge_pages.width_points` / `height_points` are stored **unrotated**
+(`pdfGeometry.ts` measures at `rotation: 0`), so for a 90°/270° page the
+rendered image's dimensions are **transposed** relative to stored geometry.
+F9-B `normalized-page-top-left` regions will be selected against the rendered
+image, so mapping them back onto stored geometry must account for that
+rotation. F9-B is not solved here; this note exists so the mismatch is found by
+reading rather than by debugging.
+
 ## Deletion boundaries
 
 - Dashboard trash (`app/dashboard/page.tsx`) is a soft-delete update to

@@ -49,6 +49,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@excalidraw/excalidraw": "file:components/collabboard/canvas/excalidraw_fork/packages/excalidraw",
     "@mapbox/search-js-react": "^1.5.1",
+    "@napi-rs/canvas": "^0.1.100",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-dialog": "^1.1.14",

@@ -31,4 +31,33 @@ describe('Knowledge PDF worker container packaging', () => {
     expect(dockerfile).not.toMatch(/host\.docker\.internal|localhost|docker-compose|kubectl|railway|fly\.io/i);
     expect(dockerfile).not.toContain('npm install');
   });
+
+  /**
+   * P6J-F9-A1b. The runtime stage copies no general node_modules, so the native
+   * canvas backend has to be packaged deliberately -- and proven at build time,
+   * because a missing or wrong-arch codec would otherwise only surface on the
+   * first real ingest.
+   */
+  describe('native canvas packaging', () => {
+    it('keeps the native addon out of the esbuild bundle', () => {
+      expect(dockerfile).toContain('--external:@napi-rs/canvas');
+      // The existing PDF.js externalization must survive alongside it.
+      expect(dockerfile).toContain('--external:pdfjs-dist/legacy/build/pdf.mjs');
+    });
+
+    it('copies the @napi-rs scope into the runtime stage, not all of node_modules', () => {
+      expect(dockerfile).toContain('COPY --from=build /app/node_modules/@napi-rs /app/node_modules/@napi-rs');
+      expect(dockerfile).toContain('COPY --from=build /app/node_modules/pdfjs-dist /app/node_modules/pdfjs-dist');
+      expect(dockerfile).not.toMatch(/COPY\s+--from=build\s+\/app\/node_modules\s/);
+    });
+
+    it('fails the image build unless a real WebP encode succeeds', () => {
+      expect(dockerfile).toContain("import { createCanvas } from '@napi-rs/canvas'");
+      // Drawing and encoding must actually execute -- importing is not enough.
+      expect(dockerfile).toContain("canvas.encode('webp'");
+      expect(dockerfile).toContain('fillRect');
+      expect(dockerfile).toContain("'RIFFWEBP'");
+      expect(dockerfile).toContain('process.exit(1)');
+    });
+  });
 });

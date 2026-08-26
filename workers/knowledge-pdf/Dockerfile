@@ -27,6 +27,7 @@ RUN mkdir -p /app/dist \
        --format=esm \
        --target=node22 \
        --external:pdfjs-dist/legacy/build/pdf.mjs \
+       --external:@napi-rs/canvas \
        --outfile=/app/dist/runDispatcher.mjs
 
 RUN mkdir -p /opt/opendataloader \
@@ -52,11 +53,26 @@ RUN apt-get update \
 
 COPY --from=build /app/dist /app/dist
 COPY --from=build /app/node_modules/pdfjs-dist /app/node_modules/pdfjs-dist
+# P6J-F9-A1b: the native canvas backend PDF.js rasterizes through. The whole
+# @napi-rs scope is copied so the loader finds its sibling platform binary.
+COPY --from=build /app/node_modules/@napi-rs /app/node_modules/@napi-rs
 COPY --from=build /opt/opendataloader/opendataloader-pdf-cli-2.5.0.jar /opt/opendataloader/opendataloader-pdf-cli-2.5.0.jar
 
 RUN printf '%s  %s\n' "$OPENDATALOADER_PDF_JAR_SHA256" /opt/opendataloader/opendataloader-pdf-cli-2.5.0.jar | sha256sum --check --strict \
   && node --version \
   && java -version
+
+# P6J-F9-A1b native canvas smoke check. It must actually DRAW and ENCODE: a
+# bare import would still pass with a broken or wrong-arch codec. Failing here
+# fails the image build rather than the first real ingest.
+RUN node --input-type=module -e "\
+import { createCanvas } from '@napi-rs/canvas'; \
+const canvas = createCanvas(8, 4); const context = canvas.getContext('2d'); \
+context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, 8, 4); \
+const webp = await canvas.encode('webp', 80); \
+const magic = webp.subarray(0,4).toString('latin1') + webp.subarray(8,12).toString('latin1'); \
+if (magic !== 'RIFFWEBP' || webp.length < 16) { process.exit(1); } \
+console.log('native WebP encode OK (' + webp.length + ' bytes)');"
 
 ENV NODE_ENV=production \
     TMPDIR=/tmp \
