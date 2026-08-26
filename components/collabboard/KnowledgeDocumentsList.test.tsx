@@ -13,6 +13,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeDocumentsList from './KnowledgeDocumentsList';
+import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
+import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -1279,7 +1282,9 @@ describe('P6J-F6-B2 source-open requests', () => {
     // The reader marks each page, and the target one is present to scroll to.
     expect(container.querySelector('[data-page-number="3"]')).not.toBeNull();
     expect(componentCode).toContain('initialPageNumber={details.initialPageNumber}');
-    expect(componentCode).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart)');
+    // B4-B4 widened the call with the exact-arrival target; document id and
+    // page remain the first two arguments.
+    expect(componentCode).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
   });
 
   it('C: hydrates the header from the document the endpoint returned', async () => {
@@ -1385,5 +1390,216 @@ describe('P6J-F6-B2 source-open requests', () => {
     expect(componentCode).toContain('const known = entries.find((candidate) => candidate.id === documentId)');
     expect(componentCode).not.toMatch(/find\([^)]*originalFilename/);
     expect(componentCode).not.toMatch(/filter\([^)]*originalFilename/);
+  });
+});
+
+// ============================================================================
+// P6J-F6-B4-B4 -- forwarding the exact citation to the reader
+// ============================================================================
+// Rendered through the REAL provider and the REAL index, so the arrival marker
+// only appears when a stored citation genuinely resolved on the loaded page.
+describe('P6J-F6-B4-B4 exact source forwarding', () => {
+  const SOURCE_A = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const FILENAME = 'EMG_checklist.pdf';
+  const PAGE_ONE = `${FILENAME} body for page 1`;
+  const QUOTE_START = 0;
+  const QUOTE_END = FILENAME.length;
+
+  function pagesFor(documentId: string, pageCount = 3) {
+    return jsonResponse({
+      document: { id: documentId, originalFilename: FILENAME, pageCount },
+      pages: Array.from({ length: pageCount }, (_, index) => ({
+        pageNumber: index + 1,
+        text: `${FILENAME} body for page ${index + 1}`,
+      })),
+    });
+  }
+
+  function withDocuments(documents: unknown[]) {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
+      if (/\/knowledge\/([^/]+)\/pages$/.test(url)) return pagesFor(SOURCE_A);
+      return jsonResponse({ documents });
+    });
+  }
+
+  /** A citation of page 1 whose offsets genuinely address its own quote. */
+  const exactReference = (id: string, targetPadletId = 'padlet-1') => ({
+    id,
+    targetPadletId,
+    sourceDocumentId: SOURCE_A,
+    pageStart: 1,
+    pageEnd: 1,
+    quoteText: PAGE_ONE.slice(QUOTE_START, QUOTE_END),
+    quoteHash: null,
+    charStart: QUOTE_START,
+    charEnd: QUOTE_END,
+    locator: null,
+    createdAt: '2026-08-24T00:00:00.000Z',
+  }) as unknown as SourceReference;
+
+  const REFERENCES = [exactReference('ref-exact-1')];
+
+  async function render(request: unknown) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(REFERENCES)}>
+          <KnowledgeDocumentsList
+            refreshToken={0}
+            isOpen
+            onClose={vi.fn()}
+            sourceOpenRequest={request as never}
+          />
+        </KnowledgeSourceReferenceProvider>,
+      );
+    });
+    await settle();
+    return host!;
+  }
+
+  async function rerender(request: unknown) {
+    await act(async () => {
+      root!.render(
+        <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(REFERENCES)}>
+          <KnowledgeDocumentsList
+            refreshToken={0}
+            isOpen
+            onClose={vi.fn()}
+            sourceOpenRequest={request as never}
+          />
+        </KnowledgeSourceReferenceProvider>,
+      );
+    });
+    await settle();
+  }
+
+  const arrivalTargets = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-knowledge-source-navigation-target="true"]'));
+
+  const sourceRequest = (requestId: number, sourceReferenceId: string) => ({
+    requestId,
+    sourceDocumentId: SOURCE_A,
+    sourceReferenceId,
+    pageStart: 1,
+    pageEnd: 1,
+  });
+
+  it('E: a source request still opens by document id and page', async () => {
+    withDocuments([doc({ id: SOURCE_A })]);
+
+    const container = await render(sourceRequest(1, 'ref-exact-1'));
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input)))
+      .toContain(`/api/boards/${BOARD_ID}/knowledge/${SOURCE_A}/pages`);
+    expect(container.querySelector('[data-page-number="1"]')).not.toBeNull();
+  });
+
+  it('F: the citing row id reaches the reader and marks its resolved span', async () => {
+    withDocuments([doc({ id: SOURCE_A })]);
+
+    const container = await render(sourceRequest(1, 'ref-exact-1'));
+
+    const marked = arrivalTargets(container);
+    expect(marked).toHaveLength(1);
+    // The RESOLVED text, not the whole page and not the page start.
+    expect(marked[0].textContent).toBe(FILENAME);
+  });
+
+  it('G: opening a document by hand inherits no exact target', async () => {
+    withDocuments([doc({ id: SOURCE_A })]);
+
+    const container = await render(null);
+    const viewText = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent === 'View text')!;
+    await act(async () => {
+      viewText.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    // The citation still paints -- it just was not navigated to.
+    expect(container.querySelectorAll('[data-knowledge-source-highlight="true"]').length).toBeGreaterThan(0);
+    expect(arrivalTargets(container)).toHaveLength(0);
+  });
+
+  it('H: opening a search result inherits no exact target', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
+      if (/\/knowledge\/([^/]+)\/pages$/.test(url)) return pagesFor(SOURCE_A);
+      if (url.includes('/knowledge/search') && init?.method === 'POST') {
+        return jsonResponse({
+          results: [{ documentId: SOURCE_A, originalFilename: FILENAME, pageStart: 1, pageEnd: 1, text: 'excerpt' }],
+        });
+      }
+      return jsonResponse({ documents: [doc({ id: SOURCE_A })] });
+    });
+
+    const container = await render(null);
+    const input = container.querySelector('input[type="search"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'body');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    const result = container.querySelector('[data-knowledge-search-results="true"] button') as HTMLButtonElement;
+    await act(async () => {
+      result.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(container.querySelector('[data-page-number="1"]')).not.toBeNull();
+    expect(arrivalTargets(container)).toHaveLength(0);
+  });
+
+  it('I: the same citation under a new request id is forwarded again', async () => {
+    withDocuments([doc({ id: SOURCE_A })]);
+
+    const container = await render(sourceRequest(1, 'ref-exact-1'));
+    expect(arrivalTargets(container)).toHaveLength(1);
+
+    // Back to the list, then the very same citation asked for again.
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Back to PDFs'))!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    expect(arrivalTargets(container)).toHaveLength(0);
+
+    await rerender(sourceRequest(2, 'ref-exact-1'));
+
+    expect(arrivalTargets(container)).toHaveLength(1);
+  });
+
+  it('J: a repeated render of one request id opens the document once', async () => {
+    withDocuments([doc({ id: SOURCE_A })]);
+    const request = sourceRequest(1, 'ref-exact-1');
+
+    await render(request);
+    await rerender(request);
+    await rerender(request);
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => /\/pages$/.test(url)))
+      .toHaveLength(1);
+  });
+
+  it('K: forwarding the citation adds no endpoint of its own', async () => {
+    withDocuments([doc({ id: SOURCE_A })]);
+
+    await render(sourceRequest(1, 'ref-exact-1'));
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    // Warm plus the board list plus the one pages read -- nothing provenance-
+    // specific: the citations were already in memory.
+    expect(urls.filter((url) => /reference|provenance|source/i.test(url))).toEqual([]);
+    expect(urls.filter((url) => /\/pages$/.test(url))).toHaveLength(1);
   });
 });

@@ -52,6 +52,17 @@ interface KnowledgeListEntry {
 
 type ListPhase = 'loading' | 'loaded' | 'error';
 
+/**
+ * P6J-F6-B4-B4. The exact citation a Note asked for, carried only as far as the
+ * reader. `requestId` travels with it because a second click on the same source
+ * is a genuinely new intent: keyed on the reference alone, the reader would
+ * treat the repeat as already handled and never scroll again.
+ */
+interface KnowledgeSourceTarget {
+  readonly referenceId: string;
+  readonly requestId: number;
+}
+
 interface KnowledgeDetailsState {
   entry: KnowledgeListEntry;
   pages: readonly KnowledgeDocumentDetailPage[];
@@ -59,6 +70,8 @@ interface KnowledgeDetailsState {
   error: boolean;
   /** Navigation state only -- never written back to source_references. */
   initialPageNumber?: number;
+  /** Null for every manual and search-result open, so neither inherits one. */
+  sourceTarget?: KnowledgeSourceTarget | null;
 }
 
 interface KnowledgeSearchResult { documentId: string; originalFilename: string; pageStart: number; pageEnd: number; text: string; }
@@ -354,9 +367,15 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     };
   }
 
-  const openDetails = async (entry: KnowledgeListEntry, initialPageNumber?: number) => {
+  const openDetails = async (
+    entry: KnowledgeListEntry,
+    initialPageNumber?: number,
+    // Defaulted rather than optional at the call site: every existing caller is
+    // a manual or search-result open, and each must arrive with no exact target.
+    sourceTarget: KnowledgeSourceTarget | null = null,
+  ) => {
     if (!boardId) return;
-    setDetails({ entry, pages: [], loading: true, error: false, initialPageNumber });
+    setDetails({ entry, pages: [], loading: true, error: false, initialPageNumber, sourceTarget });
     try {
       const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(entry.id)}/pages`);
       const payload = await response.json().catch(() => null) as { pages?: unknown; document?: unknown } | null;
@@ -364,7 +383,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
       const pages = payload.pages.filter((page): page is KnowledgeDocumentDetailPage => (
         !!page && typeof page === 'object' && typeof (page as KnowledgeDocumentDetailPage).pageNumber === 'number' && typeof (page as KnowledgeDocumentDetailPage).text === 'string'
       ));
-      setDetails({ entry: hydrateEntry(entry, payload.document), pages, loading: false, error: false, initialPageNumber });
+      setDetails({ entry: hydrateEntry(entry, payload.document), pages, loading: false, error: false, initialPageNumber, sourceTarget });
     } catch {
       setDetails((current) => current?.entry.id === entry.id ? { ...current, loading: false, error: true } : current);
     }
@@ -376,11 +395,16 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
    * document. A known list entry is reused when present purely to show a
    * filename sooner; the request still decides which document loads.
    */
-  const openDetailsByDocumentId = (documentId: string, initialPageNumber?: number) => {
+  const openDetailsByDocumentId = (
+    documentId: string,
+    initialPageNumber?: number,
+    sourceTarget: KnowledgeSourceTarget | null = null,
+  ) => {
     const known = entries.find((candidate) => candidate.id === documentId);
     void openDetails(
       known ?? { id: documentId, originalFilename: '', pageCount: null, processingStatus: null, statusLabel: null },
       initialPageNumber,
+      sourceTarget,
     );
   };
 
@@ -391,7 +415,10 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     if (!boardId || !sourceOpenRequest) return;
     if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;
     handledSourceRequestRef.current = sourceOpenRequest.requestId;
-    openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart);
+    openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {
+      referenceId: sourceOpenRequest.sourceReferenceId,
+      requestId: sourceOpenRequest.requestId,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, sourceOpenRequest]);
 
@@ -449,6 +476,8 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             loading={details.loading}
             error={details.error}
             initialPageNumber={details.initialPageNumber}
+            initialSourceReferenceId={details.sourceTarget?.referenceId}
+            initialSourceRequestId={details.sourceTarget?.requestId}
             onBack={() => setDetails(null)}
             onCreateNoteFromPage={onCreateNoteFromPage}
             onOpenBacklinkTarget={onOpenBacklinkTarget

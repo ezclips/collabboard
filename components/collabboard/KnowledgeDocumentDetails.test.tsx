@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeDocumentDetails from './KnowledgeDocumentDetails';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
 const pages = [
@@ -878,5 +879,426 @@ describe('KnowledgeDocumentDetails persisted source highlights', () => {
     const { container } = mountWithReferences([other]);
 
     expect(highlightsIn(container)).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// P6J-F6-B4-B4 -- bidirectional exact source interactions
+// ============================================================================
+
+/** Every element a scrollIntoView call was made on, in order. */
+function scrolledElements(): HTMLElement[] {
+  return ((HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock.instances ?? []) as HTMLElement[];
+}
+
+const arrivals = (container: HTMLElement): HTMLElement[] =>
+  Array.from(container.querySelectorAll('[data-knowledge-source-navigation-target="true"]'));
+
+const chooserOptions = (container: HTMLElement): HTMLElement[] =>
+  Array.from(container.querySelectorAll('[data-knowledge-source-choice-target]'));
+
+/** A Note post so the reference has a backlink row, which is what makes it a target. */
+const notePost = (id: string, title: string) => ({ id, type: 'text', title, content: '' });
+
+/** Branded row/post ids, so each fixture reads as plain strings at its call site. */
+const ids = (id: string, targetPadletId: string) =>
+  ({ id, targetPadletId } as unknown as Pick<SourceReference, 'id' | 'targetPadletId'>);
+
+/**
+ * The reader as it exists on a canvas: forward references AND the backlink
+ * index, both built by the real domain builders from the same rows.
+ */
+function mountInteractive(
+  references: readonly SourceReference[],
+  posts: readonly { id: string; type: string; title: string; content: string }[],
+  props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {},
+) {
+  const onOpenBacklinkTarget = vi.fn();
+  const onCreateNoteFromPage = vi.fn();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  const render = (extra: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {}) => {
+    act(() => {
+      root!.render(
+        <KnowledgeSourceReferenceProvider
+          index={buildKnowledgeSourceReferenceIndex(references)}
+          backlinks={buildKnowledgeSourceBacklinkIndex(references, posts)}
+        >
+          <KnowledgeDocumentDetails
+            documentId={DOC_ID}
+            originalFilename="EMG_checklist.pdf"
+            pageCount={2}
+            pages={pages}
+            loading={false}
+            error={false}
+            onBack={vi.fn()}
+            onCreateNoteFromPage={onCreateNoteFromPage}
+            onOpenBacklinkTarget={onOpenBacklinkTarget}
+            {...props}
+            {...extra}
+          />
+        </KnowledgeSourceReferenceProvider>,
+      );
+    });
+  };
+  render();
+  return { container: host!, onOpenBacklinkTarget, onCreateNoteFromPage, render };
+}
+
+const clickOn = (element: Element) => act(() => {
+  element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+});
+
+const pressOn = (element: Element, key: string) => {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  act(() => { element.dispatchEvent(event); });
+  return event;
+};
+
+describe('P6J-F6-B4-B4 Note -> exact source span', () => {
+  it('L/M: the requested citation is marked and scrolled to at its resolved span', () => {
+    const { container } = mountInteractive(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+      { initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 1 },
+    );
+
+    const marked = arrivals(container);
+    expect(marked).toHaveLength(1);
+    expect(marked[0].textContent).toBe('safety');
+    // The exact piece, not merely the page section, is what was scrolled to.
+    expect(scrolledElements()).toContain(marked[0]);
+    expect(marked[0].className).toContain('bg-sky-200');
+  });
+
+  it('N: a drifted citation lands on the passage its quote recovered', () => {
+    // Offsets no longer address the quote; the quote still says one thing.
+    const drifted = exactRef(4, 10, { ...ids('ref-a', 'note-a'), charStart: 20, charEnd: 26 });
+
+    const { container } = mountInteractive([drifted], [notePost('note-a', 'Citing Note')], {
+      initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 1,
+    });
+
+    const marked = arrivals(container);
+    expect(marked).toHaveLength(1);
+    // Recovered, never repaired: the stale offsets are not what was used.
+    expect(marked[0].textContent).toBe('safety');
+    expect(scrolledElements()).toContain(marked[0]);
+  });
+
+  it('O: a legacy page-only citation keeps the B2 page arrival and gains no exact target', () => {
+    const { container } = mountInteractive(
+      [sourceRef({ ...ids('ref-a', 'note-a'), pageStart: 1, pageEnd: 1 })],
+      [notePost('note-a', 'Citing Note')],
+      { initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 1 },
+    );
+
+    expect(arrivals(container)).toHaveLength(0);
+    expect(highlightsIn(container)).toHaveLength(0);
+    expect(scrolledPageNumbers()).toContain('1');
+  });
+
+  it('P/Q/R: ambiguous, missing and unknown citations all fall back to the page', () => {
+    const cases: [string, SourceReference[], string][] = [
+      // 'PDF' occurs twice: the quote cannot say which passage was meant.
+      ['ambiguous', [exactRef(4, 10, { ...ids('ref-a', 'note-a'), charStart: 20, charEnd: 23, quoteText: 'PDF' })], 'ref-a'],
+      ['missing', [exactRef(4, 10, { ...ids('ref-a', 'note-a'), charStart: 0, charEnd: 3, quoteText: 'nowhere at all' })], 'ref-a'],
+      ['unknown id', [exactRef(4, 10, ids('ref-a', 'note-a'))], 'ref-does-not-exist'],
+    ];
+
+    for (const [label, references, requested] of cases) {
+      const { container } = mountInteractive(references, [notePost('note-a', 'Citing Note')], {
+        initialPageNumber: 1, initialSourceReferenceId: requested, initialSourceRequestId: 1,
+      });
+
+      expect(arrivals(container), label).toHaveLength(0);
+      expect(scrolledPageNumbers(), label).toContain('1');
+      remount();
+    }
+  });
+
+  it('S/T: a repeat request scrolls again; a rerender of one request does not', () => {
+    const reference = exactRef(4, 10, ids('ref-a', 'note-a'));
+    const posts = [notePost('note-a', 'Citing Note')];
+    const { container, render } = mountInteractive(reference ? [reference] : [], posts, {
+      initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 1,
+    });
+    const marked = arrivals(container)[0];
+    const scrollsFor = () => scrolledElements().filter((element) => element === marked).length;
+    expect(scrollsFor()).toBe(1);
+
+    // Same request id, rendered again: the intent has already been served.
+    render({ initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 1 });
+    expect(scrollsFor()).toBe(1);
+
+    // A genuinely new click on the same source.
+    render({ initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 2 });
+    expect(scrollsFor()).toBe(2);
+  });
+
+  it('U: a citation of another document can never become the exact target', () => {
+    const foreign = exactRef(4, 10, {
+      ...ids('ref-a', 'note-a'),
+      sourceDocumentId: 'some-other-document' as SourceReference['sourceDocumentId'],
+    });
+
+    const { container } = mountInteractive([foreign], [notePost('note-a', 'Citing Note')], {
+      initialPageNumber: 1, initialSourceReferenceId: 'ref-a', initialSourceRequestId: 1,
+    });
+
+    expect(arrivals(container)).toHaveLength(0);
+    expect(highlightsIn(container)).toHaveLength(0);
+  });
+});
+
+describe('P6J-F6-B4-B4 exact source -> Note', () => {
+  it('V: one citing Note opens directly, once', () => {
+    const { container, onOpenBacklinkTarget } = mountInteractive(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+    );
+
+    clickOn(highlightsIn(container)[0]);
+
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
+    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
+  });
+
+  it('W: two citations pointing at ONE Note are one destination', () => {
+    const { container, onOpenBacklinkTarget } = mountInteractive(
+      [
+        exactRef(0, 10, ids('ref-a', 'note-a')),
+        exactRef(4, 14, ids('ref-b', 'note-a')),
+      ],
+      [notePost('note-a', 'Citing Note')],
+    );
+
+    // The overlap run carries both citations...
+    const overlap = highlightsIn(container).find((node) => node.textContent === 'safety')!;
+    expect(overlap.getAttribute('data-knowledge-source-highlight-count')).toBe('2');
+    clickOn(overlap);
+
+    // ...but only one Note, so no chooser and exactly one call.
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
+    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
+  });
+
+  it('X/Y/Z: an overlap of two Notes asks, and routes by id even when labels match', () => {
+    const { container, onOpenBacklinkTarget } = mountInteractive(
+      [
+        exactRef(0, 10, ids('ref-a', 'note-a')),
+        exactRef(4, 14, ids('ref-b', 'note-b')),
+      ],
+      // Deliberately identical titles: a source-created Note inherits the PDF's
+      // filename, so two citing Notes legitimately read the same.
+      [notePost('note-a', 'EMG_checklist.pdf'), notePost('note-b', 'EMG_checklist.pdf')],
+    );
+
+    clickOn(highlightsIn(container).find((node) => node.textContent === 'safety')!);
+
+    // Nothing was chosen for the user.
+    expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
+    const options = chooserOptions(container);
+    expect(options).toHaveLength(2);
+    expect(options.map((option) => option.getAttribute('data-knowledge-source-choice-target')))
+      .toEqual(['note-a', 'note-b']);
+
+    clickOn(options[1]);
+
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-b');
+    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
+  });
+
+  it('AA/AB: a span with no listed Note, or no callback, stays visible but inert', () => {
+    // The citation resolves and paints, but its target is not a Note the board
+    // currently lists as citing this document.
+    const orphan = mountInteractive([exactRef(4, 10, ids('ref-a', 'note-gone'))], []);
+    const orphanSpan = highlightsIn(orphan.container)[0];
+    expect(orphanSpan.textContent).toBe('safety');
+    expect(orphanSpan.getAttribute('role')).toBeNull();
+    expect(orphanSpan.getAttribute('tabindex')).toBeNull();
+    clickOn(orphanSpan);
+    expect(orphan.onOpenBacklinkTarget).not.toHaveBeenCalled();
+    remount();
+
+    // Outside a canvas there is nothing to navigate to at all.
+    const { container } = mountWithReferences([exactRef(4, 10, ids('ref-a', 'note-a'))]);
+    const span = highlightsIn(container)[0];
+    expect(span.getAttribute('role')).toBeNull();
+    expect(span.getAttribute('tabindex')).toBeNull();
+  });
+
+  it('AG/AH/AI: Enter and Space activate, and Space does not scroll the page', () => {
+    const { container, onOpenBacklinkTarget } = mountInteractive(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+    );
+    const span = highlightsIn(container)[0];
+    expect(span.getAttribute('role')).toBe('button');
+    expect(span.getAttribute('tabindex')).toBe('0');
+
+    expect(pressOn(span, 'Enter').defaultPrevented).toBe(true);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
+
+    const space = pressOn(span, ' ');
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(2);
+    // Space would otherwise scroll the reader out from under the reader.
+    expect(space.defaultPrevented).toBe(true);
+
+    // An unrelated key does nothing at all.
+    expect(pressOn(span, 'a').defaultPrevented).toBe(false);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('P6J-F6-B4-B4 selection still wins over navigation', () => {
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('AC/AE: a drag inside an interactive highlight arms Create Note and suppresses navigation', () => {
+    const { container, onOpenBacklinkTarget, onCreateNoteFromPage } = mountInteractive(
+      [exactRef(0, 14, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+    );
+    const span = highlightsIn(container)[0];
+    const text = span.firstChild!;
+
+    // 'safety' lies inside the highlighted run: offsets 4-10 of the page.
+    selectRange(text, 4, text, 10);
+    finishSelectionOn(span);
+    clickOn(span);
+
+    // The click that ended the drag is not a navigation request.
+    expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
+    // And B4-B2B still holds the exact span.
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    clickCreateNote(container, 1);
+    expect(onCreateNoteFromPage.mock.calls[0][0].selection)
+      .toEqual({ charStart: 4, charEnd: 10, selectedText: 'safety' });
+  });
+
+  it('AD: a drag crossing plain -> highlight -> plain still maps to page offsets', () => {
+    const { container, onCreateNoteFromPage } = mountInteractive(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+    );
+    const root = pageRoot(container, 1);
+    // The renderer split page 1 into: 'PDF ' | 'safety' | ' PDF\nLiteralâ€¦'.
+    const [before, , after] = Array.from(root.childNodes);
+
+    selectRange(before.firstChild ?? before, 0, after.firstChild ?? after, 4);
+    finishSelectionOn(root);
+
+    clickCreateNote(container, 1);
+    expect(onCreateNoteFromPage.mock.calls[0][0].selection)
+      .toEqual({ charStart: 0, charEnd: 14, selectedText: 'PDF safety PDF' });
+  });
+
+  it('AF: an ordinary collapsed click still navigates', () => {
+    const { container, onOpenBacklinkTarget } = mountInteractive(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+    );
+
+    // Nothing selected -- the browser's selection is collapsed.
+    clickOn(highlightsIn(container)[0]);
+
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
+  });
+});
+
+describe('P6J-F6-B4-B4 search keeps its match, and the canonical root is untouched', () => {
+  const withOverlap = () => mountInteractive(
+    [
+      exactRef(0, 10, ids('ref-a', 'note-a')),
+      exactRef(4, 14, ids('ref-b', 'note-b')),
+    ],
+    [notePost('note-a', 'First Note'), notePost('note-b', 'Second Note')],
+  );
+
+  it('AK/AL/AM/AN/AO: a source-overlapping match stays one inert <mark>', () => {
+    const { container, onOpenBacklinkTarget } = withOverlap();
+    setSearch(container, 'safety');
+
+    const marks = Array.from(container.querySelectorAll('mark'));
+    expect(marks).toHaveLength(1);
+    expect(container.textContent).toContain('1 match');
+    expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
+    // It still REPORTS the citations it overlaps -- display metadata only.
+    expect(marks[0].getAttribute('data-knowledge-source-highlight')).toBe('true');
+    expect(marks[0].getAttribute('data-knowledge-source-highlight-count')).toBe('2');
+    // But the match is search's: clicking it routes nowhere, because that count
+    // is an aggregate and cannot say which characters belong to which citation.
+    expect(marks[0].getAttribute('role')).toBeNull();
+    expect(marks[0].getAttribute('tabindex')).toBeNull();
+    clickOn(marks[0]);
+    expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
+  });
+
+  it('AP: clearing the search hands the run back to the source pieces', () => {
+    const { container, onOpenBacklinkTarget } = withOverlap();
+    setSearch(container, 'safety');
+    expect(container.querySelectorAll('mark')).toHaveLength(1);
+
+    setSearch(container, '');
+
+    const overlap = highlightsIn(container).find((node) => node.textContent === 'safety')!;
+    expect(overlap.getAttribute('role')).toBe('button');
+    clickOn(overlap);
+    expect(chooserOptions(container)).toHaveLength(2);
+    expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
+  });
+
+  it('AR/AS/AT/AU/AV: the page text reconstructs exactly, chooser open or closed', () => {
+    const { container } = withOverlap();
+    const root = pageRoot(container, 1);
+    expect(root.textContent).toBe(PAGE_ONE);
+
+    clickOn(highlightsIn(container).find((node) => node.textContent === 'safety')!);
+
+    const chooser = container.querySelector('[data-knowledge-source-choice="true"]')!;
+    expect(chooser).not.toBeNull();
+    // Outside every page text root -- otherwise its labels would land in the
+    // coordinate space B4-B2B measures against.
+    expect(root.contains(chooser)).toBe(false);
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+
+    // Dismissing restores nothing, because nothing in the root ever changed.
+    clickOn(Array.from(container.querySelectorAll('button'))
+      .find((button) => button.getAttribute('aria-label') === 'Dismiss citing Notes')!);
+    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
+    expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
+    // Each substring is emitted once: the overlap is not painted per citation.
+    expect((root.textContent!.match(/safety/g) ?? []).length).toBe(1);
+  });
+
+  it('AW/AX/AY/AZ/BA: the surrounding B2/B3N behaviour is unchanged', () => {
+    const { container, onOpenBacklinkTarget, onCreateNoteFromPage } = withOverlap();
+
+    // AW: a backlink row still navigates by id.
+    const row = container.querySelector('[data-knowledge-backlink-target="note-b"] button') as HTMLButtonElement;
+    clickOn(row);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-b');
+
+    // AX: page-level Create Note is untouched by any of this.
+    clickCreateNote(container, 2);
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toMatchObject({ pageNumber: 2, selection: null });
+
+    // AZ: search navigation still moves the active match.
+    setSearch(container, 'pdf');
+    expect(container.textContent).toContain('3 matches');
+    const next = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Next')!;
+    clickOn(next);
+    expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
+
+    // BA: and the persistent highlights survive the round trip.
+    setSearch(container, '');
+    expect(highlightTexts(container)).toEqual(['PDF ', 'safety', ' PDF']);
   });
 });

@@ -483,17 +483,42 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
   });
 
   it('L: the reader opens by document id, once per request id', () => {
-    expect(documentsList).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart)');
+    // B4-B4 widened this call with the exact-arrival target; the document id
+    // and page remain the first two arguments and the latch below is untouched.
+    expect(documentsList).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
     expect(documentsList).toContain('const known = entries.find((candidate) => candidate.id === documentId)');
     // Handled-once latch, so a manual reopen never replays a stale request.
     expect(documentsList).toContain('if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;');
     expect(documentsList).not.toMatch(/find\([^)]*originalFilename/);
   });
 
-  it('M: the reader receives the page target and nothing finer', () => {
+  /**
+   * B4-B4 partially expires this test's B2 wording. The reader may now receive
+   * the CITING ROW ID as well as the page -- that is a name, resolvable only
+   * through the segments the reader already derives. What stays forbidden is
+   * navigation authority in the form of coordinates or geometry: handed those,
+   * the reader would scroll to stale numbers instead of the span B4-B1 decided
+   * on, and would honour a citation the resolver refuses.
+   */
+  it('M: the reader receives the page and the citing row id, and no coordinate', () => {
     expect(documentsList).toContain('initialPageNumber={details.initialPageNumber}');
     expect(documentDetails).toContain('initialPageNumber?: number;');
     expect(documentDetails).toContain('data-page-number={page.pageNumber}');
+
+    // The hint is forwarded, and it is a row id plus the repeat-intent id.
+    expect(documentsList).toContain('initialSourceReferenceId={details.sourceTarget?.referenceId}');
+    expect(documentsList).toContain('initialSourceRequestId={details.sourceTarget?.requestId}');
+    expect(documentDetails).toContain('initialSourceReferenceId?: string;');
+    expect(documentDetails).toContain('initialSourceRequestId?: number;');
+
+    // The request type itself carries the five fields and nothing finer.
+    const navigation = sourceOf('lib/domain/knowledge/knowledgeSourceNavigation.ts');
+    const request = after(navigation, 'export interface KnowledgeSourceOpenRequest {', 320);
+    expect(Array.from(request.matchAll(/readonly (\w+)/g)).map((match) => match[1]))
+      .toEqual(['requestId', 'sourceDocumentId', 'sourceReferenceId', 'pageStart', 'pageEnd']);
+    for (const forbidden of ['charStart', 'charEnd', 'quoteText', 'quoteHash', 'locator', 'bbox', 'targetPadletId']) {
+      expect(navigation, `${forbidden} is navigation authority, not a hint`).not.toContain(forbidden);
+    }
     // B4-B2B added exact-span CAPTURE here, so char offsets are now legitimate
     // in this file. Geometry and server-owned fields still are not.
     for (const forbidden of ['locator', 'bbox', 'quoteHash', 'quoteText']) {
@@ -763,5 +788,114 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
     // B2's forward marker and its single call site are unchanged.
     expect(postCardContent).toContain('export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {');
     expect((canvasClient.match(/setSourceReferencesByPadletId\(/g) ?? []).length).toBe(6);
+  });
+});
+
+// ============================================================================
+// P6J-F6-B4-B4 -- bidirectional exact source interactions
+// ============================================================================
+
+describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
+  it('CanvasClient is untouched: the pure request builder carried the whole change', () => {
+    // The full SourceReference was already in scope at the call site, so adding
+    // the row id to the request needed nothing here. If a hook, state or an
+    // effect had been added for provenance, this would catch it.
+    expect(canvasClient).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference)');
+    for (const forbidden of [
+      'sourceReferenceId', 'initialSourceReferenceId', 'initialSourceRequestId',
+      'data-knowledge-source-navigation-target', 'data-knowledge-source-choice',
+    ]) {
+      expect(canvasClient, `${forbidden} belongs to the reader, not CanvasClient`).not.toContain(forbidden);
+    }
+    // B2's request state remains exactly one slot, with no companion added.
+    expect((canvasClient.match(/useState<KnowledgeSourceOpenRequest \| null>/g) ?? []).length).toBe(1);
+  });
+
+  it('the reader still delegates span resolution and adds no data access', () => {
+    // Unchanged layering: segments come from the pure module, which is the sole
+    // consumer of B4-B1. Interaction rides on what it already returned.
+    expect(documentDetails).toContain('knowledgeSourceHighlightSegments(documentSourceReferences, page.pageNumber, page.text)');
+    for (const forbidden of [
+      'knowledgeSourceSpanResolver', 'resolveKnowledgeSourceSpan',
+      'fetch(', 'supabase', 'createClient', '.insert(', '.update(', '.upsert(', '.rpc(',
+    ]) {
+      expect(documentDetails, forbidden).not.toContain(forbidden);
+    }
+    // Still two Knowledge source contexts; interaction introduced no third.
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(2);
+  });
+
+  it('target identity comes from the resolved spans, never from the DOM count attribute', () => {
+    // The attribute survives for display and tests, and is emitted exactly
+    // where B4-B3 put it -- but nothing READS it back to decide a destination.
+    expect(documentDetails).toContain('data-knowledge-source-highlight-count={segment.spans.length}');
+    for (const forbidden of [
+      'dataset.knowledgeSourceHighlightCount',
+      "getAttribute('data-knowledge-source-highlight-count')",
+      'getAttribute("data-knowledge-source-highlight-count")',
+    ]) {
+      expect(documentDetails, `routing must not read ${forbidden}`).not.toContain(forbidden);
+    }
+    // Targets are derived from the segment's own spans.
+    expect(documentDetails).toContain('eligibleTargetsOf(segment, interaction.eligibleTargets)');
+    expect(documentDetails).toContain('for (const span of segment.spans) {');
+  });
+
+  it('a search match stays atomic and gains no source-navigation semantics', () => {
+    // Anchored on the element's own key, NOT on the string '<mark': the
+    // renderer's comment mentions "<mark>" first, and anchoring there windows
+    // over prose instead of the JSX -- a guard that can never fail.
+    const markKey = documentDetails.indexOf('key={`match-${match.start}`}');
+    expect(markKey).toBeGreaterThan(-1);
+    const mark = documentDetails.slice(markKey, markKey + 620);
+    for (const forbidden of ['role=', 'tabIndex', 'onKeyDown', 'onClick']) {
+      expect(mark, `a search match must not gain ${forbidden}`).not.toContain(forbidden);
+    }
+    // The whole match remains ONE element: its count is an aggregate, so a
+    // click on it could not be attributed to any particular citation.
+    expect(documentDetails).toContain('data-knowledge-source-highlight-count={sources > 0 ? sources : undefined}');
+  });
+
+  it('native text selection is never blocked, only used to suppress navigation', () => {
+    expect(documentDetails).toContain('if (selection && !selection.isCollapsed) return;');
+    // Blocking mousedown would break B4-B2B's drag-select entirely: there is no
+    // mousedown handler at all, so nothing can cancel a selection starting.
+    expect(documentDetails).not.toContain('onMouseDown');
+    // Exactly one preventDefault exists, and it is the keyboard one that stops
+    // Space scrolling the reader -- never a pointer-path default.
+    expect((documentDetails.match(/preventDefault\(\)/g) ?? []).length).toBe(1);
+    const keyHandler = after(documentDetails, "if (event.key !== 'Enter' && event.key !== ' ') return;", 200);
+    expect(keyHandler).toContain('event.preventDefault();');
+  });
+
+  it('the chooser lives outside every page text root and routes by padlet id', () => {
+    const chooser = after(documentDetails, 'data-knowledge-source-choice="true"', 900);
+    expect(chooser).toContain('data-knowledge-source-choice-target={targetPadletId}');
+    expect(chooser).toContain('onOpenBacklinkTarget(targetPadletId)');
+    // The label is presentation and must never be the argument.
+    expect(chooser).not.toMatch(/onOpenBacklinkTarget\((?!targetPadletId\))/);
+    // Rendered after the pages container closes, so it cannot be inside a root.
+    const rootIndex = documentDetails.indexOf('{...{ [PAGE_TEXT_ROOT]: page.pageNumber }}');
+    const chooserIndex = documentDetails.indexOf('data-knowledge-source-choice="true"');
+    expect(chooserIndex).toBeGreaterThan(rootIndex);
+    expect(documentDetails.slice(rootIndex, chooserIndex)).toContain('</section>');
+  });
+
+  it('highlight -> Note reuses the one existing canvas navigation callback', () => {
+    // No second navigation system. Two direct invocations -- the single-target
+    // highlight and the chooser -- plus the backlink rows, which still reach the
+    // same prop through UsedInNotes' `onOpen`.
+    expect((documentDetails.match(/onOpenBacklinkTarget\(/g) ?? []).length).toBe(2);
+    expect(documentDetails).toContain('onOpen(row.targetPadletId)');
+    expect(documentDetails).toContain('onOpen={onOpenBacklinkTarget}');
+    for (const forbidden of ['onOpenPadlet', 'onOpenSourceTarget', 'onNavigateToNote']) {
+      expect(documentDetails, forbidden).not.toContain(forbidden);
+    }
+    // The card marker itself stays display-only (the rest of PostCardContent
+    // is full of unrelated controls, so this is scoped to the marker).
+    const marker = after(postCardContent, 'export function KnowledgeSourceMarker(', 700);
+    for (const forbidden of ['onClick', 'role="button"', 'tabIndex', '<button']) {
+      expect(marker, `the card marker must not gain ${forbidden}`).not.toContain(forbidden);
+    }
   });
 });

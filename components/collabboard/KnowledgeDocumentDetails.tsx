@@ -49,10 +49,36 @@ export interface KnowledgeDocumentDetailsProps {
    */
   initialPageNumber?: number;
   /**
+   * P6J-F6-B4-B4. Which stored citation the arriving Note asked for. A hint,
+   * not a coordinate: the span it scrolls to is whatever the already-derived
+   * segments resolved, so a drifted row lands on its recovered text and a row
+   * that resolves to nothing simply keeps B2's page-level arrival.
+   */
+  initialSourceReferenceId?: string;
+  /** Distinguishes a repeat request for the SAME citation from a rerender. */
+  initialSourceRequestId?: number;
+  /**
    * P6J-F6-B3N. Asks the canvas to open one citing Note, by padlet id. Absent
    * outside a canvas, which is what keeps the rows non-interactive there.
    */
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
+}
+
+/**
+ * P6J-F6-B4-B4. Everything one page's renderer needs to make persisted spans
+ * interactive. Target identity comes from the segment's own spans and never
+ * from the DOM: `data-knowledge-source-highlight-count` is an aggregate for
+ * display and tests, and routing on it would open a Note for a run it does not
+ * actually cite.
+ */
+interface PageSourceInteraction {
+  /** The citation this arrival is aimed at, or null when there is none. */
+  readonly navigationReferenceId: string | null;
+  readonly navigationRef: React.MutableRefObject<HTMLElement | null>;
+  /** Notes currently listed as citing this document -- the only valid targets. */
+  readonly eligibleTargets: ReadonlySet<string>;
+  /** Absent outside a canvas, which keeps every piece non-interactive. */
+  readonly onActivate: ((targets: readonly string[]) => void) | null;
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
@@ -175,6 +201,25 @@ function sourceCountOver(
 }
 
 /**
+ * The distinct Notes a run cites, in the spans' own deterministic order, kept
+ * only where the Note is currently listed as citing this document. A span whose
+ * target is not in that set still paints -- it just offers no action, because
+ * there is nothing on the board to open.
+ */
+function eligibleTargetsOf(
+  segment: KnowledgeSourceHighlightSegment,
+  eligible: ReadonlySet<string>,
+): readonly string[] {
+  const targets: string[] = [];
+  for (const span of segment.spans) {
+    if (!eligible.has(span.targetPadletId)) continue;
+    // Two citations of one Note are one destination, not two.
+    if (!targets.includes(span.targetPadletId)) targets.push(span.targetPadletId);
+  }
+  return targets;
+}
+
+/**
  * Renders one page as a flat sequence of pieces, each substring emitted exactly
  * once and in order, so `textContent` still reconstructs `page.text` verbatim.
  * That is not cosmetic: B4-B2B measures selection offsets against this very
@@ -192,8 +237,12 @@ function highlightedText(
   activeMatch: TextMatch | undefined,
   activeRef: React.MutableRefObject<HTMLElement | null>,
   sourceSegments: readonly KnowledgeSourceHighlightSegment[],
+  interaction: PageSourceInteraction,
 ) {
   const nodes: React.ReactNode[] = [];
+  // The arrival ref belongs on the FIRST piece of the requested citation; the
+  // rest share its emphasis but must not steal the scroll.
+  let navigationAnchored = false;
 
   // Outside a search match the citations decide the cuts.
   const pushUnmatched = (start: number, end: number) => {
@@ -211,12 +260,49 @@ function highlightedText(
         nodes.push(<React.Fragment key={`text-${from}`}>{piece}</React.Fragment>);
         continue;
       }
+      const isArrival = interaction.navigationReferenceId !== null
+        && segment.spans.some((span) => span.referenceId === interaction.navigationReferenceId);
+      const anchorHere = isArrival && !navigationAnchored;
+      if (anchorHere) navigationAnchored = true;
+
+      const targets = interaction.onActivate === null
+        ? []
+        : eligibleTargetsOf(segment, interaction.eligibleTargets);
+      const activate = targets.length === 0 || interaction.onActivate === null
+        ? null
+        : () => {
+          // A click that ends a drag-selection is the user selecting text, not
+          // asking to navigate. Read ONLY to suppress: no offset and no
+          // identity is ever derived from the live selection here -- B4-B2B
+          // remains the single path from a selection to coordinates.
+          const selection = typeof window === 'undefined' ? null : window.getSelection();
+          if (selection && !selection.isCollapsed) return;
+          interaction.onActivate!(targets);
+        };
+
       nodes.push(
         <span
           key={`source-${from}`}
+          ref={anchorHere ? interaction.navigationRef : undefined}
           data-knowledge-source-highlight="true"
           data-knowledge-source-highlight-count={segment.spans.length}
-          className="rounded-sm bg-sky-100"
+          data-knowledge-source-navigation-target={isArrival ? 'true' : undefined}
+          role={activate ? 'button' : undefined}
+          tabIndex={activate ? 0 : undefined}
+          onClick={activate ?? undefined}
+          onKeyDown={activate
+            ? (event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              // Space would otherwise scroll the reader out from under the user.
+              event.preventDefault();
+              activate();
+            }
+            : undefined}
+          className={[
+            'rounded-sm',
+            isArrival ? 'bg-sky-200 ring-1 ring-sky-400' : 'bg-sky-100',
+            activate ? 'cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400' : '',
+          ].filter(Boolean).join(' ')}
         >
           {piece}
         </span>,
@@ -299,12 +385,19 @@ export default function KnowledgeDocumentDetails({
   onBack,
   onCreateNoteFromPage,
   initialPageNumber,
+  initialSourceReferenceId,
+  initialSourceRequestId,
   onOpenBacklinkTarget,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [capturedSelection, setCapturedSelection] = useState<CapturedPageSelection | null>(null);
+  // P6J-F6-B4-B4. The Notes offered for one ambiguous run, or null. Transient
+  // UI only -- never stored, never persisted, replaced by the next activation.
+  const [targetChoice, setTargetChoice] = useState<readonly string[] | null>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
+  const sourceNavigationRef = useRef<HTMLElement | null>(null);
+  const scrolledSourceRequestRef = useRef<number | null>(null);
   const pagesContainerRef = useRef<HTMLDivElement | null>(null);
   // The source page is scrolled to once per request. Re-running it on every
   // render would fight the search-match scroll below, which stays authoritative
@@ -337,6 +430,37 @@ export default function KnowledgeDocumentDetails({
   }, [documentSourceReferences, pages]);
 
   /**
+   * P6J-F6-B4-B4. The Notes the reader is already telling the user cite this
+   * document ARE the valid destinations. Deriving eligibility from the same
+   * rows keeps one answer to "which Notes cite this": a span pointing at a post
+   * the board no longer holds paints, but offers nothing to open.
+   */
+  const eligibleTargets = useMemo(
+    () => new Set(documentRows.map((row) => row.targetPadletId)),
+    [documentRows],
+  );
+  const targetLabels = useMemo(
+    () => new Map(documentRows.map((row) => [row.targetPadletId, row.displayText])),
+    [documentRows],
+  );
+
+  /**
+   * Whether the requested citation resolved to anything paintable at all. The
+   * value is only a trigger for the arrival effect below: the element itself
+   * comes from the ref the renderer attaches, so this never carries a
+   * coordinate of its own.
+   */
+  const requestedSourceResolved = useMemo(() => {
+    if (initialSourceReferenceId === undefined) return false;
+    for (const segments of sourceSegmentsByPage.values()) {
+      for (const segment of segments) {
+        if (segment.spans.some((span) => span.referenceId === initialSourceReferenceId)) return true;
+      }
+    }
+    return false;
+  }, [initialSourceReferenceId, sourceSegmentsByPage]);
+
+  /**
    * Re-proved against the CURRENT page text on every render, so replaced or
    * refreshed page data can never emit coordinates mapped against text that is
    * no longer on screen. Staleness degrades to "no selection", never to a wrong
@@ -358,6 +482,7 @@ export default function KnowledgeDocumentDetails({
   // A different document is a different coordinate space entirely.
   useEffect(() => {
     setCapturedSelection(null);
+    setTargetChoice(null);
   }, [documentId]);
 
   useEffect(() => {
@@ -387,6 +512,29 @@ export default function KnowledgeDocumentDetails({
   }, [initialPageNumber, loading, pages, matches.length]);
 
   /**
+   * P6J-F6-B4-B4 exact arrival, refining the page scroll above once the
+   * requested citation has actually resolved to a rendered piece.
+   *
+   * Latched on requestId, not on the reference or the page: clicking the same
+   * source a second time is a real repeat and must scroll again, while a
+   * rerender within one request must not. When nothing resolved -- a legacy
+   * page-only row, a drifted quote, an id that is not on this page -- the ref
+   * is empty and the B2 page arrival above is simply left as the outcome.
+   */
+  useEffect(() => {
+    if (initialSourceRequestId === undefined) return;
+    if (scrolledSourceRequestRef.current === initialSourceRequestId) return;
+    if (loading || pages.length === 0) return;
+    // Search is the more specific intent while it owns matches; the citation is
+    // still marked, and clearing the search re-runs this.
+    if (matches.length > 0) return;
+    const element = sourceNavigationRef.current;
+    if (!element) return;
+    scrolledSourceRequestRef.current = initialSourceRequestId;
+    element.scrollIntoView?.({ block: 'center' });
+  }, [initialSourceRequestId, loading, pages, matches.length, requestedSourceResolved]);
+
+  /**
    * The selection is captured when the user finishes making it, NOT when they
    * click the action: a click's own mousedown collapses the browser selection,
    * so reading it in the click handler would find nothing. Buttons are excluded
@@ -396,6 +544,27 @@ export default function KnowledgeDocumentDetails({
   const handleSelectionSettled = (event: React.SyntheticEvent) => {
     if (event.target instanceof Element && event.target.closest('button')) return;
     setCapturedSelection(captureExactSelection(pagesContainerRef.current, pages));
+  };
+
+  /**
+   * One eligible Note opens directly; several ask, because guessing would send
+   * the reader to a Note they did not mean and quietly hide the others.
+   */
+  const activateSourceTargets = (targets: readonly string[]) => {
+    if (!onOpenBacklinkTarget || targets.length === 0) return;
+    if (targets.length === 1) {
+      setTargetChoice(null);
+      onOpenBacklinkTarget(targets[0]);
+      return;
+    }
+    setTargetChoice(targets);
+  };
+
+  const sourceInteraction: PageSourceInteraction = {
+    navigationReferenceId: initialSourceReferenceId ?? null,
+    navigationRef: sourceNavigationRef,
+    eligibleTargets,
+    onActivate: onOpenBacklinkTarget ? activateSourceTargets : null,
   };
 
   const moveMatch = (delta: number) => {
@@ -508,6 +677,7 @@ export default function KnowledgeDocumentDetails({
                   matches[activeMatchIndex],
                   activeMatchRef,
                   sourceSegmentsByPage.get(page.pageNumber) ?? [],
+                  sourceInteraction,
                 )}
               </p>
             </section>
@@ -515,6 +685,46 @@ export default function KnowledgeDocumentDetails({
           })}
         </div>
       )}
+
+      {/*
+        Deliberately OUTSIDE the pages container, and therefore outside every
+        page text root: B4-B2B measures selection offsets against that text, so
+        no affordance may add a character to it. Identity is the padlet id on
+        each control -- the label is presentation and opens nothing.
+      */}
+      {targetChoice && onOpenBacklinkTarget ? (
+        <div
+          data-knowledge-source-choice="true"
+          className="mt-3 rounded-md border border-gray-200 bg-white p-2 shadow-sm"
+        >
+          <p className="text-[11px] font-medium text-gray-500">Open citing Note</p>
+          <ul className="mt-1 space-y-0.5">
+            {targetChoice.map((targetPadletId) => (
+              <li key={targetPadletId}>
+                <button
+                  type="button"
+                  data-knowledge-source-choice-target={targetPadletId}
+                  onClick={() => {
+                    setTargetChoice(null);
+                    onOpenBacklinkTarget(targetPadletId);
+                  }}
+                  className="block w-full truncate rounded px-2 text-left text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+                >
+                  {targetLabels.get(targetPadletId) ?? 'Note'}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            aria-label="Dismiss citing Notes"
+            onClick={() => setTargetChoice(null)}
+            className="mt-1 px-2 text-[11px] text-gray-500 underline underline-offset-2 hover:text-gray-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -9,10 +9,19 @@ import type { SourceReference } from './knowledgePersistence';
  *
  * Identity is `sourceDocumentId` and nothing else. Filenames are display text --
  * two sources can share one -- so they never decide which document opens.
+ *
+ * P6J-F6-B4-B4 adds `sourceReferenceId` as a NAVIGATION HINT, not a coordinate.
+ * The reader already holds the same persisted rows in memory and already
+ * resolves them through the B4-B1 resolver, so naming the row lets it scroll to
+ * the span that resolver decided on. Copying the stored offsets here instead
+ * would create a second, unresolved authority: a drifted row would then be
+ * trusted at its stale numbers rather than recovered, and a row the resolver
+ * refuses would still be navigated to.
  */
 export interface KnowledgeSourceOpenRequest {
   readonly requestId: number;
   readonly sourceDocumentId: string;
+  readonly sourceReferenceId: string;
   readonly pageStart: number;
   readonly pageEnd: number;
 }
@@ -63,6 +72,7 @@ export function buildKnowledgeSourceOpenRequest(
   return {
     requestId,
     sourceDocumentId: String(reference.sourceDocumentId),
+    sourceReferenceId: String(reference.id),
     pageStart: reference.pageStart,
     pageEnd: reference.pageEnd,
   };

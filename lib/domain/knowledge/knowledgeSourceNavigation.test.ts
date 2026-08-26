@@ -112,20 +112,43 @@ describe('P6J-F6-B2 knowledge source navigation', () => {
   });
 
   describe('open request', () => {
-    it('carries document identity and the page range, and nothing else', () => {
+    // B4-B4: the row id joins the request as a navigation HINT. It expired the
+    // B2 wording "never the reference row id" -- deliberately, and only for the
+    // id. Coordinates are still refused below, because the reader resolves the
+    // named row through B4-B1 rather than trusting numbers carried to it.
+    it('A: carries document identity, the page range and the citing row id, and nothing else', () => {
       const request = buildKnowledgeSourceOpenRequest(7, reference({ id: 'reference-1', pageStart: 3, pageEnd: 5 }));
 
       expect(request).toEqual({
         requestId: 7,
         sourceDocumentId: DOCUMENT,
+        sourceReferenceId: 'reference-1',
         pageStart: 3,
         pageEnd: 5,
       });
-      // Never the filename, the quote, or the reference row id.
-      expect(Object.keys(request).sort()).toEqual(['pageEnd', 'pageStart', 'requestId', 'sourceDocumentId']);
+      expect(Object.keys(request).sort())
+        .toEqual(['pageEnd', 'pageStart', 'requestId', 'sourceDocumentId', 'sourceReferenceId']);
     });
 
-    it('produces a distinct request each time the same source is opened', () => {
+    it('B: carries no exact coordinate, no quote and no target', () => {
+      const request = buildKnowledgeSourceOpenRequest(7, reference({
+        id: 'reference-1',
+        charStart: 12,
+        charEnd: 40,
+        quoteText: 'a passage the reader must resolve for itself',
+        quoteHash: 'hash-9',
+      }));
+
+      for (const forbidden of ['charStart', 'charEnd', 'quoteText', 'quoteHash', 'locator', 'targetPadletId']) {
+        expect(Object.keys(request), forbidden).not.toContain(forbidden);
+      }
+      // Not merely absent as keys -- the values never leak in under other names.
+      expect(JSON.stringify(request)).not.toContain('a passage');
+      expect(JSON.stringify(request)).not.toContain('hash-9');
+      expect(JSON.stringify(request)).not.toContain(NOTE);
+    });
+
+    it('C: the same source opened twice is a new request for the same row', () => {
       const same = reference({ id: 'reference-1' });
 
       const first = buildKnowledgeSourceOpenRequest(1, same);
@@ -134,7 +157,19 @@ describe('P6J-F6-B2 knowledge source navigation', () => {
       // The reader consumes a request once, so reopening needs a new id.
       expect(first.requestId).not.toBe(second.requestId);
       expect(first.sourceDocumentId).toBe(second.sourceDocumentId);
+      // The destination is unchanged: only the intent to go there is new.
+      expect(first.sourceReferenceId).toBe(second.sourceReferenceId);
       expect(first).not.toBe(second);
+    });
+
+    it('D: two citations of one document stay distinct rows', () => {
+      const first = buildKnowledgeSourceOpenRequest(1, reference({ id: 'reference-1', pageStart: 2, pageEnd: 2 }));
+      const second = buildKnowledgeSourceOpenRequest(2, reference({ id: 'reference-2', pageStart: 2, pageEnd: 2 }));
+
+      // Same document, same page: the row id is the only thing telling the
+      // reader which of the two spans to scroll to.
+      expect(first.sourceDocumentId).toBe(second.sourceDocumentId);
+      expect(first.sourceReferenceId).not.toBe(second.sourceReferenceId);
     });
 
     it('keeps two documents distinct even when everything else matches', () => {
