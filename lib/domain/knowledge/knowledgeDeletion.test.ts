@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { asBoardId, asKnowledgeDocumentId, asUserId } from '../core/ids';
 import { domainError } from '../core/errors';
 import type { DomainError } from '../core/errors';
@@ -6,6 +6,7 @@ import { err, ok } from '../core/result';
 import type { Result } from '../core/result';
 import {
   cleanupKnowledgeArtifacts,
+  KNOWLEDGE_STORAGE_REMOVAL_BATCH_SIZE,
   deleteKnowledgeBoard,
   deleteKnowledgeDocument,
 } from './knowledgeDeletion';
@@ -46,12 +47,33 @@ function uuidArtifact(pageCount: number | null) {
   };
 }
 
+/**
+ * P6J-F9-A1a. Cleanup removes in batches, so fixtures record the batch shape
+ * rather than only which paths were seen. A batch fails as a unit.
+ */
+function batchRecorder(failBatch: (paths: readonly string[]) => boolean = () => false) {
+  const batches: string[][] = [];
+  const removed: string[] = [];
+  return {
+    batches,
+    removed,
+    removeMany: async (paths: readonly string[]) => {
+      batches.push([...paths]);
+      removed.push(...paths);
+      return failBatch(paths)
+        ? err(domainError('unavailable', 'Storage unavailable'))
+        : ok(undefined as void);
+    },
+  };
+}
+
 function documentDeps(options: {
   authorized?: boolean;
   deleteResult?: Result<boolean, DomainError>;
-  remove?: (path: string) => Promise<Result<void, DomainError>>;
+  failBatch?: (paths: readonly string[]) => boolean;
 } = {}) {
-  const removed: string[] = [];
+  const recorder = batchRecorder(options.failBatch);
+  const removed = recorder.removed;
   const events: string[] = [];
   const deps = {
     authorizer: {
@@ -71,14 +93,13 @@ function documentDeps(options: {
       },
     },
     storage: {
-      remove: async (path: string) => {
-        events.push(`remove:${path}`);
-        removed.push(path);
-        return options.remove ? options.remove(path) : ok(undefined);
+      removeMany: async (paths: readonly string[]) => {
+        for (const path of paths) events.push(`remove:${path}`);
+        return recorder.removeMany(paths);
       },
     },
   };
-  return { deps, removed, events };
+  return { deps, removed, events, batches: recorder.batches };
 }
 
 describe('deleteKnowledgeDocument', () => {
@@ -135,10 +156,7 @@ describe('deleteKnowledgeDocument', () => {
 
   it('reports partial cleanup while keeping the successful DB deletion', async () => {
     const { deps, removed } = documentDeps({
-      remove: async (path) =>
-        path.endsWith('raw.json')
-          ? err(domainError('unavailable', 'Storage unavailable'))
-          : ok(undefined),
+      failBatch: (paths) => paths.some((path) => path.endsWith('raw.json')),
     });
 
     const result = await deleteKnowledgeDocument(deps, { documentId: DOCUMENT, userId: OWNER });
@@ -146,9 +164,14 @@ describe('deleteKnowledgeDocument', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.deleted).toBe(true);
+    // P6J-F9-A1a: both paths shared one batch, and a batch fails as a unit --
+    // Storage cannot say which member survived, so neither is called removed.
     expect(result.value.storageCleanup).toMatchObject({
       status: 'partial',
-      failedPaths: ['knowledge/board-1/document-1/raw.json'],
+      failedPaths: [
+        'knowledge/board-1/document-1/original.pdf',
+        'knowledge/board-1/document-1/raw.json',
+      ],
     });
     expect(removed).toHaveLength(2);
   });
@@ -184,9 +207,11 @@ describe('deleteKnowledgeBoard', () => {
           },
         },
         storage: {
-          remove: async (path: string) => {
-            events.push(`remove:${path}`);
-            removed.push(path);
+          removeMany: async (paths: readonly string[]) => {
+            for (const path of paths) {
+              events.push(`remove:${path}`);
+              removed.push(path);
+            }
             return ok(undefined);
           },
         },
@@ -210,8 +235,8 @@ describe('deleteKnowledgeBoard', () => {
           deleteBoard: async () => err(domainError('unavailable', 'database unavailable')),
         },
         storage: {
-          remove: async (path: string) => {
-            removed.push(path);
+          removeMany: async (paths: readonly string[]) => {
+            removed.push(...paths);
             return ok(undefined);
           },
         },
@@ -226,22 +251,14 @@ describe('deleteKnowledgeBoard', () => {
 
 describe('cleanupKnowledgeArtifacts', () => {
   it('continues after one failure so other artifacts are still attempted', async () => {
-    const removed: string[] = [];
-    const result = await cleanupKnowledgeArtifacts(
-      {
-        remove: async (path) => {
-          removed.push(path);
-          return path === 'bad' ? err(domainError('unavailable', 'failed')) : ok(undefined);
-        },
-      },
-      [
-        { ...artifact(), storagePath: 'good', rawArtifactPath: null },
-        { ...artifact(), storagePath: 'bad', rawArtifactPath: 'good' },
-      ],
-    );
+    const storage = batchRecorder((paths) => paths.includes('bad'));
+    const result = await cleanupKnowledgeArtifacts(storage, [
+      { ...artifact(), storagePath: 'good', rawArtifactPath: null },
+      { ...artifact(), storagePath: 'bad', rawArtifactPath: 'good' },
+    ]);
 
     expect(result.status).toBe('partial');
-    expect(removed).toEqual(['good', 'bad']);
+    expect(storage.removed).toEqual(['good', 'bad']);
   });
 });
 
@@ -252,18 +269,8 @@ describe('cleanupKnowledgeArtifacts', () => {
  * derives them from the stored page count instead of discovering them.
  */
 describe('page derivative cleanup', () => {
-  function recordingStorage(failing: readonly string[] = []) {
-    const removed: string[] = [];
-    return {
-      removed,
-      remove: async (path: string) => {
-        removed.push(path);
-        return failing.includes(path)
-          ? err(domainError('unavailable', 'nope'))
-          : ok(undefined as void);
-      },
-    };
-  }
+  const recordingStorage = (failing: readonly string[] = []) =>
+    batchRecorder((paths) => paths.some((path) => failing.includes(path)));
 
   it('adds exactly one derivative path per page, alongside the existing artifacts', async () => {
     const storage = recordingStorage();
@@ -303,15 +310,16 @@ describe('page derivative cleanup', () => {
     expect(cleanup.attemptedPaths.filter((path) => path.includes('/pages/'))).toHaveLength(2);
   });
 
-  it('reports partial exactly as before when one derivative cannot be removed', async () => {
+  it('reports partial when a batch carrying a derivative cannot be removed', async () => {
     const failed = `knowledge/${UUID_BOARD}/${UUID_DOCUMENT}/pages/2.webp`;
     const storage = recordingStorage([failed]);
     const cleanup = await cleanupKnowledgeArtifacts(storage, [uuidArtifact(3)]);
 
     expect(cleanup.status).toBe('partial');
-    expect(cleanup.failedPaths).toEqual([failed]);
-    expect(cleanup.failures).toEqual([{ path: failed, message: 'nope' }]);
-    // A failure never stops the rest: page 3 was still attempted.
+    // P6J-F9-A1a: these four paths travel in one batch, which fails as a unit.
+    expect(cleanup.failedPaths).toEqual(cleanup.attemptedPaths);
+    expect(cleanup.failures).toContainEqual({ path: failed, message: 'Storage unavailable' });
+    // Every path was still submitted: page 3 was not skipped.
     expect(storage.removed).toContain(`knowledge/${UUID_BOARD}/${UUID_DOCUMENT}/pages/3.webp`);
   });
 
@@ -346,5 +354,92 @@ describe('page derivative cleanup', () => {
       'knowledge/uuid/original.pdf',
       `knowledge/${UUID_BOARD}/${UUID_DOCUMENT}/pages/1.webp`,
     ]);
+  });
+});
+
+/**
+ * P6J-F9-A1a -- deterministic paths are removed in bounded batches.
+ *
+ * Batching is a transport change only: which paths are attempted, and in what
+ * order, must stay exactly as the capture step produced them.
+ */
+describe('batched artifact removal', () => {
+  const bulk = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      ...uuidArtifact(null),
+      storagePath: `knowledge/bulk/${index}.pdf`,
+    }));
+
+  it('submits batches through removeMany and never one request per path', async () => {
+    const perPath = vi.fn(async () => ok(undefined as void));
+    const storage = { ...batchRecorder(), remove: perPath };
+    const cleanup = await cleanupKnowledgeArtifacts(storage, [uuidArtifact(3)]);
+
+    expect(perPath).not.toHaveBeenCalled();
+    expect(storage.batches).toHaveLength(1);
+    expect(storage.batches[0]).toEqual(cleanup.attemptedPaths);
+  });
+
+  it('splits at 100 and covers exactly the attempted paths, in order', async () => {
+    const storage = batchRecorder();
+    const cleanup = await cleanupKnowledgeArtifacts(storage, bulk(101));
+
+    expect(KNOWLEDGE_STORAGE_REMOVAL_BATCH_SIZE).toBe(100);
+    expect(storage.batches.map((batch) => batch.length)).toEqual([100, 1]);
+    expect(storage.batches.flat()).toEqual(cleanup.attemptedPaths);
+  });
+
+  it('keeps every batch within the limit for a large board', async () => {
+    const storage = batchRecorder();
+    const cleanup = await cleanupKnowledgeArtifacts(storage, bulk(250));
+
+    expect(storage.batches.map((batch) => batch.length)).toEqual([100, 100, 50]);
+    expect(cleanup.attemptedPaths).toHaveLength(250);
+    expect(cleanup.status).toBe('complete');
+  });
+
+  it('deduplicates before batching, so no path is ever sent twice', async () => {
+    const storage = batchRecorder();
+    const cleanup = await cleanupKnowledgeArtifacts(storage, [
+      uuidArtifact(2),
+      uuidArtifact(2),
+      uuidArtifact(2),
+    ]);
+    const sent = storage.batches.flat();
+
+    expect(new Set(sent).size).toBe(sent.length);
+    expect(sent).toEqual(cleanup.attemptedPaths);
+    expect(sent).toHaveLength(3);
+  });
+
+  it('makes no Storage call at all when there is nothing to remove', async () => {
+    const storage = batchRecorder();
+    const cleanup = await cleanupKnowledgeArtifacts(storage, []);
+
+    expect(storage.batches).toEqual([]);
+    expect(cleanup).toMatchObject({ status: 'complete', attemptedPaths: [], failedPaths: [] });
+  });
+
+  it('fails a whole batch together and still runs the batches after it', async () => {
+    const storage = batchRecorder((paths) => paths.includes('knowledge/bulk/0.pdf'));
+    const cleanup = await cleanupKnowledgeArtifacts(storage, bulk(150));
+
+    expect(storage.batches).toHaveLength(2);
+    expect(cleanup.status).toBe('partial');
+    expect(cleanup.failedPaths).toEqual(cleanup.attemptedPaths.slice(0, 100));
+    // The second batch succeeded, so none of its paths are reported failed.
+    expect(cleanup.failedPaths).not.toContain('knowledge/bulk/149.pdf');
+    expect(storage.batches[1]).toContain('knowledge/bulk/149.pdf');
+  });
+
+  it('treats a throwing Storage client as a failed batch rather than a crash', async () => {
+    const cleanup = await cleanupKnowledgeArtifacts(
+      { removeMany: async () => { throw new Error('socket hang up'); } },
+      [uuidArtifact(2)],
+    );
+
+    expect(cleanup.status).toBe('partial');
+    expect(cleanup.failedPaths).toEqual(cleanup.attemptedPaths);
+    expect(cleanup.failures.every(({ message }) => message === 'socket hang up')).toBe(true);
   });
 });

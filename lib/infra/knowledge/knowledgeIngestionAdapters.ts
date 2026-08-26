@@ -171,6 +171,25 @@ export class SupabaseKnowledgeStorageGateway implements KnowledgeStorageGateway 
       return err(domainError('unavailable', 'Could not remove the uploaded PDF', { cause }));
     }
   }
+
+  /**
+   * P6J-F9-A1a. One Storage request for the whole batch -- never a loop over
+   * `remove`. An empty batch is a no-op rather than an empty API call.
+   */
+  async removeMany(paths: readonly string[]): Promise<Result<void, DomainError>> {
+    if (paths.length === 0) return ok(undefined);
+    try {
+      const { error } = await this.client.storage.from(this.bucket).remove(paths);
+      if (error) {
+        return err(
+          domainError('unavailable', 'Could not remove the Knowledge artifacts', { cause: error }),
+        );
+      }
+      return ok(undefined);
+    } catch (cause: unknown) {
+      return err(domainError('unavailable', 'Could not remove the Knowledge artifacts', { cause }));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

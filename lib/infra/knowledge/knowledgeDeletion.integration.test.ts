@@ -4,7 +4,11 @@ import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { asBoardId, asKnowledgeDocumentId, asUserId } from '../../domain/core/ids';
-import { deleteKnowledgeBoard, deleteKnowledgeDocument } from '../../domain/knowledge/knowledgeDeletion';
+import {
+  cleanupKnowledgeArtifacts,
+  deleteKnowledgeBoard,
+  deleteKnowledgeDocument,
+} from '../../domain/knowledge/knowledgeDeletion';
 import { createKnowledgePdfUpload } from '../../domain/knowledge/knowledgeIngestion';
 import {
   KNOWLEDGE_STORAGE_BUCKET,
@@ -239,5 +243,56 @@ describe.skipIf(!hasLocalStack)('P4D deletion -- local Postgres and Storage inte
     expect(await objectExists(first.storagePath)).toBe(false);
     expect(await objectExists(second.storagePath)).toBe(false);
     expect(await objectExists(rawPath)).toBe(false);
+  });
+  /**
+   * P6J-F9-A1a. Most attempted paths are absent: page derivatives are optional
+   * and none are generated yet, so cleanup routinely asks Storage to remove
+   * objects that were never written. That must be harmless -- proven here
+   * against the real local Storage API rather than assumed.
+   */
+  it('removes a batch mixing one real object with never-written paths', async () => {
+    const existing = `knowledge/${BOARD_A}/missing-mix/original.pdf`;
+    const uploaded = await client.storage
+      .from(KNOWLEDGE_STORAGE_BUCKET)
+      .upload(existing, pdf('missing-mix'), { contentType: 'application/pdf' });
+    expect(uploaded.error).toBeNull();
+
+    const result = await storage.removeMany([
+      existing,
+      `knowledge/${BOARD_A}/missing-mix/pages/1.webp`,
+      `knowledge/${BOARD_A}/missing-mix/pages/2.webp`,
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(await objectExists(existing)).toBe(false);
+  });
+
+  it('reports complete cleanup when no derivative was ever generated', async () => {
+    const document = await uploadDocument(BOARD_A, 'missing-derivatives');
+    const documentId = asKnowledgeDocumentId(document.id);
+
+    const cleanup = await cleanupKnowledgeArtifacts(storage, [
+      { boardId: BOARD_A, documentId, storagePath: document.storagePath, rawArtifactPath: null, pageCount: 3 },
+    ]);
+
+    // The real PDF plus three derivative paths that were never written.
+    expect(cleanup.attemptedPaths).toHaveLength(4);
+    expect(cleanup.status).toBe('complete');
+    expect(cleanup.failedPaths).toEqual([]);
+    expect(await objectExists(document.storagePath)).toBe(false);
+
+    // A batch of nothing but absent paths is equally harmless.
+    const allMissing = await cleanupKnowledgeArtifacts(storage, [
+      {
+        boardId: BOARD_A,
+        documentId,
+        storagePath: `knowledge/${BOARD_A}/${document.id}/never-written.pdf`,
+        rawArtifactPath: null,
+        pageCount: 2,
+      },
+    ]);
+    expect(allMissing).toMatchObject({ status: 'complete', failedPaths: [] });
+
+    await client.from('knowledge_documents').delete().eq('id', document.id);
   });
 });

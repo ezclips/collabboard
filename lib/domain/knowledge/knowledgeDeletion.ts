@@ -63,12 +63,19 @@ function failureMessage(error: DomainError | unknown): string {
 }
 
 /**
+ * P6J-F9-A1a. Deterministic page derivatives mean one document can contribute
+ * a couple of hundred paths, so cleanup removes them in bounded batches
+ * instead of one Storage round trip per object.
+ */
+export const KNOWLEDGE_STORAGE_REMOVAL_BATCH_SIZE = 100;
+
+/**
  * Remove every captured artifact, continuing after an individual failure.
  * This is the one cleanup implementation shared by document and board
  * deletion. Storage is deliberately after the authoritative database delete.
  */
 export async function cleanupKnowledgeArtifacts(
-  storage: Pick<KnowledgeStorageGateway, 'remove'>,
+  storage: Pick<KnowledgeStorageGateway, 'removeMany'>,
   artifacts: readonly KnowledgeArtifactPaths[],
 ): Promise<KnowledgeStorageCleanup> {
   const attemptedPaths = [
@@ -86,14 +93,22 @@ export async function cleanupKnowledgeArtifacts(
   ];
   const failures: KnowledgeStorageCleanupFailure[] = [];
 
-  for (const path of attemptedPaths) {
+  // Batching happens after capture and deduplication, so membership and order
+  // are exactly what they were before; only the transport changed.
+  for (let start = 0; start < attemptedPaths.length; start += KNOWLEDGE_STORAGE_REMOVAL_BATCH_SIZE) {
+    const batch = attemptedPaths.slice(start, start + KNOWLEDGE_STORAGE_REMOVAL_BATCH_SIZE);
+    let message: string | undefined;
     try {
-      const removed = await storage.remove(path);
-      if (!removed.ok) {
-        failures.push({ path, message: failureMessage(removed.error) });
-      }
+      const removed = await storage.removeMany(batch);
+      if (!removed.ok) message = failureMessage(removed.error);
     } catch (error: unknown) {
-      failures.push({ path, message: failureMessage(error) });
+      message = failureMessage(error);
+    }
+    // A batch-level error is attributed to every path it carried. Storage
+    // cannot tell an absent object apart from an undeleted one, so per-path
+    // outcomes are not inferable -- and inventing success is the worse error.
+    if (message !== undefined) {
+      for (const path of batch) failures.push({ path, message });
     }
   }
 
@@ -117,7 +132,7 @@ export async function deleteKnowledgeDocument(
       canMutateBoard(boardId: BoardId, userId: UserId): Promise<Result<boolean, DomainError>>;
     };
     readonly repository: KnowledgeDocumentDeletionRepository;
-    readonly storage: Pick<KnowledgeStorageGateway, 'remove'>;
+    readonly storage: Pick<KnowledgeStorageGateway, 'removeMany'>;
   },
   input: DeleteKnowledgeDocumentInput,
 ): Promise<Result<KnowledgeDeletionOutcome, DomainError>> {
@@ -159,7 +174,7 @@ export async function deleteKnowledgeBoard(
   deps: {
     readonly authorizer: KnowledgeBoardDeletionAuthorizer;
     readonly repository: KnowledgeBoardDeletionRepository;
-    readonly storage: Pick<KnowledgeStorageGateway, 'remove'>;
+    readonly storage: Pick<KnowledgeStorageGateway, 'removeMany'>;
   },
   input: DeleteKnowledgeBoardInput,
 ): Promise<Result<KnowledgeDeletionOutcome, DomainError>> {

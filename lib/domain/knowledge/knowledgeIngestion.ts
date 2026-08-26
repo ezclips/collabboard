@@ -138,6 +138,12 @@ export interface KnowledgeIngestionRepository {
 export interface KnowledgeStorageGateway {
   upload(path: string, bytes: Uint8Array, contentType: string): Promise<Result<void, DomainError>>;
   remove(path: string): Promise<Result<void, DomainError>>;
+  /**
+   * P6J-F9-A1a. Deletion cleanup removes deterministic artifact paths in
+   * bounded batches rather than one request per object. `remove` stays because
+   * ingestion compensation deletes exactly the one path it just uploaded.
+   */
+  removeMany(paths: readonly string[]): Promise<Result<void, DomainError>>;
 }
 
 export interface KnowledgeContentHasher {
@@ -151,7 +157,9 @@ export interface KnowledgeDocumentIdFactory {
 export interface KnowledgeIngestionDeps {
   readonly authorizer: KnowledgeBoardAuthorizer;
   readonly repository: KnowledgeIngestionRepository;
-  readonly storage: KnowledgeStorageGateway;
+  // Ingestion uploads one object and compensates for that one object. It has
+  // no business reaching the batch removal the deletion path needs.
+  readonly storage: Pick<KnowledgeStorageGateway, 'upload' | 'remove'>;
   readonly hasher: KnowledgeContentHasher;
   readonly ids: KnowledgeDocumentIdFactory;
 }

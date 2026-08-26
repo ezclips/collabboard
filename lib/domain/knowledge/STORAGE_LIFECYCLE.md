@@ -49,6 +49,26 @@ transaction. A successful DB deletion with a failed object cleanup is reported
 as `storageCleanup: "partial"`; the failure remains observable for a future
 retry/garbage-collection feature.
 
+## Batched removal (P6J-F9-A1a)
+
+Because a single document can contribute a couple of hundred deterministic
+paths, cleanup removes them through `removeMany` in batches of at most
+`KNOWLEDGE_STORAGE_REMOVAL_BATCH_SIZE` (100) rather than one request per
+object. Batching happens *after* path capture and deduplication, so which
+paths are attempted, and in what order, is unchanged — only the transport is.
+
+- Most attempted paths are expected to be absent: page derivatives are
+  optional, so removing an object that was never written must be harmless.
+  `knowledgeDeletion.integration.test.ts` proves that against a local Supabase
+  Storage instance; it is not assumed.
+- A batch-level Storage error marks **every** path in that batch failed.
+  Storage cannot distinguish an absent object from an undeleted one, so
+  per-path outcomes are not inferable from the response — and reporting
+  success that did not happen is the worse failure. Later batches still run.
+- Single-path `remove` remains for ingestion compensation, which deletes
+  exactly the one object it just uploaded.
+- Still no Storage listing: paths are derived, never discovered.
+
 ## Future private PDF viewing
 
 The eventual read flow is server authorization by board, followed by a

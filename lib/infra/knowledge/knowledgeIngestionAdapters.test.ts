@@ -103,13 +103,16 @@ describe('SupabaseKnowledgeStorageGateway', () => {
     uploadError?: { message: string } | null;
     removeError?: { message: string } | null;
     uploadThrows?: boolean;
+    removeThrows?: boolean;
   }) {
     const seen: {
       bucket?: string;
       path?: string;
       options?: { contentType?: string; upsert?: boolean };
       removed?: readonly string[];
-    } = {};
+      /** P6J-F9-A1a: every remove request, to prove batching is not a loop. */
+      removeCalls: string[][];
+    } = { removeCalls: [] };
     return {
       seen,
       client: {
@@ -129,6 +132,8 @@ describe('SupabaseKnowledgeStorageGateway', () => {
               },
               async remove(paths: readonly string[]) {
                 seen.removed = paths;
+                seen.removeCalls.push([...paths]);
+                if (behaviour.removeThrows) throw new Error('network');
                 return { error: behaviour.removeError ?? null };
               },
             };
@@ -169,6 +174,42 @@ describe('SupabaseKnowledgeStorageGateway', () => {
     const result = await new SupabaseKnowledgeStorageGateway(client).remove('knowledge/b/d/original.pdf');
     expect(result.ok).toBe(true);
     expect(seen.removed).toEqual(['knowledge/b/d/original.pdf']);
+    expect(seen.removeCalls).toEqual([['knowledge/b/d/original.pdf']]);
+  });
+
+  /**
+   * P6J-F9-A1a. Cleanup hands the gateway a whole batch; it must become one
+   * Storage request, not one request per path.
+   */
+  it('sends a batch as a single Storage request carrying every path', async () => {
+    const { client, seen } = storageClient({});
+    const batch = Array.from({ length: 100 }, (_, index) => `knowledge/b/d/pages/${index + 1}.webp`);
+
+    const result = await new SupabaseKnowledgeStorageGateway(client).removeMany(batch);
+
+    expect(result.ok).toBe(true);
+    expect(seen.removeCalls).toHaveLength(1);
+    expect(seen.removeCalls[0]).toEqual(batch);
+  });
+
+  it('maps a batch Storage error and a thrown client to unavailable', async () => {
+    const failing = new SupabaseKnowledgeStorageGateway(
+      storageClient({ removeError: { message: 'nope' } }).client,
+    );
+    const mapped = await failing.removeMany(['a', 'b']);
+    expect(!mapped.ok && mapped.error.code).toBe('unavailable');
+
+    const throwing = new SupabaseKnowledgeStorageGateway(storageClient({ removeThrows: true }).client);
+    const crashed = await throwing.removeMany(['a', 'b']);
+    expect(!crashed.ok && crashed.error.code).toBe('unavailable');
+  });
+
+  it('treats an empty batch as a no-op rather than an empty Storage call', async () => {
+    const { client, seen } = storageClient({});
+    const result = await new SupabaseKnowledgeStorageGateway(client).removeMany([]);
+
+    expect(result.ok).toBe(true);
+    expect(seen.removeCalls).toEqual([]);
   });
 });
 
