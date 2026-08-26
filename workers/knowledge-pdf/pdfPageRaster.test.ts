@@ -187,6 +187,28 @@ describe('resource ordering and background', () => {
     // refused was never allocated a canvas at all.
     expect(canvases.allocations).toHaveLength(result.pages.length);
   });
+
+  it('charges attempted render work against the budget, not just successful output', async () => {
+    const perPage = 1191 * 1684;
+    const admitted = Math.floor(KNOWLEDGE_RASTER_MAX_DOCUMENT_PIXELS / perPage);
+    // Every page is individually valid and gets admitted and allocated, then
+    // fails after allocation. Under success-only accounting the budget would
+    // still read zero and admit all of them.
+    const canvases = fakeCanvases({ encode: async () => { throw new Error('codec missing'); } });
+    const { document } = fakeDocument(Array.from({ length: admitted + 1 }, () => ({})));
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load(document),
+      createCanvas: canvases.createCanvas,
+    });
+
+    expect(result.pages).toEqual([]);
+    expect(canvases.allocations).toHaveLength(admitted);
+    expect(result.skipped.filter((skip) => skip.reason === 'encode_failed')).toHaveLength(admitted);
+    // The page that crossed the budget was refused before allocation even
+    // though not one earlier page produced a single WebP byte.
+    expect(result.skipped.at(-1)).toEqual({ pageNumber: admitted + 1, reason: 'document_budget_exhausted' });
+  });
 });
 
 describe('caller-owned bytes', () => {
@@ -297,6 +319,123 @@ describe('typed failures', () => {
     expect(result.pages).toEqual([]);
     expect(result.skipped).toEqual([{ pageNumber: 1, reason: 'encode_failed', detail: 'codec missing' }]);
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * PDF.js resolves the page dictionary lazily, so a malformed page throws from
+ * `rotate` or `getViewport` long after getPage() resolved. A1c treats rasters
+ * as optional enhancement data, so none of these may escape as an exception.
+ */
+describe('page geometry that throws', () => {
+  const goodPage = (): RasterPdfPage => ({
+    rotate: 0,
+    getViewport: ({ scale }) => ({ width: A4.width * scale, height: A4.height * scale }),
+    render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
+  });
+
+  const withBadFirstPage = (bad: RasterPdfPage) => {
+    const destroy = vi.fn(async () => undefined);
+    const document: RasterPdfDocument = {
+      numPages: 2,
+      destroy,
+      getPage: async (pageNumber: number) => (pageNumber === 1 ? bad : goodPage()),
+    };
+    return { document, destroy };
+  };
+
+  it('contains a synchronous getViewport throw and still renders later pages', async () => {
+    const canvases = fakeCanvases();
+    const { document, destroy } = withBadFirstPage({
+      rotate: 0,
+      getViewport: () => { throw new Error('malformed page dictionary'); },
+      render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
+    });
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load(document),
+      createCanvas: canvases.createCanvas,
+    });
+
+    expect(result.skipped).toEqual([
+      { pageNumber: 1, reason: 'invalid_geometry', detail: 'malformed page dictionary' },
+    ]);
+    expect(result.pages.map((page) => page.pageNumber)).toEqual([2]);
+    // The unreadable page never reached allocation.
+    expect(canvases.allocations).toHaveLength(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('contains a synchronous throw from the rotate getter', async () => {
+    const { document } = withBadFirstPage({
+      get rotate(): number { throw new Error('bad /Rotate entry'); },
+      getViewport: ({ scale }) => ({ width: A4.width * scale, height: A4.height * scale }),
+      render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
+    });
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load(document),
+      createCanvas: fakeCanvases().createCanvas,
+    });
+
+    expect(result.skipped).toEqual([
+      { pageNumber: 1, reason: 'invalid_geometry', detail: 'bad /Rotate entry' },
+    ]);
+    expect(result.pages.map((page) => page.pageNumber)).toEqual([2]);
+  });
+
+  it('contains a canvas allocation failure as a typed render skip', async () => {
+    const { document } = withBadFirstPage(goodPage());
+    const real = fakeCanvases();
+    let attempts = 0;
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load(document),
+      createCanvas: (width, height) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('no native canvas backend');
+        return real.createCanvas(width, height);
+      },
+    });
+
+    expect(result.skipped).toEqual([
+      { pageNumber: 1, reason: 'render_failed', detail: 'no native canvas backend' },
+    ]);
+    expect(result.pages.map((page) => page.pageNumber)).toEqual([2]);
+  });
+});
+
+describe('document teardown cannot discard the result', () => {
+  it('survives a destroy() that throws synchronously', async () => {
+    const { document } = fakeDocument([{}]);
+    const exploding: RasterPdfDocument = {
+      ...document,
+      destroy: (() => { throw new Error('teardown exploded'); }) as unknown as () => Promise<void>,
+    };
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load(exploding),
+      createCanvas: fakeCanvases().createCanvas,
+    });
+
+    expect(result.pages.map((page) => page.pageNumber)).toEqual([1]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('survives a destroy() that rejects', async () => {
+    const { document } = fakeDocument([{}]);
+    const rejecting: RasterPdfDocument = {
+      ...document,
+      destroy: async () => { throw new Error('teardown rejected'); },
+    };
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load(rejecting),
+      createCanvas: fakeCanvases().createCanvas,
+    });
+
+    expect(result.pages.map((page) => page.pageNumber)).toEqual([1]);
+    expect(result.skipped).toEqual([]);
   });
 });
 

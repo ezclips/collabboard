@@ -12,7 +12,7 @@ export const KNOWLEDGE_RASTER_MAX_SCALE = 2;
 export const KNOWLEDGE_RASTER_MAX_WIDTH_PX = 2000;
 export const KNOWLEDGE_RASTER_MAX_HEIGHT_PX = 2000;
 export const KNOWLEDGE_RASTER_MAX_PAGE_PIXELS = 4_000_000;
-/** Whole-document ceiling: only this module counts pixels actually drawn. */
+/** Whole-document ceiling: only this module meters attempted raster work. */
 export const KNOWLEDGE_RASTER_MAX_DOCUMENT_PIXELS = 400_000_000;
 export const KNOWLEDGE_RASTER_PAGE_TIMEOUT_MS = 20_000;
 export const KNOWLEDGE_RASTER_WEBP_QUALITY = 80;
@@ -144,13 +144,16 @@ async function rasterizeOnePage(
   createCanvas: RasterCanvasFactory,
   timeoutMs: number,
 ): Promise<PdfRasterPage | PdfRasterSkip> {
-  const canvas = createCanvas(size.widthPx, size.heightPx);
-  const canvasContext = canvas.getContext('2d');
-  canvasContext.fillStyle = KNOWLEDGE_RASTER_BACKGROUND;
-  canvasContext.fillRect(0, 0, size.widthPx, size.heightPx);
-
-  const viewport = page.getViewport({ scale: size.scale, rotation });
+  let canvas: RasterCanvas;
+  // Allocation, setup and the render itself share one guard: a missing native
+  // backend or a page whose viewport throws mid-setup is a render failure, not
+  // an exception the caller has to handle.
   try {
+    canvas = createCanvas(size.widthPx, size.heightPx);
+    const canvasContext = canvas.getContext('2d');
+    canvasContext.fillStyle = KNOWLEDGE_RASTER_BACKGROUND;
+    canvasContext.fillRect(0, 0, size.widthPx, size.heightPx);
+    const viewport = page.getViewport({ scale: size.scale, rotation });
     await awaitRender(page.render({ canvasContext, viewport }), timeoutMs);
   } catch (error: unknown) {
     const reason = error instanceof RasterTimeoutError ? 'render_timeout' : 'render_failed';
@@ -172,7 +175,9 @@ const isSkip = (value: PdfRasterPage | PdfRasterSkip): value is PdfRasterSkip =>
  *
  * Callers get a total result: a page that cannot be drawn is reported as
  * skipped, so A1c can treat visuals as optional enhancement data rather than
- * an extraction failure.
+ * an extraction failure. Every PDF.js and canvas call is guarded, including
+ * the lazy page-dictionary reads and document teardown, so a malformed file
+ * cannot turn optional visuals into a failed extraction.
  */
 export async function rasterizePdfPages(
   bytes: Uint8Array,
@@ -209,9 +214,20 @@ export async function rasterizePdfPages(
       // and the caps apply to what is actually drawn. Both limits are decided
       // here, BEFORE rasterizeOnePage allocates anything: a budget checked
       // after rendering would not have prevented spending the memory.
-      const rotation = page.rotate;
-      const intrinsic = page.getViewport({ scale: 1, rotation });
-      const size = rasterDimensions(intrinsic.width, intrinsic.height);
+      //
+      // PDF.js resolves the page dictionary lazily, so `rotate` and
+      // `getViewport` read the file and can throw on a malformed page well
+      // after getPage() succeeded. Guarded here so they become skips.
+      let rotation: number;
+      let size: RasterDimensions;
+      try {
+        rotation = page.rotate;
+        const intrinsic = page.getViewport({ scale: 1, rotation });
+        size = rasterDimensions(intrinsic.width, intrinsic.height);
+      } catch (error: unknown) {
+        skipped.push({ pageNumber, reason: 'invalid_geometry', detail: describe(error) });
+        continue;
+      }
       if (!size.ok) {
         skipped.push({ pageNumber, reason: size.reason });
         continue;
@@ -221,16 +237,23 @@ export async function rasterizePdfPages(
         continue;
       }
 
+      // Charged on admission, never refunded: a page that allocates a canvas
+      // and then times out or fails to encode has already spent the memory the
+      // budget exists to bound, so the budget meters attempted work.
+      documentPixels += size.pixelCount;
       const rendered = await rasterizeOnePage(pageNumber, page, rotation, size, createCanvas, timeoutMs);
       if (isSkip(rendered)) skipped.push(rendered);
-      else {
-        documentPixels += size.pixelCount;
-        pages.push(rendered);
-      }
+      else pages.push(rendered);
     }
   } finally {
-    // Teardown must never lose the pages that did render.
-    await document.destroy().catch(() => undefined);
+    // Teardown must never lose the pages that did render. try/catch rather than
+    // `.catch()` so a destroy() that throws synchronously -- before it ever
+    // returns a promise -- cannot escape and replace the result either.
+    try {
+      await document.destroy();
+    } catch {
+      // Nothing to salvage: the pages are already collected.
+    }
   }
 
   return { pages, skipped };
