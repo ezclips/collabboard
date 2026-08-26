@@ -252,9 +252,11 @@ describe('P6J-F5 source note wiring', () => {
     // provenance presence instead, and the direct save reports through
     // usePadletSave's callback.
     expect((canvasClient.match(/\n\s*completeSourceReferenceForDraft\(/g) ?? []).length).toBe(5);
-    // Three direct persists: the shared finaliser's own, plus the two Drawing
-    // paths whose rebuilt payloads have no `kind` to gate on.
-    expect((canvasClient.match(/void persistKnowledgeSourceReference\(/g) ?? []).length).toBe(3);
+    // Four direct persists: the shared finaliser's own, the two Drawing paths
+    // whose rebuilt payloads have no `kind` to gate on, and -- from P6J-F8-B1 --
+    // the freeform source-clip drop, which inserts its own post and so has no
+    // placement draft to finalise through.
+    expect((canvasClient.match(/void persistKnowledgeSourceReference\(/g) ?? []).length).toBe(4);
   });
 
   it('K: ordinary Note creation carries no source reference at all', () => {
@@ -493,5 +495,176 @@ describe('P6J-F5 source note wiring', () => {
     // The reader surface never writes anything itself.
     expect(details).not.toContain('knowledge/references');
     expect(details).not.toContain('supabase');
+  });
+});
+
+// ==========================================================================
+// P6J-F8-B1 -- the dragged text source clip
+// ==========================================================================
+// The drag adds a GESTURE, not a write path. Everything below exists to prove
+// that: one dedicated transfer type, parsed fail-closed, authorised again at
+// the point of writing, and finishing through the same two creation paths that
+// already existed. A render test cannot show any of it -- the drop handlers sit
+// inside a 9k-line controller's JSX -- so these are source invariants.
+describe('P6J-F8-B1 source clip drop', () => {
+  const dropHandler = () => after(canvasClient, 'const handleKnowledgeSourceClipDrop', 3200);
+
+  it('reads one dedicated transfer type and never text/plain', () => {
+    const handler = dropHandler();
+    expect(handler).toContain('parseKnowledgeSourceClipPayload(');
+    expect(handler).toContain('event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME)');
+    // text/plain accompanies every drag on the system. Reading it here would
+    // let any dropped text impersonate a citation.
+    expect(handler).not.toContain("getData('text/plain')");
+    expect(handler).not.toContain('text/plain');
+    // The type is the domain constant, never a re-typed string literal that
+    // could drift away from the one the reader publishes.
+    expect(canvasClient).toContain("from '@/lib/domain/knowledge/knowledgeSourceClipPayload'");
+    for (const name of ['KNOWLEDGE_SOURCE_CLIP_MIME', 'knowledgeSourceClipPageRequest', 'parseKnowledgeSourceClipPayload']) {
+      expect(canvasClient, name).toContain(name);
+    }
+    expect(canvasClient).not.toContain("'application/collabboard-knowledge-clip'");
+  });
+
+  it('refuses an unparseable payload before anything else happens', () => {
+    const handler = dropHandler();
+    const parseIndex = handler.indexOf('parseKnowledgeSourceClipPayload(');
+    const bailIndex = handler.indexOf('if (!payload) return false;');
+    const buildIndex = handler.indexOf('buildKnowledgeSourceNoteDraft(');
+    expect(bailIndex).toBeGreaterThan(parseIndex);
+    // Nothing is built, and no post is inserted, until the payload is proven.
+    expect(buildIndex).toBeGreaterThan(bailIndex);
+  });
+
+  it('re-checks the creation capability at the point of writing', () => {
+    const handler = dropHandler();
+    // The SAME signal the creation toolbar and the click path are gated on.
+    expect(handler).toContain('if (!canUseCanvasToolbar || !canvasId) return true;');
+    const capabilityIndex = handler.indexOf('if (!canUseCanvasToolbar');
+    const insertIndex = handler.indexOf('insertPostAndSelectOrThrow(');
+    const drawingIndex = handler.indexOf('handleDrawingLayoutAddPadletWithContainerCheck(');
+    // Both creation routes sit behind it: a forged DataTransfer from a viewer
+    // reaches neither, so the absent chip is defence in depth, not the defence.
+    expect(insertIndex).toBeGreaterThan(capabilityIndex);
+    expect(drawingIndex).toBeGreaterThan(capabilityIndex);
+  });
+
+  it('creates the Note first and completes the reference only after', () => {
+    const handler = dropHandler();
+    const insertIndex = handler.indexOf('await insertPostAndSelectOrThrow(');
+    const idGuardIndex = handler.indexOf('if (created?.id)');
+    const persistIndex = handler.indexOf('void persistKnowledgeSourceReference(created.id');
+    expect(insertIndex).toBeGreaterThan(-1);
+    // Guarded on a REAL persisted id, and strictly after the insert resolves.
+    expect(idGuardIndex).toBeGreaterThan(insertIndex);
+    expect(persistIndex).toBeGreaterThan(idGuardIndex);
+    // A throwing insert never reaches the persist: it is inside the try.
+    expect(handler.indexOf('} catch (err)')).toBeGreaterThan(persistIndex);
+    // Drawing defers to the path that already owns this ordering.
+    expect(handler).toContain('sourceReference: draft.sourceReference,');
+  });
+
+  it('adds no write path, no route and no elevated authority of its own', () => {
+    const handler = dropHandler();
+    for (const forbidden of ['knowledge/references', 'supabase', '.insert(', '.upsert(', 'fetch(',
+      'getSupabaseAdmin', 'service_role']) {
+      expect(handler, forbidden).not.toContain(forbidden);
+    }
+    // Still exactly one references POST in the whole controller.
+    expect((canvasClient.match(/knowledge\/references/g) ?? []).length).toBe(1);
+  });
+
+  it('reuses the one existing draft builder rather than a second one', () => {
+    const handler = dropHandler();
+    expect(handler).toContain('buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload))');
+    // The Note is an ordinary blank Note; the passage stays source evidence.
+    expect(handler).toContain('content: draft.content,');
+    expect(handler).toContain('title: draft.title,');
+    expect(handler).toContain("type: 'text',");
+    // The selected text is never written into the row.
+    expect(handler).not.toContain('selectedText,');
+    expect(handler).not.toMatch(/content:\s*payload\./);
+    expect(handler).not.toMatch(/metadata:\s*\{[^}]*source/);
+  });
+
+  it('creates at the real drop point in freeform, and refuses coordinate-less layouts', () => {
+    const handler = dropHandler();
+    // The existing conversion and the existing bound, not a second geometry.
+    expect(handler).toContain('getCanvasPointFromClient(event.clientX, event.clientY)');
+    expect(handler).toContain('clampRectPositionToFreeformBounds({');
+    // Wall/columns/grid/timeline/map have no world coordinate; the clip is
+    // refused there rather than stacked at the origin.
+    expect(handler).toContain('if (!isFreeformLayout) {');
+    const refusal = handler.slice(handler.indexOf('if (!isFreeformLayout) {'));
+    expect(refusal.slice(0, 400)).toContain('return true;');
+    expect(handler).not.toMatch(/position_x:\s*0,\s*\n\s*position_y:\s*0,/);
+  });
+
+  it('owns the drop outright, so one gesture cannot create twice', () => {
+    const handler = dropHandler();
+    // stopPropagation is SYNCHRONOUS and before any await: the drop finishes
+    // dispatching the moment the handler yields, so a deferred one would be a
+    // no-op and the outer CanvasViewport handler would create a second Note.
+    const stopIndex = handler.indexOf('event.stopPropagation();');
+    expect(stopIndex).toBeGreaterThan(-1);
+    expect(handler.slice(0, stopIndex)).not.toContain('await');
+    // Both drop surfaces consult it first and return the moment it claims one.
+    const callSite = 'if (handleKnowledgeSourceClipDrop(e)) return;';
+    expect((canvasClient.match(/if \(handleKnowledgeSourceClipDrop\(e\)\) return;/g) ?? []).length).toBe(2);
+
+    /**
+     * Ahead of every pre-existing branch on BOTH surfaces. Measured inside each
+     * call site's own forward window rather than by global index: several
+     * unrelated handlers elsewhere in this 9k-line file read the same transfer
+     * types, and a whole-file indexOf would compare against one of those.
+     */
+    const viewportSite = canvasClient.indexOf(callSite);
+    const layerSite = canvasClient.lastIndexOf(callSite);
+    expect(viewportSite).toBeGreaterThan(-1);
+    expect(layerSite).toBeGreaterThan(viewportSite);
+    // CanvasViewport: the padlet reposition read follows the clip check.
+    expect(canvasClient.slice(viewportSite, layerSite))
+      .toContain("const padletId = e.dataTransfer.getData('text/padlet-id');");
+    // PadletLayer: the SVG and library branches follow it too.
+    const layerWindow = canvasClient.slice(layerSite, layerSite + 4000);
+    expect(layerWindow).toContain("e.dataTransfer.getData('application/collabboard-svg')");
+    expect(layerWindow).toContain("e.dataTransfer.getData('application/collabboard-library')");
+    // The scheduler's own drop guard still runs before the clip check.
+    const beforeLayerSite = canvasClient.slice(viewportSite, layerSite);
+    expect(beforeLayerSite).toContain(".closest?.('.scheduler-wrapper, .rbc-calendar')");
+  });
+
+  it('keeps the reader free of drop, creation and persistence concerns', () => {
+    // The chip publishes a payload; it never learns what a canvas is.
+    for (const forbidden of ['getCanvasPointFromClient', 'clampRectPositionToFreeformBounds',
+      'insertPostAndSelectOrThrow', 'padlets', 'board_id', 'position_x', 'onDrop']) {
+      expect(details, forbidden).not.toContain(forbidden);
+    }
+    // It builds the transfer with the shared builder and reads no selection of
+    // its own at drag time -- the captured state is the authority.
+    expect(details).toContain('buildKnowledgeSourceClipTransfer({');
+    const dragStart = after(details, 'onDragStart={(event) => {', 700);
+    expect(dragStart).toContain('pageSelection.charStart');
+    expect(dragStart).toContain('pageSelection.charEnd');
+    expect(dragStart).toContain('pageSelection.selectedText');
+    // window.getSelection() here would find nothing: pressing the chip collapses
+    // the live range before dragstart fires.
+    expect(dragStart).not.toContain('getSelection');
+    expect(dragStart).not.toContain('captureExactSelection');
+  });
+
+  it('keeps the chip out of the canonical text root', () => {
+    // Source-level companion to the rendered assertion in the reader suite:
+    // the chip is emitted before the paragraph that owns the coordinate space,
+    // in the page header, and the paragraph itself gains nothing.
+    const chipIndex = details.indexOf('[CLIP_CHIP]: \'true\'');
+    const rootIndex = details.indexOf('{...{ [PAGE_TEXT_ROOT]: page.pageNumber }}');
+    expect(chipIndex).toBeGreaterThan(-1);
+    expect(chipIndex).toBeLessThan(rootIndex);
+    // Nothing was added between the root attribute and its rendered text.
+    const rootElement = details.slice(rootIndex, rootIndex + 400);
+    expect(rootElement).toContain('highlightedText(');
+    expect(rootElement).not.toContain('CLIP_CHIP');
+    expect(rootElement).not.toContain('draggable');
   });
 });

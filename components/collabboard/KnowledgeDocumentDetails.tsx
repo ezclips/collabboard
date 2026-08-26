@@ -7,6 +7,10 @@ import type {
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
 import {
+  KNOWLEDGE_SOURCE_CLIP_MIME,
+  buildKnowledgeSourceClipTransfer,
+} from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
+import {
   useKnowledgeSourceBacklinksForDocument,
   useKnowledgeSourceReferencesForDocument,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
@@ -92,6 +96,13 @@ type CapturedPageSelection = KnowledgeSourceTextSelection & { readonly pageNumbe
 
 /** Marks the one element whose text is the exact-span coordinate space. */
 const PAGE_TEXT_ROOT = 'data-knowledge-page-text-root';
+
+/**
+ * P6J-F8-B1. The one element allowed to start a Knowledge drag. Everything
+ * else inside the reader -- the page text above all -- is suppressed below, so
+ * this attribute is what the suppression handler tests for.
+ */
+const CLIP_CHIP = 'data-knowledge-clip-chip';
 
 function pageTextRootOf(node: Node | null, container: HTMLElement): HTMLElement | null {
   const element = node instanceof Element ? node : node?.parentElement ?? null;
@@ -547,6 +558,20 @@ export default function KnowledgeDocumentDetails({
   };
 
   /**
+   * P6J-F8-B1. Browsers make selected text natively draggable, carrying
+   * `text/plain`. Left alone that is a second, uncontrolled way to fling page
+   * text at the canvas -- racing the mouseup that is the ONLY path from a
+   * selection to canonical coordinates, on a type any application can forge.
+   * So: the chip drags, nothing else does. Scoped to this pages container, so
+   * every unrelated drag in the app is untouched.
+   */
+  const suppressNativePageTextDrag = (event: React.DragEvent) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(`[${CLIP_CHIP}]`)) return;
+    event.preventDefault();
+  };
+
+  /**
    * One eligible Note opens directly; several ask, because guessing would send
    * the reader to a Note they did not mean and quietly hide the others.
    */
@@ -624,6 +649,7 @@ export default function KnowledgeDocumentDetails({
           ref={pagesContainerRef}
           onMouseUp={handleSelectionSettled}
           onKeyUp={handleSelectionSettled}
+          onDragStart={suppressNativePageTextDrag}
           className="max-h-[60vh] space-y-4 overflow-y-auto pr-1"
         >
           {pages.map((page, pageIndex) => {
@@ -642,6 +668,62 @@ export default function KnowledgeDocumentDetails({
                     onOpen={onOpenBacklinkTarget}
                   />
                 </div>
+                <div className="flex shrink-0 items-center gap-1">
+                {/*
+                  P6J-F8-B1 -- the source clip chip. Rendered HERE, in the page
+                  header, and never inside the paragraph below: B4-B2B measures
+                  selection offsets against that paragraph's textContent, so a
+                  control living in it would add characters and move every
+                  coordinate after itself.
+
+                  It appears only for a selection this page owns, and
+                  `pageSelection` is `activeSelection` -- already re-proved
+                  against the current page text on every render. A page whose
+                  text changed under a stale selection loses its chip rather
+                  than keeping a draggable payload nobody can honour.
+                */}
+                {onCreateNoteFromPage && documentId && pageSelection ? (
+                  <button
+                    type="button"
+                    {...{ [CLIP_CHIP]: 'true' }}
+                    draggable
+                    aria-label={`Drag source clip from page ${page.pageNumber} to the canvas, or activate to create a Note`}
+                    className="shrink-0 cursor-grab rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100 hover:text-blue-900 active:cursor-grabbing focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+                    onDragStart={(event) => {
+                      // The CAPTURED selection, never window.getSelection():
+                      // pressing this control collapses the browser range, so
+                      // reading it live would find nothing exactly when needed.
+                      event.dataTransfer.setData(
+                        KNOWLEDGE_SOURCE_CLIP_MIME,
+                        buildKnowledgeSourceClipTransfer({
+                          kind: 'text',
+                          sourceDocumentId: documentId,
+                          originalFilename,
+                          pageNumber: pageSelection.pageNumber,
+                          charStart: pageSelection.charStart,
+                          charEnd: pageSelection.charEnd,
+                          selectedText: pageSelection.selectedText,
+                        }),
+                      );
+                      event.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    // Click and keyboard activation take the EXISTING selection
+                    // path: the drag adds an affordance, not a second creator.
+                    onClick={() => onCreateNoteFromPage({
+                      sourceDocumentId: documentId,
+                      originalFilename,
+                      pageNumber: page.pageNumber,
+                      pageText: page.text,
+                      selection: {
+                        charStart: pageSelection.charStart,
+                        charEnd: pageSelection.charEnd,
+                        selectedText: pageSelection.selectedText,
+                      },
+                    })}
+                  >
+                    Source clip
+                  </button>
+                ) : null}
                 {onCreateNoteFromPage && documentId ? (
                   <button
                     type="button"
@@ -666,6 +748,7 @@ export default function KnowledgeDocumentDetails({
                     {pageSelection ? 'Create Note from selection' : 'Create Note'}
                   </button>
                 ) : null}
+                </div>
               </div>
               <p
                 {...{ [PAGE_TEXT_ROOT]: page.pageNumber }}

@@ -1302,3 +1302,234 @@ describe('P6J-F6-B4-B4 search keeps its match, and the canonical root is untouch
     expect(highlightTexts(container)).toEqual(['PDF ', 'safety', ' PDF']);
   });
 });
+
+// ============================================================================
+// P6J-F8-B1 -- the draggable text source clip
+// ============================================================================
+// The chip is an ADDED affordance, not a replacement: it must reach the same
+// callback the existing button reaches, and it must not put a single character
+// inside the paragraph B4-B2B measures its coordinates against.
+
+const CLIP_MIME = 'application/collabboard-knowledge-clip';
+
+function clipChip(container: HTMLElement, pageNumber: number): HTMLButtonElement | null {
+  const section = container.querySelector(`[data-page-number="${pageNumber}"]`)!;
+  return section.querySelector('[data-knowledge-clip-chip="true"]') as HTMLButtonElement | null;
+}
+
+/** A DataTransfer stand-in: jsdom does not construct one for synthetic drags. */
+function fakeDataTransfer() {
+  const store = new Map<string, string>();
+  return {
+    store,
+    setData: (type: string, value: string) => { store.set(type, value); },
+    getData: (type: string) => store.get(type) ?? '',
+    effectAllowed: 'none',
+  };
+}
+
+/** Starts a React drag on `element` and returns what it put on the transfer. */
+function dragFrom(element: Element) {
+  const transfer = fakeDataTransfer();
+  const event = new Event('dragstart', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: transfer });
+  act(() => { element.dispatchEvent(event); });
+  return { transfer, defaultPrevented: event.defaultPrevented };
+}
+
+describe('P6J-F8-B1 source clip chip', () => {
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  /** Selects 'safety' on page 1 -- page-relative [4,10). */
+  function armPageOne() {
+    const mounted = mountReader();
+    const pageOne = pageRoot(mounted.container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+    finishSelectionOn(pageOne);
+    return mounted;
+  }
+
+  it('A: a valid selection produces exactly one chip, on its own page', () => {
+    const { container } = armPageOne();
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(1);
+    expect(clipChip(container, 1)).not.toBeNull();
+    // A selection on page 1 arms page 1 and nothing else.
+    expect(clipChip(container, 2)).toBeNull();
+  });
+
+  it('B: with no selection there is no chip at all', () => {
+    const { container } = mountReader();
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    // The page-level fallback is still offered.
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('C: the chip lives OUTSIDE the canonical text root, which stays exact', () => {
+    const { container } = armPageOne();
+    const chip = clipChip(container, 1)!;
+    const pageOne = pageRoot(container, 1);
+
+    // The decisive check: not a descendant, at any depth.
+    expect(pageOne.contains(chip)).toBe(false);
+    expect(chip.closest('[data-knowledge-page-text-root]')).toBeNull();
+    // And the coordinate space is byte-for-byte the page text.
+    expect(pageOne.textContent).toBe(pages[0].text);
+    expect(pageOne.querySelector('[data-knowledge-clip-chip]')).toBeNull();
+    expect(pageOne.querySelector('[draggable]')).toBeNull();
+    expect(pageOne.querySelector('button')).toBeNull();
+  });
+
+  it('D: the chip is draggable, focusable and labelled', () => {
+    const { container } = armPageOne();
+    const chip = clipChip(container, 1)!;
+
+    expect(chip.getAttribute('draggable')).toBe('true');
+    // A real button element: focusable, and Enter/Space activated by the platform.
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.getAttribute('type')).toBe('button');
+    expect(chip.getAttribute('aria-label')).toContain('page 1');
+    expect(chip.getAttribute('aria-label')).toContain('canvas');
+  });
+
+  it('E: dragging the chip emits the exact captured span on the dedicated type', () => {
+    const { container } = armPageOne();
+    const { transfer } = dragFrom(clipChip(container, 1)!);
+
+    expect(JSON.parse(transfer.getData(CLIP_MIME))).toEqual({
+      kind: 'text',
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      charStart: 4,
+      charEnd: 10,
+      selectedText: 'safety',
+    });
+    // The offsets address exactly what the user selected.
+    expect(pages[0].text.slice(4, 10)).toBe('safety');
+    // Nothing is published on text/plain: that type is forgeable by any drag.
+    expect(transfer.getData('text/plain')).toBe('');
+    expect([...transfer.store.keys()]).toEqual([CLIP_MIME]);
+  });
+
+  it('F: the captured selection survives the browser range collapsing first', () => {
+    const { container } = armPageOne();
+    // Pressing the chip collapses the live selection, exactly as a real click
+    // does. The payload must come from captured state, not from the browser.
+    window.getSelection()!.removeAllRanges();
+
+    const { transfer } = dragFrom(clipChip(container, 1)!);
+
+    expect(JSON.parse(transfer.getData(CLIP_MIME))).toMatchObject({
+      charStart: 4, charEnd: 10, selectedText: 'safety',
+    });
+  });
+
+  it('G: clicking the chip invokes the EXISTING selection callback', () => {
+    const { container, onCreateNoteFromPage } = armPageOne();
+
+    act(() => clipChip(container, 1)!.click());
+
+    expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: pages[0].text,
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+    });
+  });
+
+  it('H: the existing Create Note from selection fallback still works', () => {
+    const { container, onCreateNoteFromPage } = armPageOne();
+
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    clickCreateNote(container, 1);
+
+    expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toMatchObject({
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+    });
+  });
+
+  it('I: native dragging of the page text itself is suppressed', () => {
+    const { container } = armPageOne();
+
+    const fromText = dragFrom(pageRoot(container, 1));
+
+    // Cancelled, so the browser starts no native text drag at all.
+    expect(fromText.defaultPrevented).toBe(true);
+    expect(fromText.transfer.store.size).toBe(0);
+    // The chip drag rides the same container handler and is NOT cancelled.
+    const fromChip = dragFrom(clipChip(container, 1)!);
+    expect(fromChip.defaultPrevented).toBe(false);
+    expect(fromChip.transfer.getData(CLIP_MIME)).not.toBe('');
+  });
+
+  it('J: a cross-page selection produces no chip on either page', () => {
+    const { container } = mountReader();
+    selectRange(pageRoot(container, 1).firstChild!, 4, pageRoot(container, 2).firstChild!, 3);
+    finishSelectionOn(pageRoot(container, 2));
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+  });
+
+  it('K: a selection reaching outside any page root produces no chip', () => {
+    const { container } = mountReader();
+    const heading = container.querySelector('h3')!;
+    selectRange(heading.firstChild!, 0, pageRoot(container, 1).firstChild!, 6);
+    finishSelectionOn(pageRoot(container, 1));
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+  });
+
+  it('L: a selection made stale by new page text loses its chip', () => {
+    const { container } = armPageOne();
+    expect(clipChip(container, 1)).not.toBeNull();
+
+    // The document is re-read and page 1 now says something else. The captured
+    // offsets no longer describe it, so the clip must fail closed rather than
+    // stay draggable against text nobody selected.
+    act(() => {
+      root!.render(
+        <KnowledgeDocumentDetails
+          documentId="doc-1"
+          originalFilename="EMG_checklist.pdf"
+          pageCount={2}
+          pages={[{ pageNumber: 1, text: 'completely different page one' }, pages[1]]}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onCreateNoteFromPage={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+  });
+
+  it('M: a viewer who cannot create posts is offered no chip to drag', () => {
+    // No onCreateNoteFromPage is exactly how the reader is handed to a viewer.
+    const container = mountWith({ documentId: 'doc-1' });
+    const pageOne = pageRoot(container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+    finishSelectionOn(pageOne);
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    // Selecting and reading still work; only creation is absent.
+    expect(pageOne.textContent).toBe(pages[0].text);
+  });
+
+  it('N: a reader with no document id offers no chip', () => {
+    const container = mountWith({ onCreateNoteFromPage: vi.fn() });
+    const pageOne = pageRoot(container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+    finishSelectionOn(pageOne);
+
+    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+  });
+});

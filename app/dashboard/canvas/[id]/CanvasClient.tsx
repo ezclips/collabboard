@@ -87,6 +87,11 @@ import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { buildKnowledgeSourceNoteDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import {
+  KNOWLEDGE_SOURCE_CLIP_MIME,
+  knowledgeSourceClipPageRequest,
+  parseKnowledgeSourceClipPayload,
+} from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
+import {
   EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX,
   buildKnowledgeSourceReferenceIndex,
   parseKnowledgeSourceReference,
@@ -5928,6 +5933,107 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return handleDrawingLayoutAddPadlet(postData);
   }, [handleDrawingLayoutAddPadlet]);
 
+  /**
+   * P6J-F8-B1 -- a dragged text source clip, dropped on the canvas.
+   *
+   * Returns whether this drop was a Knowledge clip, so the caller stops rather
+   * than letting the same event fall through and create or move a second post.
+   * True covers "handled and refused" as well as "handled and created": a
+   * refusal must still consume the drop.
+   *
+   * Nothing here trusts the transfer. The payload is parsed fail-closed, the
+   * capability is re-checked against the same signal that gates the creation
+   * toolbar, and the SERVER still re-derives the canonical quote from its own
+   * stored page before any source_references row exists. No write path of its
+   * own -- it reuses the two that already exist.
+   */
+  const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
+    const payload = parseKnowledgeSourceClipPayload(
+      // The dedicated type only. text/plain rides along with every drag on the
+      // system, so honouring it would let any dropped text forge a citation.
+      event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME),
+    );
+    if (!payload) return false;
+    // Synchronous, and BEFORE anything can await. The drop finishes dispatching
+    // the instant this handler yields, so a stopPropagation deferred behind an
+    // await would be a no-op and the outer surface would receive the very same
+    // clip -- creating a second Note from one gesture.
+    event.stopPropagation();
+    // Re-checked HERE rather than left to the chip being absent: a viewer can
+    // synthesise a DataTransfer, so the surface that writes must authorise.
+    if (!canUseCanvasToolbar || !canvasId) return true;
+
+    // The SAME builder the click path uses -- one draft authority, two gestures.
+    const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload));
+    // Read now: `event` is only guaranteed live during this synchronous turn.
+    const dropPoint = getCanvasPointFromClient(event.clientX, event.clientY);
+
+    if (isDrawingLayout) {
+      // The existing Drawing placement path, container prompt included. It
+      // completes the reference itself, after its own insert has succeeded.
+      void handleDrawingLayoutAddPadletWithContainerCheck({
+        board_id: canvasId,
+        type: 'text',
+        title: draft.title,
+        content: draft.content,
+        position_x: dropPoint.x,
+        position_y: dropPoint.y,
+        width: 280,
+        height: 280,
+        metadata: {},
+        sourceReference: draft.sourceReference,
+      });
+      return true;
+    }
+
+    if (!isFreeformLayout) {
+      // Wall/columns/grid/timeline/map place by flow or section order and never
+      // mount the Freeform world, so a pointer position is not a canvas
+      // coordinate. Creating anyway would stack every clip at (0,0); the chip's
+      // click path stays the layout-aware route.
+      toast.error('Drop source clips on a Freeform or Drawing board, or use the Source clip button');
+      return true;
+    }
+
+    const { x, y } = clampRectPositionToFreeformBounds({
+      x: dropPoint.x - 140,
+      y: dropPoint.y - 140,
+      width: 280,
+      height: 280,
+    });
+    void (async () => {
+      try {
+        const created = await insertPostAndSelectOrThrow({
+          board_id: canvasId,
+          title: draft.title,
+          // Blank. The selected passage is source evidence and lives in
+          // source_references; it is never pasted in as authorship.
+          content: draft.content,
+          type: 'text',
+          position_x: x,
+          position_y: y,
+          width: 280,
+          height: 280,
+          metadata: {},
+        });
+        // Only now does a real target id exist. A failed insert throws instead
+        // of reaching here, so no reference is written for a Note that is not.
+        if (created?.id) {
+          setPadlets(prev => [...prev, created as Padlet]);
+          void persistKnowledgeSourceReference(created.id, draft.sourceReference);
+        }
+      } catch (err) {
+        console.error('Failed to create Note from source clip:', err);
+        toast.error('Could not create the Note from that source clip');
+      }
+    })();
+    return true;
+  }, [
+    canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout, getCanvasPointFromClient,
+    handleDrawingLayoutAddPadletWithContainerCheck, insertPostAndSelectOrThrow, setPadlets,
+    persistKnowledgeSourceReference,
+  ]);
+
   const handleDrawingNewContainer = useCallback(async () => {
     if (!drawingPendingDraft || !canvasId) return;
     setDrawingContainerPromptOpen(false);
@@ -6961,8 +7067,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               isDrawingLayout
             });
             e.preventDefault();
+            // 0. P6J-F8-B1. Checked FIRST, and returns unconditionally once it
+            // owns the drop, so a source clip can never also be read as a
+            // padlet reposition below.
+            if (handleKnowledgeSourceClipDrop(e)) return;
             // 1. Try dealing with a line drop
-            // (Lines logic if needed, usually Lines are drag-created, not dropped-moved, 
+            // (Lines logic if needed, usually Lines are drag-created, not dropped-moved,
             // but if we support moving lines later, handled here)
 
             // 2. Handle Padlet Drop (from container or just moving)
@@ -7360,6 +7470,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               // fire. Guard here so the scheduler handles its own drops and we
               // don't double-create a freeform post on top.
               if ((e.target as HTMLElement).closest?.('.scheduler-wrapper, .rbc-calendar')) return;
+              // P6J-F8-B1. Ahead of every existing MIME branch. It stops
+              // propagation itself once it owns the drop: this handler does not
+              // otherwise stop bubbling, so the CanvasViewport handler would
+              // otherwise receive the same clip and create a second Note.
+              if (handleKnowledgeSourceClipDrop(e)) return;
               const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
               const dropX = dropPoint.x;
               const dropY = dropPoint.y;

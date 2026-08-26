@@ -921,11 +921,31 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
     // Blocking mousedown would break B4-B2B's drag-select entirely: there is no
     // mousedown handler at all, so nothing can cancel a selection starting.
     expect(documentDetails).not.toContain('onMouseDown');
-    // Exactly one preventDefault exists, and it is the keyboard one that stops
-    // Space scrolling the reader -- never a pointer-path default.
-    expect((documentDetails.match(/preventDefault\(\)/g) ?? []).length).toBe(1);
+    /**
+     * P6J-F8-B1 REPLACES this test's count premise, and only the count.
+     *
+     * It used to read "exactly one preventDefault, never a pointer-path
+     * default". Suppressing the browser's native selected-text drag is
+     * necessarily a pointer-path default, so the premise is inverted rather
+     * than deleted: there are now exactly TWO, each pinned to its own handler,
+     * and a third would be an unexplained cancellation of something.
+     */
+    expect((documentDetails.match(/preventDefault\(\)/g) ?? []).length).toBe(2);
     const keyHandler = after(documentDetails, "if (event.key !== 'Enter' && event.key !== ' ') return;", 200);
     expect(keyHandler).toContain('event.preventDefault();');
+
+    // The second one cancels dragstart ONLY, and only away from the chip.
+    const dragSuppression = after(documentDetails, 'const suppressNativePageTextDrag', 400);
+    expect(dragSuppression).toContain('event.preventDefault();');
+    expect(dragSuppression).toContain('CLIP_CHIP');
+    // Selection is never what it cancels: no selectstart, no mouse handler.
+    expect(documentDetails).not.toContain('onSelectStart');
+    expect(documentDetails).not.toContain('selectstart');
+    expect(dragSuppression).not.toContain('getSelection');
+    // And it is wired to the pages container, not to the document or window,
+    // so no unrelated drag anywhere else in the app is affected.
+    expect(documentDetails).toContain('onDragStart={suppressNativePageTextDrag}');
+    expect(documentDetails).not.toContain("addEventListener('dragstart'");
   });
 
   it('the chooser lives outside every page text root and routes by padlet id', () => {
