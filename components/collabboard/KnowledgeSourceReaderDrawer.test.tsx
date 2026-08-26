@@ -343,6 +343,62 @@ describe('P6J-F5 create Note from a source page (relocated)', () => {
 });
 
 // ============================================================================
+// Relocated from KnowledgeDocumentsList: reader load states
+// ============================================================================
+// A source opened from a semantic result arrives with no page count, and an
+// extraction run can legitimately yield no pages at all. Neither absence may be
+// reported as a fact the reader does not actually have.
+
+describe('reader load states (relocated)', () => {
+  it('claims no page count while the page request is still unresolved', async () => {
+    const pages = deferred<Response>();
+    fetchMock.mockImplementation(() => pages.promise);
+
+    // A semantic-result open: the page number is known, the page count is not.
+    await mount({ documentOpenRequest: docRequest(1, SOURCE_A, 1) });
+
+    const loading = drawerEl()!;
+    expect(loading.textContent).toContain('Loading extracted text…');
+    // The reader is holding zero pages here -- but it has not read the document
+    // yet, so "0 pages" would assert something it does not know.
+    expect(loading.textContent).not.toContain('0 pages');
+    expect(loading.textContent, 'no page count may be claimed before one is known')
+      .not.toMatch(/\d+\s+pages?\b/);
+
+    pages.resolve(jsonResponse({
+      document: { id: SOURCE_A, originalFilename: 'Slow.pdf', pageCount: 1 },
+      pages: [{ pageNumber: 1, text: 'the only page' }],
+    }));
+    await settle();
+
+    // Once the document really has been read, the count is stated.
+    expect(drawerEl()!.textContent).not.toContain('Loading extracted text…');
+    expect(drawerEl()!.textContent).toContain('1 page');
+    expect(drawerEl()!.textContent).not.toContain('0 pages');
+    expect(drawerEl()!.textContent).toContain('the only page');
+  });
+
+  it('reports a successful empty-pages response as its own state', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({
+      document: { id: SOURCE_A, originalFilename: 'Empty.pdf', pageCount: 2 },
+      pages: [],
+    }));
+
+    await mount({ documentOpenRequest: docRequest(1) });
+
+    const drawer = drawerEl()!;
+    expect(drawer.textContent).toContain('No extracted text available.');
+    // A successful read that yielded nothing is neither a failure nor a wait,
+    // so neither neighbouring branch may stand in for it.
+    expect(drawer.textContent, 'an empty result is not an error').not.toContain('Extracted text unavailable.');
+    expect(drawer.textContent, 'an empty result is not still loading').not.toContain('Loading extracted text…');
+    // And it stays a usable reader: named, and closable.
+    expect(drawer.textContent).toContain('Empty.pdf');
+    expect(drawer.querySelector('button[aria-label="Close Knowledge reader"]')).not.toBeNull();
+  });
+});
+
+// ============================================================================
 // Relocated from KnowledgeDocumentsList: P6J-F6-B4-B4 exact citation forwarding
 // ============================================================================
 // Rendered through the REAL provider and the REAL index, so the arrival marker
