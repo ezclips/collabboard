@@ -2,9 +2,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
-import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
-import type { KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
@@ -27,19 +24,13 @@ export interface KnowledgeDocumentsListProps {
   refreshToken?: number;
   isOpen?: boolean;
   onClose?: () => void;
-  /** Forwarded verbatim to the page reader; absent when the viewer cannot create posts. */
-  onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
   /**
-   * P6J-F6-B2. A Note asking for its exact source. Handled at most once per
-   * requestId, so closing the modal and reopening it manually never replays
-   * the last source.
+   * P6J-F7-B1. The user picked something to read. This surface is the library
+   * and only the library: it names a document and, for a semantic result, that
+   * result's own starting page. It never opens, fetches or renders the reader,
+   * so there is exactly one detail implementation on the board.
    */
-  sourceOpenRequest?: KnowledgeSourceOpenRequest | null;
-  /**
-   * P6J-F6-B3N. Forwarded to the canvas after this surface closes. Nothing is
-   * stored -- one direct user event, so reopening by hand replays nothing.
-   */
-  onOpenBacklinkTarget?: (targetPadletId: string) => void;
+  onOpenDocument?: (request: { documentId: string; pageNumber?: number }) => void;
 }
 
 interface KnowledgeListEntry {
@@ -51,28 +42,6 @@ interface KnowledgeListEntry {
 }
 
 type ListPhase = 'loading' | 'loaded' | 'error';
-
-/**
- * P6J-F6-B4-B4. The exact citation a Note asked for, carried only as far as the
- * reader. `requestId` travels with it because a second click on the same source
- * is a genuinely new intent: keyed on the reference alone, the reader would
- * treat the repeat as already handled and never scroll again.
- */
-interface KnowledgeSourceTarget {
-  readonly referenceId: string;
-  readonly requestId: number;
-}
-
-interface KnowledgeDetailsState {
-  entry: KnowledgeListEntry;
-  pages: readonly KnowledgeDocumentDetailPage[];
-  loading: boolean;
-  error: boolean;
-  /** Navigation state only -- never written back to source_references. */
-  initialPageNumber?: number;
-  /** Null for every manual and search-result open, so neither inherits one. */
-  sourceTarget?: KnowledgeSourceTarget | null;
-}
 
 interface KnowledgeSearchResult { documentId: string; originalFilename: string; pageStart: number; pageEnd: number; text: string; }
 type SearchPhase = 'idle' | 'loading' | 'loaded' | 'error';
@@ -199,12 +168,11 @@ function subscribeToKnowledgeWarm(boardId: string): KnowledgeWarmSubscription {
  * No client-side role gating: whatever the server returns is rendered, so
  * read-only collaborators see the same list an editor does.
  */
-export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onCreateNoteFromPage, sourceOpenRequest = null, onOpenBacklinkTarget }: KnowledgeDocumentsListProps) {
+export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onOpenDocument }: KnowledgeDocumentsListProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [phase, setPhase] = useState<ListPhase>('loading');
   const [entries, setEntries] = useState<readonly KnowledgeListEntry[]>([]);
-  const [details, setDetails] = useState<KnowledgeDetailsState | null>(null);
   const [searchQuery, setSearchQuery] = useState(''), [searchPhase, setSearchPhase] = useState<SearchPhase>('idle'), [searchResults, setSearchResults] = useState<readonly KnowledgeSearchResult[]>([]);
   const [warmPhase, setWarmPhase] = useState<WarmPhase>('idle');
   const searchControllerRef = useRef<AbortController | null>(null);
@@ -213,7 +181,6 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const warmReleaseRef = useRef<(() => void) | null>(null);
   const queuedSearchRef = useRef<string | null>(null);
   const executeSearchRef = useRef<(query: string) => void>(() => undefined);
-  const handledSourceRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!boardId) return;
@@ -346,84 +313,18 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   };
 
   /**
-   * The document's own response is the better source of its display metadata
-   * than whatever the caller happened to hold: the pages endpoint already
-   * returns id, filename and page count, so opening by id alone is fully
-   * supported and a stale or synthesized entry gets corrected on arrival.
+   * P6J-F7-B1. Picking something to read is the end of this surface's job. The
+   * library closes and the shell-level drawer opens the document: identity is
+   * the DOCUMENT ID and only the id, because two sources can share a filename
+   * and a name-based lookup would open the wrong one.
    */
-  function hydrateEntry(entry: KnowledgeListEntry, value: unknown): KnowledgeListEntry {
-    if (!value || typeof value !== 'object') return entry;
-    const record = value as Record<string, unknown>;
-    // Identity is never overwritten from the payload -- the id we asked for is
-    // the id we show.
-    return {
-      ...entry,
-      originalFilename: typeof record.originalFilename === 'string' && record.originalFilename.length > 0
-        ? record.originalFilename
-        : entry.originalFilename,
-      pageCount: typeof record.pageCount === 'number' && Number.isInteger(record.pageCount) && record.pageCount > 0
-        ? record.pageCount
-        : entry.pageCount,
-    };
-  }
-
-  const openDetails = async (
-    entry: KnowledgeListEntry,
-    initialPageNumber?: number,
-    // Defaulted rather than optional at the call site: every existing caller is
-    // a manual or search-result open, and each must arrive with no exact target.
-    sourceTarget: KnowledgeSourceTarget | null = null,
-  ) => {
-    if (!boardId) return;
-    setDetails({ entry, pages: [], loading: true, error: false, initialPageNumber, sourceTarget });
-    try {
-      const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(entry.id)}/pages`);
-      const payload = await response.json().catch(() => null) as { pages?: unknown; document?: unknown } | null;
-      if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('details unavailable');
-      const pages = payload.pages.filter((page): page is KnowledgeDocumentDetailPage => (
-        !!page && typeof page === 'object' && typeof (page as KnowledgeDocumentDetailPage).pageNumber === 'number' && typeof (page as KnowledgeDocumentDetailPage).text === 'string'
-      ));
-      setDetails({ entry: hydrateEntry(entry, payload.document), pages, loading: false, error: false, initialPageNumber, sourceTarget });
-    } catch {
-      setDetails((current) => current?.entry.id === entry.id ? { ...current, loading: false, error: true } : current);
-    }
+  const requestOpenDocument = (documentId: string, pageNumber?: number) => {
+    if (!boardId || !onOpenDocument) return;
+    onOpenDocument({ documentId, pageNumber });
+    onClose?.();
   };
-
-  /**
-   * Opens a source by DOCUMENT ID. Identity is the id and only the id: two
-   * sources can share a filename, so a name-based lookup would open the wrong
-   * document. A known list entry is reused when present purely to show a
-   * filename sooner; the request still decides which document loads.
-   */
-  const openDetailsByDocumentId = (
-    documentId: string,
-    initialPageNumber?: number,
-    sourceTarget: KnowledgeSourceTarget | null = null,
-  ) => {
-    const known = entries.find((candidate) => candidate.id === documentId);
-    void openDetails(
-      known ?? { id: documentId, originalFilename: '', pageCount: null, processingStatus: null, statusLabel: null },
-      initialPageNumber,
-      sourceTarget,
-    );
-  };
-
-  // Each requestId is acted on at most once. Without this latch, closing the
-  // modal and reopening it by hand would replay the last source the user
-  // clicked, which is not what reopening a library means.
-  useEffect(() => {
-    if (!boardId || !sourceOpenRequest) return;
-    if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;
-    handledSourceRequestRef.current = sourceOpenRequest.requestId;
-    openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {
-      referenceId: sourceOpenRequest.sourceReferenceId,
-      requestId: sourceOpenRequest.requestId,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boardId, sourceOpenRequest]);
 
   const closeSurface = () => {
-    setDetails(null);
     onClose?.();
   };
 
@@ -434,6 +335,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, onClose]);
 
   if (!boardId || !isOpen) return null;
@@ -467,31 +369,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
           </button>
         </div>
 
-        {details ? (
-          <KnowledgeDocumentDetails
-            documentId={details.entry.id}
-            originalFilename={details.entry.originalFilename}
-            pageCount={details.entry.pageCount}
-            pages={details.pages}
-            loading={details.loading}
-            error={details.error}
-            initialPageNumber={details.initialPageNumber}
-            initialSourceReferenceId={details.sourceTarget?.referenceId}
-            initialSourceRequestId={details.sourceTarget?.requestId}
-            onBack={() => setDetails(null)}
-            onCreateNoteFromPage={onCreateNoteFromPage}
-            onOpenBacklinkTarget={onOpenBacklinkTarget
-              ? (targetPadletId) => {
-                // Close first, then hand the canvas the target: the reader is a
-                // modal over the board, so the Note must not open behind it.
-                closeSurface();
-                onOpenBacklinkTarget(targetPadletId);
-              }
-              : undefined}
-          />
-        ) : (
-          <>
-            <form className="mt-3 flex gap-2" onSubmit={(event) => void submitSearch(event)}>
+        <form className="mt-3 flex gap-2" onSubmit={(event) => void submitSearch(event)}>
               <input
                 type="search"
                 aria-label="Search Knowledge"
@@ -507,7 +385,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
               >
                 Search
               </button>
-            </form>
+        </form>
             {warmPhase === 'warming' ? <p className="mt-2 text-[11px] text-gray-500">Search engine is waking up…</p> : null}
             {searchPhase === 'loading' ? <p className="mt-2 text-[11px] text-gray-500">Searching Knowledge…</p> : null}
             {searchPhase === 'error' ? <p className="mt-2 text-[11px] text-gray-500">Knowledge search unavailable.</p> : null}
@@ -519,7 +397,9 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                     <button
                       type="button"
                       // Identity is documentId: two sources can share a filename.
-                      onClick={() => void openDetails({ id: result.documentId, originalFilename: result.originalFilename, pageCount: null, processingStatus: null, statusLabel: null })}
+                      // The page is the result's own start -- display navigation,
+                      // never a citation.
+                      onClick={() => requestOpenDocument(result.documentId, result.pageStart)}
                       className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
                     >
                       <p className="truncate text-xs font-medium text-gray-700">{result.originalFilename}</p>
@@ -561,7 +441,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                   <button
                     type="button"
                     className="mt-1 text-[11px] font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
-                    onClick={() => void openDetails(entry)}
+                    onClick={() => requestOpenDocument(entry.id)}
                   >
                     View text
                   </button>
@@ -575,8 +455,6 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             ) : (
               <p className="mt-2 text-[11px] text-gray-500">No PDFs added yet.</p>
             )}
-          </>
-        )}
       </div>
     </div>
   );

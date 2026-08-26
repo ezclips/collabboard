@@ -85,20 +85,20 @@ async function settle() {
   });
 }
 
-async function renderList(refreshToken = 0, isOpen = true, onClose = vi.fn()): Promise<HTMLDivElement> {
+async function renderList(refreshToken = 0, isOpen = true, onClose = vi.fn(), onOpenDocument = vi.fn()): Promise<HTMLDivElement> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} isOpen={isOpen} onClose={onClose} />);
+    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} isOpen={isOpen} onClose={onClose} onOpenDocument={onOpenDocument} />);
   });
   await settle();
   return host;
 }
 
-async function rerender(refreshToken: number, isOpen = true, onClose = vi.fn()) {
+async function rerender(refreshToken: number, isOpen = true, onClose = vi.fn(), onOpenDocument = vi.fn()) {
   await act(async () => {
-    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} isOpen={isOpen} onClose={onClose} />);
+    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} isOpen={isOpen} onClose={onClose} onOpenDocument={onOpenDocument} />);
   });
   await settle();
 }
@@ -173,18 +173,16 @@ describe('P6D Knowledge documents read surface', () => {
     }
   });
 
-  it('fetches page details only after View text and returns to the list', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse({
-        document: { id: 'doc-1', originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
-        pages: [
-          { pageNumber: 1, text: 'Page one extracted text' },
-          { pageNumber: 2, text: 'Page two\nwith readable lines' },
-        ],
-      }));
-    const container = await renderList();
+  /**
+   * P6J-F7-B1. View text used to fetch and render the reader here. The reader
+   * moved to the shell-level drawer, so what this surface owes is one emitted
+   * intent and its own dismissal -- and, decisively, NO page fetch of its own.
+   */
+  it('View text emits the document id, closes the library, and fetches no pages', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const onClose = vi.fn();
+    const onOpenDocument = vi.fn();
+    const container = await renderList(0, true, onClose, onOpenDocument);
     const viewText = container.querySelector('button:not([aria-label])') as HTMLButtonElement;
 
     await act(async () => {
@@ -192,51 +190,12 @@ describe('P6D Knowledge documents read surface', () => {
     });
     await settle();
 
-    expect(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/pages'))?.[0]).toBe(`/api/boards/${BOARD_ID}/knowledge/doc-1/pages`);
-    expect(container.textContent).toContain('EMG_checklist.pdf');
-    expect(container.textContent).toContain('2 pages');
-    expect(container.textContent).toContain('Page 1');
-    expect(container.textContent).toContain('Page one extracted text');
-    expect(container.textContent).toContain('Page 2');
-    expect(container.textContent).toContain('Page two\nwith readable lines');
+    expect(onOpenDocument).toHaveBeenCalledTimes(1);
+    expect(onOpenDocument.mock.calls[0][0]).toEqual({ documentId: 'doc-1', pageNumber: undefined });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // The library never reads a page. One reader, one fetch owner.
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/pages'))).toHaveLength(0);
     expect(container.querySelector('iframe, embed, object')).toBeNull();
-
-    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
-    await act(async () => {
-      back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(container.textContent).toContain('View text');
-  });
-
-  it('shows details errors and empty-page responses without blocking the modal', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse({
-        document: { id: 'doc-1', originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
-        pages: [],
-      }));
-    const emptyContainer = await renderList();
-    await act(async () => {
-      emptyContainer.querySelector('button:not([aria-label])')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-    expect(emptyContainer.textContent).toContain('No extracted text available.');
-
-    const back = Array.from(emptyContainer.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
-    await act(async () => {
-      back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
-      .mockResolvedValueOnce(jsonResponse({ error: 'Unavailable' }, 503));
-    await rerender(1, true);
-    await act(async () => {
-      emptyContainer.querySelector('button:not([aria-label])')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-    expect(emptyContainer.textContent).toContain('Extracted text unavailable.');
   });
 
   it('shows View text only for ready documents', async () => {
@@ -851,18 +810,16 @@ describe('P6D Knowledge documents read surface', () => {
     await settle();
   }
 
-  it('opens a semantic result as a source through the existing details fetch', async () => {
+  it('opens a semantic result by emitting its document id and its own start page', async () => {
+    const onOpenDocument = vi.fn();
+    const onClose = vi.fn();
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [] }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ results: [
         { documentId: 'doc-source', originalFilename: 'Handbook.pdf', pageStart: 2, pageEnd: 2, text: 'excerpt from the source' },
-      ] }))
-      .mockResolvedValueOnce(jsonResponse({
-        document: { id: 'doc-source', originalFilename: 'Handbook.pdf', pageCount: 3 },
-        pages: [{ pageNumber: 2, text: 'full page two text' }],
-      }));
-    const container = await renderList();
+      ] }));
+    const container = await renderList(0, true, onClose, onOpenDocument);
     await searchThen(container, 'handbook');
 
     const buttons = searchResultButtons(container);
@@ -871,11 +828,11 @@ describe('P6D Knowledge documents read surface', () => {
 
     await activate(buttons[0]);
 
-    expect(fetchMock.mock.calls.find(([url]) => String(url).endsWith('/pages'))?.[0])
-      .toBe(`/api/boards/${BOARD_ID}/knowledge/doc-source/pages`);
-    expect(container.textContent).toContain('full page two text');
-    expect(container.textContent).toContain('Page 2');
-    // No second semantic search, and no mutating request of any kind.
+    expect(onOpenDocument).toHaveBeenCalledTimes(1);
+    expect(onOpenDocument.mock.calls[0][0]).toEqual({ documentId: 'doc-source', pageNumber: 2 });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Still no page fetch here, no second semantic search, no mutating request.
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/pages'))).toHaveLength(0);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(searchCallsBefore);
     expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== 'DELETE')).toBe(true);
     expect(fetchMock.mock.calls.filter(([url], index) => (
@@ -884,8 +841,7 @@ describe('P6D Knowledge documents read surface', () => {
   });
 
   it('identifies a source by documentId even when two results share a filename', async () => {
-    // URL-aware so the second search returns results again rather than consuming
-    // a queued pages response.
+    const onOpenDocument = vi.fn();
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
@@ -895,43 +851,40 @@ describe('P6D Knowledge documents read surface', () => {
           { documentId: 'document-b', originalFilename: 'duplicate.pdf', pageStart: 4, pageEnd: 4, text: 'second source' },
         ] });
       }
-      if (url.endsWith('/pages')) return jsonResponse({ document: { id: 'x', originalFilename: 'duplicate.pdf', pageCount: 1 }, pages: [] });
       return jsonResponse({ documents: [] });
     });
-    const container = await renderList();
+    const container = await renderList(0, true, vi.fn(), onOpenDocument);
     await searchThen(container, 'duplicate');
     expect(searchResultButtons(container)).toHaveLength(2);
 
+    // The SECOND of two identically named results: the id decides, not the name.
     await activate(searchResultButtons(container)[1]);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/pages')).map(([url]) => url))
-      .toEqual([`/api/boards/${BOARD_ID}/knowledge/document-b/pages`]);
+    expect(onOpenDocument.mock.calls.map(([request]) => request))
+      .toEqual([{ documentId: 'document-b', pageNumber: 4 }]);
 
-    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
-    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await searchThen(container, 'duplicate again');
     await activate(searchResultButtons(container)[0]);
 
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/pages')).map(([url]) => url))
-      .toEqual([
-        `/api/boards/${BOARD_ID}/knowledge/document-b/pages`,
-        `/api/boards/${BOARD_ID}/knowledge/document-a/pages`,
-      ]);
+    expect(onOpenDocument.mock.calls.map(([request]) => request)).toEqual([
+      { documentId: 'document-b', pageNumber: 4 },
+      { documentId: 'document-a', pageNumber: 1 },
+    ]);
   });
 
-  it('returns from a source opened by search to the ordinary document list', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse({ results: [
-        { documentId: 'doc-source', originalFilename: 'Handbook.pdf', pageStart: 1, pageEnd: 1, text: 'excerpt' },
-      ] }))
-      .mockResolvedValueOnce(jsonResponse({ document: { id: 'doc-source', originalFilename: 'Handbook.pdf', pageCount: 1 }, pages: [] }));
+  it('restores the ordinary document list after a search result was opened', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
+      if (url.includes('/knowledge/search')) {
+        return jsonResponse({ results: [
+          { documentId: 'doc-source', originalFilename: 'Handbook.pdf', pageStart: 1, pageEnd: 1, text: 'excerpt' },
+        ] });
+      }
+      return jsonResponse({ documents: [doc()] });
+    });
     const container = await renderList();
     await searchThen(container, 'handbook');
     await activate(searchResultButtons(container)[0]);
-
-    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
-    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // Existing behaviour: clearing the query leaves search mode and restores the list.
     typeIntoSearch(container, '');
@@ -956,44 +909,6 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).toContain('kept.pdf');
     expect(container.textContent).not.toContain('anonymous.pdf');
     expect(container.textContent).not.toContain('empty.pdf');
-  });
-
-  it('claims no page count while a source opened from search is still loading', async () => {
-    const pagesResponse = deferred<Response>();
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
-      if (url.includes('/knowledge/search')) {
-        return Promise.resolve(jsonResponse({ results: [
-          { documentId: 'doc-slow', originalFilename: 'Slow.pdf', pageStart: 1, pageEnd: 1, text: 'excerpt' },
-        ] }));
-      }
-      if (url.endsWith('/pages')) return pagesResponse.promise;
-      return Promise.resolve(jsonResponse({ documents: [] }));
-    });
-    const container = await renderList();
-    await searchThen(container, 'slow');
-
-    // Open the source but leave /pages unresolved: pageCount is unknown here.
-    await act(async () => {
-      searchResultButtons(container)[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushMicrotasks();
-
-    expect(container.textContent).toContain('Loading extracted text…');
-    expect(container.textContent).not.toContain('0 pages');
-    expect(container.textContent).not.toMatch(/\d+\s+pages?/);
-
-    pagesResponse.resolve(jsonResponse({
-      document: { id: 'doc-slow', originalFilename: 'Slow.pdf', pageCount: 1 },
-      pages: [{ pageNumber: 1, text: 'the only page' }],
-    }));
-    await settle();
-
-    expect(container.textContent).not.toContain('Loading extracted text…');
-    expect(container.textContent).toContain('1 page');
-    expect(container.textContent).not.toContain('0 pages');
-    expect(container.textContent).toContain('the only page');
   });
 
   it('exposes each semantic result as a single keyboard-reachable control', async () => {
@@ -1043,563 +958,42 @@ describe('P6D Knowledge documents read surface', () => {
   });
 });
 
-// P6J-F5. The reader surface gains one action: emit this page upward. It still
-// writes nothing itself, and the page's identity remains the documentId the
-// list already holds -- never the filename, which is display text and is not
-// unique across a board.
-describe('P6J-F5 create Note from a source page', () => {
-  const PAGES = [
-    { pageNumber: 1, text: 'Page one extracted text' },
-    { pageNumber: 2, text: '  spaced\r\nlines  ' },
-  ];
-
-  async function renderWithCreate(onCreateNoteFromPage?: (request: unknown) => void): Promise<HTMLDivElement> {
-    host = document.createElement('div');
-    document.body.appendChild(host);
-    root = createRoot(host);
-    await act(async () => {
-      root!.render(
-        <KnowledgeDocumentsList
-          refreshToken={0}
-          isOpen
-          onClose={vi.fn()}
-          onCreateNoteFromPage={onCreateNoteFromPage}
-        />,
-      );
-    });
-    await settle();
-    return host;
-  }
-
-  async function openFirstDocument(container: HTMLElement) {
-    const viewText = container.querySelector('button:not([aria-label])') as HTMLButtonElement;
-    await act(async () => {
-      viewText.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-  }
-
-  function createNoteButtons(container: HTMLElement): HTMLButtonElement[] {
-    return Array.from(container.querySelectorAll('button'))
-      .filter((button) => button.textContent?.trim() === 'Create Note') as HTMLButtonElement[];
-  }
-
-  it('emits the real document id, filename, page number and exact page text', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
-      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: PAGES }));
-      return Promise.resolve(jsonResponse({ documents: [doc({ id: 'doc-real', originalFilename: 'sources.pdf' })] }));
-    });
-    const onCreate = vi.fn();
-    const container = await renderWithCreate(onCreate);
-    await openFirstDocument(container);
-
-    const buttons = createNoteButtons(container);
-    expect(buttons).toHaveLength(2);
-    await act(async () => {
-      buttons[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(onCreate).toHaveBeenCalledTimes(1);
-    expect(onCreate.mock.calls[0][0]).toEqual({
-      sourceDocumentId: 'doc-real',
-      originalFilename: 'sources.pdf',
-      pageNumber: 2,
-      // Byte-exact: whitespace and CRLF are evidence, not formatting.
-      pageText: '  spaced\r\nlines  ',
-      // B4-B2B: no text was selected, so this stays the page-only request.
-      selection: null,
-    });
-  });
-
-  it('identifies the page by documentId when two documents share a filename', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
-      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: [PAGES[0]] }));
-      return Promise.resolve(jsonResponse({
-        documents: [
-          doc({ id: 'document-a', originalFilename: 'duplicate.pdf' }),
-          doc({ id: 'document-b', originalFilename: 'duplicate.pdf' }),
-        ],
-      }));
-    });
-    const onCreate = vi.fn();
-    const container = await renderWithCreate(onCreate);
-
-    // Open the SECOND of two identically named documents.
-    const viewTextButtons = Array.from(container.querySelectorAll('button:not([aria-label])')) as HTMLButtonElement[];
-    await act(async () => {
-      viewTextButtons[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-    await act(async () => {
-      createNoteButtons(container)[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    const request = onCreate.mock.calls[0][0] as { sourceDocumentId: string; originalFilename: string };
-    expect(request.sourceDocumentId).toBe('document-b');
-    expect(request.originalFilename).toBe('duplicate.pdf');
-  });
-
-  it('offers no creation action to a viewer without the capability', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
-      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: PAGES }));
-      return Promise.resolve(jsonResponse({ documents: [doc()] }));
-    });
-    const container = await renderWithCreate(undefined);
-    await openFirstDocument(container);
-
-    expect(container.textContent).toContain('Page one extracted text');
-    // Absent entirely, not rendered disabled.
-    expect(createNoteButtons(container)).toHaveLength(0);
-    expect(container.textContent).not.toContain('Create Note');
-  });
-
-  it('shows no action until pages have actually rendered', async () => {
-    const pages = deferred<Response>();
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
-      if (url.endsWith('/pages')) return pages.promise;
-      return Promise.resolve(jsonResponse({ documents: [doc()] }));
-    });
-    const onCreate = vi.fn();
-    const container = await renderWithCreate(onCreate);
-    await openFirstDocument(container);
-
-    expect(container.textContent).toContain('Loading extracted text…');
-    expect(createNoteButtons(container)).toHaveLength(0);
-
-    pages.resolve(jsonResponse({ pages: [PAGES[0]] }));
-    await settle();
-    expect(createNoteButtons(container)).toHaveLength(1);
-    expect(onCreate).not.toHaveBeenCalled();
-  });
-
-  it('leaves Back to PDFs working while the action is present', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
-      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: PAGES }));
-      return Promise.resolve(jsonResponse({ documents: [doc()] }));
-    });
-    const onCreate = vi.fn();
-    const container = await renderWithCreate(onCreate);
-    await openFirstDocument(container);
-    expect(createNoteButtons(container)).toHaveLength(2);
-
-    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
-    await act(async () => {
-      back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(container.textContent).toContain('View text');
-    expect(createNoteButtons(container)).toHaveLength(0);
-    expect(onCreate).not.toHaveBeenCalled();
-  });
-});
-
 // ============================================================================
-// P6J-F6-B2 -- opening a Note's exact source
+// P6J-F7-B1 -- the library is the library, and nothing else
 // ============================================================================
-// Identity is the document id throughout. Two sources can share a filename, so
-// a name-based lookup would open the wrong document.
-describe('P6J-F6-B2 source-open requests', () => {
-  const SOURCE_A = 'aaaaaaaa-1111-4111-8111-111111111111';
-  const SOURCE_B = 'bbbbbbbb-2222-4222-8222-222222222222';
 
-  function pagesFor(documentId: string, originalFilename: string, pageCount = 3) {
-    return jsonResponse({
-      document: { id: documentId, originalFilename, pageCount },
-      pages: Array.from({ length: pageCount }, (_, index) => ({
-        pageNumber: index + 1,
-        text: `${originalFilename} body for page ${index + 1}`,
-      })),
-    });
-  }
-
-  function withDocuments(documents: unknown[], pageBodies: Record<string, Response | (() => Response)>) {
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
-      const pageMatch = url.match(/\/knowledge\/([^/]+)\/pages$/);
-      if (pageMatch) {
-        const body = pageBodies[pageMatch[1]];
-        if (!body) return jsonResponse({ error: 'Not found' }, 404);
-        return typeof body === 'function' ? body() : body;
-      }
-      return jsonResponse({ documents });
-    });
-  }
-
-  async function renderWithRequest(request: unknown, documents: unknown[] = []) {
-    host = document.createElement('div');
-    document.body.appendChild(host);
-    root = createRoot(host);
-    await act(async () => {
-      root!.render(
-        <KnowledgeDocumentsList refreshToken={0} isOpen onClose={vi.fn()} sourceOpenRequest={request as never} />,
-      );
-    });
-    await settle();
-    return host!;
-  }
-
-  async function rerenderWithRequest(request: unknown, isOpen = true) {
-    await act(async () => {
-      root!.render(
-        <KnowledgeDocumentsList refreshToken={0} isOpen={isOpen} onClose={vi.fn()} sourceOpenRequest={request as never} />,
-      );
-    });
-    await settle();
-  }
-
-  function pageRequests() {
-    return fetchMock.mock.calls
-      .map(([input]) => String(input))
-      .filter((url) => /\/pages$/.test(url));
-  }
-
-  it('A: opens the reader on the requested document id', async () => {
-    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
-
-    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 2, pageEnd: 2 });
-
-    expect(pageRequests()).toHaveLength(1);
-    expect(pageRequests()[0]).toBe(`/api/boards/${BOARD_ID}/knowledge/${SOURCE_A}/pages`);
-    expect(container.textContent).toContain('EMG_checklist.pdf');
-  });
-
-  it('B: hands the reader the requested page as its scroll target', async () => {
-    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
-
-    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 3, pageEnd: 3 });
-
-    // The reader marks each page, and the target one is present to scroll to.
-    expect(container.querySelector('[data-page-number="3"]')).not.toBeNull();
-    expect(componentCode).toContain('initialPageNumber={details.initialPageNumber}');
-    // B4-B4 widened the call with the exact-arrival target; document id and
-    // page remain the first two arguments.
-    expect(componentCode).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
-  });
-
-  it('C: hydrates the header from the document the endpoint returned', async () => {
-    // Not in the board list at all: everything shown must come from the response.
-    withDocuments([], { [SOURCE_A]: pagesFor(SOURCE_A, 'Sammelmappe1.pdf', 4) });
-
-    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
-
-    expect(container.textContent).toContain('Sammelmappe1.pdf');
-    expect(container.textContent).toContain('4 pages');
-    // Never fabricated from the id.
-    expect(container.textContent).not.toContain(SOURCE_A);
-  });
-
-  it('D: two documents sharing a filename resolve by id, not by name', async () => {
-    withDocuments(
-      [doc({ id: SOURCE_A, originalFilename: 'Good.pdf' }), doc({ id: SOURCE_B, originalFilename: 'Good.pdf' })],
-      {
-        [SOURCE_A]: pagesFor(SOURCE_A, 'Good.pdf'),
-        [SOURCE_B]: pagesFor(SOURCE_B, 'Good.pdf'),
-      },
+describe('P6J-F7-B1 single reader ownership', () => {
+  it('K: the library neither imports nor renders the detail reader', () => {
+    const raw = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentsList.tsx'),
+      'utf8',
     );
-
-    // Dispatch only AFTER the board list has loaded, so both same-named
-    // entries are present and an id-keyed lookup genuinely differs from a
-    // name-keyed one. Requesting before the list loads would resolve through
-    // the synthesized fallback and prove nothing.
-    const container = await renderWithRequest(null);
-    expect(container.textContent).toContain('Good.pdf');
-    await rerenderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_B, pageStart: 1, pageEnd: 1 });
-
-    // The requested id is the one fetched; the identical name never decides.
-    expect(pageRequests()).toEqual([`/api/boards/${BOARD_ID}/knowledge/${SOURCE_B}/pages`]);
-    expect(container.textContent).toContain('Good.pdf body for page 1');
+    expect(raw).not.toContain('KnowledgeDocumentDetails');
+    // And it owns no reader state or reader fetch of its own.
+    for (const forbidden of ['/pages`', 'initialSourceReferenceId', 'initialPageNumber', 'sourceOpenRequest', 'onOpenBacklinkTarget']) {
+      expect(componentCode, `${forbidden} belongs to the reader drawer`).not.toContain(forbidden);
+    }
+    // Exactly one component hosts the reader, and it is the drawer.
+    const drawer = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/KnowledgeSourceReaderDrawer.tsx'),
+      'utf8',
+    );
+    expect(drawer).toContain('<KnowledgeDocumentDetails');
   });
 
-  it('E: a request is acted on once, not on every re-render', async () => {
-    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
-    const request = { requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 };
+  it('A: the library still offers upload, list and search from the same modal', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    const surface = container.querySelector('[data-knowledge-documents]') as HTMLElement;
 
-    await renderWithRequest(request);
-    await rerenderWithRequest(request);
-    await rerenderWithRequest(request);
-
-    expect(pageRequests()).toHaveLength(1);
-  });
-
-  it('F: clicking the same source again opens it again under a new request id', async () => {
-    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: () => pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
-
-    await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
-    expect(pageRequests()).toHaveLength(1);
-
-    // Same document, same page -- only the id differs.
-    await rerenderWithRequest({ requestId: 2, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
-
-    expect(pageRequests()).toHaveLength(2);
-  });
-
-  it('G: reopening the modal by hand does not replay the last handled source', async () => {
-    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: () => pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
-    const request = { requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 };
-
-    await renderWithRequest(request);
-    expect(pageRequests()).toHaveLength(1);
-
-    // Close, then reopen with the same stale request object still in place.
-    await rerenderWithRequest(request, false);
-    await rerenderWithRequest(request, true);
-
-    expect(pageRequests()).toHaveLength(1);
-  });
-
-  it('H: with no request, the list behaves exactly as before', async () => {
-    withDocuments([doc({ id: SOURCE_A })], { [SOURCE_A]: pagesFor(SOURCE_A, 'EMG_checklist.pdf') });
-
-    const container = await renderWithRequest(null);
-
-    expect(pageRequests()).toHaveLength(0);
+    expect(surface.getAttribute('role')).toBe('dialog');
+    expect(surface.getAttribute('aria-modal')).toBe('true');
+    expect(surface.className).toContain('fixed inset-0');
+    expect(container.querySelector('input[aria-label="Search Knowledge"]')).not.toBeNull();
     expect(container.textContent).toContain('EMG_checklist.pdf');
-    const view = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'View text');
-    expect(view).toBeDefined();
-
-    await act(async () => { view!.click(); });
-    await settle();
-    expect(pageRequests()).toEqual([`/api/boards/${BOARD_ID}/knowledge/${SOURCE_A}/pages`]);
-  });
-
-  it('I: a failed source document reuses the existing reader error state', async () => {
-    withDocuments([], { });
-
-    const container = await renderWithRequest({ requestId: 1, sourceDocumentId: SOURCE_A, pageStart: 1, pageEnd: 1 });
-
-    // No bespoke broken-citation modal, no throw.
-    expect(container.textContent).toContain('Extracted text unavailable.');
-  });
-
-  it('J: source opening adds no endpoint and no filename-keyed lookup', async () => {
-    // One pages endpoint, reused -- not a second fetch implementation.
-    expect((componentCode.match(/\/pages`\)/g) ?? []).length).toBe(1);
-    // The document lookup is keyed on id. A filename-keyed find would open the
-    // wrong one of two same-named sources.
-    expect(componentCode).toContain('const known = entries.find((candidate) => candidate.id === documentId)');
-    expect(componentCode).not.toMatch(/find\([^)]*originalFilename/);
-    expect(componentCode).not.toMatch(/filter\([^)]*originalFilename/);
-  });
-});
-
-// ============================================================================
-// P6J-F6-B4-B4 -- forwarding the exact citation to the reader
-// ============================================================================
-// Rendered through the REAL provider and the REAL index, so the arrival marker
-// only appears when a stored citation genuinely resolved on the loaded page.
-describe('P6J-F6-B4-B4 exact source forwarding', () => {
-  const SOURCE_A = 'aaaaaaaa-1111-4111-8111-111111111111';
-  const FILENAME = 'EMG_checklist.pdf';
-  const PAGE_ONE = `${FILENAME} body for page 1`;
-  const QUOTE_START = 0;
-  const QUOTE_END = FILENAME.length;
-
-  function pagesFor(documentId: string, pageCount = 3) {
-    return jsonResponse({
-      document: { id: documentId, originalFilename: FILENAME, pageCount },
-      pages: Array.from({ length: pageCount }, (_, index) => ({
-        pageNumber: index + 1,
-        text: `${FILENAME} body for page ${index + 1}`,
-      })),
-    });
-  }
-
-  function withDocuments(documents: unknown[]) {
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
-      if (/\/knowledge\/([^/]+)\/pages$/.test(url)) return pagesFor(SOURCE_A);
-      return jsonResponse({ documents });
-    });
-  }
-
-  /** A citation of page 1 whose offsets genuinely address its own quote. */
-  const exactReference = (id: string, targetPadletId = 'padlet-1') => ({
-    id,
-    targetPadletId,
-    sourceDocumentId: SOURCE_A,
-    pageStart: 1,
-    pageEnd: 1,
-    quoteText: PAGE_ONE.slice(QUOTE_START, QUOTE_END),
-    quoteHash: null,
-    charStart: QUOTE_START,
-    charEnd: QUOTE_END,
-    locator: null,
-    createdAt: '2026-08-24T00:00:00.000Z',
-  }) as unknown as SourceReference;
-
-  const REFERENCES = [exactReference('ref-exact-1')];
-
-  async function render(request: unknown) {
-    host = document.createElement('div');
-    document.body.appendChild(host);
-    root = createRoot(host);
-    await act(async () => {
-      root!.render(
-        <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(REFERENCES)}>
-          <KnowledgeDocumentsList
-            refreshToken={0}
-            isOpen
-            onClose={vi.fn()}
-            sourceOpenRequest={request as never}
-          />
-        </KnowledgeSourceReferenceProvider>,
-      );
-    });
-    await settle();
-    return host!;
-  }
-
-  async function rerender(request: unknown) {
-    await act(async () => {
-      root!.render(
-        <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(REFERENCES)}>
-          <KnowledgeDocumentsList
-            refreshToken={0}
-            isOpen
-            onClose={vi.fn()}
-            sourceOpenRequest={request as never}
-          />
-        </KnowledgeSourceReferenceProvider>,
-      );
-    });
-    await settle();
-  }
-
-  const arrivalTargets = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-knowledge-source-navigation-target="true"]'));
-
-  const sourceRequest = (requestId: number, sourceReferenceId: string) => ({
-    requestId,
-    sourceDocumentId: SOURCE_A,
-    sourceReferenceId,
-    pageStart: 1,
-    pageEnd: 1,
-  });
-
-  it('E: a source request still opens by document id and page', async () => {
-    withDocuments([doc({ id: SOURCE_A })]);
-
-    const container = await render(sourceRequest(1, 'ref-exact-1'));
-
-    expect(fetchMock.mock.calls.map(([input]) => String(input)))
-      .toContain(`/api/boards/${BOARD_ID}/knowledge/${SOURCE_A}/pages`);
-    expect(container.querySelector('[data-page-number="1"]')).not.toBeNull();
-  });
-
-  it('F: the citing row id reaches the reader and marks its resolved span', async () => {
-    withDocuments([doc({ id: SOURCE_A })]);
-
-    const container = await render(sourceRequest(1, 'ref-exact-1'));
-
-    const marked = arrivalTargets(container);
-    expect(marked).toHaveLength(1);
-    // The RESOLVED text, not the whole page and not the page start.
-    expect(marked[0].textContent).toBe(FILENAME);
-  });
-
-  it('G: opening a document by hand inherits no exact target', async () => {
-    withDocuments([doc({ id: SOURCE_A })]);
-
-    const container = await render(null);
-    const viewText = Array.from(container.querySelectorAll('button'))
-      .find((button) => button.textContent === 'View text')!;
-    await act(async () => {
-      viewText.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-
-    // The citation still paints -- it just was not navigated to.
-    expect(container.querySelectorAll('[data-knowledge-source-highlight="true"]').length).toBeGreaterThan(0);
-    expect(arrivalTargets(container)).toHaveLength(0);
-  });
-
-  it('H: opening a search result inherits no exact target', async () => {
-    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
-      if (/\/knowledge\/([^/]+)\/pages$/.test(url)) return pagesFor(SOURCE_A);
-      if (url.includes('/knowledge/search') && init?.method === 'POST') {
-        return jsonResponse({
-          results: [{ documentId: SOURCE_A, originalFilename: FILENAME, pageStart: 1, pageEnd: 1, text: 'excerpt' }],
-        });
-      }
-      return jsonResponse({ documents: [doc({ id: SOURCE_A })] });
-    });
-
-    const container = await render(null);
-    const input = container.querySelector('input[type="search"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-      setter.call(input, 'body');
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(async () => {
-      container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    });
-    await settle();
-    const result = container.querySelector('[data-knowledge-search-results="true"] button') as HTMLButtonElement;
-    await act(async () => {
-      result.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-
-    expect(container.querySelector('[data-page-number="1"]')).not.toBeNull();
-    expect(arrivalTargets(container)).toHaveLength(0);
-  });
-
-  it('I: the same citation under a new request id is forwarded again', async () => {
-    withDocuments([doc({ id: SOURCE_A })]);
-
-    const container = await render(sourceRequest(1, 'ref-exact-1'));
-    expect(arrivalTargets(container)).toHaveLength(1);
-
-    // Back to the list, then the very same citation asked for again.
-    await act(async () => {
-      Array.from(container.querySelectorAll('button'))
-        .find((button) => button.textContent?.includes('Back to PDFs'))!
-        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await settle();
-    expect(arrivalTargets(container)).toHaveLength(0);
-
-    await rerender(sourceRequest(2, 'ref-exact-1'));
-
-    expect(arrivalTargets(container)).toHaveLength(1);
-  });
-
-  it('J: a repeated render of one request id opens the document once', async () => {
-    withDocuments([doc({ id: SOURCE_A })]);
-    const request = sourceRequest(1, 'ref-exact-1');
-
-    await render(request);
-    await rerender(request);
-    await rerender(request);
-
-    expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => /\/pages$/.test(url)))
-      .toHaveLength(1);
-  });
-
-  it('K: forwarding the citation adds no endpoint of its own', async () => {
-    withDocuments([doc({ id: SOURCE_A })]);
-
-    await render(sourceRequest(1, 'ref-exact-1'));
-
-    const urls = fetchMock.mock.calls.map(([input]) => String(input));
-    // Warm plus the board list plus the one pages read -- nothing provenance-
-    // specific: the citations were already in memory.
-    expect(urls.filter((url) => /reference|provenance|source/i.test(url))).toEqual([]);
-    expect(urls.filter((url) => /\/pages$/.test(url))).toHaveLength(1);
+    expect(container.textContent).toContain('View text');
+    // The uploader is still the sidebar's, mounted beside this modal.
+    expect(sidebarCode).toContain('<KnowledgePdfUploader');
+    expect(sidebarCode).toContain('data-knowledge-trigger="true"');
   });
 });

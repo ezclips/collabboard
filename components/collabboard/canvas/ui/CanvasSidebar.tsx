@@ -4,8 +4,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { BookOpen, MoreVertical } from 'lucide-react';
 import KnowledgeDocumentsList from '@/components/collabboard/KnowledgeDocumentsList';
 import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
-import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
-import type { KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,21 +49,12 @@ interface CanvasSidebarProps {
   handleToolClick: (type: string) => void;
   onBack: () => void;
   /**
-   * P6J-F5. The sidebar only closes its own Knowledge modal and forwards the
-   * request; the canvas controller owns placement and every write.
+   * P6J-F7-B1. The library named something to read. Pure plumbing: the sidebar
+   * neither loads nor renders the reader, which lives at canvas shell level --
+   * from inside this component's `z-[3000]` wrapper no reader can coexist with
+   * an open editor. The sidebar's only remaining Knowledge job is the library.
    */
-  onCreateNoteFromKnowledgePage?: (request: KnowledgeSourcePageRequest) => void;
-  /**
-   * P6J-F6-B2. A Note's source affordance asks to open the Knowledge reader
-   * on an exact document/page. The sidebar still owns `knowledgeOpen`; this
-   * only opens it and forwards the request.
-   */
-  knowledgeSourceOpenRequest?: KnowledgeSourceOpenRequest | null;
-  /**
-   * P6J-F6-B3N. Pure plumbing: the sidebar neither resolves the target nor
-   * remembers it. The reader closes itself; the canvas opens the Note.
-   */
-  onOpenBacklinkTarget?: (targetPadletId: string) => void;
+  onOpenKnowledgeDocument?: (request: { documentId: string; pageNumber?: number }) => void;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -92,9 +81,7 @@ export default function CanvasSidebar({
   onBeforeToolClick,
   handleToolClick,
   onBack,
-  onCreateNoteFromKnowledgePage,
-  knowledgeSourceOpenRequest = null,
-  onOpenBacklinkTarget,
+  onOpenKnowledgeDocument,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -111,11 +98,11 @@ export default function CanvasSidebar({
   const [knowledgeRefreshToken, setKnowledgeRefreshToken] = useState(0);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
-  // Opening is all this does: KnowledgeDocumentsList decides whether the
-  // request is new, so a stale one can never re-open the reader by itself.
-  useEffect(() => {
-    if (knowledgeSourceOpenRequest) setKnowledgeOpen(true);
-  }, [knowledgeSourceOpenRequest]);
+  // P6J-F7-B1: a Note asking for its source no longer touches this component.
+  // The request goes straight to the shell-level reader, so opening a citation
+  // never pops the library open on the way -- and a collapsed toolbar, which
+  // unmounts this whole sidebar, can no longer take the reader down with it.
+
   // The tool an overflow item selected, dispatched only once the dropdown has
   // finished closing (see onCloseAutoFocus below).
   const pendingToolRef = useRef<string | null>(null);
@@ -288,16 +275,9 @@ export default function CanvasSidebar({
       <KnowledgePdfUploader ref={knowledgePdfUploaderRef} onKnowledgeChanged={handleKnowledgeChanged} />
       <KnowledgeDocumentsList
         refreshToken={knowledgeRefreshToken}
-        sourceOpenRequest={knowledgeSourceOpenRequest}
         isOpen={knowledgeOpen}
         onClose={() => setKnowledgeOpen(false)}
-        onOpenBacklinkTarget={onOpenBacklinkTarget}
-        onCreateNoteFromPage={onCreateNoteFromKnowledgePage
-          ? (request) => {
-            setKnowledgeOpen(false);
-            onCreateNoteFromKnowledgePage(request);
-          }
-          : undefined}
+        onOpenDocument={onOpenKnowledgeDocument}
       />
       <button
         ref={moreMeasureRef}

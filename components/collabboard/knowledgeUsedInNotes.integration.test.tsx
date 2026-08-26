@@ -19,7 +19,7 @@ const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: BOARD_ID }) }));
 
 import KnowledgeDocumentDetails from './KnowledgeDocumentDetails';
-import KnowledgeDocumentsList from './KnowledgeDocumentsList';
+import KnowledgeSourceReaderDrawer from './KnowledgeSourceReaderDrawer';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
 import { EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import {
@@ -558,7 +558,12 @@ describe('P6J-F6-B3N Knowledge close/navigate transition', () => {
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   }
 
-  /** Mounts the real list, opens the real reader, and logs the callback order. */
+  /**
+   * P6J-F7-B1. Mount plumbing only: the reader is now the shell-level drawer,
+   * so the same real backlink row is exercised through it instead of through
+   * the library modal. The behaviour under test is what changed deliberately --
+   * the reader no longer tears itself down to let the Note through.
+   */
   async function openReader() {
     const calls: string[] = [];
     const originalFetch = globalThis.fetch;
@@ -573,59 +578,60 @@ describe('P6J-F6-B3N Knowledge close/navigate transition', () => {
     document.body.appendChild(host);
     root = createRoot(host);
 
-    const view = (isOpen: boolean) => (
+    const view = (requestId: number | null) => (
       <KnowledgeSourceReferenceProvider
         index={EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX}
         backlinks={buildKnowledgeSourceBacklinkIndex([reference(N1, DOC_A, 2)], [note(N1, 'Cited note')])}
       >
-        <KnowledgeDocumentsList
-          isOpen={isOpen}
-          onClose={() => calls.push('close')}
+        <KnowledgeSourceReaderDrawer
+          documentOpenRequest={requestId === null ? null : { requestId, sourceDocumentId: DOC_A }}
           onOpenBacklinkTarget={(targetPadletId) => calls.push(`navigate:${targetPadletId}`)}
         />
       </KnowledgeSourceReferenceProvider>
     );
 
-    await act(async () => { root!.render(view(true)); });
-    // The list has loaded; open the document's text.
-    const viewText = Array.from(document.querySelectorAll('button'))
-      .find((button) => button.textContent === 'View text')!;
-    expect(viewText, 'the document did not reach the list').toBeTruthy();
-    await act(async () => { viewText.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { root!.render(view(1)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(document.querySelector('[data-knowledge-reader="true"]'), 'the reader did not open').toBeTruthy();
 
     return { calls, view, restore: () => { globalThis.fetch = originalFetch; } };
   }
 
-  it('H: Knowledge closes FIRST, then the canvas is asked to open the Note', async () => {
+  it('H: the canvas is asked to open the Note, and the reader stays open', async () => {
     const { calls, restore } = await openReader();
     try {
-      const surface = document.querySelector('[data-knowledge-documents="true"]')!;
+      const surface = document.querySelector('[data-knowledge-reader="true"]')!;
       const button = surface.querySelector(`[data-knowledge-backlink-target="${N1}"] button`) as HTMLButtonElement;
       expect(button, 'the reader rendered no clickable backlink').toBeTruthy();
 
       await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-      // Order is the contract: the modal must not still be over the Note.
-      expect(calls).toEqual(['close', `navigate:${N1}`]);
+      // F7 inverts B3N's premise: the reader no longer paints over the editor,
+      // so it stays beside the Note instead of closing to make room for it.
+      expect(calls).toEqual([`navigate:${N1}`]);
+      expect(document.querySelector('[data-knowledge-reader="true"]')).not.toBeNull();
+      expect(document.querySelector('[data-knowledge-used-in-notes]')).not.toBeNull();
     } finally {
       restore();
     }
   });
 
-  it('I: reopening Knowledge by hand replays nothing', async () => {
+  it('I: closing the reader replays nothing', async () => {
     const { calls, view, restore } = await openReader();
     try {
       const button = document.querySelector(`[data-knowledge-backlink-target="${N1}"] button`) as HTMLButtonElement;
       await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(calls).toEqual(['close', `navigate:${N1}`]);
+      expect(calls).toEqual([`navigate:${N1}`]);
 
-      // Close for real, then reopen the library the way a user would.
-      await act(async () => { root!.render(view(false)); });
-      await act(async () => { root!.render(view(true)); });
+      // Close the reader, then re-render with the same handled request in place.
+      const close = document.querySelector('button[aria-label="Close Knowledge reader"]') as HTMLButtonElement;
+      await act(async () => { close.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { root!.render(view(1)); });
 
-      // No stored request, so nothing to re-fire -- and the reader is back at
-      // the library rather than the document it last showed.
-      expect(calls).toEqual(['close', `navigate:${N1}`]);
+      // The request was already handled, so nothing re-fires and the reader
+      // stays shut rather than reopening the document it last showed.
+      expect(calls).toEqual([`navigate:${N1}`]);
+      expect(document.querySelector('[data-knowledge-reader="true"]')).toBeNull();
       expect(document.querySelector('[data-knowledge-used-in-notes]')).toBeNull();
     } finally {
       restore();

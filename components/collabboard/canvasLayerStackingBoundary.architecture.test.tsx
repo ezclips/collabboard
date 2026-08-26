@@ -408,3 +408,54 @@ describe('PATCH 9M: application editor panel z-index values untouched -- single 
     expect(containerEditorSrc).toContain('z-[1001]');
   });
 });
+
+// ============================================================================
+// P6J-F7-B1: the Knowledge reader's band -- editor tier < drawer < toolbar tier
+// ============================================================================
+// The reader may stay open beside a Note ONLY because it out-ranks the editor
+// tier while still yielding to the toolbar. These three numbers are the whole
+// mechanism, so they are pinned together rather than one at a time.
+describe('P6J-F7-B1 Knowledge reader drawer stacking band', () => {
+  const readerDrawerSrc = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+  const postEditorShellSrc = read('components/collabboard/editors/PostEditorShell.tsx');
+
+  it('the editor tier is still z-[1000], unmodified by this patch', () => {
+    expect(postEditorShellSrc).toContain('fixed inset-0 z-[1000]');
+  });
+
+  it('the reader drawer is z-[1200]', () => {
+    expect(readerDrawerSrc).toContain('z-[1200]');
+  });
+
+  it('the toolbar wrapper is still z-[3000]', () => {
+    expect(canvasClientSrc).toContain('absolute left-0 bottom-0 z-[3000]');
+  });
+
+  it('1000 < 1200 < 3000, read from the drawer\'s own className', () => {
+    // Comment-stripped: the file's prose explains the 3000 wrapper it avoids,
+    // and matching that number would prove nothing about what actually renders.
+    const code = readerDrawerSrc.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const bands = code.match(/z-\[(\d+)\]/g) ?? [];
+    // Exactly one z-index in the rendered drawer: a second makes it ambiguous.
+    expect(bands).toEqual(['z-[1200]']);
+
+    const drawer = Number(/z-\[(\d+)\]/.exec(bands[0] ?? '')![1]);
+    expect(1000, 'editor tier').toBeLessThan(drawer);
+    expect(drawer).toBeLessThan(3000);
+  });
+
+  it('the drawer is a CanvasClient-level sibling AFTER </CanvasViewport>, never inside the toolbar wrapper', () => {
+    const mount = canvasClientSrc.indexOf('<KnowledgeSourceReaderDrawer');
+    expect(mount).toBeGreaterThan(-1);
+    // Outside the isolated canvas subtree, exactly like LibraryPanel.
+    expect(canvasViewportChildren).not.toContain('<KnowledgeSourceReaderDrawer');
+    expect(mount).toBeGreaterThan(canvasViewportCloseTag);
+    // And nowhere near the z-[3000] toolbar wrapper, whose stacking context
+    // would trap the drawer above the editor tier no matter what it asks for.
+    const toolbarWrapper = canvasClientSrc.indexOf('absolute left-0 bottom-0 z-[3000]');
+    const toolbarWrapperEnd = canvasClientSrc.indexOf('</div>', canvasClientSrc.indexOf('<CanvasSidebar'));
+    expect(mount < toolbarWrapper || mount > toolbarWrapperEnd).toBe(true);
+    expect(read('components/collabboard/canvas/ui/CanvasSidebar.tsx'))
+      .not.toContain('KnowledgeSourceReaderDrawer');
+  });
+});

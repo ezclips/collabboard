@@ -26,6 +26,10 @@ const gridSave = sourceOf('hooks/canvas/useGridPadletSave.ts');
 const details = sourceOf('components/collabboard/KnowledgeDocumentDetails.tsx');
 const sidebar = sourceOf('components/collabboard/canvas/ui/CanvasSidebar.tsx');
 const drawingLayout = sourceOf('components/collabboard/canvas/layouts/DrawingLayout.tsx');
+// P6J-F7-B1: the reader moved out of the sidebar into a shell-level drawer, so
+// the create-Note callback now travels CanvasClient -> drawer directly.
+const readerDrawer = sourceOf('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+const documentsList = sourceOf('components/collabboard/KnowledgeDocumentsList.tsx');
 
 /** Everything between an anchor and the next `count` characters of source. */
 function after(source: string, anchor: string, count = 900): string {
@@ -35,14 +39,39 @@ function after(source: string, anchor: string, count = 900): string {
 }
 
 describe('P6J-F5 source note wiring', () => {
+  /**
+   * P6J-F7-B1 RETIRES three presentation premises this test used to hold, and
+   * ONLY those three. Each is obsolete because the reader left the sidebar:
+   *
+   *   1. `CanvasSidebar` contains `onCreateNoteFromKnowledgePage` -- it no
+   *      longer sees the callback at all; CanvasClient hands it to the drawer.
+   *   2. The sidebar closes Knowledge via `setKnowledgeOpen(false)` BEFORE
+   *      forwarding -- F7 requires the opposite: the reader stays open, so the
+   *      source sits beside the Note being drafted from it.
+   *   3. The callback is routed specifically THROUGH `CanvasSidebar`.
+   *
+   * Everything about the durable WRITE path below is untouched, and the
+   * replacements below are inversions rather than deletions, so none of the
+   * retired behaviour can quietly return.
+   */
   it('A: routes the Knowledge page request into the ordinary Note editor', () => {
-    expect(sidebar).toContain('onCreateNoteFromKnowledgePage');
-    // The sidebar closes its own modal and forwards; it creates nothing.
-    expect(after(sidebar, 'onCreateNoteFromPage={onCreateNoteFromKnowledgePage')).toContain('setKnowledgeOpen(false)');
+    // The sidebar is out of this path entirely, and still writes nothing.
+    expect(sidebar).not.toContain('onCreateNoteFromKnowledgePage');
+    expect(sidebar).not.toContain('onCreateNoteFromPage');
     expect(sidebar).not.toContain('padlets');
     expect(sidebar).not.toContain('knowledge/references');
 
-    expect(canvasClient).toContain('onCreateNoteFromKnowledgePage={handleCreateNoteFromKnowledgePage}');
+    // F7 wiring: CanvasClient -> KnowledgeSourceReaderDrawer -> the same handler.
+    expect(canvasClient).toContain('<KnowledgeSourceReaderDrawer');
+    expect(after(canvasClient, '<KnowledgeSourceReaderDrawer', 400))
+      .toContain('onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}');
+    // The drawer forwards the callback verbatim: no wrapper, and above all no
+    // close. Closing here is precisely what F7 removed.
+    expect(readerDrawer).toContain('onCreateNoteFromPage={onCreateNoteFromPage}');
+    const forward = after(readerDrawer, 'onCreateNoteFromPage={onCreateNoteFromPage}', 120);
+    expect(forward).not.toContain('closeReader');
+    expect(readerDrawer).not.toContain('setKnowledgeOpen');
+
     const handler = after(canvasClient, 'const handleCreateNoteFromKnowledgePage', 1200);
     expect(handler).toContain('buildKnowledgeSourceNoteDraft(request)');
     expect(handler).toContain('setIsNoteEditorOpen(true)');
@@ -53,6 +82,47 @@ describe('P6J-F5 source note wiring', () => {
     // Nothing is written here.
     expect(handler).not.toContain('.insert(');
     expect(handler).not.toContain('knowledge/references');
+  });
+
+  /**
+   * P6J-F7-B1. Moving the reader must not have moved the WRITE. CanvasClient is
+   * still the only layer that may persist a source reference; every Knowledge
+   * presentation surface -- drawer, library, sidebar -- forwards and nothing
+   * more. A drawer that could POST would be a second write path, and the
+   * ordering guarantees in E and J would no longer describe the whole system.
+   */
+  it('A2: the reader surfaces forward create-Note only -- CanvasClient keeps the write', () => {
+    for (const [name, source] of [
+      ['KnowledgeSourceReaderDrawer', readerDrawer],
+      ['KnowledgeDocumentsList', documentsList],
+      ['CanvasSidebar', sidebar],
+      ['KnowledgeDocumentDetails', details],
+    ] as const) {
+      for (const forbidden of [
+        'knowledge/references',
+        'persistKnowledgeSourceReference',
+        'completeSourceReferenceForDraft',
+        'sourceReferencesByPadletId',
+        '.insert(',
+        '.upsert(',
+        'supabase',
+      ]) {
+        expect(source, `${name} must not ${forbidden}: the write is CanvasClient's`).not.toContain(forbidden);
+      }
+    }
+
+    // The drawer issues no mutating request of any kind -- it reads pages.
+    expect(readerDrawer).not.toMatch(/method:\s*'(POST|PATCH|PUT|DELETE)'/);
+    // The library's only POSTs are the prewarm and the semantic search, both
+    // reads in every sense that matters here.
+    const listPosts = documentsList.match(/method:\s*'POST'/g) ?? [];
+    expect(listPosts).toHaveLength(2);
+    expect(documentsList).toContain('/knowledge/warm`, { method: \'POST\'');
+    expect(after(documentsList, '/knowledge/search`, {', 60)).toContain("method: 'POST'");
+
+    // And the write path itself still lives in exactly one place.
+    expect((canvasClient.match(/knowledge\/references/g) ?? []).length).toBe(1);
+    expect(canvasClient).toContain('const persistKnowledgeSourceReference = useCallback(async (');
   });
 
   it('B: opens the editor with the builder title and blank content', () => {

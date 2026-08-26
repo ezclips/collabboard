@@ -98,8 +98,9 @@ import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/kn
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
 import { KnowledgeSourceReferenceProvider } from '@/components/collabboard/KnowledgeSourceReferenceContext';
-import { buildKnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
-import type { KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
@@ -1621,10 +1622,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const knowledgeSourceRequestIdRef = useRef(0);
   const [knowledgeSourceOpenRequest, setKnowledgeSourceOpenRequest] =
     useState<KnowledgeSourceOpenRequest | null>(null);
+  // P6J-F7-B1 -- the library's own open intent, kept deliberately separate from
+  // the citation request above: a library pick carries no reference at all.
+  const knowledgeDocumentRequestIdRef = useRef(0);
+  const [knowledgeDocumentOpenRequest, setKnowledgeDocumentOpenRequest] =
+    useState<KnowledgeDocumentOpenRequest | null>(null);
 
   // A request belongs to the scope that produced it. Clearing on scope change
   // is what stops an old board's source from opening inside a new one.
   useEffect(() => {
+    setKnowledgeDocumentOpenRequest(null);
     setKnowledgeSourceOpenRequest(null);
   }, [sourceReferenceScopeKey]);
 
@@ -1633,6 +1640,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     knowledgeSourceRequestIdRef.current += 1;
     setKnowledgeSourceOpenRequest(
       buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference),
+    );
+  }, [sourceReferenceScopeKey]);
+
+  /**
+   * P6J-F7-B1. The library named a document; the shell-level reader opens it.
+   * Same scope gate and same mint-a-new-id contract as the citation request, so
+   * picking the same document twice is two genuine intents rather than one
+   * already-handled one.
+   */
+  const requestKnowledgeDocumentOpen = useCallback((request: { documentId: string; pageNumber?: number }) => {
+    if (!sourceReferenceScopeKey) return;
+    knowledgeDocumentRequestIdRef.current += 1;
+    setKnowledgeDocumentOpenRequest(
+      buildKnowledgeDocumentOpenRequest(knowledgeDocumentRequestIdRef.current, request.documentId, request.pageNumber),
     );
   }, [sourceReferenceScopeKey]);
 
@@ -6765,9 +6786,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
-              onCreateNoteFromKnowledgePage={handleCreateNoteFromKnowledgePage}
-              knowledgeSourceOpenRequest={knowledgeSourceOpenRequest}
-              onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
+              onOpenKnowledgeDocument={requestKnowledgeDocumentOpen}
             />
           </div>
         )}
@@ -8822,6 +8841,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             handleChangeLineLayer={handleChangeLineLayer}
           />
         </CanvasViewport>
+
+        {/* P6J-F7-B1 Knowledge reader. A sibling here for the same reason
+            LibraryPanel is (see below), plus one of its own: CanvasSidebar sits
+            inside an `absolute ... z-[3000]` wrapper, which is a stacking
+            context, so a reader mounted there is pinned above the z-[1000]
+            editor tier no matter what z-index it asks for -- and could never
+            stay open beside a Note. Here it is in the root stacking context at
+            z-[1200]: above the editors, below the toolbar. Mounted
+            unconditionally, so collapsing the toolbar neither closes the reader
+            nor lets a stale source request replay when it comes back. */}
+        <KnowledgeSourceReaderDrawer
+          sourceOpenRequest={knowledgeSourceOpenRequest}
+          documentOpenRequest={knowledgeDocumentOpenRequest}
+          onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
+          onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
+        />
 
         {/* Library Panel. PATCH 9W.1: deliberately rendered as a sibling
             OUTSIDE CanvasViewport rather than as one of its children. Root

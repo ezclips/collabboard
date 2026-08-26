@@ -23,6 +23,8 @@ const noteEditor = sourceOf('components/collabboard/editors/NoteEditor.tsx');
 const canvasModals = sourceOf('components/collabboard/canvas/ui/CanvasModals.tsx');
 const canvasSidebar = sourceOf('components/collabboard/canvas/ui/CanvasSidebar.tsx');
 const documentsList = sourceOf('components/collabboard/KnowledgeDocumentsList.tsx');
+// P6J-F7-B1: the reader moved out of the library into a shell-level drawer.
+const readerDrawer = sourceOf('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
 const documentDetails = sourceOf('components/collabboard/KnowledgeDocumentDetails.tsx');
 const referenceContext = sourceOf('components/collabboard/KnowledgeSourceReferenceContext.tsx');
 
@@ -474,22 +476,44 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     expect(clear).toContain('}, [sourceReferenceScopeKey]);');
   });
 
-  it('K: CanvasSidebar still owns knowledgeOpen', () => {
+  it('K: CanvasSidebar still owns knowledgeOpen (library only)', () => {
     expect(canvasSidebar).toContain('const [knowledgeOpen, setKnowledgeOpen] = useState(false);');
-    // The normal trigger is untouched; the request only opens the same modal.
+    // The normal trigger is untouched.
     expect(canvasSidebar).toContain('onClick={() => setKnowledgeOpen(true)}');
-    expect(canvasSidebar).toContain('if (knowledgeSourceOpenRequest) setKnowledgeOpen(true);');
     expect(canvasClient).not.toContain('const [knowledgeOpen');
+
+    /**
+     * P6J-F7-B1 deliberately retires B2's `if (knowledgeSourceOpenRequest)
+     * setKnowledgeOpen(true);`. A Note asking for its citation must NOT pop the
+     * library open on the way to the reader, so the sidebar no longer sees the
+     * source request at all. Asserting its ABSENCE keeps the retired line from
+     * quietly coming back.
+     */
+    expect(canvasSidebar).not.toContain('setKnowledgeOpen(true);\n  }, [knowledgeSourceOpenRequest]);');
+    expect(canvasSidebar).not.toContain('knowledgeSourceOpenRequest');
+    // The library is all it still owns: no reader, no reader state, no fetch.
+    for (const forbidden of ['KnowledgeSourceReaderDrawer', 'KnowledgeDocumentDetails', 'initialSourceReferenceId', '/pages']) {
+      expect(canvasSidebar, `${forbidden} is the drawer's, not the sidebar's`).not.toContain(forbidden);
+    }
   });
 
-  it('L: the reader opens by document id, once per request id', () => {
-    // B4-B4 widened this call with the exact-arrival target; the document id
-    // and page remain the first two arguments and the latch below is untouched.
-    expect(documentsList).toContain('openDetailsByDocumentId(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
-    expect(documentsList).toContain('const known = entries.find((candidate) => candidate.id === documentId)');
-    // Handled-once latch, so a manual reopen never replays a stale request.
-    expect(documentsList).toContain('if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;');
-    expect(documentsList).not.toMatch(/find\([^)]*originalFilename/);
+  it('L: the reader opens by document id, once per request id (now the drawer)', () => {
+    // Ownership moved to KnowledgeSourceReaderDrawer; the guarantees did not.
+    // The document id and page remain the first two arguments.
+    expect(readerDrawer).toContain('openDocumentById(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
+    // Handled-once latch, so closing the reader never replays a stale request.
+    expect(readerDrawer).toContain('if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;');
+    // The library's own pick gets the same once-per-request contract.
+    expect(readerDrawer).toContain('if (handledDocumentRequestRef.current === documentOpenRequest.requestId) return;');
+    // Identity is the id. A filename-keyed lookup would open the wrong one of
+    // two same-named sources -- forbidden on BOTH sides of the split.
+    for (const source of [readerDrawer, documentsList]) {
+      expect(source).not.toMatch(/find\([^)]*originalFilename/);
+      expect(source).not.toMatch(/filter\([^)]*originalFilename/);
+    }
+    // And the library no longer opens anything itself.
+    expect(documentsList).not.toContain('sourceOpenRequest');
+    expect(documentsList).not.toContain('KnowledgeDocumentDetails');
   });
 
   /**
@@ -501,13 +525,13 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
    * on, and would honour a citation the resolver refuses.
    */
   it('M: the reader receives the page and the citing row id, and no coordinate', () => {
-    expect(documentsList).toContain('initialPageNumber={details.initialPageNumber}');
+    expect(readerDrawer).toContain('initialPageNumber={reader.initialPageNumber}');
     expect(documentDetails).toContain('initialPageNumber?: number;');
     expect(documentDetails).toContain('data-page-number={page.pageNumber}');
 
     // The hint is forwarded, and it is a row id plus the repeat-intent id.
-    expect(documentsList).toContain('initialSourceReferenceId={details.sourceTarget?.referenceId}');
-    expect(documentsList).toContain('initialSourceRequestId={details.sourceTarget?.requestId}');
+    expect(readerDrawer).toContain('initialSourceReferenceId={reader.sourceTarget?.referenceId}');
+    expect(readerDrawer).toContain('initialSourceRequestId={reader.sourceTarget?.requestId}');
     expect(documentDetails).toContain('initialSourceReferenceId?: string;');
     expect(documentDetails).toContain('initialSourceRequestId?: number;');
 
@@ -516,6 +540,17 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     const request = after(navigation, 'export interface KnowledgeSourceOpenRequest {', 320);
     expect(Array.from(request.matchAll(/readonly (\w+)/g)).map((match) => match[1]))
       .toEqual(['requestId', 'sourceDocumentId', 'sourceReferenceId', 'pageStart', 'pageEnd']);
+
+    /**
+     * P6J-F7-B1's library request is a SEPARATE type, and it must stay poorer
+     * than the citation request above: a document and, at most, a page. If it
+     * ever grew a reference id or an offset it would become a second, unresolved
+     * navigation authority -- exactly what keeping the two apart prevents.
+     */
+    const documentRequest = after(navigation, 'export interface KnowledgeDocumentOpenRequest {', 200);
+    expect(Array.from(documentRequest.matchAll(/readonly (\w+)/g)).map((match) => match[1]))
+      .toEqual(['requestId', 'sourceDocumentId', 'pageNumber']);
+    expect(documentRequest).not.toContain('sourceReferenceId');
     for (const forbidden of ['charStart', 'charEnd', 'quoteText', 'quoteHash', 'locator', 'bbox', 'targetPadletId']) {
       expect(navigation, `${forbidden} is navigation authority, not a hint`).not.toContain(forbidden);
     }
@@ -601,8 +636,10 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
         expect(source).not.toContain(forbidden);
       }
     }
-    // The reader still speaks only to the endpoints it already used.
-    expect((documentsList.match(/fetch\(/g) ?? []).length).toBe(4);
+    // The two surfaces together still speak only to the endpoints they already
+    // used: the library keeps list/warm/search, the drawer takes /pages.
+    expect((documentsList.match(/fetch\(/g) ?? []).length).toBe(3);
+    expect((readerDrawer.match(/fetch\(/g) ?? []).length).toBe(1);
   });
 });
 
@@ -649,7 +686,7 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
   });
 
   it('K2: no document-keyed or page-keyed server capability was introduced', () => {
-    for (const source of [canvasClient, documentsList, documentDetails, referenceContext, backlinks]) {
+    for (const source of [canvasClient, documentsList, readerDrawer, documentDetails, referenceContext, backlinks]) {
       for (const forbidden of [
         'listReferencesBySourceDocumentId',
         'listReferencesByDocument',
@@ -661,8 +698,9 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
         expect(source).not.toContain(forbidden);
       }
     }
-    // The reader's endpoint count is unchanged from B2.
-    expect((documentsList.match(/fetch\(/g) ?? []).length).toBe(4);
+    // The endpoint count is unchanged from B2 -- F7 split it across the two
+    // surfaces without adding one.
+    expect((documentsList.match(/fetch\(/g) ?? []).length + (readerDrawer.match(/fetch\(/g) ?? []).length).toBe(4);
     // And the reader still performs no read of its own for backlinks.
     expect(documentDetails).not.toContain('fetch(');
     expect(documentDetails).toContain('useKnowledgeSourceBacklinksForDocument(documentId)');
@@ -715,7 +753,7 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
   it('L2: only CanvasClient resolves a backlink target; every other layer forwards it', () => {
     // The reader emits an id, the list closes and forwards, the context and the
     // domain helper stay out of it entirely. None of them may navigate.
-    for (const source of [documentDetails, documentsList, referenceContext, backlinks]) {
+    for (const source of [documentDetails, documentsList, readerDrawer, referenceContext, backlinks]) {
       for (const forbidden of [
         'setSelectedPadletId',
         'openPadletInTypeEditor',
@@ -728,23 +766,35 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
       }
     }
 
-    // The list closes Knowledge BEFORE handing the target on: the reader is a
-    // modal over the board, so the Note must not open behind it.
-    const forward = after(documentsList, 'onOpenBacklinkTarget={onOpenBacklinkTarget', 400);
-    expect(forward.indexOf('closeSurface();'), 'closeSurface() missing from the forward')
-      .toBeGreaterThanOrEqual(0);
-    expect(forward.indexOf('closeSurface();'))
-      .toBeLessThan(forward.indexOf('onOpenBacklinkTarget(targetPadletId);'));
+    /**
+     * P6J-F7-B1 RETIRES B3N's close-before-forward ordering. Its premise --
+     * "the reader is a modal over the board, so the Note must not open behind
+     * it" -- is precisely what F7 removed: the drawer sits at z-[1200], above
+     * the z-[1000] editor tier, so the Note opens BESIDE it. The replacement
+     * below is the inverse assertion, so the retired behaviour cannot creep
+     * back in unnoticed.
+     */
+    const forward = after(readerDrawer, 'onOpenBacklinkTarget={onOpenBacklinkTarget}', 200);
+    expect(forward).not.toContain('closeReader');
+    expect(readerDrawer, 'the drawer must forward the target verbatim, not wrap it')
+      .toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
+    // The z-band is the whole reason the reader may now stay open.
+    expect(readerDrawer).toContain('z-[1200]');
+    expect(canvasClient).toContain('absolute left-0 bottom-0 z-[3000]');
 
-    // CanvasSidebar is plumbing: it forwards the callback and owns nothing.
-    expect(canvasSidebar).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
+    // CanvasSidebar is out of this path entirely now: it neither forwards the
+    // target nor knows the reader exists.
     for (const forbidden of [
       'padlets.find', 'setSelectedPadletId', 'openPadletInTypeEditor', 'useState<string',
+      'onOpenBacklinkTarget',
     ]) {
       expect(canvasSidebar, `CanvasSidebar must not ${forbidden}`).not.toContain(forbidden);
     }
     // And it still renders none of the backlink UI itself.
     expect(canvasSidebar).not.toContain('UsedInNotes');
+
+    // CanvasClient is still the one and only navigation authority.
+    expect(canvasClient).toContain('onOpenBacklinkTarget={openKnowledgeBacklinkTarget}');
   });
 
   // B3N's navigation handler: the four things that make the click safe.
@@ -772,10 +822,20 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
     }
   });
 
-  it('L3: only the reader renders the backlink UI', () => {
+  it('L3: only the reader renders the backlink UI, and only the drawer hosts the reader', () => {
     expect(documentDetails).toContain('Used in Notes');
-    for (const source of [canvasClient, noteEditor, documentsList, canvasModals, canvasSidebar, postCardContent]) {
+    for (const source of [canvasClient, noteEditor, documentsList, readerDrawer, canvasModals, canvasSidebar, postCardContent]) {
       expect(source).not.toContain('Used in Notes');
+    }
+
+    /**
+     * P6J-F7-B1. Exactly one component may host KnowledgeDocumentDetails. Two
+     * hosts would mean two detail-rendering paths, which is how a canonical
+     * text root quietly diverges between surfaces.
+     */
+    expect(readerDrawer).toContain('<KnowledgeDocumentDetails');
+    for (const source of [canvasClient, noteEditor, documentsList, canvasModals, canvasSidebar, postCardContent]) {
+      expect(source, 'KnowledgeDocumentDetails has exactly one host').not.toContain('KnowledgeDocumentDetails');
     }
   });
 

@@ -77,3 +77,33 @@ export function buildKnowledgeSourceOpenRequest(
     pageEnd: reference.pageEnd,
   };
 }
+
+/**
+ * P6J-F7-B1. One request to open a document in the reader from the LIBRARY.
+ *
+ * Deliberately a SEPARATE type rather than a widened source request. A library
+ * pick carries no citation at all, so folding it into the request above would
+ * have meant a nullable `sourceReferenceId` sitting inside the exact-span hint
+ * contract -- an optional field that every future reader of that type would
+ * then have to reason about. Two intents, two shapes, one reader.
+ *
+ * `pageNumber` is a semantic result's own starting page and nothing finer. It
+ * is display navigation, not provenance: no citation, no offsets, no quote, no
+ * geometry. Anything exact still arrives only through the request above.
+ */
+export interface KnowledgeDocumentOpenRequest {
+  readonly requestId: number;
+  readonly sourceDocumentId: string;
+  readonly pageNumber?: number;
+}
+
+/** Builds a library open request. Pure: the caller owns the id. */
+export function buildKnowledgeDocumentOpenRequest(
+  requestId: number,
+  sourceDocumentId: string,
+  pageNumber?: number,
+): KnowledgeDocumentOpenRequest {
+  return pageNumber === undefined
+    ? { requestId, sourceDocumentId }
+    : { requestId, sourceDocumentId, pageNumber };
+}
