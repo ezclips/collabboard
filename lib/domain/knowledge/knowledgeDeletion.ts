@@ -4,10 +4,19 @@ import type { DomainError } from '../core/errors';
 import type { Result } from '../core/result';
 import { err, ok } from '../core/result';
 import type { KnowledgeStorageGateway } from './knowledgeIngestion';
+import { knowledgePageDerivativePaths } from './knowledgePdfRenderPolicy';
 
 export interface KnowledgeArtifactPaths {
   readonly storagePath: string;
   readonly rawArtifactPath: string | null;
+  /**
+   * P6J-F9-A0. Identity and page count are captured so the deterministic page
+   * derivatives can be enumerated at cleanup time. No Storage listing is
+   * involved: the paths are derivable, so nothing has to be discovered.
+   */
+  readonly boardId: BoardId;
+  readonly documentId: KnowledgeDocumentId;
+  readonly pageCount: number | null;
 }
 
 export interface KnowledgeStorageCleanupFailure {
@@ -64,8 +73,14 @@ export async function cleanupKnowledgeArtifacts(
 ): Promise<KnowledgeStorageCleanup> {
   const attemptedPaths = [
     ...new Set(
-      artifacts.flatMap(({ storagePath, rawArtifactPath }) =>
-        [storagePath, rawArtifactPath].filter((path): path is string => Boolean(path)),
+      artifacts.flatMap(({ storagePath, rawArtifactPath, boardId, documentId, pageCount }) =>
+        [
+          storagePath,
+          rawArtifactPath,
+          // Additive and deduplicated by the same Set: an absent page count
+          // contributes nothing rather than a guessed range.
+          ...knowledgePageDerivativePaths(boardId, documentId, pageCount),
+        ].filter((path): path is string => Boolean(path)),
       ),
     ),
   ];

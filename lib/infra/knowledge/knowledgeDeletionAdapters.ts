@@ -20,27 +20,25 @@ interface SupabaseErrorLike {
   readonly message?: string;
 }
 
-interface KnowledgeDocumentArtifactRow {
+/**
+ * P6J-F9-A0: both deletion reads now capture the same columns -- identity and
+ * page count alongside the two artifact paths -- so one row shape serves both.
+ */
+interface KnowledgeArtifactRow {
+  readonly id: string;
   readonly board_id: string;
   readonly storage_path: string;
   readonly raw_artifact_path: string | null;
+  readonly page_count: number | null;
 }
 
-interface KnowledgeArtifactRow {
-  readonly storage_path: string;
-  readonly raw_artifact_path: string | null;
-}
-
-interface KnowledgeSingleQuery {
-  eq(column: string, value: string): KnowledgeSingleQuery;
+/** One builder: the caller chooses maybeSingle() for a row or awaits for many. */
+interface KnowledgeArtifactQuery {
+  eq(column: string, value: string): KnowledgeArtifactQuery;
   maybeSingle(): Promise<{
-    data: KnowledgeDocumentArtifactRow | null;
+    data: KnowledgeArtifactRow | null;
     error: SupabaseErrorLike | null;
   }>;
-}
-
-interface KnowledgeListQuery {
-  eq(column: string, value: string): KnowledgeListQuery;
   then<TResult1 = { data: KnowledgeArtifactRow[] | null; error: SupabaseErrorLike | null }>(
     onfulfilled?:
       | ((
@@ -53,14 +51,13 @@ interface KnowledgeListQuery {
 
 interface KnowledgeDocumentDeleteQuery {
   eq(column: string, value: string): KnowledgeDocumentDeleteQuery;
-  select(columns: string): KnowledgeSingleQuery;
+  select(columns: string): KnowledgeArtifactQuery;
 }
 
 interface KnowledgeDocumentsTable {
   select(
-    columns: 'board_id, storage_path, raw_artifact_path',
-  ): KnowledgeSingleQuery;
-  select(columns: 'storage_path, raw_artifact_path'): KnowledgeListQuery;
+    columns: 'id, board_id, storage_path, raw_artifact_path, page_count',
+  ): KnowledgeArtifactQuery;
   delete(): KnowledgeDocumentDeleteQuery;
 }
 
@@ -102,15 +99,17 @@ export class SupabaseKnowledgeDeletionRepository
     try {
       const { data, error } = await this.client
         .from('knowledge_documents')
-        .select('board_id, storage_path, raw_artifact_path')
+        .select('id, board_id, storage_path, raw_artifact_path, page_count')
         .eq('id', id)
         .maybeSingle();
       if (error) return unavailable('Could not load the Knowledge document', error);
       if (!data) return ok(null);
       return ok({
         boardId: data.board_id as BoardId,
+        documentId: data.id as KnowledgeDocumentId,
         storagePath: data.storage_path,
         rawArtifactPath: data.raw_artifact_path,
+        pageCount: data.page_count,
       });
     } catch (cause: unknown) {
       return unavailable('Could not load the Knowledge document', cause);
@@ -138,13 +137,16 @@ export class SupabaseKnowledgeDeletionRepository
     try {
       const { data, error } = await this.client
         .from('knowledge_documents')
-        .select('storage_path, raw_artifact_path')
+        .select('id, board_id, storage_path, raw_artifact_path, page_count')
         .eq('board_id', boardId);
       if (error) return unavailable('Could not capture board Knowledge artifacts', error);
       return ok(
         (data ?? []).map((row) => ({
+          boardId: row.board_id as BoardId,
+          documentId: row.id as KnowledgeDocumentId,
           storagePath: row.storage_path,
           rawArtifactPath: row.raw_artifact_path,
+          pageCount: row.page_count,
         })),
       );
     } catch (cause: unknown) {

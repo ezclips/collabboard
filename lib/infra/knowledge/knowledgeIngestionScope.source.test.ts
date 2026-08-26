@@ -127,3 +127,41 @@ describe('P4 scope -- deletion lifecycle is deferred, but ingestion cleans up af
     expect(domain).toContain('await deps.storage.remove(storagePath);');
   });
 });
+
+describe('P6J-F9-A0 scope -- derivative policy is pure, and renders nothing', () => {
+  const policy = read('lib/domain/knowledge/knowledgePdfRenderPolicy.ts');
+
+  it('carries no renderer, no data layer, no framework, and writes nothing', () => {
+    for (const forbidden of [
+      'pdfjs-dist', 'pdfjs', 'canvas', '@napi-rs', 'sharp', 'fetch(', '@supabase',
+      'react', 'child_process', 'process.env',
+      'upload(', '.insert(', '.update(', '.remove(', '.from(',
+    ]) {
+      expect(codeOnly(policy), `the policy module must not contain ${forbidden}`)
+        .not.toContain(forbidden);
+    }
+  });
+
+  it('pins the PM-locked limits as constants and keeps the path scoped', () => {
+    expect(policy).toContain('KNOWLEDGE_DERIVATIVE_MAX_SOURCE_BYTES = 52_428_800');
+    expect(policy).toContain('KNOWLEDGE_DERIVATIVE_MAX_PAGES = 200');
+    expect(policy).toContain('`knowledge/${boardId}/${documentId}/pages/${pageNumber}');
+  });
+
+  it('deletion enumerates derivatives without any Storage listing API', () => {
+    const deletion = read('lib/domain/knowledge/knowledgeDeletion.ts');
+    expect(deletion).toContain('knowledgePageDerivativePaths');
+    // The gateway is upload/remove only; discovering objects is not available
+    // and must not be introduced to make cleanup work.
+    for (const forbidden of ['.list(', 'listObjects', 'prefix']) {
+      expect(codeOnly(deletion), `deletion must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('A0 adds no Storage write anywhere in the ingestion path', () => {
+    // The renderer arrives in F9-A1; nothing in A0 may produce a derivative.
+    const worker = read('workers/knowledge-pdf/processKnowledgePdfDocument.ts');
+    expect(worker).not.toContain('pages/');
+    expect(worker).not.toContain('webp');
+  });
+});
