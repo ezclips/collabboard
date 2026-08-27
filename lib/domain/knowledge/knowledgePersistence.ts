@@ -96,11 +96,11 @@ export interface SourceReference {
    * different coordinate system, and mixing them would create a second
    * geometry authority. Null for page-only and exact-span references.
    *
-   * Optional, not required: `parseKnowledgeSourceReference` builds this shape
-   * from an API payload and does not carry the region yet, so absent and null
-   * mean the same thing -- no region is available on this reference.
+   * REQUIRED as of P6J-F9-B2: every construction site states the answer, so a
+   * reference that silently lost its region is a compile error rather than an
+   * absent field that reads exactly like a page-only citation.
    */
-  readonly region?: NormalizedPageRegion | null;
+  readonly region: NormalizedPageRegion | null;
   readonly locator: KnowledgeSourceLocator | null;
   readonly createdAt: string;
 }

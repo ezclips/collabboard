@@ -136,6 +136,8 @@ describe('knowledge source clip payload', () => {
       charStart: 4,
       charEnd: 10,
       selectedText: 'safety',
+      region: null,
+      appliedRotation: null,
     });
   });
 

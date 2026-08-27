@@ -185,12 +185,12 @@ describe('P6J-F5 source note wiring', () => {
     expect(helper).not.toContain('supabase');
   });
 
-  it('G: sends exactly the eight client-owned body fields', () => {
-    // B4-B2B: the char offsets and the selected text became client input, so
-    // the window is three fields longer than the F5 body it started as.
-    const body = after(canvasClient, 'body: JSON.stringify({', 640);
+  it('C5/C6/G: sends exactly the ten client-owned body fields', () => {
+    // B4-B2B added the char offsets and the selected text; F9-B2 added the
+    // rectangle and the rotation it was transformed with.
+    const body = after(canvasClient, 'body: JSON.stringify({', 800);
     for (const allowed of ['targetPadletId', 'sourceDocumentId', 'pageStart', 'pageEnd', 'quoteText',
-      'charStart', 'charEnd', 'selectedText']) {
+      'charStart', 'charEnd', 'selectedText', 'region', 'appliedRotation']) {
       expect(body, allowed).toContain(allowed);
     }
     // Identity, the hash and the locator remain server-owned and unreachable.
@@ -199,6 +199,48 @@ describe('P6J-F5 source note wiring', () => {
     // assertion is what pins id and createdAt out of the command input.
     for (const forbidden of ['boardId', 'userId', 'quoteHash', 'locator', 'createdAt']) {
       expect(body, forbidden).not.toContain(forbidden);
+    }
+    // C5: the rectangle is forwarded from the draft, never rebuilt or measured
+    // here, and no page or image dimension travels beside it.
+    expect(body).toContain('region: sourceReference.region');
+    expect(body).toContain('appliedRotation: sourceReference.appliedRotation');
+    for (const forbidden of ['naturalWidth', 'naturalHeight', 'widthPoints', 'heightPoints',
+      'clientWidth', 'getBoundingClientRect', 'storagePath', 'bucket', '.webp']) {
+      expect(body, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  /**
+   * P6J-F9-B2. A region Note is an ordinary source Note: it must reach the
+   * SAME builder, the SAME route and the SAME ordering, or B2 has quietly
+   * grown a second write path that nothing else in this suite guards.
+   */
+  it('C7/C9/C10: a region uses the one Note writer and the one reference writer', () => {
+    // C9: two entry points -- the F8 clip drop and the page/region request --
+    // and both reach the ONE builder. The region adds no third.
+    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(2);
+    // Nothing hand-builds provenance: the only value ever stashed is a draft's.
+    expect(canvasClient.match(/setSourceNoteReference\((?!null\))/g) ?? []).toHaveLength(1);
+    expect(canvasClient).toContain('setSourceNoteReference(draft.sourceReference)');
+    // C10: one POST to the references route, in one helper.
+    expect(canvasClient.match(/knowledge\/references/g) ?? []).toHaveLength(1);
+    expect(canvasClient.match(/const persistKnowledgeSourceReference/g) ?? []).toHaveLength(1);
+    // C7: the reference is still written from the completion helpers, which run
+    // only once a real padlet id exists -- never from the request handler.
+    const handler = after(canvasClient, 'const handleCreateNoteFromKnowledgePage', 700);
+    expect(handler).toContain('buildKnowledgeSourceNoteDraft(request)');
+    expect(handler).toContain('setSourceNoteReference(draft.sourceReference)');
+    expect(handler).not.toContain('persistKnowledgeSourceReference');
+  });
+
+  it('C8: the reader adds no second failure channel for regions', () => {
+    // The confirm control calls the existing callback and returns; the reference
+    // outcome is reported exactly where every other mode reports it.
+    const confirm = after(details, 'Create Note from area', 200);
+    expect(confirm).not.toContain('fetch(');
+    expect(confirm).not.toContain('toast');
+    for (const forbidden of ['fetch(', 'supabase', 'knowledge/references']) {
+      expect(details, `details:${forbidden}`).not.toContain(forbidden);
     }
   });
 
@@ -361,13 +403,15 @@ describe('P6J-F5 source note wiring', () => {
 
       expect(roundTripped.sourceReference).toEqual(draft);
       expect(roundTripped.sourceReference.quoteText).toBe('  spaced\r\nquote  ');
-      // Widened at B4-B2B. Still an EXACT key set: a page-only draft carries
-      // the three span fields as explicit nulls, which survive the JSON round
-      // trip, and nothing server-owned ever joins them.
+      // Widened at B4-B2B and again at F9-B2. Still an EXACT key set: a
+      // page-only draft carries the span AND region fields as explicit nulls,
+      // which survive the JSON round trip, and nothing server-owned joins them.
       expect(Object.keys(roundTripped.sourceReference).sort()).toEqual([
-        'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText', 'selectedText', 'sourceDocumentId',
+        'appliedRotation', 'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText',
+        'region', 'selectedText', 'sourceDocumentId',
       ]);
-      expect(roundTripped.sourceReference).toMatchObject({ charStart: null, charEnd: null, selectedText: null });
+      expect(roundTripped.sourceReference).toMatchObject({
+        charStart: null, charEnd: null, selectedText: null, region: null, appliedRotation: null });
     });
 
     it('isolates three drafts with no shared carrier between them', () => {

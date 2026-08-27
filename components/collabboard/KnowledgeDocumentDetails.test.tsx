@@ -1927,6 +1927,26 @@ describe('P6J-F9-A2b: page image integration', () => {
     }
   });
 
+  /**
+   * P6J-F9-B2. Region selection needs to measure the DOM, and the guard above
+   * says the reader and the image component are not where that may happen. One
+   * wrapper owns it, and the frozen image component gained nothing at all.
+   */
+  it('B2: DOM measurement lives only in the region selector', () => {
+    const selector = fs.readFileSync(path.join(process.cwd(),
+      'components/collabboard/KnowledgeDocumentPageRegionSelector.tsx'), 'utf8');
+    expect(selector).toContain('getBoundingClientRect');
+    expect(selector).toContain('KnowledgeDocumentPageImage');
+
+    const image = fs.readFileSync(path.join(process.cwd(),
+      'components/collabboard/KnowledgeDocumentPageImage.tsx'), 'utf8');
+    // The image component owns no interaction: the wrapper reads its load and
+    // error events through React's own propagation instead of a new prop.
+    for (const forbidden of ['onPointer', 'pointerdown', 'setPointerCapture', 'region', 'imageRef']) {
+      expect(image, `the image component must not mention ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
   it('R9/R10/R11: the reader gains no Storage, PDF.js or rotation behaviour', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8');

@@ -89,7 +89,8 @@ describe('P6J-F5 knowledge source note draft', () => {
     // Char offsets and their selected text became client input at B4-B2A; the
     // hash, the locator and every identity field remain server-owned.
     expect(Object.keys(sourceReference).sort()).toEqual([
-      'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText', 'selectedText', 'sourceDocumentId',
+      'appliedRotation', 'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText',
+      'region', 'selectedText', 'sourceDocumentId',
     ]);
     for (const forbidden of ['quoteHash', 'locator', 'id', 'createdAt', 'boardId', 'userId']) {
       expect(sourceReference, forbidden).not.toHaveProperty(forbidden);
@@ -143,6 +144,9 @@ describe('P6J-F6-B4-B2B exact selection drafts', () => {
       charStart: 10,
       charEnd: 15,
       selectedText: 'alpha',
+      // A text span is not a region, and says so rather than leaving it absent.
+      region: null,
+      appliedRotation: null,
     });
     // The offsets index the page the reader measured against.
     expect(PAGE.slice(sourceReference.charStart!, sourceReference.charEnd!)).toBe(sourceReference.selectedText);
@@ -182,7 +186,8 @@ describe('P6J-F6-B4-B2B exact selection drafts', () => {
         expect(sourceReference, forbidden).not.toHaveProperty(forbidden);
       }
       expect(Object.keys(sourceReference).sort()).toEqual([
-        'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText', 'selectedText', 'sourceDocumentId',
+        'appliedRotation', 'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText',
+        'region', 'selectedText', 'sourceDocumentId',
       ]);
     }
   });
@@ -208,6 +213,81 @@ describe('P6J-F6-B4-B2B exact selection drafts', () => {
       expect(sourceReference.selectedText, JSON.stringify(selectedText)).toBe(selectedText);
       // Still exactly what those coordinates address in the page.
       expect(pageText.slice(sourceReference.charStart!, sourceReference.charEnd!)).toBe(selectedText);
+    }
+  });
+});
+
+/**
+ * P6J-F9-B2. The third draft shape. A region cites a place on a page, so it
+ * carries a rectangle and no text evidence of any kind -- F9 reads none.
+ */
+describe('P6J-F9-B2 page region note draft', () => {
+  const REGION = { x: 0.25, y: 0.1, width: 0.5, height: 0.4 };
+  const regionRequest = (overrides: Partial<KnowledgeSourcePageRequest> = {}) =>
+    request({ region: { region: REGION, appliedRotation: 90 }, ...overrides });
+
+  it('C1/C2: titles the Note after the document and leaves the body blank', () => {
+    const draft = buildKnowledgeSourceNoteDraft(regionRequest());
+    expect(draft.title).toBe('quarterly-report.pdf');
+    expect(draft.content).toBe('');
+  });
+
+  it('falls back to a usable title when the document has no filename', () => {
+    expect(buildKnowledgeSourceNoteDraft(regionRequest({ originalFilename: '' })).title).toBe('New Note');
+  });
+
+  it('C3/C4: carries the rectangle and its rotation, and no text evidence', () => {
+    const { sourceReference } = buildKnowledgeSourceNoteDraft(regionRequest());
+    expect(sourceReference).toEqual({
+      sourceDocumentId: DOCUMENT_ID,
+      pageStart: 4,
+      pageEnd: 4,
+      quoteText: null,
+      charStart: null,
+      charEnd: null,
+      selectedText: null,
+      region: REGION,
+      appliedRotation: 90,
+    });
+  });
+
+  it('never snapshots the page text, however much of it arrives', () => {
+    // The page-only branch would have quoted this whole string.
+    const { sourceReference } = buildKnowledgeSourceNoteDraft(
+      regionRequest({ pageText: 'The margin improved by six points.' }));
+    expect(sourceReference.quoteText).toBeNull();
+  });
+
+  it.each([0, 90, 180, 270] as const)('forwards rotation %s unchanged', (appliedRotation) => {
+    const { sourceReference } = buildKnowledgeSourceNoteDraft(
+      request({ region: { region: REGION, appliedRotation } }));
+    expect(sourceReference.appliedRotation).toBe(appliedRotation);
+  });
+
+  it('a text span outranks a region, so a pre-B2 payload cannot change shape', () => {
+    // Unreachable from the reader, which builds one or the other. If it ever
+    // happened, the older locator wins and the region is not smuggled along.
+    const { sourceReference } = buildKnowledgeSourceNoteDraft(regionRequest({
+      selection: { charStart: 2, charEnd: 6, selectedText: 'marg' },
+    }));
+    expect(sourceReference).toMatchObject({
+      charStart: 2, charEnd: 6, selectedText: 'marg', region: null, appliedRotation: null,
+    });
+  });
+
+  it.each([
+    ['a page-only draft', {}],
+    ['an exact span', { selection: { charStart: 2, charEnd: 6, selectedText: 'marg' } }],
+  ])('%s still states that it has no region', (_label, overrides) => {
+    const { sourceReference } = buildKnowledgeSourceNoteDraft(request(overrides));
+    expect(sourceReference.region).toBeNull();
+    expect(sourceReference.appliedRotation).toBeNull();
+  });
+
+  it('C12: no image, Storage or crop data reaches the draft', () => {
+    const serialized = JSON.stringify(buildKnowledgeSourceNoteDraft(regionRequest()));
+    for (const leaked of ['webp', 'storage', 'bucket', 'signed', 'natural', 'base64', 'dataurl']) {
+      expect(serialized.toLowerCase(), leaked).not.toContain(leaked);
     }
   });
 });

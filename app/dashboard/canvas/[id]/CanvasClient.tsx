@@ -1687,7 +1687,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const response = await fetch(`/api/boards/${encodeURIComponent(canvasId)}/knowledge/references`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Exactly the eight client-owned fields. Board and user identity are
+        // Exactly the ten client-owned fields. Board and user identity are
         // the route's to decide, quoteHash is computed server-side, and the
         // locator stays unwritable. A page-only draft sends the three span
         // fields as explicit nulls, which is what selects that server mode.
@@ -1702,6 +1702,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           // Verification evidence: the server compares it against its own page
           // slice and stores its own text, never this string.
           selectedText: sourceReference.selectedText,
+          // P6J-F9-B2. Already the page's intrinsic unrotated rectangle; the
+          // rotation beside it is verification evidence like selectedText and
+          // is never stored. No dimensions, no Storage path, no image.
+          region: sourceReference.region,
+          appliedRotation: sourceReference.appliedRotation,
         }),
       });
       if (!response.ok) throw new Error(`source reference rejected with ${response.status}`);

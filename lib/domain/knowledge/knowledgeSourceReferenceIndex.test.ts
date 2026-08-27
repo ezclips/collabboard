@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX,
@@ -24,6 +26,7 @@ function reference(overrides: Omit<Partial<SourceReference>, 'id'> & { id: strin
     quoteHash: 'hash-1',
     charStart: null,
     charEnd: null,
+    region: null,
     locator: null,
     createdAt: '2026-08-24T00:00:00.000Z',
     ...overrides,
@@ -217,7 +220,8 @@ describe('P6J-F6 knowledge source reference index', () => {
     };
 
     it('accepts the reference the write route returns', () => {
-      expect(parseKnowledgeSourceReference(body)).toEqual({ ...body, id: 'reference-1' });
+      // I1: a page-only body carries no rectangle, and says so explicitly.
+      expect(parseKnowledgeSourceReference(body)).toEqual({ ...body, id: 'reference-1', region: null });
     });
 
     it('rejects payloads missing an identifying field', () => {
@@ -265,6 +269,66 @@ describe('P6J-F6 knowledge source reference index', () => {
       ['a valid span', { pageStart: 3, pageEnd: 5 }],
     ])('accepts %s', (_label, pages) => {
       expect(parseKnowledgeSourceReference({ ...body, ...pages })).toMatchObject(pages);
+    });
+
+    /**
+     * P6J-F9-B2. The region reaches the client index through the SAME validator
+     * the write path uses. Anything that is not a whole, in-bounds rectangle
+     * degrades to no region: a citation still points at its page, which is more
+     * useful than refusing the whole reference over optional geometry.
+     */
+    describe('P6J-F9-B2 region propagation', () => {
+      const REGION = { x: 0.25, y: 0.1, width: 0.5, height: 0.4 };
+
+      it('I3: carries a valid rectangle through', () => {
+        expect(parseKnowledgeSourceReference({ ...body, region: REGION })?.region).toEqual(REGION);
+      });
+
+      it('I2: an exact span carries no region', () => {
+        const parsed = parseKnowledgeSourceReference({ ...body, charStart: 4, charEnd: 9 });
+        expect(parsed).toMatchObject({ charStart: 4, charEnd: 9, region: null });
+      });
+
+      it.each([
+        ['I4 a partial rectangle', { x: 0.25, y: 0.1, width: 0.5 }],
+        ['I4 an empty object', {}],
+        ['I5 a NaN edge', { ...REGION, x: Number.NaN }],
+        ['I5 an infinite width', { ...REGION, width: Number.POSITIVE_INFINITY }],
+        ['I5 string members', { x: '0.25', y: '0.1', width: '0.5', height: '0.4' }],
+        ['a zero width', { ...REGION, width: 0 }],
+        ['a negative origin', { ...REGION, x: -0.1 }],
+        ['a rectangle past the page edge', { ...REGION, x: 0.7, width: 0.5 }],
+        ['an array', [0.25, 0.1, 0.5, 0.4]],
+        ['a number', 4],
+        ['a string', '0.25'],
+      ])('%s fails closed to no region, keeping the citation', (_label, region) => {
+        const parsed = parseKnowledgeSourceReference({ ...body, region });
+        expect(parsed).not.toBeNull();
+        expect(parsed!.region).toBeNull();
+      });
+
+      it('trims only the float overhang an edge selection produces', () => {
+        const edge = { x: 0.5, y: 0.5, width: 0.5 + 1e-12, height: 0.5 };
+        const parsed = parseKnowledgeSourceReference({ ...body, region: edge });
+        expect(parsed!.region!.x + parsed!.region!.width).toBeLessThanOrEqual(1);
+        expect(parsed!.region!.width).toBeCloseTo(0.5, 9);
+      });
+
+      it('I6: the domain shape REQUIRES region, so no site can silently omit it', () => {
+        const source = fs.readFileSync(
+          path.join(process.cwd(), 'lib/domain/knowledge/knowledgePersistence.ts'), 'utf8');
+        // Several test factories cast their way to a SourceReference, so the
+        // compiler alone would not notice this loosening again.
+        expect(source).toContain('readonly region: NormalizedPageRegion | null;');
+        expect(source).not.toContain('readonly region?:');
+      });
+
+      it('I6: the parser validates rather than casting the payload through', () => {
+        const source = fs.readFileSync(
+          path.join(process.cwd(), 'lib/domain/knowledge/knowledgeSourceReferenceIndex.ts'), 'utf8');
+        expect(source).toContain('normalizeStorableRegion(record.region)');
+        expect(source).not.toMatch(/record\.region as/);
+      });
     });
   });
 });

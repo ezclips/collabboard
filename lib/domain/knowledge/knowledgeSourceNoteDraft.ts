@@ -1,4 +1,19 @@
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from './knowledgeSourceReferenceWrite';
+import type {
+  KnowledgePageRotation,
+  NormalizedPageRegion,
+} from './knowledgePageRegionGeometry';
+
+/**
+ * P6J-F9-B2. One visual rectangle on ONE page, already transformed into the
+ * page's INTRINSIC UNROTATED system by the reader. `appliedRotation` is the
+ * rotation that transform used -- verification evidence the server compares
+ * against its stored page, as `selectedText` is, and like it never persisted.
+ */
+export interface KnowledgeSourcePageRegionSelection {
+  readonly region: NormalizedPageRegion;
+  readonly appliedRotation: KnowledgePageRotation;
+}
 
 /**
  * P6J-F5: one Knowledge source page, as the reader surface sees it. Deliberately
@@ -30,6 +45,8 @@ export interface KnowledgeSourcePageRequest {
    * the page-only behaviour every pre-B4 caller already has.
    */
   readonly selection?: KnowledgeSourceTextSelection | null;
+  /** A visual region instead of a text span; mutually exclusive with `selection`. */
+  readonly region?: KnowledgeSourcePageRegionSelection | null;
 }
 
 /**
@@ -45,6 +62,10 @@ export interface KnowledgeSourceReferenceDraft {
   readonly charStart: number | null;
   readonly charEnd: number | null;
   readonly selectedText: string | null;
+  /** P6J-F9-B2 source/unrotated rectangle; null for page-only and exact spans. */
+  readonly region: NormalizedPageRegion | null;
+  /** Verification only; null whenever `region` is. */
+  readonly appliedRotation: KnowledgePageRotation | null;
 }
 
 export interface KnowledgeSourceNoteDraft {
@@ -59,6 +80,9 @@ export interface KnowledgeSourceNoteDraft {
  * nobody ever read. Absent evidence beats wrong evidence, and the page range
  * still records exactly where the Note came from.
  */
+/** One title rule for every mode: the document's name, or a safe default. */
+function noteTitle(name: string): string { return name.length > 0 ? name : 'New Note'; }
+
 function quoteFromPageText(pageText: string): string | null {
   if (pageText.length === 0) return null;
   if (pageText.length > MAX_SOURCE_REFERENCE_QUOTE_LENGTH) return null;
@@ -69,11 +93,38 @@ function quoteFromPageText(pageText: string): string | null {
 export function buildKnowledgeSourceNoteDraft(
   request: KnowledgeSourcePageRequest,
 ): KnowledgeSourceNoteDraft {
-  // Exactly two shapes, chosen by one test, so an exact span can never carry a
-  // page quote and a page-only draft can never carry half an offset pair.
+  // Exactly three shapes, chosen by one test each, so an exact span can never
+  // carry a page quote, a page-only draft can never carry half an offset pair,
+  // and a region can never carry text evidence F9 never read.
   const selection = request.selection ?? null;
+  // A text span outranks a region: the pair is unreachable from the reader,
+  // and letting a field B2 introduced change a pre-B2 payload is the worse
+  // of the two failures.
+  const region = selection === null ? request.region ?? null : null;
+  if (region !== null) {
+    return {
+      title: noteTitle(request.originalFilename),
+      content: '',
+      sourceReference: {
+        sourceDocumentId: request.sourceDocumentId,
+        pageStart: request.pageNumber,
+        pageEnd: request.pageNumber,
+        // F9 performs no OCR, so a region quotes nothing: a page snapshot would
+        // attribute text to a rectangle nobody read it from, and the server
+        // refuses such a write outright.
+        quoteText: null,
+        charStart: null,
+        charEnd: null,
+        selectedText: null,
+        // Already intrinsic/unrotated: the reader transformed it through the
+        // one geometry authority.
+        region: region.region,
+        appliedRotation: region.appliedRotation,
+      },
+    };
+  }
   return {
-    title: request.originalFilename.length > 0 ? request.originalFilename : 'New Note',
+    title: noteTitle(request.originalFilename),
     // Always blank: a source-created Note is an ordinary Note the user writes
     // themselves. The page text is evidence, not authorship, and lives only in
     // source_references. An exact selection is evidence too -- it is not
@@ -92,6 +143,8 @@ export function buildKnowledgeSourceNoteDraft(
       charStart: selection === null ? null : selection.charStart,
       charEnd: selection === null ? null : selection.charEnd,
       selectedText: selection === null ? null : selection.selectedText,
+      region: null,
+      appliedRotation: null,
     },
   };
 }

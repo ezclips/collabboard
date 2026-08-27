@@ -1,5 +1,6 @@
 import { asKnowledgeDocumentId, asPostId, asSourceReferenceId } from '../core/ids';
 import type { SourceReference } from './knowledgePersistence';
+import { normalizeStorableRegion } from './knowledgePageRegionGeometry';
 
 /**
  * Source references grouped by the Note they annotate.
@@ -130,6 +131,10 @@ export function parseKnowledgeSourceReference(value: unknown): SourceReference |
     quoteHash: optionalString(record.quoteHash),
     charStart: optionalInteger(record.charStart),
     charEnd: optionalInteger(record.charEnd),
+    // P6J-F9-B2. Validated through the one region authority, never cast: an
+    // out-of-bounds or partial rectangle from a response body degrades to no
+    // region rather than becoming a locator nothing downstream could honour.
+    region: normalizeStorableRegion(record.region),
     locator: record.locator === null || record.locator === undefined
       ? null
       : (record.locator as SourceReference['locator']),

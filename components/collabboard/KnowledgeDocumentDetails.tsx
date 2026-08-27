@@ -15,7 +15,9 @@ import {
   useKnowledgeSourceNoteColors,
   useKnowledgeSourceReferencesForDocument,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
-import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
+import KnowledgeDocumentPageRegionSelector from '@/components/collabboard/KnowledgeDocumentPageRegionSelector';
+import type { KnowledgePageRotation, NormalizedPageRegion }
+  from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
@@ -117,6 +119,13 @@ type TextMatch = { pageIndex: number; start: number; end: number };
 type CapturedPageSelection = KnowledgeSourceTextSelection & { readonly pageNumber: number };
 
 /** Marks the one element whose text is the exact-span coordinate space. */
+/** P6J-F9-B2. The reader's ONE armed rectangle, already in SOURCE coordinates. */
+interface ArmedPageRegion {
+  readonly pageNumber: number;
+  readonly region: NormalizedPageRegion;
+  readonly appliedRotation: KnowledgePageRotation;
+}
+
 const PAGE_TEXT_ROOT = 'data-knowledge-page-text-root';
 
 /**
@@ -436,6 +445,10 @@ export default function KnowledgeDocumentDetails({
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [capturedSelection, setCapturedSelection] = useState<CapturedPageSelection | null>(null);
+  // One mode and one armed rectangle: two armed pages would offer two confirm
+  // buttons for one intent.
+  const [regionMode, setRegionMode] = useState(false);
+  const [armedRegion, setArmedRegion] = useState<ArmedPageRegion | null>(null);
   // P6J-F6-B4-B4. The Notes offered for one ambiguous run, or null. Transient
   // UI only -- never stored, never persisted, replaced by the next activation.
   const [targetChoice, setTargetChoice] = useState<readonly string[] | null>(null);
@@ -529,7 +542,15 @@ export default function KnowledgeDocumentDetails({
   useEffect(() => {
     setCapturedSelection(null);
     setTargetChoice(null);
+    setRegionMode(false);
+    setArmedRegion(null);
   }, [documentId]);
+
+  // Re-proved against the rendered pages, as activeSelection is.
+  const activeRegion = useMemo(() => {
+    if (armedRegion === null) return null;
+    return pages.some((page) => page.pageNumber === armedRegion.pageNumber) ? armedRegion : null;
+  }, [armedRegion, pages]);
 
   useEffect(() => {
     activeMatchRef.current?.scrollIntoView?.({ block: 'nearest' });
@@ -674,6 +695,24 @@ export default function KnowledgeDocumentDetails({
         ) : null}
       </div>
 
+      {/* P6J-F9-B2. ONE mode, off by default: always-on image dragging would
+          fight the reader's own vertical scrolling. */}
+      {onCreateNoteFromPage && documentId ? (
+        <div className="mb-2">
+          <button
+            type="button"
+            aria-pressed={regionMode}
+            className={`rounded border px-1.5 py-0.5 text-[11px] ${regionMode
+              ? 'border-blue-300 bg-blue-50 text-blue-700'
+              : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            // Leaving the mode abandons whatever was drawn in it.
+            onClick={() => { setRegionMode((current) => !current); setArmedRegion(null); }}
+          >
+            Select area
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <p className="text-[11px] text-gray-500">Loading extracted text…</p>
       ) : error ? (
@@ -692,6 +731,7 @@ export default function KnowledgeDocumentDetails({
             // Only the page the selection actually lives on offers the exact
             // action; every other page keeps its ordinary one.
             const pageSelection = activeSelection?.pageNumber === page.pageNumber ? activeSelection : null;
+            const pageRegion = activeRegion?.pageNumber === page.pageNumber ? activeRegion : null;
             return (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
               <div className="mb-1 flex items-baseline justify-between gap-2">
@@ -784,6 +824,46 @@ export default function KnowledgeDocumentDetails({
                     {pageSelection ? 'Create Note from selection' : 'Create Note'}
                   </button>
                 ) : null}
+                {/* Only for the page owning the armed rectangle, the F8 clip
+                    chip's rule, in the same cluster: no new toolbar. */}
+                {onCreateNoteFromPage && documentId && pageRegion ? (
+                  <>
+                    <button
+                      type="button"
+                      aria-label={`Create Note from selected area on page ${page.pageNumber}`}
+                      className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+                      onClick={() => {
+                        onCreateNoteFromPage({
+                          sourceDocumentId: documentId,
+                          originalFilename,
+                          pageNumber: page.pageNumber,
+                          // Empty by design, as the F8 clip path does: a region
+                          // quotes nothing, and passing the text would leave a
+                          // page snapshot one branch away from a rectangle
+                          // nobody read it from.
+                          pageText: '',
+                          selection: null,
+                          region: {
+                            region: pageRegion.region,
+                            appliedRotation: pageRegion.appliedRotation,
+                          },
+                        });
+                        setArmedRegion(null);
+                        setRegionMode(false);
+                      }}
+                    >
+                      Create Note from area
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Clear selected area on page ${page.pageNumber}`}
+                      className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      onClick={() => setArmedRegion(null)}
+                    >
+                      Clear
+                    </button>
+                  </>
+                ) : null}
                 </div>
               </div>
               {/*
@@ -793,7 +873,7 @@ export default function KnowledgeDocumentDetails({
                 would move every coordinate after itself.
               */}
               {boardId && documentId ? (
-                <KnowledgeDocumentPageImage
+                <KnowledgeDocumentPageRegionSelector
                   boardId={boardId}
                   documentId={documentId}
                   pageNumber={page.pageNumber}
@@ -801,6 +881,11 @@ export default function KnowledgeDocumentDetails({
                   widthPoints={page.widthPoints}
                   heightPoints={page.heightPoints}
                   rotation={page.rotation}
+                  enabled={regionMode && onCreateNoteFromPage !== undefined}
+                  armedRegion={pageRegion?.region ?? null}
+                  onArm={(region, appliedRotation) =>
+                    setArmedRegion({ pageNumber: page.pageNumber, region, appliedRotation })}
+                  onClear={() => setArmedRegion(null)}
                 />
               ) : null}
               <p

@@ -22,6 +22,7 @@ function reference(overrides: Omit<Partial<SourceReference>, 'id'> & { id: strin
     quoteHash: 'hash-1',
     charStart: null,
     charEnd: null,
+    region: null,
     locator: null,
     createdAt: '2026-08-24T00:00:00.000Z',
     ...overrides,
