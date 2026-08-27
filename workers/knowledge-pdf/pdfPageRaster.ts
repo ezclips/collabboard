@@ -124,8 +124,17 @@ async function awaitRender(task: RasterRenderTask, timeoutMs: number): Promise<v
       task.promise,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
-          task.cancel();
-          reject(new RasterTimeoutError('page render timed out'));
+          // Cancelling is best-effort, but settling is not: reject from
+          // `finally` so a cancel() that throws cannot leave this race
+          // unsettled. An unsettled race would hang the page render until the
+          // Worker Pool lease expired instead of degrading to a typed skip.
+          try {
+            task.cancel();
+          } catch {
+            // The page is abandoned either way; the timeout still classifies it.
+          } finally {
+            reject(new RasterTimeoutError('page render timed out'));
+          }
         }, timeoutMs);
       }),
     ]);

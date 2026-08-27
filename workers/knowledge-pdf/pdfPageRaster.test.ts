@@ -8,7 +8,7 @@ import {
   rasterDimensions,
   rasterizePdfPages,
 } from './pdfPageRaster';
-import type { RasterCanvas, RasterContext, RasterPdfDocument, RasterPdfPage } from './pdfPageRaster';
+import type { PdfRasterResult, RasterCanvas, RasterContext, RasterPdfDocument, RasterPdfPage } from './pdfPageRaster';
 
 const A4 = { width: 595.276, height: 841.89 };
 const WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
@@ -384,6 +384,34 @@ describe('page geometry that throws', () => {
     expect(result.pages.map((page) => page.pageNumber)).toEqual([2]);
   });
 
+  it('contains a render-pass getViewport throw, not just the measuring one', async () => {
+    let views = 0;
+    const { document, destroy } = fakeDocument([{}]);
+    const page: RasterPdfPage = {
+      rotate: 0,
+      getViewport: ({ scale }) => {
+        views += 1;
+        // The measuring pass succeeds; only the render pass throws, so this
+        // pins the second call inside rasterizeOnePage rather than the first.
+        if (views > 1) throw new Error('viewport failed on render pass');
+        return { width: A4.width * scale, height: A4.height * scale };
+      },
+      render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
+    };
+
+    const result = await rasterizePdfPages(new Uint8Array([1]), {
+      loadDocument: load({ ...document, numPages: 1, getPage: async () => page }),
+      createCanvas: fakeCanvases().createCanvas,
+    });
+
+    expect(views).toBe(2);
+    expect(result.pages).toEqual([]);
+    expect(result.skipped).toEqual([
+      { pageNumber: 1, reason: 'render_failed', detail: 'viewport failed on render pass' },
+    ]);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('contains a canvas allocation failure as a typed render skip', async () => {
     const { document } = withBadFirstPage(goodPage());
     const real = fakeCanvases();
@@ -402,6 +430,50 @@ describe('page geometry that throws', () => {
       { pageNumber: 1, reason: 'render_failed', detail: 'no native canvas backend' },
     ]);
     expect(result.pages.map((page) => page.pageNumber)).toEqual([2]);
+  });
+});
+
+describe('render cancellation failure', () => {
+  it('settles the timeout even when cancel() throws, with no uncaught timer error', async () => {
+    const cancel = vi.fn(() => { throw new Error('cancel exploded'); });
+    const { document, destroy } = fakeDocument([{
+      render: () => ({ promise: new Promise(() => {}), cancel }),
+    }]);
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => { uncaught.push(error); };
+    process.on('uncaughtException', onUncaught);
+
+    // Bounded watchdog: a regression must fail this test, never hang the runner.
+    const WATCHDOG = Symbol('watchdog');
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const raced = await Promise.race([
+        rasterizePdfPages(new Uint8Array([1]), {
+          loadDocument: load(document),
+          createCanvas: fakeCanvases().createCanvas,
+          pageTimeoutMs: 10,
+        }),
+        new Promise<symbol>((resolve) => { watchdog = setTimeout(() => resolve(WATCHDOG), 2000); }),
+      ]);
+
+      expect(raced).not.toBe(WATCHDOG);
+      const result = raced as PdfRasterResult;
+      expect(result.pages).toEqual([]);
+      expect(result.skipped).toEqual([
+        { pageNumber: 1, reason: 'render_timeout', detail: 'page render timed out' },
+      ]);
+      // Cancellation is still attempted, exactly once, and its failure neither
+      // escapes nor changes how the page is classified.
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(uncaught).toEqual([]);
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+      expect(destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (watchdog) clearTimeout(watchdog);
+      process.off('uncaughtException', onUncaught);
+      clearTimeoutSpy.mockRestore();
+    }
   });
 });
 
