@@ -26,7 +26,13 @@ import {
   NodeKnowledgeContentHasher,
 } from '../../lib/infra/knowledge/knowledgeIngestionAdapters';
 import { SupabaseKnowledgeExtractionRepository } from '../../lib/infra/knowledge/knowledgeExtractionAdapters';
+import {
+  KNOWLEDGE_DERIVATIVE_CONTENT_TYPE,
+  knowledgeDerivativeEligibility,
+  knowledgePageDerivativePath,
+} from '../../lib/domain/knowledge/knowledgePdfRenderPolicy';
 import { extractPdfPageGeometry } from './pdfGeometry';
+import { rasterizePdfPages } from './pdfPageRaster';
 import {
   assertWorkerRuntimePath,
   boundedDiagnostic,
@@ -49,11 +55,32 @@ export const KNOWLEDGE_RAW_ARTIFACT_PATH = (
 
 const DEFAULT_MAX_PARSER_JSON_BYTES = 64 * 1024 * 1024;
 
+export interface KnowledgeWorkerUploadOptions {
+  readonly upsert?: boolean;
+  readonly cacheControl?: string;
+}
+
 export interface KnowledgeWorkerStorage {
   download(path: string): Promise<Uint8Array>;
-  upload(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  upload(
+    path: string,
+    bytes: Uint8Array,
+    contentType: string,
+    options?: KnowledgeWorkerUploadOptions,
+  ): Promise<void>;
   remove(path: string): Promise<void>;
 }
+
+/** Derivatives are immutable for a given path, so they cache for a year. */
+const KNOWLEDGE_DERIVATIVE_CACHE_CONTROL = '31536000';
+
+/**
+ * Low-cardinality derivative outcomes. Never carries document text, a path, a
+ * signed URL or a stack trace -- these are counters, not diagnostics.
+ */
+export type KnowledgeDerivativeWarning =
+  | 'text_only_ineligible' | 'raster_partial' | 'raster_failed'
+  | 'upload_partial' | 'upload_failed' | 'invalid_derivative_path';
 
 export interface KnowledgePdfParser {
   run(input: OpenDataLoaderRunInput): Promise<OpenDataLoaderRunResult>;
@@ -64,6 +91,8 @@ export interface KnowledgePdfWorkerDependencies {
   readonly storage: KnowledgeWorkerStorage;
   readonly parser: KnowledgePdfParser;
   readonly geometry: (bytes: Uint8Array) => Promise<readonly KnowledgePageGeometryInput[]>;
+  /** Test seam only. Production leaves this unset and gets rasterizePdfPages. */
+  readonly rasterizePages?: typeof rasterizePdfPages;
   readonly hasher: { sha256(bytes: Uint8Array): Promise<string> };
   readonly parserOptionsHash: string;
   readonly parserName: string;
@@ -85,6 +114,7 @@ export interface KnowledgePdfWorkerResult {
   readonly failureRecorded?: boolean;
   readonly rawArtifactPath?: string;
   readonly cleanupWarning?: string;
+  readonly derivativeWarning?: KnowledgeDerivativeWarning;
 }
 
 class KnowledgePdfWorkerError extends Error {
@@ -282,6 +312,71 @@ function geometryRecord(geometry: readonly KnowledgePageGeometryInput[]): Readon
 }
 
 /**
+ * Optional page derivatives, generated only after the document is already ready.
+ *
+ * Total by construction. The canonical text is committed before this runs, and
+ * a `ready` row is claimable by neither list_knowledge_processing_candidates
+ * nor claim_knowledge_extraction -- but `failed` IS claimable by both, so
+ * letting a derivative problem reach recordFailure would re-run an entire
+ * successful extraction to retry an optional image. Every failure here is
+ * therefore swallowed into a warning and the text result stands.
+ */
+async function generatePageDerivatives(
+  deps: KnowledgePdfWorkerDependencies,
+  job: KnowledgeExtractionJob,
+  sourceBytes: Uint8Array,
+  pageCount: number,
+): Promise<KnowledgeDerivativeWarning | undefined> {
+  try {
+    const eligibility = knowledgeDerivativeEligibility({
+      sourcePdfBytes: sourceBytes.byteLength,
+      pageCount,
+    });
+    // Oversized or over-length sources are text-only, which is a normal
+    // outcome and not a failure: no render is even attempted.
+    if (!eligibility.eligible) return 'text_only_ineligible';
+
+    const raster = await (deps.rasterizePages ?? rasterizePdfPages)(sourceBytes);
+    if (raster.pages.length === 0) return 'raster_failed';
+
+    let uploaded = 0;
+    let unbuildablePath = false;
+    // Sequential and page-local: one failure never stops the pages after it,
+    // and nothing already stored is rolled back. A later attempt overwrites
+    // the same deterministic paths because derivatives upsert.
+    for (const page of raster.pages) {
+      const objectPath = knowledgePageDerivativePath(job.boardId, job.documentId, page.pageNumber);
+      if (objectPath === null) {
+        unbuildablePath = true;
+        continue;
+      }
+      try {
+        await deps.storage.upload(objectPath, page.bytes, KNOWLEDGE_DERIVATIVE_CONTENT_TYPE, {
+          upsert: true,
+          cacheControl: KNOWLEDGE_DERIVATIVE_CACHE_CONTROL,
+        });
+        uploaded += 1;
+      } catch {
+        // Page-local: the next page is still attempted.
+      }
+    }
+
+    if (unbuildablePath) return 'invalid_derivative_path';
+    if (uploaded === 0) return 'upload_failed';
+    if (uploaded < raster.pages.length) return 'upload_partial';
+    if (raster.skipped.length > 0) return 'raster_partial';
+    return undefined;
+  } catch (error: unknown) {
+    console.error(JSON.stringify({
+      documentId: job.documentId,
+      stage: 'page-derivatives',
+      error: boundedDiagnostic(errorMessage(error)),
+    }));
+    return 'raster_failed';
+  }
+}
+
+/**
  * Process exactly one explicit Knowledge document. There is deliberately no
  * polling, queue access, scheduler, or retry loop in this operation.
  */
@@ -380,12 +475,22 @@ export async function processKnowledgePdfDocument(
       return recordFailure(deps, documentId, job.leaseToken, completed.error, stage, cleanupWarning);
     }
 
+    // Past this point the document is ready and its text is authoritative;
+    // derivatives are optional enhancement data layered on top of it.
+    const derivativeWarning = await generatePageDerivatives(
+      deps,
+      job,
+      originalBytes,
+      completed.value.pageCount,
+    );
+
     return {
       status: 'ready',
       documentId,
       stage,
       pageCount: completed.value.pageCount,
       rawArtifactPath,
+      derivativeWarning,
     };
   } catch (error: unknown) {
     const cleanupWarning = await removeRawArtifact(deps.storage, rawUploaded ? rawArtifactPath : undefined);
@@ -426,10 +531,20 @@ class SupabaseKnowledgeWorkerStorage implements KnowledgeWorkerStorage {
     return new Uint8Array(await data.arrayBuffer());
   }
 
-  async upload(storagePath: string, bytes: Uint8Array, contentType: string): Promise<void> {
+  async upload(
+    storagePath: string,
+    bytes: Uint8Array,
+    contentType: string,
+    options?: KnowledgeWorkerUploadOptions,
+  ): Promise<void> {
     const { error } = await this.client.storage
       .from(KNOWLEDGE_STORAGE_BUCKET)
-      .upload(storagePath, bytes, { contentType, upsert: false });
+      .upload(storagePath, bytes, {
+        contentType,
+        // Raw extraction artifacts stay non-overwritable; only derivatives opt in.
+        upsert: options?.upsert ?? false,
+        ...(options?.cacheControl ? { cacheControl: options.cacheControl } : {}),
+      });
     if (error) throw new Error(`Could not upload extraction artifact: ${error.message}`);
   }
 

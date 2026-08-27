@@ -158,10 +158,54 @@ describe('P6J-F9-A0 scope -- derivative policy is pure, and renders nothing', ()
     }
   });
 
-  it('A0 adds no Storage write anywhere in the ingestion path', () => {
-    // The renderer arrives in F9-A1; nothing in A0 may produce a derivative.
-    const worker = read('workers/knowledge-pdf/processKnowledgePdfDocument.ts');
-    expect(worker).not.toContain('pages/');
-    expect(worker).not.toContain('webp');
+  /**
+   * F9-A1c gives the worker a derivative phase, so the old "nothing may render"
+   * prohibition is retired. What replaces it is stricter about duplication: the
+   * worker may orchestrate derivatives, but every derivative DECISION -- which
+   * documents qualify, where objects live, what type they are -- must still come
+   * from this one policy module. A second copy inside the worker is exactly how
+   * the generation lifecycle and the deletion lifecycle drift apart.
+   */
+  it('the worker orchestrates derivatives only through the canonical A0 authorities', () => {
+    const worker = codeOnly(read('workers/knowledge-pdf/processKnowledgePdfDocument.ts'));
+    for (const authority of [
+      'knowledgeDerivativeEligibility',
+      'knowledgePageDerivativePath',
+      'KNOWLEDGE_DERIVATIVE_CONTENT_TYPE',
+    ]) {
+      expect(worker, `the worker must decide derivatives via ${authority}`).toContain(authority);
+    }
+    // No ad-hoc path segment, content type, or re-declared policy threshold.
+    for (const forbidden of ['pages/', 'webp', '52_428_800', '52428800', 'MAX_PAGES =']) {
+      expect(worker, `the worker must not hardcode ${forbidden}`).not.toContain(forbidden);
+    }
+    // PDF.js stays behind the raster module; the orchestrator never imports it.
+    expect(worker).not.toContain('pdfjs');
+    // Eligibility reads the committed page count, so generation, the A1a
+    // deletion sweep and the stored row can never disagree about how many
+    // pages a document has. buildKnowledgeExtractionPages currently forces the
+    // geometry input to the same length, which makes the two indistinguishable
+    // at runtime -- this is the only place the choice can be pinned.
+    expect(worker.replace(/\s+/g, ' ')).toMatch(
+      /generatePageDerivatives\( deps, job, originalBytes, completed\.value\.pageCount/,
+    );
+  });
+
+  it('the rasterizer stays free of Storage, eligibility and path knowledge', () => {
+    const raster = codeOnly(read('workers/knowledge-pdf/pdfPageRaster.ts'));
+    for (const forbidden of [
+      '@supabase', 'knowledgePageDerivativePath', 'knowledgeDerivativeEligibility',
+      'KNOWLEDGE_DERIVATIVE_CONTENT_TYPE', 'upload(', 'processing_status', 'pages/',
+    ]) {
+      expect(raster, `the rasterizer must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('derivative uploads overwrite while raw extraction artifacts still do not', () => {
+    const worker = codeOnly(read('workers/knowledge-pdf/processKnowledgePdfDocument.ts'));
+    // Retrying a document must be able to replace its page images, but must
+    // never be able to silently replace another attempt's raw artifact.
+    expect(worker).toContain('upsert: true');
+    expect(worker).toContain('upsert: options?.upsert ?? false');
   });
 });
