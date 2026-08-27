@@ -314,12 +314,17 @@ function geometryRecord(geometry: readonly KnowledgePageGeometryInput[]): Readon
 /**
  * Optional page derivatives, generated only after the document is already ready.
  *
- * Total by construction. The canonical text is committed before this runs, and
- * a `ready` row is claimable by neither list_knowledge_processing_candidates
- * nor claim_knowledge_extraction -- but `failed` IS claimable by both, so
- * letting a derivative problem reach recordFailure would re-run an entire
- * successful extraction to retry an optional image. Every failure here is
- * therefore swallowed into a warning and the text result stands.
+ * The canonical text is committed before this runs. A `ready` row matches
+ * neither list_knowledge_processing_candidates nor claim_knowledge_extraction,
+ * so it cannot be rediscovered or reclaimed once complete. A `failed` row is
+ * different: list_knowledge_processing_candidates does not discover it, but
+ * claim_knowledge_extraction accepts it, so a retry can pick it up and re-run
+ * the whole extraction. Marking a text-complete document failed for a missing
+ * optional image would therefore both misreport it and expose it to being
+ * re-processed, which is why every failure here becomes a warning instead.
+ *
+ * The caller adds a second, structural guard around this call -- see
+ * processKnowledgePdfDocument.
  */
 async function generatePageDerivatives(
   deps: KnowledgePdfWorkerDependencies,
@@ -477,12 +482,24 @@ export async function processKnowledgePdfDocument(
 
     // Past this point the document is ready and its text is authoritative;
     // derivatives are optional enhancement data layered on top of it.
-    const derivativeWarning = await generatePageDerivatives(
-      deps,
-      job,
-      originalBytes,
-      completed.value.pageCount,
-    );
+    //
+    // This catch is what makes the boundary structural rather than a property
+    // of the helper: without it, anything escaping generatePageDerivatives
+    // would fall into the canonical catch below and stamp an already-ready
+    // document failed. The thrown value is deliberately never read -- not its
+    // message, not its stack, not via String() -- because a value whose
+    // accessors throw is exactly the case that defeats an inspecting handler.
+    let derivativeWarning: KnowledgeDerivativeWarning | undefined;
+    try {
+      derivativeWarning = await generatePageDerivatives(
+        deps,
+        job,
+        originalBytes,
+        completed.value.pageCount,
+      );
+    } catch {
+      derivativeWarning = 'raster_failed';
+    }
 
     return {
       status: 'ready',

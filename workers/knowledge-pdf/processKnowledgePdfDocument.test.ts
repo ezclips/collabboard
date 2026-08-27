@@ -656,4 +656,59 @@ describe('processKnowledgePdfDocument -- optional page derivatives', () => {
     expect(repository.failures).toEqual([]);
   });
 
+  /**
+   * The canonical catch owns recordFailure, so anything escaping the derivative
+   * phase turns a ready document into a failed one -- and a failed row is
+   * claimable by claim_knowledge_extraction, so it can be re-extracted whole.
+   * A handler that inspects the thrown value cannot close this: reading
+   * .message is itself what throws here. The call-site guard must not look.
+   */
+  it('contains a hostile throw whose own accessors throw, without inspecting it', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    // Every accessor throws the object itself, so a handler that inspects the
+    // thrown value re-throws the same hostile value and can never converge.
+    // Only a catch that refuses to look at it terminates.
+    const hostile = {} as { readonly message: string; readonly stack: string };
+    for (const accessor of ['message', 'stack'] as const) {
+      Object.defineProperty(hostile, accessor, { get: (): string => { throw hostile; } });
+    }
+    Object.defineProperty(hostile, 'toString', { value: (): string => { throw hostile; } });
+
+    const result = await processKnowledgePdfDocument(
+      eligible(repository, storage, async () => { throw hostile; }),
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('ready');
+    expect(result.pageCount).toBe(2);
+    expect(result.derivativeWarning).toBe('raster_failed');
+    // The dangerous transition -- ready to failed -- must not have happened.
+    expect(repository.failures).toEqual([]);
+    expect(repository.status).toBe('ready');
+    // Nothing was rendered, so nothing was uploaded and nothing re-downloaded.
+    expect(storage.uploads.filter((upload) => upload.path !== result.rawArtifactPath)).toEqual([]);
+    expect(storage.downloads).toEqual([SOURCE_PATH]);
+  });
+
+  it.each([
+    ['a bare string', 'renderer exploded'],
+    ['null', null],
+    ['a number', 42],
+    ['a proxy that throws on every read', new Proxy({}, { get() { throw new Error('proxy trap'); } })],
+  ])('contains a non-Error throw: %s', async (_label, thrown) => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+
+    const result = await processKnowledgePdfDocument(
+      eligible(repository, storage, async () => { throw thrown; }),
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('ready');
+    expect(result.derivativeWarning).toBe('raster_failed');
+    expect(repository.failures).toEqual([]);
+    expect(repository.status).toBe('ready');
+  });
+
 });
