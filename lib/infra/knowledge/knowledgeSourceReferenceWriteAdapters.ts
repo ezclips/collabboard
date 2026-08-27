@@ -10,12 +10,13 @@ import type {
   KnowledgeQuoteHasher,
   KnowledgeSourceReferenceBoardWriteAuthorizer,
   KnowledgeSourceReferenceInsert,
+  KnowledgeSourceReferencePageGeometry,
   KnowledgeSourceReferenceSourceDocument,
   KnowledgeSourceReferenceTargetPadlet,
   KnowledgeSourceReferenceValidationRepository,
   KnowledgeSourceReferenceWriter,
 } from '../../domain/knowledge/knowledgeSourceReferenceWrite';
-import { SOURCE_REFERENCE_COLUMNS } from './knowledgeSourceReferenceAdapters';
+import { SOURCE_REFERENCE_COLUMNS, toSourceReferenceRegion } from './knowledgeSourceReferenceAdapters';
 
 interface SupabaseErrorLike {
   readonly code?: string;
@@ -42,7 +43,12 @@ interface SourceDocumentRow {
   readonly processing_status: string;
 }
 interface TargetPadletRow { readonly board_id: string }
-interface PageTextRow { readonly text: string }
+interface KnowledgePageRow {
+  readonly text: string;
+  readonly width_points: number | null;
+  readonly height_points: number | null;
+  readonly rotation: number | null;
+}
 
 interface SourceReferenceRow {
   readonly id: string;
@@ -54,6 +60,10 @@ interface SourceReferenceRow {
   readonly quote_hash: string | null;
   readonly char_start: number | null;
   readonly char_end: number | null;
+  readonly region_x: number | null;
+  readonly region_y: number | null;
+  readonly region_width: number | null;
+  readonly region_height: number | null;
   readonly locator: unknown;
   readonly created_at: string;
 }
@@ -72,6 +82,10 @@ interface SourceReferenceInsertRow {
   readonly quote_hash: string | null;
   readonly char_start: number | null;
   readonly char_end: number | null;
+  readonly region_x: number | null;
+  readonly region_y: number | null;
+  readonly region_width: number | null;
+  readonly region_height: number | null;
   readonly locator: null;
 }
 
@@ -94,7 +108,7 @@ export interface KnowledgeSourceReferenceWriteSupabaseClient {
   from(table: 'board_collaborators'): ReadTable<CollaboratorRow>;
   from(table: 'knowledge_documents'): ReadTable<SourceDocumentRow>;
   from(table: 'padlets'): ReadTable<TargetPadletRow>;
-  from(table: 'knowledge_pages'): ReadTable<PageTextRow>;
+  from(table: 'knowledge_pages'): ReadTable<KnowledgePageRow>;
   from(table: 'source_references'): SourceReferenceWriteTable;
 }
 
@@ -216,6 +230,34 @@ implements KnowledgeSourceReferenceValidationRepository {
       return err(unavailable(cause));
     }
   }
+
+  /**
+   * The stored page shape, returned verbatim. Nothing is defaulted or repaired
+   * here: the domain decides what an absent rotation or a missing dimension
+   * means, so there is one place that judgement lives.
+   */
+  async findPageGeometry(
+    documentId: KnowledgeDocumentId,
+    pageNumber: number,
+  ): Promise<Result<KnowledgeSourceReferencePageGeometry | null, DomainError>> {
+    try {
+      const { data, error } = await this.client
+        .from('knowledge_pages')
+        .select('width_points, height_points, rotation')
+        .eq('document_id', documentId)
+        .eq('page_number', pageNumber)
+        .maybeSingle();
+      if (error) return err(unavailable(error));
+      if (data === null) return ok(null);
+      return ok({
+        widthPoints: data.width_points,
+        heightPoints: data.height_points,
+        rotation: data.rotation,
+      });
+    } catch (cause) {
+      return err(unavailable(cause));
+    }
+  }
 }
 
 function toSourceReference(row: SourceReferenceRow): SourceReference {
@@ -229,6 +271,7 @@ function toSourceReference(row: SourceReferenceRow): SourceReference {
     quoteHash: row.quote_hash,
     charStart: row.char_start,
     charEnd: row.char_end,
+    region: toSourceReferenceRegion(row),
     locator: row.locator === null || row.locator === undefined ? null : (row.locator as KnowledgeSourceLocator),
     createdAt: row.created_at,
   };
@@ -252,6 +295,11 @@ export class SupabaseKnowledgeSourceReferenceWriter implements KnowledgeSourceRe
           quote_hash: row.quoteHash,
           char_start: row.charStart,
           char_end: row.charEnd,
+          region_x: row.regionX,
+          region_y: row.regionY,
+          region_width: row.regionWidth,
+          region_height: row.regionHeight,
+          // F9 regions are typed columns; this jsonb stays parser bbox territory.
           locator: null,
         })
         .select(SOURCE_REFERENCE_COLUMNS)

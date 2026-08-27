@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   SOURCE_REFERENCE_COLUMNS,
@@ -103,7 +105,8 @@ describe('P6J-F3 Supabase source reference reader', () => {
     const projected = SOURCE_REFERENCE_COLUMNS.split(',').map((column) => column.trim());
     expect(projected).toEqual([
       'id', 'target_padlet_id', 'source_document_id', 'page_start', 'page_end',
-      'quote_text', 'quote_hash', 'char_start', 'char_end', 'locator', 'created_at',
+      'quote_text', 'quote_hash', 'char_start', 'char_end',
+      'region_x', 'region_y', 'region_width', 'region_height', 'locator', 'created_at',
     ]);
     // Nothing beyond the domain shape leaves the database.
     expect(projected).not.toContain('*');
@@ -140,6 +143,7 @@ describe('P6J-F3 Supabase source reference reader', () => {
       quoteHash: 'hash-1',
       charStart: 10,
       charEnd: 26,
+      region: null,
       locator: { coordinateSystem: 'pdf', bbox: { x: 1, y: 2, width: 3, height: 4 } },
       createdAt: '2026-08-24T00:00:00.000Z',
     }]);
@@ -448,5 +452,77 @@ describe('P6J-F6 batch source reference read', () => {
     expect(result.ok === false && result.error.code).toBe('unavailable');
     expect(result.ok === false && result.error.message).toBe('Could not read the source references');
     expect(result.ok === false && result.error.message).not.toContain('socket hang up');
+  });
+});
+
+/**
+ * P6J-F9-B1. The read side is where a corrupt rectangle would otherwise become
+ * a typed lie, so the four columns are VALIDATED into a region and never cast.
+ */
+describe('P6J-F9-B1 region read shaping', () => {
+  const regionRow = (overrides: Record<string, unknown> = {}) => row({
+    region_x: 0.25, region_y: 0.1, region_width: 0.5, region_height: 0.4,
+    quote_text: null, quote_hash: null, char_start: null, char_end: null,
+    ...overrides,
+  });
+
+  async function firstReference(rowValue: Record<string, unknown>) {
+    const state = setup({ data: [rowValue], error: null });
+    const result = await state.reader.listReferencesByTargetPadletId(asPostId(PADLET_ID));
+    expect(result.ok).toBe(true);
+    return result.ok ? result.value[0] : null;
+  }
+
+  it('maps four valid columns onto a normalized region', async () => {
+    const reference = await firstReference(regionRow());
+    expect(reference!.region).toEqual({ x: 0.25, y: 0.1, width: 0.5, height: 0.4 });
+    // A region reference carries no text evidence: F9 performs no OCR.
+    expect([reference!.quoteText, reference!.charStart]).toEqual([null, null]);
+  });
+
+  it('reports all-null columns as no region', async () => {
+    const reference = await firstReference(row({
+      region_x: null, region_y: null, region_width: null, region_height: null,
+    }));
+    expect(reference!.region).toBeNull();
+  });
+
+  it('leaves page-only and exact-span references exactly as they were', async () => {
+    const pageOnly = await firstReference(row({
+      quote_text: 'a quoted passage', char_start: null, char_end: null,
+      region_x: null, region_y: null, region_width: null, region_height: null,
+    }));
+    expect(pageOnly).toMatchObject({ quoteText: 'a quoted passage', charStart: null, region: null });
+
+    const exactSpan = await firstReference(row({
+      region_x: null, region_y: null, region_width: null, region_height: null,
+    }));
+    expect(exactSpan).toMatchObject({ charStart: 10, charEnd: 26, region: null });
+    // The parser bbox locator keeps its own, different coordinate system.
+    expect(exactSpan!.locator).toEqual({
+      coordinateSystem: 'pdf', bbox: { x: 1, y: 2, width: 3, height: 4 },
+    });
+  });
+
+  it.each([
+    ['a partial row', { region_width: null }],
+    ['a negative width', { region_width: -0.5 }],
+    ['a zero height', { region_height: 0 }],
+    ['a rectangle past the page edge', { region_x: 0.9, region_width: 0.5 }],
+    ['a NaN edge', { region_x: Number.NaN }],
+    ['an infinite width', { region_width: Number.POSITIVE_INFINITY }],
+  ])('degrades %s to no region rather than trusting it', async (_label, overrides) => {
+    // Unreachable while the CHECK constraints hold. If it ever happens, one bad
+    // rectangle must not fail a whole board's citation read.
+    const reference = await firstReference(regionRow(overrides));
+    expect(reference!.region).toBeNull();
+    expect(reference!.pageStart).toBe(2);
+  });
+
+  it('never casts the columns into shape', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'lib/infra/knowledge/knowledgeSourceReferenceAdapters.ts'), 'utf8');
+    expect(source).not.toMatch(/region[^)]*as NormalizedPageRegion/);
+    expect(source).toContain('normalizeStorableRegion');
   });
 });

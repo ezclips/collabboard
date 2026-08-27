@@ -4,6 +4,11 @@ import type { Result } from '../core/result';
 import { err, ok } from '../core/result';
 import type { BoardId, KnowledgeDocumentId, PostId, UserId } from '../core/ids';
 import type { SourceReference } from './knowledgePersistence';
+import {
+  isCanonicalPageRotation,
+  normalizeStorableRegion,
+} from './knowledgePageRegionGeometry';
+import type { KnowledgePageRotation, NormalizedPageRegion } from './knowledgePageRegionGeometry';
 
 /** UTF-16 code units, matching `String.prototype.length`. */
 export const MAX_SOURCE_REFERENCE_QUOTE_LENGTH = 100_000;
@@ -30,6 +35,18 @@ export interface CreateKnowledgeSourceReferenceInput {
    * it never becomes the canonical quote.
    */
   readonly selectedText: string | null;
+  /**
+   * P6J-F9-B1 visual region, already transformed by the client into the page's
+   * INTRINSIC UNROTATED system. Absent or null selects the pre-B1 modes.
+   */
+  readonly region?: NormalizedPageRegion | null;
+  /**
+   * The rotation the client transformed WITH. VERIFICATION ONLY -- compared
+   * against the stored page rotation and then discarded, exactly as
+   * `selectedText` is compared against the stored page text. It is never
+   * persisted, and it never makes the client's geometry authoritative.
+   */
+  readonly appliedRotation?: number | null;
 }
 
 export interface KnowledgeSourceReferenceSourceDocument {
@@ -40,6 +57,13 @@ export interface KnowledgeSourceReferenceSourceDocument {
 
 export interface KnowledgeSourceReferenceTargetPadlet {
   readonly boardId: BoardId;
+}
+
+/** The stored page geometry, the only authority on a page's real shape. */
+export interface KnowledgeSourceReferencePageGeometry {
+  readonly widthPoints: number | null;
+  readonly heightPoints: number | null;
+  readonly rotation: number | null;
 }
 
 /**
@@ -56,6 +80,11 @@ export interface KnowledgeSourceReferenceInsert {
   readonly quoteHash: string | null;
   readonly charStart: number | null;
   readonly charEnd: number | null;
+  /** All four together or all four null -- the database enforces the same. */
+  readonly regionX: number | null;
+  readonly regionY: number | null;
+  readonly regionWidth: number | null;
+  readonly regionHeight: number | null;
 }
 
 export interface KnowledgeSourceReferenceBoardWriteAuthorizer {
@@ -80,6 +109,14 @@ export interface KnowledgeSourceReferenceValidationRepository {
     documentId: KnowledgeDocumentId,
     pageNumber: number,
   ): Promise<Result<string | null, DomainError>>;
+  /**
+   * Read solely for region writes. A normalised rectangle means nothing against
+   * a page whose real geometry is unknown, and F9-C could never crop it.
+   */
+  findPageGeometry(
+    documentId: KnowledgeDocumentId,
+    pageNumber: number,
+  ): Promise<Result<KnowledgeSourceReferencePageGeometry | null, DomainError>>;
 }
 
 export interface KnowledgeSourceReferenceWriter {
@@ -100,18 +137,64 @@ export interface CreateKnowledgeSourceReferenceDependencies {
 }
 
 /**
- * Exactly two shapes are writable. Offsets arrive as a pair or not at all: a
- * half-pair is a malformed request, never a page-only row and never recovered.
+ * Exactly three shapes are writable, and a reference carries exactly ONE
+ * locator beyond page identity. Offsets arrive as a pair or not at all, a
+ * region arrives whole or not at all, and the two never coexist: each is a
+ * malformed request, never repaired into a weaker mode.
  */
 type SpanMode =
   | { readonly kind: 'page_only' }
-  | { readonly kind: 'exact_span'; readonly charStart: number; readonly charEnd: number };
+  | { readonly kind: 'exact_span'; readonly charStart: number; readonly charEnd: number }
+  | {
+    readonly kind: 'page_region';
+    readonly region: NormalizedPageRegion;
+    readonly appliedRotation: KnowledgePageRotation;
+  };
 
 function classifyMode(input: CreateKnowledgeSourceReferenceInput): SpanMode | null {
   const { charStart, charEnd } = input;
+  const region = input.region ?? null;
+  const appliedRotation = input.appliedRotation ?? null;
+  const hasOffsets = charStart !== null || charEnd !== null;
+
+  if (region !== null) {
+    // Two locators describe two different things; picking one would silently
+    // discard what the user actually selected.
+    if (hasOffsets) return null;
+    const normalized = normalizeStorableRegion(region);
+    if (normalized === null) return null;
+    // Region writes are unverifiable without the rotation the client used.
+    if (!isCanonicalPageRotation(appliedRotation)) return null;
+    return { kind: 'page_region', region: normalized, appliedRotation };
+  }
+  // A rotation with nothing to rotate is a confused client, not a page-only save.
+  if (appliedRotation !== null) return null;
   if (charStart === null && charEnd === null) return { kind: 'page_only' };
   if (charStart === null || charEnd === null) return null;
   return { kind: 'exact_span', charStart, charEnd };
+}
+
+/**
+ * A region carries no text evidence of any kind: F9 performs no OCR, so a
+ * quote would be invented rather than quoted.
+ */
+function validatePageRegion(input: CreateKnowledgeSourceReferenceInput): DomainError | null {
+  if (input.quoteText !== null) {
+    return domainError('validation', 'A page region reference stores no quote');
+  }
+  if (input.selectedText !== null) {
+    return domainError('validation', 'A page region reference has no selected text');
+  }
+  if (input.pageStart !== input.pageEnd) {
+    return domainError('validation', 'A page region must not cross pages');
+  }
+  return null;
+}
+
+/** NULL means no rotation was recorded, matching how the reader renders it. */
+function canonicalStoredRotation(rotation: number | null): KnowledgePageRotation | null {
+  if (rotation === null) return 0;
+  return isCanonicalPageRotation(rotation) ? rotation : null;
 }
 
 function validatePageOnly(input: CreateKnowledgeSourceReferenceInput): DomainError | null {
@@ -172,7 +255,9 @@ function validateInput(
   if (!Number.isInteger(input.pageEnd) || input.pageEnd < input.pageStart) {
     return domainError('validation', 'Source reference page end must not precede page start');
   }
-  return mode.kind === 'page_only' ? validatePageOnly(input) : validateExactSpan(input, mode);
+  if (mode.kind === 'page_only') return validatePageOnly(input);
+  if (mode.kind === 'page_region') return validatePageRegion(input);
+  return validateExactSpan(input, mode);
 }
 
 /**
@@ -238,6 +323,56 @@ export function createCreateKnowledgeSourceReferenceCommand(
         quoteHash: input.quoteText === null ? null : dependencies.hasher.hashQuoteText(input.quoteText),
         charStart: null,
         charEnd: null,
+        regionX: null,
+        regionY: null,
+        regionWidth: null,
+        regionHeight: null,
+      });
+    }
+
+    if (mode.kind === 'page_region') {
+      // The stored page is the only authority on the page's real shape, and it
+      // is read here -- after authorization and after both the document and the
+      // target have been proven to sit on this board, never before.
+      const geometry = await dependencies.repository.findPageGeometry(
+        input.sourceDocumentId,
+        input.pageStart,
+      );
+      if (!geometry.ok) return geometry;
+      if (geometry.value === null) {
+        return err(domainError('not_found', 'Source page was not found on this document'));
+      }
+      const { widthPoints, heightPoints } = geometry.value;
+      if (widthPoints === null || !Number.isFinite(widthPoints) || widthPoints <= 0
+        || heightPoints === null || !Number.isFinite(heightPoints) || heightPoints <= 0) {
+        // Without real page dimensions the rectangle cannot later be cropped.
+        return err(domainError('validation', 'Source page geometry is unavailable'));
+      }
+      const storedRotation = canonicalStoredRotation(geometry.value.rotation);
+      if (storedRotation === null) {
+        return err(domainError('validation', 'Source page rotation is not usable'));
+      }
+      // The client transformed display coordinates into page coordinates with
+      // ITS rotation. If that disagrees with the stored one the rectangle
+      // describes a different part of the page, so the write fails closed.
+      if (mode.appliedRotation !== storedRotation) {
+        return err(domainError('validation', 'Source page rotation does not match the stored page'));
+      }
+
+      return dependencies.writer.insertSourceReference({
+        targetPadletId: input.targetPadletId,
+        sourceDocumentId: input.sourceDocumentId,
+        pageStart: input.pageStart,
+        pageEnd: input.pageEnd,
+        // No OCR exists, so a region quotes nothing and hashes nothing.
+        quoteText: null,
+        quoteHash: null,
+        charStart: null,
+        charEnd: null,
+        regionX: mode.region.x,
+        regionY: mode.region.y,
+        regionWidth: mode.region.width,
+        regionHeight: mode.region.height,
       });
     }
 
@@ -278,6 +413,10 @@ export function createCreateKnowledgeSourceReferenceCommand(
       quoteHash: dependencies.hasher.hashQuoteText(canonicalQuote),
       charStart: mode.charStart,
       charEnd: mode.charEnd,
+      regionX: null,
+      regionY: null,
+      regionWidth: null,
+      regionHeight: null,
     });
   };
 }

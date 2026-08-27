@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createKnowledgeSourceReferencePostHandler } from './knowledgeSourceReferenceRoute';
 import type { KnowledgeSourceReferenceSession } from './knowledgeSourceReferenceRoute';
@@ -21,6 +23,7 @@ const reference = {
   quoteHash: 'server-hash',
   charStart: null,
   charEnd: null,
+  region: null,
   locator: null,
   createdAt: '2026-08-24T00:00:00.000Z',
 };
@@ -144,11 +147,12 @@ describe('P6J-F4-B source reference write route', () => {
 
     expect(response.status).toBe(201);
     const input = state.createSourceReference.mock.calls[0][0] as unknown as Record<string, unknown>;
-    // Exactly the ten intended fields. char offsets and selected text became
-    // caller input at B4-B2A; identity, hash and locator never can.
+    // Exactly the twelve intended fields. char offsets and selected text became
+    // caller input at B4-B2A and the region pair at F9-B1; identity, hash and
+    // locator never can.
     expect(Object.keys(input).sort()).toEqual([
-      'boardId', 'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteText',
-      'selectedText', 'sourceDocumentId', 'targetPadletId', 'userId',
+      'appliedRotation', 'boardId', 'charEnd', 'charStart', 'pageEnd', 'pageStart',
+      'quoteText', 'region', 'selectedText', 'sourceDocumentId', 'targetPadletId', 'userId',
     ]);
     expect(input.boardId).toBe(BOARD_ID);
     expect(input.userId).toBe(USER_ID);
@@ -171,7 +175,7 @@ describe('P6J-F4-B source reference write route', () => {
     expect(json.reference).toEqual(reference);
     expect(Object.keys(json.reference as object).sort()).toEqual([
       'charEnd', 'charStart', 'createdAt', 'id', 'locator', 'pageEnd', 'pageStart',
-      'quoteHash', 'quoteText', 'sourceDocumentId', 'targetPadletId',
+      'quoteHash', 'quoteText', 'region', 'sourceDocumentId', 'targetPadletId',
     ]);
     // V1 guarantees from F4-A survive the boundary.
     expect(json.reference).toMatchObject({ charStart: null, charEnd: null, locator: null });
@@ -291,5 +295,136 @@ describe('P6J-F4-B source reference write route', () => {
     expect(pageOnlyResponse.json).toMatchObject({
       reference: { charStart: null, charEnd: null },
     });
+  });
+});
+
+/**
+ * P6J-F9-B1. The route stays structural: it builds the typed region field and
+ * nothing else, so every semantic rule about a rectangle lives in the one
+ * domain command. There is no second endpoint and no crop API.
+ */
+describe('P6J-F9-B1 region payloads', () => {
+  const REGION = { x: 0.25, y: 0.1, width: 0.5, height: 0.4 };
+
+  it('forwards a valid region and its applied rotation to the command', async () => {
+    const state = setup();
+
+    const { response } = await post(state, body({
+      quoteText: null, region: REGION, appliedRotation: 90,
+    }));
+
+    expect(response.status).toBe(201);
+    const input = state.createSourceReference.mock.calls[0][0] as unknown as Record<string, unknown>;
+    expect(input.region).toEqual(REGION);
+    expect(input.appliedRotation).toBe(90);
+  });
+
+  it('rebuilds the rectangle field by field, so nothing rides along inside it', async () => {
+    const state = setup();
+
+    await post(state, body({
+      quoteText: null,
+      appliedRotation: 0,
+      region: {
+        ...REGION,
+        // Storage authority a client might try to smuggle in beside the shape.
+        storagePath: 'knowledge/board/document/pages/1.webp',
+        bucket: 'knowledge-documents',
+        signedUrl: 'https://example.test/signed',
+        naturalWidth: 1650,
+      },
+    }));
+
+    const input = state.createSourceReference.mock.calls[0][0] as unknown as Record<string, unknown>;
+    expect(Object.keys(input.region as object).sort()).toEqual(['height', 'width', 'x', 'y']);
+    const serialized = JSON.stringify(input);
+    for (const leaked of ['knowledge-documents', 'signed', 'naturalWidth', 'pages/1.webp']) {
+      expect(serialized, leaked).not.toContain(leaked);
+    }
+  });
+
+  it('keeps pre-B1 bodies valid: an absent region is not a region', async () => {
+    const state = setup();
+
+    await post(state, body());
+    await post(state, body({ region: null, appliedRotation: null }));
+
+    for (const call of state.createSourceReference.mock.calls) {
+      const input = call[0] as unknown as Record<string, unknown>;
+      expect(input.region).toBeNull();
+      expect(input.appliedRotation).toBeNull();
+    }
+  });
+
+  it.each([
+    ['a partial rectangle', { x: 0.1, y: 0.1, width: 0.2 }],
+    ['string members', { x: '0.1', y: '0.1', width: '0.2', height: '0.2' }],
+    ['an array', [0.1, 0.1, 0.2, 0.2]],
+    ['a number', 4],
+  ])('rejects %s structurally with 400, before the command runs', async (_label, region) => {
+    const state = setup();
+    const { response } = await post(state, body({ quoteText: null, region, appliedRotation: 0 }));
+    expect(response.status).toBe(400);
+    expect(state.createSourceReference).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-numeric applied rotation structurally', async () => {
+    const state = setup();
+    const { response } = await post(state, body({ region: REGION, appliedRotation: '90' }));
+    expect(response.status).toBe(400);
+    expect(state.createSourceReference).not.toHaveBeenCalled();
+  });
+
+  it('passes a semantically wrong region to the domain, which owns that verdict', async () => {
+    // Structurally a rectangle, semantically out of bounds: the route must not
+    // grow a second copy of the rules.
+    const state = setup({ result: err(domainError('validation', 'bad region')) });
+    const { response, json } = await post(state, body({
+      quoteText: null, region: { x: 0.9, y: 0.1, width: 0.5, height: 0.4 }, appliedRotation: 0,
+    }));
+    expect(state.createSourceReference).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(400);
+    expect(json).toEqual({ error: 'Invalid source reference' });
+  });
+
+  it('maps a rotation mismatch and a permission failure through the existing taxonomy', async () => {
+    const mismatch = setup({ result: err(domainError('validation', 'rotation mismatch')) });
+    expect((await post(mismatch, body({ region: REGION, appliedRotation: 0 }))).response.status).toBe(400);
+
+    const denied = setup({ result: err(domainError('permission_denied', 'no write')) });
+    const forbidden = await post(denied, body({ region: REGION, appliedRotation: 0 }));
+    expect(forbidden.response.status).toBe(403);
+    expect(forbidden.json).toEqual({ error: 'Forbidden' });
+
+    const missing = setup({ result: err(domainError('not_found', 'cross board')) });
+    expect((await post(missing, body({ region: REGION, appliedRotation: 0 }))).response.status).toBe(404);
+  });
+
+  it('returns the region on the public reference and still exposes no storage authority', async () => {
+    const state = setup({
+      result: ok({ ...reference, quoteText: null, quoteHash: null, region: REGION }),
+    });
+
+    const { json } = await post(state, body({ region: REGION, appliedRotation: 0 }));
+
+    const published = (json as { reference: Record<string, unknown> }).reference;
+    expect(published.region).toEqual(REGION);
+    expect(Object.keys(published).sort()).toEqual([
+      'charEnd', 'charStart', 'createdAt', 'id', 'locator', 'pageEnd', 'pageStart',
+      'quoteHash', 'quoteText', 'region', 'sourceDocumentId', 'targetPadletId',
+    ]);
+  });
+
+  it('adds no second endpoint and no client-controlled crop surface', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'lib/server/knowledge/knowledgeSourceReferenceRoute.ts'), 'utf8');
+    for (const forbidden of [
+      'crop', 'storagePath', 'storage_path', 'bucket', 'createSignedUrl',
+      'naturalWidth', 'naturalHeight', '.webp',
+    ]) {
+      expect(source, `the route must not mention ${forbidden}`).not.toContain(forbidden);
+    }
+    // One POST handler, and the region reaches the domain through it alone.
+    expect(source.match(/export function create/g) ?? []).toHaveLength(1);
   });
 });

@@ -203,6 +203,8 @@ describe.skipIf(!hasLocalStack)('P6J-F4-C source_references RLS -- authenticated
     if (!service) return;
     try {
       await service.from('source_references').delete().like('quote_text', `${RUN}%`);
+      // F9-B1 region rows carry no quote_text, so the marker sweep cannot see them.
+      await service.from('source_references').delete().in('target_padlet_id', [padletA, padletB]);
       await service.from('knowledge_documents').delete().in('id', [documentA, documentB]);
       await service.from('padlets').delete().in('id', [padletA, padletB]);
       await service.from('board_collaborators').delete().in('board_id', [boardA, boardB]);
@@ -335,5 +337,172 @@ describe.skipIf(!hasLocalStack)('P6J-F4-C source_references RLS -- authenticated
     expect(count('cross-source')).toBe(0);
     expect(count('cross-padlet')).toBe(0);
     expect(rows).toHaveLength(2);
+  });
+
+  /**
+   * P6J-F9-B1. The region columns carry their own invariants, and PostgreSQL
+   * must enforce every one of them without the application layer's help. The
+   * CHECK cases run as service role on purpose: RLS is bypassed there, so a
+   * rejection can only be the constraint.
+   */
+  describe('P6J-F9-B1 page region columns', () => {
+    const REGION = { region_x: 0.25, region_y: 0.1, region_width: 0.5, region_height: 0.4 };
+
+    const regionRow = (overrides: Record<string, unknown> = {}) => ({
+      target_padlet_id: padletA,
+      source_document_id: documentA,
+      page_start: 1,
+      page_end: 1,
+      quote_text: null,
+      quote_hash: null,
+      char_start: null,
+      char_end: null,
+      ...REGION,
+      ...overrides,
+    });
+
+    /** Service role: no RLS in the way, so only a CHECK can refuse the row. */
+    const serviceInsert = (overrides: Record<string, unknown> = {}) =>
+      service.from('source_references').insert(regionRow(overrides)).select('id').single();
+
+    const regionIds: string[] = [];
+
+    afterAll(async () => {
+      if (regionIds.length > 0) await service.from('source_references').delete().in('id', regionIds);
+    });
+
+    it('D1: the migration added the four region columns as nullable double precision', () => {
+      const rows = catalogQuery(
+        "SELECT column_name || '|' || data_type || '|' || is_nullable"
+        + " FROM information_schema.columns WHERE table_schema = 'public'"
+        + " AND table_name = 'source_references' AND column_name LIKE 'region\\_%'"
+        + ' ORDER BY column_name',
+      ).split('\n').map((line) => line.trim()).filter(Boolean);
+
+      expect(rows).toEqual([
+        'region_height|double precision|YES',
+        'region_width|double precision|YES',
+        'region_x|double precision|YES',
+        'region_y|double precision|YES',
+      ]);
+    });
+
+    it('D1: all four region CHECK constraints exist on the table', () => {
+      const names = catalogQuery(
+        "SELECT conname FROM pg_constraint WHERE conrelid = 'public.source_references'::regclass"
+        + " AND contype = 'c' AND conname LIKE '%region%' ORDER BY conname",
+      ).split('\n').map((line) => line.trim()).filter(Boolean);
+
+      expect(names).toEqual([
+        'source_references_region_bounds_check',
+        'source_references_region_complete_check',
+        'source_references_region_single_page_check',
+        'source_references_region_text_exclusion_check',
+      ]);
+    });
+
+    it('D2: a legacy reference with no region still inserts and reads back null', async () => {
+      const { data, error } = await service
+        .from('source_references')
+        .insert({
+          target_padlet_id: padletA,
+          source_document_id: documentA,
+          page_start: 1,
+          page_end: 2,
+          // Deliberately NOT the RUN marker prefix: this row must not be
+          // counted by the write-accounting test above.
+          quote_text: 'f9b1-legacy-no-region',
+          quote_hash: null,
+          char_start: null,
+          char_end: null,
+        })
+        .select('id, region_x, region_y, region_width, region_height')
+        .single();
+
+      expect(error).toBeNull();
+      expect(data).toMatchObject({
+        region_x: null, region_y: null, region_width: null, region_height: null,
+      });
+    });
+
+    it('D3: the board owner and a board editor may both write a region', async () => {
+      for (const [role, user] of [['owner', owner], ['editor', editor]] as const) {
+        const { data, error } = await user.client
+          .from('source_references')
+          .insert(regionRow())
+          .select('id, region_x, region_y, region_width, region_height')
+          .single();
+
+        expect(error, `${role} region insert`).toBeNull();
+        expect(data).toMatchObject(REGION);
+        regionIds.push((data as { id: string }).id);
+      }
+    });
+
+    it('D4/D5: a viewer and a cross-board pairing are still refused a region', async () => {
+      const asViewer = await viewer.client.from('source_references').insert(regionRow()).select('id').single();
+      expect(asViewer.error, 'viewer region write').not.toBeNull();
+
+      const crossDocument = await owner.client
+        .from('source_references')
+        .insert(regionRow({ source_document_id: documentB }))
+        .select('id').single();
+      expect(crossDocument.error, 'cross-board document region write').not.toBeNull();
+
+      const crossPadlet = await owner.client
+        .from('source_references')
+        .insert(regionRow({ target_padlet_id: padletB }))
+        .select('id').single();
+      expect(crossPadlet.error, 'cross-board padlet region write').not.toBeNull();
+    });
+
+    it.each([
+      ['D6 a missing width', { region_width: null }],
+      ['D6 only an x', { region_y: null, region_width: null, region_height: null }],
+      ['D7 a region beside char offsets', { char_start: 3, char_end: 9 }],
+      ['D8 a negative x', { region_x: -0.1 }],
+      ['D8 a zero width', { region_width: 0 }],
+      ['D8 an x beyond the page', { region_x: 1.5 }],
+      ['D8 a rectangle running off the right edge', { region_x: 0.7, region_width: 0.5 }],
+      ['D8 a rectangle running off the bottom edge', { region_y: 0.7, region_height: 0.5 }],
+      ['D8 a NaN edge', { region_x: Number.NaN }],
+      ['D8 an infinite width', { region_width: Number.POSITIVE_INFINITY }],
+      ['D9 a region spanning two pages', { page_start: 1, page_end: 2 }],
+    ])('rejects %s at the database, not merely in the application', async (_label, overrides) => {
+      const { data, error } = await serviceInsert(overrides);
+      expect(error, 'the CHECK must refuse this row').not.toBeNull();
+      // 23514 is check_violation: proof it was a constraint and not RLS.
+      expect(error?.code).toBe('23514');
+      expect(data).toBeNull();
+    });
+
+    it('accepts an edge-touching region, which the float tolerance exists for', async () => {
+      const { data, error } = await serviceInsert({
+        region_x: 0.5, region_y: 0.5, region_width: 0.5, region_height: 0.5,
+      });
+      expect(error).toBeNull();
+      regionIds.push((data as { id: string }).id);
+    });
+
+    it('D10: deleting the target padlet still cascades a region reference away', async () => {
+      const padletId = randomUUID();
+      const created = await service.from('padlets').insert({
+        id: padletId, board_id: boardA, title: `F9B1 cascade ${RUN}`, content: '', type: 'text',
+      });
+      expect(created.error).toBeNull();
+
+      const inserted = await service
+        .from('source_references')
+        .insert(regionRow({ target_padlet_id: padletId }))
+        .select('id').single();
+      expect(inserted.error).toBeNull();
+      const referenceId = (inserted.data as { id: string }).id;
+
+      await service.from('padlets').delete().eq('id', padletId);
+
+      const remaining = await service.from('source_references').select('id').eq('id', referenceId);
+      expect(remaining.error).toBeNull();
+      expect(remaining.data ?? []).toEqual([]);
+    });
   });
 });

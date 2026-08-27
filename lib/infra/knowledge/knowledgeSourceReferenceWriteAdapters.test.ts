@@ -173,6 +173,10 @@ describe('P6J-F4-A source reference write adapters', () => {
       quote_hash: 'server-hash',
       char_start: null,
       char_end: null,
+      region_x: null,
+      region_y: null,
+      region_width: null,
+      region_height: null,
       locator: null,
       created_at: '2026-08-24T00:00:00.000Z',
     };
@@ -189,6 +193,7 @@ describe('P6J-F4-A source reference write adapters', () => {
         quoteHash: 'server-hash',
         charStart: null,
         charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
 
       const entry = state.table('source_references')[0];
@@ -196,7 +201,8 @@ describe('P6J-F4-A source reference write adapters', () => {
       expect(state.calls.map((call) => call.table)).toEqual(['source_references']);
       expect(Object.keys(row).sort()).toEqual([
         'char_end', 'char_start', 'locator', 'page_end', 'page_start',
-        'quote_hash', 'quote_text', 'source_document_id', 'target_padlet_id',
+        'quote_hash', 'quote_text', 'region_height', 'region_width', 'region_x', 'region_y',
+        'source_document_id', 'target_padlet_id',
       ]);
       expect(row).toMatchObject({
         target_padlet_id: PADLET,
@@ -220,6 +226,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 3,
         quoteText: 'a quoted passage', quoteHash: 'server-hash', charStart: null, charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
 
       expect(result).toEqual({ ok: true, value: {
@@ -232,6 +239,7 @@ describe('P6J-F4-A source reference write adapters', () => {
         quoteHash: 'server-hash',
         charStart: null,
         charEnd: null,
+        region: null,
         locator: null,
         createdAt: '2026-08-24T00:00:00.000Z',
       } });
@@ -241,6 +249,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       const queryError = setup({ source_references: { data: null, error: { message: 'violates row-level security policy' } } });
       const first = await new SupabaseKnowledgeSourceReferenceWriter(queryError.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
       expect(first.ok === false && first.error.code).toBe('unavailable');
       expect(first.ok === false && first.error.message).toBe('Could not write the source reference');
@@ -249,6 +258,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       const thrown = setup({ source_references: new Error('network down') });
       const second = await new SupabaseKnowledgeSourceReferenceWriter(thrown.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
       expect(second.ok === false && second.error.code).toBe('unavailable');
       expect(second.ok === false && second.error.message).not.toContain('network down');
@@ -260,6 +270,7 @@ describe('P6J-F4-A source reference write adapters', () => {
 
       await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
 
       for (const method of ['rpc', 'storage', 'auth', 'channel']) {
@@ -363,6 +374,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 2,
         quoteText: 'alpha', quoteHash: 'server-hash', charStart: 10, charEnd: 15,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
 
       const row = state.table('source_references')[0].insert as Record<string, unknown>;
@@ -377,6 +389,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 2,
         quoteText: 'alpha', quoteHash: 'server-hash', charStart: 10, charEnd: 15,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
 
       expect(result.ok && result.value.charStart).toBe(10);
@@ -391,10 +404,127 @@ describe('P6J-F4-A source reference write adapters', () => {
       await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 3,
         quoteText: 'a quoted passage', quoteHash: 'server-hash', charStart: null, charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
       });
 
       const row = state.table('source_references')[0].insert as Record<string, unknown>;
       expect(row).toMatchObject({ char_start: null, char_end: null, locator: null });
     });
+  });
+});
+
+/**
+ * P6J-F9-B1. The adapter is the only thing that knows region geometry lives in
+ * four typed columns, so these pin the column names and the read that supplies
+ * the server's page-shape authority.
+ */
+describe('P6J-F9-B1 region write adapters', () => {
+  const REGION_ROW = {
+    id: 'reference-1',
+    target_padlet_id: PADLET,
+    source_document_id: DOCUMENT,
+    page_start: 4,
+    page_end: 4,
+    quote_text: null,
+    quote_hash: null,
+    char_start: null,
+    char_end: null,
+    region_x: 0.25,
+    region_y: 0.1,
+    region_width: 0.5,
+    region_height: 0.4,
+    locator: null,
+    created_at: '2026-08-27T00:00:00.000Z',
+  };
+
+  it('writes the region into its four columns and leaves locator null', async () => {
+    const state = setup({ source_references: { data: REGION_ROW, error: null } });
+
+    const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
+      targetPadletId: PADLET,
+      sourceDocumentId: DOCUMENT,
+      pageStart: 4,
+      pageEnd: 4,
+      quoteText: null,
+      quoteHash: null,
+      charStart: null,
+      charEnd: null,
+      regionX: 0.25,
+      regionY: 0.1,
+      regionWidth: 0.5,
+      regionHeight: 0.4,
+    });
+
+    const row = state.table('source_references')[0].insert as Record<string, unknown>;
+    expect(row).toMatchObject({
+      region_x: 0.25, region_y: 0.1, region_width: 0.5, region_height: 0.4,
+    });
+    // The jsonb column stays parser-bbox territory in its own coordinate system.
+    expect(row.locator).toBeNull();
+    expect(result.ok === true && result.value.region).toEqual({
+      x: 0.25, y: 0.1, width: 0.5, height: 0.4,
+    });
+  });
+
+  it('selects the persisted page geometry by document and page number', async () => {
+    const state = setup({
+      knowledge_pages: { data: { width_points: 595, height_points: 842, rotation: 90 }, error: null },
+    });
+
+    const result = await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
+      .findPageGeometry(DOCUMENT, 4);
+
+    const entry = state.table('knowledge_pages')[0];
+    expect(entry.select).toBe('width_points, height_points, rotation');
+    expect(entry.eq).toEqual([['document_id', DOCUMENT], ['page_number', 4]]);
+    expect(result).toEqual({ ok: true, value: { widthPoints: 595, heightPoints: 842, rotation: 90 } });
+  });
+
+  it('returns the stored geometry verbatim, defaulting and repairing nothing', async () => {
+    // A NULL rotation means "none recorded"; what that means is the domain's
+    // judgement, so it must be made in exactly one place and not here.
+    const state = setup({
+      knowledge_pages: { data: { width_points: null, height_points: null, rotation: null }, error: null },
+    });
+
+    const result = await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
+      .findPageGeometry(DOCUMENT, 1);
+
+    expect(result).toEqual({ ok: true, value: { widthPoints: null, heightPoints: null, rotation: null } });
+  });
+
+  it('reports a missing page as null and a failure as unavailable without provider text', async () => {
+    const missing = setup({ knowledge_pages: { data: null, error: null } });
+    expect(await new SupabaseKnowledgeSourceReferenceValidationRepository(missing.client)
+      .findPageGeometry(DOCUMENT, 9)).toEqual({ ok: true, value: null });
+
+    const failed = setup({
+      knowledge_pages: { data: null, error: { message: 'violates row-level security policy' } },
+    });
+    const result = await new SupabaseKnowledgeSourceReferenceValidationRepository(failed.client)
+      .findPageGeometry(DOCUMENT, 1);
+    expect(result.ok === false && result.error.code).toBe('unavailable');
+    expect(result.ok === false && result.error.message).not.toContain('row-level security');
+
+    const thrown = setup({ knowledge_pages: new Error('network down') });
+    const crashed = await new SupabaseKnowledgeSourceReferenceValidationRepository(thrown.client)
+      .findPageGeometry(DOCUMENT, 1);
+    expect(crashed.ok === false && crashed.error.code).toBe('unavailable');
+    expect(crashed.ok === false && crashed.error.message).not.toContain('network down');
+  });
+
+  it('degrades a corrupt region row to no region rather than failing the read', async () => {
+    // The CHECK constraints make this unreachable in practice; a region is
+    // optional enhancement data, so one bad rectangle must not take the
+    // reference with it.
+    const state = setup({
+      source_references: { data: { ...REGION_ROW, region_width: null }, error: null },
+    });
+    const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
+      targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 4, pageEnd: 4,
+      quoteText: null, quoteHash: null, charStart: null, charEnd: null,
+      regionX: 0.25, regionY: 0.1, regionWidth: 0.5, regionHeight: 0.4,
+    });
+    expect(result.ok === true && result.value.region).toBeNull();
   });
 });

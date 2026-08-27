@@ -10,6 +10,7 @@ import type {
 import type { DomainError } from '../core/errors';
 import type { Result } from '../core/result';
 import type { KnowledgeBoundingBox, KnowledgePdfElementType } from './pdfExtraction';
+import type { NormalizedPageRegion } from './knowledgePageRegionGeometry';
 
 export type KnowledgeDocumentKind = 'pdf';
 export type KnowledgeDocumentProcessingStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
@@ -88,6 +89,18 @@ export interface SourceReference {
   readonly quoteHash: string | null;
   readonly charStart: number | null;
   readonly charEnd: number | null;
+  /**
+   * P6J-F9-B1 visual page region: normalised 0..1, top-left origin, in the
+   * page's INTRINSIC UNROTATED coordinate system. Deliberately NOT stored in
+   * `locator`, whose KnowledgeBoundingBox is `pdf-points-bottom-left` -- a
+   * different coordinate system, and mixing them would create a second
+   * geometry authority. Null for page-only and exact-span references.
+   *
+   * Optional, not required: `parseKnowledgeSourceReference` builds this shape
+   * from an API payload and does not carry the region yet, so absent and null
+   * mean the same thing -- no region is available on this reference.
+   */
+  readonly region?: NormalizedPageRegion | null;
   readonly locator: KnowledgeSourceLocator | null;
   readonly createdAt: string;
 }

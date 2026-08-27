@@ -10,6 +10,8 @@ import type {
   SourceReference,
 } from '../../domain/knowledge/knowledgePersistence';
 import { compareKnowledgeSourceReferences } from '../../domain/knowledge/knowledgeSourceReferenceIndex';
+import { normalizeStorableRegion } from '../../domain/knowledge/knowledgePageRegionGeometry';
+import type { NormalizedPageRegion } from '../../domain/knowledge/knowledgePageRegionGeometry';
 
 interface SupabaseErrorLike {
   readonly code?: string;
@@ -26,6 +28,10 @@ interface SourceReferenceRow {
   readonly quote_hash: string | null;
   readonly char_start: number | null;
   readonly char_end: number | null;
+  readonly region_x: number | null;
+  readonly region_y: number | null;
+  readonly region_width: number | null;
+  readonly region_height: number | null;
   readonly locator: unknown;
   readonly created_at: string;
 }
@@ -60,7 +66,31 @@ export interface KnowledgeSourceReferenceSupabaseClient {
 }
 
 export const SOURCE_REFERENCE_COLUMNS =
-  'id, target_padlet_id, source_document_id, page_start, page_end, quote_text, quote_hash, char_start, char_end, locator, created_at';
+  'id, target_padlet_id, source_document_id, page_start, page_end, quote_text, quote_hash, char_start, char_end, '
+  + 'region_x, region_y, region_width, region_height, locator, created_at';
+
+/**
+ * P6J-F9-B1. Validated, never cast: the four columns become a region only when
+ * all four are finite numbers describing an in-bounds normalised rectangle.
+ *
+ * A row that fails those checks yields null rather than an error. The database
+ * CHECK makes a partial row unreachable in practice, and a region is optional
+ * enhancement data over the reference's page identity -- degrading one corrupt
+ * rectangle is right, while failing a whole board's citation read is not.
+ */
+export function toSourceReferenceRegion(row: {
+  readonly region_x: number | null;
+  readonly region_y: number | null;
+  readonly region_width: number | null;
+  readonly region_height: number | null;
+}): NormalizedPageRegion | null {
+  return normalizeStorableRegion({
+    x: row.region_x,
+    y: row.region_y,
+    width: row.region_width,
+    height: row.region_height,
+  });
+}
 
 /**
  * Parser-neutral passthrough. The stored payload is already the domain locator
@@ -82,6 +112,7 @@ function toSourceReference(row: SourceReferenceRow): SourceReference {
     quoteHash: row.quote_hash,
     charStart: row.char_start,
     charEnd: row.char_end,
+    region: toSourceReferenceRegion(row),
     locator: toLocator(row.locator),
     createdAt: row.created_at,
   };

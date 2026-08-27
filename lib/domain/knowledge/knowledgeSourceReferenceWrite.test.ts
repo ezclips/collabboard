@@ -45,6 +45,8 @@ type SetupOverrides = {
   padlet?: { boardId?: unknown } | null;
   pageText?: string | null;
   pageFails?: boolean;
+  geometry?: { widthPoints: number | null; heightPoints: number | null; rotation: number | null } | null;
+  geometryFails?: boolean;
 };
 
 function setup(overrides: SetupOverrides = {}) {
@@ -54,12 +56,18 @@ function setup(overrides: SetupOverrides = {}) {
     : overrides.document;
   const padlet = overrides.padlet === undefined ? { boardId: BOARD_A } : overrides.padlet;
   const pageText = overrides.pageText === undefined ? PAGE_TEXT : overrides.pageText;
+  const geometry = overrides.geometry === undefined
+    ? { widthPoints: 595, heightPoints: 842, rotation: 0 }
+    : overrides.geometry;
   const repository = {
     findSourceDocument: vi.fn(async () => ok(document as never)),
     findTargetPadlet: vi.fn(async () => ok(padlet as never)),
     findPageText: vi.fn(async () => (overrides.pageFails
       ? err(domainError('unavailable', 'Could not read the source page')) as never
       : ok(pageText) as never)),
+    findPageGeometry: vi.fn(async () => (overrides.geometryFails
+      ? err(domainError('unavailable', 'Could not read the source page')) as never
+      : ok(geometry) as never)),
   };
   const writer = { insertSourceReference: vi.fn(async (_row: KnowledgeSourceReferenceInsert) => ok(reference() as never)) };
   // Distinguishable from any caller-supplied value.
@@ -203,10 +211,12 @@ describe('P6J-F4-A create knowledge source reference', () => {
     await state.create(hostile as CreateKnowledgeSourceReferenceInput);
 
     const row = insertedRow(state);
-    // The insert payload carries offsets from B4-B2A, but still has no field
-    // for a locator, so highlight geometry remains unwritable.
+    // The insert payload carries offsets from B4-B2A and the F9-B1 region
+    // columns, but still has no field for a locator: parser bbox geometry
+    // remains unwritable, and a region is typed columns rather than jsonb.
     expect(Object.keys(row).sort()).toEqual([
       'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteHash', 'quoteText',
+      'regionHeight', 'regionWidth', 'regionX', 'regionY',
       'sourceDocumentId', 'targetPadletId',
     ]);
     expect(row.charStart).toBeNull();
@@ -368,6 +378,10 @@ describe('P6J-F6-B4-B2A exact source spans', () => {
       quoteHash: 'sha256(alpha)',
       charStart: 10,
       charEnd: 15,
+      regionX: null,
+      regionY: null,
+      regionWidth: null,
+      regionHeight: null,
     });
     // The canonical slice is what was hashed -- never the client's string.
     expect(state.hasher.hashQuoteText).toHaveBeenCalledTimes(1);
@@ -498,6 +512,7 @@ describe('P6J-F6-B4-B2A exact source spans', () => {
     const row = insertedRow(state) as unknown as Record<string, unknown>;
     expect(Object.keys(row).sort()).toEqual([
       'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteHash', 'quoteText',
+      'regionHeight', 'regionWidth', 'regionX', 'regionY',
       'sourceDocumentId', 'targetPadletId',
     ]);
     expect(row).not.toHaveProperty('selectedText');
@@ -528,5 +543,230 @@ describe('P6J-F6-B4-B2A exact source spans', () => {
     expect(source).toContain('const canonicalQuote = pageText.slice(mode.charStart, mode.charEnd);');
     // selectedText is used exactly once in the command: the comparison.
     expect((source.match(/input\.selectedText !== canonicalQuote/g) ?? []).length).toBe(1);
+  });
+});
+
+// ============================================================================
+// P6J-F9-B1 -- the third locator mode: a visual page region
+// ============================================================================
+
+/**
+ * A region carries no text evidence at all: F9 performs no OCR, so anything
+ * quoted would be invented. What makes the write safe instead is that the
+ * server owns the page's real geometry and the client only owns where the
+ * pointer was.
+ */
+describe('P6J-F9-B1 page region references', () => {
+  const REGION = { x: 0.25, y: 0.1, width: 0.5, height: 0.4 };
+
+  const regionInput = (overrides: Partial<CreateKnowledgeSourceReferenceInput> = {}) =>
+    input({ quoteText: null, region: REGION, appliedRotation: 0, ...overrides });
+
+  async function rejects(
+    overrides: Partial<CreateKnowledgeSourceReferenceInput>,
+    setupOverrides: SetupOverrides = {},
+  ) {
+    const state = setup(setupOverrides);
+    const result = await state.create(regionInput(overrides));
+    expect(result.ok).toBe(false);
+    expect(state.writer.insertSourceReference).not.toHaveBeenCalled();
+    return result;
+  }
+
+  it('W3/W4: persists the four normalized columns and no text evidence', async () => {
+    const state = setup();
+    const result = await state.create(regionInput());
+
+    expect(result.ok).toBe(true);
+    const row = insertedRow(state);
+    expect([row.regionX, row.regionY, row.regionWidth, row.regionHeight])
+      .toEqual([0.25, 0.1, 0.5, 0.4]);
+    expect([row.quoteText, row.quoteHash, row.charStart, row.charEnd])
+      .toEqual([null, null, null, null]);
+    // No OCR exists, so nothing is hashed and the stored page text is never read.
+    expect(state.hasher.hashQuoteText).not.toHaveBeenCalled();
+    expect(state.repository.findPageText).not.toHaveBeenCalled();
+  });
+
+  it('W1: a page-only reference still writes null region columns', async () => {
+    const state = setup();
+    await state.create(input());
+    const row = insertedRow(state);
+    expect([row.regionX, row.regionY, row.regionWidth, row.regionHeight])
+      .toEqual([null, null, null, null]);
+    expect(row.quoteText).toBe('a quoted passage');
+  });
+
+  it('W2: an exact span still writes null region columns', async () => {
+    const state = setup();
+    await state.create(input({
+      quoteText: null, charStart: 7, charEnd: 12, selectedText: PAGE_TEXT.slice(7, 12),
+    }));
+    const row = insertedRow(state);
+    expect([row.regionX, row.regionY, row.regionWidth, row.regionHeight])
+      .toEqual([null, null, null, null]);
+    expect([row.charStart, row.charEnd]).toEqual([7, 12]);
+  });
+
+  it('W5: a request carrying both a region and text offsets fails closed', async () => {
+    // Two locators describe two different things; choosing one would silently
+    // discard what the user actually selected.
+    const result = await rejects({ charStart: 7, charEnd: 12, selectedText: 'x' });
+    expect(result.ok === false && result.error.code).toBe('validation');
+    await rejects({ charStart: 7, charEnd: null });
+  });
+
+  it('W6: a partial region fails closed rather than being completed', async () => {
+    for (const partial of [
+      { x: 0.1, y: 0.1, width: 0.2 },
+      { x: 0.1, y: 0.1, height: 0.2 },
+      { y: 0.1, width: 0.2, height: 0.2 },
+      {},
+    ]) {
+      await rejects({ region: partial as never });
+    }
+  });
+
+  it('W7: a region must not cross pages', async () => {
+    await rejects({ pageEnd: 3 });
+  });
+
+  it.each([
+    ['W8 NaN x', { x: Number.NaN, y: 0.1, width: 0.5, height: 0.4 }],
+    ['W8 NaN width', { x: 0.1, y: 0.1, width: Number.NaN, height: 0.4 }],
+    ['W9 infinite width', { x: 0.1, y: 0.1, width: Number.POSITIVE_INFINITY, height: 0.4 }],
+    ['W9 infinite x', { x: Number.POSITIVE_INFINITY, y: 0.1, width: 0.5, height: 0.4 }],
+    ['W10 negative x', { x: -0.1, y: 0.1, width: 0.5, height: 0.4 }],
+    ['W10 negative y', { x: 0.1, y: -0.1, width: 0.5, height: 0.4 }],
+    ['W11 zero width', { x: 0.1, y: 0.1, width: 0, height: 0.4 }],
+    ['W11 zero height', { x: 0.1, y: 0.1, width: 0.5, height: 0 }],
+    ['W12 x + width past the page', { x: 0.6, y: 0.1, width: 0.5, height: 0.4 }],
+    ['W13 y + height past the page', { x: 0.1, y: 0.7, width: 0.5, height: 0.4 }],
+  ])('%s is rejected', async (_label, region) => {
+    await rejects({ region: region as never });
+  });
+
+  it('W14: an edge selection within float tolerance is accepted and clamped', async () => {
+    const state = setup();
+    const result = await state.create(regionInput({
+      region: { x: 0.5, y: 0.5, width: 0.5 + 1e-12, height: 0.5 + 1e-12 },
+    }));
+
+    expect(result.ok).toBe(true);
+    const row = insertedRow(state);
+    // Stored so the database CHECK holds exactly, without rounding the value.
+    expect(row.regionX! + row.regionWidth!).toBeLessThanOrEqual(1);
+    expect(row.regionY! + row.regionHeight!).toBeLessThanOrEqual(1);
+    expect(row.regionWidth).toBeCloseTo(0.5, 9);
+  });
+
+  it('W15: a page with no stored geometry row is rejected', async () => {
+    const state = setup({ geometry: null });
+    const result = await state.create(regionInput());
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('not_found');
+    expect(state.writer.insertSourceReference).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['W16 missing width', { widthPoints: null, heightPoints: 842, rotation: 0 }],
+    ['W16 zero width', { widthPoints: 0, heightPoints: 842, rotation: 0 }],
+    ['W16 negative height', { widthPoints: 595, heightPoints: -842, rotation: 0 }],
+    ['W16 NaN height', { widthPoints: 595, heightPoints: Number.NaN, rotation: 0 }],
+    ['W18 non-canonical rotation', { widthPoints: 595, heightPoints: 842, rotation: 45 }],
+  ])('%s is rejected: an uncroppable region must not be stored', async (_label, geometry) => {
+    await rejects({}, { geometry });
+  });
+
+  it('W17: a stored NULL rotation counts as upright, matching how the reader renders it', async () => {
+    const upright = { widthPoints: 595, heightPoints: 842, rotation: null };
+    const state = setup({ geometry: upright });
+    expect((await state.create(regionInput({ appliedRotation: 0 }))).ok).toBe(true);
+    // A client that claimed a quarter turn on that same page is still wrong.
+    await rejects({ appliedRotation: 90 }, { geometry: upright });
+  });
+
+  it('W19: a rotation the client did not actually use is rejected', async () => {
+    // Stale rotation means the rectangle describes a different part of the page.
+    for (const rotation of [0, 90, 180, 270]) {
+      const state = setup({ geometry: { widthPoints: 595, heightPoints: 842, rotation } });
+      const wrong = await state.create(regionInput({ appliedRotation: (rotation + 90) % 360 }));
+      expect(wrong.ok).toBe(false);
+      const right = await state.create(regionInput({ appliedRotation: rotation }));
+      expect(right.ok).toBe(true);
+    }
+  });
+
+  it('W19: a region without a usable applied rotation cannot be verified', async () => {
+    await rejects({ appliedRotation: null });
+    await rejects({ appliedRotation: 45 });
+    await rejects({ appliedRotation: -90 });
+  });
+
+  it('W19: an applied rotation without a region is a confused client', async () => {
+    const state = setup();
+    const result = await state.create(input({ region: null, appliedRotation: 0 }));
+    expect(result.ok).toBe(false);
+    expect(state.writer.insertSourceReference).not.toHaveBeenCalled();
+  });
+
+  it('W20: the insert carries exactly the known columns -- no client geometry rides along', async () => {
+    const state = setup();
+    await state.create({
+      ...regionInput(),
+      // Anything a client might try to smuggle beside the rectangle.
+      naturalWidth: 1650,
+      storagePath: 'knowledge/board/document/pages/1.webp',
+      bucket: 'knowledge-documents',
+    } as never);
+
+    expect(Object.keys(insertedRow(state)).sort()).toEqual([
+      'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteHash', 'quoteText',
+      'regionHeight', 'regionWidth', 'regionX', 'regionY', 'sourceDocumentId', 'targetPadletId',
+    ]);
+  });
+
+  it('W20: the command reads page shape only from its own repository', async () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'lib/domain/knowledge/knowledgeSourceReferenceWrite.ts'), 'utf8');
+    for (const forbidden of [
+      'naturalWidth', 'naturalHeight', 'storagePath', 'storage_path', 'bucket',
+      'signedUrl', 'devicePixelRatio', 'input.widthPoints', 'input.heightPoints',
+    ]) {
+      expect(source, `the command must not read ${forbidden}`).not.toContain(forbidden);
+    }
+    expect(source).toContain('findPageGeometry');
+  });
+
+  it('W21/W22: cross-board document and padlet are rejected before any geometry read', async () => {
+    const crossDocument = setup({ document: { boardId: BOARD_B, pageCount: 10, processingStatus: 'ready' } });
+    expect((await crossDocument.create(regionInput())).ok).toBe(false);
+    expect(crossDocument.repository.findPageGeometry).not.toHaveBeenCalled();
+
+    const crossPadlet = setup({ padlet: { boardId: BOARD_B } });
+    expect((await crossPadlet.create(regionInput())).ok).toBe(false);
+    expect(crossPadlet.repository.findPageGeometry).not.toHaveBeenCalled();
+  });
+
+  it('W23: a caller without board write access is refused before anything is read', async () => {
+    const state = setup({ canWrite: false });
+    const result = await state.create(regionInput());
+    expect(result.ok === false && result.error.code).toBe('permission_denied');
+    expect(state.repository.findSourceDocument).not.toHaveBeenCalled();
+    expect(state.repository.findPageGeometry).not.toHaveBeenCalled();
+  });
+
+  it('W24/W25: an authorized writer succeeds through the same authority as every other mode', async () => {
+    // Owner and editor are one decision to this command; which of the two a
+    // caller is lives in the authorizer adapter and in RLS.
+    const state = setup({ canWrite: true });
+    expect((await state.create(regionInput())).ok).toBe(true);
+    expect(state.authorizer.canWriteBoard).toHaveBeenCalledWith(BOARD_A, USER);
+  });
+
+  it('surfaces a geometry read failure as unavailable rather than a bad request', async () => {
+    const state = setup({ geometryFails: true });
+    const result = await state.create(regionInput());
+    expect(result.ok === false && result.error.code).toBe('unavailable');
   });
 });

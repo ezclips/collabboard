@@ -35,6 +35,8 @@ interface SourceReferenceRequestBody {
   readonly charStart: number | null;
   readonly charEnd: number | null;
   readonly selectedText: string | null;
+  readonly region: { x: number; y: number; width: number; height: number } | null;
+  readonly appliedRotation: number | null;
 }
 
 const INVALID = 'Invalid source reference';
@@ -70,6 +72,10 @@ function parseBody(value: unknown): SourceReferenceRequestBody | null {
   if (!isNullableNumber(body.charStart) || !isNullableNumber(body.charEnd)) return null;
   if (body.selectedText !== undefined && body.selectedText !== null
     && typeof body.selectedText !== 'string') return null;
+  // P6J-F9-B1. Absent and null are both "no region", so every pre-B1 body stays
+  // valid; anything present must be the whole four-number shape.
+  if (body.region !== undefined && body.region !== null && !isRegionPayload(body.region)) return null;
+  if (!isNullableNumber(body.appliedRotation)) return null;
   return {
     targetPadletId: body.targetPadletId,
     sourceDocumentId: body.sourceDocumentId,
@@ -79,7 +85,23 @@ function parseBody(value: unknown): SourceReferenceRequestBody | null {
     charStart: typeof body.charStart === 'number' ? body.charStart : null,
     charEnd: typeof body.charEnd === 'number' ? body.charEnd : null,
     selectedText: typeof body.selectedText === 'string' ? body.selectedText : null,
+    // Rebuilt field by field rather than forwarded: a body that hangs a storage
+    // path, a container name or a natural size off the region cannot smuggle
+    // any of it inward.
+    region: isRegionPayload(body.region)
+      ? { x: body.region.x, y: body.region.y, width: body.region.width, height: body.region.height }
+      : null,
+    appliedRotation: typeof body.appliedRotation === 'number' ? body.appliedRotation : null,
   };
+}
+
+function isRegionPayload(
+  value: unknown,
+): value is { x: number; y: number; width: number; height: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const region = value as Record<string, unknown>;
+  return typeof region.x === 'number' && typeof region.y === 'number'
+    && typeof region.width === 'number' && typeof region.height === 'number';
 }
 
 function isNullableNumber(value: unknown): boolean {
@@ -97,6 +119,7 @@ function publicReference(reference: SourceReference) {
     quoteHash: reference.quoteHash,
     charStart: reference.charStart,
     charEnd: reference.charEnd,
+    region: reference.region,
     locator: reference.locator,
     createdAt: reference.createdAt,
   };
@@ -147,6 +170,10 @@ export function createKnowledgeSourceReferencePostHandler(
         charStart: body.charStart,
         charEnd: body.charEnd,
         selectedText: body.selectedText,
+        region: body.region,
+        // Verification evidence only, exactly like selectedText: the command
+        // compares it against the stored page rotation and discards it.
+        appliedRotation: body.appliedRotation,
       });
     } catch {
       return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });

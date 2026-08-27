@@ -68,6 +68,10 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260826_dedupe_knowledge_search_by_document.sql',
     target: '20260826000000_dedupe_knowledge_search_by_document.sql',
   },
+  {
+    source: '20260827_add_source_reference_region.sql',
+    target: '20260827000000_add_source_reference_region.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `

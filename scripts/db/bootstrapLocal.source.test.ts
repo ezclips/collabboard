@@ -17,6 +17,7 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('20260821_add_knowledge_extraction_lifecycle.sql');
     expect(source).toContain('20260822_add_knowledge_processing_lease.sql');
     expect(source).toContain('20260823_add_knowledge_processing_candidates.sql');
+    expect(source).toContain('20260827_add_source_reference_region.sql');
     expect(source).toContain('workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts');
     expect(source).toContain('workers/knowledge-pdf/knowledgePdfDispatcher.integration.test.ts');
     expect(source).toContain('workers/knowledge-pdf/knowledgePdfContainer.integration.test.ts');
