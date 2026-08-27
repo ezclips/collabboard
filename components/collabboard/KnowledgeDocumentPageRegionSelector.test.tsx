@@ -4,7 +4,7 @@ import path from 'node:path';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeDocumentPageRegionSelector from './KnowledgeDocumentPageRegionSelector';
 import type { NormalizedPageRegion } from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 
@@ -26,12 +26,27 @@ const LANDSCAPE_NATURAL = { naturalWidth: 1415, naturalHeight: 1000 };
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
+let resizeCallback: ResizeObserverCallback | null = null;
+const resizeObserve = vi.fn();
+const resizeDisconnect = vi.fn();
+
+beforeEach(() => {
+  resizeCallback = null;
+  resizeObserve.mockClear();
+  resizeDisconnect.mockClear();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) { resizeCallback = callback; }
+    observe = resizeObserve;
+    disconnect = resizeDisconnect;
+  });
+});
 
 afterEach(() => {
   act(() => { root?.unmount(); });
   host?.remove();
   root = null;
   host = null;
+  vi.unstubAllGlobals();
 });
 
 const define = (t: object, k: string, v: unknown) => Object.defineProperty(t, k, { value: v, configurable: true });
@@ -119,6 +134,59 @@ function expectDrawn(drawn: HTMLElement, expected: readonly number[]) {
   [drawn.style.left, drawn.style.top, drawn.style.width, drawn.style.height]
     .forEach((value, index) => expect(Number.parseFloat(value)).toBeCloseTo(expected[index], 6));
 }
+
+const hitBox = (c: HTMLElement) => {
+  const hit = layer(c) as HTMLElement;
+  return [hit.style.left, hit.style.top, hit.style.width, hit.style.height];
+};
+const triggerResize = () => act(() => { resizeCallback?.([], {} as ResizeObserver); });
+
+describe('P6J-F9-B3 resize synchronization', () => {
+  it('B3-1: observes the enabled selector wrapper', () => {
+    const harness = mount();
+    expect(resizeObserve).toHaveBeenCalledTimes(1);
+    expect(resizeObserve).toHaveBeenCalledWith(harness.image.parentElement);
+  });
+
+  it('B3-2: refreshes the hit layer from the resized content box', () => {
+    const harness = mount();
+    expect(hitBox(harness.container)).toEqual(['1px', '1px', '500px', '700px']);
+    layOut(harness.image, { left: 151, top: 251, width: 300, height: 420 }, PORTRAIT_NATURAL,
+      { offsetLeft: 20, offsetTop: 10, clientLeft: 2, clientTop: 3 });
+    triggerResize();
+    expect(hitBox(harness.container)).toEqual(['22px', '13px', '300px', '420px']);
+  });
+
+  it('B3-3: redraws an armed region without re-arming or changing source coordinates', () => {
+    const harness = mount();
+    drag(harness, PORTRAIT);
+    const armed = armedRegionOf(harness);
+    harness.render({ armedRegion: armed });
+    expectDrawn(rectangle(harness.container) as HTMLElement, [10, 10, 40, 50]);
+    layOut(harness.image, { left: 151, top: 251, width: 250, height: 350 }, PORTRAIT_NATURAL,
+      { offsetLeft: 8, offsetTop: 6 });
+    triggerResize();
+    expect(hitBox(harness.container)).toEqual(['9px', '7px', '250px', '350px']);
+    expectDrawn(rectangle(harness.container) as HTMLElement, [10, 10, 40, 50]);
+    expectRegion(armed, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    expect(harness.onArm).toHaveBeenCalledTimes(1);
+    expect(harness.onClear).not.toHaveBeenCalled();
+  });
+
+  it('B3-4: disconnects the observer when selection is disabled', () => {
+    const harness = mount();
+    harness.render({ enabled: false });
+    expect(resizeDisconnect).toHaveBeenCalledTimes(1);
+    expect(layer(harness.container)).toBeNull();
+  });
+
+  it('B3-5: keeps selection working without ResizeObserver', () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    const harness = mount();
+    drag(harness, PORTRAIT);
+    expect(harness.onArm).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('P6J-F9-B2 mode and readiness', () => {
   it('S1: mode OFF renders the image and no hit layer at all', () => {

@@ -108,6 +108,15 @@ export default function KnowledgeDocumentPageRegionSelector({
   // A cached image is already complete on mount and fires no load event.
   useEffect(() => { refresh(); }, [refresh, boardId, documentId, pageNumber, enabled]);
 
+  useEffect(() => {
+    if (!enabled || typeof ResizeObserver === 'undefined') return undefined;
+    const wrapper = wrapperRef.current;
+    if (wrapper === null) return undefined;
+    const observer = new ResizeObserver(() => { refresh(); });
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [enabled, refresh]);
+
   /**
    * Escape precedence. The reader closes itself on Escape, so clearing a
    * rectangle would take the reader with it. An armed rectangle is the more

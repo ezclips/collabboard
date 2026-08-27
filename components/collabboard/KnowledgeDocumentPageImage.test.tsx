@@ -59,6 +59,28 @@ const componentSource = () =>
 const componentCode = () => componentSource()
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
+/** The utility after the last variant colon OUTSIDE brackets/parens: a colon
+ * inside `[--foo:p-1]` is an arbitrary-property value, not a variant split. */
+function utilityPortion(token: string): string {
+  let depth = 0;
+  let lastTopLevelColon = -1;
+  for (let i = 0; i < token.length; i += 1) {
+    const char = token[i];
+    if (char === '[' || char === '(') depth += 1;
+    else if (char === ']' || char === ')') depth = Math.max(0, depth - 1);
+    else if (char === ':' && depth === 0) lastTopLevelColon = i;
+  }
+  return lastTopLevelColon === -1 ? token : token.slice(lastTopLevelColon + 1);
+}
+const PADDING_UTILITY = /^!?p(?:[trblxyse])?-/;
+const hasPaddingUtility = (className: string) =>
+  className.split(/\s+/).filter(Boolean).some((token) => PADDING_UTILITY.test(utilityPortion(token)));
+const paddingUtilityTokens = ['p-1', 'px-2', 'py-2', 'pt-1', 'pr-1', 'pb-1', 'pl-1', 'ps-2', 'pe-2',
+  'md:p-1', 'lg:px-2', 'md:ps-2', 'xl:pe-4', 'hover:px-2', 'focus:ps-2',
+  'sm:hover:py-[3px]', 'md:focus:pe-[2px]', 'md:!p-1', 'hover:!ps-2'];
+const nonPaddingUtilityTokens = ['md:w-full', 'hover:opacity-90', 'rounded', 'border',
+  '[--foo:p-1]', 'hover:[--foo:p-1]', 'md:[--foo:px-2]'];
+
 describe('R1: image URL identity', () => {
   it('addresses the authenticated route with board, document and page only', () => {
     const img = render();
@@ -107,6 +129,12 @@ describe('R2/R3/R11: image element contract', () => {
   it('is not draggable, so it can never become a second F8 clip source', () => {
     const img = render()!;
     expect(img.draggable).toBe(false);
+  });
+
+  it('B3-6: keeps zero padding on all sides for selector content-box mapping', () => {
+    expect(hasPaddingUtility(render()!.className)).toBe(false);
+    expect(paddingUtilityTokens.every(hasPaddingUtility)).toBe(true);
+    expect(nonPaddingUtilityTokens.some(hasPaddingUtility)).toBe(false);
   });
 });
 
