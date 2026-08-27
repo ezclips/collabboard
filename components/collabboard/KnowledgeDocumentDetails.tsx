@@ -15,6 +15,7 @@ import {
   useKnowledgeSourceNoteColors,
   useKnowledgeSourceReferencesForDocument,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
 import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
@@ -37,6 +38,11 @@ export interface KnowledgeDocumentDetailsProps {
    * than emitting a request with no real source identity.
    */
   documentId?: string;
+  /**
+   * P6J-F9-A2b. Addresses the authenticated page-image route. Optional like
+   * documentId: without it the reader renders exactly the text it always did.
+   */
+  boardId?: string;
   originalFilename: string;
   pageCount: number | null;
   pages: readonly KnowledgeDocumentDetailPage[];
@@ -406,6 +412,7 @@ function UsedInNotes({ scope, rows, onOpen }: {
 
 export default function KnowledgeDocumentDetails({
   documentId,
+  boardId,
   originalFilename,
   pageCount,
   pages,
@@ -771,6 +778,20 @@ export default function KnowledgeDocumentDetails({
                 ) : null}
                 </div>
               </div>
+              {/*
+                P6J-F9-A2b -- the page visual, a SIBLING of the canonical text
+                root and never inside it: B4-B2B measures selection offsets
+                against that paragraph's textContent, so an element within it
+                would move every coordinate after itself.
+              */}
+              {boardId && documentId ? (
+                <KnowledgeDocumentPageImage
+                  boardId={boardId}
+                  documentId={documentId}
+                  pageNumber={page.pageNumber}
+                  originalFilename={originalFilename}
+                />
+              ) : null}
               <p
                 {...{ [PAGE_TEXT_ROOT]: page.pageNumber }}
                 className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700"

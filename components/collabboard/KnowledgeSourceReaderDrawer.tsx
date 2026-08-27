@@ -244,6 +244,7 @@ export default function KnowledgeSourceReaderDrawer({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
         <KnowledgeDocumentDetails
           documentId={reader.documentId}
+          boardId={boardId}
           originalFilename={reader.originalFilename}
           pageCount={reader.pageCount}
           pages={reader.pages}

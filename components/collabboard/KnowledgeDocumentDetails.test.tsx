@@ -1735,3 +1735,145 @@ describe('P6J-F8-B3 source highlight colour', () => {
     expect(highlight.className).toContain('bg-sky-100');
   });
 });
+
+// ============================================================================
+// P6J-F9-A2b -- the page visual, layered over the canonical text
+// ============================================================================
+
+/**
+ * The image is optional enhancement data. These pin the two properties that
+ * make it safe: it never enters the F8 coordinate space, and its absence or
+ * failure leaves the reader exactly as it was.
+ */
+describe('P6J-F9-A2b: page image integration', () => {
+  const A2B_BOARD = '44444444-4444-4444-8444-444444444444';
+  const A2B_DOCUMENT = '55555555-5555-4555-8555-555555555555';
+  const a2bPages = [
+    { pageNumber: 1, text: 'Alpha page one text.' },
+    { pageNumber: 2, text: 'Beta page two text.' },
+  ];
+
+  function mountReader(props: Record<string, unknown> = {}) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(
+      <KnowledgeDocumentDetails
+        documentId={A2B_DOCUMENT}
+        boardId={A2B_BOARD}
+        originalFilename="report.pdf"
+        pageCount={2}
+        pages={a2bPages}
+        loading={false}
+        error={false}
+        onBack={vi.fn()}
+        {...props}
+      />,
+    ));
+    return host;
+  }
+
+  const imageIn = (container: HTMLElement, page: number) =>
+    container.querySelector(`[data-page-number="${page}"] img`) as HTMLImageElement | null;
+
+  it('R7: renders one image per page, inside that page section', () => {
+    const container = mountReader();
+
+    expect(container.querySelectorAll('img')).toHaveLength(2);
+    expect(imageIn(container, 1)!.getAttribute('src'))
+      .toBe(`/api/boards/${A2B_BOARD}/knowledge/${A2B_DOCUMENT}/pages/1/image`);
+    expect(imageIn(container, 2)!.getAttribute('src'))
+      .toBe(`/api/boards/${A2B_BOARD}/knowledge/${A2B_DOCUMENT}/pages/2/image`);
+  });
+
+  it('R5/R6: the image is a SIBLING above the canonical text root, which stays exact', () => {
+    const container = mountReader();
+    const image = imageIn(container, 1)!;
+    const textRoot = b3PageRoot(container, 1);
+
+    // The decisive checks: not a descendant at any depth, in either direction.
+    expect(textRoot.contains(image)).toBe(false);
+    expect(image.closest('[data-knowledge-page-text-root]')).toBeNull();
+    expect(textRoot.querySelector('img')).toBeNull();
+    // The coordinate space captureExactSelection measures is byte-identical.
+    expect(textRoot.textContent).toBe(a2bPages[0].text);
+    // And the image precedes the text within the same section.
+    const section = container.querySelector('[data-page-number="1"]')!;
+    expect(section.contains(image)).toBe(true);
+    expect(image.compareDocumentPosition(textRoot) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it('R4/R13: an image failure removes only the visual; text and search survive', () => {
+    const container = mountReader();
+    const image = imageIn(container, 1)!;
+
+    act(() => { image.dispatchEvent(new Event('error')); });
+
+    expect(imageIn(container, 1)).toBeNull();
+    // Page 2's image is untouched: failure is per-page, not per-document.
+    expect(imageIn(container, 2)).not.toBeNull();
+    // The text root is byte-identical and still selectable.
+    const textRoot = b3PageRoot(container, 1);
+    expect(textRoot.textContent).toBe(a2bPages[0].text);
+    expect(textRoot.className).toContain('select-text');
+    // Search still finds and marks text on the page whose image failed.
+    const search = container.querySelector('input')!;
+    act(() => {
+      (Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
+        .set as (v: string) => void).call(search, 'Alpha');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(b3PageRoot(container, 1).querySelector('mark')?.textContent).toBe('Alpha');
+  });
+
+  it('R12: without boardId the reader renders exactly the text and no image', () => {
+    const container = mountReader({ boardId: undefined });
+
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(b3PageRoot(container, 1).textContent).toBe(a2bPages[0].text);
+    expect(b3PageRoot(container, 2).textContent).toBe(a2bPages[1].text);
+  });
+
+  it('R12: without documentId the reader renders exactly the text and no image', () => {
+    const container = mountReader({ documentId: undefined });
+
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(b3PageRoot(container, 1).textContent).toBe(a2bPages[0].text);
+  });
+
+  it('R15: every page still renders -- no pager and no current-page state', () => {
+    const container = mountReader();
+
+    expect(container.querySelectorAll('[data-page-number]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-knowledge-page-text-root]')).toHaveLength(2);
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8');
+    expect(source).not.toMatch(/currentPage|useState<number>\(1\)|setCurrentPage/);
+  });
+
+  /**
+   * An <img> is natively draggable, and the reader already suppresses drags
+   * outside the F8 clip chip. Pinning it here keeps that correct on purpose:
+   * a second drag source inside the reader could otherwise hijack the canvas
+   * drop that expects a knowledge-clip payload.
+   */
+  it('the page image starts no drag and carries no F8 clip payload', () => {
+    const container = mountReader();
+    const image = imageIn(container, 1)!;
+
+    expect(image.draggable).toBe(false);
+    const dragEvent = new Event('dragstart', { bubbles: true, cancelable: true });
+    act(() => { image.dispatchEvent(dragEvent); });
+    // The existing suppression handler owns this: the drag never begins.
+    expect(dragEvent.defaultPrevented).toBe(true);
+  });
+
+  it('R9/R10/R11: the reader gains no Storage, PDF.js or rotation behaviour', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8');
+    for (const forbidden of ['supabase', 'storage.from', 'createSignedUrl', 'pdfjs', '.webp']) {
+      expect(source, `the reader must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+});

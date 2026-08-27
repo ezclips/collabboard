@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createClient } from '@supabase/supabase-js';
 import {
   KNOWLEDGE_DERIVATIVE_CONTENT_TYPE,
   knowledgePageDerivativePath,
@@ -336,5 +337,44 @@ describe('Knowledge page image route -- source boundaries', () => {
     expect(code).not.toContain('searchParams');
     expect(code).not.toContain('nextUrl');
     expect(code).not.toMatch(/_request\./);
+  });
+});
+
+/**
+ * P6J-F9-A2b -- the vendor contract this route's missing/outage split rests on.
+ *
+ * The fixtures above hand-build the error shape, which would keep passing if
+ * storage-js changed it. These drive the REAL `download()` code path with a
+ * stubbed fetch, so storage-js itself constructs the error: if a future upgrade
+ * moved `originalError` or started resolving JSON, this fails loudly instead of
+ * letting every missing derivative silently become a 503 outage.
+ */
+describe('Knowledge page image route -- genuine storage-js error contract', () => {
+  const vendorError = async (status: number) => {
+    const client = createClient('http://storage.test', 'anon-key', {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: async () => new Response('body', { status }) },
+    });
+    const { error } = await client.storage.from('b').download('missing.webp');
+    return error;
+  };
+
+  it('pins the shape: a failed download is a StorageUnknownError with no own status', async () => {
+    const error = await vendorError(404) as unknown as { name: string; status?: number; originalError?: { status?: number } };
+    expect(error).not.toBeNull();
+    expect(error.name).toBe('StorageUnknownError');
+    // `noResolveJson` is why this is not a StorageApiError carrying `status`.
+    expect(error.status).toBeUndefined();
+    expect(error.originalError?.status).toBe(404);
+  });
+
+  it.each([404, 400])('maps a genuine %i vendor error to 404', async (status) => {
+    configure({ storageError: await vendorError(status) });
+    expect((await route.GET(request(), context())).status).toBe(404);
+  });
+
+  it.each([500, 401])('maps a genuine %i vendor error to 503', async (status) => {
+    configure({ storageError: await vendorError(status) });
+    expect((await route.GET(request(), context())).status).toBe(503);
   });
 });
