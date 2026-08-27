@@ -29,6 +29,14 @@ import type { KnowledgeSourceBacklinkRow } from '@/lib/domain/knowledge/knowledg
 export interface KnowledgeDocumentDetailPage {
   pageNumber: number;
   text: string;
+  /**
+   * P6J-F9-A2b. Canonical persisted page geometry, optional because pre-A1 rows
+   * and the older render tests carry none. Used only to reserve image layout;
+   * it is never a coordinate space for F8 selections.
+   */
+  widthPoints?: number | null;
+  heightPoints?: number | null;
+  rotation?: number | null;
 }
 
 export interface KnowledgeDocumentDetailsProps {
@@ -790,6 +798,9 @@ export default function KnowledgeDocumentDetails({
                   documentId={documentId}
                   pageNumber={page.pageNumber}
                   originalFilename={originalFilename}
+                  widthPoints={page.widthPoints}
+                  heightPoints={page.heightPoints}
+                  rotation={page.rotation}
                 />
               ) : null}
               <p

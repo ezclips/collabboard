@@ -1749,8 +1749,8 @@ describe('P6J-F9-A2b: page image integration', () => {
   const A2B_BOARD = '44444444-4444-4444-8444-444444444444';
   const A2B_DOCUMENT = '55555555-5555-4555-8555-555555555555';
   const a2bPages = [
-    { pageNumber: 1, text: 'Alpha page one text.' },
-    { pageNumber: 2, text: 'Beta page two text.' },
+    { pageNumber: 1, text: 'Alpha page one text.', widthPoints: 600, heightPoints: 800, rotation: 0 },
+    { pageNumber: 2, text: 'Beta page two text.', widthPoints: 600, heightPoints: 800, rotation: 90 },
   ];
 
   function mountReader(props: Record<string, unknown> = {}) {
@@ -1867,6 +1867,64 @@ describe('P6J-F9-A2b: page image integration', () => {
     act(() => { image.dispatchEvent(dragEvent); });
     // The existing suppression handler owns this: the drag never begins.
     expect(dragEvent.defaultPrevented).toBe(true);
+  });
+
+  /**
+   * P6J-F9-A2b corrective. The browser run proved the sections collapsed to
+   * 57px before load, which made loading="lazy" defer nothing. These pin that
+   * each page's OWN persisted geometry reaches its OWN image -- transposed for
+   * a quarter-turn page, because A1 bakes the rotation into the derivative.
+   */
+  it('C9/C10: per-page geometry reserves layout without touching the text root', () => {
+    const container = mountReader();
+    const upright = imageIn(container, 1)!;
+    const quarterTurn = imageIn(container, 2)!;
+
+    expect([upright.getAttribute('width'), upright.getAttribute('height')]).toEqual(['600', '800']);
+    // Same stored points, rotation 90: the reservation must transpose or it
+    // would describe a shape the rasterised derivative never has.
+    expect([quarterTurn.getAttribute('width'), quarterTurn.getAttribute('height')])
+      .toEqual(['800', '600']);
+
+    // C9/C10: F8's coordinate space is byte-identical and the images are still
+    // siblings, so nothing about the reservation entered the canonical text.
+    for (const page of [1, 2]) {
+      const textRoot = b3PageRoot(container, page);
+      expect(textRoot.contains(imageIn(container, page)!)).toBe(false);
+      expect(textRoot.querySelector('img')).toBeNull();
+      expect(textRoot.textContent).toBe(a2bPages[page - 1].text);
+    }
+  });
+
+  it('C6: a legacy page with no persisted geometry still reserves space', () => {
+    const container = mountReader({ pages: [{ pageNumber: 1, text: 'Legacy page.' }] });
+    const image = imageIn(container, 1)!;
+
+    // Pre-A1 rows must not reintroduce the zero-height collapse.
+    expect(Number(image.getAttribute('width'))).toBeGreaterThan(0);
+    expect(Number(image.getAttribute('height'))).toBeGreaterThan(0);
+    expect(b3PageRoot(container, 1).textContent).toBe('Legacy page.');
+  });
+
+  it('C11/C12: reservation adds no viewport machinery and no client rotation', () => {
+    const container = mountReader();
+    expect(container.querySelectorAll('[data-page-number]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-knowledge-page-text-root]')).toHaveLength(2);
+    // Every page image is still rendered: the fix is a layout reservation, not
+    // a virtualised or paged reader.
+    expect(container.querySelectorAll('img')).toHaveLength(2);
+    for (const image of Array.from(container.querySelectorAll('img'))) {
+      expect(image.getAttribute('style')).toBeNull();
+      expect(image.getAttribute('class') ?? '').not.toMatch(/rotate|skew|aspect-/);
+    }
+    for (const file of [
+      'components/collabboard/KnowledgeDocumentDetails.tsx',
+      'components/collabboard/KnowledgeDocumentPageImage.tsx',
+    ]) {
+      const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+      expect(source, `${file} must add no viewport machinery`)
+        .not.toMatch(/IntersectionObserver|currentPage|getBoundingClientRect|scrollTop/);
+    }
   });
 
   it('R9/R10/R11: the reader gains no Storage, PDF.js or rotation behaviour', () => {

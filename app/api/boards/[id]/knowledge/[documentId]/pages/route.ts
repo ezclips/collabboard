@@ -63,7 +63,7 @@ export async function GET(
 
     const { data: pages, error: pagesError } = await adminClient
       .from('knowledge_pages')
-      .select('page_number, text')
+      .select('page_number, text, width_points, height_points, rotation')
       .eq('document_id', document.id)
       .order('page_number', { ascending: true });
     if (pagesError) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
@@ -75,9 +75,17 @@ export async function GET(
           originalFilename: document.original_filename,
           pageCount: document.page_count,
         },
-        pages: (pages ?? []).map((page: { page_number: number; text: string }) => ({
+        // P6J-F9-A2b: the geometry the worker already persisted, so the reader
+        // can reserve each page image's aspect ratio before the derivative loads.
+        pages: (pages ?? []).map((page: {
+          page_number: number; text: string;
+          width_points: number | null; height_points: number | null; rotation: number | null;
+        }) => ({
           pageNumber: page.page_number,
           text: page.text,
+          widthPoints: page.width_points,
+          heightPoints: page.height_points,
+          rotation: page.rotation,
         })),
       },
       { status: 200, headers: { 'Cache-Control': 'no-store' } },

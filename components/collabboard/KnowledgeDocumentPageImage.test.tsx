@@ -5,7 +5,10 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import KnowledgeDocumentPageImage, { knowledgePageImageUrl } from './KnowledgeDocumentPageImage';
+import KnowledgeDocumentPageImage, {
+  knowledgePageDisplayDimensions,
+  knowledgePageImageUrl,
+} from './KnowledgeDocumentPageImage';
 
 /**
  * P6J-F9-A2b. The page visual is optional enhancement data over canonical
@@ -83,6 +86,10 @@ describe('R2/R3/R11: image element contract', () => {
     // Every page section mounts at once, so deferral is what stops a 200-page
     // document from fetching 200 images the moment the reader opens.
     expect(img.getAttribute('loading')).toBe('lazy');
+    // C7: deferral and reservation are not alternatives -- lazy loading only
+    // defers anything if the element already occupies space in the layout.
+    expect(img.getAttribute('width')).toBe('3');
+    expect(img.getAttribute('height')).toBe('4');
     expect(img.getAttribute('decoding')).toBe('async');
     // A1 rasterises with the page rotation already applied; rotating again
     // client-side would double-apply it.
@@ -100,6 +107,76 @@ describe('R2/R3/R11: image element contract', () => {
   it('is not draggable, so it can never become a second F8 clip source', () => {
     const img = render()!;
     expect(img.draggable).toBe(false);
+  });
+});
+
+/**
+ * P6J-F9-A2b corrective. A real browser run proved loading="lazy" inert here:
+ * with no intrinsic size every page section measured 57px, all twelve pages
+ * fit one 540px viewport, and Chrome fetched every image at open. HTML
+ * width/height restore the aspect-ratio reservation the layout needs.
+ */
+describe('C2-C6: pre-load layout reservation', () => {
+  const reserved = (props: Record<string, unknown>) => {
+    const img = render(props)!;
+    return [img.getAttribute('width'), img.getAttribute('height')];
+  };
+
+  /**
+   * A1 rasterises with the page rotation already applied, so a quarter-turn
+   * page arrives transposed. Reserving the stored unrotated points for it
+   * would describe a shape the derivative never has.
+   */
+  it.each([
+    ['C2', 0, '600', '800'],
+    ['C3', 180, '600', '800'],
+    ['C4', 90, '800', '600'],
+    ['C5', 270, '800', '600'],
+  ])('%s: a 600x800 page at rotation %i reserves %s x %s', (_id, rotation, width, height) => {
+    expect(reserved({ widthPoints: 600, heightPoints: 800, rotation })).toEqual([width, height]);
+  });
+
+  it.each([
+    ['both dimensions null', { widthPoints: null, heightPoints: null, rotation: 0 }],
+    ['one dimension null', { widthPoints: null, heightPoints: 800, rotation: 0 }],
+    ['zero width', { widthPoints: 0, heightPoints: 800, rotation: 0 }],
+    ['negative width', { widthPoints: -600, heightPoints: 800, rotation: 0 }],
+    ['NaN width', { widthPoints: Number.NaN, heightPoints: 800, rotation: 0 }],
+    ['infinite width', { widthPoints: Number.POSITIVE_INFINITY, heightPoints: 800, rotation: 0 }],
+    ['no geometry at all', {}],
+    ['non-canonical rotation', { widthPoints: 600, heightPoints: 800, rotation: 45 }],
+    ['NaN rotation', { widthPoints: 600, heightPoints: 800, rotation: Number.NaN }],
+  ])('C6: %s still reserves positive space, never zero', (_label, props) => {
+    const [width, height] = reserved(props);
+    // The exact ratio is guesswork; that it is POSITIVE is the whole point,
+    // because zero is what reproduced the collapse the browser run found.
+    expect([width, height]).toEqual(['3', '4']);
+    expect(Number(width)).toBeGreaterThan(0);
+    expect(Number(height)).toBeGreaterThan(0);
+  });
+
+  it('C6: an absent rotation is upright, so real geometry is not discarded', () => {
+    // The column is nullable and pre-A1 rows leave it unset. Throwing away a
+    // perfectly good 600x800 for the neutral 3x4 would reserve a worse shape.
+    expect(reserved({ widthPoints: 600, heightPoints: 800, rotation: null })).toEqual(['600', '800']);
+  });
+
+  it('C6: sub-pixel geometry rounds, but never down to zero', () => {
+    expect(reserved({ widthPoints: 0.2, heightPoints: 0.4, rotation: 0 })).toEqual(['1', '1']);
+    expect(reserved({ widthPoints: 612.4, heightPoints: 792.6, rotation: 0 })).toEqual(['612', '793']);
+  });
+
+  it('C6: never throws, whatever malformed row the API surfaces', () => {
+    const wild = [null, undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1e9,
+      '600' as unknown as number, {} as unknown as number];
+    for (const width of wild) {
+      for (const rotation of wild) {
+        expect(() => knowledgePageDisplayDimensions(width, 800, rotation)).not.toThrow();
+        const box = knowledgePageDisplayDimensions(width, 800, rotation);
+        expect(box.width).toBeGreaterThan(0);
+        expect(box.height).toBeGreaterThan(0);
+      }
+    }
   });
 });
 

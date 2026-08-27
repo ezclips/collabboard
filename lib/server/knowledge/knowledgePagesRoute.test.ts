@@ -28,6 +28,7 @@ function context(boardId = BOARD_ID, documentId = DOCUMENT_ID) {
 
 function query<T>(result: Lookup<T>) {
   const filters: Array<[string, string]> = [];
+  const selects: string[] = [];
   let ordered: { column: string; ascending: boolean } | null = null;
   const builder = {
     eq: vi.fn((column: string, value: string) => {
@@ -40,7 +41,12 @@ function query<T>(result: Lookup<T>) {
     }),
     maybeSingle: vi.fn(async () => result),
   };
-  return { filters, get ordered() { return ordered; }, select: vi.fn(() => builder) };
+  return {
+    filters,
+    selects,
+    get ordered() { return ordered; },
+    select: vi.fn((columns: string) => { selects.push(columns); return builder; }),
+  };
 }
 
 function configure(options: {
@@ -48,7 +54,10 @@ function configure(options: {
   owner?: Lookup<{ id: string } | null>;
   member?: Lookup<boolean | null>;
   document?: Lookup<{ id: string; original_filename: string; page_count: number | null; processing_status: string } | null>;
-  pages?: Lookup<{ page_number: number; text: string }[] | null>;
+  pages?: Lookup<{
+    page_number: number; text: string;
+    width_points: number | null; height_points: number | null; rotation: number | null;
+  }[] | null>;
 } = {}) {
   const ownerQuery = query(options.owner ?? { data: null, error: null });
   const documentQuery = query(options.document ?? {
@@ -62,8 +71,8 @@ function configure(options: {
   });
   const pagesQuery = query(options.pages ?? {
     data: [
-      { page_number: 1, text: 'first' },
-      { page_number: 2, text: 'second' },
+      { page_number: 1, text: 'first', width_points: 612, height_points: 792, rotation: 0 },
+      { page_number: 2, text: 'second', width_points: 595, height_points: 842, rotation: 90 },
     ],
     error: null,
   });
@@ -111,8 +120,8 @@ describe('Knowledge extracted pages route', () => {
     expect(payload).toEqual({
       document: { id: DOCUMENT_ID, originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
       pages: [
-        { pageNumber: 1, text: 'first' },
-        { pageNumber: 2, text: 'second' },
+        { pageNumber: 1, text: 'first', widthPoints: 612, heightPoints: 792, rotation: 0 },
+        { pageNumber: 2, text: 'second', widthPoints: 595, heightPoints: 842, rotation: 90 },
       ],
     });
     expect(state.pagesQuery.ordered).toEqual({ column: 'page_number', ascending: true });
@@ -176,6 +185,53 @@ describe('Knowledge extracted pages route', () => {
     const response = await route.GET(new Request('http://localhost'), context());
     expect(response.status).toBe(200);
     expect((await response.json()).pages).toEqual([]);
+  });
+
+  /**
+   * P6J-F9-A2b corrective. A browser run proved loading="lazy" inert: with no
+   * intrinsic size every section measured 57px and Chrome fetched all twelve
+   * images at open. The reader can only reserve each image's ratio if this
+   * route surfaces geometry the worker ALREADY persisted -- no recomputation.
+   */
+  it('C1: selects and returns the persisted page geometry verbatim', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      pages: {
+        data: [{ page_number: 1, text: 'first', width_points: 612.5, height_points: 792, rotation: 270 }],
+        error: null,
+      },
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+
+    for (const column of ['width_points', 'height_points', 'rotation']) {
+      expect(state.pagesQuery.selects[0], `pages query must select ${column}`).toContain(column);
+    }
+    // Passed through untouched: no rounding, no rotation applied, no raster
+    // pixel size invented here. Display reservation is the client's business.
+    expect((await response.json()).pages).toEqual([
+      { pageNumber: 1, text: 'first', widthPoints: 612.5, heightPoints: 792, rotation: 270 },
+    ]);
+  });
+
+  it('C1: reports absent geometry as null instead of inventing a default', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      pages: {
+        data: [{ page_number: 1, text: 'first', width_points: null, height_points: null, rotation: null }],
+        error: null,
+      },
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+    // Pre-A1 rows are legitimate; the client owns the fallback, not this route.
+    expect((await response.json()).pages).toEqual([
+      { pageNumber: 1, text: 'first', widthPoints: null, heightPoints: null, rotation: null },
+    ]);
+  });
+
+  it('C1: adds no second query and no geometry recomputation', () => {
+    const source = readFileSync(resolve(process.cwd(), 'app/api/boards/[id]/knowledge/[documentId]/pages/route.ts'), 'utf8');
+    expect(source).not.toMatch(/pdfjs|getViewport|normalizeRotation|widthPx|heightPx/);
+    expect(source.match(/\.from\('knowledge_pages'\)/g) ?? []).toHaveLength(1);
   });
 
   it('does not use the legacy permission path or expose unsafe fields', () => {

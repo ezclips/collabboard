@@ -22,6 +22,37 @@ export interface KnowledgeDocumentPageImageProps {
   readonly documentId: string;
   readonly pageNumber: number;
   readonly originalFilename: string;
+  readonly widthPoints?: number | null;
+  readonly heightPoints?: number | null;
+  readonly rotation?: number | null;
+}
+
+/** Reserves pre-load space only. Never page-coordinate authority. */
+const FALLBACK_RATIO = { width: 3, height: 4 } as const;
+
+/**
+ * Without intrinsic dimensions an <img> occupies zero height until its bytes
+ * arrive: every page section collapses, the document fits inside one viewport,
+ * and the browser fetches every image at once -- which defeats loading="lazy".
+ * A1 rasterises with the page rotation already applied, so a quarter-turn page
+ * displays transposed relative to the stored unrotated points.
+ */
+export function knowledgePageDisplayDimensions(
+  widthPoints?: number | null,
+  heightPoints?: number | null,
+  rotation?: number | null,
+): { readonly width: number; readonly height: number } {
+  const positive = (value: number | null | undefined): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+  if (!positive(widthPoints) || !positive(heightPoints)) return FALLBACK_RATIO;
+  // Absent means none recorded; a present non-canonical value is uninterpretable.
+  const turn = rotation ?? 0;
+  if (turn !== 0 && turn !== 90 && turn !== 180 && turn !== 270) return FALLBACK_RATIO;
+  const quarter = turn === 90 || turn === 270;
+  return {
+    width: Math.max(1, Math.round(quarter ? heightPoints : widthPoints)),
+    height: Math.max(1, Math.round(quarter ? widthPoints : heightPoints)),
+  };
 }
 
 /**
@@ -42,8 +73,12 @@ export default function KnowledgeDocumentPageImage({
   boardId,
   documentId,
   pageNumber,
+  widthPoints,
+  heightPoints,
+  rotation,
 }: KnowledgeDocumentPageImageProps) {
   const src = knowledgePageImageUrl(boardId, documentId, pageNumber);
+  const reserved = knowledgePageDisplayDimensions(widthPoints, heightPoints, rotation);
   // The FAILED URL is remembered, not a bare boolean: when the reader switches
   // document or page the src changes, and the stale failure clears itself
   // without an effect. A boolean would survive the identity change and hide a
@@ -70,6 +105,10 @@ export default function KnowledgeDocumentPageImage({
       // than incidental, so this can never become a second drag source
       // competing with the knowledge-clip payload on the canvas.
       draggable={false}
+      // The pre-load ratio reservation that makes loading="lazy" real; these
+      // are attributes, not styling, so h-auto still governs the drawn size.
+      width={reserved.width}
+      height={reserved.height}
       onError={() => setFailedSrc(src)}
       className="mb-2 block h-auto w-full rounded border border-gray-200 bg-gray-50"
     />
