@@ -2057,6 +2057,21 @@ describe('P6J-F9-D region arrival', () => {
     expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
   });
 
+  it('D12/M8: switching from a PAGE_REGION reference to an EXACT_SPAN one clears the overlay', () => {
+    const refA = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    const text = regionPages[0].text;
+    const refB = sourceRef({
+      pageStart: 1, pageEnd: 1, sourceDocumentId: regionDocId,
+      charStart: 0, charEnd: 10, quoteText: text.slice(0, 10),
+    });
+    const { container, render } = mountRegionArrival([refA, refB],
+      { initialSourceReferenceId: refA.id, initialSourceRequestId: 1 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(1);
+    render({ initialSourceReferenceId: refB.id, initialSourceRequestId: 2 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+    expect(container.querySelector('[data-knowledge-source-navigation-target="true"]')).not.toBeNull();
+  });
+
   it('D13/M11: switching documents clears a stale region overlay', () => {
     const ref = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
     const { container, render } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
@@ -2067,8 +2082,11 @@ describe('P6J-F9-D region arrival', () => {
 
   it('D14: a reference id matching nothing fails soft with no overlay and no throw', () => {
     const ref = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
-    expect(() => mountRegionArrival([ref], { initialSourceReferenceId: 'ref-does-not-exist', initialSourceRequestId: 1 }))
-      .not.toThrow();
+    let container: HTMLElement | undefined;
+    expect(() => {
+      container = mountRegionArrival([ref], { initialSourceReferenceId: 'ref-does-not-exist', initialSourceRequestId: 1 }).container;
+    }).not.toThrow();
+    expect((container as HTMLElement).querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
   });
 
   it('D14: a malformed stored region fails soft with no overlay', () => {
