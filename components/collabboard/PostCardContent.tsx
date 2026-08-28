@@ -25,6 +25,8 @@ import { BookOpen } from "lucide-react";
 import { useKnowledgeSourceReferencesForPadlet } from "./KnowledgeSourceReferenceContext";
 import { knowledgeSourceCardLabel } from "@/lib/domain/knowledge/knowledgeSourceNavigation";
 import { knowledgeSourceCardExcerpt } from "@/lib/domain/knowledge/knowledgeSourceCardExcerpt";
+import { getKnowledgeSourceCardRegionCrop } from "@/lib/domain/knowledge/knowledgeSourceCardRegionCrop";
+import KnowledgeSourceRegionCrop from "./KnowledgeSourceRegionCrop";
 
 type CellStyle = {
     bg?: string;
@@ -1127,10 +1129,12 @@ export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {
     const references = useKnowledgeSourceReferencesForPadlet(padletId);
     const label = knowledgeSourceCardLabel(references);
     const excerpt = knowledgeSourceCardExcerpt(references);
+    const crop = getKnowledgeSourceCardRegionCrop(references);
     if (label === null) return null;
 
     return (
         <>
+            {crop && <KnowledgeSourceRegionCrop referenceId={crop.referenceId} />}
             {excerpt && (
                 <div
                     data-knowledge-source-excerpt="true"

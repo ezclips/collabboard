@@ -21,9 +21,11 @@ import path from 'node:path';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock('next/navigation', () => ({ useParams: () => ({ id: '11111111-1111-4111-8111-111111111111' }) }));
 
 import { KnowledgeSourceMarker } from './PostCardContent';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
@@ -320,5 +322,77 @@ describe('P6J-F8-B2 card source excerpt', () => {
   it('the excerpt adds no interactive element', () => {
     const container = mountMarker([exactSpanReference('Opening are prime examples')]);
     expect(container.querySelector('button, a, [role="button"], [tabindex]')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P6J-F9-C2 -- the region crop, mounted by the SAME shared marker component
+// ---------------------------------------------------------------------------
+
+const CROP = '[data-knowledge-source-region-crop]';
+
+function pageRegionReference(id: string): SourceReference {
+  return {
+    ...reference(id, 3, 3, '2026-01-01T00:00:00.000Z'),
+    region: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 },
+  } as unknown as SourceReference;
+}
+
+describe('P6J-F9-C2 card region crop (shared marker mount)', () => {
+  it('P1: one valid PAGE_REGION reference renders the crop, and the marker still renders alongside it', () => {
+    const container = mountMarker([pageRegionReference('ref-1')]);
+    expect(container.querySelector(CROP)).not.toBeNull();
+    expect(container.querySelector(MARKER)).not.toBeNull();
+  });
+
+  it('P2: the crop appears before the marker in document order', () => {
+    const container = mountMarker([pageRegionReference('ref-1')]);
+    const crop = container.querySelector(CROP)!;
+    const marker = container.querySelector(MARKER)!;
+    expect(crop.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('P3: PAGE_ONLY renders no crop but keeps the marker', () => {
+    const pageOnly = {
+      ...reference('ref-1', 1, 1, '2026-01-01T00:00:00.000Z'),
+      quoteText: 'A'.repeat(1591),
+    } as unknown as SourceReference;
+    const container = mountMarker([pageOnly]);
+    expect(container.querySelector(CROP)).toBeNull();
+    expect(container.querySelector(MARKER)).not.toBeNull();
+  });
+
+  it('P4: EXACT_SPAN renders no crop, and the existing excerpt still renders', () => {
+    const container = mountMarker([exactSpanReference('Opening are prime examples')]);
+    expect(container.querySelector(CROP)).toBeNull();
+    expect(container.querySelector(EXCERPT)).not.toBeNull();
+  });
+
+  it('P5: two references -- even when one alone would be a valid PAGE_REGION -- render no crop', () => {
+    const container = mountMarker([
+      pageRegionReference('ref-1'),
+      reference('ref-2', 5, 5, '2026-01-02T00:00:00.000Z'),
+    ]);
+    expect(container.querySelector(CROP)).toBeNull();
+    expect(container.querySelector(MARKER)!.textContent).toBe('2 sources');
+  });
+
+  it('P9: exactly one crop element is mounted, never a duplicate', () => {
+    const container = mountMarker([pageRegionReference('ref-1')]);
+    expect(container.querySelectorAll(CROP).length).toBe(1);
+  });
+
+  it('P10/P11: the crop rides the identical shared call site every layout already uses -- Drawing gains no marker or crop of its own', () => {
+    // The same call site assertion A/B/D above already pin for the marker:
+    // PostCardContent's TEXT/DEFAULT branch and FreeformPadletCards' generic/
+    // Note branch both call this exact component, and the Drawing branch
+    // calls no marker at all -- so crop rides along by construction, with no
+    // separate per-layout implementation.
+    expect(postCardContent).toContain('<KnowledgeSourceMarker padletId={padlet.id} />');
+    expect(freeform).toContain('<KnowledgeSourceMarker padletId={padlet.id} />');
+    expect(mountMarker([pageRegionReference('ref-1')]).querySelector(CROP)).not.toBeNull();
+    // No separate/duplicate mount: freeform never references the crop
+    // component directly, only through the shared marker above.
+    expect(freeform).not.toContain('KnowledgeSourceRegionCrop');
   });
 });

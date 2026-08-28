@@ -388,7 +388,10 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
   });
 
   it('D: the card marker is non-interactive', () => {
-    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 900);
+    // P6J-F9-C2 widened this window: the eligibility check and the crop's
+    // own conditional line now sit before the marker div inside this
+    // function, pushing it further from the anchor than before.
+    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 1000);
 
     expect(marker).toContain('data-knowledge-source-marker="true"');
     // No click surface of any kind: the clickable affordance is the editor's.
