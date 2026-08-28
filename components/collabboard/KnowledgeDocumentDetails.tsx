@@ -16,6 +16,7 @@ import {
   useKnowledgeSourceReferencesForDocument,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import KnowledgeDocumentPageRegionSelector from '@/components/collabboard/KnowledgeDocumentPageRegionSelector';
+import { normalizeStorableRegion } from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 import type { KnowledgePageRotation, NormalizedPageRegion }
   from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
@@ -520,6 +521,23 @@ export default function KnowledgeDocumentDetails({
   }, [initialSourceReferenceId, sourceSegmentsByPage]);
 
   /**
+   * P6J-F9-D. The one explicitly navigated PAGE_REGION reference, or null for
+   * every other citation kind -- the same eligibility C2's card crop checks,
+   * applied to one named reference rather than a card's whole array.
+   */
+  const arrivalRegion = useMemo(() => {
+    if (initialSourceReferenceId === undefined) return null;
+    const reference = documentSourceReferences.find((row) => row.id === initialSourceReferenceId);
+    if (!reference) return null;
+    if (reference.quoteText !== null) return null;
+    if (reference.charStart !== null || reference.charEnd !== null) return null;
+    if (!Number.isInteger(reference.pageStart) || reference.pageStart < 1) return null;
+    if (reference.pageStart !== reference.pageEnd) return null;
+    const region = normalizeStorableRegion(reference.region);
+    return region === null ? null : { pageNumber: reference.pageStart, region };
+  }, [initialSourceReferenceId, documentSourceReferences]);
+
+  /**
    * Re-proved against the CURRENT page text on every render, so replaced or
    * refreshed page data can never emit coordinates mapped against text that is
    * no longer on screen. Staleness degrades to "no selection", never to a wrong
@@ -883,6 +901,7 @@ export default function KnowledgeDocumentDetails({
                   rotation={page.rotation}
                   enabled={regionMode && onCreateNoteFromPage !== undefined}
                   armedRegion={pageRegion?.region ?? null}
+                  highlightRegion={arrivalRegion?.pageNumber === page.pageNumber ? arrivalRegion.region : null}
                   onArm={(region, appliedRotation) =>
                     setArmedRegion({ pageNumber: page.pageNumber, region, appliedRotation })}
                   onClear={() => setArmedRegion(null)}

@@ -1955,3 +1955,143 @@ describe('P6J-F9-A2b: page image integration', () => {
     }
   });
 });
+
+// ============================================================================
+// P6J-F9-D -- region arrival overlay
+// ============================================================================
+
+describe('P6J-F9-D region arrival', () => {
+  const REGION_DOC = 'doc-region-1';
+  const regionPages = [
+    { pageNumber: 1, text: 'Page one region arrival fixture text right here.', widthPoints: 595, heightPoints: 842, rotation: 0 },
+    { pageNumber: 2, text: 'Page two region arrival fixture text right here.', widthPoints: 595, heightPoints: 842, rotation: 0 },
+  ];
+
+  const regionDocId = REGION_DOC as SourceReference['sourceDocumentId'];
+  const regionRef = (pageNumber: number, region: { x: number; y: number; width: number; height: number },
+    overrides: Partial<SourceReference> = {}) =>
+    sourceRef({ pageStart: pageNumber, pageEnd: pageNumber, sourceDocumentId: regionDocId, region, ...overrides });
+
+  /** Same jsdom layout hack the selector's own suite uses, applied per <img>. */
+  function layOutImage(image: HTMLImageElement) {
+    const layout: Record<string, unknown> = {
+      complete: true, naturalWidth: 1000, naturalHeight: 1415,
+      clientLeft: 1, clientTop: 1, clientWidth: 500, clientHeight: 700, offsetLeft: 0, offsetTop: 0,
+    };
+    for (const [key, value] of Object.entries(layout)) Object.defineProperty(image, key, { value, configurable: true });
+    act(() => { image.dispatchEvent(new Event('load')); });
+  }
+
+  const overlayIn = (container: HTMLElement, page: number) =>
+    container.querySelector(`[data-page-number="${page}"] [data-knowledge-source-region-overlay]`);
+
+  function mountRegionArrival(
+    references: readonly SourceReference[],
+    props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {},
+  ) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const render = (extra: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {}) => {
+      act(() => {
+        root!.render(
+          <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(references)}>
+            <KnowledgeDocumentDetails
+              documentId={REGION_DOC} boardId="board-region-1" originalFilename="synthetic.pdf"
+              pageCount={2} pages={regionPages} loading={false} error={false} onBack={vi.fn()}
+              {...props} {...extra}
+            />
+          </KnowledgeSourceReferenceProvider>,
+        );
+      });
+    };
+    render();
+    for (const image of Array.from(host!.querySelectorAll('img'))) layOutImage(image as HTMLImageElement);
+    return { container: host!, render };
+  }
+
+  it('D1: PAGE_REGION arrival renders exactly one overlay, on the cited page only', () => {
+    const ref = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    const { container } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(1);
+    expect(overlayIn(container, 1)).not.toBeNull();
+    expect(overlayIn(container, 2)).toBeNull();
+  });
+
+  it('D9/M7: PAGE_ONLY arrival produces no region overlay', () => {
+    const ref = sourceRef({ pageStart: 1, pageEnd: 1, sourceDocumentId: regionDocId });
+    const { container } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+  });
+
+  it('D10/M8: EXACT_SPAN arrival produces no region overlay, and its own arrival is unaffected', () => {
+    const text = regionPages[0].text;
+    const ref = sourceRef({
+      pageStart: 1, pageEnd: 1, sourceDocumentId: regionDocId,
+      charStart: 0, charEnd: 10, quoteText: text.slice(0, 10),
+    });
+    const { container } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+    expect(container.querySelector('[data-knowledge-source-navigation-target="true"]')).not.toBeNull();
+  });
+
+  it('D11/M6: switching the navigated reference replaces the overlay, never leaving a stale one', () => {
+    const refA = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    const refB = regionRef(2, { x: 0.2, y: 0.2, width: 0.2, height: 0.2 });
+    const { container, render } = mountRegionArrival([refA, refB],
+      { initialSourceReferenceId: refA.id, initialSourceRequestId: 1 });
+    expect(overlayIn(container, 1)).not.toBeNull();
+    render({ initialSourceReferenceId: refB.id, initialSourceRequestId: 2 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(1);
+    expect(overlayIn(container, 1)).toBeNull();
+    expect(overlayIn(container, 2)).not.toBeNull();
+  });
+
+  it('D12: switching from a PAGE_REGION reference to a page-only one clears the overlay', () => {
+    const refA = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    const refB = sourceRef({ pageStart: 1, pageEnd: 1, sourceDocumentId: regionDocId });
+    const { container, render } = mountRegionArrival([refA, refB],
+      { initialSourceReferenceId: refA.id, initialSourceRequestId: 1 });
+    expect(overlayIn(container, 1)).not.toBeNull();
+    render({ initialSourceReferenceId: refB.id, initialSourceRequestId: 2 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+  });
+
+  it('D13/M11: switching documents clears a stale region overlay', () => {
+    const ref = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    const { container, render } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(overlayIn(container, 1)).not.toBeNull();
+    render({ documentId: 'a-different-document', initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+  });
+
+  it('D14: a reference id matching nothing fails soft with no overlay and no throw', () => {
+    const ref = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    expect(() => mountRegionArrival([ref], { initialSourceReferenceId: 'ref-does-not-exist', initialSourceRequestId: 1 }))
+      .not.toThrow();
+  });
+
+  it('D14: a malformed stored region fails soft with no overlay', () => {
+    const ref = regionRef(1, { x: 2, y: 0.1, width: 0.4, height: 0.5 });
+    const { container } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+  });
+
+  it('D14: an image failure drops the overlay without breaking the reader', () => {
+    const ref = regionRef(1, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    const { container } = mountRegionArrival([ref], { initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(overlayIn(container, 1)).not.toBeNull();
+    const image = container.querySelector('[data-page-number="1"] img') as HTMLImageElement;
+    act(() => {
+      Object.defineProperty(image, 'naturalWidth', { value: 0, configurable: true });
+      image.dispatchEvent(new Event('error'));
+    });
+    expect(container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(0);
+  });
+
+  it('D20: existing page-level arrival scrolling is unaffected by a PAGE_REGION overlay', () => {
+    const ref = regionRef(2, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    mountRegionArrival([ref], { initialPageNumber: 2, initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
+    expect(scrolledElements().some((el) => el.getAttribute('data-page-number') === '2')).toBe(true);
+  });
+});

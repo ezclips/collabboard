@@ -38,6 +38,8 @@ export interface KnowledgeDocumentPageRegionSelectorProps {
   readonly armedRegion: NormalizedPageRegion | null;
   readonly onArm: (region: NormalizedPageRegion, appliedRotation: KnowledgePageRotation) => void;
   readonly onClear: () => void;
+  /** P6J-F9-D. One explicitly navigated SOURCE-space region, or null. Suppressed whenever `enabled`. */
+  readonly highlightRegion?: NormalizedPageRegion | null;
 }
 
 /** Raster rounding shifts the aspect by ~1/(2*natural); a transposition doubles it. */
@@ -77,7 +79,7 @@ const percent = (value: number): string => `${value * 100}%`;
 export default function KnowledgeDocumentPageRegionSelector({
   boardId, documentId, pageNumber, originalFilename,
   widthPoints, heightPoints, rotation,
-  enabled, armedRegion, onArm, onClear,
+  enabled, armedRegion, onArm, onClear, highlightRegion = null,
 }: KnowledgeDocumentPageRegionSelectorProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [overlay, setOverlay] = useState<PageImageContentBox | null>(null);
@@ -108,14 +110,16 @@ export default function KnowledgeDocumentPageRegionSelector({
   // A cached image is already complete on mount and fires no load event.
   useEffect(() => { refresh(); }, [refresh, boardId, documentId, pageNumber, enabled]);
 
+  // P6J-F9-D widens this beyond `enabled`: an arrival highlight also needs its
+  // measured content box kept fresh across a resize, not just an armed drag.
   useEffect(() => {
-    if (!enabled || typeof ResizeObserver === 'undefined') return undefined;
+    if ((!enabled && highlightRegion === null) || typeof ResizeObserver === 'undefined') return undefined;
     const wrapper = wrapperRef.current;
     if (wrapper === null) return undefined;
     const observer = new ResizeObserver(() => { refresh(); });
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [enabled, refresh]);
+  }, [enabled, highlightRegion, refresh]);
 
   /**
    * Escape precedence. The reader closes itself on Escape, so clearing a
@@ -188,6 +192,11 @@ export default function KnowledgeDocumentPageRegionSelector({
   const shown = live ?? (armedRegion === null || turn === null
     ? null
     : sourceRegionToDisplayRegion(armedRegion, turn));
+  // P6J-F9-D. Suppressed whenever Select-area is enabled: the armed rectangle
+  // above is the only region presentation during active selection.
+  const arrivalShown = enabled || highlightRegion === null || turn === null
+    ? null
+    : sourceRegionToDisplayRegion(highlightRegion, turn);
 
   // React propagates the image's load/error here, so A2b needs no new prop, and
   // failure drops the armed rectangle: the page it described is gone.
@@ -223,6 +232,18 @@ export default function KnowledgeDocumentPageRegionSelector({
             />
           )}
         </div>
+      ) : null}
+      {overlay !== null && arrivalShown !== null ? (
+        <div
+          data-knowledge-source-region-overlay="true"
+          className="pointer-events-none absolute border-2 border-amber-500 bg-amber-500/20"
+          style={{
+            left: overlay.left + arrivalShown.x * overlay.width,
+            top: overlay.top + arrivalShown.y * overlay.height,
+            width: arrivalShown.width * overlay.width,
+            height: arrivalShown.height * overlay.height,
+          }}
+        />
       ) : null}
     </div>
   );

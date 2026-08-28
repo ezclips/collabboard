@@ -96,6 +96,7 @@ function mount(
 
 const layer = (c: HTMLElement) => c.querySelector('[data-knowledge-region-layer]');
 const rectangle = (c: HTMLElement) => c.querySelector('[data-knowledge-region-rectangle]');
+const highlight = (c: HTMLElement) => c.querySelector('[data-knowledge-source-region-overlay]');
 
 /** jsdom has no PointerEvent constructor, so the pointer fields are added by hand. */
 function firePointer(target: Element, type: string, init: Record<string, unknown> = {}) {
@@ -140,6 +141,17 @@ const hitBox = (c: HTMLElement) => {
   return [hit.style.left, hit.style.top, hit.style.width, hit.style.height];
 };
 const triggerResize = () => act(() => { resizeCallback?.([], {} as ResizeObserver); });
+
+/** The arrival overlay is drawn in raw px, not percent, so this checks px math directly. */
+function expectOverlayPx(
+  el: HTMLElement, box: Box, display: readonly number[], inset: Box | { left: number; top: number } = { left: 1, top: 1 },
+) {
+  const [dx, dy, dw, dh] = display;
+  expect(Number.parseFloat(el.style.left)).toBeCloseTo(inset.left + dx * box.width, 6);
+  expect(Number.parseFloat(el.style.top)).toBeCloseTo(inset.top + dy * box.height, 6);
+  expect(Number.parseFloat(el.style.width)).toBeCloseTo(dw * box.width, 6);
+  expect(Number.parseFloat(el.style.height)).toBeCloseTo(dh * box.height, 6);
+}
 
 describe('P6J-F9-B3 resize synchronization', () => {
   it('B3-1: observes the enabled selector wrapper', () => {
@@ -422,5 +434,79 @@ describe('P6J-F9-B2 isolation', () => {
     expect(source).toContain('displayRegionToSourceRegion');
     expect(source).not.toMatch(/1 - [a-z]+\.(x|y|width|height)/);
     expect(source).not.toMatch(/(width|height):\s*rect\.(width|height)/);
+  });
+});
+
+describe('P6J-F9-D arrival overlay', () => {
+  it('D1: an arrival region renders exactly one overlay', () => {
+    const harness = mount({ enabled: false, highlightRegion: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 } });
+    expect(harness.container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(1);
+  });
+
+  it('D9/D12: no highlightRegion renders nothing', () => {
+    expect(highlight(mount({ enabled: false, highlightRegion: null }).container)).toBeNull();
+  });
+
+  it.each([
+    ['D3 0', 0, PORTRAIT, PORTRAIT_NATURAL, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 }],
+    ['D4 90', 90, LANDSCAPE, LANDSCAPE_NATURAL, { x: 0.1, y: 0.5, width: 0.5, height: 0.4 }],
+    ['D5 180', 180, PORTRAIT, PORTRAIT_NATURAL, { x: 0.5, y: 0.4, width: 0.4, height: 0.5 }],
+    ['D6 270', 270, LANDSCAPE, LANDSCAPE_NATURAL, { x: 0.4, y: 0.1, width: 0.5, height: 0.4 }],
+  ])('%s degrees positions the overlay from the SOURCE-space region', (_l, rotation, box, natural, source) => {
+    // Same hand-computed SOURCE fixtures as the armedRegion rotation table
+    // above: every case draws the identical display rect (0.1, 0.1, 0.4, 0.5).
+    const harness = mount(
+      { enabled: false, rotation, highlightRegion: source as NormalizedPageRegion }, box as Box, natural,
+    );
+    expectOverlayPx(highlight(harness.container) as HTMLElement, box as Box, [0.1, 0.1, 0.4, 0.5]);
+  });
+
+  it('D7: overlay basis is the measured CONTENT box, including the border inset', () => {
+    const harness = mount({ enabled: false, highlightRegion: { x: 0, y: 0, width: 1, height: 1 } });
+    expectOverlayPx(highlight(harness.container) as HTMLElement, PORTRAIT, [0, 0, 1, 1]);
+    layOut(harness.image, { left: 151, top: 251, width: 300, height: 420 }, PORTRAIT_NATURAL,
+      { offsetLeft: 20, offsetTop: 10, clientLeft: 2, clientTop: 3 });
+    triggerResize();
+    const after = highlight(harness.container) as HTMLElement;
+    expect(after.style.left).toBe('22px');
+    expect(after.style.top).toBe('13px');
+    expect(after.style.width).toBe('300px');
+    expect(after.style.height).toBe('420px');
+  });
+
+  it('D8: resize keeps a partial arrival region aligned to the new content box', () => {
+    const harness = mount({ enabled: false, highlightRegion: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 } });
+    expectOverlayPx(highlight(harness.container) as HTMLElement, PORTRAIT, [0.1, 0.1, 0.4, 0.5]);
+    layOut(harness.image, { left: 151, top: 251, width: 250, height: 350 }, PORTRAIT_NATURAL,
+      { offsetLeft: 8, offsetTop: 6 });
+    triggerResize();
+    expectOverlayPx(highlight(harness.container) as HTMLElement,
+      { left: 151, top: 251, width: 250, height: 350 }, [0.1, 0.1, 0.4, 0.5], { left: 9, top: 7 });
+  });
+
+  it('D11/M10: switching the region replaces the overlay rather than duplicating it', () => {
+    const harness = mount({ enabled: false, highlightRegion: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 } });
+    harness.render({ enabled: false, highlightRegion: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 } });
+    expect(harness.container.querySelectorAll('[data-knowledge-source-region-overlay]')).toHaveLength(1);
+    expectOverlayPx(highlight(harness.container) as HTMLElement, PORTRAIT, [0.2, 0.2, 0.2, 0.2]);
+  });
+
+  it('D14: a non-canonical rotation fails soft with no overlay', () => {
+    const harness = mount({ enabled: false, rotation: 45, highlightRegion: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 } });
+    expect(highlight(harness.container)).toBeNull();
+  });
+
+  it('D15/M9: the overlay is pointer-events-none and carries no interactive content', () => {
+    const harness = mount({ enabled: false, highlightRegion: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 } });
+    const el = highlight(harness.container) as HTMLElement;
+    expect(el.className).toContain('pointer-events-none');
+    expect(el.querySelectorAll('button, a, input, textarea')).toHaveLength(0);
+    expect(el.textContent).toBe('');
+  });
+
+  it('D16/M12: Select-area enabled suppresses the arrival overlay entirely', () => {
+    const harness = mount({ enabled: true, highlightRegion: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 } });
+    expect(highlight(harness.container)).toBeNull();
+    expect(layer(harness.container)).not.toBeNull();
   });
 });
