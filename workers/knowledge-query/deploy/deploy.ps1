@@ -13,17 +13,19 @@ function Write-Utf8NoBom([string] $path, [string] $content) {
     [IO.File]::WriteAllText($path, $content, (New-Object Text.UTF8Encoding($false)))
 }
 function Test-SecretsAnnotation([string] $raw, [string[]] $expectedAliases) {
-    $found = @{}
+    $found = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
     foreach ($part in ($raw -split ',')) {
         $kv = $part -split ':', 2
         if ($kv.Count -ne 2) { throw ('Malformed secrets annotation entry: ' + $part) }
         $alias = $kv[0].Trim()
         $target = $kv[1].Trim()
-        if ($target -notmatch ('^projects/\d+/secrets/' + [regex]::Escape($alias) + '$')) {
+        if ($target -cnotmatch ('^projects/\d+/secrets/' + [regex]::Escape($alias) + '$')) {
             throw ('Secrets annotation entry for "' + $alias + '" has an unexpected resource location')
         }
-        $found[$alias] = $target
+        if ($found.ContainsKey($alias)) { throw ('Secrets annotation has duplicate alias "' + $alias + '"') }
+        $found.Add($alias, $target)
     }
+    if ($found.Count -ne $expectedAliases.Count) { throw ('Secrets annotation must contain exactly ' + $expectedAliases.Count + ' aliases; found ' + $found.Count) }
     foreach ($expected in $expectedAliases) {
         if (-not $found.ContainsKey($expected)) { throw ('Secrets annotation is missing expected alias "' + $expected + '"') }
     }
@@ -94,20 +96,39 @@ $trafficArray = @($trafficRaw)
 if ($trafficArray.Count -eq 0) { throw 'Pre-state status.traffic is empty; aborting before any mutation' }
 $tagEntries = @()
 $seenTags = @{}
+$servingTotal = 0
+$servingCount = 0
 foreach ($entry in $trafficArray) {
     $tag = Get-Prop $entry 'tag'
-    if ($null -eq $tag -or [string]::IsNullOrWhiteSpace($tag)) { continue }
-    $revisionName = Get-Prop $entry 'revisionName'
-    if ([string]::IsNullOrWhiteSpace($revisionName)) { throw ('Pre-state tag "' + $tag + '" has no revisionName; aborting before any mutation') }
-    if (-not (Test-SafeResourceName $tag) -or -not (Test-SafeResourceName $revisionName)) { throw ('Pre-state tag "' + $tag + '" or its revision has an unsafe name; aborting before any mutation') }
-    if ($seenTags.ContainsKey($tag)) { throw ('Pre-state has duplicate tag "' + $tag + '"; aborting before any mutation') }
-    $seenTags[$tag] = $true
-    $tagEntries += [PSCustomObject]@{ Tag = $tag; RevisionName = $revisionName }
+    if ($null -ne $tag -and -not [string]::IsNullOrWhiteSpace($tag)) {
+        $revisionName = Get-Prop $entry 'revisionName'
+        if ([string]::IsNullOrWhiteSpace($revisionName)) { throw ('Pre-state tag "' + $tag + '" has no revisionName; aborting before any mutation') }
+        if (-not (Test-SafeResourceName $tag) -or -not (Test-SafeResourceName $revisionName)) { throw ('Pre-state tag "' + $tag + '" or its revision has an unsafe name; aborting before any mutation') }
+        if ($seenTags.ContainsKey($tag)) { throw ('Pre-state has duplicate tag "' + $tag + '"; aborting before any mutation') }
+        $seenTags[$tag] = $true
+        $tagEntries += [PSCustomObject]@{ Tag = $tag; RevisionName = $revisionName }
+        continue
+    }
+    # Not a tagged entry: it must be a genuine serving entry (nonempty tags were
+    # handled above and `continue`d past this point).
+    $percent = Get-Prop $entry 'percent'
+    $percentValue = 0
+    if ($null -eq $percent -or -not [int]::TryParse([string]$percent, [ref]$percentValue) -or $percentValue -lt 1 -or $percentValue -gt 100) {
+        throw 'Pre-state has a malformed or out-of-range serving traffic entry; aborting before any mutation'
+    }
+    $servingRevision = Get-Prop $entry 'revisionName'
+    if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) {
+        throw 'Pre-state serving entry is missing a safe revisionName; aborting before any mutation'
+    }
+    $servingTotal += $percentValue
+    $servingCount++
 }
+if ($servingCount -eq 0) { throw 'Pre-state has no serving traffic entry; aborting before any mutation' }
+if ($servingTotal -ne 100) { throw ('Pre-state serving percentages total ' + $servingTotal + ', not 100; aborting before any mutation') }
 $tagBlockLines = @()
 foreach ($tagEntry in $tagEntries) {
-    $tagBlockLines += ('  - tag: ' + $tagEntry.Tag)
-    $tagBlockLines += ('    revisionName: ' + $tagEntry.RevisionName)
+    $tagBlockLines += ("  - tag: '" + $tagEntry.Tag + "'")
+    $tagBlockLines += ("    revisionName: '" + $tagEntry.RevisionName + "'")
 }
 $tagBlock = $tagBlockLines -join "`n"
 # Cloud Run v1 requires an explicit run.googleapis.com/secrets location
@@ -221,6 +242,8 @@ $postAnnotations = $postState.spec.template.metadata.annotations
 $dependencyAnnotationRaw = Get-Prop $postAnnotations 'run.googleapis.com/container-dependencies'
 if ([string]::IsNullOrWhiteSpace($dependencyAnnotationRaw)) { throw 'Postdeploy verification failed: container dependency annotation missing' }
 try { $dependencyParsed = $dependencyAnnotationRaw | ConvertFrom-Json } catch { throw 'Postdeploy verification failed: container dependency annotation is not valid JSON' }
+$dependencyProps = @($dependencyParsed.PSObject.Properties)
+if ($dependencyProps.Count -ne 1 -or $dependencyProps[0].Name -cne 'query-service') { throw 'Postdeploy verification failed: container dependency annotation must contain exactly one top-level mapping for query-service' }
 $queryDeps = @(Get-Prop $dependencyParsed 'query-service')
 if ($queryDeps.Count -ne 1 -or $queryDeps[0] -ne 'voyage-tei') { throw 'Postdeploy verification failed: query-service dependency is not exactly [voyage-tei]' }
 $teiProbe = $teiContainer.startupProbe

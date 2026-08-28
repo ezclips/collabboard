@@ -30,14 +30,10 @@ function runPredeploy(overrides: Record<string, string | undefined> = {}) {
 describe('P6I-H1 predeploy validator -- behavioral', () => {
   it('H1-T1: missing required env fails', () => { expect(runPredeploy({ GCP_PROJECT_ID: undefined }).status).not.toBe(0); });
   it('H1-T2: bad query digest fails', () => { expect(runPredeploy({ QUERY_IMAGE_DIGEST: 'sha256:not-hex' }).status).not.toBe(0); });
-  it('H1-T3: bad TEI digest fails', () => {
-    expect(runPredeploy({ TEI_IMAGE_DIGEST: 'knowledge-embedding-tei:latest' }).status).not.toBe(0);
-  });
+  it('H1-T3: bad TEI digest fails', () => { expect(runPredeploy({ TEI_IMAGE_DIGEST: 'knowledge-embedding-tei:latest' }).status).not.toBe(0); });
   it('H1-T4: wrong project fails', () => { expect(runPredeploy({ GCP_PROJECT_ID: 'wrong-project' }).status).not.toBe(0); });
   it('H1-T5: wrong region fails', () => { expect(runPredeploy({ GCP_REGION: 'us-central1' }).status).not.toBe(0); });
-  it('H1-T6: wrong service name fails', () => {
-    expect(runPredeploy({ SERVICE_NAME: 'collabboard-knowledge-embedding-worker' }).status).not.toBe(0);
-  });
+  it('H1-T6: wrong service name fails', () => { expect(runPredeploy({ SERVICE_NAME: 'collabboard-knowledge-embedding-worker' }).status).not.toBe(0); });
   it('H1-T7: wrong service account fails', () => {
     expect(runPredeploy({ SERVICE_ACCOUNT_EMAIL: 'someone-else@callabboard.iam.gserviceaccount.com' }).status).not.toBe(0);
   });
@@ -49,15 +45,9 @@ describe('P6I-H1 predeploy validator -- behavioral', () => {
     expect(runPredeploy({ TEI_CPU: '1' }).status).not.toBe(0);
     expect(runPredeploy({ TEI_MEMORY: '4Gi' }).status).not.toBe(0);
   });
-  it('H1-T10: wrong TEI URL fails', () => {
-    expect(runPredeploy({ KNOWLEDGE_EMBEDDING_TEI_URL: 'http://127.0.0.1:9090' }).status).not.toBe(0);
-  });
-  it('H1-T11: non-loopback TEI URL fails', () => {
-    expect(runPredeploy({ KNOWLEDGE_EMBEDDING_TEI_URL: 'https://tei.internal:8080' }).status).not.toBe(0);
-  });
-  it('H1-T12: wrong secret name fails', () => {
-    expect(runPredeploy({ SUPABASE_SERVICE_ROLE_KEY_SECRET_NAME: 'wrong-name' }).status).not.toBe(0);
-  });
+  it('H1-T10: wrong TEI URL fails', () => { expect(runPredeploy({ KNOWLEDGE_EMBEDDING_TEI_URL: 'http://127.0.0.1:9090' }).status).not.toBe(0); });
+  it('H1-T11: non-loopback TEI URL fails', () => { expect(runPredeploy({ KNOWLEDGE_EMBEDDING_TEI_URL: 'https://tei.internal:8080' }).status).not.toBe(0); });
+  it('H1-T12: wrong secret name fails', () => { expect(runPredeploy({ SUPABASE_SERVICE_ROLE_KEY_SECRET_NAME: 'wrong-name' }).status).not.toBe(0); });
   it('H1-T13: latest/non-integer secret version fails', () => {
     expect(runPredeploy({ SUPABASE_URL_SECRET_VERSION: 'latest' }).status).not.toBe(0);
     expect(runPredeploy({ SUPABASE_ANON_KEY_SECRET_VERSION: '0' }).status).not.toBe(0);
@@ -234,17 +224,35 @@ try {
     if ($trafficArray.Count -eq 0) { throw 'empty traffic' }
     $tagEntries = @()
     $seenTags = @{}
+    $servingTotal = 0
+    $servingCount = 0
     foreach ($entry in $trafficArray) {
       $tag = Get-Prop $entry 'tag'
-      if ($null -eq $tag -or [string]::IsNullOrWhiteSpace($tag)) { continue }
-      $revisionName = Get-Prop $entry 'revisionName'
-      if ([string]::IsNullOrWhiteSpace($revisionName)) { throw 'no revisionName' }
-      if (-not (Test-SafeResourceName $tag) -or -not (Test-SafeResourceName $revisionName)) { throw 'unsafe name' }
-      if ($seenTags.ContainsKey($tag)) { throw 'duplicate tag' }
-      $seenTags[$tag] = $true
-      $tagEntries += [PSCustomObject]@{ Tag = $tag; RevisionName = $revisionName }
+      if ($null -ne $tag -and -not [string]::IsNullOrWhiteSpace($tag)) {
+        $revisionName = Get-Prop $entry 'revisionName'
+        if ([string]::IsNullOrWhiteSpace($revisionName)) { throw 'no revisionName' }
+        if (-not (Test-SafeResourceName $tag) -or -not (Test-SafeResourceName $revisionName)) { throw 'unsafe name' }
+        if ($seenTags.ContainsKey($tag)) { throw 'duplicate tag' }
+        $seenTags[$tag] = $true
+        $tagEntries += [PSCustomObject]@{ Tag = $tag; RevisionName = $revisionName }
+        continue
+      }
+      $percent = Get-Prop $entry 'percent'
+      $percentValue = 0
+      if ($null -eq $percent -or -not [int]::TryParse([string]$percent, [ref]$percentValue) -or $percentValue -lt 1 -or $percentValue -gt 100) { throw 'malformed serving entry' }
+      $servingRevision = Get-Prop $entry 'revisionName'
+      if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) { throw 'serving entry missing safe revisionName' }
+      $servingTotal += $percentValue
+      $servingCount++
     }
-    Write-Output ('OK:' + $tagEntries.Count + ':' + (($tagEntries | ForEach-Object { $_.Tag + '=' + $_.RevisionName }) -join ';'))
+    if ($servingCount -eq 0) { throw 'no serving entry' }
+    if ($servingTotal -ne 100) { throw 'serving total not 100' }
+    $tagBlockLines = @()
+    foreach ($tagEntry in $tagEntries) {
+      $tagBlockLines += ("  - tag: '" + $tagEntry.Tag + "'")
+      $tagBlockLines += ("    revisionName: '" + $tagEntry.RevisionName + "'")
+    }
+    Write-Output ('OK:' + $tagEntries.Count + ':' + (($tagEntries | ForEach-Object { $_.Tag + '=' + $_.RevisionName }) -join ';') + '::' + ($tagBlockLines -join '|'))
   } elseif ($mode -eq 'secrets') {
     $aliases = @('collabboard-supabase-url','collabboard-supabase-anon-key','collabboard-supabase-service-role-key')
     $annotations = $preState.spec.template.metadata.annotations
@@ -260,6 +268,8 @@ try {
     Write-Output 'OK:mapping-intact'
   } elseif ($mode -eq 'dependency') {
     $parsed = $env:H1_DEP_JSON | ConvertFrom-Json
+    $depProps = @($parsed.PSObject.Properties)
+    if ($depProps.Count -ne 1 -or $depProps[0].Name -cne 'query-service') { throw 'dependency object is not exactly {query-service: [...]}' }
     $deps = @(Get-Prop $parsed 'query-service')
     if ($deps.Count -ne 1 -or $deps[0] -ne 'voyage-tei') { throw 'dependency mismatch' }
     Write-Output 'OK:dependency-exact'
@@ -349,4 +359,51 @@ describe('P6I-H1 corrective behavioral tests -- real PowerShell execution under 
     expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'] }) }).status).toBe(0);
     expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei', 'extra'] }) }).status).not.toBe(0);
   });
+});
+
+describe('P6I-H1 final edge-case corrective tests', () => {
+  const secretsAnnotation = (aliases: string) => JSON.stringify({ spec: { template: { metadata: { annotations: { 'run.googleapis.com/secrets': aliases } } } } });
+  it('H1-F1: malformed nonempty traffic entry (no tag, no usable percent) fails closed', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ foo: 'bar' }] } }) }).status).not.toBe(0); });
+  it('H1-F2: only-tag traffic with no serving percentage fails closed', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ tag: 'stable', revisionName: 'r1' }] } }) }).status).not.toBe(0); });
+  it('H1-F3: a valid 100% serving entry with zero tags passes', () => {
+    const preState = JSON.stringify({ status: { traffic: [{ percent: 100, revisionName: 'r1', latestRevision: true }] } });
+    const result = run('traffic', { H1_PRESTATE: preState });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK:0');
+  });
+  it('H1-F4: a serving entry missing revisionName fails closed', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ percent: 100 }] } }) }).status).not.toBe(0); });
+  it('H1-F5: serving percentages not totaling 100 fail closed; totaling 100 passes', () => {
+    const under = JSON.stringify({ status: { traffic: [{ percent: 50, revisionName: 'r1' }, { percent: 40, revisionName: 'r2' }] } });
+    expect(run('traffic', { H1_PRESTATE: under }).status).not.toBe(0);
+    const exact = JSON.stringify({ status: { traffic: [{ percent: 50, revisionName: 'r1' }, { percent: 50, revisionName: 'r2' }] } });
+    expect(run('traffic', { H1_PRESTATE: exact }).status).toBe(0);
+  });
+  it('H1-F6: an unexpected fourth secret alias fails closed', () => {
+    const aliases = 'collabboard-supabase-url:projects/1/secrets/collabboard-supabase-url,collabboard-supabase-anon-key:projects/1/secrets/collabboard-supabase-anon-key,collabboard-supabase-service-role-key:projects/1/secrets/collabboard-supabase-service-role-key,fourth:projects/1/secrets/fourth';
+    expect(run('secrets', { H1_PRESTATE: secretsAnnotation(aliases) }).status).not.toBe(0);
+  });
+  it('H1-F7: a duplicate exact secret alias fails closed', () => {
+    const aliases = 'collabboard-supabase-url:projects/1/secrets/collabboard-supabase-url,collabboard-supabase-anon-key:projects/1/secrets/collabboard-supabase-anon-key,collabboard-supabase-service-role-key:projects/1/secrets/collabboard-supabase-service-role-key,collabboard-supabase-url:projects/2/secrets/collabboard-supabase-url';
+    expect(run('secrets', { H1_PRESTATE: secretsAnnotation(aliases) }).status).not.toBe(0);
+  });
+  it('H1-F8: a case-variant alias fails closed (comparison is case-sensitive)', () => {
+    const aliases = 'COLLABBOARD-SUPABASE-URL:projects/1/secrets/COLLABBOARD-SUPABASE-URL,collabboard-supabase-anon-key:projects/1/secrets/collabboard-supabase-anon-key,collabboard-supabase-service-role-key:projects/1/secrets/collabboard-supabase-service-role-key';
+    expect(run('secrets', { H1_PRESTATE: secretsAnnotation(aliases) }).status).not.toBe(0);
+  });
+  it('H1-F9: exactly the three expected secret aliases pass', () => {
+    const aliases = 'collabboard-supabase-url:projects/1/secrets/collabboard-supabase-url,collabboard-supabase-anon-key:projects/1/secrets/collabboard-supabase-anon-key,collabboard-supabase-service-role-key:projects/1/secrets/collabboard-supabase-service-role-key';
+    expect(run('secrets', { H1_PRESTATE: secretsAnnotation(aliases) }).status).toBe(0);
+  });
+  it('H1-F10/H1-F11: validator-accepted tag/revisionName values are emitted as quoted YAML scalars, never bare booleans/null/numbers', () => {
+    for (const dangerous of ['true', 'false', 'null', '12345']) {
+      const preState = JSON.stringify({ status: { traffic: [{ percent: 100, revisionName: 'r1' }, { tag: dangerous, revisionName: 'r1' }] } });
+      const result = run('traffic', { H1_PRESTATE: preState });
+      expect(result.status).toBe(0);
+      const generatedLines = result.stdout.split('::')[1] ?? '';
+      expect(generatedLines).toContain(`tag: '${dangerous}'`);
+      expect(generatedLines).not.toContain(`tag: ${dangerous}`);
+    }
+  });
+  it('H1-F12: a dependency object with an extra top-level key fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'], foo: ['bar'] }) }).status).not.toBe(0); });
+  it('H1-F13: the exact dependency object {query-service:[voyage-tei]} passes', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'] }) }).status).toBe(0); });
 });
