@@ -112,10 +112,10 @@ foreach ($entry in $trafficArray) {
     # Not a tagged entry: it must be a genuine serving entry (nonempty tags were
     # handled above and `continue`d past this point).
     $percent = Get-Prop $entry 'percent'
-    $percentValue = 0
-    if ($null -eq $percent -or -not [int]::TryParse([string]$percent, [ref]$percentValue) -or $percentValue -lt 1 -or $percentValue -gt 100) {
+    if (($percent -isnot [int] -and $percent -isnot [long]) -or [int]$percent -lt 1 -or [int]$percent -gt 100) {
         throw 'Pre-state has a malformed or out-of-range serving traffic entry; aborting before any mutation'
     }
+    $percentValue = [int]$percent
     $servingRevision = Get-Prop $entry 'revisionName'
     if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) {
         throw 'Pre-state serving entry is missing a safe revisionName; aborting before any mutation'
@@ -244,7 +244,9 @@ if ([string]::IsNullOrWhiteSpace($dependencyAnnotationRaw)) { throw 'Postdeploy 
 try { $dependencyParsed = $dependencyAnnotationRaw | ConvertFrom-Json } catch { throw 'Postdeploy verification failed: container dependency annotation is not valid JSON' }
 $dependencyProps = @($dependencyParsed.PSObject.Properties)
 if ($dependencyProps.Count -ne 1 -or $dependencyProps[0].Name -cne 'query-service') { throw 'Postdeploy verification failed: container dependency annotation must contain exactly one top-level mapping for query-service' }
-$queryDeps = @(Get-Prop $dependencyParsed 'query-service')
+$queryDepsRaw = $dependencyProps[0].Value
+if ($queryDepsRaw -isnot [array]) { throw 'Postdeploy verification failed: query-service dependency value must be a JSON array' }
+$queryDeps = @($queryDepsRaw)
 if ($queryDeps.Count -ne 1 -or $queryDeps[0] -ne 'voyage-tei') { throw 'Postdeploy verification failed: query-service dependency is not exactly [voyage-tei]' }
 $teiProbe = $teiContainer.startupProbe
 if ($teiProbe.httpGet.path -ne '/health' -or $teiProbe.httpGet.port -ne 8080 -or $teiProbe.failureThreshold -ne 36 -or $teiProbe.periodSeconds -ne 5 -or $teiProbe.timeoutSeconds -ne 3) { throw 'Postdeploy verification failed: TEI startup probe mismatch' }

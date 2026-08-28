@@ -238,8 +238,8 @@ try {
         continue
       }
       $percent = Get-Prop $entry 'percent'
-      $percentValue = 0
-      if ($null -eq $percent -or -not [int]::TryParse([string]$percent, [ref]$percentValue) -or $percentValue -lt 1 -or $percentValue -gt 100) { throw 'malformed serving entry' }
+      if (($percent -isnot [int] -and $percent -isnot [long]) -or [int]$percent -lt 1 -or [int]$percent -gt 100) { throw 'malformed serving entry' }
+      $percentValue = [int]$percent
       $servingRevision = Get-Prop $entry 'revisionName'
       if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) { throw 'serving entry missing safe revisionName' }
       $servingTotal += $percentValue
@@ -270,7 +270,9 @@ try {
     $parsed = $env:H1_DEP_JSON | ConvertFrom-Json
     $depProps = @($parsed.PSObject.Properties)
     if ($depProps.Count -ne 1 -or $depProps[0].Name -cne 'query-service') { throw 'dependency object is not exactly {query-service: [...]}' }
-    $deps = @(Get-Prop $parsed 'query-service')
+    $depsRaw = $depProps[0].Value
+    if ($depsRaw -isnot [array]) { throw 'dependency value is not a JSON array' }
+    $deps = @($depsRaw)
     if ($deps.Count -ne 1 -or $deps[0] -ne 'voyage-tei') { throw 'dependency mismatch' }
     Write-Output 'OK:dependency-exact'
   }
@@ -406,4 +408,20 @@ describe('P6I-H1 final edge-case corrective tests', () => {
   });
   it('H1-F12: a dependency object with an extra top-level key fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'], foo: ['bar'] }) }).status).not.toBe(0); });
   it('H1-F13: the exact dependency object {query-service:[voyage-tei]} passes', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'] }) }).status).toBe(0); });
+});
+
+describe('P6I-H1 value-type corrective tests', () => {
+  it('H1-G1: a JSON-integer percent 100 passes', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ percent: 100, revisionName: 'r1' }] } }) }).status).toBe(0); });
+  it('H1-G2: a JSON-string percent "100" fails closed', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ percent: '100', revisionName: 'r1' }] } }) }).status).not.toBe(0); });
+  it('H1-G3: a JSON-boolean percent fails closed', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ percent: true, revisionName: 'r1' }] } }) }).status).not.toBe(0); });
+  it('H1-G4: a JSON-decimal percent fails closed', () => { expect(run('traffic', { H1_PRESTATE: JSON.stringify({ status: { traffic: [{ percent: 99.5, revisionName: 'r1' }] } }) }).status).not.toBe(0); });
+  it('H1-G5: two JSON-integer percentages summing to 100 pass', () => {
+    const preState = JSON.stringify({ status: { traffic: [{ percent: 50, revisionName: 'r1' }, { percent: 50, revisionName: 'r2' }] } });
+    expect(run('traffic', { H1_PRESTATE: preState }).status).toBe(0);
+  });
+  it('H1-G6: the exact dependency array {query-service:["voyage-tei"]} passes', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'] }) }).status).toBe(0); });
+  it('H1-G7: a scalar dependency value (not an array) fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': 'voyage-tei' }) }).status).not.toBe(0); });
+  it('H1-G8: a dependency array with an extra element fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei', 'other'] }) }).status).not.toBe(0); });
+  it('H1-G9: an empty dependency array fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': [] }) }).status).not.toBe(0); });
+  it('H1-G10: an exact dependency array with an extra top-level key fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'], foo: ['bar'] }) }).status).not.toBe(0); });
 });
