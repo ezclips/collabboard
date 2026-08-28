@@ -5,6 +5,9 @@ import path from "node:path";
 const E2E_BRIDGE_BUILD = process.env.E2E_BRIDGE_BUILD === "1";
 
 const nextConfig: NextConfig = {
+  // @napi-rs/canvas is native; Next externalizes sharp by default but not this,
+  // so the F9-C1 crop route would otherwise get bundled into the client graph.
+  serverExternalPackages: ['@napi-rs/canvas'],
   eslint: {
     // 5,426 pre-existing lint errors block `next build` (Phase 0 audit).
     // Lint runs separately via `npm run lint`; build gates on compile + types.
