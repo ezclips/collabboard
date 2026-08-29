@@ -160,6 +160,19 @@ describe('SelectedTextContextMenu / TextStylePopup / ColorPicker: one text palet
   });
 });
 
+describe('KNI-R3B: the menu stacks above the editor modal overlay', () => {
+  // The modal overlay (PostEditorShell) is z-[1000]; PositionedContextMenu's
+  // shared default is z-50. jsdom cannot resolve real stacking contexts or
+  // elementFromPoint(), so this only proves the elevated class reaches the
+  // portaled surface -- actual click-through-ability is BROWSER_RUNTIME_REQUIRED,
+  // verified by the KNI-R3 runtime gate's Chromium hit-testing instead.
+  it('opts into an effective z-index above the editor modal, not the shared z-50 default', () => {
+    mount(<SelectedTextContextMenu open x={0} y={0} onOpenChange={noop()} onTextColor={noop()} onHighlight={noop()} onClearHighlight={noop()} />);
+    expect(surface().className).toContain('z-[1100]');
+    expect(surface().className).not.toMatch(/(?:^|\s)z-50(?:\s|$)/);
+  });
+});
+
 describe('R3A-1: Escape isolation -- the menu owns Escape, an ancestor keydown listener never fires for it', () => {
   it('a document-level Escape listener registered after open never receives the menu-consumed keydown', () => {
     const outer = vi.fn();

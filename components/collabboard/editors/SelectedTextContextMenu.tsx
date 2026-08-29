@@ -51,7 +51,14 @@ export default function SelectedTextContextMenu({
   onAIAction,
 }: SelectedTextContextMenuProps) {
   return (
-    <PositionedContextMenu open={open} x={x} y={y} onOpenChange={onOpenChange} className="w-56 py-2">
+    <PositionedContextMenu
+      open={open}
+      x={x}
+      y={y}
+      onOpenChange={onOpenChange}
+      // KNI-R3B: elevate above PostEditorShell's z-[1000] modal overlay (shared default is z-50).
+      className="w-56 py-2 z-[1100]"
+    >
       <PositionedContextMenuLabel>Text color</PositionedContextMenuLabel>
       <div className="flex flex-wrap gap-1.5 px-2 pb-2">
         {TEXT_COLOR_PRESETS.map((color) => (
