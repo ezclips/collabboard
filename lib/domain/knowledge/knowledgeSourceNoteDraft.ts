@@ -83,6 +83,32 @@ export interface KnowledgeSourceNoteDraft {
 /** One title rule for every mode: the document's name, or a safe default. */
 function noteTitle(name: string): string { return name.length > 0 ? name : 'New Note'; }
 
+/**
+ * KNI-R1-A. `selectedText` is untrusted PLAIN TEXT lifted from the reader's
+ * DOM, never source HTML -- escaping every markup-significant character is
+ * what stops a selection like `<img onerror=...>` from becoming an element
+ * the card's TipTap render pipeline would treat as structure.
+ */
+function escapeNoteHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * The one place an EXACT_SPAN selection becomes editable Note body: escaped
+ * literal text, CR/CRLF folded to LF, line breaks as `<br>`, wrapped in the
+ * single paragraph StarterKit already expects. Never trimmed -- the
+ * selection the user deliberately made travels through exactly as chosen.
+ */
+function selectionToNoteContent(selectedText: string): string {
+  const normalized = selectedText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return `<p>${escapeNoteHtml(normalized).split('\n').join('<br>')}</p>`;
+}
+
 function quoteFromPageText(pageText: string): string | null {
   if (pageText.length === 0) return null;
   if (pageText.length > MAX_SOURCE_REFERENCE_QUOTE_LENGTH) return null;
@@ -125,11 +151,13 @@ export function buildKnowledgeSourceNoteDraft(
   }
   return {
     title: noteTitle(request.originalFilename),
-    // Always blank: a source-created Note is an ordinary Note the user writes
-    // themselves. The page text is evidence, not authorship, and lives only in
-    // source_references. An exact selection is evidence too -- it is not
-    // pasted into the body either.
-    content: '',
+    // PAGE_ONLY stays blank: the page text is evidence, not authorship, and
+    // lives only in source_references. KNI-R1: an EXACT_SPAN selection is
+    // different -- the user deliberately chose it, so it also becomes the
+    // Note's initial editable body (escaped, never trimmed). Either way the
+    // source reference below stays the untouched, independent provenance
+    // record; editing the body afterward can never redefine it.
+    content: selection === null ? '' : selectionToNoteContent(selection.selectedText),
     sourceReference: {
       sourceDocumentId: request.sourceDocumentId,
       pageStart: request.pageNumber,

@@ -403,7 +403,7 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
   it('E: the marker renders inside the untouched pointer-events-none wrapper', () => {
     const branch = after(postCardContent, '<div className="select-none pointer-events-none">', 1200);
     const wrapper = branch.indexOf('<div className="select-none pointer-events-none">');
-    const marker = branch.indexOf('<KnowledgeSourceMarker padletId={padlet.id} />');
+    const marker = branch.indexOf('<KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />');
 
     // The drag-critical wrapper still exists and still encloses the marker.
     expect(wrapper).toBeGreaterThan(-1);
@@ -851,8 +851,11 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
     for (const forbidden of ['setPadlets(', 'updatePadletById', 'metadata:']) {
       expect(derivation).not.toContain(forbidden);
     }
-    // B2's forward marker and its single call site are unchanged.
-    expect(postCardContent).toContain('export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {');
+    // B2's forward marker and its single call site are unchanged in shape;
+    // KNI-R1 widened the signature to also receive the caller's Note body.
+    expect(postCardContent).toContain(
+      'export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {',
+    );
     expect((canvasClient.match(/setSourceReferencesByPadletId\(/g) ?? []).length).toBe(6);
   });
 });
@@ -1007,8 +1010,9 @@ describe('P6J-F8-B2 source excerpt boundaries', () => {
 
   it('the eligibility gate lives in the domain, not inline in JSX', () => {
     // One owner for "may this be shown", so a second render site cannot grow a
-    // looser copy of the rule.
-    expect(postCardContent).toContain('knowledgeSourceCardExcerpt(references)');
+    // looser copy of the rule. KNI-R1 widened its inputs to the caller's Note
+    // body, passed through untransformed rather than re-derived here.
+    expect(postCardContent).toContain('knowledgeSourceCardExcerpt(references, noteContent)');
     expect(postCardContent).not.toContain('quoteText');
     expect(postCardContent).not.toContain('charStart');
   });

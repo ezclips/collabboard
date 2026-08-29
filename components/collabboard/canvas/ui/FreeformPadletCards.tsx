@@ -4033,7 +4033,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     never reaches PostCardContent, so the shared marker is
                     mounted here too. Display-only, exactly as on every other
                     layout -- the editor keeps the interactive Source control. */}
-                <KnowledgeSourceMarker padletId={padlet.id} />
+                <KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />
                 </>
               )}
 

@@ -170,12 +170,74 @@ describe('P6J-F6-B4-B2B exact selection drafts', () => {
     expect(buildKnowledgeSourceNoteDraft(request({ originalFilename: '', selection: SELECTION })).title).toBe('New Note');
   });
 
-  it('R: the selected source text never becomes Note content', () => {
-    const draft = buildKnowledgeSourceNoteDraft(request({ pageText: PAGE, selection: SELECTION }));
+  // ==========================================================================
+  // KNI-R1-A -- the selected source text becomes the initial editable body
+  // ==========================================================================
+  describe('KNI-R1-A exact-span selection becomes editable Note content', () => {
+    it('1: simple text becomes visible, TipTap-compatible paragraph HTML', () => {
+      const draft = buildKnowledgeSourceNoteDraft(request({
+        pageText: PAGE, selection: { charStart: 0, charEnd: 5, selectedText: 'alpha' },
+      }));
+      expect(draft.content).toBe('<p>alpha</p>');
+    });
 
-    expect(draft.content).toBe('');
-    // Provenance, not authorship: it exists only on the reference.
-    expect(JSON.stringify({ title: draft.title, content: draft.content })).not.toContain('alpha');
+    it('2: hostile HTML-shaped text is escaped, never parsed as markup', () => {
+      const hostile = '<img src=x onerror=alert(1)>';
+      const draft = buildKnowledgeSourceNoteDraft(request({
+        pageText: PAGE, selection: { charStart: 0, charEnd: hostile.length, selectedText: hostile },
+      }));
+      expect(draft.content).not.toContain('<img');
+      expect(draft.content).toBe('<p>&lt;img src=x onerror=alert(1)&gt;</p>');
+    });
+
+    it('3: ampersands and angle brackets survive as literal escaped text', () => {
+      const text = 'A & B < C > D';
+      const draft = buildKnowledgeSourceNoteDraft(request({
+        pageText: PAGE, selection: { charStart: 0, charEnd: text.length, selectedText: text },
+      }));
+      expect(draft.content).toBe('<p>A &amp; B &lt; C &gt; D</p>');
+    });
+
+    it('4: Unicode is preserved unchanged', () => {
+      const text = 'Grüße — 日本語 — \u{1F9EA} — Ω';
+      const draft = buildKnowledgeSourceNoteDraft(request({
+        pageText: PAGE, selection: { charStart: 0, charEnd: text.length, selectedText: text },
+      }));
+      expect(draft.content).toBe(`<p>${text}</p>`);
+    });
+
+    it('5: LF, CRLF and CR all become the same visible <br> structure', () => {
+      const withLf = 'line one\nline two';
+      const withCrlf = 'line one\r\nline two';
+      const withCr = 'line one\rline two';
+      for (const selectedText of [withLf, withCrlf, withCr]) {
+        const draft = buildKnowledgeSourceNoteDraft(request({
+          pageText: PAGE, selection: { charStart: 0, charEnd: selectedText.length, selectedText },
+        }));
+        expect(draft.content, JSON.stringify(selectedText)).toBe('<p>line one<br>line two</p>');
+      }
+    });
+
+    it('6: leading/trailing spaces are not trimmed out of the editable body', () => {
+      const text = '  padded  ';
+      const draft = buildKnowledgeSourceNoteDraft(request({
+        pageText: PAGE, selection: { charStart: 0, charEnd: text.length, selectedText: text },
+      }));
+      expect(draft.content).toBe('<p>  padded  </p>');
+    });
+
+    it('7: the source reference is completely unaffected by the HTML conversion', () => {
+      const hostile = '<img src=x onerror=alert(1)>';
+      const { sourceReference } = buildKnowledgeSourceNoteDraft(request({
+        pageText: PAGE, selection: { charStart: 0, charEnd: hostile.length, selectedText: hostile },
+      }));
+      // Exact, byte-for-byte, unescaped -- the server verifies this string.
+      expect(sourceReference.selectedText).toBe(hostile);
+      expect(sourceReference).toEqual({
+        sourceDocumentId: DOCUMENT_ID, pageStart: 4, pageEnd: 4, quoteText: null,
+        charStart: 0, charEnd: hostile.length, selectedText: hostile, region: null, appliedRotation: null,
+      });
+    });
   });
 
   it('S: no hash and no locator exist on the client draft in either mode', () => {

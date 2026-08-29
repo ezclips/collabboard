@@ -125,8 +125,10 @@ describe('knowledge source clip payload', () => {
   it('produces an exact-span draft, never a page-only one', () => {
     const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(VALID));
     expect(draft.title).toBe('EMG_checklist.pdf');
-    // The selected passage is evidence, not authorship.
-    expect(draft.content).toBe('');
+    // KNI-R1: the clip reuses the SAME builder as the click path, so the
+    // dragged selection becomes the same safe editable body -- no second
+    // conversion implementation for the drag gesture.
+    expect(draft.content).toBe('<p>safety</p>');
     expect(draft.sourceReference).toEqual({
       sourceDocumentId: VALID.sourceDocumentId,
       pageStart: 2,

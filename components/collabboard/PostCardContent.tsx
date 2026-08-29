@@ -1091,7 +1091,7 @@ export default function PostCardContent({
                 }}
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(decodeHtmlEntities(rawContent || "")) }}
             />
-            <KnowledgeSourceMarker padletId={padlet.id} />
+            <KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />
         </div>
     );
 }
@@ -1124,11 +1124,17 @@ const SOURCE_EXCERPT_CLAMP: React.CSSProperties = {
  * P6J-F8-B2 renders the source excerpt as a SIBLING above it, never a child: the
  * marker's own text stays exactly its label, and the excerpt stays display-only
  * text that no editor, save payload or Note body ever sees.
+ *
+ * KNI-R1-F/G/I. `noteContent` is the caller's OWN stored Note body, passed
+ * through untransformed: this component makes no eligibility decision of its
+ * own from it, and delegates entirely to the one shared domain rule so a
+ * post-R1 Note's editable body and this excerpt can never both render the
+ * same passage.
  */
-export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {
+export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {
     const references = useKnowledgeSourceReferencesForPadlet(padletId);
     const label = knowledgeSourceCardLabel(references);
-    const excerpt = knowledgeSourceCardExcerpt(references);
+    const excerpt = knowledgeSourceCardExcerpt(references, noteContent);
     const crop = getKnowledgeSourceCardRegionCrop(references);
     if (label === null) return null;
 

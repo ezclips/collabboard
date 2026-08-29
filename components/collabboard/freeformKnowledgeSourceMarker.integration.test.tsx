@@ -49,6 +49,8 @@ function sliceFrom(text: string, anchor: string, length: number): string {
 
 const GENERIC_NOTE_BRANCH_ANCHOR =
   "{(!['link', 'todo', 'table', 'container', 'drawing', 'ai-component'].includes(padlet.type)";
+// KNI-R1-F/G/I: the one shared invocation both call sites must use verbatim.
+const CALL_SITE = '<KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />';
 
 // ---------------------------------------------------------------------------
 // A-F: the freeform call site
@@ -58,7 +60,9 @@ describe('P6J-F6-B2H freeform marker call site', () => {
     expect(freeform).toContain(
       "import PostCardContent, { KnowledgeSourceMarker } from '@/components/collabboard/PostCardContent';",
     );
-    expect(postCardContent).toContain('export function KnowledgeSourceMarker({ padletId }: { padletId: string }) {');
+    expect(postCardContent).toContain(
+      'export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {',
+    );
   });
 
   it('B: the handwritten generic/Note branch mounts the marker with padlet.id', () => {
@@ -67,7 +71,7 @@ describe('P6J-F6-B2H freeform marker call site', () => {
     // after it, so this window covers the branch and little else.
     const branch = sliceFrom(freeform, GENERIC_NOTE_BRANCH_ANCHOR, 5600);
 
-    expect(branch).toContain('<KnowledgeSourceMarker padletId={padlet.id} />');
+    expect(branch).toContain(CALL_SITE);
     // It belongs to the hand-written body, not some unrelated later branch:
     // the sanitized note markup must appear before it inside the same slice.
     const body = branch.indexOf('dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(padlet.content');
@@ -86,7 +90,7 @@ describe('P6J-F6-B2H freeform marker call site', () => {
     // carries a long comment-mark click handler) and the fragment closes right
     // after it, so this window covers the branch and little else.
     const branch = sliceFrom(freeform, GENERIC_NOTE_BRANCH_ANCHOR, 5600);
-    const marker = branch.indexOf('<KnowledgeSourceMarker padletId={padlet.id} />');
+    const marker = branch.indexOf(CALL_SITE);
     const closes = branch.indexOf('</>', marker);
     expect(closes).toBeGreaterThan(marker);
     expect(branch.slice(marker, closes)).not.toContain('padlet.type ===');
@@ -132,7 +136,7 @@ describe('P6J-F6-B2H freeform marker call site', () => {
   });
 
   it('F2: the marker stays display-only at the new call site', () => {
-    const branch = sliceFrom(freeform, '<KnowledgeSourceMarker padletId={padlet.id} />', 60);
+    const branch = sliceFrom(freeform, CALL_SITE, 60);
     for (const forbidden of ['onClick', 'onPointerDown', 'onMouseDown', 'role=', 'tabIndex']) {
       expect(branch).not.toContain(forbidden);
     }
@@ -170,14 +174,14 @@ function reference(id: string, pageStart: number, pageEnd: number, createdAt: st
   } as unknown as SourceReference;
 }
 
-function mountMarker(references: readonly SourceReference[], padletId = PADLET) {
+function mountMarker(references: readonly SourceReference[], padletId = PADLET, noteContent = '') {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => {
     root!.render(
       <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(references)}>
-        <KnowledgeSourceMarker padletId={padletId} />
+        <KnowledgeSourceMarker padletId={padletId} noteContent={noteContent} />
       </KnowledgeSourceReferenceProvider>,
     );
   });
@@ -326,6 +330,33 @@ describe('P6J-F8-B2 card source excerpt', () => {
 });
 
 // ---------------------------------------------------------------------------
+// KNI-R1-F/G/I -- noteContent decides excerpt eligibility, not the call site
+// ---------------------------------------------------------------------------
+describe('KNI-R1-F/G/I noteContent display contract', () => {
+  it('A/D: a genuinely authored body suppresses the excerpt but keeps the marker', () => {
+    const container = mountMarker(
+      [exactSpanReference('Opening are prime examples')], PADLET, '<p>Opening are prime examples</p>',
+    );
+    expect(container.querySelector(EXCERPT)).toBeNull();
+    expect(container.querySelector(MARKER)!.textContent).toBe('Source · p. 2');
+  });
+
+  it.each([
+    ['empty string', ''], ['whitespace only', '   '],
+    ['empty paragraph', '<p></p>'], ['paragraph with only a line break', '<p><br></p>'],
+  ])('C: structural-empty body (%s) still allows the legacy excerpt fallback', (_label, noteContent) => {
+    const container = mountMarker([exactSpanReference('Opening are prime examples')], PADLET, noteContent);
+    expect(container.querySelector(EXCERPT)!.textContent).toBe('Opening are prime examples');
+    expect(container.querySelector(MARKER)).not.toBeNull();
+  });
+
+  it('H: PostCardContent and the Freeform handwritten branch call the identical marker invocation', () => {
+    expect(postCardContent).toContain(CALL_SITE);
+    expect(freeform).toContain(CALL_SITE);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // P6J-F9-C2 -- the region crop, mounted by the SAME shared marker component
 // ---------------------------------------------------------------------------
 
@@ -388,8 +419,8 @@ describe('P6J-F9-C2 card region crop (shared marker mount)', () => {
     // Note branch both call this exact component, and the Drawing branch
     // calls no marker at all -- so crop rides along by construction, with no
     // separate per-layout implementation.
-    expect(postCardContent).toContain('<KnowledgeSourceMarker padletId={padlet.id} />');
-    expect(freeform).toContain('<KnowledgeSourceMarker padletId={padlet.id} />');
+    expect(postCardContent).toContain(CALL_SITE);
+    expect(freeform).toContain(CALL_SITE);
     expect(mountMarker([pageRegionReference('ref-1')]).querySelector(CROP)).not.toBeNull();
     // No separate/duplicate mount: freeform never references the crop
     // component directly, only through the shared marker above.

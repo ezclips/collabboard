@@ -65,19 +65,39 @@ function clampQuote(quote: string): KnowledgeSourceCardExcerpt {
 }
 
 /**
+ * KNI-R1-H. Distinguishes a genuinely authored Note body from the HTML
+ * wrapper noise an emptied TipTap editor still emits (`''`, `<p></p>`,
+ * `<p><br></p>`). A small tag-strip, not a parser: this exists only to gate
+ * the legacy excerpt fallback below, never to sanitise or persist anything.
+ */
+function hasMeaningfulNoteContent(noteContent: string): boolean {
+  return noteContent.replace(/<[^>]*>/g, '').trim().length > 0;
+}
+
+/**
  * The excerpt one card may display, or null when it may display none. A Note
  * with several citations gets nothing: the marker already collapses to
  * "N sources" because choosing one of them to show would misrepresent the rest,
  * and an excerpt would make that choice invisible. Null is the honest answer,
  * not a failure -- the Note still renders, marker and navigation untouched.
+ *
+ * KNI-R1-F/G. `noteContent` is the ONE other input to this eligibility
+ * decision: a post-R1 Note already carries its selection as editable body,
+ * so showing the read-only excerpt beside it would print the same passage
+ * twice. Only a legacy blank-body Note -- the pre-R1 contract -- still needs
+ * this fallback. Defaults to `''` so a caller mid-migration to the new
+ * parameter still gets the pre-R1 (fallback-eligible) behaviour rather than a
+ * type error.
  */
 export function knowledgeSourceCardExcerpt(
   references: readonly SourceReference[],
+  noteContent: string = '',
 ): KnowledgeSourceCardExcerpt | null {
   if (references.length !== 1) return null;
   const [only] = references;
   if (!hasVerifiedExactSpan(only)) return null;
   const { quoteText } = only;
   if (typeof quoteText !== 'string' || quoteText.length === 0) return null;
+  if (hasMeaningfulNoteContent(noteContent)) return null;
   return clampQuote(quoteText);
 }

@@ -161,3 +161,36 @@ describe('knowledgeSourceCardExcerpt clamping', () => {
     expect(JSON.stringify(original)).toBe(snapshot);
   });
 });
+
+describe('KNI-R1-F/G/H noteContent eligibility gate', () => {
+  it('12: a genuinely authored body suppresses the excerpt entirely', () => {
+    expect(knowledgeSourceCardExcerpt([reference()], '<p>Opening are prime examples</p>')).toBeNull();
+  });
+
+  it('13: a legacy blank body still shows the excerpt (default parameter)', () => {
+    expect(knowledgeSourceCardExcerpt([reference()])).toEqual({
+      text: 'Opening are prime examples', truncated: false,
+    });
+    expect(knowledgeSourceCardExcerpt([reference()], '')).toEqual({
+      text: 'Opening are prime examples', truncated: false,
+    });
+  });
+
+  it('treats empty-editor wrapper noise as no body, not as authored content', () => {
+    for (const empty of ['', '   ', '<p></p>', '<p><br></p>', '<p>   </p>']) {
+      expect(knowledgeSourceCardExcerpt([reference()], empty), JSON.stringify(empty)).not.toBeNull();
+    }
+  });
+
+  it('17: HTML-shaped note content is stripped as tags, never causing a false negative', () => {
+    // A body containing literal angle brackets the user typed still counts as
+    // meaningful -- the tag-strip only removes real markup, and any residual
+    // non-whitespace character makes the body meaningful.
+    expect(knowledgeSourceCardExcerpt([reference()], '<p>&lt;img&gt;</p>')).toBeNull();
+  });
+
+  it('14: multiple references still show no excerpt regardless of note content', () => {
+    const two = [reference(), reference({ id: 'ref-2', quoteText: 'Second quote' })];
+    expect(knowledgeSourceCardExcerpt(two, '')).toBeNull();
+  });
+});
