@@ -883,10 +883,12 @@ describe('KNI-R3: selected-text context menu (Note)', () => {
     outside.mockRestore();
     const inside = stubHit(0);
     rightClick(c.querySelector('.ProseMirror')!);
-    act(() => { (document.body.querySelector('[aria-label="Red"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // Text color and Highlight now share one palette (KNI-R3A), so scope to the row after the "Text color" label.
+    const textColorRow = Array.from(document.body.querySelectorAll('[data-slot="context-menu-label"]')).find((el) => el.textContent === 'Text color')!.nextElementSibling as HTMLElement;
+    act(() => { (textColorRow.querySelector('[aria-label="#212529"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const html = c.querySelector('.ProseMirror')!.innerHTML;
-    expect(html).toMatch(/rgb\(220, 38, 38\)[^>]*>world</);
-    expect(html).not.toMatch(/rgb\(220, 38, 38\)[^>]*>hello/);
+    expect(html).toMatch(/rgb\(33, 37, 41\)[^>]*>world</);
+    expect(html).not.toMatch(/rgb\(33, 37, 41\)[^>]*>hello/);
     inside.mockRestore();
   });
 });

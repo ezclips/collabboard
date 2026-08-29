@@ -241,7 +241,10 @@ export default function DocumentEditor({
   useEffect(() => {
     if (!isOpen || !editor) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || isSaving) return;
+      // KNI-R3A: PositionedContextMenu (SelectedTextContextMenu) calls
+      // preventDefault() on the Escape it consumes to dismiss itself --
+      // defaultPrevented here means that menu handled it, not this editor.
+      if (e.key !== 'Escape' || isSaving || e.defaultPrevented) return;
       void attemptClose();
     };
     document.addEventListener('keydown', handleKeyDown);

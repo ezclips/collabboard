@@ -356,3 +356,66 @@ describe('KNI-R3: selected-text context menu (Document) -- same shared component
     stub.mockRestore();
   });
 });
+
+// KNI-R3A: Text color and Highlight share one palette, so aria-label collides between rows -- scope to the intended section.
+function menuSwatch(section: 'Text color' | 'Highlight', color: string) {
+  const label = Array.from(document.body.querySelectorAll('[data-slot="context-menu-label"]')).find((el) => el.textContent === section)!;
+  return (label.nextElementSibling as HTMLElement).querySelector(`[aria-label="${color}"]`) as HTMLElement;
+}
+
+describe('KNI-R3A: Escape isolation + effect-level proofs (Document) -- real DOM/HTML, not callback firing', () => {
+  const stubHit = (offset: number) => vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: any) { return { pos: this.state.selection.from + offset, inside: -1 }; });
+  const rightClick = (el: Element) => { act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); }); };
+  const menu = () => document.body.querySelector('[data-positioned-menu-surface]');
+
+  it('Escape closes the selected-text menu only while it is open; a second Escape then closes Document as before', () => {
+    const onClose = vi.fn();
+    const c = mount(<DocumentEditor isOpen title="T" initialContent="<p>hello world</p>" metadata={{}} onSave={vi.fn()} onClose={onClose} />);
+    selectText(c, 'world');
+    const stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).not.toBeNull();
+    act(() => { menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(menu()).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    stub.mockRestore();
+  });
+
+  it('highlight from the menu marks only the selected word; Clear then removes exactly that mark', () => {
+    const c = open('', '<p>A B C</p>');
+    selectText(c, 'B');
+    let stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    act(() => { menuSwatch('Highlight', '#fa5252').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    let html = c.querySelector('.ProseMirror')!.innerHTML;
+    expect(html).toMatch(/<mark[^>]*>B<\/mark>/);
+    expect(html).not.toMatch(/<mark[^>]*>A/);
+    expect(html).not.toMatch(/<mark[^>]*>C/);
+    stub.mockRestore();
+
+    selectText(c, 'B');
+    stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    act(() => { (document.body.querySelector('[aria-label="Clear"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    html = c.querySelector('.ProseMirror')!.innerHTML;
+    expect(html).not.toContain('<mark');
+    expect(html).toContain('A B C');
+    stub.mockRestore();
+  });
+
+  it('collapsing the live selection after opening the menu does not redirect formatting: the originally selected word still receives it', () => {
+    const c = open('', '<p>A B C</p>');
+    selectText(c, 'B');
+    const stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    collapseSelection(c);
+    act(() => { menuSwatch('Text color', '#212529').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const html = c.querySelector('.ProseMirror')!.innerHTML;
+    expect(html).toMatch(/rgb\(33, 37, 41\)[^>]*>B</);
+    expect(html).not.toMatch(/rgb\(33, 37, 41\)[^>]*>A/);
+    expect(html).not.toMatch(/rgb\(33, 37, 41\)[^>]*>C/);
+    stub.mockRestore();
+  });
+});

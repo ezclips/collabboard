@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import TextFormattingButtons, { type TextFormattingButtonsProps } from './TextFormattingButtons';
-import { HIGHLIGHT_COLOR_PRESETS } from './textStylePresets';
+import { TEXT_COLOR_PRESETS, HIGHLIGHT_COLOR_PRESETS } from './textStylePresets';
 
 interface TextStylePopupProps extends TextFormattingButtonsProps {
     isOpen: boolean;
@@ -183,7 +183,7 @@ export default function TextStylePopup({
                         color={colorMode === 'text' ? currentColor : currentHighlight}
                         onChange={(c) => colorMode === 'text' ? onSelectColor(c) : onSelectHighlight(c)}
                         hasOpacity={true}
-                        presets={colorMode === 'highlight' ? HIGHLIGHT_COLOR_PRESETS : undefined}
+                        presets={colorMode === 'text' ? TEXT_COLOR_PRESETS : HIGHLIGHT_COLOR_PRESETS}
                     />
                 </div>
             </div>

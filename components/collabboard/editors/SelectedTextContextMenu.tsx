@@ -54,13 +54,13 @@ export default function SelectedTextContextMenu({
     <PositionedContextMenu open={open} x={x} y={y} onOpenChange={onOpenChange} className="w-56 py-2">
       <PositionedContextMenuLabel>Text color</PositionedContextMenuLabel>
       <div className="flex flex-wrap gap-1.5 px-2 pb-2">
-        {TEXT_COLOR_PRESETS.map((preset) => (
+        {TEXT_COLOR_PRESETS.map((color) => (
           <PositionedContextMenuSwatch
-            key={preset.color}
-            color={preset.color}
-            label={preset.label}
-            selected={currentTextColor === preset.color}
-            onSelect={() => onTextColor(preset.color)}
+            key={color}
+            color={color}
+            label={color}
+            selected={currentTextColor === color}
+            onSelect={() => onTextColor(color)}
           />
         ))}
       </div>

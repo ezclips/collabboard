@@ -48,7 +48,8 @@ const PRESET_COLORS = [
     '#ae3ec9', // Grape 4
 ];
 
-const SIMPLE_PALETTE = [
+// KNI-R3A: exported so textStylePresets.ts (the shared authority for TextStylePopup/SelectedTextContextMenu) can re-export this same array rather than duplicating it.
+export const SIMPLE_PALETTE = [
     '#ffffff', '#f8f9fa', '#e9ecef', '#868e96', '#212529',
     '#fa5252', '#e64980', '#be4bdb', '#7950f2', '#4c6ef5',
     '#228be6', '#15aabf', '#12b886', '#40c057', '#82c91e',
