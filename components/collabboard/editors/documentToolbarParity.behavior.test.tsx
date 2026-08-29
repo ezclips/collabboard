@@ -357,6 +357,34 @@ describe('KNI-R3: selected-text context menu (Document) -- same shared component
   });
 });
 
+describe('KNI-R4: Ask AI synchronous capture (Document) -- same shared panel as Note', () => {
+  const stubHit = (offset: number) => vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: any) { return { pos: this.state.selection.from + offset, inside: -1 }; });
+  const rightClick = (el: Element) => { act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); }); };
+  const menu = () => document.body.querySelector('[data-positioned-menu-surface]');
+  const askAI = () => Array.from(document.body.querySelectorAll('[role="menuitem"]')).find((el) => el.textContent === 'Ask AI') as HTMLElement;
+
+  it('uses the one shared SelectedTextAIPanel (source-level), and captures the exact range/text before the menu closes', async () => {
+    const src = require('node:fs').readFileSync('components/collabboard/editors/DocumentEditor.tsx', 'utf8');
+    expect(src).toContain("import SelectedTextAIPanel from './SelectedTextAIPanel'");
+    const c = open();
+    selectText(c, 'world');
+    const stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).not.toBeNull();
+    act(() => { askAI().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(menu()).toBeNull();
+    expect(document.body.querySelector('[data-selected-text-ai-panel]')).not.toBeNull();
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch' as any).mockResolvedValue(new Response(JSON.stringify({ text: 'ok' }), { status: 200 }));
+    const improveBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Improve writing') as HTMLButtonElement;
+    await act(async () => { improveBtn.click(); await Promise.resolve(); });
+    const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody.selectedText).toBe('world');
+    fetchMock.mockRestore();
+    stub.mockRestore();
+  });
+});
+
 // KNI-R3A: Text color and Highlight share one palette, so aria-label collides between rows -- scope to the intended section.
 function menuSwatch(section: 'Text color' | 'Highlight', color: string) {
   const label = Array.from(document.body.querySelectorAll('[data-slot="context-menu-label"]')).find((el) => el.textContent === section)!;

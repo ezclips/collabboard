@@ -6,6 +6,7 @@ import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditor
 import { cycleEditorTextAlign, nextTextAlign } from './textAlignCycle';
 import TextStylePopup from './TextStylePopup';
 import SelectedTextContextMenu from './SelectedTextContextMenu';
+import SelectedTextAIPanel from './SelectedTextAIPanel';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
@@ -321,6 +322,21 @@ export default function NoteEditor({
   const handleSelectedTextMenuColor = (color: string) => { setCurrentTextColor(color); runOnSelectedTextMenuRange(() => editor?.chain().focus().setColor(color).run()); };
   const handleSelectedTextMenuHighlight = (color: string) => { setCurrentHighlight(color); runOnSelectedTextMenuRange(() => editor?.chain().focus().setHighlight({ color }).run()); };
   const handleSelectedTextMenuClearHighlight = () => { setCurrentHighlight('transparent'); runOnSelectedTextMenuRange(() => editor?.chain().focus().unsetHighlight().run()); };
+
+  // KNI-R4: captured synchronously inside onAIAction, before
+  // PositionedContextMenuItem's activate() calls close() (which nulls
+  // selectedTextMenuRange) -- see SelectedTextAIPanel.tsx for why this must
+  // never be re-read from selectedTextMenuRange after this point.
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiRange, setAiRange] = useState<{ from: number; to: number } | null>(null);
+  const [aiCapturedText, setAiCapturedText] = useState('');
+  const handleAskAI = () => {
+    if (!editor || !selectedTextMenuRange) return;
+    const { from, to } = selectedTextMenuRange;
+    setAiRange({ from, to });
+    setAiCapturedText(editor.state.doc.textBetween(from, to, '\n', '\n'));
+    setAiPanelOpen(true);
+  };
 
   // Clicking into the TipTap content hands the Text style panel's target
   // back to 'content' -- without this, formatting the title once would
@@ -938,6 +954,7 @@ export default function NoteEditor({
             onTextColor={handleSelectedTextMenuColor}
             onHighlight={handleSelectedTextMenuHighlight}
             onClearHighlight={handleSelectedTextMenuClearHighlight}
+            onAIAction={handleAskAI}
           />
         )}
 
@@ -1091,6 +1108,20 @@ export default function NoteEditor({
               />
             </div>
             </div>
+          </div>
+        )}
+
+        {/* KNI-R4: selected-text AI panel - right-side flex sibling, same slot
+            convention as the other side panels below. Never portaled, so it
+            never repeats R3's body-portal-vs-modal z-index defect. */}
+        {aiPanelOpen && aiRange && editor && (
+          <div style={{ width: '300px' }}>
+            <SelectedTextAIPanel
+              editor={editor}
+              range={aiRange}
+              capturedText={aiCapturedText}
+              onClose={() => { setAiPanelOpen(false); setAiRange(null); }}
+            />
           </div>
         )}
 

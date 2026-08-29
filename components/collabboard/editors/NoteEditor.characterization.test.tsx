@@ -892,3 +892,30 @@ describe('KNI-R3: selected-text context menu (Note)', () => {
     inside.mockRestore();
   });
 });
+
+describe('KNI-R4: Ask AI synchronous capture (Note)', () => {
+  const stubHit = (offset: number) => vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: any) { return { pos: this.state.selection.from + offset, inside: -1 }; });
+  const rightClick = (el: Element) => { act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); }); };
+  const menu = () => document.body.querySelector('[data-positioned-menu-surface]');
+  const askAI = () => Array.from(document.body.querySelectorAll('[role="menuitem"]')).find((el) => el.textContent === 'Ask AI') as HTMLElement;
+
+  it('clicking Ask AI captures the exact range/text before the menu\'s own close() nulls selectedTextMenuRange, and opens the shared panel with it', async () => {
+    const c = openNote();
+    selectText(c, 'world');
+    const stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).not.toBeNull();
+    act(() => { askAI().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(menu()).toBeNull(); // the R3 menu itself closes as normal
+    expect(document.body.querySelector('[data-selected-text-ai-panel]')).not.toBeNull();
+    expect(document.body.textContent).toContain('Only the selected text is sent to AI.');
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch' as any).mockResolvedValue(new Response(JSON.stringify({ text: 'ok' }), { status: 200 }));
+    const improveBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === 'Improve writing') as HTMLButtonElement;
+    await act(async () => { improveBtn.click(); await Promise.resolve(); });
+    const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody.selectedText).toBe('world'); // exact captured text, not "hello world again"
+    fetchMock.mockRestore();
+    stub.mockRestore();
+  });
+});
