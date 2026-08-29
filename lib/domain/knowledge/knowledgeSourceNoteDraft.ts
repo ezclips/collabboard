@@ -103,10 +103,37 @@ function escapeNoteHtml(text: string): string {
  * literal text, CR/CRLF folded to LF, line breaks as `<br>`, wrapped in the
  * single paragraph StarterKit already expects. Never trimmed -- the
  * selection the user deliberately made travels through exactly as chosen.
+ *
+ * KNI-R2: exported so the drop-onto-an-existing-Note gesture reuses this
+ * SAME authority rather than re-implementing escaping in the canvas layer.
  */
-function selectionToNoteContent(selectedText: string): string {
+export function knowledgeSourceSelectionToNoteHtml(selectedText: string): string {
   const normalized = selectedText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   return `<p>${escapeNoteHtml(normalized).split('\n').join('<br>')}</p>`;
+}
+
+/**
+ * KNI-R2. A structurally empty TipTap body ('' , whitespace, `<p></p>`,
+ * `<p><br></p>`) carries no authored text -- a tag-strip that leaves nothing
+ * behind, mirroring knowledgeSourceCardExcerpt's own meaningful-content gate.
+ */
+function isStructurallyEmptyNoteContent(content: string): boolean {
+  return content.replace(/<[^>]*>/g, '').trim().length === 0;
+}
+
+/**
+ * KNI-R2. Dropping a Source clip onto an EXISTING Note appends the selection
+ * as a new paragraph after whatever the Note already says -- it never
+ * replaces authored content. A structurally empty existing body (the common
+ * case: a fresh Note, or a legacy blank-body source Note) has no wrapper
+ * noise worth preserving, so the result is just the new paragraph.
+ */
+export function appendKnowledgeSourceSelectionToNoteContent(
+  existingContent: string,
+  selectedText: string,
+): string {
+  const appended = knowledgeSourceSelectionToNoteHtml(selectedText);
+  return isStructurallyEmptyNoteContent(existingContent) ? appended : `${existingContent}${appended}`;
 }
 
 function quoteFromPageText(pageText: string): string | null {
@@ -157,7 +184,7 @@ export function buildKnowledgeSourceNoteDraft(
     // Note's initial editable body (escaped, never trimmed). Either way the
     // source reference below stays the untouched, independent provenance
     // record; editing the body afterward can never redefine it.
-    content: selection === null ? '' : selectionToNoteContent(selection.selectedText),
+    content: selection === null ? '' : knowledgeSourceSelectionToNoteHtml(selection.selectedText),
     sourceReference: {
       sourceDocumentId: request.sourceDocumentId,
       pageStart: request.pageNumber,

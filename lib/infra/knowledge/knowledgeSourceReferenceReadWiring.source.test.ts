@@ -175,7 +175,7 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     const parseFallback = block.indexOf('.catch(() => null)');
     const elseBranch = block.indexOf('} else {');
     const catchIndex = block.indexOf('} catch (err) {');
-    const failureToast = block.indexOf("toast.error('Note created, but source link could not be saved')");
+    const failureToast = block.indexOf('toast.error(onSaveFailedMessage)');
 
     // Reading the body absorbs its own rejection, so it cannot fall into the
     // F5 catch and claim the durable write failed.
@@ -186,6 +186,9 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     expect(block.slice(elseBranch, catchIndex)).toContain('console.warn(');
     expect(block.slice(elseBranch, catchIndex)).not.toContain('toast.');
     expect(failureToast).toBeGreaterThan(catchIndex);
+    // KNI-R2: the message is now a parameter, defaulted to the ORIGINAL
+    // NEW-Note wording -- every pre-existing caller still sees it unchanged.
+    expect(block).toContain("onSaveFailedMessage: string = 'Note created, but source link could not be saved'");
   });
 
   it('K3: F5 failure semantics are untouched -- one toast, no rollback', () => {
@@ -193,10 +196,13 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     const failure = block.slice(block.indexOf('} catch (err) {'));
 
     expect((failure.match(/toast\./g) ?? []).length).toBe(1);
-    expect(failure).toContain("toast.error('Note created, but source link could not be saved')");
+    expect(failure).toContain('toast.error(onSaveFailedMessage)');
     for (const rollback of ['delete', 'setPadlets', 'rollback']) {
       expect(failure).not.toContain(rollback);
     }
+    // KNI-R2's existing-Note append supplies its own truthful wording rather
+    // than reusing the NEW-Note default.
+    expect(canvasClient).toContain("'Text was added, but the source link could not be saved'");
   });
 
   it('L: no source-reference state is copied into a padlet row or its metadata', () => {

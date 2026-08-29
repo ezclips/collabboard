@@ -30,6 +30,7 @@ const drawingLayout = sourceOf('components/collabboard/canvas/layouts/DrawingLay
 // the create-Note callback now travels CanvasClient -> drawer directly.
 const readerDrawer = sourceOf('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
 const documentsList = sourceOf('components/collabboard/KnowledgeDocumentsList.tsx');
+const freeformCards = sourceOf('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
 
 /** Everything between an anchor and the next `count` characters of source. */
 function after(source: string, anchor: string, count = 900): string {
@@ -216,9 +217,9 @@ describe('P6J-F5 source note wiring', () => {
    * grown a second write path that nothing else in this suite guards.
    */
   it('C7/C9/C10: a region uses the one Note writer and the one reference writer', () => {
-    // C9: two entry points -- the F8 clip drop and the page/region request --
-    // and both reach the ONE builder. The region adds no third.
-    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(2);
+    // C9: three entry points now -- the F8 clip drop, the page/region request,
+    // and KNI-R2's existing-Note drop -- all reaching the ONE builder.
+    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(3);
     // Nothing hand-builds provenance: the only value ever stashed is a draft's.
     expect(canvasClient.match(/setSourceNoteReference\((?!null\))/g) ?? []).toHaveLength(1);
     expect(canvasClient).toContain('setSourceNoteReference(draft.sourceReference)');
@@ -258,7 +259,9 @@ describe('P6J-F5 source note wiring', () => {
     const helper = after(canvasClient, 'const persistKnowledgeSourceReference', 1900);
     const failure = helper.slice(helper.indexOf('} catch'));
     expect(failure).toContain('toast.error');
-    expect(failure).toContain('Note created, but source link could not be saved');
+    // KNI-R2: the message is now a defaulted parameter, unchanged for every pre-existing caller.
+    expect(failure).toContain('toast.error(onSaveFailedMessage)');
+    expect(helper).toContain("onSaveFailedMessage: string = 'Note created, but source link could not be saved'");
     // No rollback of any kind, and nothing rethrown into the creation path.
     for (const forbidden of ['delete', 'setPadlets', 'fetchData', 'filter', 'throw']) {
       expect(failure, forbidden).not.toContain(forbidden);
@@ -294,11 +297,10 @@ describe('P6J-F5 source note wiring', () => {
     // provenance presence instead, and the direct save reports through
     // usePadletSave's callback.
     expect((canvasClient.match(/\n\s*completeSourceReferenceForDraft\(/g) ?? []).length).toBe(5);
-    // Four direct persists: the shared finaliser's own, the two Drawing paths
-    // whose rebuilt payloads have no `kind` to gate on, and -- from P6J-F8-B1 --
-    // the freeform source-clip drop, which inserts its own post and so has no
-    // placement draft to finalise through.
-    expect((canvasClient.match(/void persistKnowledgeSourceReference\(/g) ?? []).length).toBe(4);
+    // Five direct persists: the shared finaliser's own, the two Drawing paths
+    // (no `kind` to gate on), the P6J-F8-B1 freeform source-clip drop, and
+    // KNI-R2's existing-Note append -- none of the last three has a placement draft.
+    expect((canvasClient.match(/void persistKnowledgeSourceReference\(/g) ?? []).length).toBe(5);
   });
 
   it('K: ordinary Note creation carries no source reference at all', () => {
@@ -710,5 +712,58 @@ describe('P6J-F8-B1 source clip drop', () => {
     expect(rootElement).toContain('highlightedText(');
     expect(rootElement).not.toContain('CLIP_CHIP');
     expect(rootElement).not.toContain('draggable');
+  });
+});
+
+// ==========================================================================
+// KNI-R2 -- dropping a source clip onto an EXISTING ordinary Note
+// ==========================================================================
+describe('KNI-R2 existing-Note source clip drop', () => {
+  const existingNoteHandler = () => after(canvasClient, 'const handleKnowledgeSourceClipDropOnExistingNote', 2000);
+
+  it('parses the one dedicated clip, claims synchronously, then validates the target type', () => {
+    const handler = existingNoteHandler();
+    const parseIndex = handler.indexOf('parseKnowledgeSourceClipPayload(');
+    const bailIndex = handler.indexOf('if (!payload) return false;');
+    const stopIndex = handler.indexOf('event.stopPropagation();');
+    const typeGuardIndex = handler.indexOf("targetPadlet.type !== 'text' && targetPadlet.type !== 'note'");
+    const capabilityIndex = handler.indexOf('if (!canUseCanvasToolbar || !canvasId) return true;');
+    expect(bailIndex).toBeGreaterThan(parseIndex);
+    // Claimed before any await -- a deferred stopPropagation lets the same clip also create a second Note.
+    expect(stopIndex).toBeGreaterThan(bailIndex);
+    expect(handler.slice(0, stopIndex)).not.toContain('await');
+    // Re-checked at the point of writing -- a viewer can synthesise a payload.
+    expect(capabilityIndex).toBeGreaterThan(stopIndex);
+    expect(typeGuardIndex).toBeGreaterThan(capabilityIndex);
+    // And it never reaches the new-Note creation path.
+    for (const forbidden of ['insertPostAndSelectOrThrow', 'handleDrawingLayoutAddPadletWithContainerCheck']) {
+      expect(handler, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('updates the Note content before completing the reference, and only on success', () => {
+    const handler = existingNoteHandler();
+    const updateIndex = handler.indexOf('await updatePostFieldsOrThrow(targetPadlet.id');
+    const persistIndex = handler.indexOf('void persistKnowledgeSourceReference(');
+    const catchIndex = handler.indexOf('} catch (err)');
+    expect(updateIndex).toBeGreaterThan(-1);
+    expect(persistIndex).toBeGreaterThan(updateIndex);
+    // Both sit inside the same try -- a rejected update jumps to catch instead.
+    expect(persistIndex).toBeLessThan(catchIndex);
+    expect(handler).toContain("'Text was added, but the source link could not be saved'");
+    expect(handler).not.toContain('Note created, but source link could not be saved');
+    // Reuses the one draft builder and the one append authority.
+    expect(handler).toContain('buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload))');
+    expect(handler).toContain('appendKnowledgeSourceSelectionToNoteContent(');
+  });
+
+  it('is wired once on each of Freeform and Drawing, which forward and persist nothing themselves', () => {
+    expect((canvasClient.match(/onKnowledgeSourceClipDropOnNote=\{handleKnowledgeSourceClipDropOnExistingNote\}/g) ?? []).length).toBe(2);
+    for (const [name, source] of [['FreeformPadletCards', freeformCards], ['DrawingLayout', drawingLayout]] as const) {
+      expect(source, name).toContain('onKnowledgeSourceClipDropOnNote?.(e, padlet)');
+      for (const forbidden of ['parseKnowledgeSourceClipPayload', 'appendKnowledgeSourceSelectionToNoteContent', 'persistKnowledgeSourceReference']) {
+        expect(source, `${name}:${forbidden}`).not.toContain(forbidden);
+      }
+    }
   });
 });

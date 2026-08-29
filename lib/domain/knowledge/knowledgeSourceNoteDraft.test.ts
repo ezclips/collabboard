@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildKnowledgeSourceNoteDraft } from './knowledgeSourceNoteDraft';
+import {
+  buildKnowledgeSourceNoteDraft,
+  knowledgeSourceSelectionToNoteHtml,
+  appendKnowledgeSourceSelectionToNoteContent,
+} from './knowledgeSourceNoteDraft';
 import type { KnowledgeSourcePageRequest } from './knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from './knowledgeSourceReferenceWrite';
 
@@ -351,5 +355,48 @@ describe('P6J-F9-B2 page region note draft', () => {
     for (const leaked of ['webp', 'storage', 'bucket', 'signed', 'natural', 'base64', 'dataurl']) {
       expect(serialized.toLowerCase(), leaked).not.toContain(leaked);
     }
+  });
+});
+
+// ==========================================================================
+// KNI-R2 -- appending a dropped selection onto an EXISTING Note's content
+// ==========================================================================
+describe('KNI-R2 appendKnowledgeSourceSelectionToNoteContent', () => {
+  it('1: a structurally empty Note becomes just the new paragraph', () => {
+    for (const existing of ['', '   ', '<p></p>', '<p><br></p>']) {
+      expect(appendKnowledgeSourceSelectionToNoteContent(existing, 'alpha'), JSON.stringify(existing))
+        .toBe('<p>alpha</p>');
+    }
+  });
+
+  it('2: an authored Note keeps its content, with the selection appended after', () => {
+    const result = appendKnowledgeSourceSelectionToNoteContent('<p>My notes</p>', 'alpha');
+    expect(result).toBe('<p>My notes</p><p>alpha</p>');
+    expect(result).toContain('My notes');
+  });
+
+  it('3: hostile HTML-shaped text is escaped, never parsed as markup', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const result = appendKnowledgeSourceSelectionToNoteContent('<p>My notes</p>', hostile);
+    expect(result).not.toContain('<img');
+    expect(result).toBe('<p>My notes</p><p>&lt;img src=x onerror=alert(1)&gt;</p>');
+  });
+
+  it('4: Unicode and CRLF are preserved through the same R1 converter', () => {
+    const unicode = 'Grüße — 日本語 — \u{1F9EA} — Ω';
+    expect(appendKnowledgeSourceSelectionToNoteContent('<p>Existing</p>', unicode))
+      .toBe(`<p>Existing</p><p>${unicode}</p>`);
+    expect(appendKnowledgeSourceSelectionToNoteContent('', 'line one\r\nline two'))
+      .toBe('<p>line one<br>line two</p>');
+  });
+
+  it('never trims the selected source text', () => {
+    expect(appendKnowledgeSourceSelectionToNoteContent('<p>x</p>', '  padded  '))
+      .toBe('<p>x</p><p>  padded  </p>');
+  });
+
+  it('5: matches the shared converter exactly for a structurally empty existing body', () => {
+    expect(appendKnowledgeSourceSelectionToNoteContent('<p><br></p>', 'alpha'))
+      .toBe(knowledgeSourceSelectionToNoteHtml('alpha'));
   });
 });

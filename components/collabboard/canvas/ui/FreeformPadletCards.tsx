@@ -33,6 +33,7 @@ import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import PostCardContent, { KnowledgeSourceMarker } from '@/components/collabboard/PostCardContent';
+import { KNOWLEDGE_SOURCE_CLIP_MIME } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMenu';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
@@ -74,6 +75,10 @@ import { useCanvasConfig } from '@/components/collabboard/canvas/contexts/Canvas
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 const DND_KIND_CONTAINER_MOVE = 'columns-container-move';
+// KNI-R2: R2 applies ONLY to ordinary Note types -- never Document, Todo,
+// Table, Container, Image, Link, Drawing, AI Component or Section Heading.
+const isKnowledgeSourceClipEligibleNote = (padlet: Padlet) =>
+  padlet.type === 'text' || (padlet.type as string) === 'note';
 
 // PATCH POST-RESIZE-B1: render-side mirrors of the policy minima, so legacy
 // render fallbacks and resized canonical rendering agree with the resize
@@ -243,6 +248,10 @@ export interface FreeformPadletCardsProps {
   // this component without it keeps working -- 'comment' mode simply cannot
   // persist without it (see each call site's own branch).
   commentModeMutations?: CommentModeMutations;
+  // KNI-R2: CanvasClient's single existing-Note drop-claim handler. This
+  // component is an event adapter only -- it owns no parsing, validation or
+  // persistence of its own, it just forwards the native drop event.
+  onKnowledgeSourceClipDropOnNote?: (event: React.DragEvent, targetPadlet: Padlet) => boolean;
 }
 
 // PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
@@ -403,6 +412,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     requestOpenDocument,
     commentAccessMode = 'manage',
     commentModeMutations,
+    onKnowledgeSourceClipDropOnNote,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -1264,6 +1274,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         // Fires in capture phase so child stopPropagation cannot block it.
         handlePadletMouseDown(e, padlet.id);
       }}
+      onDragOver={isKnowledgeSourceClipEligibleNote(padlet) ? (e) => {
+        // Only the dedicated clip type ever gets preventDefault here --
+        // every other drag (card moves, library items) must bubble normally.
+        if (e.dataTransfer.types.includes(KNOWLEDGE_SOURCE_CLIP_MIME)) e.preventDefault();
+      } : undefined}
+      onDrop={isKnowledgeSourceClipEligibleNote(padlet) ? (e) => {
+        onKnowledgeSourceClipDropOnNote?.(e, padlet);
+      } : undefined}
       style={{
         left: padlet.position_x || 0,
         top: padlet.position_y || 0,

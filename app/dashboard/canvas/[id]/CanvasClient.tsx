@@ -85,7 +85,10 @@ import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository'
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
-import { buildKnowledgeSourceNoteDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import {
+  buildKnowledgeSourceNoteDraft,
+  appendKnowledgeSourceSelectionToNoteContent,
+} from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import {
   KNOWLEDGE_SOURCE_CLIP_MIME,
   knowledgeSourceClipPageRequest,
@@ -1681,6 +1684,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
     sourceReference: KnowledgeSourceReferenceDraft,
+    // KNI-R2: an existing-Note append never "creates" a Note, so its failure
+    // wording must say so -- every pre-existing caller keeps today's message.
+    onSaveFailedMessage: string = 'Note created, but source link could not be saved',
   ) => {
     if (!canvasId) return;
     try {
@@ -1737,7 +1743,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // The Note stays. No delete, no rollback, no retry, and nothing thrown
       // back into the already-successful creation path.
       console.error('Failed to save Knowledge source reference:', err);
-      toast.error('Note created, but source link could not be saved');
+      toast.error(onSaveFailedMessage);
     }
   }, [canvasId]);
 
@@ -6055,6 +6061,57 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     persistKnowledgeSourceReference,
   ]);
 
+  /**
+   * KNI-R2. A dedicated Knowledge clip dropped on an EXISTING ordinary Note
+   * (text/legacy note only) appends the selection instead of creating a
+   * second Note. Freeform and Drawing both call this from their own
+   * card-level onDrop -- this is the one place that owns payload parsing,
+   * target-type validation, the permission re-check, and the content-before-
+   * reference write order. Returns whether it claimed the event, exactly
+   * like handleKnowledgeSourceClipDrop above.
+   */
+  const handleKnowledgeSourceClipDropOnExistingNote = useCallback((
+    event: React.DragEvent,
+    targetPadlet: Padlet,
+  ): boolean => {
+    const payload = parseKnowledgeSourceClipPayload(
+      event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME),
+    );
+    if (!payload) return false;
+    // Synchronous, before any await -- see handleKnowledgeSourceClipDrop's
+    // own comment: an await here would let this SAME clip also reach the
+    // outer blank-canvas handler and create a second Note.
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canUseCanvasToolbar || !canvasId) return true;
+    if (targetPadlet.type !== 'text' && targetPadlet.type !== 'note') return true;
+
+    const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload));
+    const nextContent = appendKnowledgeSourceSelectionToNoteContent(
+      targetPadlet.content || '',
+      payload.selectedText,
+    );
+    void (async () => {
+      try {
+        // Content first, durably. A failed update must leave the Note and
+        // the reference index both untouched -- no reference request follows.
+        await updatePostFieldsOrThrow(targetPadlet.id, { content: nextContent });
+        setPadlets((prev) => prev.map((p) => (p.id === targetPadlet.id ? { ...p, content: nextContent } : p)));
+        // Only after that success. A reference failure here must never roll
+        // the appended text back -- it survives, matching R1's own philosophy.
+        void persistKnowledgeSourceReference(
+          targetPadlet.id,
+          draft.sourceReference,
+          'Text was added, but the source link could not be saved',
+        );
+      } catch (err) {
+        console.error('Failed to append source clip to Note:', err);
+        toast.error('Could not add the source passage to this Note');
+      }
+    })();
+    return true;
+  }, [canUseCanvasToolbar, canvasId, updatePostFieldsOrThrow, setPadlets, persistKnowledgeSourceReference]);
+
   const handleDrawingNewContainer = useCallback(async () => {
     if (!drawingPendingDraft || !canvasId) return;
     setDrawingContainerPromptOpen(false);
@@ -7950,6 +8007,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 readOnly={currentWorkspaceRole === 'readonly'}
                 fetchData={fetchData}
                 commentAccessMode={commentAccessMode}
+                onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
               />
             )}
 
@@ -8316,6 +8374,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     requestOpenDocument={requestOpenDocument}
                     commentAccessMode={commentAccessMode}
                     commentModeMutations={commentModeMutations}
+                    onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>

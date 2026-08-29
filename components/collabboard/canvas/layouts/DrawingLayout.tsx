@@ -30,6 +30,7 @@ import { createSettledScenePropagation } from '@/lib/infra/drawing/settledSceneP
 import { computePostRenderRevision } from '@/lib/infra/drawing/postRenderRevision';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
+import { KNOWLEDGE_SOURCE_CLIP_MIME } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
@@ -784,6 +785,9 @@ type DrawingEmbeddableCardProps = {
   // during a live manual-resize preview, without onNaturalResize's own
   // persistence side-effect (see lockManualResizePreviewWidth's own comment).
   onManualResizePreviewLock?: (padletId: string, width: number) => void;
+  // KNI-R2: CanvasClient's single existing-Note drop-claim handler. This
+  // adapter owns no parsing, validation or persistence of its own.
+  onKnowledgeSourceClipDropOnNote?: (event: React.DragEvent, targetPadlet: Padlet) => boolean;
 };
 
 // Exported for genuine DOM-mounted test coverage (PATCH POST-RESIZE-B3.2).
@@ -811,6 +815,7 @@ export function DrawingEmbeddableCard({
   onNaturalResize,
   onOpenDocument,
   onManualResizePreviewLock,
+  onKnowledgeSourceClipDropOnNote,
 }: DrawingEmbeddableCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
@@ -822,6 +827,9 @@ export function DrawingEmbeddableCard({
   // broader legacy-compatibility `isContainer` heuristic above (which also
   // matches other types carrying stray childPadletIds metadata).
   const isResizableContainer = padlet.type === 'container';
+  // KNI-R2: R2 applies ONLY to ordinary Note types -- never Document, Todo,
+  // Table, Container, Image, Link, Drawing, AI Component or Section Heading.
+  const isKnowledgeSourceClipNoteTarget = !isContainer && (padlet.type === 'text' || (padlet.type as string) === 'note');
   const containerResizeSelection = useContext(ContainerResizeDrawingContext);
   const selectedContainerId = useSyncExternalStore(
     containerResizeSelection?.store.subscribe ?? (() => () => {}),
@@ -1131,8 +1139,14 @@ export function DrawingEmbeddableCard({
           e.preventDefault();
           e.dataTransfer.dropEffect = 'copy';
         }
+      } : isKnowledgeSourceClipNoteTarget ? (e) => {
+        // Only the dedicated clip type ever gets preventDefault here --
+        // every other drag must bubble normally.
+        if (e.dataTransfer.types.includes(KNOWLEDGE_SOURCE_CLIP_MIME)) e.preventDefault();
       } : undefined}
-      onDrop={isContainer ? async (e) => {
+      onDrop={isKnowledgeSourceClipNoteTarget ? (e) => {
+        onKnowledgeSourceClipDropOnNote?.(e, padlet);
+      } : isContainer ? async (e) => {
         // Fires only when the inner RowColumnContainerCard drop zone did NOT handle it
         // (e.g. cursor on header strip). Inner onDrop calls stopPropagation so it won't bubble here.
         const libPayload = e.dataTransfer.getData('application/collabboard-library');
@@ -1551,6 +1565,10 @@ interface DrawingLayoutProps {
   drawingAppStateRef?: React.RefObject<any>;
   drawingExcalidrawAPIRef?: React.RefObject<any>;
   onDrawingViewportChange?: (viewport: DrawingViewport) => void;
+  // KNI-R2: CanvasClient's single existing-Note drop-claim handler, forwarded
+  // straight through to DrawingEmbeddableCard -- this layout owns no parsing,
+  // validation or persistence of its own.
+  onKnowledgeSourceClipDropOnNote?: (event: React.DragEvent, targetPadlet: Padlet) => boolean;
 }
 
 export default function DrawingLayout({
@@ -1578,6 +1596,7 @@ export default function DrawingLayout({
   drawingAppStateRef,
   drawingExcalidrawAPIRef,
   onDrawingViewportChange,
+  onKnowledgeSourceClipDropOnNote,
 }: DrawingLayoutProps) {
   const [masterPadlet, setMasterPadlet] = useState<Padlet | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -3373,9 +3392,10 @@ export default function DrawingLayout({
         }}
         onOpenDocument={onOpenDocument}
         onManualResizePreviewLock={lockManualResizePreviewWidth}
+        onKnowledgeSourceClipDropOnNote={onKnowledgeSourceClipDropOnNote}
       />
     );
-  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument, lockManualResizePreviewWidth]);
+  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument, lockManualResizePreviewWidth, onKnowledgeSourceClipDropOnNote]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.
