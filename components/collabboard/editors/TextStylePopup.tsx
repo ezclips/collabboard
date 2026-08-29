@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import TextFormattingButtons, { type TextFormattingButtonsProps } from './TextFormattingButtons';
+import { HIGHLIGHT_COLOR_PRESETS } from './textStylePresets';
 
 interface TextStylePopupProps extends TextFormattingButtonsProps {
     isOpen: boolean;
@@ -21,37 +22,6 @@ interface TextStylePopupProps extends TextFormattingButtonsProps {
     hideCloseButton?: boolean;
 }
 
-
-const textColors = [
-    { color: '#1f2937', label: 'Default', border: true },
-    { color: '#dc2626', label: 'Red' },
-    { color: '#16a34a', label: 'Green' },
-    { color: '#2563eb', label: 'Blue' },
-    { color: '#ea580c', label: 'Orange' },
-    { color: '#9333ea', label: 'Purple' },
-];
-
-const highlightColors = [
-    { color: '#1f2937', bgColor: '#1f2937', textColor: 'white' },
-    { color: '#dc2626', bgColor: '#fecaca', textColor: '#991b1b' },
-    { color: '#f59e0b', bgColor: '#fef3c7', textColor: '#92400e' },
-    { color: '#16a34a', bgColor: '#dcfce7', textColor: '#166534' },
-    { color: '#14b8a6', bgColor: '#ccfbf1', textColor: '#0f766e' },
-    { color: '#8b5cf6', bgColor: '#ede9fe', textColor: '#5b21b6' },
-    { color: 'transparent', bgColor: 'white', textColor: '#1f2937', border: true },
-];
-
-// Same palette ColorPickerContent falls back to on its own (SIMPLE_PALETTE
-// in ColorPicker.tsx, not exported), with "transparent" prepended -- the
-// only way to clear a highlight back to none. Without it, a highlight set
-// to e.g. white sits as a mismatched box on top of a colored title strip,
-// and the only fix was hunting down the strip's exact hex by hand.
-const HIGHLIGHT_COLOR_PRESETS = [
-    'transparent', '#ffffff', '#f8f9fa', '#e9ecef', '#868e96', '#212529',
-    '#fa5252', '#e64980', '#be4bdb', '#7950f2', '#4c6ef5',
-    '#228be6', '#15aabf', '#12b886', '#40c057', '#82c91e',
-    '#fab005', '#fd7e14',
-];
 
 const headingStyles = [
     { level: 'h1' as const, label: 'Large heading', shortcut: '⌘1', className: 'text-lg font-bold' },

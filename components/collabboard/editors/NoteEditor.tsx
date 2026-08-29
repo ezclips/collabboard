@@ -5,6 +5,7 @@ import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
 import { cycleEditorTextAlign, nextTextAlign } from './textAlignCycle';
 import TextStylePopup from './TextStylePopup';
+import SelectedTextContextMenu from './SelectedTextContextMenu';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
@@ -301,6 +302,25 @@ export default function NoteEditor({
   });
 
   const { hasSelection, lastSelection } = useShellSelection(editor);
+
+  // KNI-R3: selected-text right-click menu; range captured at claim time since opening the menu can collapse the live TipTap selection.
+  const [selectedTextMenuPosition, setSelectedTextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [selectedTextMenuRange, setSelectedTextMenuRange] = useState<{ from: number; to: number } | null>(null);
+  const handleEditorContextMenu = (event: React.MouseEvent) => {
+    if (!editor || !editor.isEditable || editor.state.selection.empty) return;
+    const { from, to } = editor.state.selection;
+    const hit = editor.view.posAtCoords({ left: event.clientX, top: event.clientY });
+    if (!hit || hit.pos < from || hit.pos > to) return;
+    event.preventDefault(); event.stopPropagation();
+    setSelectedTextMenuRange({ from, to }); setSelectedTextMenuPosition({ x: event.clientX, y: event.clientY });
+  };
+  const runOnSelectedTextMenuRange = (run: () => void) => {
+    const r = selectedTextMenuRange;
+    if (editor && r && r.from >= 0 && r.to <= editor.state.doc.content.size && r.from <= r.to) { editor.chain().setTextSelection(r).run(); run(); }
+  };
+  const handleSelectedTextMenuColor = (color: string) => { setCurrentTextColor(color); runOnSelectedTextMenuRange(() => editor?.chain().focus().setColor(color).run()); };
+  const handleSelectedTextMenuHighlight = (color: string) => { setCurrentHighlight(color); runOnSelectedTextMenuRange(() => editor?.chain().focus().setHighlight({ color }).run()); };
+  const handleSelectedTextMenuClearHighlight = () => { setCurrentHighlight('transparent'); runOnSelectedTextMenuRange(() => editor?.chain().focus().unsetHighlight().run()); };
 
   // Clicking into the TipTap content hands the Text style panel's target
   // back to 'content' -- without this, formatting the title once would
@@ -844,6 +864,7 @@ export default function NoteEditor({
                 {/* Editor */}
                 <div
                   className="p-3"
+                  onContextMenu={handleEditorContextMenu}
                   style={{
                     wordWrap: 'break-word',
                     overflowWrap: 'break-word',
@@ -905,6 +926,20 @@ export default function NoteEditor({
             </div>
           </div>
         </div>
+
+        {selectedTextMenuPosition && (
+          <SelectedTextContextMenu
+            open
+            x={selectedTextMenuPosition.x}
+            y={selectedTextMenuPosition.y}
+            onOpenChange={(open) => { if (!open) { setSelectedTextMenuPosition(null); setSelectedTextMenuRange(null); } }}
+            currentTextColor={currentTextColor}
+            currentHighlightColor={currentHighlight}
+            onTextColor={handleSelectedTextMenuColor}
+            onHighlight={handleSelectedTextMenuHighlight}
+            onClearHighlight={handleSelectedTextMenuClearHighlight}
+          />
+        )}
 
         {panels.open.detached && (
           <CommentPopup

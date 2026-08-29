@@ -848,3 +848,45 @@ describe('PATCH 8P.1: canonical Comments-panel title/style wiring (READ)', () =>
     expect(detachedPanel(c).querySelector('button[aria-label="Style comment title"]')).toBeNull();
   });
 });
+
+// jsdom has no layout, so EditorView.posAtCoords (the real hit-test facility) is stubbed per test; production always calls the real one.
+import { EditorView } from 'prosemirror-view';
+describe('KNI-R3: selected-text context menu (Note)', () => {
+  const stubHit = (offset: number) => vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: any) { return { pos: this.state.selection.from + offset, inside: -1 }; });
+  const rightClick = (el: Element) => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); act(() => { el.dispatchEvent(e); }); return e; };
+  const menu = () => document.body.querySelector('[data-positioned-menu-surface]');
+
+  it('a right-click inside a real selection opens the menu and stops it reaching an ancestor; no selection leaves it unclaimed and bubbling', () => {
+    const c = openNote();
+    const outer = vi.fn();
+    document.addEventListener('contextmenu', outer);
+    const bare = rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).toBeNull();
+    expect(bare.defaultPrevented).toBe(false);
+    expect(outer).toHaveBeenCalledTimes(1);
+    selectText(c, 'world');
+    const stub = stubHit(0);
+    const claimed = rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).not.toBeNull();
+    expect(claimed.defaultPrevented).toBe(true);
+    expect(outer).toHaveBeenCalledTimes(1);
+    stub.mockRestore();
+    document.removeEventListener('contextmenu', outer);
+  });
+
+  it('a right-click outside the active selection does not claim it; one inside it applies color to only that word', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    const outside = stubHit(6);
+    rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).toBeNull();
+    outside.mockRestore();
+    const inside = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    act(() => { (document.body.querySelector('[aria-label="Red"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const html = c.querySelector('.ProseMirror')!.innerHTML;
+    expect(html).toMatch(/rgb\(220, 38, 38\)[^>]*>world</);
+    expect(html).not.toMatch(/rgb\(220, 38, 38\)[^>]*>hello/);
+    inside.mockRestore();
+  });
+});

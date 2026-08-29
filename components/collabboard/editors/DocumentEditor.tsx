@@ -6,6 +6,7 @@ import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
 import { cycleEditorTextAlign } from './textAlignCycle';
 import TextStylePopup from './TextStylePopup';
+import SelectedTextContextMenu from './SelectedTextContextMenu';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
 import { ColorPickerContent } from '../ColorPicker';
@@ -272,6 +273,21 @@ export default function DocumentEditor({
     }
   };
   const handleSelectTextColor = (color: string) => { restoreSelection(lastSelection); setCurrentTextColor(color); editor?.chain().focus().setColor(color).run(); };
+
+  // KNI-R3: selected-text right-click menu; range captured at claim time, then restored via restoreSelection above before a command applies.
+  const [selectedTextMenuPosition, setSelectedTextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [selectedTextMenuRange, setSelectedTextMenuRange] = useState<{ from: number; to: number } | null>(null);
+  const handleEditorContextMenu = (event: React.MouseEvent) => {
+    if (!editor || !editor.isEditable || editor.state.selection.empty) return;
+    const { from, to } = editor.state.selection;
+    const hit = editor.view.posAtCoords({ left: event.clientX, top: event.clientY });
+    if (!hit || hit.pos < from || hit.pos > to) return;
+    event.preventDefault(); event.stopPropagation();
+    setSelectedTextMenuRange({ from, to }); setSelectedTextMenuPosition({ x: event.clientX, y: event.clientY });
+  };
+  const handleSelectedTextMenuColor = (color: string) => { if (restoreSelection(selectedTextMenuRange)) { setCurrentTextColor(color); editor?.chain().focus().setColor(color).run(); } };
+  const handleSelectedTextMenuHighlight = (color: string) => { if (restoreSelection(selectedTextMenuRange)) { setCurrentHighlight(color); editor?.chain().focus().setHighlight({ color }).run(); } };
+  const handleSelectedTextMenuClearHighlight = () => { if (restoreSelection(selectedTextMenuRange)) { setCurrentHighlight('transparent'); editor?.chain().focus().unsetHighlight().run(); } };
   const handleSelectHighlight = (color: string) => {
     restoreSelection(lastSelection);
     setCurrentHighlight(color);
@@ -497,9 +513,23 @@ export default function DocumentEditor({
 
           {saveError && <div role="alert" className="px-6 py-2 text-sm text-red-700 bg-red-50 border-b border-red-100">{saveError}</div>}
 
-          <div className="flex-1 overflow-y-auto px-6 py-4" onClick={handleBodyClick}>
+          <div className="flex-1 overflow-y-auto px-6 py-4" onClick={handleBodyClick} onContextMenu={handleEditorContextMenu}>
             <EditorContent editor={editor} className="prose max-w-none" />
           </div>
+
+          {selectedTextMenuPosition && (
+            <SelectedTextContextMenu
+              open
+              x={selectedTextMenuPosition.x}
+              y={selectedTextMenuPosition.y}
+              onOpenChange={(open) => { if (!open) { setSelectedTextMenuPosition(null); setSelectedTextMenuRange(null); } }}
+              currentTextColor={currentTextColor}
+              currentHighlightColor={currentHighlight}
+              onTextColor={handleSelectedTextMenuColor}
+              onHighlight={handleSelectedTextMenuHighlight}
+              onClearHighlight={handleSelectedTextMenuClearHighlight}
+            />
+          )}
 
           {!readOnly && (
             <div className="px-6 py-3 border-t">

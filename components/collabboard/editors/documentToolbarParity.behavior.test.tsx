@@ -315,3 +315,44 @@ describe('PATCH-152 §8 30-33: no regression to Document lifecycle or Note', () 
     expect(dirtySpy).toHaveBeenLastCalledWith(false); // opening a popup alone does not dirty the draft
   });
 });
+
+// jsdom has no layout, so EditorView.posAtCoords (the real hit-test facility) is stubbed per test; production always calls the real one.
+import { EditorView } from 'prosemirror-view';
+describe('KNI-R3: selected-text context menu (Document) -- same shared component as Note', () => {
+  const stubHit = (offset: number) => vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: any) { return { pos: this.state.selection.from + offset, inside: -1 }; });
+  const rightClick = (el: Element) => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); act(() => { el.dispatchEvent(e); }); return e; };
+  const menu = () => document.body.querySelector('[data-positioned-menu-surface]');
+
+  it('opens on a right-click inside a real selection, using the shared SelectedTextContextMenu component (source-level)', () => {
+    const src = require('node:fs').readFileSync('components/collabboard/editors/DocumentEditor.tsx', 'utf8');
+    expect(src).toContain("import SelectedTextContextMenu from './SelectedTextContextMenu'");
+    const c = open();
+    selectText(c, 'world');
+    const stub = stubHit(0);
+    const event = rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).not.toBeNull();
+    expect(event.defaultPrevented).toBe(true);
+    stub.mockRestore();
+  });
+
+  it('does not claim without a real selection, or when the click lands outside it', () => {
+    const c = open();
+    const bare = rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).toBeNull();
+    expect(bare.defaultPrevented).toBe(false);
+    selectText(c, 'world');
+    const outside = stubHit(6);
+    rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).toBeNull();
+    outside.mockRestore();
+  });
+
+  it('read-only: never opens the menu even over a real selection', () => {
+    const c = open('', '<p>hello world</p>', { readOnly: true });
+    selectText(c, 'world');
+    const stub = stubHit(0);
+    rightClick(c.querySelector('.ProseMirror')!);
+    expect(menu()).toBeNull();
+    stub.mockRestore();
+  });
+});
