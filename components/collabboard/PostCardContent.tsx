@@ -72,6 +72,20 @@ function decodeHtmlEntities(text: string): string {
     return textarea.value;
 }
 
+/**
+ * KNI-R1A. A stored Note body is TipTap HTML, where an escaped entity is the
+ * user's OWN literal text (e.g. `<p>&lt;img ...&gt;</p>`) -- decoding the
+ * whole string before sanitizing would turn that text back into a real
+ * element. True only when the stored string itself contains a real tag, so
+ * fully-escaped legacy content (no literal tag present) still falls through
+ * to the decode compatibility path below. Not a security boundary -- DOMPurify
+ * remains that either way.
+ */
+const STRUCTURED_RICH_TEXT_TAG = /<\/?(p|br|div|span|ul|ol|li|strong|em|b|i|u|s|a|h1|h2|blockquote|code|pre|mark)(\s[^>]*)?\/?>/i;
+function isStructuredRichTextHtml(raw: string): boolean {
+    return STRUCTURED_RICH_TEXT_TAG.test(raw);
+}
+
 function normalizeType(t: unknown): string {
     return String(t ?? "").trim().toLowerCase();
 }
@@ -1089,7 +1103,11 @@ export default function PostCardContent({
                     WebkitBoxOrient: "vertical",
                     color: padlet.metadata?.textColor || "#1F2937",
                 }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(decodeHtmlEntities(rawContent || "")) }}
+                dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(
+                        isStructuredRichTextHtml(rawContent || "") ? (rawContent || "") : decodeHtmlEntities(rawContent || ""),
+                    ),
+                }}
             />
             <KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />
         </div>
