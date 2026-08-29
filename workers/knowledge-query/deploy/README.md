@@ -100,13 +100,15 @@ each env var's `secretKeyRef.name`/`key`.
 
 ## StrictMode-safe traffic handling
 
-`deploy.ps1` runs under `Set-StrictMode -Version Latest`. The real traffic
-array is heterogeneous -- a 100%-routed entry has no `tag`, a tagged entry
-has no `percent` -- so every optional property is read through a `Get-Prop`
-helper that checks `PSObject.Properties` membership first, rather than a
-bare `.tag`/`.percent` access that would throw `PropertyNotFoundException`
-on a legitimately absent key. Tag/revision names are validated against the
-RFC1035 label shape before being spliced into YAML; duplicates abort.
+`deploy.ps1` runs under `Set-StrictMode -Version Latest`. Traffic entries are
+heterogeneous and optional fields must be read safely; an entry may carry a
+serving percentage, a tag, or both -- so every optional property is read
+through a `Get-Prop` helper that checks `PSObject.Properties` membership
+first, rather than a bare `.tag`/`.percent` access that would throw
+`PropertyNotFoundException` on a legitimately absent key. Tag/revision names
+are validated against the RFC1035 label shape before being spliced into YAML;
+duplicates abort. Tag and percent are validated independently, so a combined
+entry gets both effects.
 
 ## Pre-state: rollback artifact AND spec-generation input
 

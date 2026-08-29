@@ -228,22 +228,26 @@ try {
     $servingCount = 0
     foreach ($entry in $trafficArray) {
       $tag = Get-Prop $entry 'tag'
-      if ($null -ne $tag -and -not [string]::IsNullOrWhiteSpace($tag)) {
+      $hasTag = ($null -ne $tag -and -not [string]::IsNullOrWhiteSpace($tag))
+      $percent = Get-Prop $entry 'percent'
+      $hasPercent = ($null -ne $percent)
+      if (-not $hasTag -and -not $hasPercent) { throw 'entry has neither tag nor percent' }
+      if ($hasTag) {
         $revisionName = Get-Prop $entry 'revisionName'
         if ([string]::IsNullOrWhiteSpace($revisionName)) { throw 'no revisionName' }
         if (-not (Test-SafeResourceName $tag) -or -not (Test-SafeResourceName $revisionName)) { throw 'unsafe name' }
         if ($seenTags.ContainsKey($tag)) { throw 'duplicate tag' }
         $seenTags[$tag] = $true
         $tagEntries += [PSCustomObject]@{ Tag = $tag; RevisionName = $revisionName }
-        continue
       }
-      $percent = Get-Prop $entry 'percent'
-      if (($percent -isnot [int] -and $percent -isnot [long]) -or [int]$percent -lt 1 -or [int]$percent -gt 100) { throw 'malformed serving entry' }
-      $percentValue = [int]$percent
-      $servingRevision = Get-Prop $entry 'revisionName'
-      if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) { throw 'serving entry missing safe revisionName' }
-      $servingTotal += $percentValue
-      $servingCount++
+      if ($hasPercent) {
+        if (($percent -isnot [int] -and $percent -isnot [long]) -or [int]$percent -lt 1 -or [int]$percent -gt 100) { throw 'malformed serving entry' }
+        $percentValue = [int]$percent
+        $servingRevision = Get-Prop $entry 'revisionName'
+        if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) { throw 'serving entry missing safe revisionName' }
+        $servingTotal += $percentValue
+        $servingCount++
+      }
     }
     if ($servingCount -eq 0) { throw 'no serving entry' }
     if ($servingTotal -ne 100) { throw 'serving total not 100' }
@@ -295,9 +299,9 @@ function run(mode: string, env: Record<string, string> = {}) {
 }
 describe('P6I-H1 corrective behavioral tests -- real PowerShell execution under StrictMode', () => {
   const liveShape = JSON.stringify({
+    // Real captured live shape: one entry carries percent AND tag together.
     status: { traffic: [
-      { revisionName: 'q-00008-zg8', percent: 100, latestRevision: true },
-      { revisionName: 'q-00008-zg8', tag: 'c3c' },
+      { revisionName: 'q-00008-zg8', percent: 100, tag: 'c3c' },
     ] },
     spec: { template: { metadata: { annotations: {
       'run.googleapis.com/secrets': 'collabboard-supabase-url:projects/76510182918/secrets/collabboard-supabase-url,collabboard-supabase-anon-key:projects/76510182918/secrets/collabboard-supabase-anon-key,collabboard-supabase-service-role-key:projects/76510182918/secrets/collabboard-supabase-service-role-key',
@@ -305,6 +309,13 @@ describe('P6I-H1 corrective behavioral tests -- real PowerShell execution under 
   });
   it('H1-C1/H1-C13: real heterogeneous live traffic shape does not throw under StrictMode and extracts the tag', () => {
     const result = run('traffic', { H1_PRESTATE: liveShape });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK:1');
+    expect(result.stdout).toContain('c3c=q-00008-zg8');
+  });
+  it('H1-C1b: the exact captured live combined entry (tag+percent on one entry) is both counted toward serving and preserved as a tag mapping', () => {
+    const combined = JSON.stringify({ status: { traffic: [{ revisionName: 'q-00008-zg8', percent: 100, tag: 'c3c' }] } });
+    const result = run('traffic', { H1_PRESTATE: combined });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('OK:1');
     expect(result.stdout).toContain('c3c=q-00008-zg8');
@@ -424,4 +435,38 @@ describe('P6I-H1 value-type corrective tests', () => {
   it('H1-G8: a dependency array with an extra element fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei', 'other'] }) }).status).not.toBe(0); });
   it('H1-G9: an empty dependency array fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': [] }) }).status).not.toBe(0); });
   it('H1-G10: an exact dependency array with an extra top-level key fails closed', () => { expect(run('dependency', { H1_DEP_JSON: JSON.stringify({ 'query-service': ['voyage-tei'], foo: ['bar'] }) }).status).not.toBe(0); });
+});
+
+describe('P6I-H1 combined traffic entry corrective tests', () => {
+  it('H1-H1: a combined tag+percent entry with a JSON-string percent "100" fails closed', () => {
+    const preState = JSON.stringify({ status: { traffic: [{ tag: 'c3c', percent: '100', revisionName: 'r1' }] } });
+    expect(run('traffic', { H1_PRESTATE: preState }).status).not.toBe(0);
+  });
+  it('H1-H2: a combined tag+percent entry with a JSON-boolean percent fails closed', () => {
+    const preState = JSON.stringify({ status: { traffic: [{ tag: 'c3c', percent: true, revisionName: 'r1' }] } });
+    expect(run('traffic', { H1_PRESTATE: preState }).status).not.toBe(0);
+  });
+  it('H1-H3: a combined tag+percent entry with a JSON-decimal percent fails closed', () => {
+    const preState = JSON.stringify({ status: { traffic: [{ tag: 'c3c', percent: 99.5, revisionName: 'r1' }] } });
+    expect(run('traffic', { H1_PRESTATE: preState }).status).not.toBe(0);
+  });
+  it('H1-H4: a combined tag+percent entry missing revisionName fails closed', () => {
+    const preState = JSON.stringify({ status: { traffic: [{ tag: 'c3c', percent: 100 }] } });
+    expect(run('traffic', { H1_PRESTATE: preState }).status).not.toBe(0);
+  });
+  it('H1-H5: a combined entry plus another serving entry totaling over 100 fails closed', () => {
+    const preState = JSON.stringify({ status: { traffic: [
+      { tag: 'c3c', percent: 100, revisionName: 'r1' }, { percent: 1, revisionName: 'r2' },
+    ] } });
+    expect(run('traffic', { H1_PRESTATE: preState }).status).not.toBe(0);
+  });
+  it('H1-H6: separate serving-only and tag-only entries (non-combined shape) still pass', () => {
+    const preState = JSON.stringify({ status: { traffic: [
+      { revisionName: 'r1', percent: 100, latestRevision: true }, { revisionName: 'r1', tag: 'c3c' },
+    ] } });
+    const result = run('traffic', { H1_PRESTATE: preState });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK:1');
+    expect(result.stdout).toContain('c3c=r1');
+  });
 });

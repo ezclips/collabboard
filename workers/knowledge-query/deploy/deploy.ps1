@@ -87,9 +87,11 @@ try { $preState = $jsonContent | ConvertFrom-Json } catch { throw ('Pre-state JS
 $priorRevision = Get-Prop $preState.status 'latestReadyRevisionName'
 if ([string]::IsNullOrWhiteSpace($priorRevision)) { throw 'Could not determine prior ready revision from pre-state; aborting before any mutation' }
 Write-Host ('Prior ready revision (rollback target if unhealthy): ' + $priorRevision)
-# Traffic entries are heterogeneous (a 100% entry has no `tag`; a tagged entry
-# has no `percent`) -- every optional property is read through Get-Prop so
-# StrictMode never throws on a legitimately absent key.
+# Traffic entries are heterogeneous and optional fields must be read safely:
+# an entry may carry a serving percentage, a tag, or both -- every optional
+# property is read through Get-Prop so StrictMode never throws on a
+# legitimately absent key. Tag and percent are validated independently below
+# so a combined entry (the real live shape) gets both effects.
 $trafficRaw = Get-Prop $preState.status 'traffic'
 if ($null -eq $trafficRaw) { throw 'Pre-state has no status.traffic; aborting before any mutation' }
 $trafficArray = @($trafficRaw)
@@ -100,28 +102,30 @@ $servingTotal = 0
 $servingCount = 0
 foreach ($entry in $trafficArray) {
     $tag = Get-Prop $entry 'tag'
-    if ($null -ne $tag -and -not [string]::IsNullOrWhiteSpace($tag)) {
+    $hasTag = ($null -ne $tag -and -not [string]::IsNullOrWhiteSpace($tag))
+    $percent = Get-Prop $entry 'percent'
+    $hasPercent = ($null -ne $percent)
+    if (-not $hasTag -and -not $hasPercent) { throw 'Pre-state has a traffic entry with neither a tag nor a percent; aborting before any mutation' }
+    if ($hasTag) {
         $revisionName = Get-Prop $entry 'revisionName'
         if ([string]::IsNullOrWhiteSpace($revisionName)) { throw ('Pre-state tag "' + $tag + '" has no revisionName; aborting before any mutation') }
         if (-not (Test-SafeResourceName $tag) -or -not (Test-SafeResourceName $revisionName)) { throw ('Pre-state tag "' + $tag + '" or its revision has an unsafe name; aborting before any mutation') }
         if ($seenTags.ContainsKey($tag)) { throw ('Pre-state has duplicate tag "' + $tag + '"; aborting before any mutation') }
         $seenTags[$tag] = $true
         $tagEntries += [PSCustomObject]@{ Tag = $tag; RevisionName = $revisionName }
-        continue
     }
-    # Not a tagged entry: it must be a genuine serving entry (nonempty tags were
-    # handled above and `continue`d past this point).
-    $percent = Get-Prop $entry 'percent'
-    if (($percent -isnot [int] -and $percent -isnot [long]) -or [int]$percent -lt 1 -or [int]$percent -gt 100) {
-        throw 'Pre-state has a malformed or out-of-range serving traffic entry; aborting before any mutation'
+    if ($hasPercent) {
+        if (($percent -isnot [int] -and $percent -isnot [long]) -or [int]$percent -lt 1 -or [int]$percent -gt 100) {
+            throw 'Pre-state has a malformed or out-of-range serving traffic entry; aborting before any mutation'
+        }
+        $percentValue = [int]$percent
+        $servingRevision = Get-Prop $entry 'revisionName'
+        if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) {
+            throw 'Pre-state serving entry is missing a safe revisionName; aborting before any mutation'
+        }
+        $servingTotal += $percentValue
+        $servingCount++
     }
-    $percentValue = [int]$percent
-    $servingRevision = Get-Prop $entry 'revisionName'
-    if ([string]::IsNullOrWhiteSpace($servingRevision) -or -not (Test-SafeResourceName $servingRevision)) {
-        throw 'Pre-state serving entry is missing a safe revisionName; aborting before any mutation'
-    }
-    $servingTotal += $percentValue
-    $servingCount++
 }
 if ($servingCount -eq 0) { throw 'Pre-state has no serving traffic entry; aborting before any mutation' }
 if ($servingTotal -ne 100) { throw ('Pre-state serving percentages total ' + $servingTotal + ', not 100; aborting before any mutation') }
