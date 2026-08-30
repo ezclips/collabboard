@@ -220,8 +220,10 @@ describe('P6J-F5 source note wiring', () => {
     // C9: three entry points now -- the F8 clip drop, the page/region request,
     // and KNI-R2's existing-Note drop -- all reaching the ONE builder.
     expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(3);
-    // Nothing hand-builds provenance: the only value ever stashed is a draft's.
-    expect(canvasClient.match(/setSourceNoteReference\((?!null\))/g) ?? []).toHaveLength(1);
+    // Nothing hand-builds provenance: the only value EVER stashed is a
+    // draft's. Text Phase 1: two call sites now, click and drag, both
+    // staging the SAME shape from the SAME builder -- never a second one.
+    expect(canvasClient.match(/setSourceNoteReference\((?!null\))/g) ?? []).toHaveLength(2);
     expect(canvasClient).toContain('setSourceNoteReference(draft.sourceReference)');
     // C10: one POST to the references route, in one helper.
     expect(canvasClient.match(/knowledge\/references/g) ?? []).toHaveLength(1);
@@ -298,8 +300,10 @@ describe('P6J-F5 source note wiring', () => {
     // usePadletSave's callback.
     expect((canvasClient.match(/\n\s*completeSourceReferenceForDraft\(/g) ?? []).length).toBe(5);
     // Five direct persists: the shared finaliser's own, the two Drawing paths
-    // (no `kind` to gate on), the P6J-F8-B1 freeform source-clip drop, and
-    // KNI-R2's existing-Note append -- none of the last three has a placement draft.
+    // (no `kind` to gate on), Text Phase 1's handleSourceNoteCreated -- now the
+    // ONE completion point for BOTH click and drag Knowledge-Note creation --
+    // and KNI-R2's existing-Note append -- none of the last three has a
+    // placement draft.
     expect((canvasClient.match(/void persistKnowledgeSourceReference\(/g) ?? []).length).toBe(5);
   });
 
@@ -308,7 +312,7 @@ describe('P6J-F5 source note wiring', () => {
     // abandoned source workflow first.
     expect(after(canvasClient, 'const executeToolAction', 400)).toContain('setSourceNoteReference(null)');
     // Closing the editor for any reason ends the workflow.
-    expect(canvasClient).toMatch(/if \(!isNoteEditorOpen\) setSourceNoteReference\(null\);/);
+    expect(canvasClient).toMatch(/if \(!isNoteEditorOpen\) \{\s*setSourceNoteReference\(null\);/);
 
     // The toolbar's own new-Note draft, identified by its stock title.
     const toolbarNote = after(canvasClient, "title: 'New Note',", 700);
@@ -363,7 +367,7 @@ describe('P6J-F5 source note wiring', () => {
       expect(canvasClient).not.toMatch(/[A-Za-z0-9_]*[sS]ourceReference[A-Za-z0-9_]*\.current/);
       // The one retained piece of source state belongs to the open editor and
       // is cleared whenever it closes.
-      expect(canvasClient).toMatch(/if \(!isNoteEditorOpen\) setSourceNoteReference\(null\);/);
+      expect(canvasClient).toMatch(/if \(!isNoteEditorOpen\) \{\s*setSourceNoteReference\(null\);/);
     });
 
     it('persists only after a real created row, using that row id', () => {
@@ -545,15 +549,18 @@ describe('P6J-F5 source note wiring', () => {
 });
 
 // ==========================================================================
-// P6J-F8-B1 -- the dragged text source clip
+// P6J-F8-B1 / Text Phase 1 -- the dragged text source clip
 // ==========================================================================
-// The drag adds a GESTURE, not a write path. Everything below exists to prove
+// The drag adds a GESTURE, not a write path. Text Phase 1 (section G) removed
+// the direct-create branch entirely: a drop now STAGES the same draft the
+// click path already builds and opens the ordinary Note editor -- zero
+// database writes happen in this handler. Everything below exists to prove
 // that: one dedicated transfer type, parsed fail-closed, authorised again at
-// the point of writing, and finishing through the same two creation paths that
-// already existed. A render test cannot show any of it -- the drop handlers sit
-// inside a 9k-line controller's JSX -- so these are source invariants.
+// the point of staging, and finishing through the SAME staging authority the
+// click path uses. A render test cannot show any of it -- the drop handlers
+// sit inside a 9k-line controller's JSX -- so these are source invariants.
 describe('P6J-F8-B1 source clip drop', () => {
-  const dropHandler = () => after(canvasClient, 'const handleKnowledgeSourceClipDrop', 3200);
+  const dropHandler = () => after(canvasClient, 'const handleKnowledgeSourceClipDrop', 2600);
 
   it('reads one dedicated transfer type and never text/plain', () => {
     const handler = dropHandler();
@@ -578,41 +585,42 @@ describe('P6J-F8-B1 source clip drop', () => {
     const bailIndex = handler.indexOf('if (!payload) return false;');
     const buildIndex = handler.indexOf('buildKnowledgeSourceNoteDraft(');
     expect(bailIndex).toBeGreaterThan(parseIndex);
-    // Nothing is built, and no post is inserted, until the payload is proven.
+    // Nothing is built, and no editor is staged, until the payload is proven.
     expect(buildIndex).toBeGreaterThan(bailIndex);
   });
 
-  it('re-checks the creation capability at the point of writing', () => {
+  it('re-checks the creation capability before staging the editor', () => {
     const handler = dropHandler();
     // The SAME signal the creation toolbar and the click path are gated on.
     expect(handler).toContain('if (!canUseCanvasToolbar || !canvasId) return true;');
     const capabilityIndex = handler.indexOf('if (!canUseCanvasToolbar');
-    const insertIndex = handler.indexOf('insertPostAndSelectOrThrow(');
-    const drawingIndex = handler.indexOf('handleDrawingLayoutAddPadletWithContainerCheck(');
-    // Both creation routes sit behind it: a forged DataTransfer from a viewer
-    // reaches neither, so the absent chip is defence in depth, not the defence.
-    expect(insertIndex).toBeGreaterThan(capabilityIndex);
-    expect(drawingIndex).toBeGreaterThan(capabilityIndex);
+    const stageIndex = handler.indexOf('setPadletToEdit({');
+    // A forged DataTransfer from a viewer never reaches the staging call: the
+    // absent grip is defence in depth, not the defence.
+    expect(stageIndex).toBeGreaterThan(capabilityIndex);
   });
 
-  it('creates the Note first and completes the reference only after', () => {
+  it('stages the draft and opens the editor -- ZERO database writes happen here', () => {
     const handler = dropHandler();
-    const insertIndex = handler.indexOf('await insertPostAndSelectOrThrow(');
-    const idGuardIndex = handler.indexOf('if (created?.id)');
-    const persistIndex = handler.indexOf('void persistKnowledgeSourceReference(created.id');
-    expect(insertIndex).toBeGreaterThan(-1);
-    // Guarded on a REAL persisted id, and strictly after the insert resolves.
-    expect(idGuardIndex).toBeGreaterThan(insertIndex);
-    expect(persistIndex).toBeGreaterThan(idGuardIndex);
-    // A throwing insert never reaches the persist: it is inside the try.
-    expect(handler.indexOf('} catch (err)')).toBeGreaterThan(persistIndex);
-    // Drawing defers to the path that already owns this ordering.
-    expect(handler).toContain('sourceReference: draft.sourceReference,');
+    // Text Phase 1 (G): no direct creation route survives in this handler.
+    for (const forbidden of ['insertPostAndSelectOrThrow', 'handleDrawingLayoutAddPadletWithContainerCheck',
+      '.insert(', '.upsert(', 'fetch(', 'await ']) {
+      expect(handler, forbidden).not.toContain(forbidden);
+    }
+    // The SAME staging authority the click path (handleCreateNoteFromKnowledgePage)
+    // uses: sourceNoteReference staged, padletToEdit id:'new', editor opened.
+    expect(handler).toContain('setSourceNoteReference(draft.sourceReference)');
+    expect(handler).toContain("id: 'new'");
+    expect(handler).toContain("type: 'text'");
+    expect(handler).toContain('setIsNoteEditorOpen(true)');
+    const stageIndex = handler.indexOf('setPadletToEdit({');
+    const openIndex = handler.indexOf('setIsNoteEditorOpen(true)');
+    expect(openIndex).toBeGreaterThan(stageIndex);
   });
 
   it('adds no write path, no route and no elevated authority of its own', () => {
     const handler = dropHandler();
-    for (const forbidden of ['knowledge/references', 'supabase', '.insert(', '.upsert(', 'fetch(',
+    for (const forbidden of ['knowledge/references', 'supabase',
       'getSupabaseAdmin', 'service_role']) {
       expect(handler, forbidden).not.toContain(forbidden);
     }
@@ -622,28 +630,47 @@ describe('P6J-F8-B1 source clip drop', () => {
 
   it('reuses the one existing draft builder rather than a second one', () => {
     const handler = dropHandler();
-    expect(handler).toContain('buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload))');
+    expect(handler).toContain('knowledgeSourceClipPageRequest(payload)');
+    expect(handler).toContain('buildKnowledgeSourceNoteDraft({');
     // The Note is an ordinary blank Note; the passage stays source evidence.
     expect(handler).toContain('content: draft.content,');
     expect(handler).toContain('title: draft.title,');
-    expect(handler).toContain("type: 'text',");
     // The selected text is never written into the row.
     expect(handler).not.toContain('selectedText,');
     expect(handler).not.toMatch(/content:\s*payload\./);
-    expect(handler).not.toMatch(/metadata:\s*\{[^}]*source/);
   });
 
-  it('creates at the real drop point in freeform, and refuses coordinate-less layouts', () => {
+  it('the color hint rides a SEPARATE, non-authoritative transfer type', () => {
+    const handler = dropHandler();
+    expect(handler).toContain('KNOWLEDGE_SOURCE_CLIP_COLOR_HINT');
+    expect(handler).toContain('topStripColor: colorHint');
+    // The dedicated Knowledge MIME parse is untouched by the color hint.
+    expect(handler.indexOf('KNOWLEDGE_SOURCE_CLIP_COLOR_HINT')).toBeGreaterThan(handler.indexOf('parseKnowledgeSourceClipPayload('));
+    expect(canvasClient).toContain("from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice'");
+  });
+
+  it('computes the real drop point in freeform, and refuses coordinate-less layouts', () => {
     const handler = dropHandler();
     // The existing conversion and the existing bound, not a second geometry.
     expect(handler).toContain('getCanvasPointFromClient(event.clientX, event.clientY)');
     expect(handler).toContain('clampRectPositionToFreeformBounds({');
     // Wall/columns/grid/timeline/map have no world coordinate; the clip is
-    // refused there rather than stacked at the origin.
-    expect(handler).toContain('if (!isFreeformLayout) {');
-    const refusal = handler.slice(handler.indexOf('if (!isFreeformLayout) {'));
+    // refused there rather than stacked at the origin. Drawing IS eligible
+    // now (Text Phase 1 unified both coordinate-bearing layouts).
+    expect(handler).toContain('if (!isFreeformLayout && !isDrawingLayout) {');
+    const refusal = handler.slice(handler.indexOf('if (!isFreeformLayout && !isDrawingLayout) {'));
     expect(refusal.slice(0, 400)).toContain('return true;');
     expect(handler).not.toMatch(/position_x:\s*0,\s*\n\s*position_y:\s*0,/);
+  });
+
+  it('the staged position is applied via a normal reposition once a real id exists, never by teaching saveNote a second rule', () => {
+    const handlerText = after(canvasClient, 'const handleSourceNoteCreated = useCallback', 900);
+    expect(handlerText).toContain('pendingSourceDropPosition');
+    expect(handlerText).toContain('updatePostFieldsOrThrow(targetPadletId, { position_x, position_y })');
+    const repositionIndex = handlerText.indexOf('updatePostFieldsOrThrow(targetPadletId');
+    const persistIndex = handlerText.indexOf('persistKnowledgeSourceReference(targetPadletId, sourceReference)');
+    expect(persistIndex).toBeGreaterThan(repositionIndex);
+    expect(canvasClient).toContain('onSourceNoteCreated: handleSourceNoteCreated,');
   });
 
   it('owns the drop outright, so one gesture cannot create twice', () => {
@@ -681,7 +708,7 @@ describe('P6J-F8-B1 source clip drop', () => {
   });
 
   it('keeps the reader free of drop, creation and persistence concerns', () => {
-    // The chip publishes a payload; it never learns what a canvas is.
+    // The grip publishes a payload; it never learns what a canvas is.
     for (const forbidden of ['getCanvasPointFromClient', 'clampRectPositionToFreeformBounds',
       'insertPostAndSelectOrThrow', 'padlets', 'board_id', 'position_x', 'onDrop']) {
       expect(details, forbidden).not.toContain(forbidden);
@@ -689,26 +716,28 @@ describe('P6J-F8-B1 source clip drop', () => {
     // It builds the transfer with the shared builder and reads no selection of
     // its own at drag time -- the captured state is the authority.
     expect(details).toContain('buildKnowledgeSourceClipTransfer({');
-    const dragStart = after(details, 'onDragStart={(event) => {', 700);
-    expect(dragStart).toContain('pageSelection.charStart');
-    expect(dragStart).toContain('pageSelection.charEnd');
-    expect(dragStart).toContain('pageSelection.selectedText');
-    // window.getSelection() here would find nothing: pressing the chip collapses
+    const dragStart = after(details, 'onDragStart={(event) => {', 900);
+    expect(dragStart).toContain('activeSelection.charStart');
+    expect(dragStart).toContain('activeSelection.charEnd');
+    expect(dragStart).toContain('activeSelection.selectedText');
+    // window.getSelection() here would find nothing: pressing the grip collapses
     // the live range before dragstart fires.
     expect(dragStart).not.toContain('getSelection');
     expect(dragStart).not.toContain('captureExactSelection');
   });
 
-  it('keeps the chip out of the canonical text root', () => {
+  it('keeps the grip out of the canonical text root, in the ONE floating toolbar', () => {
     // Source-level companion to the rendered assertion in the reader suite:
-    // the chip is emitted before the paragraph that owns the coordinate space,
-    // in the page header, and the paragraph itself gains nothing.
+    // the toolbar is a SIBLING emitted after every page section, never nested
+    // inside any page's paragraph, and the paragraph itself gains nothing.
     const chipIndex = details.indexOf('[CLIP_CHIP]: \'true\'');
-    const rootIndex = details.indexOf('{...{ [PAGE_TEXT_ROOT]: page.pageNumber }}');
+    const lastRootIndex = details.lastIndexOf('{...{ [PAGE_TEXT_ROOT]: page.pageNumber }}');
     expect(chipIndex).toBeGreaterThan(-1);
-    expect(chipIndex).toBeLessThan(rootIndex);
-    // Nothing was added between the root attribute and its rendered text.
-    const rootElement = details.slice(rootIndex, rootIndex + 400);
+    expect(chipIndex).toBeGreaterThan(lastRootIndex);
+    expect(details).toContain('data-knowledge-selection-toolbar');
+    // Nothing was added between the FIRST root attribute and its rendered text.
+    const firstRootIndex = details.indexOf('{...{ [PAGE_TEXT_ROOT]: page.pageNumber }}');
+    const rootElement = details.slice(firstRootIndex, firstRootIndex + 400);
     expect(rootElement).toContain('highlightedText(');
     expect(rootElement).not.toContain('CLIP_CHIP');
     expect(rootElement).not.toContain('draggable');

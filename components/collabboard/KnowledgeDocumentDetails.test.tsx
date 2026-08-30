@@ -281,10 +281,29 @@ function pageRoot(container: HTMLElement, pageNumber: number): HTMLElement {
   return container.querySelector(`[data-knowledge-page-text-root="${pageNumber}"]`) as HTMLElement;
 }
 
+/**
+ * Text Phase 1: an exact selection's action moved to the ONE floating
+ * toolbar (outside every page section); the plain page-level action stays
+ * in the page header for when there is no selection. Callers that just want
+ * "the button that reaches onCreateNoteFromPage" get either, transparently.
+ */
 function createNoteButton(container: HTMLElement, pageNumber: number): HTMLButtonElement {
   const section = container.querySelector(`[data-page-number="${pageNumber}"]`)!;
-  return Array.from(section.querySelectorAll('button'))
-    .find((button) => button.textContent?.startsWith('Create Note')) as HTMLButtonElement;
+  const pageButton = Array.from(section.querySelectorAll('button'))
+    .find((button) => button.textContent?.startsWith('Create Note')) as HTMLButtonElement | undefined;
+  if (pageButton) return pageButton;
+  const toolbar = container.querySelector('[data-knowledge-selection-toolbar]');
+  return toolbar?.querySelector(
+    `button[aria-label="Create Note from selection on page ${pageNumber}"]`,
+  ) as HTMLButtonElement;
+}
+
+function selectionToolbar(container: HTMLElement): HTMLElement | null {
+  return container.querySelector('[data-knowledge-selection-toolbar]');
+}
+
+function selectionGrip(container: HTMLElement): HTMLButtonElement | null {
+  return selectionToolbar(container)?.querySelector('[data-knowledge-clip-chip="true"]') ?? null;
 }
 
 /** Puts a real DOM Range on the document's real Selection. */
@@ -345,7 +364,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from selection on page 1');
     // Page 2 is untouched by a selection that does not live there.
     expect(createNoteButton(container, 2).textContent).toBe('Create Note');
@@ -366,6 +385,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
       pageNumber: 1,
       pageText: pages[0].text,
       selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+      topStripColor: null,
     });
     expect(pages[0].text.slice(4, 10)).toBe('safety');
   });
@@ -392,7 +412,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     window.getSelection()!.removeAllRanges();
     finishSelectionOn(createNoteButton(container, 1));
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
   });
 
   it('D: a selection crossing text -> <mark> -> text maps to page coordinates', async () => {
@@ -497,7 +517,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     const root = pageRoot(container, 1);
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
 
     selectRange(root.firstChild!, 4, root.firstChild!, 4);
     finishSelectionOn(root);
@@ -510,7 +530,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     const textRoot = pageRoot(container, 1);
     selectRange(textRoot.firstChild!, 4, textRoot.firstChild!, 10);
     finishSelectionOn(textRoot);
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
 
     // Same coordinates, different text underneath them.
     act(() => {
@@ -536,7 +556,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     const textRoot = pageRoot(container, 1);
     selectRange(textRoot.firstChild!, 4, textRoot.firstChild!, 10);
     finishSelectionOn(textRoot);
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
 
     act(() => {
       root!.render(
@@ -576,7 +596,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
     expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 
@@ -594,7 +614,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
     // Re-rendering with <mark> nodes does not corrupt the stored capture: it is
     // re-proved against the page text, which did not change.
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
   });
 });
 
@@ -1177,7 +1197,7 @@ describe('P6J-F6-B4-B4 selection still wins over navigation', () => {
     expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
     expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
     // And B4-B2B still holds the exact span.
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
     clickCreateNote(container, 1);
     expect(onCreateNoteFromPage.mock.calls[0][0].selection)
       .toEqual({ charStart: 4, charEnd: 10, selectedText: 'safety' });
@@ -1304,18 +1324,16 @@ describe('P6J-F6-B4-B4 search keeps its match, and the canonical root is untouch
 });
 
 // ============================================================================
-// P6J-F8-B1 -- the draggable text source clip
+// Text Phase 1 -- the floating selection toolbar (six-dot grip, Note Post,
+// Copy, color choices), replacing the P6J-F8-B1 page-header clip chip.
 // ============================================================================
-// The chip is an ADDED affordance, not a replacement: it must reach the same
-// callback the existing button reaches, and it must not put a single character
-// inside the paragraph B4-B2B measures its coordinates against.
+// The toolbar is an ADDED affordance, not a replacement: it must reach the
+// same callback the existing page-level button reaches, and it must not put
+// a single character inside the paragraph B4-B2B measures its coordinates
+// against.
 
 const CLIP_MIME = 'application/collabboard-knowledge-clip';
-
-function clipChip(container: HTMLElement, pageNumber: number): HTMLButtonElement | null {
-  const section = container.querySelector(`[data-page-number="${pageNumber}"]`)!;
-  return section.querySelector('[data-knowledge-clip-chip="true"]') as HTMLButtonElement | null;
-}
+const COLOR_HINT_MIME = 'application/collabboard-knowledge-clip-color-hint';
 
 /** A DataTransfer stand-in: jsdom does not construct one for synthetic drags. */
 function fakeDataTransfer() {
@@ -1337,7 +1355,11 @@ function dragFrom(element: Element) {
   return { transfer, defaultPrevented: event.defaultPrevented };
 }
 
-describe('P6J-F8-B1 source clip chip', () => {
+function toolbarButton(container: HTMLElement, label: string): HTMLButtonElement | null {
+  return selectionToolbar(container)?.querySelector(`button[aria-label="${label}"]`) ?? null;
+}
+
+describe('Text Phase 1 floating selection toolbar', () => {
   beforeEach(() => {
     window.getSelection()?.removeAllRanges();
   });
@@ -1351,31 +1373,29 @@ describe('P6J-F8-B1 source clip chip', () => {
     return mounted;
   }
 
-  it('A: a valid selection produces exactly one chip, on its own page', () => {
+  it('1: a valid exact single-page selection shows the floating toolbar', () => {
     const { container } = armPageOne();
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(1);
-    expect(clipChip(container, 1)).not.toBeNull();
-    // A selection on page 1 arms page 1 and nothing else.
-    expect(clipChip(container, 2)).toBeNull();
+    expect(selectionToolbar(container)).not.toBeNull();
+    expect(selectionGrip(container)).not.toBeNull();
   });
 
-  it('B: with no selection there is no chip at all', () => {
+  it('2/B: with no selection there is no toolbar at all', () => {
     const { container } = mountReader();
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(selectionToolbar(container)).toBeNull();
     // The page-level fallback is still offered.
     expect(createNoteButton(container, 1).textContent).toBe('Create Note');
   });
 
-  it('C: the chip lives OUTSIDE the canonical text root, which stays exact', () => {
+  it('3/C: the toolbar and grip live OUTSIDE the canonical text root, which stays exact', () => {
     const { container } = armPageOne();
-    const chip = clipChip(container, 1)!;
+    const toolbar = selectionToolbar(container)!;
     const pageOne = pageRoot(container, 1);
 
     // The decisive check: not a descendant, at any depth.
-    expect(pageOne.contains(chip)).toBe(false);
-    expect(chip.closest('[data-knowledge-page-text-root]')).toBeNull();
+    expect(pageOne.contains(toolbar)).toBe(false);
+    expect(toolbar.closest('[data-knowledge-page-text-root]')).toBeNull();
     // And the coordinate space is byte-for-byte the page text.
     expect(pageOne.textContent).toBe(pages[0].text);
     expect(pageOne.querySelector('[data-knowledge-clip-chip]')).toBeNull();
@@ -1383,21 +1403,19 @@ describe('P6J-F8-B1 source clip chip', () => {
     expect(pageOne.querySelector('button')).toBeNull();
   });
 
-  it('D: the chip is draggable, focusable and labelled', () => {
+  it('the grip is draggable, focusable and labelled', () => {
     const { container } = armPageOne();
-    const chip = clipChip(container, 1)!;
+    const grip = selectionGrip(container)!;
 
-    expect(chip.getAttribute('draggable')).toBe('true');
-    // A real button element: focusable, and Enter/Space activated by the platform.
-    expect(chip.tagName).toBe('BUTTON');
-    expect(chip.getAttribute('type')).toBe('button');
-    expect(chip.getAttribute('aria-label')).toContain('page 1');
-    expect(chip.getAttribute('aria-label')).toContain('canvas');
+    expect(grip.getAttribute('draggable')).toBe('true');
+    expect(grip.tagName).toBe('BUTTON');
+    expect(grip.getAttribute('type')).toBe('button');
+    expect(grip.getAttribute('aria-label')).toBe('Drag selected PDF text to the canvas');
   });
 
-  it('E: dragging the chip emits the exact captured span on the dedicated type', () => {
+  it('4: dragging the grip emits the dedicated Knowledge MIME with the exact documentId/page/offsets/text', () => {
     const { container } = armPageOne();
-    const { transfer } = dragFrom(clipChip(container, 1)!);
+    const { transfer } = dragFrom(selectionGrip(container)!);
 
     expect(JSON.parse(transfer.getData(CLIP_MIME))).toEqual({
       kind: 'text',
@@ -1412,26 +1430,25 @@ describe('P6J-F8-B1 source clip chip', () => {
     expect(pages[0].text.slice(4, 10)).toBe('safety');
     // Nothing is published on text/plain: that type is forgeable by any drag.
     expect(transfer.getData('text/plain')).toBe('');
-    expect([...transfer.store.keys()]).toEqual([CLIP_MIME]);
   });
 
-  it('F: the captured selection survives the browser range collapsing first', () => {
+  it('the captured selection survives the browser range collapsing first', () => {
     const { container } = armPageOne();
-    // Pressing the chip collapses the live selection, exactly as a real click
+    // Pressing the grip collapses the live selection, exactly as a real click
     // does. The payload must come from captured state, not from the browser.
     window.getSelection()!.removeAllRanges();
 
-    const { transfer } = dragFrom(clipChip(container, 1)!);
+    const { transfer } = dragFrom(selectionGrip(container)!);
 
     expect(JSON.parse(transfer.getData(CLIP_MIME))).toMatchObject({
       charStart: 4, charEnd: 10, selectedText: 'safety',
     });
   });
 
-  it('G: clicking the chip invokes the EXISTING selection callback', () => {
+  it('6/7: the Note Post button opens the EXISTING Note editor callback with the selected text in the draft request', () => {
     const { container, onCreateNoteFromPage } = armPageOne();
 
-    act(() => clipChip(container, 1)!.click());
+    act(() => toolbarButton(container, 'Create Note from selection on page 1')!.click());
 
     expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
     expect(onCreateNoteFromPage.mock.calls[0][0]).toEqual({
@@ -1440,13 +1457,14 @@ describe('P6J-F8-B1 source clip chip', () => {
       pageNumber: 1,
       pageText: pages[0].text,
       selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+      topStripColor: null,
     });
   });
 
-  it('H: the existing Create Note from selection fallback still works', () => {
+  it('the existing Create Note from selection fallback (now "Note Post") still works via the shared helper', () => {
     const { container, onCreateNoteFromPage } = armPageOne();
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note from selection');
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
     clickCreateNote(container, 1);
 
     expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
@@ -1455,7 +1473,7 @@ describe('P6J-F8-B1 source clip chip', () => {
     });
   });
 
-  it('I: native dragging of the page text itself is suppressed', () => {
+  it('5: native dragging of the page text itself is still suppressed', () => {
     const { container } = armPageOne();
 
     const fromText = dragFrom(pageRoot(container, 1));
@@ -1463,36 +1481,36 @@ describe('P6J-F8-B1 source clip chip', () => {
     // Cancelled, so the browser starts no native text drag at all.
     expect(fromText.defaultPrevented).toBe(true);
     expect(fromText.transfer.store.size).toBe(0);
-    // The chip drag rides the same container handler and is NOT cancelled.
-    const fromChip = dragFrom(clipChip(container, 1)!);
-    expect(fromChip.defaultPrevented).toBe(false);
-    expect(fromChip.transfer.getData(CLIP_MIME)).not.toBe('');
+    // The grip drag rides the same container handler and is NOT cancelled.
+    const fromGrip = dragFrom(selectionGrip(container)!);
+    expect(fromGrip.defaultPrevented).toBe(false);
+    expect(fromGrip.transfer.getData(CLIP_MIME)).not.toBe('');
   });
 
-  it('J: a cross-page selection produces no chip on either page', () => {
+  it('2: a cross-page selection does NOT show the toolbar', () => {
     const { container } = mountReader();
     selectRange(pageRoot(container, 1).firstChild!, 4, pageRoot(container, 2).firstChild!, 3);
     finishSelectionOn(pageRoot(container, 2));
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(selectionToolbar(container)).toBeNull();
   });
 
-  it('K: a selection reaching outside any page root produces no chip', () => {
+  it('2: a selection reaching outside any page root does NOT show the toolbar', () => {
     const { container } = mountReader();
     const heading = container.querySelector('h3')!;
     selectRange(heading.firstChild!, 0, pageRoot(container, 1).firstChild!, 6);
     finishSelectionOn(pageRoot(container, 1));
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(selectionToolbar(container)).toBeNull();
   });
 
-  it('L: a selection made stale by new page text loses its chip', () => {
+  it('a selection made stale by new page text loses its toolbar', () => {
     const { container } = armPageOne();
-    expect(clipChip(container, 1)).not.toBeNull();
+    expect(selectionToolbar(container)).not.toBeNull();
 
     // The document is re-read and page 1 now says something else. The captured
-    // offsets no longer describe it, so the clip must fail closed rather than
-    // stay draggable against text nobody selected.
+    // offsets no longer describe it, so the toolbar must fail closed rather
+    // than stay draggable against text nobody selected.
     act(() => {
       root!.render(
         <KnowledgeDocumentDetails
@@ -1508,29 +1526,91 @@ describe('P6J-F8-B1 source clip chip', () => {
       );
     });
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(selectionToolbar(container)).toBeNull();
     expect(createNoteButton(container, 1).textContent).toBe('Create Note');
   });
 
-  it('M: a viewer who cannot create posts is offered no chip to drag', () => {
+  it('a viewer who cannot create posts is offered no toolbar', () => {
     // No onCreateNoteFromPage is exactly how the reader is handed to a viewer.
     const container = mountWith({ documentId: 'doc-1' });
     const pageOne = pageRoot(container, 1);
     selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
     finishSelectionOn(pageOne);
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(selectionToolbar(container)).toBeNull();
     // Selecting and reading still work; only creation is absent.
     expect(pageOne.textContent).toBe(pages[0].text);
   });
 
-  it('N: a reader with no document id offers no chip', () => {
+  it('a reader with no document id offers no toolbar', () => {
     const container = mountWith({ onCreateNoteFromPage: vi.fn() });
     const pageOne = pageRoot(container, 1);
     selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
     finishSelectionOn(pageOne);
 
-    expect(container.querySelectorAll('[data-knowledge-clip-chip="true"]')).toHaveLength(0);
+    expect(selectionToolbar(container)).toBeNull();
+  });
+
+  it('Copy copies the selected text only, and creates no Note and no reference', () => {
+    const { container, onCreateNoteFromPage } = armPageOne();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    act(() => toolbarButton(container, 'Copy selected text')!.click());
+
+    expect(writeText).toHaveBeenCalledWith('safety');
+    expect(onCreateNoteFromPage).not.toHaveBeenCalled();
+  });
+
+  it('9: choosing a toolbar color sets the Note draft request\'s topStripColor', () => {
+    const { container, onCreateNoteFromPage } = armPageOne();
+    const swatch = selectionToolbar(container)!.querySelector('button[aria-label^="Highlight color"]') as HTMLButtonElement;
+    const color = swatch.getAttribute('aria-label')!.replace('Highlight color ', '');
+
+    act(() => swatch.click());
+    act(() => toolbarButton(container, 'Create Note from selection on page 1')!.click());
+
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toMatchObject({ topStripColor: color });
+  });
+
+  it('the six-dot grip also carries the chosen color as an auxiliary, non-authoritative drag hint', () => {
+    const { container } = armPageOne();
+    const swatch = selectionToolbar(container)!.querySelector('button[aria-label^="Highlight color"]') as HTMLButtonElement;
+    const color = swatch.getAttribute('aria-label')!.replace('Highlight color ', '');
+    act(() => swatch.click());
+
+    const { transfer } = dragFrom(selectionGrip(container)!);
+
+    // The dedicated Knowledge MIME payload is UNCHANGED by the color choice.
+    expect(JSON.parse(transfer.getData(CLIP_MIME))).not.toHaveProperty('color');
+    expect(transfer.getData(COLOR_HINT_MIME)).toBe(color);
+  });
+
+  it('10: choosing a color renders a transient preview span without changing canonical textContent', () => {
+    const { container } = armPageOne();
+    const pageOne = pageRoot(container, 1);
+    const before = pageOne.textContent;
+    const swatch = selectionToolbar(container)!.querySelector('button[aria-label^="Highlight color"]') as HTMLButtonElement;
+
+    act(() => swatch.click());
+
+    expect(pageOne.querySelector('[data-knowledge-selection-color-preview="true"]')).not.toBeNull();
+    expect(pageOne.querySelector('[data-knowledge-selection-color-preview="true"]')!.textContent).toBe('safety');
+    expect(pageOne.textContent).toBe(before);
+    expect(pageOne.textContent).toBe(pages[0].text);
+  });
+
+  it('a new selection clears a prior color preview', () => {
+    const { container } = armPageOne();
+    const swatch = selectionToolbar(container)!.querySelector('button[aria-label^="Highlight color"]') as HTMLButtonElement;
+    act(() => swatch.click());
+    expect(pageRoot(container, 1).querySelector('[data-knowledge-selection-color-preview]')).not.toBeNull();
+
+    const pageOne = pageRoot(container, 1);
+    selectRange(pageOne.firstChild!, 0, pageOne.firstChild!, 3);
+    finishSelectionOn(pageOne);
+
+    expect(pageOne.querySelector('[data-knowledge-selection-color-preview]')).toBeNull();
   });
 });
 
@@ -1551,7 +1631,9 @@ function mountWithNoteColors(
       // is supplied, exactly as CanvasClient derives it from its own posts.
       <KnowledgeSourceReferenceProvider
         index={buildKnowledgeSourceReferenceIndex(references)}
-        noteColors={noteColors}
+        // Callers still pass a flat id -> color map; wrapped here as topStrip,
+        // the primary field the resolver now reads (knowledgeSourceHighlightColor.ts).
+        noteColors={new Map([...noteColors].map(([id, color]) => [id, { topStrip: color }]))}
       >
         <KnowledgeDocumentDetails
           documentId={DOC_ID}
@@ -1922,8 +2004,11 @@ describe('P6J-F9-A2b: page image integration', () => {
       'components/collabboard/KnowledgeDocumentPageImage.tsx',
     ]) {
       const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+      // Text Phase 1 legitimately reads getBoundingClientRect once, to
+      // position the floating selection toolbar -- unrelated to viewport
+      // scroll-tracking, which is what this guard actually cares about.
       expect(source, `${file} must add no viewport machinery`)
-        .not.toMatch(/IntersectionObserver|currentPage|getBoundingClientRect|scrollTop/);
+        .not.toMatch(/IntersectionObserver|currentPage|scrollTop/);
     }
   });
 

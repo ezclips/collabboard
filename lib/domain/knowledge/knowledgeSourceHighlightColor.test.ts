@@ -19,8 +19,9 @@ function span(targetPadletId: string, start = 0, end = 10): KnowledgeSourceHighl
   } as KnowledgeSourceHighlightSpan;
 }
 
+/** Most tests exercise the primary `topStrip` authority. */
 const colors = (entries: Record<string, string>): KnowledgeSourceNoteColors =>
-  new Map(Object.entries(entries));
+  new Map(Object.entries(entries).map(([id, topStrip]) => [id, { topStrip }]));
 
 describe('knowledgeSourceHighlightColor single Note', () => {
   it('tints with the citing Note card colour', () => {
@@ -123,6 +124,28 @@ describe('knowledgeSourceHighlightColor overlapping Notes', () => {
 
   it('is order independent -- an uncoloured Note first still fails closed', () => {
     expect(knowledgeSourceHighlightColor([span('B'), span('A')], colors({ A: '#dbeafe' }))).toBeNull();
+  });
+});
+
+describe('knowledgeSourceHighlightColor topStrip authority, cardColor legacy fallback', () => {
+  it('reads topStrip over a legacy cardColor when both are present', () => {
+    const map: KnowledgeSourceNoteColors = new Map([['A', { topStrip: '#eab308', cardColor: '#dbeafe' }]]);
+    expect(knowledgeSourceHighlightColor([span('A')], map)).toEqual({ backgroundColor: '#eab308' });
+  });
+
+  it('falls back to cardColor only when topStrip was never written at all', () => {
+    const map: KnowledgeSourceNoteColors = new Map([['A', { cardColor: '#dbeafe' }]]);
+    expect(knowledgeSourceHighlightColor([span('A')], map)).toEqual({ backgroundColor: '#dbeafe' });
+  });
+
+  it('an explicit topStrip of "transparent" is authoritative and does NOT fall back to cardColor', () => {
+    const map: KnowledgeSourceNoteColors = new Map([['A', { topStrip: 'transparent', cardColor: '#dbeafe' }]]);
+    expect(knowledgeSourceHighlightColor([span('A')], map)).toBeNull();
+  });
+
+  it('renders nothing for a Note with neither field', () => {
+    const map: KnowledgeSourceNoteColors = new Map([['A', {}]]);
+    expect(knowledgeSourceHighlightColor([span('A')], map)).toBeNull();
   });
 });
 

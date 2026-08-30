@@ -73,6 +73,8 @@ interface NoteEditorProps {
   initialDetachedComments?: DetachedCommentData[];
   initialBadgeColor?: string;
   initialTextColor?: string;
+  /** Text Phase 1. Seeds the top-stripe control for a brand-new source Note. */
+  initialTopStrip?: string;
   initialTitleStyle?: CaptionStyle;
   // PATCH 8P.1 -- the Comments PANEL's own title/style (metadata.commentTitle /
   // metadata.commentTitleStyle), distinct from the Note POST's own title
@@ -135,6 +137,7 @@ export default function NoteEditor({
   initialDetachedComments = EMPTY_DETACHED_COMMENTS,
   initialBadgeColor = '#facc15',
   initialTextColor = '#1F2937',
+  initialTopStrip,
   initialTitleStyle,
   initialCommentTitle,
   initialCommentTitleStyle,
@@ -170,7 +173,7 @@ export default function NoteEditor({
     setCommentTitleStyle(initialCommentTitleStyle || {});
   }, [initialCommentTitleStyle]);
   const [cardColor, setCardColor] = useState('#FFFFFF');
-  const [topStrip, setTopStrip] = useState<string | null>(null);
+  const [topStrip, setTopStrip] = useState<string | null>(initialTopStrip || null);
   const [textColor, setTextColor] = useState(initialTextColor);
   const [reactions, setReactions] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'background' | 'topstrip'>('background');

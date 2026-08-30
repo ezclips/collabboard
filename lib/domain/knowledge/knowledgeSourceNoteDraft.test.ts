@@ -101,10 +101,39 @@ describe('P6J-F5 knowledge source note draft', () => {
     }
   });
 
-  it('returns exactly a title, a content and a source reference', () => {
+  it('returns exactly a title, a content, a topStripColor and a source reference', () => {
     expect(Object.keys(buildKnowledgeSourceNoteDraft(request())).sort()).toEqual([
-      'content', 'sourceReference', 'title',
+      'content', 'sourceReference', 'title', 'topStripColor',
     ]);
+  });
+
+  describe('Text Phase 1 topStripColor', () => {
+    it('is null when the request carries no color choice', () => {
+      expect(buildKnowledgeSourceNoteDraft(request()).topStripColor).toBeNull();
+    });
+
+    it('forwards the exact chosen color verbatim, un-normalised', () => {
+      expect(buildKnowledgeSourceNoteDraft(request({ topStripColor: '#eab308' })).topStripColor)
+        .toBe('#eab308');
+    });
+
+    it('is null when the request explicitly supplies null', () => {
+      expect(buildKnowledgeSourceNoteDraft(request({ topStripColor: null })).topStripColor).toBeNull();
+    });
+
+    it('never leaks into the independent source reference', () => {
+      const draft = buildKnowledgeSourceNoteDraft(request({ topStripColor: '#eab308' }));
+      expect(draft.sourceReference).not.toHaveProperty('topStripColor');
+      expect(draft.sourceReference).not.toHaveProperty('cardColor');
+    });
+
+    it('is forwarded the same way for a region draft', () => {
+      const region = buildKnowledgeSourceNoteDraft(request({
+        region: { region: { x: 0.25, y: 0.1, width: 0.5, height: 0.4 }, appliedRotation: 90 },
+        topStripColor: '#3b82f6',
+      }));
+      expect(region.topStripColor).toBe('#3b82f6');
+    });
   });
 });
 

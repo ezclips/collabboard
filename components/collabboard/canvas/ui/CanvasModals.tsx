@@ -215,6 +215,7 @@ export default function CanvasModals({
           initialDetachedComments={padletToEdit?.metadata?.detachedComments || EMPTY_COMMENTS}
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}
           initialTextColor={padletToEdit?.metadata?.textColor}
+          initialTopStrip={padletToEdit?.metadata?.topStrip}
           initialTitleStyle={padletToEdit?.metadata?.titleStyle as any}
           initialCommentTitle={typeof padletToEdit?.metadata?.commentTitle === 'string' ? padletToEdit.metadata.commentTitle : undefined}
           initialCommentTitleStyle={padletToEdit?.metadata?.commentTitleStyle as any}

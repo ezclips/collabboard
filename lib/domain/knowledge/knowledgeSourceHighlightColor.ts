@@ -3,19 +3,26 @@ import type { KnowledgeSourceHighlightSpan } from './knowledgeSourceHighlights';
 /**
  * P6J-F8-B3 -- what colour one source highlight may show.
  *
- * Read-time derivation with ONE authority: the citing Note's own
- * `metadata.cardColor`. Source highlights have no persisted colour of their own
- * and gain none here -- nothing in this module stores, defaults, generates or
- * normalises anything back into a Note. Null is the ordinary answer, and it
- * means "keep the existing neutral highlight", never "invent a colour".
+ * Read-time derivation with ONE authority per Note: `metadata.topStrip` once
+ * it exists AT ALL (any string, "transparent" included -- that spelling is
+ * simply not a colour, see canonicalHex, and yields no tint WITHOUT falling
+ * back). `metadata.cardColor` -- the card's own background, a distinct field
+ * -- is read only for a Note that predates topStrip entirely. Nothing in this
+ * module stores, defaults, generates or normalises anything back into a Note.
+ * Null is the ordinary answer, and it means "keep the existing neutral
+ * highlight", never "invent a colour".
  *
  * A run of page text can be covered by citations from SEVERAL Notes. One
  * background cannot honestly represent two different Notes, so disagreement --
  * including a coloured Note overlapping an uncoloured one -- fails closed.
  */
 
-/** Padlet id -> its stored `metadata.cardColor`, exactly as persisted. */
-export type KnowledgeSourceNoteColors = ReadonlyMap<string, string>;
+/** Padlet id -> the stored fields this authority reads, exactly as persisted. */
+export interface KnowledgeSourceNoteColorFields {
+  readonly topStrip?: string;
+  readonly cardColor?: string;
+}
+export type KnowledgeSourceNoteColors = ReadonlyMap<string, KnowledgeSourceNoteColorFields>;
 
 export interface KnowledgeSourceHighlightColor {
   /** The Note's stored spelling, not a normalised one. */
@@ -47,13 +54,18 @@ function canonicalHex(value: string): string | null {
  * every spelling of white -- `#fff`, `#FFFFFF`, `#ffffffff` -- yields null
  * rather than erasing the highlight the user came to see. Alpha does not
  * rescue it: a transparent white tints nothing either.
+ *
+ * `topStrip` wins whenever the key exists on the Note at all -- `cardColor`
+ * is consulted only for a legacy Note that never had a `topStrip` written.
  */
-function usableNoteColor(value: string | undefined): string | null {
-  if (typeof value !== 'string') return null;
-  const canonical = canonicalHex(value);
+function usableNoteColor(fields: KnowledgeSourceNoteColorFields | undefined): string | null {
+  if (!fields) return null;
+  const raw = fields.topStrip !== undefined ? fields.topStrip : fields.cardColor;
+  if (typeof raw !== 'string') return null;
+  const canonical = canonicalHex(raw);
   if (canonical === null) return null;
   if (canonical.slice(0, 6) === 'ffffff') return null;
-  return value;
+  return raw;
 }
 
 /**

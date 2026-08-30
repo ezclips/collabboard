@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { GripVertical } from 'lucide-react';
 import type {
   KnowledgeSourcePageRequest,
   KnowledgeSourceTextSelection,
@@ -10,6 +11,10 @@ import {
   KNOWLEDGE_SOURCE_CLIP_MIME,
   buildKnowledgeSourceClipTransfer,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
+import {
+  KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS,
+  KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
+} from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
 import {
   useKnowledgeSourceBacklinksForDocument,
   useKnowledgeSourceNoteColors,
@@ -262,6 +267,47 @@ function eligibleTargetsOf(
   return targets;
 }
 
+/** Text Phase 1. One not-yet-saved highlight color choice, page-relative. */
+interface SelectionColorPreview {
+  readonly pageNumber: number;
+  readonly charStart: number;
+  readonly charEnd: number;
+  readonly color: string;
+}
+
+/**
+ * Text Phase 1. Splits [start,end) around a TRANSIENT color preview -- inline
+ * flow only, exactly like the persisted-highlight `<span>` below, so
+ * `.textContent` reconstructs identically whether or not a piece is wrapped.
+ * Falls through to one plain node with no overlap, so it drops in wherever a
+ * plain fragment was emitted before this existed.
+ */
+function withPreview(
+  text: string,
+  start: number,
+  end: number,
+  keyPrefix: string,
+  preview: { readonly start: number; readonly end: number; readonly color: string } | null,
+): React.ReactNode[] {
+  const from = preview ? Math.max(preview.start, start) : start;
+  const to = preview ? Math.min(preview.end, end) : start;
+  if (!preview || from >= to) return [<React.Fragment key={keyPrefix}>{text.slice(start, end)}</React.Fragment>];
+  const nodes: React.ReactNode[] = [];
+  if (start < from) nodes.push(<React.Fragment key={`${keyPrefix}-pre`}>{text.slice(start, from)}</React.Fragment>);
+  nodes.push(
+    <span
+      key={`${keyPrefix}-preview`}
+      data-knowledge-selection-color-preview="true"
+      style={{ backgroundColor: preview.color }}
+      className="rounded-sm"
+    >
+      {text.slice(from, to)}
+    </span>,
+  );
+  if (to < end) nodes.push(<React.Fragment key={`${keyPrefix}-post`}>{text.slice(to, end)}</React.Fragment>);
+  return nodes;
+}
+
 /**
  * Renders one page as a flat sequence of pieces, each substring emitted exactly
  * once and in order, so `textContent` still reconstructs `page.text` verbatim.
@@ -281,6 +327,7 @@ function highlightedText(
   activeRef: React.MutableRefObject<HTMLElement | null>,
   sourceSegments: readonly KnowledgeSourceHighlightSegment[],
   interaction: PageSourceInteraction,
+  preview: { readonly start: number; readonly end: number; readonly color: string } | null,
 ) {
   const nodes: React.ReactNode[] = [];
   // The arrival ref belongs on the FIRST piece of the requested citation; the
@@ -291,7 +338,7 @@ function highlightedText(
   const pushUnmatched = (start: number, end: number) => {
     if (end <= start) return;
     if (sourceSegments.length === 0) {
-      nodes.push(<React.Fragment key={`text-${start}`}>{text.slice(start, end)}</React.Fragment>);
+      nodes.push(...withPreview(text, start, end, `text-${start}`, preview));
       return;
     }
     for (const segment of sourceSegments) {
@@ -300,7 +347,7 @@ function highlightedText(
       if (from >= to) continue;
       const piece = text.slice(from, to);
       if (segment.spans.length === 0) {
-        nodes.push(<React.Fragment key={`text-${from}`}>{piece}</React.Fragment>);
+        nodes.push(...withPreview(text, from, to, `text-${from}`, preview));
         continue;
       }
       const isArrival = interaction.navigationReferenceId !== null
@@ -446,6 +493,10 @@ export default function KnowledgeDocumentDetails({
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [capturedSelection, setCapturedSelection] = useState<CapturedPageSelection | null>(null);
+  // Text Phase 1. Transient toolbar state -- never persisted, always reset on
+  // a new selection, a new document, or the selection going stale.
+  const [selectionColor, setSelectionColor] = useState<string | null>(null);
+  const [selectionRect, setSelectionRect] = useState<{ top: number; left: number; bottom: number } | null>(null);
   // One mode and one armed rectangle: two armed pages would offer two confirm
   // buttons for one intent.
   const [regionMode, setRegionMode] = useState(false);
@@ -559,6 +610,8 @@ export default function KnowledgeDocumentDetails({
   // A different document is a different coordinate space entirely.
   useEffect(() => {
     setCapturedSelection(null);
+    setSelectionColor(null);
+    setSelectionRect(null);
     setTargetChoice(null);
     setRegionMode(false);
     setArmedRegion(null);
@@ -629,6 +682,15 @@ export default function KnowledgeDocumentDetails({
   const handleSelectionSettled = (event: React.SyntheticEvent) => {
     if (event.target instanceof Element && event.target.closest('button')) return;
     setCapturedSelection(captureExactSelection(pagesContainerRef.current, pages));
+    // Best-effort positioning only, read separately from the pure capture
+    // above: a prior color choice belongs to the selection that is ending,
+    // never to whatever comes next.
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    const range = selection && !selection.isCollapsed && selection.rangeCount === 1 ? selection.getRangeAt(0) : null;
+    // jsdom's Range has no getBoundingClientRect at all (not even a zero
+    // rect) -- guarded rather than assumed, since this is positioning only.
+    setSelectionRect(range && typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : null);
+    setSelectionColor(null);
   };
 
   /**
@@ -764,66 +826,15 @@ export default function KnowledgeDocumentDetails({
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                 {/*
-                  P6J-F8-B1 -- the source clip chip. Rendered HERE, in the page
-                  header, and never inside the paragraph below: B4-B2B measures
-                  selection offsets against that paragraph's textContent, so a
-                  control living in it would add characters and move every
-                  coordinate after itself.
-
-                  It appears only for a selection this page owns, and
-                  `pageSelection` is `activeSelection` -- already re-proved
-                  against the current page text on every render. A page whose
-                  text changed under a stale selection loses its chip rather
-                  than keeping a draggable payload nobody can honour.
+                  Text Phase 1 -- an exact selection's affordances moved to the
+                  ONE floating toolbar (below, outside every page and outside
+                  the paragraph B4-B2B measures). The plain page-level action
+                  stays here, and ONLY here, for when there is no selection.
                 */}
-                {onCreateNoteFromPage && documentId && pageSelection ? (
+                {onCreateNoteFromPage && documentId && !pageSelection ? (
                   <button
                     type="button"
-                    {...{ [CLIP_CHIP]: 'true' }}
-                    draggable
-                    aria-label={`Drag source clip from page ${page.pageNumber} to the canvas, or activate to create a Note`}
-                    className="shrink-0 cursor-grab rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100 hover:text-blue-900 active:cursor-grabbing focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
-                    onDragStart={(event) => {
-                      // The CAPTURED selection, never window.getSelection():
-                      // pressing this control collapses the browser range, so
-                      // reading it live would find nothing exactly when needed.
-                      event.dataTransfer.setData(
-                        KNOWLEDGE_SOURCE_CLIP_MIME,
-                        buildKnowledgeSourceClipTransfer({
-                          kind: 'text',
-                          sourceDocumentId: documentId,
-                          originalFilename,
-                          pageNumber: pageSelection.pageNumber,
-                          charStart: pageSelection.charStart,
-                          charEnd: pageSelection.charEnd,
-                          selectedText: pageSelection.selectedText,
-                        }),
-                      );
-                      event.dataTransfer.effectAllowed = 'copy';
-                    }}
-                    // Click and keyboard activation take the EXISTING selection
-                    // path: the drag adds an affordance, not a second creator.
-                    onClick={() => onCreateNoteFromPage({
-                      sourceDocumentId: documentId,
-                      originalFilename,
-                      pageNumber: page.pageNumber,
-                      pageText: page.text,
-                      selection: {
-                        charStart: pageSelection.charStart,
-                        charEnd: pageSelection.charEnd,
-                        selectedText: pageSelection.selectedText,
-                      },
-                    })}
-                  >
-                    Source clip
-                  </button>
-                ) : null}
-                {onCreateNoteFromPage && documentId ? (
-                  <button
-                    type="button"
-                    aria-label={pageSelection
-                      ? `Create Note from selection on page ${page.pageNumber}`
-                      : `Create Note from page ${page.pageNumber}`}
+                    aria-label={`Create Note from page ${page.pageNumber}`}
                     className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                     onClick={() => onCreateNoteFromPage({
                       // The document's real identity, never its filename.
@@ -831,15 +842,10 @@ export default function KnowledgeDocumentDetails({
                       originalFilename,
                       pageNumber: page.pageNumber,
                       pageText: page.text,
-                      // Read from validated state, never from the browser here.
-                      selection: pageSelection === null ? null : {
-                        charStart: pageSelection.charStart,
-                        charEnd: pageSelection.charEnd,
-                        selectedText: pageSelection.selectedText,
-                      },
+                      selection: null,
                     })}
                   >
-                    {pageSelection ? 'Create Note from selection' : 'Create Note'}
+                    Create Note
                   </button>
                 ) : null}
                 {/* Only for the page owning the armed rectangle, the F8 clip
@@ -918,6 +924,9 @@ export default function KnowledgeDocumentDetails({
                   activeMatchRef,
                   sourceSegmentsByPage.get(page.pageNumber) ?? [],
                   sourceInteraction,
+                  selectionColor && pageSelection
+                    ? { start: pageSelection.charStart, end: pageSelection.charEnd, color: selectionColor }
+                    : null,
                 )}
               </p>
             </section>
@@ -925,6 +934,100 @@ export default function KnowledgeDocumentDetails({
           })}
         </div>
       )}
+
+      {/*
+        Text Phase 1 -- the ONE floating selection toolbar, a SIBLING of the
+        pages container and every page text root, exactly like the source-
+        choice panel below: it must contribute zero characters to any page's
+        canonical textContent. Positioned via the rect captured at mouseup,
+        not from a live selection -- pressing a button here would otherwise
+        collapse the very selection it is acting on.
+      */}
+      {onCreateNoteFromPage && documentId && activeSelection ? (
+        <div
+          data-knowledge-selection-toolbar="true"
+          style={selectionRect
+            ? {
+              position: 'fixed',
+              left: Math.max(8, selectionRect.left),
+              top: selectionRect.top > 56 ? selectionRect.top - 44 : selectionRect.bottom + 8,
+              zIndex: 50,
+            }
+            : { display: 'none' }}
+          className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            {...{ [CLIP_CHIP]: 'true' }}
+            draggable
+            aria-label="Drag selected PDF text to the canvas"
+            title="Drag selected PDF text to the canvas"
+            className="cursor-grab rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 active:cursor-grabbing focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+            onDragStart={(event) => {
+              // The CAPTURED selection, never window.getSelection(): pressing
+              // this control collapses the browser range, so reading it live
+              // would find nothing exactly when needed.
+              event.dataTransfer.setData(
+                KNOWLEDGE_SOURCE_CLIP_MIME,
+                buildKnowledgeSourceClipTransfer({
+                  kind: 'text',
+                  sourceDocumentId: documentId,
+                  originalFilename,
+                  pageNumber: activeSelection.pageNumber,
+                  charStart: activeSelection.charStart,
+                  charEnd: activeSelection.charEnd,
+                  selectedText: activeSelection.selectedText,
+                }),
+              );
+              // Auxiliary hint only, on a SEPARATE type: the dedicated
+              // Knowledge payload above stays exactly as it always was.
+              if (selectionColor) event.dataTransfer.setData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT, selectionColor);
+              event.dataTransfer.effectAllowed = 'copy';
+            }}
+          >
+            <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-label={`Create Note from selection on page ${activeSelection.pageNumber}`}
+            className="rounded px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+            onClick={() => onCreateNoteFromPage({
+              sourceDocumentId: documentId,
+              originalFilename,
+              pageNumber: activeSelection.pageNumber,
+              pageText: pages.find((page) => page.pageNumber === activeSelection.pageNumber)?.text ?? '',
+              selection: {
+                charStart: activeSelection.charStart,
+                charEnd: activeSelection.charEnd,
+                selectedText: activeSelection.selectedText,
+              },
+              topStripColor: selectionColor,
+            })}
+          >
+            Note Post
+          </button>
+          <button
+            type="button"
+            aria-label="Copy selected text"
+            className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+            onClick={() => { void navigator.clipboard?.writeText?.(activeSelection.selectedText); }}
+          >
+            Copy
+          </button>
+          <div className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+          {KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              aria-label={`Highlight color ${color}`}
+              aria-pressed={selectionColor === color}
+              className={`h-4 w-4 shrink-0 rounded-full border ${selectionColor === color ? 'ring-2 ring-offset-1 ring-gray-400' : 'border-gray-300'}`}
+              style={{ backgroundColor: color }}
+              onClick={() => setSelectionColor((current) => (current === color ? null : color))}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {/*
         Deliberately OUTSIDE the pages container, and therefore outside every

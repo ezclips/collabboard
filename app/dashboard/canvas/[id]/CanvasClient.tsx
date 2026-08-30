@@ -94,6 +94,7 @@ import {
   knowledgeSourceClipPageRequest,
   parseKnowledgeSourceClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
+import { KNOWLEDGE_SOURCE_CLIP_COLOR_HINT } from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
 import {
   EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX,
   buildKnowledgeSourceReferenceIndex,
@@ -1522,6 +1523,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // and it is deliberately left in place: deleting the user's brand-new Note to
   // tidy up a link failure would destroy work to protect metadata.
   const [sourceNoteReference, setSourceNoteReference] = useState<KnowledgeSourceReferenceDraft | null>(null);
+  // Text Phase 1 -- G/H. A dragged source clip's drop point, staged the same
+  // way: usePadletSave's saveNote always calls getNewPostPosition for a brand
+  // new Note, so this is applied as a normal reposition immediately AFTER
+  // creation (the same moment the real id first exists), never by changing
+  // the create path itself.
+  const [pendingSourceDropPosition, setPendingSourceDropPosition] = useState<{ x: number; y: number } | null>(null);
 
   // ==========================================================================
   // P6J-F6-B1 -- board-scoped source-reference read + local index
@@ -1624,18 +1631,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   // P6J-F8-B3 -- Note colours for read-time source-highlight tinting, DISPLAY
   // ONLY. A projection of posts already in memory: no request, no second copy,
-  // and emphatically no write -- `metadata.cardColor` keeps its one existing
-  // owner (the card colour control), and a Note without one simply gets no
-  // entry rather than a defaulted white. Sits beside the backlink index and
-  // ABOVE the early returns for the same B3H hook-ordering reason.
-  const knowledgeSourceNoteColors = useMemo(() => new Map<string, string>(
-    padlets
-      .map((padlet) => [
-        padlet.id,
-        (padlet.metadata as { cardColor?: unknown } | null | undefined)?.cardColor,
-      ] as const)
-      .filter((entry): entry is readonly [string, string] =>
-        typeof entry[1] === 'string' && entry[1].length > 0),
+  // and emphatically no write. Text Phase 1: `metadata.topStrip` is now the
+  // authority (see knowledgeSourceHighlightColor.ts); `cardColor` still rides
+  // along, read only as that resolver's legacy fallback for a Note that
+  // predates topStrip. Sits beside the backlink index and ABOVE the early
+  // returns for the same B3H hook-ordering reason.
+  const knowledgeSourceNoteColors = useMemo(() => new Map(
+    padlets.reduce<Array<readonly [string, { topStrip?: string; cardColor?: string }]>>((entries, padlet) => {
+      const metadata = padlet.metadata as { topStrip?: unknown; cardColor?: unknown } | null | undefined;
+      const topStrip = typeof metadata?.topStrip === 'string' ? metadata.topStrip : undefined;
+      const cardColor = typeof metadata?.cardColor === 'string' && metadata.cardColor.length > 0
+        ? metadata.cardColor : undefined;
+      if (topStrip !== undefined || cardColor !== undefined) entries.push([padlet.id, { topStrip, cardColor }]);
+      return entries;
+    }, []),
   ), [padlets]);
 
   // ==========================================================================
@@ -1760,8 +1769,32 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // placement handoff -- ends this source workflow. A later ordinary Note can
   // never inherit it.
   useEffect(() => {
-    if (!isNoteEditorOpen) setSourceNoteReference(null);
+    if (!isNoteEditorOpen) {
+      setSourceNoteReference(null);
+      setPendingSourceDropPosition(null);
+    }
   }, [isNoteEditorOpen]);
+
+  /**
+   * Text Phase 1 -- H. usePadletSave's saveNote always positions a brand new
+   * Note via getNewPostPosition, the same "next toolbar slot" every other
+   * post type gets; it never reads padletToEdit's own position_x/position_y
+   * for a 'new' id. Rather than teach saveNote a second positioning rule,
+   * the drop point is applied as an ordinary reposition update at exactly
+   * the moment this same callback already fires: right after a real id
+   * exists, before the source reference write.
+   */
+  const handleSourceNoteCreated = useCallback((targetPadletId: string, sourceReference: KnowledgeSourceReferenceDraft) => {
+    if (pendingSourceDropPosition) {
+      const { x: position_x, y: position_y } = pendingSourceDropPosition;
+      setPendingSourceDropPosition(null);
+      setPadlets((prev) => prev.map((p) => (p.id === targetPadletId ? { ...p, position_x, position_y } : p)));
+      void updatePostFieldsOrThrow(targetPadletId, { position_x, position_y }).catch((err) => {
+        console.error('Failed to apply source-drop position:', err);
+      });
+    }
+    void persistKnowledgeSourceReference(targetPadletId, sourceReference);
+  }, [pendingSourceDropPosition, persistKnowledgeSourceReference, setPadlets, updatePostFieldsOrThrow]);
 
   const {
     saveNote,
@@ -1805,7 +1838,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets,
     getNewPostPosition,
     sourceNoteReference,
-    onSourceNoteCreated: persistKnowledgeSourceReference,
+    onSourceNoteCreated: handleSourceNoteCreated,
     onDrawingPlacementStart: (draft) => {
       const _as = drawingAppStateRef.current;
       const _zoom = (typeof _as?.zoom?.value === 'number' && _as.zoom.value > 0) ? _as.zoom.value : 1;
@@ -5961,18 +5994,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [handleDrawingLayoutAddPadlet]);
 
   /**
-   * P6J-F8-B1 -- a dragged text source clip, dropped on the canvas.
+   * P6J-F8-B1 / Text Phase 1 -- a dragged text source clip, dropped on the
+   * canvas.
    *
    * Returns whether this drop was a Knowledge clip, so the caller stops rather
    * than letting the same event fall through and create or move a second post.
-   * True covers "handled and refused" as well as "handled and created": a
+   * True covers "handled and refused" as well as "handled and staged": a
    * refusal must still consume the drop.
    *
-   * Nothing here trusts the transfer. The payload is parsed fail-closed, the
-   * capability is re-checked against the same signal that gates the creation
-   * toolbar, and the SERVER still re-derives the canonical quote from its own
-   * stored page before any source_references row exists. No write path of its
-   * own -- it reuses the two that already exist.
+   * Text Phase 1 (section G): this NO LONGER inserts a Note directly. It
+   * stages the SAME draft the click path already uses and opens the ordinary
+   * Note editor -- zero database writes happen here. The real create (and,
+   * after it, the source-reference write) happens only through the existing
+   * Save path, exactly like handleCreateNoteFromKnowledgePage below; Cancel
+   * before Save leaves nothing behind, because nothing was ever written.
+   *
+   * Nothing here trusts the transfer. The payload is parsed fail-closed and
+   * the capability is re-checked against the same signal the creation toolbar
+   * is gated on -- a viewer can synthesise a DataTransfer, so the surface that
+   * eventually writes must authorise, not the chip being absent.
    */
   const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
     const payload = parseKnowledgeSourceClipPayload(
@@ -5984,81 +6024,54 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // Synchronous, and BEFORE anything can await. The drop finishes dispatching
     // the instant this handler yields, so a stopPropagation deferred behind an
     // await would be a no-op and the outer surface would receive the very same
-    // clip -- creating a second Note from one gesture.
+    // clip -- opening the editor twice from one gesture.
     event.stopPropagation();
-    // Re-checked HERE rather than left to the chip being absent: a viewer can
-    // synthesise a DataTransfer, so the surface that writes must authorise.
     if (!canUseCanvasToolbar || !canvasId) return true;
 
-    // The SAME builder the click path uses -- one draft authority, two gestures.
-    const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload));
-    // Read now: `event` is only guaranteed live during this synchronous turn.
-    const dropPoint = getCanvasPointFromClient(event.clientX, event.clientY);
-
-    if (isDrawingLayout) {
-      // The existing Drawing placement path, container prompt included. It
-      // completes the reference itself, after its own insert has succeeded.
-      void handleDrawingLayoutAddPadletWithContainerCheck({
-        board_id: canvasId,
-        type: 'text',
-        title: draft.title,
-        content: draft.content,
-        position_x: dropPoint.x,
-        position_y: dropPoint.y,
-        width: 280,
-        height: 280,
-        metadata: {},
-        sourceReference: draft.sourceReference,
-      });
-      return true;
-    }
-
-    if (!isFreeformLayout) {
+    if (!isFreeformLayout && !isDrawingLayout) {
       // Wall/columns/grid/timeline/map place by flow or section order and never
-      // mount the Freeform world, so a pointer position is not a canvas
-      // coordinate. Creating anyway would stack every clip at (0,0); the chip's
-      // click path stays the layout-aware route.
+      // mount a world with drop coordinates. The click path stays the
+      // layout-aware route for those.
       toast.error('Drop source clips on a Freeform or Drawing board, or use the Source clip button');
       return true;
     }
 
-    const { x, y } = clampRectPositionToFreeformBounds({
-      x: dropPoint.x - 140,
-      y: dropPoint.y - 140,
+    // Auxiliary hint only, on its own type -- the dedicated Knowledge payload
+    // above stays exactly what it always was, unwidened.
+    const colorHint = event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT) || null;
+    // The SAME builder the click path uses -- one draft authority, two gestures.
+    const draft = buildKnowledgeSourceNoteDraft({
+      ...knowledgeSourceClipPageRequest(payload),
+      topStripColor: colorHint,
+    });
+    // Read now: `event` is only guaranteed live during this synchronous turn.
+    const dropPoint = getCanvasPointFromClient(event.clientX, event.clientY);
+    const position = isFreeformLayout
+      ? clampRectPositionToFreeformBounds({ x: dropPoint.x - 140, y: dropPoint.y - 140, width: 280, height: 280 })
+      : { x: dropPoint.x, y: dropPoint.y };
+
+    setPendingSourceDropPosition(position);
+    setSourceNoteReference(draft.sourceReference);
+    setPadletToEdit({
+      id: 'new',
+      board_id: canvasId,
+      title: draft.title,
+      content: draft.content,
+      type: 'text',
+      position_x: position.x,
+      position_y: position.y,
       width: 280,
       height: 280,
-    });
-    void (async () => {
-      try {
-        const created = await insertPostAndSelectOrThrow({
-          board_id: canvasId,
-          title: draft.title,
-          // Blank. The selected passage is source evidence and lives in
-          // source_references; it is never pasted in as authorship.
-          content: draft.content,
-          type: 'text',
-          position_x: x,
-          position_y: y,
-          width: 280,
-          height: 280,
-          metadata: {},
-        });
-        // Only now does a real target id exist. A failed insert throws instead
-        // of reaching here, so no reference is written for a Note that is not.
-        if (created?.id) {
-          setPadlets(prev => [...prev, created as Padlet]);
-          void persistKnowledgeSourceReference(created.id, draft.sourceReference);
-        }
-      } catch (err) {
-        console.error('Failed to create Note from source clip:', err);
-        toast.error('Could not create the Note from that source clip');
-      }
-    })();
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      metadata: draft.topStripColor ? { topStrip: draft.topStripColor } : {},
+    } as Padlet);
+    setIsNoteEditorOpen(true);
     return true;
   }, [
     canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout, getCanvasPointFromClient,
-    handleDrawingLayoutAddPadletWithContainerCheck, insertPostAndSelectOrThrow, setPadlets,
-    persistKnowledgeSourceReference,
+    clampRectPositionToFreeformBounds, setPadletToEdit, setIsNoteEditorOpen, setSourceNoteReference,
+    setPendingSourceDropPosition,
   ]);
 
   /**
@@ -6905,7 +6918,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       height: 250,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      metadata: {},
+      // Text Phase 1 -- D. The floating toolbar's chosen color, if any, seeds
+      // the SAME existing top-stripe field a Note editor's own TS tab writes.
+      metadata: draft.topStripColor ? { topStrip: draft.topStripColor } : {},
     } as Padlet);
     setIsNoteEditorOpen(true);
   };

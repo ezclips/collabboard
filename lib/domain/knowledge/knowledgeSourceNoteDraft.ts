@@ -47,6 +47,13 @@ export interface KnowledgeSourcePageRequest {
   readonly selection?: KnowledgeSourceTextSelection | null;
   /** A visual region instead of a text span; mutually exclusive with `selection`. */
   readonly region?: KnowledgeSourcePageRegionSelection | null;
+  /**
+   * Text Phase 1. The floating toolbar's chosen highlight color, seeding the
+   * SAME existing Note `metadata.topStrip` field -- never a new column, and
+   * never `metadata.cardColor` (the card's own, separate background field).
+   * Absent or null means no color was chosen, the existing default behavior.
+   */
+  readonly topStripColor?: string | null;
 }
 
 /**
@@ -72,6 +79,8 @@ export interface KnowledgeSourceNoteDraft {
   readonly title: string;
   readonly content: string;
   readonly sourceReference: KnowledgeSourceReferenceDraft;
+  /** Text Phase 1. Seeds the new Note's existing `metadata.topStrip` field. */
+  readonly topStripColor: string | null;
 }
 
 /**
@@ -158,6 +167,7 @@ export function buildKnowledgeSourceNoteDraft(
     return {
       title: noteTitle(request.originalFilename),
       content: '',
+      topStripColor: request.topStripColor ?? null,
       sourceReference: {
         sourceDocumentId: request.sourceDocumentId,
         pageStart: request.pageNumber,
@@ -185,6 +195,7 @@ export function buildKnowledgeSourceNoteDraft(
     // source reference below stays the untouched, independent provenance
     // record; editing the body afterward can never redefine it.
     content: selection === null ? '' : knowledgeSourceSelectionToNoteHtml(selection.selectedText),
+    topStripColor: request.topStripColor ?? null,
     sourceReference: {
       sourceDocumentId: request.sourceDocumentId,
       pageStart: request.pageNumber,
