@@ -6,9 +6,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeDocumentDetails from './KnowledgeDocumentDetails';
 
 /**
- * P6J-F9-B2 reader proofs: the Select area mode, the ONE armed rectangle, and
- * the hand-off into the EXISTING Note creation callback. Both pages are A4
- * (595 x 842), drawn inside the 1px border the reader's page image carries.
+ * P6J-F9-B2 / Area Phase 1 reader proofs: the Select area mode, the ONE armed
+ * rectangle, and the hand-off into the EXISTING Note creation callback via the
+ * floating area toolbar (a sibling of the pages container and the region
+ * pointer layer, exactly like Text Phase 1's own selection toolbar). Both
+ * pages are A4 (595 x 842), drawn inside the 1px border the reader's page
+ * image carries.
  */
 const PAGES = [
   { pageNumber: 1, text: 'first page text', widthPoints: 595, heightPoints: 842, rotation: 0 },
@@ -89,6 +92,17 @@ const click = (el: Element | null) => act(() => { el?.dispatchEvent(new MouseEve
 const layers = (c: HTMLElement) => c.querySelectorAll('[data-knowledge-region-layer]');
 const layerFor = (c: HTMLElement, page: number) => c.querySelector(`[data-knowledge-region-layer="${page}"]`);
 
+/** The ONE floating area toolbar -- a sibling of every page, never nested inside one. */
+const areaToolbar = (c: HTMLElement) => c.querySelector('[data-knowledge-area-toolbar]');
+const notePostButton = (c: HTMLElement) =>
+  areaToolbar(c)?.querySelector('button[aria-label^="Create Note from selected area"]') as HTMLButtonElement ?? null;
+const clearAreaButton = (c: HTMLElement) =>
+  areaToolbar(c)?.querySelector('button[aria-label="Clear selected area"]') as HTMLButtonElement ?? null;
+const areaGrip = (c: HTMLElement) =>
+  areaToolbar(c)?.querySelector('[aria-label="Drag selected PDF area to the canvas"]') ?? null;
+const areaColorSwatch = (c: HTMLElement) =>
+  areaToolbar(c)?.querySelector('button[aria-label^="Highlight color"]') as HTMLButtonElement ?? null;
+
 function firePointer(target: Element, type: string, clientX: number, clientY: number) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY, button: 0 });
   for (const [k, v] of Object.entries({ pointerId: 1, isPrimary: true, pointerType: 'mouse' })) define(event, k, v);
@@ -141,17 +155,17 @@ describe('P6J-F9-B2 Select area mode', () => {
   });
 });
 
-describe('P6J-F9-B2 one armed rectangle', () => {
-  it('D3/D4: arming a page offers its confirm controls and no other page\'s', () => {
+describe('Area Phase 1 one armed rectangle, surfaced via the floating area toolbar', () => {
+  it('D3/D4: arming a page offers the ONE floating area toolbar, scoped to that page, and no other', () => {
     const { container } = mount();
     enableMode(container);
-    expect(button(container, 'Create Note from area')).toBeNull();
+    expect(areaToolbar(container)).toBeNull();
 
     dragPage(container, 1);
-    const confirm = button(container, 'Create Note from area')!;
-    expect(confirm).not.toBeNull();
-    expect(buttons(container, 'Create Note from area')).toHaveLength(1);
-    expect(confirm.closest('[data-page-number]')!.getAttribute('data-page-number')).toBe('1');
+    expect(container.querySelectorAll('[data-knowledge-area-toolbar]')).toHaveLength(1);
+    const post = notePostButton(container)!;
+    expect(post).not.toBeNull();
+    expect(post.getAttribute('aria-label')).toBe('Create Note from selected area on page 1');
     expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(1);
   });
 
@@ -160,18 +174,17 @@ describe('P6J-F9-B2 one armed rectangle', () => {
     enableMode(container);
     dragPage(container, 1);
     dragPage(container, 2);
-    expect(buttons(container, 'Create Note from area')).toHaveLength(1);
-    expect(button(container, 'Create Note from area')!
-      .closest('[data-page-number]')!.getAttribute('data-page-number')).toBe('2');
+    expect(container.querySelectorAll('[data-knowledge-area-toolbar]')).toHaveLength(1);
+    expect(notePostButton(container)!.getAttribute('aria-label')).toBe('Create Note from selected area on page 2');
     expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(1);
   });
 
-  it('D5: Clear removes the rectangle and its controls, leaving the mode on', () => {
+  it('D5: Clear removes the rectangle and the toolbar, leaving the mode on', () => {
     const { container } = mount();
     enableMode(container);
     dragPage(container, 1);
-    click(button(container, 'Clear'));
-    expect(button(container, 'Create Note from area')).toBeNull();
+    click(clearAreaButton(container));
+    expect(areaToolbar(container)).toBeNull();
     expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(0);
     expect(button(container, 'Select area')!.getAttribute('aria-pressed')).toBe('true');
   });
@@ -186,7 +199,7 @@ describe('P6J-F9-B2 one armed rectangle', () => {
     enableMode(container);
     dragPage(container, 1);
     abandon(container);
-    expect(button(container, 'Create Note from area')).toBeNull();
+    expect(areaToolbar(container)).toBeNull();
   });
 
   it('offers no region controls for a page whose raster contradicts its geometry', () => {
@@ -195,14 +208,24 @@ describe('P6J-F9-B2 one armed rectangle', () => {
     enableMode(container, true);
     expect(layers(container)).toHaveLength(0);
   });
+
+  it('the area toolbar lives outside every page and outside the region pointer layer', () => {
+    const { container } = mount();
+    enableMode(container);
+    dragPage(container, 1);
+    const toolbar = areaToolbar(container)!;
+    expect(toolbar.closest('[data-page-number]')).toBeNull();
+    expect(toolbar.closest('[data-knowledge-region-layer]')).toBeNull();
+    expect(layerFor(container, 1)!.contains(toolbar)).toBe(false);
+  });
 });
 
 describe('P6J-F9-B2 hand-off into the existing Note flow', () => {
-  it('D6/C1-C4: confirming calls the one existing callback with a region request', () => {
+  it('D6/C1-C4: Note Post calls the one existing callback with a region request', () => {
     const { container, onCreateNoteFromPage } = mount();
     enableMode(container);
     dragPage(container, 1);
-    click(button(container, 'Create Note from area'));
+    click(notePostButton(container));
 
     expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
     const request = onCreateNoteFromPage.mock.calls[0][0] as Record<string, unknown>;
@@ -222,7 +245,7 @@ describe('P6J-F9-B2 hand-off into the existing Note flow', () => {
     const { container, onCreateNoteFromPage } = mount();
     enableMode(container);
     dragPage(container, 2);
-    click(button(container, 'Create Note from area'));
+    click(notePostButton(container));
 
     const request = onCreateNoteFromPage.mock.calls[0][0] as Record<string, unknown>;
     const { region, appliedRotation } = request.region as
@@ -237,9 +260,9 @@ describe('P6J-F9-B2 hand-off into the existing Note flow', () => {
     const { container } = mount();
     enableMode(container);
     dragPage(container, 1);
-    click(button(container, 'Create Note from area'));
+    click(notePostButton(container));
     expect(button(container, 'Select area')!.getAttribute('aria-pressed')).toBe('false');
-    expect(button(container, 'Create Note from area')).toBeNull();
+    expect(areaToolbar(container)).toBeNull();
     expect(layers(container)).toHaveLength(0);
   });
 
@@ -256,11 +279,34 @@ describe('P6J-F9-B2 hand-off into the existing Note flow', () => {
     const { container, onCreateNoteFromPage } = mount();
     enableMode(container);
     dragPage(container, 1);
-    click(button(container, 'Create Note from area'));
+    click(notePostButton(container));
     const serialized = JSON.stringify(onCreateNoteFromPage.mock.calls[0][0]);
     for (const leaked of ['webp', 'storage', 'bucket', 'signed', 'natural', 'dataUrl', 'base64']) {
       expect(serialized.toLowerCase(), leaked).not.toContain(leaked);
     }
+  });
+
+  it('the toolbar carries a drag affordance emitting the same area MIME the button posts', () => {
+    const { container } = mount();
+    enableMode(container);
+    dragPage(container, 1);
+    const grip = areaGrip(container) as HTMLElement;
+    expect(grip).not.toBeNull();
+    expect(grip.getAttribute('draggable')).toBe('true');
+  });
+
+  it('a toolbar color choice seeds topStripColor on the Note Post call, never a second field', () => {
+    const { container, onCreateNoteFromPage } = mount();
+    enableMode(container);
+    dragPage(container, 1);
+    const swatch = areaColorSwatch(container)!;
+    click(swatch);
+    click(notePostButton(container));
+    const request = onCreateNoteFromPage.mock.calls[0][0] as Record<string, unknown>;
+    expect(request.topStripColor).toBe(swatch.getAttribute('aria-label')!.replace('Highlight color ', ''));
+    expect(Object.keys(request).sort()).toEqual(
+      ['originalFilename', 'pageText', 'pageNumber', 'region', 'selection', 'sourceDocumentId', 'topStripColor'].sort(),
+    );
   });
 });
 
@@ -268,7 +314,7 @@ describe('P6J-F9-B2 F8 isolation', () => {
   const textRoots = (container: HTMLElement) =>
     Array.from(container.querySelectorAll('[data-knowledge-page-text-root]'));
 
-  it('D12/D15: the canonical text roots stay exact, with no region UI inside them', () => {
+  it('D12/D15: the canonical text roots stay exact, with no region UI and no area toolbar inside them', () => {
     const { container } = mount();
     enableMode(container);
     dragPage(container, 1);
@@ -279,6 +325,7 @@ describe('P6J-F9-B2 F8 isolation', () => {
       expect(root_.textContent).toBe(PAGES[index].text);
       expect(root_.querySelector('[data-knowledge-region-layer]')).toBeNull();
       expect(root_.querySelector('[data-knowledge-region-rectangle]')).toBeNull();
+      expect(root_.querySelector('[data-knowledge-area-toolbar]')).toBeNull();
       expect(root_.querySelector('button')).toBeNull();
       expect(root_.querySelector('img')).toBeNull();
     });
@@ -286,9 +333,10 @@ describe('P6J-F9-B2 F8 isolation', () => {
 
   it('D13/D14: mode OFF leaves the reader exactly as F8 left it', () => {
     const { container } = mount();
-    // No hit layer exists to intercept a text selection, and the page header
-    // controls F8 owns are still the ones present.
+    // No hit layer exists to intercept a text selection, no area toolbar is
+    // mounted, and the page header controls F8 owns are still the ones present.
     expect(layers(container)).toHaveLength(0);
+    expect(areaToolbar(container)).toBeNull();
     expect(buttons(container, 'Create Note')).toHaveLength(2);
     expect(container.querySelector('[data-knowledge-clip-chip]')).toBeNull();
     textRoots(container).forEach((root_, index) => {
