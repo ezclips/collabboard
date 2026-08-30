@@ -5997,20 +5997,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [handleDrawingLayoutAddPadlet]);
 
   /**
-   * P6J-F8-B1 / Text Phase 1 -- a dragged text source clip, dropped on the
-   * canvas.
+   * P6J-F8-B1 / Text Phase 1 / Area Phase 1 -- a dragged source clip (text OR
+   * area), dropped on the canvas.
    *
    * Returns whether this drop was a Knowledge clip, so the caller stops rather
    * than letting the same event fall through and create or move a second post.
    * True covers "handled and refused" as well as "handled and staged": a
    * refusal must still consume the drop.
    *
-   * Text Phase 1 (section G): this NO LONGER inserts a Note directly. It
-   * stages the SAME draft the click path already uses and opens the ordinary
-   * Note editor -- zero database writes happen here. The real create (and,
-   * after it, the source-reference write) happens only through the existing
-   * Save path, exactly like handleCreateNoteFromKnowledgePage below; Cancel
-   * before Save leaves nothing behind, because nothing was ever written.
+   * This NO LONGER inserts a Note directly. It stages the SAME draft the
+   * click path already uses and opens the ordinary Note editor -- zero
+   * database writes happen here. The real create (and, after it, the
+   * source-reference write) happens only through the existing Save path,
+   * exactly like handleCreateNoteFromKnowledgePage below; Cancel before Save
+   * leaves nothing behind, because nothing was ever written.
+   *
+   * Kind-agnostic by construction: `knowledgeSourceClipPageRequest` and
+   * `buildKnowledgeSourceNoteDraft` already branch on `payload.kind`, so an
+   * area clip reaches this exact same staging path with no changes here.
    *
    * Nothing here trusts the transfer. The payload is parsed fail-closed and
    * the capability is re-checked against the same signal the creation toolbar
@@ -6096,7 +6100,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const payload = parseKnowledgeSourceClipPayload(
       event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME),
     );
-    if (!payload) return false;
+    // KNI-R2 is text-only, unchanged: appending a rectangle to a Note's own
+    // text body has no meaning, so an area clip is left unclaimed here and
+    // falls through to the same modal-first path an empty-canvas drop uses.
+    if (!payload || payload.kind !== 'text') return false;
     // Synchronous, before any await -- see handleKnowledgeSourceClipDrop's
     // own comment: an await here would let this SAME clip also reach the
     // outer blank-canvas handler and create a second Note.
@@ -7017,6 +7024,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
         <CanvasModals
           onOpenSourceReference={requestKnowledgeSourceOpen}
+          sourceNoteReference={sourceNoteReference}
           isNoteEditorOpen={isNoteEditorOpen}
           setIsNoteEditorOpen={setIsNoteEditorOpen}
           isLinkEditorOpen={isLinkEditorOpen}

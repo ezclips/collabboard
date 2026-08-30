@@ -1615,6 +1615,183 @@ describe('Text Phase 1 floating selection toolbar', () => {
 });
 
 // ============================================================================
+// Area Phase 1 -- floating area toolbar
+// ============================================================================
+describe('Area Phase 1 floating area toolbar', () => {
+  const areaPages = [
+    { pageNumber: 1, text: 'PDF safety PDF\nLiteral [brackets] and (parentheses).', widthPoints: 595, heightPoints: 842, rotation: 0 },
+    { pageNumber: 2, text: 'pdf appears on the second page.', widthPoints: 595, heightPoints: 842, rotation: 0 },
+  ];
+
+  /** The exact jsdom layout hack the selector's own suite and P6J-F9-D use. */
+  function layOutImages(container: HTMLElement) {
+    for (const image of Array.from(container.querySelectorAll('img'))) {
+      const layout: Record<string, unknown> = {
+        complete: true, naturalWidth: 1000, naturalHeight: 1415,
+        clientLeft: 1, clientTop: 1, clientWidth: 500, clientHeight: 700, offsetLeft: 0, offsetTop: 0,
+      };
+      for (const [key, value] of Object.entries(layout)) Object.defineProperty(image, key, { value, configurable: true });
+      act(() => { image.dispatchEvent(new Event('load')); });
+    }
+  }
+
+  function mountAreaReader(props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {}) {
+    const onCreateNoteFromPage = vi.fn();
+    const container = mountWith({
+      documentId: 'doc-1', boardId: 'board-1', pages: areaPages, onCreateNoteFromPage, ...props,
+    });
+    layOutImages(container);
+    return { container, onCreateNoteFromPage };
+  }
+
+  const selectAreaToggle = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Select area') as HTMLButtonElement;
+  const regionLayer = (container: HTMLElement, page: number) =>
+    container.querySelector(`[data-page-number="${page}"] [data-knowledge-region-layer]`);
+  const areaToolbar = (container: HTMLElement) => container.querySelector('[data-knowledge-area-toolbar]');
+  const areaGrip = (container: HTMLElement) =>
+    areaToolbar(container)?.querySelector('[aria-label="Drag selected PDF area to the canvas"]') ?? null;
+
+  /** jsdom has no PointerEvent constructor -- pointer fields added by hand. */
+  function firePointer(target: Element, type: string, clientX: number, clientY: number) {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY, button: 0 });
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    Object.defineProperty(event, 'isPrimary', { value: true });
+    Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+    act(() => { target.dispatchEvent(event); });
+  }
+
+  /**
+   * Content box is {left:1, top:1, width:500, height:700} (see layOutImages).
+   * Drags from normalised (0.1, 0.1) to (0.5, 0.6): a (0.4 x 0.5) rectangle.
+   */
+  function armRectangle(container: HTMLElement, page: number) {
+    act(() => { selectAreaToggle(container).click(); });
+    const layer = regionLayer(container, page)!;
+    firePointer(layer, 'pointerdown', 51, 71);
+    firePointer(layer, 'pointermove', 251, 421);
+    firePointer(layer, 'pointerup', 251, 421);
+  }
+
+  it('1: Select area arms exactly one rectangle', () => {
+    const { container } = mountAreaReader();
+    armRectangle(container, 1);
+    expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(1);
+  });
+
+  it('2: an armed area shows ONE floating area toolbar', () => {
+    const { container } = mountAreaReader();
+    expect(areaToolbar(container)).toBeNull();
+    armRectangle(container, 1);
+    expect(areaToolbar(container)).not.toBeNull();
+  });
+
+  it('3: the area toolbar lives outside the canonical text root AND outside the region pointer layer', () => {
+    const { container } = mountAreaReader();
+    armRectangle(container, 1);
+    const toolbar = areaToolbar(container)!;
+    const layer = regionLayer(container, 1)!;
+    expect(layer.contains(toolbar)).toBe(false);
+    expect(toolbar.closest('[data-knowledge-page-text-root]')).toBeNull();
+    expect(toolbar.closest('[data-knowledge-region-layer]')).toBeNull();
+  });
+
+  it('4/5: entering area mode clears a prior text-selection toolbar, and the two never coexist', () => {
+    const { container } = mountAreaReader();
+    const pageOne = pageRoot(container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+    finishSelectionOn(pageOne);
+    expect(selectionToolbar(container)).not.toBeNull();
+
+    armRectangle(container, 1);
+    expect(selectionToolbar(container)).toBeNull();
+    expect(areaToolbar(container)).not.toBeNull();
+  });
+
+  it('6: the old page-header "Create Note from area" and "Clear" controls are gone', () => {
+    const { container } = mountAreaReader();
+    armRectangle(container, 1);
+    const section = container.querySelector('[data-page-number="1"]')!;
+    const labels = Array.from(section.querySelectorAll('button')).map((b) => b.textContent);
+    expect(labels).not.toContain('Create Note from area');
+    // The old per-page "Clear" button (distinct from the toolbar's own) is gone.
+    expect(section.querySelector('button[aria-label^="Clear selected area on page"]')).toBeNull();
+  });
+
+  it('7: the ordinary page-level Create Note remains available', () => {
+    const { container } = mountAreaReader();
+    expect(createNoteButton(container, 2).textContent).toBe('Create Note');
+  });
+
+  it('8/9/10: the area grip emits the SAME Knowledge MIME with kind:area and only region/rotation evidence', () => {
+    const { container } = mountAreaReader();
+    armRectangle(container, 1);
+    const { transfer } = dragFrom(areaGrip(container)!);
+    const payload = JSON.parse(transfer.getData(CLIP_MIME));
+    expect(payload.kind).toBe('area');
+    expect(payload.sourceDocumentId).toBe('doc-1');
+    expect(payload.originalFilename).toBe('EMG_checklist.pdf');
+    expect(payload.pageNumber).toBe(1);
+    expect(payload.region).toEqual({ x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+    expect(payload.appliedRotation).toBe(0);
+    expect(Object.keys(payload).sort()).toEqual([
+      'appliedRotation', 'kind', 'originalFilename', 'pageNumber', 'region', 'sourceDocumentId',
+    ]);
+  });
+
+  it('11: text drag/MIME behavior is unchanged by the area arm existing', () => {
+    const { container } = mountAreaReader();
+    const pageOne = pageRoot(container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+    finishSelectionOn(pageOne);
+    const { transfer } = dragFrom(selectionGrip(container)!);
+    expect(JSON.parse(transfer.getData(CLIP_MIME)).kind).toBe('text');
+  });
+
+  it('17: clicking Note Post in the area toolbar calls onCreateNoteFromPage with the armed region', () => {
+    const { container, onCreateNoteFromPage } = mountAreaReader();
+    armRectangle(container, 1);
+    const noteButton = areaToolbar(container)!
+      .querySelector('button[aria-label^="Create Note from selected area"]') as HTMLButtonElement;
+    act(() => noteButton.click());
+    expect(onCreateNoteFromPage).toHaveBeenCalledWith({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: '',
+      selection: null,
+      region: { region: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 }, appliedRotation: 0 },
+      topStripColor: null,
+    });
+  });
+
+  it('21: choosing a toolbar color seeds topStripColor on the Note Post call, never a second field', () => {
+    const { container, onCreateNoteFromPage } = mountAreaReader();
+    armRectangle(container, 1);
+    const swatch = areaToolbar(container)!.querySelector('button[aria-label^="Highlight color"]') as HTMLButtonElement;
+    act(() => swatch.click());
+    const noteButton = areaToolbar(container)!
+      .querySelector('button[aria-label^="Create Note from selected area"]') as HTMLButtonElement;
+    act(() => noteButton.click());
+    const call = onCreateNoteFromPage.mock.calls[0][0];
+    expect(call.topStripColor).toBe(swatch.getAttribute('aria-label')!.replace('Highlight color ', ''));
+    expect(call.region).toEqual({ region: { x: 0.1, y: 0.1, width: 0.4, height: 0.5 }, appliedRotation: 0 });
+  });
+
+  it('R: Clear only clears the armed region -- it creates nothing and stays in Select-area mode', () => {
+    const { container, onCreateNoteFromPage } = mountAreaReader();
+    armRectangle(container, 1);
+    const clearButton = areaToolbar(container)!.querySelector('button[aria-label="Clear selected area"]') as HTMLButtonElement;
+    act(() => clearButton.click());
+    expect(areaToolbar(container)).toBeNull();
+    expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(0);
+    expect(onCreateNoteFromPage).not.toHaveBeenCalled();
+    // Still in Select-area mode: the toggle button reads pressed.
+    expect(selectAreaToggle(container).getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+// ============================================================================
 // P6J-F8-B3 -- source highlights wearing the citing Note's card colour
 // ============================================================================
 function mountWithNoteColors(

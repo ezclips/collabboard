@@ -38,6 +38,7 @@ import {
 import { toast } from 'sonner';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import { useKnowledgeSourceReferencesForPadlet } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 export interface CanvasModalsProps {
@@ -47,6 +48,14 @@ export interface CanvasModalsProps {
    * forwards a click. No fetching, no Supabase, no persistence here.
    */
   onOpenSourceReference?: (reference: SourceReference) => void;
+  /**
+   * Area Phase 1. The SAME staged draft reference Text Phase 1 already
+   * threads through `usePadletSave`, read here ONLY to derive a transient
+   * pre-save area preview -- null for a text source Note, an ordinary Note,
+   * or once the editor closes (the existing cleanup effect already clears
+   * this on `!isNoteEditorOpen`).
+   */
+  sourceNoteReference?: KnowledgeSourceReferenceDraft | null;
   // Editor open/close
   isNoteEditorOpen: boolean;
   setIsNoteEditorOpen: (v: boolean) => void;
@@ -146,6 +155,7 @@ export default function CanvasModals({
   handleDeleteChildFromContainer,
   fetchData, updatePadletById,
   onOpenSourceReference,
+  sourceNoteReference = null,
 }: CanvasModalsProps) {
   // P6J-F6-B2 -- the edited Note's provenance, read from the board index.
   // A brand-new Note has the sentinel id 'new' and no row yet, so it can
@@ -154,6 +164,18 @@ export default function CanvasModals({
   const noteSourceReferences = useKnowledgeSourceReferencesForPadlet(
     padletToEdit?.id && padletToEdit.id !== 'new' ? String(padletToEdit.id) : null,
   );
+  // Area Phase 1. A region preview exists ONLY when the staged draft carries
+  // both a region and the rotation it was proved against -- a text source
+  // Note's draft has neither, and an ordinary Note has no staged draft at all.
+  const sourceRegionPreview = sourceNoteReference?.region && sourceNoteReference.appliedRotation !== null && canvasId
+    ? {
+      boardId: canvasId,
+      sourceDocumentId: sourceNoteReference.sourceDocumentId,
+      pageNumber: sourceNoteReference.pageStart,
+      region: sourceNoteReference.region,
+      appliedRotation: sourceNoteReference.appliedRotation,
+    }
+    : null;
   // Derive locked mode/subtype for regeneration — only lock when an existing
   // structured envelope is present (i.e. editing an existing AI card, not new).
   const existingAIContent = extractAIContentFromPadletMetadata(padletToEdit?.metadata);
@@ -216,6 +238,7 @@ export default function CanvasModals({
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}
           initialTextColor={padletToEdit?.metadata?.textColor}
           initialTopStrip={padletToEdit?.metadata?.topStrip}
+          initialSourceRegionPreview={padletToEdit?.id === 'new' ? sourceRegionPreview : null}
           initialTitleStyle={padletToEdit?.metadata?.titleStyle as any}
           initialCommentTitle={typeof padletToEdit?.metadata?.commentTitle === 'string' ? padletToEdit.metadata.commentTitle : undefined}
           initialCommentTitleStyle={padletToEdit?.metadata?.commentTitleStyle as any}

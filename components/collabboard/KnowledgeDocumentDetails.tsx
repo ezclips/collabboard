@@ -623,6 +623,29 @@ export default function KnowledgeDocumentDetails({
     return pages.some((page) => page.pageNumber === armedRegion.pageNumber) ? armedRegion : null;
   }, [armedRegion, pages]);
 
+  // Area Phase 1. The armed rectangle's own DOM node is the positioning
+  // source -- re-measured, not remembered, since (unlike a mouseup-captured
+  // text Range) the rectangle stays live on screen and the reader scrolls
+  // under it.
+  const [areaToolbarRect, setAreaToolbarRect] = useState<{ top: number; left: number; bottom: number } | null>(null);
+  useEffect(() => {
+    if (activeRegion === null) { setAreaToolbarRect(null); return; }
+    const container = pagesContainerRef.current;
+    const measure = () => {
+      const rectangle = container?.querySelector(
+        `[data-knowledge-region-rectangle="${activeRegion.pageNumber}"]`,
+      );
+      setAreaToolbarRect(rectangle instanceof HTMLElement ? rectangle.getBoundingClientRect() : null);
+    };
+    measure();
+    container?.addEventListener('scroll', measure);
+    window.addEventListener('resize', measure);
+    return () => {
+      container?.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+    };
+  }, [activeRegion]);
+
   useEffect(() => {
     activeMatchRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [activeMatchIndex, matches]);
@@ -785,8 +808,21 @@ export default function KnowledgeDocumentDetails({
             className={`rounded border px-1.5 py-0.5 text-[11px] ${regionMode
               ? 'border-blue-300 bg-blue-50 text-blue-700'
               : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            // Leaving the mode abandons whatever was drawn in it.
-            onClick={() => { setRegionMode((current) => !current); setArmedRegion(null); }}
+            // Leaving the mode abandons whatever was drawn in it. Area wins
+            // while active: entering it drops any captured text-selection
+            // toolbar state so the two floating toolbars can never coexist.
+            onClick={() => {
+              setRegionMode((current) => {
+                const next = !current;
+                if (next) {
+                  setCapturedSelection(null);
+                  setSelectionColor(null);
+                  setSelectionRect(null);
+                }
+                return next;
+              });
+              setArmedRegion(null);
+            }}
           >
             Select area
           </button>
@@ -848,46 +884,12 @@ export default function KnowledgeDocumentDetails({
                     Create Note
                   </button>
                 ) : null}
-                {/* Only for the page owning the armed rectangle, the F8 clip
-                    chip's rule, in the same cluster: no new toolbar. */}
-                {onCreateNoteFromPage && documentId && pageRegion ? (
-                  <>
-                    <button
-                      type="button"
-                      aria-label={`Create Note from selected area on page ${page.pageNumber}`}
-                      className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100 hover:text-blue-900"
-                      onClick={() => {
-                        onCreateNoteFromPage({
-                          sourceDocumentId: documentId,
-                          originalFilename,
-                          pageNumber: page.pageNumber,
-                          // Empty by design, as the F8 clip path does: a region
-                          // quotes nothing, and passing the text would leave a
-                          // page snapshot one branch away from a rectangle
-                          // nobody read it from.
-                          pageText: '',
-                          selection: null,
-                          region: {
-                            region: pageRegion.region,
-                            appliedRotation: pageRegion.appliedRotation,
-                          },
-                        });
-                        setArmedRegion(null);
-                        setRegionMode(false);
-                      }}
-                    >
-                      Create Note from area
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Clear selected area on page ${page.pageNumber}`}
-                      className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                      onClick={() => setArmedRegion(null)}
-                    >
-                      Clear
-                    </button>
-                  </>
-                ) : null}
+                {/*
+                  Area Phase 1 -- an armed rectangle's affordances moved to the
+                  ONE floating area toolbar (below, outside every page and
+                  outside the region pointer layer), exactly as Text Phase 1's
+                  own selection toolbar already works.
+                */}
                 </div>
               </div>
               {/*
@@ -908,8 +910,12 @@ export default function KnowledgeDocumentDetails({
                   enabled={regionMode && onCreateNoteFromPage !== undefined}
                   armedRegion={pageRegion?.region ?? null}
                   highlightRegion={arrivalRegion?.pageNumber === page.pageNumber ? arrivalRegion.region : null}
-                  onArm={(region, appliedRotation) =>
-                    setArmedRegion({ pageNumber: page.pageNumber, region, appliedRotation })}
+                  onArm={(region, appliedRotation) => {
+                    setArmedRegion({ pageNumber: page.pageNumber, region, appliedRotation });
+                    // A new rectangle is a new gesture: a prior color choice
+                    // belonged to whatever was armed before it.
+                    setSelectionColor(null);
+                  }}
                   onClear={() => setArmedRegion(null)}
                 />
               ) : null}
@@ -943,7 +949,7 @@ export default function KnowledgeDocumentDetails({
         not from a live selection -- pressing a button here would otherwise
         collapse the very selection it is acting on.
       */}
-      {onCreateNoteFromPage && documentId && activeSelection ? (
+      {onCreateNoteFromPage && documentId && activeSelection && !regionMode ? (
         <div
           data-knowledge-selection-toolbar="true"
           style={selectionRect
@@ -1026,6 +1032,105 @@ export default function KnowledgeDocumentDetails({
               onClick={() => setSelectionColor((current) => (current === color ? null : color))}
             />
           ))}
+        </div>
+      ) : null}
+
+      {/*
+        Area Phase 1 -- the ONE floating area toolbar, a SIBLING of the pages
+        container, the region pointer layer AND every page text root: a
+        pointerdown inside [data-knowledge-region-layer] clears/re-arms the
+        rectangle, so this must never mount inside it, and it must add zero
+        characters to any page's canonical textContent like every other
+        floating control here. Positioned from the armed rectangle's own DOM
+        node, re-measured on scroll/resize -- unlike a text Range, the
+        rectangle stays live on screen while the reader is used.
+      */}
+      {onCreateNoteFromPage && documentId && activeRegion ? (
+        <div
+          data-knowledge-area-toolbar="true"
+          style={areaToolbarRect
+            ? {
+              position: 'fixed',
+              left: Math.max(8, areaToolbarRect.left),
+              top: areaToolbarRect.top > 56 ? areaToolbarRect.top - 44 : areaToolbarRect.bottom + 8,
+              zIndex: 50,
+            }
+            : { display: 'none' }}
+          className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            draggable
+            aria-label="Drag selected PDF area to the canvas"
+            title="Drag selected PDF area to the canvas"
+            className="cursor-grab rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 active:cursor-grabbing focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+            onDragStart={(event) => {
+              event.dataTransfer.setData(
+                KNOWLEDGE_SOURCE_CLIP_MIME,
+                buildKnowledgeSourceClipTransfer({
+                  kind: 'area',
+                  sourceDocumentId: documentId,
+                  originalFilename,
+                  pageNumber: activeRegion.pageNumber,
+                  region: activeRegion.region,
+                  appliedRotation: activeRegion.appliedRotation,
+                }),
+              );
+              // Auxiliary hint only, on a SEPARATE type: the dedicated
+              // Knowledge payload above stays exactly as it always was.
+              if (selectionColor) event.dataTransfer.setData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT, selectionColor);
+              event.dataTransfer.effectAllowed = 'copy';
+            }}
+          >
+            <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-label={`Create Note from selected area on page ${activeRegion.pageNumber}`}
+            className="rounded px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+            onClick={() => {
+              onCreateNoteFromPage({
+                sourceDocumentId: documentId,
+                originalFilename,
+                pageNumber: activeRegion.pageNumber,
+                // Empty by design, as the text clip path does: a region quotes
+                // nothing, and passing text would leave a page snapshot one
+                // branch away from a rectangle nobody read it from.
+                pageText: '',
+                selection: null,
+                region: {
+                  region: activeRegion.region,
+                  appliedRotation: activeRegion.appliedRotation,
+                },
+                topStripColor: selectionColor,
+              });
+              setArmedRegion(null);
+              setRegionMode(false);
+            }}
+          >
+            Note Post
+          </button>
+          <div className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+          {KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              aria-label={`Highlight color ${color}`}
+              aria-pressed={selectionColor === color}
+              className={`h-4 w-4 shrink-0 rounded-full border ${selectionColor === color ? 'ring-2 ring-offset-1 ring-gray-400' : 'border-gray-300'}`}
+              style={{ backgroundColor: color }}
+              onClick={() => setSelectionColor((current) => (current === color ? null : color))}
+            />
+          ))}
+          <div className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label="Clear selected area"
+            className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+            onClick={() => setArmedRegion(null)}
+          >
+            Clear
+          </button>
         </div>
       ) : null}
 

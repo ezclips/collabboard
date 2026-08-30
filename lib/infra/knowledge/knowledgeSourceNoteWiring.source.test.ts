@@ -31,6 +31,9 @@ const drawingLayout = sourceOf('components/collabboard/canvas/layouts/DrawingLay
 const readerDrawer = sourceOf('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
 const documentsList = sourceOf('components/collabboard/KnowledgeDocumentsList.tsx');
 const freeformCards = sourceOf('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+const canvasModals = sourceOf('components/collabboard/canvas/ui/CanvasModals.tsx');
+const noteEditor = sourceOf('components/collabboard/editors/NoteEditor.tsx');
+const clipPayload = sourceOf('lib/domain/knowledge/knowledgeSourceClipPayload.ts');
 
 /** Everything between an anchor and the next `count` characters of source. */
 function after(source: string, anchor: string, count = 900): string {
@@ -239,7 +242,7 @@ describe('P6J-F5 source note wiring', () => {
   it('C8: the reader adds no second failure channel for regions', () => {
     // The confirm control calls the existing callback and returns; the reference
     // outcome is reported exactly where every other mode reports it.
-    const confirm = after(details, 'Create Note from area', 200);
+    const confirm = after(details, 'Create Note from selected area', 200);
     expect(confirm).not.toContain('fetch(');
     expect(confirm).not.toContain('toast');
     for (const forbidden of ['fetch(', 'supabase', 'knowledge/references']) {
@@ -768,7 +771,10 @@ describe('KNI-R2 existing-Note source clip drop', () => {
   it('parses the one dedicated clip, claims synchronously, then validates the target type', () => {
     const handler = existingNoteHandler();
     const parseIndex = handler.indexOf('parseKnowledgeSourceClipPayload(');
-    const bailIndex = handler.indexOf('if (!payload) return false;');
+    // KNI-R2 is text-only: an area clip is left unclaimed here (falling
+    // through to the same modal-first path an empty-canvas drop uses),
+    // rather than being appended to an existing Note's text body.
+    const bailIndex = handler.indexOf("if (!payload || payload.kind !== 'text') return false;");
     const stopIndex = handler.indexOf('event.stopPropagation();');
     const typeGuardIndex = handler.indexOf("targetPadlet.type !== 'text' && targetPadlet.type !== 'note'");
     const capabilityIndex = handler.indexOf('if (!canUseCanvasToolbar || !canvasId) return true;');
@@ -808,6 +814,63 @@ describe('KNI-R2 existing-Note source clip drop', () => {
       for (const forbidden of ['parseKnowledgeSourceClipPayload', 'appendKnowledgeSourceSelectionToNoteContent', 'persistKnowledgeSourceReference']) {
         expect(source, `${name}:${forbidden}`).not.toContain(forbidden);
       }
+    }
+  });
+});
+
+// ==========================================================================
+// Area Phase 1 -- kind-agnostic reuse, preview wiring, no new write surface
+// ==========================================================================
+describe('Area Phase 1 wiring', () => {
+  const dropHandler = () => after(canvasClient, 'const handleKnowledgeSourceClipDrop', 2600);
+
+  it('the empty-canvas drop handler is kind-agnostic: no area-specific branch of its own', () => {
+    const handler = dropHandler();
+    // The SAME two calls Text Phase 1 already proved, unmodified: neither
+    // reads `payload.kind`, `payload.region` or `payload.charStart` directly,
+    // so an area clip reaches this exact path with zero new code here.
+    expect(handler).toContain('knowledgeSourceClipPageRequest(payload)');
+    expect(handler).toContain('buildKnowledgeSourceNoteDraft({');
+    for (const forbidden of ["payload.kind === 'area'", 'payload.region', 'payload.appliedRotation', 'payload.charStart']) {
+      expect(handler, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('adds no second/raw-region crop route or Storage write anywhere on the path', () => {
+    // CanvasClient legitimately owns unrelated Storage/upload authority
+    // elsewhere (Image posts etc.); scoped to the drop handler itself, which
+    // must add none of its own.
+    for (const [name, source] of [
+      ['handleKnowledgeSourceClipDrop', dropHandler()], ['CanvasModals', canvasModals], ['NoteEditor', noteEditor],
+    ] as const) {
+      for (const forbidden of ['/crop?', 'createSignedUrl', 'getPublicUrl', '.storage.from', '@napi-rs/canvas']) {
+        expect(source, `${name}:${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('NoteEditor never gains an Image node or persists preview metadata', () => {
+    for (const forbidden of ['extension-image', 'Image.configure', 'setImage', 'sourceRegionPreview:', 'regionPreview:']) {
+      expect(noteEditor, forbidden).not.toContain(forbidden);
+    }
+    expect(noteEditor).toContain('KnowledgeSourceRegionDraftPreview');
+  });
+
+  it('CanvasModals derives the preview ONLY from the staged draft, gated to a brand-new padlet', () => {
+    const derivation = after(canvasModals, 'const sourceRegionPreview', 400);
+    expect(derivation).toContain('sourceNoteReference?.region');
+    expect(derivation).toContain('sourceNoteReference.appliedRotation !== null');
+    // Never derived from a saved reference list -- that is the OTHER, already-
+    // existing prop (`noteSourceReferences`) this same file also threads.
+    expect(derivation).not.toContain('noteSourceReferences');
+    expect(canvasModals).toContain("initialSourceRegionPreview={padletToEdit?.id === 'new' ? sourceRegionPreview : null}");
+  });
+
+  it('the area MIME arm reuses the EXISTING geometry authorities, never a second implementation', () => {
+    expect(clipPayload).toContain('normalizeStorableRegion(record.region)');
+    expect(clipPayload).toContain('isCanonicalPageRotation(record.appliedRotation)');
+    for (const forbidden of ['sourceRegionToDisplayRegion', 'displayRegionToSourceRegion', 'finalizeRegion']) {
+      expect(clipPayload, forbidden).not.toContain(forbidden);
     }
   });
 });

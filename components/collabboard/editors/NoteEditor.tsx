@@ -14,6 +14,8 @@ import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canva
 import { Palette, PenTool, X, Strikethrough, Trash2, BookOpen } from 'lucide-react';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import { knowledgeSourceEditorLabel } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import KnowledgeSourceRegionDraftPreview from '../KnowledgeSourceRegionDraftPreview';
+import type { KnowledgePageRotation, NormalizedPageRegion } from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 import { ColorPickerContent } from '../ColorPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { contrastIconColor } from '../shells/CardShell';
@@ -75,6 +77,19 @@ interface NoteEditorProps {
   initialTextColor?: string;
   /** Text Phase 1. Seeds the top-stripe control for a brand-new source Note. */
   initialTopStrip?: string;
+  /**
+   * Area Phase 1. A staged (not-yet-saved) area clip's source rectangle,
+   * shown as a transient preview above the editable body. Presentation-only:
+   * never part of the TipTap content, never persisted. Absent for a text
+   * source Note, a saved Note being reopened, or an ordinary Note.
+   */
+  initialSourceRegionPreview?: {
+    readonly boardId: string;
+    readonly sourceDocumentId: string;
+    readonly pageNumber: number;
+    readonly region: NormalizedPageRegion;
+    readonly appliedRotation: KnowledgePageRotation;
+  } | null;
   initialTitleStyle?: CaptionStyle;
   // PATCH 8P.1 -- the Comments PANEL's own title/style (metadata.commentTitle /
   // metadata.commentTitleStyle), distinct from the Note POST's own title
@@ -138,6 +153,7 @@ export default function NoteEditor({
   initialBadgeColor = '#facc15',
   initialTextColor = '#1F2937',
   initialTopStrip,
+  initialSourceRegionPreview = null,
   initialTitleStyle,
   initialCommentTitle,
   initialCommentTitleStyle,
@@ -891,6 +907,15 @@ export default function NoteEditor({
                     maxWidth: '100%',
                   }}
                 >
+                  {initialSourceRegionPreview && (
+                    <KnowledgeSourceRegionDraftPreview
+                      boardId={initialSourceRegionPreview.boardId}
+                      sourceDocumentId={initialSourceRegionPreview.sourceDocumentId}
+                      pageNumber={initialSourceRegionPreview.pageNumber}
+                      region={initialSourceRegionPreview.region}
+                      appliedRotation={initialSourceRegionPreview.appliedRotation}
+                    />
+                  )}
                   <EditorContent
                     editor={editor}
                     className="break-words"

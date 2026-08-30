@@ -4,6 +4,7 @@ import {
   buildKnowledgeSourceClipTransfer,
   knowledgeSourceClipPageRequest,
   parseKnowledgeSourceClipPayload,
+  type KnowledgeSourceAreaClipPayload,
   type KnowledgeSourceClipPayload,
 } from './knowledgeSourceClipPayload';
 import { buildKnowledgeSourceNoteDraft } from './knowledgeSourceNoteDraft';
@@ -149,5 +150,102 @@ describe('knowledge source clip payload', () => {
     for (const forbidden of ['fetch(', 'supabase', 'require(', 'window.', 'document.', 'knowledge/references']) {
       expect(source, forbidden).not.toContain(forbidden);
     }
+  });
+
+  describe('area arm', () => {
+    const VALID_AREA: KnowledgeSourceAreaClipPayload = {
+      kind: 'area',
+      sourceDocumentId: 'bbbbbbbb-2222-4222-8222-222222222222',
+      originalFilename: 'knitting_stitch_patterns.pdf',
+      pageNumber: 1,
+      region: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+      appliedRotation: 90,
+    };
+
+    function areaTransferWith(overrides: Record<string, unknown>): string {
+      return JSON.stringify({ ...VALID_AREA, ...overrides });
+    }
+
+    it('round-trips a valid area clip unchanged', () => {
+      expect(parseKnowledgeSourceClipPayload(buildKnowledgeSourceClipTransfer(VALID_AREA))).toEqual(VALID_AREA);
+    });
+
+    it('keeps only the known area fields, so an injected one cannot ride along', () => {
+      const parsed = parseKnowledgeSourceClipPayload(areaTransferWith({
+        selectedText: 'smuggled text',
+        charStart: 0,
+        charEnd: 1,
+        quoteText: 'client supplied quote',
+      }));
+      expect(parsed).toEqual(VALID_AREA);
+      expect(Object.keys(parsed!).sort()).toEqual([
+        'appliedRotation', 'kind', 'originalFilename', 'pageNumber', 'region', 'sourceDocumentId',
+      ]);
+    });
+
+    it('rejects a missing, malformed or out-of-bounds region', () => {
+      for (const region of [
+        undefined,
+        null,
+        {},
+        { x: 'not-a-number', y: 0, width: 0.5, height: 0.5 },
+        { x: 0, y: 0, width: 0, height: 0.5 }, // zero-size
+        { x: 0.9, y: 0, width: 0.5, height: 0.5 }, // exceeds page bounds
+        { x: Number.NaN, y: 0, width: 0.5, height: 0.5 },
+        { x: 0, y: 0, width: Number.POSITIVE_INFINITY, height: 0.5 },
+        'a string region',
+        [0, 0, 0.5, 0.5],
+      ]) {
+        expect(parseKnowledgeSourceClipPayload(areaTransferWith({ region })), JSON.stringify(region)).toBeNull();
+      }
+    });
+
+    it('rejects an invalid appliedRotation', () => {
+      for (const appliedRotation of [45, -90, 360, 'ninety', null, undefined, 90.5]) {
+        expect(parseKnowledgeSourceClipPayload(areaTransferWith({ appliedRotation })), String(appliedRotation)).toBeNull();
+      }
+    });
+
+    it('rejects an area payload carrying only text fields and no valid area fields', () => {
+      expect(parseKnowledgeSourceClipPayload(JSON.stringify({
+        kind: 'area',
+        sourceDocumentId: VALID_AREA.sourceDocumentId,
+        originalFilename: VALID_AREA.originalFilename,
+        pageNumber: VALID_AREA.pageNumber,
+        charStart: 0,
+        charEnd: 5,
+        selectedText: 'hello',
+      }))).toBeNull();
+    });
+
+    it('builds a region-only page request through the SAME mapper as text', () => {
+      const request = knowledgeSourceClipPageRequest(VALID_AREA);
+      expect(request.sourceDocumentId).toBe(VALID_AREA.sourceDocumentId);
+      expect(request.originalFilename).toBe(VALID_AREA.originalFilename);
+      expect(request.pageNumber).toBe(VALID_AREA.pageNumber);
+      expect(request.pageText).toBe('');
+      expect(request.selection).toBeNull();
+      expect(request.region).toEqual({
+        region: VALID_AREA.region,
+        appliedRotation: VALID_AREA.appliedRotation,
+      });
+    });
+
+    it('reaches buildKnowledgeSourceNoteDraft with blank content and null quote evidence', () => {
+      const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(VALID_AREA));
+      expect(draft.title).toBe('knitting_stitch_patterns.pdf');
+      expect(draft.content).toBe('');
+      expect(draft.sourceReference).toEqual({
+        sourceDocumentId: VALID_AREA.sourceDocumentId,
+        pageStart: 1,
+        pageEnd: 1,
+        quoteText: null,
+        charStart: null,
+        charEnd: null,
+        selectedText: null,
+        region: VALID_AREA.region,
+        appliedRotation: VALID_AREA.appliedRotation,
+      });
+    });
   });
 });
