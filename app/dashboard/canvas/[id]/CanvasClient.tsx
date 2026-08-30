@@ -94,7 +94,10 @@ import {
   knowledgeSourceClipPageRequest,
   parseKnowledgeSourceClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
-import { KNOWLEDGE_SOURCE_CLIP_COLOR_HINT } from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
+import {
+  KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
+  isKnowledgeSourceNoteTopStripColor,
+} from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
 import {
   EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX,
   buildKnowledgeSourceReferenceIndex,
@@ -6037,8 +6040,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     // Auxiliary hint only, on its own type -- the dedicated Knowledge payload
-    // above stays exactly what it always was, unwidened.
-    const colorHint = event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT) || null;
+    // above stays exactly what it always was, unwidened. Missing OR invalid
+    // (a forged/foreign drag can set this to anything) both mean "no color
+    // chosen" -- never an otherwise-valid clip's rejection reason.
+    const rawColorHint = event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT);
+    const colorHint = isKnowledgeSourceNoteTopStripColor(rawColorHint) ? rawColorHint : null;
     // The SAME builder the click path uses -- one draft authority, two gestures.
     const draft = buildKnowledgeSourceNoteDraft({
       ...knowledgeSourceClipPageRequest(payload),

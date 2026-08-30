@@ -649,6 +649,21 @@ describe('P6J-F8-B1 source clip drop', () => {
     expect(canvasClient).toContain("from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice'");
   });
 
+  it('a forged or malformed color hint is validated away rather than trusted raw', () => {
+    const handler = dropHandler();
+    // The exported validator, not a hand-rolled check -- one place decides
+    // what a top-strip color is, reused by the toolbar's own palette.
+    expect(canvasClient).toContain('isKnowledgeSourceNoteTopStripColor');
+    expect(handler).toContain('isKnowledgeSourceNoteTopStripColor(rawColorHint)');
+    // The raw transfer value is read once, then only ever used through the
+    // validated `colorHint` -- never passed to the draft builder directly.
+    expect(handler).not.toContain('topStripColor: rawColorHint');
+    const validateIndex = handler.indexOf('isKnowledgeSourceNoteTopStripColor(rawColorHint)');
+    const useIndex = handler.indexOf('topStripColor: colorHint');
+    expect(validateIndex).toBeGreaterThan(-1);
+    expect(useIndex).toBeGreaterThan(validateIndex);
+  });
+
   it('computes the real drop point in freeform, and refuses coordinate-less layouts', () => {
     const handler = dropHandler();
     // The existing conversion and the existing bound, not a second geometry.
