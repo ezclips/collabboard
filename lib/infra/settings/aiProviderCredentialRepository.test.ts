@@ -86,6 +86,19 @@ function createRecordingClient(options: FakeOptions) {
         filters.push([column, value]);
         return builder;
       },
+      // Phase 2A: updateConnectionMetadata / markConnectionVerified read the
+      // updated row back through an explicit safe projection.
+      select(columns: string) {
+        return {
+          async maybeSingle() {
+            queries.push({ table, op, columns, filters, payload });
+            return {
+              data: options.ownedConnection ? { ...options.ownedConnection, ...payload } : null,
+              error: null,
+            };
+          },
+        };
+      },
       then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
         return settle().then(onFulfilled, onRejected);
       },
@@ -322,6 +335,79 @@ describe('SupabaseAIProviderCredentialRepository', () => {
 
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error.code).toBe('unavailable');
+  });
+});
+
+describe('SupabaseAIProviderCredentialRepository -- Phase 2A safe metadata', () => {
+  it('updateConnectionMetadata scopes the write to the owner', async () => {
+    const { queries, repository } = createRecordingClient({ ownedConnection: connectionRow });
+
+    await repository.updateConnectionMetadata(OWNER, CONNECTION_ID, { displayName: 'Renamed' });
+
+    const update = queries.find((query) => query.op === 'update');
+    expect(update?.table).toBe('ai_provider_connections');
+    expect(filtersOf(update!)).toEqual({ id: CONNECTION_ID, user_id: OWNER });
+  });
+
+  it('updateConnectionMetadata writes only client-mutable fields', async () => {
+    const { queries, repository } = createRecordingClient({ ownedConnection: connectionRow });
+
+    await repository.updateConnectionMetadata(OWNER, CONNECTION_ID, { displayName: 'Renamed' });
+
+    const payload = queries.find((query) => query.op === 'update')?.payload ?? {};
+    expect(Object.keys(payload).sort()).toEqual(['display_name', 'updated_at']);
+    expect(payload).not.toHaveProperty('provider_type');
+    expect(payload).not.toHaveProperty('key_hint');
+    expect(payload).not.toHaveProperty('user_id');
+  });
+
+  it('changing the default model clears verification', async () => {
+    const { queries, repository } = createRecordingClient({ ownedConnection: connectionRow });
+
+    await repository.updateConnectionMetadata(OWNER, CONNECTION_ID, { defaultModel: 'gpt-4.1' });
+
+    const payload = queries.find((query) => query.op === 'update')?.payload ?? {};
+    expect(payload.default_model).toBe('gpt-4.1');
+    expect(payload.verified_at).toBeNull();
+  });
+
+  it('renaming alone leaves verification intact', async () => {
+    const { queries, repository } = createRecordingClient({ ownedConnection: connectionRow });
+
+    await repository.updateConnectionMetadata(OWNER, CONNECTION_ID, { displayName: 'Renamed' });
+
+    const payload = queries.find((query) => query.op === 'update')?.payload ?? {};
+    expect('verified_at' in payload).toBe(false);
+  });
+
+  it('a connection the caller does not own yields null, not a row', async () => {
+    const { repository } = createRecordingClient({ ownedConnection: null });
+
+    const result = await repository.updateConnectionMetadata(OWNER, CONNECTION_ID, { displayName: 'x' });
+
+    expect(result.ok && result.value).toBeNull();
+  });
+
+  it('markConnectionVerified stamps verified_at for the owner only', async () => {
+    const { queries, repository } = createRecordingClient({ ownedConnection: connectionRow });
+
+    await repository.markConnectionVerified(OWNER, CONNECTION_ID);
+
+    const update = queries.find((query) => query.op === 'update');
+    expect(filtersOf(update!)).toEqual({ id: CONNECTION_ID, user_id: OWNER });
+    expect(update?.payload?.verified_at).toBeTruthy();
+  });
+
+  it('neither safe-metadata path reads or returns credential material', async () => {
+    const { queries, repository } = createRecordingClient({ ownedConnection: connectionRow });
+
+    await repository.updateConnectionMetadata(OWNER, CONNECTION_ID, { displayName: 'Renamed' });
+    await repository.markConnectionVerified(OWNER, CONNECTION_ID);
+
+    expect(queries.some((query) => query.table === 'ai_provider_credentials')).toBe(false);
+    for (const query of queries) {
+      expect(query.columns ?? '').not.toMatch(/api_key|encrypted/i);
+    }
   });
 });
 

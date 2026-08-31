@@ -61,6 +61,7 @@ interface SelectQuery<T> extends PromiseLike<{ data: readonly T[] | null; error:
 
 interface MutationQuery extends PromiseLike<{ error: SupabaseErrorLike | null }> {
   eq(column: string, value: unknown): MutationQuery;
+  select(columns: string): SelectQuery<ConnectionRow>;
 }
 
 interface InsertQuery<T> {
@@ -249,6 +250,69 @@ export class SupabaseAIProviderCredentialRepository {
     } catch (cause) {
       return err(domainError('unavailable', 'Could not decrypt the provider credential', { cause }));
     }
+  }
+
+  /**
+   * Updates the two client-mutable metadata fields, ownership-scoped. Nothing
+   * else is writable through this path: provider_type, key_hint, user_id and
+   * verified_at are absent by construction, so a client cannot reach them
+   * however the request body is shaped.
+   *
+   * Changing the default model clears verified_at: what Test Connection
+   * verified was a provider/model pair, and the model half just changed.
+   */
+  async updateConnectionMetadata(
+    userId: UserId,
+    connectionId: string,
+    changes: { readonly displayName?: string; readonly defaultModel?: string | null },
+  ): Promise<Result<AIProviderConnection | null, DomainError>> {
+    const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (changes.displayName !== undefined) values.display_name = changes.displayName;
+    if (changes.defaultModel !== undefined) {
+      values.default_model = changes.defaultModel;
+      values.verified_at = null;
+    }
+
+    const { data, error } = await this.client
+      .from('ai_provider_connections')
+      .update(values)
+      .eq('id', connectionId)
+      .eq('user_id', userId)
+      .select(SAFE_CONNECTION_COLUMNS)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === UNIQUE_VIOLATION) {
+        return err(domainError('conflict', 'A provider connection with that name already exists'));
+      }
+      return err(domainError('unavailable', 'Could not update the provider connection', { cause: error }));
+    }
+
+    return ok(data ? toConnection(data) : null);
+  }
+
+  /**
+   * Records a successful Test Connection. Server-owned: verified_at has no
+   * client-writable path anywhere in this repository.
+   */
+  async markConnectionVerified(
+    userId: UserId,
+    connectionId: string,
+  ): Promise<Result<AIProviderConnection | null, DomainError>> {
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from('ai_provider_connections')
+      .update({ verified_at: now, updated_at: now })
+      .eq('id', connectionId)
+      .eq('user_id', userId)
+      .select(SAFE_CONNECTION_COLUMNS)
+      .maybeSingle();
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the provider connection', { cause: error }));
+    }
+
+    return ok(data ? toConnection(data) : null);
   }
 
   /** Refreshes the masked hint after a key replacement, ownership-scoped. */

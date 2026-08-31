@@ -42,6 +42,24 @@ export default [
               message:
                 'UI code must not import Supabase directly (PATCH-002 freeze). Use the domain layer (lib/domain) or, until it covers this feature, the legacy lib/supabase-provider. See .fable5/CLAUDE.md rule 1.',
             },
+            {
+              // BYOK Phase 2A. lib/server holds plaintext provider API keys,
+              // the credential cipher's master key and the service-role
+              // client; anything importing it that reaches a browser bundle
+              // leaks secrets. API routes are exempt by the global ignores
+              // above (app/api/** and **/route.ts), which is exactly the
+              // intended path: UI -> fetch -> route handler -> lib/server.
+              group: [
+                '@/lib/server',
+                '@/lib/server/*',
+                '@/lib/server/**',
+                '**/lib/server',
+                '**/lib/server/*',
+                '**/lib/server/**',
+              ],
+              message:
+                'UI code must not import lib/server (BYOK Phase 2A): those modules handle plaintext API keys, the credential master key and the service-role client. Call an authenticated API route under app/api/** instead.',
+            },
           ],
         },
       ],
