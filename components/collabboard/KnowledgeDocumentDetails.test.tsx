@@ -10,6 +10,7 @@ import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceCont
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
+import { KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS } from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
 
 const pages = [
   { pageNumber: 1, text: 'PDF safety PDF\nLiteral [brackets] and (parentheses).' },
@@ -2196,5 +2197,143 @@ describe('P6J-F9-D region arrival', () => {
     const ref = regionRef(2, { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
     mountRegionArrival([ref], { initialPageNumber: 2, initialSourceReferenceId: ref.id, initialSourceRequestId: 1 });
     expect(scrolledElements().some((el) => el.getAttribute('data-page-number') === '2')).toBe(true);
+  });
+});
+
+// ============================================================================
+// PDF Source AI Phase 1 -- the ONE AI activation button, in the SAME toolbar
+// ============================================================================
+
+function mountReaderWithAi(props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {}) {
+  const onCreateNoteFromPage = vi.fn();
+  const onAiFromSelection = vi.fn();
+  const container = mountWith({ documentId: 'doc-1', onCreateNoteFromPage, onAiFromSelection, ...props });
+  return { container, onCreateNoteFromPage, onAiFromSelection };
+}
+
+function aiButton(container: HTMLElement): HTMLButtonElement | null {
+  return selectionToolbar(container)?.querySelector('button[aria-label="Ask AI about the selected text"]') ?? null;
+}
+
+describe('KnowledgeDocumentDetails PDF Source AI Phase 1 toolbar', () => {
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('does not appear with no selection', () => {
+    const { container } = mountReaderWithAi();
+    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(aiButton(container)).toBeNull();
+  });
+
+  it('appears in the SAME floating toolbar as Note Post once an exact selection is captured', () => {
+    const { container } = mountReaderWithAi();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    const button = aiButton(container);
+    expect(button).not.toBeNull();
+    expect(button!.closest('[data-knowledge-selection-toolbar]')).toBe(selectionToolbar(container));
+    // Exactly one floating toolbar -- never a second one for AI.
+    expect(container.querySelectorAll('[data-knowledge-selection-toolbar]')).toHaveLength(1);
+  });
+
+  it('is hidden below lg via the same responsive class convention as the rest of the toolbar', () => {
+    const { container } = mountReaderWithAi();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    const button = aiButton(container)!;
+    expect(button.className).toContain('hidden');
+    expect(button.className).toContain('lg:inline-flex');
+  });
+
+  it('disappears once entering region mode clears the captured text selection', () => {
+    const { container } = mountReaderWithAi();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+    expect(aiButton(container)).not.toBeNull();
+
+    const selectArea = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Select area')!;
+    act(() => selectArea.click());
+
+    expect(aiButton(container)).toBeNull();
+  });
+
+  it('is absent entirely with no onAiFromSelection, even with a valid selection -- Note Post is unaffected', () => {
+    const { container } = mountReaderWithAi({ onAiFromSelection: undefined });
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    expect(aiButton(container)).toBeNull();
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+  });
+
+  it('clicking it forwards the EXACT same request shape Note Post would build, including the chosen color', () => {
+    const { container, onAiFromSelection, onCreateNoteFromPage } = mountReaderWithAi();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    const chosenColor = KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS[0];
+    const swatch = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.getAttribute('aria-label') === `Highlight color ${chosenColor}`)!;
+    act(() => swatch.click());
+
+    act(() => aiButton(container)!.click());
+
+    expect(onAiFromSelection).toHaveBeenCalledTimes(1);
+    expect(onCreateNoteFromPage).not.toHaveBeenCalled();
+    expect(onAiFromSelection.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: pages[0].text,
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+      topStripColor: chosenColor,
+    });
+  });
+
+  it('performs no write and makes no network request of its own -- it only forwards the request', () => {
+    const { container, onAiFromSelection } = mountReaderWithAi();
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+
+    act(() => aiButton(container)!.click());
+
+    expect(onAiFromSelection).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('disables itself and forwards nothing for a selection over the 4,000-character AI limit, without truncating it', () => {
+    const longText = 'x'.repeat(4001);
+    const { container, onAiFromSelection } = mountReaderWithAi({ pages: [{ pageNumber: 1, text: longText }], pageCount: 1 });
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 0, root.firstChild!, longText.length);
+    finishSelectionOn(root);
+
+    const button = aiButton(container)!;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe('AI supports selections up to 4,000 characters');
+
+    act(() => button.click());
+    expect(onAiFromSelection).not.toHaveBeenCalled();
+    // Note Post is unaffected -- the exact, untruncated selection stays there.
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+  });
+
+  it('permits exactly 4,000 characters -- the boundary is inclusive', () => {
+    const boundaryText = 'y'.repeat(4000);
+    const { container, onAiFromSelection } = mountReaderWithAi({ pages: [{ pageNumber: 1, text: boundaryText }], pageCount: 1 });
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 0, root.firstChild!, boundaryText.length);
+    finishSelectionOn(root);
+
+    expect(aiButton(container)!.disabled).toBe(false);
   });
 });

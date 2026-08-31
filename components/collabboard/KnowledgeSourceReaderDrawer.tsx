@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
+import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type {
   KnowledgeDocumentOpenRequest,
@@ -37,8 +38,13 @@ export interface KnowledgeSourceReaderDrawerProps {
   sourceOpenRequest?: KnowledgeSourceOpenRequest | null;
   /** A library or semantic-result pick. Same once-per-requestId contract. */
   documentOpenRequest?: KnowledgeDocumentOpenRequest | null;
-  /** Forwarded verbatim. The canvas still owns placement and every write. */
-  onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
+  /**
+   * Forwarded verbatim for an ordinary Note Post. PDF Source AI Phase 1 adds
+   * the optional second argument ONLY for the AI panel's own Note Post -- the
+   * canvas still owns placement and every write; this only lets it seed the
+   * new Note's initial body with the AI result instead of the raw selection.
+   */
+  onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest, options?: { initialContentText?: string }) => void;
   /**
    * Forwarded verbatim, and deliberately WITHOUT closing this drawer: reading
    * the source beside the Note it supports is the whole point of F7. The old
@@ -68,6 +74,22 @@ interface KnowledgeReaderState {
   initialPageNumber?: number;
   /** Null for every library and semantic-result open, so neither inherits one. */
   sourceTarget: KnowledgeSourceTarget | null;
+  /**
+   * PDF Source AI Phase 1. An IMMUTABLE snapshot of the exact selection that
+   * activated AI, taken once at click time -- later DOM/selection changes in
+   * the source pane can never retarget it. Always starts null on a fresh
+   * `KnowledgeReaderState`, which is what invalidates any prior AI session for
+   * free on both a document switch and a reader close: neither carries this
+   * object over, they build a brand new one.
+   */
+  aiSession: KnowledgeSourceAiSession | null;
+}
+
+/** PDF Source AI Phase 1. `requestId` distinguishes activation B from A even
+ * when both snapshot the exact same page/selection coordinates. */
+interface KnowledgeSourceAiSession {
+  readonly requestId: number;
+  readonly request: KnowledgeSourcePageRequest;
 }
 
 /**
@@ -132,7 +154,7 @@ export default function KnowledgeSourceReaderDrawer({
     const generation = ++readGenerationRef.current;
     setReader({
       documentId, originalFilename: '', pageCount: null, pages: [],
-      loading: true, error: false, initialPageNumber, sourceTarget,
+      loading: true, error: false, initialPageNumber, sourceTarget, aiSession: null,
     });
     try {
       const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`);
@@ -143,7 +165,7 @@ export default function KnowledgeSourceReaderDrawer({
         documentId,
         ...documentMetadata(payload.document),
         pages: payload.pages.filter(isDetailPage),
-        loading: false, error: false, initialPageNumber, sourceTarget,
+        loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
       });
     } catch {
       if (generation !== readGenerationRef.current) return;
@@ -175,6 +197,39 @@ export default function KnowledgeSourceReaderDrawer({
   const closeReader = () => {
     readGenerationRef.current += 1;
     setReader(null);
+  };
+
+  /**
+   * PDF Source AI Phase 1. A monotonic id, never reused, so a session B
+   * always differs from session A even when both snapshot identical page/
+   * selection coordinates -- `key={requestId}` on the AI panel below is what
+   * turns that into an actual remount, aborting whatever A had in flight.
+   */
+  const aiRequestIdRef = useRef(0);
+
+  /** Snapshots the request at the moment AI was clicked; never re-reads it. */
+  const activateAiFromSelection = (request: KnowledgeSourcePageRequest) => {
+    const requestId = ++aiRequestIdRef.current;
+    setReader((current) => (current ? { ...current, aiSession: { requestId, request } } : current));
+  };
+
+  /** Returns the right pane to Source Notes. Never closes the reader itself. */
+  const closeAiSession = () => {
+    setReader((current) => (current ? { ...current, aiSession: null } : current));
+  };
+
+  /**
+   * The AI panel's own Note Post: forwards the ORIGINAL, unmodified snapshot
+   * request plus the AI result as an initial-content override. CanvasClient
+   * derives sourceReference/topStrip from `request` alone, exactly as an
+   * ordinary Note Post would -- the AI result can only ever replace the
+   * editable body seed, never the provenance.
+   */
+  const handleAiNotePost = (resultText: string) => {
+    const session = reader?.aiSession;
+    if (!session || !onCreateNoteFromPage) return;
+    onCreateNoteFromPage(session.request, { initialContentText: resultText });
+    closeAiSession();
   };
 
   /**
@@ -260,6 +315,13 @@ export default function KnowledgeSourceReaderDrawer({
             onBack={closeReader}
             onCreateNoteFromPage={onCreateNoteFromPage}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
+            // PDF Source AI Phase 1. Only offered when there both IS a
+            // Note-creating capability AND somewhere for the AI mode to
+            // render (the pane below is itself gated on `onOpenBacklinkTarget`)
+            // -- otherwise activating AI would switch the right pane into a
+            // mode a read-only viewer, or one with no visible pane at all,
+            // could never complete.
+            onAiFromSelection={onCreateNoteFromPage && onOpenBacklinkTarget ? activateAiFromSelection : undefined}
           />
         </div>
         {/*
@@ -271,13 +333,31 @@ export default function KnowledgeSourceReaderDrawer({
           like the reading pane's own width, stays untouched there. Only
           rendered when there is somewhere to send a click: with no
           `onOpenBacklinkTarget`, the panel could show Notes it can never open.
+
+          PDF Source AI Phase 1 -- the SAME 340px column now has two modes:
+          Source Notes (default) or AI, chosen by whether `reader.aiSession`
+          is set. Swapping modes never touches `KnowledgeSourceNotesPanel`'s
+          own data source, so returning to it issues no new fetch. Keying the
+          AI panel by `requestId` is what makes activating AI on a NEW
+          selection a genuine remount -- the previous panel's own cleanup
+          effect aborts whatever it had in flight, so a stale response can
+          never land on the new session.
         */}
         {onOpenBacklinkTarget ? (
           <div
             data-knowledge-source-notes-pane="true"
             className="hidden min-h-0 w-[340px] flex-none overflow-y-auto overscroll-contain border-l border-gray-100 px-4 py-3 lg:block"
           >
-            <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} />
+            {reader.aiSession && onCreateNoteFromPage ? (
+              <KnowledgeSourceAIPanel
+                key={reader.aiSession.requestId}
+                selectedText={reader.aiSession.request.selection?.selectedText ?? ''}
+                onNotePost={handleAiNotePost}
+                onClose={closeAiSession}
+              />
+            ) : (
+              <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} />
+            )}
           </div>
         ) : null}
       </div>

@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, Sparkles } from 'lucide-react';
 import type {
   KnowledgeSourcePageRequest,
   KnowledgeSourceTextSelection,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
+import { TEXT_ACTION_SELECTED_TEXT_MAX } from '@/lib/ai/textActions';
 import {
   KNOWLEDGE_SOURCE_CLIP_MIME,
   buildKnowledgeSourceClipTransfer,
@@ -72,6 +73,14 @@ export interface KnowledgeDocumentDetailsProps {
    */
   onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
   /**
+   * PDF Source AI Phase 1. Absent for the same readers `onCreateNoteFromPage`
+   * is absent for -- the drawer only ever supplies this alongside it, so a
+   * read-only viewer can never activate an AI session with nowhere for its
+   * result to go. Fires the SAME exact-selection request Note Post builds;
+   * unlike Note Post, it opens no editor and performs no write.
+   */
+  onAiFromSelection?: (request: KnowledgeSourcePageRequest) => void;
+  /**
    * P6J-F6-B2. Page-level navigation only -- scroll the page into view once,
    * when the reader was opened from a Note's source. No highlight, no
    * geometry, no char offsets.
@@ -123,6 +132,32 @@ type TextMatch = { pageIndex: number; start: number; end: number };
  * never put in the URL, never sent to Supabase, and never highlight geometry.
  */
 type CapturedPageSelection = KnowledgeSourceTextSelection & { readonly pageNumber: number };
+
+/**
+ * PDF Source AI Phase 1. The ONE builder for an exact-selection request,
+ * shared by Note Post and the AI activation button so the two can never
+ * drift into two different request shapes for the same captured selection.
+ */
+function buildSelectionSourceRequest(
+  documentId: string,
+  originalFilename: string,
+  pages: readonly KnowledgeDocumentDetailPage[],
+  selection: CapturedPageSelection,
+  topStripColor: string | null,
+): KnowledgeSourcePageRequest {
+  return {
+    sourceDocumentId: documentId,
+    originalFilename,
+    pageNumber: selection.pageNumber,
+    pageText: pages.find((page) => page.pageNumber === selection.pageNumber)?.text ?? '',
+    selection: {
+      charStart: selection.charStart,
+      charEnd: selection.charEnd,
+      selectedText: selection.selectedText,
+    },
+    topStripColor,
+  };
+}
 
 /** Marks the one element whose text is the exact-span coordinate space. */
 /** P6J-F9-B2. The reader's ONE armed rectangle, already in SOURCE coordinates. */
@@ -485,6 +520,7 @@ export default function KnowledgeDocumentDetails({
   error,
   onBack,
   onCreateNoteFromPage,
+  onAiFromSelection,
   initialPageNumber,
   initialSourceReferenceId,
   initialSourceRequestId,
@@ -602,6 +638,15 @@ export default function KnowledgeDocumentDetails({
       === capturedSelection.selectedText;
     return stillExact ? capturedSelection : null;
   }, [capturedSelection, pages]);
+
+  /**
+   * PDF Source AI Phase 1. The endpoint's own `TEXT_ACTION_SELECTED_TEXT_MAX`
+   * bound, checked here so the button fails closed WITHOUT truncating the
+   * source text -- a shortened selection would no longer be the one the user
+   * chose, and the endpoint would reject it anyway.
+   */
+  const activeSelectionOverAiLimit = activeSelection !== null
+    && activeSelection.selectedText.length > TEXT_ACTION_SELECTED_TEXT_MAX;
 
   useEffect(() => {
     setActiveMatchIndex(0);
@@ -785,8 +830,22 @@ export default function KnowledgeDocumentDetails({
             className={`rounded border px-1.5 py-0.5 text-[11px] ${regionMode
               ? 'border-blue-300 bg-blue-50 text-blue-700'
               : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            // Leaving the mode abandons whatever was drawn in it.
-            onClick={() => { setRegionMode((current) => !current); setArmedRegion(null); }}
+            // Leaving the mode abandons whatever was drawn in it. Entering it
+            // drops any captured text-selection toolbar state so the text
+            // toolbar (and its AI activation) can never coexist with an armed
+            // region -- the same exclusivity the AI toolbar gate asserts.
+            onClick={() => {
+              setRegionMode((current) => {
+                const next = !current;
+                if (next) {
+                  setCapturedSelection(null);
+                  setSelectionColor(null);
+                  setSelectionRect(null);
+                }
+                return next;
+              });
+              setArmedRegion(null);
+            }}
           >
             Select area
           </button>
@@ -943,7 +1002,7 @@ export default function KnowledgeDocumentDetails({
         not from a live selection -- pressing a button here would otherwise
         collapse the very selection it is acting on.
       */}
-      {onCreateNoteFromPage && documentId && activeSelection ? (
+      {onCreateNoteFromPage && documentId && activeSelection && !regionMode ? (
         <div
           data-knowledge-selection-toolbar="true"
           style={selectionRect
@@ -991,18 +1050,9 @@ export default function KnowledgeDocumentDetails({
             type="button"
             aria-label={`Create Note from selection on page ${activeSelection.pageNumber}`}
             className="rounded px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
-            onClick={() => onCreateNoteFromPage({
-              sourceDocumentId: documentId,
-              originalFilename,
-              pageNumber: activeSelection.pageNumber,
-              pageText: pages.find((page) => page.pageNumber === activeSelection.pageNumber)?.text ?? '',
-              selection: {
-                charStart: activeSelection.charStart,
-                charEnd: activeSelection.charEnd,
-                selectedText: activeSelection.selectedText,
-              },
-              topStripColor: selectionColor,
-            })}
+            onClick={() => onCreateNoteFromPage(
+              buildSelectionSourceRequest(documentId, originalFilename, pages, activeSelection, selectionColor),
+            )}
           >
             Note Post
           </button>
@@ -1014,6 +1064,27 @@ export default function KnowledgeDocumentDetails({
           >
             Copy
           </button>
+          {onAiFromSelection ? (
+            <button
+              type="button"
+              aria-label="Ask AI about the selected text"
+              title={activeSelectionOverAiLimit ? 'AI supports selections up to 4,000 characters' : undefined}
+              disabled={activeSelectionOverAiLimit}
+              // lg-only: the right pane the button opens is itself hidden below
+              // lg, so a visible-but-dead control below that width would be
+              // worse than no control at all.
+              className="hidden items-center gap-1 rounded px-2 py-1 text-xs font-medium text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
+              onClick={() => {
+                if (activeSelectionOverAiLimit) return;
+                onAiFromSelection(
+                  buildSelectionSourceRequest(documentId, originalFilename, pages, activeSelection, selectionColor),
+                );
+              }}
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              AI
+            </button>
+          ) : null}
           <div className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
           {KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS.map((color) => (
             <button
