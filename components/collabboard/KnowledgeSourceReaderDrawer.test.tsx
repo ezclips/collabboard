@@ -882,3 +882,161 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(drawerEl()).not.toBeNull();
   });
 });
+
+// ============================================================================
+// PDF Source AI Phase 1 -- the right pane's AI session and mode switch
+// ============================================================================
+
+describe('PDF Source AI Phase 1 right pane', () => {
+  const FILENAME = 'AiSource.pdf';
+  const PAGE_TEXT = 'Alpha safety text on the first page of the AI source document.';
+
+  function withPagesAndAi(resultText: string) {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/api/ai/text-action')) return jsonResponse({ text: resultText });
+      return jsonResponse({
+        document: { id: SOURCE_A, originalFilename: FILENAME, pageCount: 1 },
+        pages: [{ pageNumber: 1, text: PAGE_TEXT }],
+      });
+    });
+  }
+
+  function pageTextRoot(): HTMLElement {
+    return drawerEl()!.querySelector('[data-knowledge-page-text-root="1"]') as HTMLElement;
+  }
+
+  /** Selects [start,end) on page 1's text root and dispatches the settling mouseup. */
+  async function select(start: number, end: number) {
+    const root = pageTextRoot();
+    const range = document.createRange();
+    range.setStart(root.firstChild!, start);
+    range.setEnd(root.firstChild!, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => { root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+    await settle();
+  }
+
+  async function clickAi() {
+    const button = drawerEl()!.querySelector('button[aria-label="Ask AI about the selected text"]') as HTMLButtonElement;
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+  }
+
+  /** Activates AI on 'safety' -- page-relative [6,12). */
+  async function activateAi() { await select(6, 12); await clickAi(); }
+
+  const aiPanel = () => drawerEl()!.querySelector('[data-knowledge-source-ai-panel]');
+  const notesPanel = () => drawerEl()!.querySelector('[data-knowledge-source-notes-panel]');
+  const rightPane = () => drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+  const panelButton = (text: string) =>
+    Array.from(aiPanel()!.querySelectorAll('button')).find((button) => button.textContent === text) as HTMLButtonElement;
+  const openWithAi = (result = 'unused') => {
+    withPagesAndAi(result);
+    return mount({ documentOpenRequest: docRequest(1, SOURCE_A), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
+  };
+
+  it('AA: Source Notes is the default right-pane content -- no AI panel until activated', async () => {
+    await openWithAi();
+
+    expect(notesPanel()).not.toBeNull();
+    expect(aiPanel()).toBeNull();
+  });
+
+  it('AB: activating AI snapshots the exact selection, switches the pane, and keeps the 340px/760px layout', async () => {
+    await openWithAi();
+    await activateAi();
+
+    expect(aiPanel()).not.toBeNull();
+    expect(notesPanel()).toBeNull();
+    expect(aiPanel()!.textContent).toContain('safety');
+    expect(drawerEl()!.className).toContain('lg:w-[760px]');
+    expect(rightPane().className).toContain('w-[340px]');
+  });
+
+  it('AD: Back to Source Notes returns the pane with no new pages fetch', async () => {
+    await openWithAi();
+    await activateAi();
+    expect(pageRequests()).toHaveLength(1);
+
+    const back = aiPanel()!.querySelector('[aria-label="Back to Source Notes"]') as HTMLButtonElement;
+    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+
+    expect(aiPanel()).toBeNull();
+    expect(notesPanel()).not.toBeNull();
+    expect(pageRequests()).toHaveLength(1);
+    expect(drawerEl()).not.toBeNull();
+  });
+
+  it('AE: opening another document clears any AI session', async () => {
+    await openWithAi();
+    await activateAi();
+    expect(aiPanel()).not.toBeNull();
+
+    await renderInto({ documentOpenRequest: docRequest(2, SOURCE_B), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
+
+    expect(aiPanel()).toBeNull();
+    expect(notesPanel()).not.toBeNull();
+  });
+
+  it('AF: closing the reader clears the AI session; reopening starts at Source Notes', async () => {
+    await openWithAi();
+    await activateAi();
+    await closeDrawer();
+    expect(drawerEl()).toBeNull();
+
+    await renderInto({ documentOpenRequest: docRequest(3, SOURCE_A), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
+
+    expect(aiPanel()).toBeNull();
+    expect(notesPanel()).not.toBeNull();
+  });
+
+  it('AG: activating AI on a new selection replaces the prior session and aborts its request', async () => {
+    let firstSignal: AbortSignal | null = null;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/ai/text-action')) {
+        if (!firstSignal) { firstSignal = init?.signal as AbortSignal; return new Promise(() => {}); }
+        return jsonResponse({ text: 'second' });
+      }
+      return jsonResponse({ document: { id: SOURCE_A, originalFilename: FILENAME, pageCount: 1 }, pages: [{ pageNumber: 1, text: PAGE_TEXT }] });
+    });
+    await mount({ documentOpenRequest: docRequest(1, SOURCE_A), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
+    await activateAi();
+    await act(async () => { panelButton('Summarize').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+
+    // A NEW selection -- 'Alpha' [0,5) -- activated while the first is in flight.
+    await select(0, 5);
+    await clickAi();
+
+    expect(firstSignal!.aborted, 'session B must abort whatever session A had in flight').toBe(true);
+    expect(aiPanel()!.textContent).toContain('Alpha');
+    expect(aiPanel()!.textContent).not.toContain('safety');
+  });
+
+  it('AH: AI Note Post forwards the original snapshot request plus the AI result, clears AI, leaves the reader open', async () => {
+    const onCreate = vi.fn();
+    withPagesAndAi('AI generated answer');
+    await mount({ documentOpenRequest: docRequest(1, SOURCE_A), onCreateNoteFromPage: onCreate, onOpenBacklinkTarget: vi.fn() });
+    await activateAi();
+    await act(async () => { panelButton('Summarize').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+    await act(async () => { panelButton('Note Post').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    const [request, options] = onCreate.mock.calls[0];
+    expect(request).toEqual({
+      sourceDocumentId: SOURCE_A, originalFilename: FILENAME, pageNumber: 1, pageText: PAGE_TEXT,
+      selection: { charStart: 6, charEnd: 12, selectedText: 'safety' }, topStripColor: null,
+    });
+    expect(options).toEqual({ initialContentText: 'AI generated answer' });
+    expect(aiPanel()).toBeNull();
+    expect(notesPanel()).not.toBeNull();
+    expect(drawerEl()).not.toBeNull();
+    expect(pageRequests()).toHaveLength(1);
+  });
+});

@@ -88,6 +88,7 @@ import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndi
 import {
   buildKnowledgeSourceNoteDraft,
   appendKnowledgeSourceSelectionToNoteContent,
+  knowledgeSourceSelectionToNoteHtml,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import {
   KNOWLEDGE_SOURCE_CLIP_MIME,
@@ -6925,15 +6926,27 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * document's filename as its title and a blank body; nothing is written yet,
    * and the eventual save takes whatever placement path this layout already
    * uses for a toolbar Note.
+   *
+   * PDF Source AI Phase 1. `options.initialContentText`, when supplied, is
+   * the AI panel's plain-text result -- it overrides ONLY the new Note's
+   * initial editable body, converted through the SAME safe escaping
+   * authority an ordinary exact-text selection already uses.
+   * `draft.sourceReference` and `draft.topStripColor` are still derived from
+   * `request` alone, exactly as with no override: the AI's own output can
+   * never become provenance, never redefine charStart/charEnd/selectedText,
+   * and is never written anywhere before an ordinary Save.
    */
-  const handleCreateNoteFromKnowledgePage = (request: KnowledgeSourcePageRequest) => {
+  const handleCreateNoteFromKnowledgePage = (
+    request: KnowledgeSourcePageRequest,
+    options?: { initialContentText?: string },
+  ) => {
     // The same capability the creation toolbar itself is gated on.
     if (!canUseCanvasToolbar) return;
     const draft = buildKnowledgeSourceNoteDraft(request);
     setSourceNoteReference(draft.sourceReference);
     closeDrawingSelectedShapePanel();
     closeDrawingEditorsBeforePadletEdit();
-    setPadletToEdit({
+    const notePadlet = {
       id: 'new',
       board_id: canvasId,
       title: draft.title,
@@ -6948,7 +6961,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // Text Phase 1 -- D. The floating toolbar's chosen color, if any, seeds
       // the SAME existing top-stripe field a Note editor's own TS tab writes.
       metadata: draft.topStripColor ? { topStrip: draft.topStripColor } : {},
-    } as Padlet);
+    } as Padlet;
+    setPadletToEdit(options?.initialContentText === undefined
+      ? notePadlet
+      : { ...notePadlet, content: knowledgeSourceSelectionToNoteHtml(options.initialContentText) });
     setIsNoteEditorOpen(true);
   };
 
