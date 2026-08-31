@@ -13,8 +13,8 @@ import { describe, expect, it } from 'vitest';
  */
 
 const ROOT = resolve(__dirname, '../../..');
-const MIGRATION = resolve(ROOT, 'supabase/migrations/20260831_140000_add_ai_provider_atomic_functions.sql');
-const FOUNDATION = resolve(ROOT, 'supabase/migrations/20260831_120000_create_ai_provider_foundation.sql');
+const MIGRATION = resolve(ROOT, 'supabase/migrations/20260831140000_add_ai_provider_atomic_functions.sql');
+const FOUNDATION = resolve(ROOT, 'supabase/migrations/20260831120000_create_ai_provider_foundation.sql');
 
 const sql = readFileSync(MIGRATION, 'utf8');
 

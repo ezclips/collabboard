@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
  * harness lands first.
  */
 
-const migrationPath = 'supabase/migrations/20260831_120000_create_ai_provider_foundation.sql';
+const migrationPath = 'supabase/migrations/20260831120000_create_ai_provider_foundation.sql';
 const migration = fs.readFileSync(path.join(process.cwd(), migrationPath), 'utf8');
 
 const domainContract = fs.readFileSync(
