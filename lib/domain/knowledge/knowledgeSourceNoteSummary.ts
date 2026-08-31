@@ -69,12 +69,27 @@ function truncate(value: string, max: number): string {
   return `${value.slice(0, max - ELLIPSIS.length).trimEnd()}${ELLIPSIS}`;
 }
 
+/**
+ * A reference is presentable as exact-text only when its offsets are the
+ * SAME well-formed shape the write authority defines: integer, non-negative,
+ * ordered, single-page, with a non-empty canonical quote. Anything short of
+ * that -- a torn row, a partial offset, a reversed pair -- fails closed to
+ * page-only rather than showing a malformed or fabricated selection.
+ */
+function isWellFormedExactSpan(reference: SourceReference): boolean {
+  return reference.pageStart === reference.pageEnd
+    && Number.isInteger(reference.charStart)
+    && Number.isInteger(reference.charEnd)
+    && (reference.charStart as number) >= 0
+    && (reference.charStart as number) < (reference.charEnd as number)
+    && typeof reference.quoteText === 'string'
+    && reference.quoteText.length > 0;
+}
+
 /** Same identification the persisted region branch already uses: no OCR here either. */
 function referenceKind(reference: SourceReference): KnowledgeSourceNoteReferenceKind {
   if (reference.region !== null) return 'area';
-  if (reference.quoteText !== null && reference.charStart !== null && reference.charEnd !== null) {
-    return 'exact-text';
-  }
+  if (isWellFormedExactSpan(reference)) return 'exact-text';
   // A page-only reference's own quoteText may still carry a page snapshot --
   // that is evidence for the server, never a selected quote to display here.
   return 'page';

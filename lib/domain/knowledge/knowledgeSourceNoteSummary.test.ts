@@ -236,6 +236,82 @@ describe('reference detail classification', () => {
   });
 });
 
+describe('malformed exact-offset classification fails closed to page-only', () => {
+  const detailOf = (overrides: Partial<ReferenceOverrides> & { quoteText?: string | null }) => {
+    const summaries = forDocument(
+      [reference({ targetPadletId: N1, sourceDocumentId: DOC_A, pageStart: 2, pageEnd: 2, quoteText: 'valid', charStart: 0, charEnd: 5, ...overrides })],
+      [NOTE_1],
+      DOC_A,
+    );
+    return summaries[0].references[0];
+  };
+
+  it('negative start classifies page-only', () => {
+    expect(detailOf({ charStart: -1, charEnd: 4 }).kind).toBe('page');
+  });
+
+  it('zero-length (equal start/end) classifies page-only', () => {
+    expect(detailOf({ charStart: 4, charEnd: 4 }).kind).toBe('page');
+  });
+
+  it('reversed offsets classify page-only', () => {
+    expect(detailOf({ charStart: 8, charEnd: 3 }).kind).toBe('page');
+  });
+
+  it('partial start only (charEnd null) classifies page-only, Note stays visible', () => {
+    const summaries = forDocument(
+      [reference({ targetPadletId: N1, sourceDocumentId: DOC_A, pageStart: 2, quoteText: 'x', charStart: 2, charEnd: null })],
+      [NOTE_1],
+      DOC_A,
+    );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].references[0].kind).toBe('page');
+  });
+
+  it('partial end only (charStart null) classifies page-only', () => {
+    expect(detailOf({ charStart: null, charEnd: 7 }).kind).toBe('page');
+  });
+
+  it('a span crossing more than one page classifies page-only', () => {
+    expect(detailOf({ pageStart: 2, pageEnd: 3 }).kind).toBe('page');
+  });
+
+  it('an empty quote classifies page-only despite valid offsets', () => {
+    expect(detailOf({ quoteText: '' }).kind).toBe('page');
+  });
+
+  it('a fully valid exact span classifies exact-text', () => {
+    const detail = detailOf({ pageStart: 2, pageEnd: 2, charStart: 0, charEnd: 4, quoteText: 'test' });
+    expect(detail.kind).toBe('exact-text');
+  });
+
+  it('a whitespace-only quote is still non-empty canonical text, not trimmed or reinterpreted', () => {
+    expect(detailOf({ quoteText: ' ' }).kind).toBe('exact-text');
+  });
+
+  it('area precedence: a torn row with region present renders as area, never exact-text or page', () => {
+    const summaries = forDocument(
+      [reference({
+        targetPadletId: N1, sourceDocumentId: DOC_A, pageStart: 3, region: REGION,
+        quoteText: '', charStart: 9, charEnd: 4,
+      })],
+      [NOTE_1],
+      DOC_A,
+    );
+    expect(summaries[0].references[0].kind).toBe('area');
+  });
+
+  it('page-only quoteText safety: a page snapshot with well-formed offsets is still page, once any offset is malformed', () => {
+    const summaries = forDocument(
+      [reference({ targetPadletId: N1, sourceDocumentId: DOC_A, pageStart: 1, quoteText: 'page snapshot text', charStart: null, charEnd: null })],
+      [NOTE_1],
+      DOC_A,
+    );
+    expect(summaries[0].references[0].kind).toBe('page');
+    expect(summaries[0].references[0].quoteExcerpt).toBeNull();
+  });
+});
+
 describe('page hint aggregation', () => {
   it('20: the aggregated page hint reuses the existing range-merge/format authority', () => {
     const summaries = forDocument(
