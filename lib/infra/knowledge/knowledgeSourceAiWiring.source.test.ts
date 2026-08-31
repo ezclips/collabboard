@@ -41,7 +41,14 @@ describe('PDF Source AI Phase 1 wiring', () => {
 
   it('the request body carries ONLY action/selectedText/instruction -- no page, board or PDF context', () => {
     const call = after(aiPanel, "fetch('/api/ai/text-action'", 500);
-    expect(call).toContain("body: JSON.stringify({ action: 'custom', selectedText, instruction })");
+    // BYOK Phase 3 added `purpose`, which names the SERVER-stored role
+    // preference to resolve a provider from. It carries no provider, model,
+    // key or endpoint, so the "no page, board or PDF context" guarantee this
+    // test exists for is unchanged -- the forbidden list below still governs.
+    expect(call).toContain("body: JSON.stringify({ action: 'custom', selectedText, instruction, purpose: AI_ROLE_SOURCE })");
+    for (const forbidden of ['provider', 'model', 'apiKey', 'connectionId', 'baseUrl']) {
+      expect(call, forbidden).not.toContain(`${forbidden}:`);
+    }
     for (const forbidden of ['sourceDocumentId', 'pageText', 'pageNumber', 'boardId', 'canvasId',
       'documentId', 'sourceReference', 'topStripColor', 'originalFilename']) {
       expect(call, forbidden).not.toContain(forbidden);
@@ -64,12 +71,15 @@ describe('PDF Source AI Phase 1 wiring', () => {
     }
   });
 
-  it('the FROZEN endpoint and its shared contract were not touched by this feature', () => {
+  it('the endpoint stays generic -- it still knows nothing about Knowledge, PDFs or boards', () => {
     // The route stays generic: it knows nothing about Knowledge, PDFs, or boards.
     for (const forbidden of ['sourceDocumentId', 'KnowledgeSource', 'boardId', 'pdf', 'PDF']) {
       expect(textActionRoute, forbidden).not.toContain(forbidden);
     }
-    expect(textActionRoute).toContain("const { action, selectedText, instruction } = body");
+    // BYOK Phase 3 added `purpose` to the destructure. It is a role name --
+    // 'source-ai' | 'edit' -- validated against the shared AIRole contract, so
+    // the route learned a ROLE, not anything about the Knowledge feature.
+    expect(textActionRoute).toContain("const { action, selectedText, instruction, purpose } = body");
   });
 
   it('SelectedTextAIPanel (KNI-R4) stays TipTap-only and gains no Knowledge/PDF coupling', () => {

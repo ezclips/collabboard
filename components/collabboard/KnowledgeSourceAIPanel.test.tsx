@@ -86,7 +86,7 @@ describe('KnowledgeSourceAIPanel: presets reuse the existing endpoint with fixed
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/ai/text-action');
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({
-      action: 'custom', selectedText: 'Bravo', instruction: 'Summarize the selected text clearly and concisely.',
+      action: 'custom', selectedText: 'Bravo', instruction: 'Summarize the selected text clearly and concisely.', purpose: 'source-ai',
     });
   });
 
@@ -97,7 +97,7 @@ describe('KnowledgeSourceAIPanel: presets reuse the existing endpoint with fixed
     clickByText(container, 'Explain');
     await flush();
     expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
-      action: 'custom', selectedText: 'Bravo', instruction: 'Explain the selected text clearly in plain language.',
+      action: 'custom', selectedText: 'Bravo', instruction: 'Explain the selected text clearly in plain language.', purpose: 'source-ai',
     });
   });
 
@@ -116,18 +116,52 @@ describe('KnowledgeSourceAIPanel: presets reuse the existing endpoint with fixed
     clickByText(container, 'Ask AI');
     await flush();
     expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
-      action: 'custom', selectedText: 'Bravo', instruction: 'p'.repeat(TEXT_ACTION_INSTRUCTION_MAX),
+      action: 'custom',
+      selectedText: 'Bravo',
+      instruction: 'p'.repeat(TEXT_ACTION_INSTRUCTION_MAX),
+      purpose: 'source-ai',
     });
   });
 
-  it('sends ONLY action/selectedText/instruction -- no document, page, or board field ever rides along', async () => {
+  it('sends ONLY action/selectedText/instruction/purpose -- no document, page, or board field ever rides along', async () => {
     const fetchMock = fetchOk('ok');
     vi.stubGlobal('fetch', fetchMock);
     const { container } = mountPanel('Bravo');
     clickByText(container, 'Summarize');
     await flush();
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    expect(Object.keys(body).sort()).toEqual(['action', 'instruction', 'selectedText']);
+    expect(Object.keys(body).sort()).toEqual(['action', 'instruction', 'purpose', 'selectedText']);
+  });
+
+  it('BYOK Phase 3: names the source-ai role, and carries no provider, model or key', async () => {
+    const fetchMock = fetchOk('ok');
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = mountPanel('Bravo');
+    clickByText(container, 'Summarize');
+    await flush();
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.purpose).toBe('source-ai');
+    // `purpose` selects a SERVER-stored preference; it is not provider control.
+    for (const forbidden of ['provider', 'providerType', 'model', 'apiKey', 'connectionId', 'baseUrl', 'endpoint']) {
+      expect(body).not.toHaveProperty(forbidden);
+    }
+  });
+
+  it('BYOK Phase 3: the custom prompt path also names the source-ai role', async () => {
+    const fetchMock = fetchOk('ok');
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = mountPanel('Bravo');
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'Explain simply.');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    clickByText(container, 'Ask AI');
+    await flush();
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.purpose).toBe('source-ai');
+    expect(body.instruction).toBe('Explain simply.');
   });
 });
 
@@ -183,7 +217,7 @@ describe('KnowledgeSourceAIPanel: loading, error, retry', () => {
     clickByText(container, 'Retry');
     await flush();
     expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
-      action: 'custom', selectedText: 'Bravo', instruction: 'Explain the selected text clearly in plain language.',
+      action: 'custom', selectedText: 'Bravo', instruction: 'Explain the selected text clearly in plain language.', purpose: 'source-ai',
     });
     expect(container.textContent).toContain('Recovered');
   });

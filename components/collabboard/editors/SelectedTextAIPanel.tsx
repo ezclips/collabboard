@@ -9,6 +9,7 @@ import {
   TEXT_ACTION_INSTRUCTION_MAX,
   type TextAction,
 } from '@/lib/ai/textActions';
+import { AI_ROLE_EDIT } from '@/lib/ai/aiRoles';
 
 interface SelectedTextAIPanelProps {
   /** Shared by Note and Document -- this component never reads a live TipTap
@@ -65,6 +66,10 @@ export default function SelectedTextAIPanel({ editor, range, capturedText, onClo
           action: nextAction,
           selectedText: capturedText,
           instruction: nextAction === 'custom' ? nextInstruction?.trim() : undefined,
+          // Names the stored role preference the SERVER resolves a provider
+          // from. Sent explicitly rather than relying on the route's default,
+          // so this caller's role is visible at the call site.
+          purpose: AI_ROLE_EDIT,
         }),
       });
       if (generationRef.current !== generation) return;

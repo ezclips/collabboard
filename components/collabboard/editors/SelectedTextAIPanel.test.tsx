@@ -117,7 +117,7 @@ describe('SelectedTextAIPanel: explicit action triggers exactly one request', ()
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body).toEqual({ action: 'improve', selectedText: 'Bravo' });
+    expect(body).toEqual({ action: 'improve', selectedText: 'Bravo', purpose: 'edit' });
   });
 
   it('Shorten sends action=shorten', async () => {
@@ -156,7 +156,35 @@ describe('SelectedTextAIPanel: explicit action triggers exactly one request', ()
     clickByText(container, 'Custom instruction');
     await flush();
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    expect(body).toEqual({ action: 'custom', selectedText: 'Bravo', instruction: 'translate to pirate speak' });
+    expect(body).toEqual({ action: 'custom', selectedText: 'Bravo', instruction: 'translate to pirate speak', purpose: 'edit' });
+  });
+
+  it('BYOK Phase 3: names the edit role, and carries no provider, model or key', async () => {
+    const { editor, range, capturedText } = setupEditor();
+    const fetchMock = fetchOk('ok');
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = mountPanel(editor, range, capturedText);
+    clickByText(container, 'Improve writing');
+    await flush();
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.purpose).toBe('edit');
+    // `purpose` selects a SERVER-stored preference; it is not provider control.
+    for (const forbidden of ['provider', 'providerType', 'model', 'apiKey', 'connectionId', 'baseUrl', 'endpoint']) {
+      expect(body).not.toHaveProperty(forbidden);
+    }
+  });
+
+  it('BYOK Phase 3: every action variant names the edit role', async () => {
+    for (const label of ['Improve writing', 'Shorten', 'Fix grammar']) {
+      const { editor, range, capturedText } = setupEditor();
+      const fetchMock = fetchOk('ok');
+      vi.stubGlobal('fetch', fetchMock);
+      const { container } = mountPanel(editor, range, capturedText);
+      clickByText(container, label);
+      await flush();
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+      expect(body.purpose).toBe('edit');
+    }
   });
 });
 
@@ -322,7 +350,7 @@ describe('SelectedTextAIPanel: failure UX', () => {
     clickByText(container, 'Retry');
     await flush();
     const secondBody = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string);
-    expect(secondBody).toEqual({ action: 'improve', selectedText: 'Bravo' });
+    expect(secondBody).toEqual({ action: 'improve', selectedText: 'Bravo', purpose: 'edit' });
     clickByText(container, 'Replace selection');
     expect(editor.getHTML()).toBe('<p>Alpha Recovered text Charlie</p>');
   });

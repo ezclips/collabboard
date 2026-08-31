@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { TEXT_ACTION_INSTRUCTION_MAX, TEXT_ACTION_SELECTED_TEXT_MAX } from '@/lib/ai/textActions';
+import { AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
 
 /**
  * PDF Source AI Phase 1. The right-pane AI surface for one exact PDF text
@@ -62,9 +63,11 @@ export default function KnowledgeSourceAIPanel({ selectedText, onNotePost, onClo
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        // ONLY these three fields, ever: no document id, page text, board
+        // ONLY these four fields, ever: no document id, page text, board
         // content or source-reference metadata travels with this request.
-        body: JSON.stringify({ action: 'custom', selectedText, instruction }),
+        // `purpose` names the stored role preference the SERVER uses to pick a
+        // provider; it carries no provider, model or key of its own.
+        body: JSON.stringify({ action: 'custom', selectedText, instruction, purpose: AI_ROLE_SOURCE }),
       });
       if (generationRef.current !== generation) return;
       if (!res.ok) {

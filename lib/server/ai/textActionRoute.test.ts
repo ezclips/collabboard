@@ -11,10 +11,28 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
   createRouteHandlerClient: vi.fn(),
+  getPreference: vi.fn(),
+  getConnection: vi.fn(),
+  loadCredential: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
 vi.mock('@supabase/auth-helpers-nextjs', () => ({ createRouteHandlerClient: mocks.createRouteHandlerClient }));
+
+// BYOK Phase 3: the route now resolves a provider per user/role instead of
+// calling DeepSeek directly. These repositories are the resolver's data seam;
+// stubbed to "no stored preference", which is exactly the CollabBoard Default
+// path every assertion in this file already describes. The provider fetch
+// itself is still stubbed per test, so the behaviour proven here is unchanged.
+vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
+  createAIRolePreferenceRepository: () => ({ getPreference: mocks.getPreference }),
+}));
+vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
+  createAIProviderCredentialRepository: () => ({
+    getConnection: mocks.getConnection,
+    loadCredential: mocks.loadCredential,
+  }),
+}));
 
 let route: typeof import('../../../app/api/ai/text-action/route');
 let ipCounter = 0;
@@ -50,6 +68,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('DEEPSEEK_API_KEY', 'test-deepseek-key');
   configureAuth({ id: 'user-1' });
+  // No stored role preference => CollabBoard Default => DeepSeek, and the
+  // credential table is never consulted on that path.
+  mocks.getPreference.mockResolvedValue({ ok: true, value: null });
 });
 
 afterEach(() => {
@@ -198,7 +219,11 @@ describe('POST /api/ai/text-action -- scope and secret handling', () => {
     expect(source).not.toContain('generate-component');
     expect(source).not.toContain('convert-component');
     expect(source).not.toContain('classify-intent');
-    expect(source).not.toContain('AIMode');
+    // Word-boundary matched, not a bare substring: the guard targets the
+    // structured-component `AIMode` contract, and BYOK Phase 3 legitimately
+    // imports `resolveAIModelForRole`, which contains those characters. The
+    // import path assertion above remains the primary proof.
+    expect(source).not.toMatch(/\bAIMode\b/);
     expect(source).not.toContain('StoredAIContent');
   });
 
@@ -212,7 +237,11 @@ describe('POST /api/ai/text-action -- scope and secret handling', () => {
   it('14b. a missing API key never leaks the env var name to the client', async () => {
     vi.stubEnv('DEEPSEEK_API_KEY', '');
     const res = await route.POST(request({ action: 'improve', selectedText: 'hello' }));
-    expect(res.status).toBe(502);
+    // BYOK Phase 3 changed this status from 502 to 400: an absent server key is
+    // now surfaced by the resolver as `invalid_configuration`, which the agreed
+    // provider-error mapping renders as 400. The security property this test
+    // exists for -- the env var name never reaching the client -- is unchanged.
+    expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).not.toContain('DEEPSEEK_API_KEY');
   });
