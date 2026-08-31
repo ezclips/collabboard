@@ -18,6 +18,7 @@ import KnowledgeSourceReaderDrawer from './KnowledgeSourceReaderDrawer';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
+import { buildKnowledgeSourceNoteSummaryIndex } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -81,13 +82,13 @@ async function mount(props: DrawerProps, references: readonly SourceReference[] 
 }
 
 async function renderInto(props: DrawerProps, references: readonly SourceReference[] = []) {
+  const posts = [{ id: 'padlet-1', type: 'text', title: 'Citing Note', content: '' } as never];
   await act(async () => {
     root!.render(
       <KnowledgeSourceReferenceProvider
         index={buildKnowledgeSourceReferenceIndex(references)}
-        backlinks={buildKnowledgeSourceBacklinkIndex(references, [
-          { id: 'padlet-1', type: 'text', title: 'Citing Note', content: '' } as never,
-        ])}
+        backlinks={buildKnowledgeSourceBacklinkIndex(references, posts)}
+        noteSummaries={buildKnowledgeSourceNoteSummaryIndex(references, posts)}
       >
         <KnowledgeSourceReaderDrawer {...props} />
       </KnowledgeSourceReferenceProvider>,
@@ -776,5 +777,108 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     }
     // POST/PATCH/DELETE are not this surface's business: it reads pages only.
     expect(drawerCode).not.toMatch(/method:\s*'(POST|PATCH|PUT|DELETE)'/);
+  });
+
+  // ==========================================================================
+  // Source Notes Panel -- Phase 1
+  // ==========================================================================
+  it('Q: below lg, the existing reading experience is unaffected', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    const drawer = drawerEl()!;
+    expect(drawer.className).toContain('md:w-[420px]');
+    expect(drawer.textContent).toContain(FILENAME);
+    expect(drawer.textContent).toContain(PAGE_ONE);
+  });
+
+  it('R: the drawer widens to lg:w-[760px] for the two-pane desktop layout', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    expect(drawerEl()!.className).toContain('lg:w-[760px]');
+  });
+
+  it('S: the source pane and the Source Notes pane render as siblings, never nested', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    const drawer = drawerEl()!;
+    // The FIRST .overflow-y-auto is the pre-existing source pane (test O's
+    // own selector): it must stay the reading pane, not the new one.
+    const sourcePane = drawer.querySelector('.overflow-y-auto') as HTMLElement;
+    const notesPane = drawer.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+    expect(sourcePane).not.toBeNull();
+    expect(notesPane).not.toBeNull();
+    expect(notesPane.parentElement).toBe(sourcePane.parentElement);
+    expect(sourcePane.contains(notesPane)).toBe(false);
+    expect(notesPane.contains(sourcePane)).toBe(false);
+  });
+
+  it('T: the source pane keeps its 420px width at desktop', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    const sourcePane = drawerEl()!.querySelector('.overflow-y-auto') as HTMLElement;
+    expect(sourcePane.className).toContain('lg:w-[420px]');
+  });
+
+  it('U: the Source Notes pane is 340px wide and hidden below lg', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+    expect(notesPane.className).toContain('w-[340px]');
+    expect(notesPane.className).toContain('hidden');
+    expect(notesPane.className).toContain('lg:block');
+  });
+
+  it('V: the Source Notes panel receives the currently open document id', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1, SOURCE_A), onOpenBacklinkTarget: vi.fn() }, [exactReference()]);
+    const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]')!;
+    // exactReference() cites SOURCE_A and targets 'padlet-1', the SAME post
+    // renderInto()'s own provider setup registers as 'Citing Note'.
+    expect(notesPane.textContent).toContain('Citing Note');
+  });
+
+  it('W: the existing onOpenBacklinkTarget is forwarded to the Source Notes panel unchanged', async () => {
+    withPages();
+    const onOpen = vi.fn();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: onOpen }, [exactReference()]);
+    const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]')!;
+    const button = notesPane.querySelector('[data-knowledge-source-note-item] button') as HTMLButtonElement;
+    expect(button).not.toBeNull();
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onOpen).toHaveBeenCalledWith('padlet-1');
+  });
+
+  it('X: KnowledgeDocumentDetails keeps receiving its existing forwarded props unchanged', () => {
+    expect(drawerCode).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
+    expect(drawerCode).toContain('onCreateNoteFromPage={onCreateNoteFromPage}');
+    expect(drawerCode).toContain('initialPageNumber={reader.initialPageNumber}');
+  });
+
+  it('Y: the close button still closes the whole drawer, both panes included', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    expect(drawerEl()).not.toBeNull();
+    await closeDrawer();
+    expect(drawerEl()).toBeNull();
+  });
+
+  it('Z: Escape still closes the drawer with the Source Notes pane present', async () => {
+    withPages();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(drawerEl()).toBeNull();
+  });
+
+  it('AA: opening a Source Note does not close the reader', async () => {
+    withPages();
+    const onOpen = vi.fn();
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: onOpen }, [exactReference()]);
+    const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]')!;
+    const button = notesPane.querySelector('[data-knowledge-source-note-item] button') as HTMLButtonElement;
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(drawerEl()).not.toBeNull();
   });
 });

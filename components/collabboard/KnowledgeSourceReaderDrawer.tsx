@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
+import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type {
   KnowledgeDocumentOpenRequest,
@@ -224,8 +225,10 @@ export default function KnowledgeSourceReaderDrawer({
       role="complementary"
       aria-label="Knowledge reader"
       // Overlay, never a layout reservation: the board keeps its full width and
-      // no layout implementation learns that this drawer exists.
-      className="fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px]"
+      // no layout implementation learns that this drawer exists. `lg:w-[760px]`
+      // is the SAME overlay, merely wide enough to also fit the Source Notes
+      // pane beside the unchanged 420px reading experience.
+      className="fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[760px]"
     >
       <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
         <span className="select-none text-[9px] font-medium uppercase leading-none tracking-wider text-gray-400">
@@ -241,22 +244,42 @@ export default function KnowledgeSourceReaderDrawer({
           ×
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
-        <KnowledgeDocumentDetails
-          documentId={reader.documentId}
-          boardId={boardId}
-          originalFilename={reader.originalFilename}
-          pageCount={reader.pageCount}
-          pages={reader.pages}
-          loading={reader.loading}
-          error={reader.error}
-          initialPageNumber={reader.initialPageNumber}
-          initialSourceReferenceId={reader.sourceTarget?.referenceId}
-          initialSourceRequestId={reader.sourceTarget?.requestId}
-          onBack={closeReader}
-          onCreateNoteFromPage={onCreateNoteFromPage}
-          onOpenBacklinkTarget={onOpenBacklinkTarget}
-        />
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 lg:w-[420px] lg:flex-none">
+          <KnowledgeDocumentDetails
+            documentId={reader.documentId}
+            boardId={boardId}
+            originalFilename={reader.originalFilename}
+            pageCount={reader.pageCount}
+            pages={reader.pages}
+            loading={reader.loading}
+            error={reader.error}
+            initialPageNumber={reader.initialPageNumber}
+            initialSourceReferenceId={reader.sourceTarget?.referenceId}
+            initialSourceRequestId={reader.sourceTarget?.requestId}
+            onBack={closeReader}
+            onCreateNoteFromPage={onCreateNoteFromPage}
+            onOpenBacklinkTarget={onOpenBacklinkTarget}
+          />
+        </div>
+        {/*
+          Source Notes Panel -- Phase 1. A SIBLING of the reading pane above,
+          never nested inside KnowledgeDocumentDetails: it owns its own
+          vertical scroll and reads its data straight from the SAME board-
+          level context every other Knowledge surface already uses, so
+          opening it never issues a second fetch. Hidden below `lg`, exactly
+          like the reading pane's own width, stays untouched there. Only
+          rendered when there is somewhere to send a click: with no
+          `onOpenBacklinkTarget`, the panel could show Notes it can never open.
+        */}
+        {onOpenBacklinkTarget ? (
+          <div
+            data-knowledge-source-notes-pane="true"
+            className="hidden min-h-0 w-[340px] flex-none overflow-y-auto overscroll-contain border-l border-gray-100 px-4 py-3 lg:block"
+          >
+            <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} />
+          </div>
+        ) : null}
       </div>
     </aside>
   );

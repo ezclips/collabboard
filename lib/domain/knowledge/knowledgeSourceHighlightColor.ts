@@ -69,6 +69,17 @@ function usableNoteColor(fields: KnowledgeSourceNoteColorFields | undefined): st
 }
 
 /**
+ * The Note's own accent colour (topStrip, with the same legacy cardColor
+ * fallback), for a caller that needs ONE Note's colour rather than a run's
+ * agreement across several. Same authority as `usableNoteColor`, exported.
+ */
+export function knowledgeSourceNoteAccentColor(
+  fields: KnowledgeSourceNoteColorFields | undefined,
+): string | null {
+  return usableNoteColor(fields);
+}
+
+/**
  * The one colour every citation covering a run agrees on, or null.
  *
  * Two citations from the SAME Note are one opinion, not two: a Note with
