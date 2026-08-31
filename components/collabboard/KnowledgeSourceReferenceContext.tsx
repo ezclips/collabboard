@@ -17,6 +17,14 @@ import type {
 } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
+import {
+  EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
+  knowledgeSourceNoteSummariesForDocument,
+} from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
+import type {
+  KnowledgeSourceNoteSummary,
+  KnowledgeSourceNoteSummaryIndex,
+} from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
 
 /**
  * Read-only access to the board's source-reference index.
@@ -50,15 +58,29 @@ const KnowledgeSourceBacklinkContext = createContext<KnowledgeSourceBacklinkInde
  */
 const KnowledgeSourceNoteColorContext = createContext<KnowledgeSourceNoteColors>(new Map());
 
+/**
+ * PDF Source Notes Panel -- Phase 1. Document id -> the Notes citing it, with
+ * enough presentation-safe detail (title, body excerpt, accent, page hint,
+ * per-reference kind) for a standalone panel. Carried on the SAME provider,
+ * for the SAME reason as the other three: CanvasClient already holds both
+ * halves the projection joins, and the reader must not grow a second way to
+ * reach them, let alone a second fetch.
+ */
+const KnowledgeSourceNoteSummaryContext = createContext<KnowledgeSourceNoteSummaryIndex>(
+  EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
+);
+
 /** Stable empty result so a padlet with no references never re-renders on identity. */
 const NO_REFERENCES: readonly SourceReference[] = [];
 const NO_BACKLINKS: readonly KnowledgeSourceBacklink[] = [];
 const NO_NOTE_COLORS: KnowledgeSourceNoteColors = new Map();
+const NO_NOTE_SUMMARIES: readonly KnowledgeSourceNoteSummary[] = [];
 
 export function KnowledgeSourceReferenceProvider({
   index,
   backlinks = EMPTY_KNOWLEDGE_SOURCE_BACKLINK_INDEX,
   noteColors = NO_NOTE_COLORS,
+  noteSummaries = EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
   children,
 }: {
   index: KnowledgeSourceReferenceIndex;
@@ -66,15 +88,19 @@ export function KnowledgeSourceReferenceProvider({
   backlinks?: KnowledgeSourceBacklinkIndex;
   /** Optional: omitting it leaves every highlight on its neutral styling. */
   noteColors?: KnowledgeSourceNoteColors;
+  /** Optional: omitting it leaves the Source Notes panel showing nothing. */
+  noteSummaries?: KnowledgeSourceNoteSummaryIndex;
   children: React.ReactNode;
 }) {
-  // All three are already new Maps only when they actually changed, so this
+  // All four are already new Maps only when they actually changed, so this
   // passes the owner's values straight through rather than copying them.
   return (
     <KnowledgeSourceReferenceContext.Provider value={index}>
       <KnowledgeSourceBacklinkContext.Provider value={backlinks}>
         <KnowledgeSourceNoteColorContext.Provider value={noteColors}>
-          {children}
+          <KnowledgeSourceNoteSummaryContext.Provider value={noteSummaries}>
+            {children}
+          </KnowledgeSourceNoteSummaryContext.Provider>
         </KnowledgeSourceNoteColorContext.Provider>
       </KnowledgeSourceBacklinkContext.Provider>
     </KnowledgeSourceReferenceContext.Provider>
@@ -151,4 +177,20 @@ export function useKnowledgeSourceBacklinksForDocument(
     const found = knowledgeSourceBacklinksForDocument(backlinks, documentId);
     return found.length > 0 ? found : NO_BACKLINKS;
   }, [backlinks, documentId]);
+}
+
+/**
+ * PDF Source Notes Panel -- Phase 1. Every Note summary citing one document,
+ * read straight from context: no request, no Supabase, no persistence. A
+ * surface outside the provider, or a document with no citations, both read as
+ * "no Source Notes", the same neutral result an empty board would produce.
+ */
+export function useKnowledgeSourceNoteSummariesForDocument(
+  documentId: string | null | undefined,
+): readonly KnowledgeSourceNoteSummary[] {
+  const index = useContext(KnowledgeSourceNoteSummaryContext);
+  return useMemo(() => {
+    const found = knowledgeSourceNoteSummariesForDocument(index, documentId);
+    return found.length > 0 ? found : NO_NOTE_SUMMARIES;
+  }, [index, documentId]);
 }

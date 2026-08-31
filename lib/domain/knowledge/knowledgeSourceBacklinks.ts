@@ -59,7 +59,7 @@ const FALLBACK_LABEL = 'Note';
  * a decoded `&lt;` can never reconstitute markup here; the result is then only
  * ever rendered as a React text node, never through dangerouslySetInnerHTML.
  */
-function plainTextFromNoteContent(html: string): string {
+export function plainTextFromNoteContent(html: string): string {
   return html
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;|&#160;/g, ' ')

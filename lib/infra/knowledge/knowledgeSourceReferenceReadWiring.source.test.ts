@@ -367,11 +367,14 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
 describe('P6J-F6-B2 source marker and navigation wiring', () => {
   it('A: CanvasClient is still the only owner of the reference index', () => {
     // The provider carries the owner's values; it never holds state of its own.
-    // F6-B3 added the derived `backlinks` prop to this same tag and F8-B3 added
-    // `noteColors` -- three derived values, still exactly one owner and one tag.
-    expect(canvasClient).toContain(
-      '<KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex} noteColors={knowledgeSourceNoteColors}>',
-    );
+    // F6-B3 added `backlinks`, F8-B3 added `noteColors`, and the PDF Source
+    // Notes Panel phase added `noteSummaries` -- four derived values, still
+    // exactly one owner and one tag.
+    const tag = after(canvasClient, '<KnowledgeSourceReferenceProvider', 260);
+    expect(tag).toContain('index={sourceReferencesByPadletId}');
+    expect(tag).toContain('backlinks={knowledgeSourceBacklinkIndex}');
+    expect(tag).toContain('noteColors={knowledgeSourceNoteColors}');
+    expect(tag).toContain('noteSummaries={knowledgeSourceNoteSummaries}');
     expect((canvasClient.match(/<KnowledgeSourceReferenceProvider/g) ?? []).length).toBe(1);
     expect(referenceContext).not.toContain('useState');
     expect(referenceContext).not.toContain('listReferencesByTargetPadletIds');
@@ -591,11 +594,12 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     }
 
     // The projection is a memo over the EXISTING context, not a second context
-    // and not new state. B4-B3 added none; F8-B3 added exactly one, for Note
-    // colour transport, bringing the total to three and no further.
+    // and not new state. B4-B3 added none; F8-B3 added one for Note colour
+    // transport, and the PDF Source Notes Panel phase added one for Note
+    // summary transport, bringing the total to four and no further.
     expect(referenceContext).toContain('export function useKnowledgeSourceReferencesForDocument');
     expect(referenceContext).toContain('useContext(KnowledgeSourceReferenceContext)');
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(3);
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(4);
     for (const forbidden of ['fetch(', 'supabase', 'useState', 'useEffect', '.insert(', '.update(']) {
       expect(referenceContext, forbidden).not.toContain(forbidden);
     }
@@ -897,8 +901,9 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
       expect(documentDetails, forbidden).not.toContain(forbidden);
     }
     // Interaction introduced no context of its own. The third is F8-B3's Note
-    // colour transport, and it carries no state either.
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(3);
+    // colour transport and the fourth is the Source Notes Panel phase's Note
+    // summary transport, and neither carries state either.
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(4);
   });
 
   it('target identity comes from the resolved spans, never from the DOM count attribute', () => {

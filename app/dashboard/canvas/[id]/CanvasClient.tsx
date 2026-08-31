@@ -106,6 +106,7 @@ import {
 } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex, isKnowledgeBacklinkNote } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
+import { buildKnowledgeSourceNoteSummaryIndex } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
 import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
@@ -1649,6 +1650,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       return entries;
     }, []),
   ), [padlets]);
+
+  // PDF Source Notes Panel -- Phase 1. Per-document Note summaries, DISPLAY
+  // ONLY. The SAME join as the two projections above (already-loaded
+  // references + live posts), so opening the panel never issues a second
+  // read. Sits beside them and ABOVE the early returns for the same B3H
+  // hook-ordering reason.
+  const knowledgeSourceNoteSummaries = useMemo(
+    () => buildKnowledgeSourceNoteSummaryIndex(
+      Array.from(sourceReferencesByPadletId.values()).flat(),
+      padlets,
+    ),
+    [sourceReferencesByPadletId, padlets],
+  );
 
   // ==========================================================================
   // P6J-F6-B2 -- source navigation request (Note -> exact document/page)
@@ -6962,7 +6976,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }
 
   return (
-    <KnowledgeSourceReferenceProvider index={sourceReferencesByPadletId} backlinks={knowledgeSourceBacklinkIndex} noteColors={knowledgeSourceNoteColors}>
+    <KnowledgeSourceReferenceProvider
+      index={sourceReferencesByPadletId}
+      backlinks={knowledgeSourceBacklinkIndex}
+      noteColors={knowledgeSourceNoteColors}
+      noteSummaries={knowledgeSourceNoteSummaries}
+    >
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
