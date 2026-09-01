@@ -53,6 +53,12 @@ export interface KnowledgePdfCardControlsProps {
    * Non-terminal and failed states are always shown.
    */
   readonly hideStatusWhenReady?: boolean;
+  /**
+   * Read-only board access. The controls still RENDER -- a viewer should see
+   * what the document offers -- but none of them can be activated, using the
+   * board's own permission authority rather than a second rule.
+   */
+  readonly disabled?: boolean;
 }
 
 export interface KnowledgePdfOpenRequest {
@@ -177,11 +183,14 @@ export function KnowledgePdfCardControls({
   onToggleView,
   iconColor,
   hideStatusWhenReady = false,
+  disabled = false,
 }: KnowledgePdfCardControlsProps) {
   const openDocument = useKnowledgePdfOpen();
   const isReady = status === 'ready';
   const button = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded '
-    + 'hover:bg-black/10 focus-visible:outline focus-visible:outline-1';
+    + 'focus-visible:outline focus-visible:outline-1 '
+    // The toolbar's own disabled convention: dimmed and visibly inert.
+    + (disabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-black/10');
   // `data-no-drag` is the host strip's own convention for interactive children.
   const guard = {
     'data-no-drag': 'true',
@@ -193,6 +202,7 @@ export function KnowledgePdfCardControls({
       <button
         type="button"
         {...guard}
+        disabled={disabled}
         data-knowledge-pdf-action="collapse"
         title={collapsed ? 'Expand' : 'Collapse'}
         aria-label={collapsed ? 'Expand' : 'Collapse'}
@@ -221,6 +231,7 @@ export function KnowledgePdfCardControls({
         <button
           type="button"
           {...guard}
+          disabled={disabled}
           data-knowledge-pdf-action="parsed-content"
           data-knowledge-pdf-view={view}
           title={view === 'page' ? 'Show parsed content' : 'Show pages'}
@@ -239,6 +250,7 @@ export function KnowledgePdfCardControls({
           <button
             type="button"
             {...guard}
+            disabled={disabled}
             data-knowledge-pdf-action="open"
             title="Open"
             aria-label="Open"
@@ -253,6 +265,7 @@ export function KnowledgePdfCardControls({
           <button
             type="button"
             {...guard}
+            disabled={disabled}
             data-knowledge-pdf-action="side-panel"
             title="Add to side panel"
             aria-label="Add to side panel"
@@ -265,7 +278,21 @@ export function KnowledgePdfCardControls({
         </>
       ) : null}
 
-      {isReady ? (
+      {isReady ? (disabled ? (
+        /* An <a> takes no `disabled`, so a viewer gets the same affordance
+           with no href: nothing to activate and nowhere to navigate. */
+        <span
+          data-knowledge-pdf-action="new-tab"
+          aria-disabled="true"
+          role="link"
+          title="Open in new tab"
+          aria-label="Open in new tab"
+          className={button}
+          style={{ color: iconColor }}
+        >
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </span>
+      ) : (
         <a
           {...guard}
           data-knowledge-pdf-action="new-tab"
@@ -280,7 +307,7 @@ export function KnowledgePdfCardControls({
         >
           <ExternalLink className="h-3 w-3" aria-hidden="true" />
         </a>
-      ) : null}
+      )) : null}
     </>
   );
 }

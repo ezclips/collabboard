@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgePdfCanvasSurface, {
+  KnowledgePdfCardControls,
   KnowledgePdfOpenProvider,
 } from './KnowledgePdfCanvasSurface';
 
@@ -98,6 +99,33 @@ async function card(options: {
   });
   // Let the page fetch resolve.
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  mounted.push({ root, host });
+  return host;
+}
+
+/** The controls as a read-only viewer gets them: rendered, but inert. */
+async function viewerControls() {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const onOpen = vi.fn();
+  await act(async () => {
+    root.render(
+      <KnowledgePdfOpenProvider onOpenDocument={onOpen}>
+        <KnowledgePdfCardControls
+          boardId={BOARD_ID}
+          documentId={DOC_ID}
+          status="ready"
+          collapsed={false}
+          view="page"
+          disabled
+          onToggleCollapse={vi.fn()}
+          onToggleView={vi.fn()}
+        />
+      </KnowledgePdfOpenProvider>,
+    );
+  });
   mounted.push({ root, host });
   return host;
 }
@@ -365,33 +393,78 @@ describe('22-23. permissions', () => {
   });
 });
 
+describe('50-56. read-only viewers see the controls but cannot fire them', () => {
+  const ACTIONS = ['collapse', 'parsed-content', 'open', 'side-panel', 'new-tab'] as const;
+
+  it('50. every control is still rendered for a viewer', async () => {
+    const host = await viewerControls();
+    for (const name of ACTIONS) {
+      expect(action(host, name), name + ' must stay visible').not.toBeNull();
+    }
+  });
+
+  it.each(ACTIONS)('51-55. %s cannot be activated by a viewer', async (name) => {
+    const host = await viewerControls();
+    const control = action(host, name)!;
+    if (control.tagName === 'BUTTON') {
+      expect((control as HTMLButtonElement).disabled).toBe(true);
+    } else {
+      // An anchor takes no `disabled`; a viewer gets no href to follow.
+      expect(control.getAttribute('aria-disabled')).toBe('true');
+      expect(control.getAttribute('href')).toBeNull();
+    }
+    expect(control.className).toContain('cursor-not-allowed');
+  });
+
+  it('56. an editor keeps every control live', async () => {
+    const host = await card();
+    for (const name of ACTIONS) {
+      const control = action(host, name)!;
+      if (control.tagName === 'BUTTON') {
+        expect((control as HTMLButtonElement).disabled).toBe(false);
+      } else {
+        expect(control.getAttribute('href')).toContain('/original');
+      }
+      expect(control.className).not.toContain('cursor-not-allowed');
+    }
+  });
+
+  it('57. a viewer can still read and scroll the document body', async () => {
+    // The body is never permission-gated: reading is the point of a viewer.
+    const host = await card();
+    expect(body(host)!.className).toContain('overflow-y-auto');
+    expect(pageSections(host).length).toBeGreaterThan(0);
+    const code = executable(SURFACE);
+    expect(code).not.toMatch(/disabled \&\& .*data-knowledge-pdf-body/);
+  });
+});
+
 describe('46-49. renaming a PDF card, and the toolbar yielding to a modal', () => {
   const FREEFORM_SRC = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
   const CLIENT_SRC = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
-  it('46. the strip renames the BOARD label, never the Knowledge source', () => {
-    expect(FREEFORM_SRC).toContain('const pdfCardTitle = padlet.title?.trim() || pdfPlacement.originalFilename;');
+  it('46. renaming edits the BOARD label, never the Knowledge source', () => {
     expect(FREEFORM_SRC).toContain('updatePadletTitle(padlet.id, noteTitleDraft.trim());');
-    // The document's own filename is display fallback only -- never written.
+    // The document's own filename is display data only -- never written back.
     expect(FREEFORM_SRC).not.toContain('originalFilename =');
     expect(FREEFORM_SRC).not.toMatch(/knowledgeOriginalFilename\s*:/);
   });
 
   it('47. renaming reuses the strip title-edit machinery, not a new one', () => {
-    expect(FREEFORM_SRC).toContain('data-knowledge-pdf-title-input="true"');
-    expect(FREEFORM_SRC).toContain('setEditingNoteTitleId(padlet.id);');
-    // The SAME editing-id the note title already uses, taken from the one
-    // host prop -- not a second rename state of its own.
+    // A file post now joins the shared centre-column title cell rather than
+    // carrying a second rename implementation.
+    expect(FREEFORM_SRC).toContain("|| padlet.type === 'file') ? (() => {");
     expect(FREEFORM_SRC).toContain('editingNoteTitleId === padlet.id ? (');
     expect(FREEFORM_SRC).not.toContain('editingPdfTitleId');
     expect(FREEFORM_SRC).not.toContain('pdfTitleDraft');
+    expect(FREEFORM_SRC).not.toContain('data-knowledge-pdf-title-input');
   });
 
-  it('48. a read-only viewer cannot start a rename', () => {
-    // The double-click handler is undefined without edit rights, and the
-    // read-only branch returns the plain label before any of it.
-    expect(FREEFORM_SRC).toContain('onDoubleClick={canUseFreeformEditButton ? (e) => {');
-    expect(FREEFORM_SRC).toContain('if (!canUseFreeformEditButton) return pdfTitle;');
+  it('48. rename stays permission-gated by the strip it now lives in', () => {
+    // The pencil beside it is gated the same way, and the controls carry the
+    // same capability. No PDF-specific permission rule was introduced.
+    expect(FREEFORM_SRC).toContain('const showModalEditButton = canUseFreeformEditButton');
+    expect(FREEFORM_SRC).toContain('disabled={!canUseFreeformEditButton}');
   });
 
   it('49. the toolbar yields to a blocking modal instead of re-ordering z-index', () => {
@@ -455,41 +528,52 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     return FREEFORM.slice(at, at + 1200);
   };
 
-  /** The strip's PDF cell: title by default, controls on hover. */
+  /** The strip's PDF cell -- the controls, rendered unconditionally. */
   const pdfCell = () => {
-    const at = FREEFORM.indexOf('const pdfCardTitle =');
-    expect(at, 'the strip must render a PDF title cell').toBeGreaterThan(-1);
-    const end = FREEFORM.indexOf('{/* Center: title', at);
-    expect(end, 'the PDF cell must sit before the centre column').toBeGreaterThan(at);
-    return FREEFORM.slice(at - 1200, end);
+    const at = FREEFORM.indexOf('const pdfPlacement = readKnowledgePdfPlacement(padlet);');
+    expect(at, 'the strip must render the PDF controls').toBeGreaterThan(-1);
+    // Just the PDF block itself: the surrounding left column also holds the
+    // container/AI cluster, whose own hover behaviour is none of our business.
+    const end = FREEFORM.indexOf('})()}', at);
+    expect(end, 'the PDF block must close').toBeGreaterThan(at);
+    return FREEFORM.slice(at, end);
   };
 
-  it('40. the strip shows the PDF name by default, falling back to the filename', () => {
-    const cell = pdfCell();
-    expect(cell).toContain('padlet.title?.trim() || pdfPlacement.originalFilename');
-    expect(cell).toContain('{pdfCardTitle}');
-    // Truncated, so a long filename cannot push the strip's pencil off again.
-    expect(cell).toContain('truncate');
+  it('40. the PDF name uses the strip own shared centre title cell', () => {
+    // The 1fr centre column truncates instead of overflowing, and it already
+    // carries the shared double-click rename -- so the name needs no cell of
+    // its own competing with the controls for width.
+    expect(FREEFORM).toContain("|| padlet.type === 'file') ? (() => {");
+    expect(FREEFORM).toContain('setEditingNoteTitleId(padlet.id);');
   });
 
-  it('41. hovering swaps the title out and every control in, together', () => {
+  it('41. the controls are PERMANENT -- never hover-revealed', async () => {
     const cell = pdfCell();
-    // One reveal for the whole set -- the same group-hover the pencil uses,
-    // suspended only while the name is actually being edited.
-    expect(cell).toContain("editingNoteTitleId === padlet.id ? '' : 'group-hover:hidden'");
-    expect(cell).toContain("'hidden items-center gap-0.5 group-hover:flex'");
+    // No reveal mechanism of any kind may gate the PDF controls.
+    expect(cell).not.toContain('group-hover');
+    expect(cell).not.toContain('opacity-0');
+    expect(cell).not.toContain('hidden');
+    expect(cell).toContain('<KnowledgePdfCardControls');
+    // The strip's own pencil keeps its hover behaviour -- untouched.
     expect(FREEFORM).toContain('opacity-0 group-hover:opacity-100');
+
+    const host = await card();
+    for (const name of ['collapse', 'parsed-content', 'open', 'side-panel', 'new-tab']) {
+      const control = action(host, name)!;
+      expect(control, name + ' must render').not.toBeNull();
+      expect(control.className).not.toContain('opacity-0');
+      expect(control.className).not.toContain('group-hover');
+    }
   });
 
-  it('42. a read-only viewer gets NO hover reveal -- the strip stays a label', () => {
+  it('42. read-only keeps the controls VISIBLE but inert', () => {
     const cell = pdfCell();
-    // Returns the plain title before any hover markup is reached, so no
-    // control can be uncovered by moving the mouse over the card.
-    expect(cell).toContain('if (!canUseFreeformEditButton) return pdfTitle;');
-    expect(cell.indexOf('if (!canUseFreeformEditButton) return pdfTitle;'))
-      .toBeLessThan(cell.indexOf('group-hover:hidden'));
-    // Same capability that already withholds the pencil.
+    // Same board capability that already withholds the pencil -- not a new
+    // permission model, and not removal of the controls.
+    expect(cell).toContain('disabled={!canUseFreeformEditButton}');
     expect(FREEFORM).toContain('const showModalEditButton = canUseFreeformEditButton');
+    const code = executable(SURFACE);
+    expect(code).toContain("(disabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-black/10')");
   });
 
   it('35z. a resized PDF hugs its content: manual height is a CAP, not a pin', () => {

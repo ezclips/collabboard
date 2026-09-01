@@ -3344,83 +3344,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     {(() => {
                       const pdfPlacement = readKnowledgePdfPlacement(padlet);
                       if (!pdfPlacement) return null;
-                      /**
-                       * The BOARD's label for this placement, which is the
-                       * filename only until someone renames it. Renaming edits
-                       * padlet.title and nothing else: the Knowledge document
-                       * keeps its own originalFilename, because the source is
-                       * durable authority this card merely references.
-                       */
-                      const pdfCardTitle = padlet.title?.trim() || pdfPlacement.originalFilename;
-                      const pdfTitle = editingNoteTitleId === padlet.id ? (
-                        <input
-                          type="text"
-                          value={noteTitleDraft}
-                          onChange={(e) => setNoteTitleDraft(e.target.value)}
-                          onBlur={() => {
-                            setEditingNoteTitleId(null);
-                            updatePadletTitle(padlet.id, noteTitleDraft.trim());
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') e.currentTarget.blur();
-                            if (e.key === 'Escape') setEditingNoteTitleId(null);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          data-no-drag="true"
-                          data-knowledge-pdf-title-input="true"
-                          placeholder="PDF name"
-                          className="w-[150px] bg-transparent border-b border-blue-400 text-[10px] font-medium outline-none"
-                          style={{ color: freeformTitleColor }}
-                          autoFocus
-                        />
-                      ) : (
-                        <span
-                          data-knowledge-pdf-title="true"
-                          className="block max-w-[150px] truncate text-[10px] font-medium"
-                          style={{ color: freeformTitleColor }}
-                          title={canUseFreeformEditButton ? 'Double-click to rename' : pdfCardTitle}
-                          onDoubleClick={canUseFreeformEditButton ? (e) => {
-                            e.stopPropagation();
-                            setEditingNoteTitleId(padlet.id);
-                            setNoteTitleDraft(pdfCardTitle);
-                          } : undefined}
-                        >
-                          {pdfCardTitle}
-                        </span>
-                      );
-                      // Read-only: the strip stays a label. No hover reveal at
-                      // all, matching the pencil, which is likewise withheld
-                      // from a viewer -- so a viewer never uncovers a control
-                      // by moving the mouse across the card.
-                      if (!canUseFreeformEditButton) return pdfTitle;
+                      // Always rendered, never hover-revealed: a person should
+                      // see what a PDF offers without probing it. A read-only
+                      // viewer sees the same set, visibly inert -- the board's
+                      // own edit capability decides, not a second rule.
                       return (
-                        <>
-                          {/* Default state is the document's name; hovering the
-                              card swaps the whole set of controls in at once,
-                              the same reveal the strip's pencil uses. While the
-                              name is actually being edited the swap is off, or
-                              the input would vanish under the pointer. */}
-                          <span className={editingNoteTitleId === padlet.id ? '' : 'group-hover:hidden'}>{pdfTitle}</span>
-                          <span className={editingNoteTitleId === padlet.id
-                            ? 'hidden'
-                            : 'hidden items-center gap-0.5 group-hover:flex'}>
-                            <KnowledgePdfCardControls
-                              boardId={padlet.board_id}
-                              documentId={pdfPlacement.documentId}
-                              status={pdfPlacement.processingStatus}
-                              collapsed={pdfCardCollapsed[padlet.id] ?? false}
-                              view={pdfCardView[padlet.id] ?? 'page'}
-                              iconColor={freeformIconColor}
-                              hideStatusWhenReady
-                              onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
-                              onToggleView={() => setPdfCardView((prev) => ({
-                                ...prev,
-                                [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
-                              }))}
-                            />
-                          </span>
-                        </>
+                        <KnowledgePdfCardControls
+                          boardId={padlet.board_id}
+                          documentId={pdfPlacement.documentId}
+                          status={pdfPlacement.processingStatus}
+                          collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                          view={pdfCardView[padlet.id] ?? 'page'}
+                          iconColor={freeformIconColor}
+                          hideStatusWhenReady
+                          disabled={!canUseFreeformEditButton}
+                          onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
+                          onToggleView={() => setPdfCardView((prev) => ({
+                            ...prev,
+                            [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
+                          }))}
+                        />
                       );
                     })()}
                     {showExpandButton || isAIPost ? (
@@ -3545,7 +3488,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           </span>
                         );
                       })()
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'ai-component' || padlet.type === 'drawing') ? (() => {
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'ai-component' || padlet.type === 'drawing' || padlet.type === 'file') ? (() => {
                       // Resolve the title's FULL style (heading/size, bold,
                       // italic, underline, strikethrough, align, color) the
                       // same way the editor modal's Text style panel wrote
