@@ -36,7 +36,11 @@ export async function DELETE(
 ) {
   try {
     const cookieStore = await cookies();
-    const sessionClient = createRouteHandlerClient({ cookies: async () => cookieStore });
+    // createRouteHandlerClient calls .get() on whatever this returns, synchronously.
+    // An async wrapper hands it a Promise, so the client threw
+    // "nextCookies.get is not a function" before any auth check could run. This is
+    // the same adapter form the repository's other route handlers use.
+    const sessionClient = createRouteHandlerClient({ cookies: () => cookieStore as any });
     const {
       data: { user },
       error: authError,
