@@ -39,22 +39,44 @@ export interface KnowledgePdfOpenRequest {
  */
 const KnowledgePdfOpenContext = createContext<((request: KnowledgePdfOpenRequest) => void) | null>(null);
 
+/**
+ * R1-B. The SAME transport, for the reverse direction: a surface that learns a
+ * terminal status reports it to the board, which owns the durable write. The
+ * surface never touches persistence itself, and both hosts (common card and
+ * Freeform) therefore share one status contract rather than two.
+ */
+export type KnowledgePdfStatusReporter = (
+  documentId: string,
+  status: KnowledgePdfProcessingStatus,
+) => void;
+
+const KnowledgePdfStatusContext = createContext<KnowledgePdfStatusReporter | null>(null);
+
 export function KnowledgePdfOpenProvider({
   onOpenDocument,
+  onStatusResolved = null,
   children,
 }: {
   onOpenDocument: ((request: KnowledgePdfOpenRequest) => void) | null;
+  /** Optional so a host without durable posts stays inert, as before. */
+  onStatusResolved?: KnowledgePdfStatusReporter | null;
   children: React.ReactNode;
 }) {
   return (
     <KnowledgePdfOpenContext.Provider value={onOpenDocument}>
-      {children}
+      <KnowledgePdfStatusContext.Provider value={onStatusResolved}>
+        {children}
+      </KnowledgePdfStatusContext.Provider>
     </KnowledgePdfOpenContext.Provider>
   );
 }
 
 export function useKnowledgePdfOpen() {
   return useContext(KnowledgePdfOpenContext);
+}
+
+export function useKnowledgePdfStatusReporter() {
+  return useContext(KnowledgePdfStatusContext);
 }
 
 /** Reads a placement off any padlet-shaped value. Identity is the id alone. */
@@ -106,6 +128,7 @@ export default function KnowledgePdfCanvasSurface({
   onStatusResolved,
 }: KnowledgePdfCanvasSurfaceProps) {
   const openDocument = useKnowledgePdfOpen();
+  const reportStatus = useKnowledgePdfStatusReporter();
   const [status, setStatus] = useState<KnowledgePdfProcessingStatus>(processingStatus);
 
   useEffect(() => setStatus(processingStatus), [processingStatus]);
@@ -124,13 +147,18 @@ export default function KnowledgePdfCanvasSurface({
         const found = documents.find((item) => item.id === documentId);
         if (cancelled || !found || !TERMINAL(found.processingStatus)) return;
         setStatus(found.processingStatus);
+        // Exactly once per resolution: this runs only while `status` is
+        // non-terminal, and setStatus re-runs the effect straight into the
+        // terminal early-return above, so the interval is gone before a second
+        // tick. `cancelled` additionally blocks any report after unmount.
         onStatusResolved?.(found.processingStatus);
+        reportStatus?.(documentId, found.processingStatus);
       } catch {
         // Status is optional enhancement; a failed poll leaves the last state.
       }
     }, 4000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [boardId, documentId, status, onStatusResolved]);
+  }, [boardId, documentId, status, onStatusResolved, reportStatus]);
 
   const open = useCallback(() => {
     openDocument?.({ documentId });

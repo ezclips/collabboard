@@ -5,7 +5,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import KnowledgePdfCanvasSurface, {
   KnowledgePdfOpenProvider,
   readKnowledgePdfPlacement,
@@ -202,7 +202,7 @@ describe('8 + 9. Open and Add to side panel are the same one reader', () => {
   });
 
   it('routes into the existing shell reader, adding no second one', () => {
-    expect(CLIENT).toContain('<KnowledgePdfOpenProvider onOpenDocument={requestKnowledgeDocumentOpen}>');
+    expect(CLIENT).toMatch(/<KnowledgePdfOpenProvider[\s\S]{0,120}onOpenDocument=\{requestKnowledgeDocumentOpen\}/);
     expect(SURFACE).not.toMatch(/KnowledgeSourceReaderDrawer|createPortal|<dialog/);
   });
 });
@@ -253,5 +253,194 @@ describe('polling stops on a terminal state', () => {
   it('never starts a loop for a document that is already ready', () => {
     expect(SURFACE).toContain('if (TERMINAL(status) || !boardId) return;');
     expect(SURFACE).toContain('window.clearInterval(timer)');
+  });
+});
+
+/**
+ * R1-B. Terminal status resolved on a REOPENED board must reach the board's
+ * own persistence owner exactly once. The surface itself must never write.
+ */
+describe('R1-B. reopen-resolved terminal status is reported to the board once', () => {
+  const listUrl = `/api/boards/${BOARD_ID}/knowledge`;
+
+  function mountWithStatus(
+    processingStatus: 'uploaded' | 'processing' | 'ready' | 'failed',
+    report: (id: string, s: string) => void,
+  ) {
+    return mount(
+      <KnowledgePdfOpenProvider onOpenDocument={vi.fn()} onStatusResolved={report as never}>
+        <KnowledgePdfCanvasSurface
+          boardId={BOARD_ID}
+          documentId={DOC_ID}
+          originalFilename="lesson.pdf"
+          processingStatus={processingStatus}
+        />
+      </KnowledgePdfOpenProvider>,
+    );
+  }
+
+  function stubList(status: string) {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith(listUrl)) {
+        return new Response(JSON.stringify({ documents: [{
+          id: DOC_ID, boardId: BOARD_ID, originalFilename: 'lesson.pdf',
+          mimeType: 'application/pdf', fileSizeBytes: 1, pageCount: 1,
+          processingStatus: status, createdAt: 'x', updatedAt: 'x',
+        }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it.each(['ready', 'failed'] as const)('persisted "processing" resolving to %s reports once', async (terminal) => {
+    vi.useFakeTimers();
+    const report = vi.fn();
+    stubList(terminal);
+    mountWithStatus('processing', report);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(DOC_ID, terminal);
+  });
+
+  it.each(['ready', 'failed'] as const)('a placement already %s never polls and never reports', async (terminal) => {
+    vi.useFakeTimers();
+    const report = vi.fn();
+    const fetchMock = stubList(terminal);
+    mountWithStatus(terminal, report);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('the surface itself performs no persistence -- it only reports', () => {
+    const code = executable(SURFACE);
+    expect(code).not.toMatch(/method:\s*'(POST|PATCH|PUT|DELETE)'/);
+    expect(code).not.toContain('updatePostFields');
+    expect(code).not.toContain('setPadlets');
+    // The board owns the durable write.
+    expect(CLIENT).toContain('onStatusResolved={handleKnowledgePdfSettled}');
+    expect(CLIENT).toContain('updatePostFieldsSwallowResolved(target.id');
+  });
+
+  it('the board writes only on a real non-terminal -> terminal transition', () => {
+    const owner = CLIENT.slice(
+      CLIENT.indexOf('const handleKnowledgePdfSettled'),
+      CLIENT.indexOf('const persistKnowledgeSourceReference'),
+    );
+    expect(owner).toContain("if (status !== 'ready' && status !== 'failed') return;");
+    expect(owner).toContain("knowledgeProcessingStatus === status) return;");
+  });
+
+  it('both hosts deliver through the SAME context contract, not two writers', () => {
+    // Neither host passes a status writer of its own, and neither renders the
+    // surface with per-host persistence wiring: the reporter reaches the board
+    // through the one context. (Freeform's unrelated comment-mutation calls are
+    // deliberately not matched -- this asserts about the PDF surface only.)
+    for (const host of [POST_CARD, FREEFORM]) {
+      const mountSite = host.slice(host.indexOf('<KnowledgePdfCanvasSurface'));
+      const element = mountSite.slice(0, mountSite.indexOf('/>') + 2);
+      expect(element).toContain('documentId=');
+      expect(element).not.toContain('onStatusResolved');
+      expect(element).not.toContain('updatePostFields');
+    }
+    expect(SURFACE).toContain('useKnowledgePdfStatusReporter');
+    expect(CLIENT).toContain('onStatusResolved={handleKnowledgePdfSettled}');
+  });
+});
+
+/**
+ * R1-A-2. The PDF placement must ask the SAME layout placement authority every
+ * other new post asks, and must keep its own persistence. These are source
+ * proofs because the authority lives in a hook wired through the whole board
+ * shell; the behavioural half (which layout prompts) belongs to the layouts'
+ * own suites, which this change does not alter.
+ */
+describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
+  const HOOK = read('hooks/canvas/usePadletSave.ts');
+  const GHOST = read('components/collabboard/canvas/ui/GhostDragElement.tsx');
+  const TYPES = read('types/collabboard.ts');
+  const handler = CLIENT.slice(
+    CLIENT.indexOf('const handleKnowledgePdfUploaded'),
+    CLIENT.indexOf('const handleKnowledgePdfSettled'),
+  );
+
+  it('1. the public gate delegates to the existing checkPlacementRequired', () => {
+    expect(HOOK).toContain('requestPlacementIfRequired:');
+    expect(HOOK).toContain('checkPlacementRequired(draft, closeEditor)');
+    // Exactly one definition of the policy still exists.
+    expect((HOOK.match(/const checkPlacementRequired = \(/g) || []).length).toBe(1);
+  });
+
+  it('2. the public gate performs no persistence of its own', () => {
+    const gate = HOOK.slice(HOOK.indexOf('requestPlacementIfRequired:'));
+    const body = gate.slice(0, gate.indexOf('};'));
+    for (const forbidden of ['supabase', 'insert(', 'Repository', 'fetch(']) {
+      expect(body).not.toContain(forbidden);
+    }
+  });
+
+  it('3. the PDF builds a file draft and honours the TRUE-means-taken contract', () => {
+    expect(TYPES).toContain("| 'file';");
+    expect(handler).toContain("kind: 'file'");
+    expect(handler).toContain('if (placementTaken) return;');
+    // The gate is consulted BEFORE any row is built or inserted.
+    expect(handler.indexOf('placementTaken')).toBeLessThan(handler.indexOf('crypto.randomUUID()'));
+  });
+
+  it('4. the no-placement path keeps the existing PDF persistence authority', () => {
+    expect(handler).toContain('insertPostPreservingFailureChannels(placement');
+    expect(handler).not.toContain('supabase.from');
+  });
+
+  it('5. a required placement suppresses the immediate insert', () => {
+    const gateAt = handler.indexOf('if (placementTaken) return;');
+    const insertAt = handler.indexOf('insertPostPreservingFailureChannels');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(insertAt);
+  });
+
+  it('6-12. no PDF-specific per-layout branch exists anywhere in the PDF path', () => {
+    for (const layout of [
+      'isDrawingLayout', 'isTimelineLayout', 'isSchedulerLayout',
+      'isMapLayout', 'isGridLayout', 'isColumnsLayout', 'isWallLayout',
+    ]) {
+      expect(handler, `${layout} must not be branched on in the PDF handler`).not.toContain(layout);
+    }
+    // The layout policy the PDF now inherits is the one the hook already owns.
+    for (const branch of ['isDrawingLayout', 'isTimelineLayout', 'isSchedulerLayout']) {
+      expect(HOOK).toContain(branch);
+    }
+    expect(HOOK).toContain('checkGridPlacementRequired({');
+  });
+
+  it('13. deferred completion rebuilds a file payload with the same identity', () => {
+    const payload = CLIENT.slice(CLIENT.indexOf('const draftToInsertPayload'));
+    const fileCase = payload.slice(payload.indexOf("case 'file':"), payload.indexOf("case 'comment':"));
+    expect(fileCase).toContain("type: 'file'");
+    expect(fileCase).toContain('...draft.metadata');
+    expect(fileCase).toContain('parentId');
+    for (const forbidden of ['storage_path', 'signedUrl', 'pageText', 'chunks', 'embedding']) {
+      expect(fileCase).not.toContain(forbidden);
+    }
+  });
+
+  it('14. the drag ghost names a file draft instead of rendering blank', () => {
+    expect(GHOST).toContain("draft.kind === 'file'");
+    expect(GHOST).toContain("'PDF'");
+  });
+
+  it('15. document-id dedupe still guards before the gate is consulted', () => {
+    expect(handler.indexOf('if (alreadyPlaced) return;'))
+      .toBeLessThan(handler.indexOf('placementTaken'));
+    expect(handler).not.toContain('originalFilename ===');
   });
 });

@@ -1530,5 +1530,20 @@ export function usePadletSave(params: UsePadletSaveParams) {
     saveImage,
     saveDrawing,
     saveAIComponent,
+    /**
+     * PDF-C1 R1-A-2. The layout placement DECISION, for a caller that owns its
+     * own persistence (the Knowledge PDF placement already writes through
+     * insertPostPreservingFailureChannels and must keep doing so).
+     *
+     * Deliberately a thin delegation to the same checkPlacementRequired every
+     * saveX above uses -- no second copy of the policy, no Supabase write, no
+     * layout switch of its own. Same contract as internally: TRUE means the
+     * placement flow has taken ownership and the caller must NOT insert; FALSE
+     * means no placement is required and the caller proceeds normally.
+     */
+    requestPlacementIfRequired: (
+      draft: PlacementDraft,
+      closeEditor: () => void = () => {},
+    ): boolean => checkPlacementRequired(draft, closeEditor),
   };
 }

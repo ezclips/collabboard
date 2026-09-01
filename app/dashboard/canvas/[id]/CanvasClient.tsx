@@ -1713,6 +1713,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
   }, [sourceReferenceScopeKey]);
 
+  // R1-A-2. Placement gate lives on usePadletSave (constructed below); this ref
+  // bridges the ordering without duplicating any placement policy.
+  const requestPlacementIfRequiredRef = useRef<((draft: any) => boolean) | null>(null);
+
   /**
    * PDF-C1 placement footprint. Portrait-ish so a page-one preview reads as a
    * page; the host owns resize from here on, exactly as for any other post.
@@ -1736,6 +1740,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
     if (alreadyPlaced) return;
 
+    const knowledgeMetadata = {
+      knowledgeDocumentId: document.id,
+      knowledgeOriginalFilename: document.originalFilename,
+      knowledgeProcessingStatus: document.processingStatus,
+      knowledgeDisplayMode: 'preview' as const,
+    };
+
+    // R1-A-2. The layout decides placement, not this handler. `true` means the
+    // normal placement flow took ownership and completes the draft through
+    // draftToInsertPayload -- so no immediate insert here, and no layout branch.
+    const placementTaken = requestPlacementIfRequiredRef.current?.({
+      kind: 'file',
+      content: '',
+      title: document.originalFilename,
+      metadata: knowledgeMetadata,
+    });
+    if (placementTaken) return;
+
     const placementId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
     const width = KNOWLEDGE_PDF_PLACEMENT_WIDTH;
@@ -1754,13 +1776,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       height,
       created_at: nowIso,
       updated_at: nowIso,
-      metadata: {
-        knowledgeDocumentId: document.id,
-        knowledgeOriginalFilename: document.originalFilename,
-        knowledgeProcessingStatus: document.processingStatus,
-        knowledgeDisplayMode: 'preview',
-        zIndex: nextZIndex(padlets),
-      } as any,
+      metadata: { ...knowledgeMetadata, zIndex: nextZIndex(padlets) } as any,
     };
 
     setPadlets((prev) => [...prev, placement]);
@@ -1780,10 +1796,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     documentId: string,
     status: KnowledgePdfProcessingStatus,
   ) => {
+    // Only a real transition is written: terminal-in, non-terminal-stored,
+    // and actually different. A repeated `ready` therefore costs no write,
+    // whether it arrives from the upload poll or a reopened surface.
+    if (status !== 'ready' && status !== 'failed') return;
     const target = padlets.find(
       (p) => (p.metadata as any)?.knowledgeDocumentId === documentId,
     );
     if (!target) return;
+    if ((target.metadata as any)?.knowledgeProcessingStatus === status) return;
     const nextMetadata = { ...(target.metadata as any), knowledgeProcessingStatus: status };
     setPadlets((prev) => prev.map((p) => (p.id === target.id ? { ...p, metadata: nextMetadata } : p)));
     void updatePostFieldsSwallowResolved(target.id, { metadata: nextMetadata } as any);
@@ -1905,7 +1926,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     saveCard,
     saveImage,
     saveDrawing,
-    saveAIComponent
+    saveAIComponent,
+    requestPlacementIfRequired
   } = usePadletSave({
     canvasId: canvasId ?? null,
     padletToEdit,
@@ -1983,6 +2005,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       toast.info('Drag onto a time slot to place your post');
     },
   });
+  requestPlacementIfRequiredRef.current = requestPlacementIfRequired;
 
   // Scroll to bottom when toggling Gantt or Scheduler so they are instantly visible
   useEffect(() => {
@@ -2350,6 +2373,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             ...draft.metadata,
             parentId
           },
+        };
+
+      // R1-A-2. Completion of a DEFERRED PDF placement: the draft's knowledge
+      // metadata carries through untouched, so a prompted placement keeps the
+      // same document identity. Still a reference -- no bytes, text or path.
+      case 'file':
+        return {
+          ...basePayload,
+          title: draft.title || draft.metadata?.knowledgeOriginalFilename || 'PDF',
+          content: '',
+          type: 'file',
+          width: KNOWLEDGE_PDF_PLACEMENT_WIDTH,
+          height: KNOWLEDGE_PDF_PLACEMENT_HEIGHT,
+          metadata: { ...draft.metadata, parentId },
         };
 
       case 'comment':
@@ -7079,7 +7116,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       noteColors={knowledgeSourceNoteColors}
       noteSummaries={knowledgeSourceNoteSummaries}
     >
-    <KnowledgePdfOpenProvider onOpenDocument={requestKnowledgeDocumentOpen}>
+    <KnowledgePdfOpenProvider
+      onOpenDocument={requestKnowledgeDocumentOpen}
+      onStatusResolved={handleKnowledgePdfSettled}
+    >
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">

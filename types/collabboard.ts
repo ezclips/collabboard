@@ -380,7 +380,10 @@ export interface CanvasLine {
 
 // Types for Column Layout Post Placement
 export type PendingPostDraft = {
-  kind: 'note' | 'todo' | 'link' | 'table' | 'image' | 'comment' | 'drawing' | 'card' | 'ai-component';
+  // 'file' (PDF-C1 R1-A-2) is a Knowledge-document PLACEMENT draft. It exists
+  // so a PDF enters the same layout placement policy as every other new
+  // post; the durable PDF authority remains the Knowledge document.
+  kind: 'note' | 'todo' | 'link' | 'table' | 'image' | 'comment' | 'drawing' | 'card' | 'ai-component' | 'file';
   title?: string;
   content: any;
   file_url?: string;

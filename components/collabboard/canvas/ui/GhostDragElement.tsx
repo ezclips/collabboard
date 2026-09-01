@@ -23,6 +23,7 @@ export default function GhostDragElement({ newPostDragState }: GhostDragElementP
           {newPostDragState.draft.kind === 'link' && 'Link'}
           {newPostDragState.draft.kind === 'todo' && 'To-do'}
           {newPostDragState.draft.kind === 'table' && 'Table'}
+          {newPostDragState.draft.kind === 'file' && (newPostDragState.draft.title || 'PDF')}
         </div>
         <div className="text-[10px] text-gray-500 truncate mt-1">
           Drag to a container...
