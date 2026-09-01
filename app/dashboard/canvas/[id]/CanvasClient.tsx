@@ -112,6 +112,11 @@ import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/kn
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
 import { KnowledgeSourceReferenceProvider } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import { KnowledgePdfOpenProvider } from '@/components/collabboard/KnowledgePdfCanvasSurface';
+import type {
+  KnowledgePdfProcessingStatus,
+  KnowledgePdfUploadResult,
+} from '@/components/collabboard/KnowledgePdfUploader';
 import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
@@ -1707,6 +1712,82 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       buildKnowledgeDocumentOpenRequest(knowledgeDocumentRequestIdRef.current, request.documentId, request.pageNumber),
     );
   }, [sourceReferenceScopeKey]);
+
+  /**
+   * PDF-C1 placement footprint. Portrait-ish so a page-one preview reads as a
+   * page; the host owns resize from here on, exactly as for any other post.
+   */
+  const KNOWLEDGE_PDF_PLACEMENT_WIDTH = 260;
+  const KNOWLEDGE_PDF_PLACEMENT_HEIGHT = 320;
+
+  /**
+   * PDF-C1. Upload produced ONE Knowledge document; the board gets ONE
+   * placement referencing it. The placement is an ordinary post: it goes
+   * through the same position authority and the same insert path every other
+   * post uses, so no layout gets a PDF-specific branch.
+   *
+   * Identity is the server's document id. Filenames are display text and are
+   * allowed to repeat, so the duplicate guard below keys on the id alone.
+   */
+  const handleKnowledgePdfUploaded = useCallback(async (document: KnowledgePdfUploadResult) => {
+    if (!canvasId) return;
+    const alreadyPlaced = padlets.some(
+      (p) => (p.metadata as any)?.knowledgeDocumentId === document.id,
+    );
+    if (alreadyPlaced) return;
+
+    const placementId = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+    const width = KNOWLEDGE_PDF_PLACEMENT_WIDTH;
+    const height = KNOWLEDGE_PDF_PLACEMENT_HEIGHT;
+    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+
+    const placement: Padlet = {
+      id: placementId,
+      board_id: canvasId,
+      title: document.originalFilename,
+      content: '',
+      type: 'file',
+      position_x: positionX,
+      position_y: positionY,
+      width,
+      height,
+      created_at: nowIso,
+      updated_at: nowIso,
+      metadata: {
+        knowledgeDocumentId: document.id,
+        knowledgeOriginalFilename: document.originalFilename,
+        knowledgeProcessingStatus: document.processingStatus,
+        knowledgeDisplayMode: 'preview',
+        zIndex: nextZIndex(padlets),
+      } as any,
+    };
+
+    setPadlets((prev) => [...prev, placement]);
+    const insertResult = await insertPostPreservingFailureChannels(placement as any);
+    if (!insertResult.ok) {
+      setPadlets((prev) => prev.filter((p) => p.id !== placementId));
+      toast.error('PDF uploaded, but it could not be added to the canvas');
+      fetchData();
+    }
+  }, [canvasId, padlets, getNewPostPosition, insertPostPreservingFailureChannels, fetchData]);
+
+  /**
+   * Terminal processing state for an already-placed document. Metadata only --
+   * this never touches the Knowledge document itself.
+   */
+  const handleKnowledgePdfSettled = useCallback((
+    documentId: string,
+    status: KnowledgePdfProcessingStatus,
+  ) => {
+    const target = padlets.find(
+      (p) => (p.metadata as any)?.knowledgeDocumentId === documentId,
+    );
+    if (!target) return;
+    const nextMetadata = { ...(target.metadata as any), knowledgeProcessingStatus: status };
+    setPadlets((prev) => prev.map((p) => (p.id === target.id ? { ...p, metadata: nextMetadata } : p)));
+    void updatePostFieldsSwallowResolved(target.id, { metadata: nextMetadata } as any);
+  }, [padlets, updatePostFieldsSwallowResolved]);
 
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
@@ -6998,6 +7079,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       noteColors={knowledgeSourceNoteColors}
       noteSummaries={knowledgeSourceNoteSummaries}
     >
+    <KnowledgePdfOpenProvider onOpenDocument={requestKnowledgeDocumentOpen}>
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
@@ -7026,7 +7108,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
-              onOpenKnowledgeDocument={requestKnowledgeDocumentOpen}
+              onKnowledgePdfUploaded={handleKnowledgePdfUploaded}
+              onKnowledgePdfSettled={handleKnowledgePdfSettled}
             />
           </div>
         )}
@@ -9717,6 +9800,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       {/* New Post Ghost Drag Element */}
       <GhostDragElement newPostDragState={newPostDragState} />
     </div >
+    </KnowledgePdfOpenProvider>
     </KnowledgeSourceReferenceProvider>
   );
   // === END RENDER REGION (JSX ONLY) ===

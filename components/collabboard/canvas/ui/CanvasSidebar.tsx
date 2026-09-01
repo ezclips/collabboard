@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, MoreVertical } from 'lucide-react';
-import KnowledgeDocumentsList from '@/components/collabboard/KnowledgeDocumentsList';
-import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
+import { MoreVertical } from 'lucide-react';
+import KnowledgePdfUploader, {
+  type KnowledgePdfProcessingStatus,
+  type KnowledgePdfUploadResult,
+  type KnowledgePdfUploaderHandle,
+} from '@/components/collabboard/KnowledgePdfUploader';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,12 +52,14 @@ interface CanvasSidebarProps {
   handleToolClick: (type: string) => void;
   onBack: () => void;
   /**
-   * P6J-F7-B1. The library named something to read. Pure plumbing: the sidebar
-   * neither loads nor renders the reader, which lives at canvas shell level --
-   * from inside this component's `z-[3000]` wrapper no reader can coexist with
-   * an open editor. The sidebar's only remaining Knowledge job is the library.
+   * PDF-C1. The sidebar's only remaining Knowledge job is owning the hidden
+   * file input behind Add PDF. It neither loads, lists nor reads documents:
+   * the library launcher is gone because the board now holds the PDFs, and the
+   * reader lives at canvas shell level. These two are pure plumbing for the
+   * upload the shell turns into a canvas placement.
    */
-  onOpenKnowledgeDocument?: (request: { documentId: string; pageNumber?: number }) => void;
+  onKnowledgePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
+  onKnowledgePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -81,7 +86,8 @@ export default function CanvasSidebar({
   onBeforeToolClick,
   handleToolClick,
   onBack,
-  onOpenKnowledgeDocument,
+  onKnowledgePdfUploaded,
+  onKnowledgePdfSettled,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -94,9 +100,6 @@ export default function CanvasSidebar({
   const naturalHeightsRef = useRef(new Map<string, Map<string, number>>());
   const [overflowState, setOverflowState] = useState<OverflowState | null>(null);
   const [menuSideOffset, setMenuSideOffset] = useState(TOOLBAR_MENU_GAP_PX);
-  // Bumped by the uploader so the read surface refetches instead of polling.
-  const [knowledgeRefreshToken, setKnowledgeRefreshToken] = useState(0);
-  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
   // P6J-F7-B1: a Note asking for its source no longer touches this component.
   // The request goes straight to the shell-level reader, so opening a citation
@@ -106,10 +109,6 @@ export default function CanvasSidebar({
   // The tool an overflow item selected, dispatched only once the dropdown has
   // finished closing (see onCloseAutoFocus below).
   const pendingToolRef = useRef<string | null>(null);
-
-  const handleKnowledgeChanged = useCallback(() => {
-    setKnowledgeRefreshToken((token) => token + 1);
-  }, []);
 
   const groupSignature = useMemo(
     () => `${isCollapsed ? 'collapsed' : 'expanded'}:${groups.map((group) => `${group.id}:${group.tools.length}`).join('|')}`,
@@ -272,12 +271,10 @@ export default function CanvasSidebar({
       data-toolbar-sidebar="true"
       className={`${isCollapsed ? 'w-12' : 'w-14'} h-full bg-white border-r flex flex-col items-center py-6 gap-3 shadow-sm z-20 relative overflow-visible transition-[width] duration-150`}
     >
-      <KnowledgePdfUploader ref={knowledgePdfUploaderRef} onKnowledgeChanged={handleKnowledgeChanged} />
-      <KnowledgeDocumentsList
-        refreshToken={knowledgeRefreshToken}
-        isOpen={knowledgeOpen}
-        onClose={() => setKnowledgeOpen(false)}
-        onOpenDocument={onOpenKnowledgeDocument}
+      <KnowledgePdfUploader
+        ref={knowledgePdfUploaderRef}
+        onDocumentUploaded={onKnowledgePdfUploaded}
+        onDocumentSettled={onKnowledgePdfSettled}
       />
       <button
         ref={moreMeasureRef}
@@ -304,19 +301,10 @@ export default function CanvasSidebar({
 
       <div ref={dividerRef} className="w-6 h-px bg-gray-200" />
 
-      <button
-        type="button"
-        data-knowledge-trigger="true"
-        className="group relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100"
-        aria-label="Knowledge"
-        title="Knowledge"
-        onClick={() => setKnowledgeOpen(true)}
-      >
-        <BookOpen size={18} strokeWidth={1.5} />
-        <span className="absolute left-full ml-2 rounded bg-gray-700 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 group-hover:opacity-100 z-[100] pointer-events-none">
-          Knowledge
-        </span>
-      </button>
+      {/* PDF-C1 removed the Knowledge library launcher that stood here. PDFs
+          are canvas objects now, so the board itself is the library; Add PDF
+          (tool group) remains the one entry point. KnowledgeDocumentsList and
+          every Knowledge API, reader and provenance feature are untouched. */}
 
       {/* Tool groups */}
       {visibleGroups.map((group) => (

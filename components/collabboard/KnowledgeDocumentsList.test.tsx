@@ -328,13 +328,16 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.querySelector('[data-knowledge-documents]')).not.toBeNull();
   });
 
-  it('keeps Add PDF separate from the Knowledge trigger', () => {
+  it('keeps Add PDF, and PDF-C1 removed the Knowledge launcher beside it', () => {
     expect(sidebarCode).toContain("if (type === 'knowledge-pdf')");
     expect(sidebarCode).toContain('knowledgePdfUploaderRef.current?.openPicker()');
-    expect(sidebarCode).toContain('data-knowledge-trigger="true"');
-    expect(sidebarCode).toContain('onClick={() => setKnowledgeOpen(true)}');
-    expect(sidebarCode).toContain('isOpen={knowledgeOpen}');
-    expect(sidebarCode).toContain('onClose={() => setKnowledgeOpen(false)}');
+    // PDF-C1 made PDFs canvas objects, so the board IS the library and the
+    // sidebar launcher was deliberately deleted. This component and every
+    // Knowledge API behind it are untouched -- only its toolbar entry point
+    // is gone, which is why the rest of this suite still passes unchanged.
+    expect(sidebarCode).not.toContain('data-knowledge-trigger="true"');
+    expect(sidebarCode).not.toContain('setKnowledgeOpen');
+    expect(sidebarCode).not.toContain('isOpen={knowledgeOpen}');
   });
 
   it('is a read surface only: it neither renders PDF content nor creates posts', async () => {
@@ -992,8 +995,9 @@ describe('P6J-F7-B1 single reader ownership', () => {
     expect(container.querySelector('input[aria-label="Search Knowledge"]')).not.toBeNull();
     expect(container.textContent).toContain('EMG_checklist.pdf');
     expect(container.textContent).toContain('View text');
-    // The uploader is still the sidebar's, mounted beside this modal.
+    // The uploader is still the sidebar's. Its launcher is not: PDF-C1
+    // removed the trigger, leaving Add PDF as the one entry point.
     expect(sidebarCode).toContain('<KnowledgePdfUploader');
-    expect(sidebarCode).toContain('data-knowledge-trigger="true"');
+    expect(sidebarCode).not.toContain('data-knowledge-trigger="true"');
   });
 });

@@ -33,6 +33,7 @@ import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import PostCardContent, { KnowledgeSourceMarker } from '@/components/collabboard/PostCardContent';
+import KnowledgePdfCanvasSurface, { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import { KNOWLEDGE_SOURCE_CLIP_MIME } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMenu';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
@@ -3881,6 +3882,23 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   accessMode={commentAccessMode}
                 />
               )}
+
+              {/* Knowledge PDF placement (PDF-C1). The SAME surface the common
+                  host renders -- Freeform draws its own card body, so it names
+                  the component directly rather than duplicating its logic. */}
+              {(() => {
+                const pdfPlacement = readKnowledgePdfPlacement(padlet);
+                if (!pdfPlacement) return null;
+                return (
+                  <KnowledgePdfCanvasSurface
+                    boardId={padlet.board_id}
+                    documentId={pdfPlacement.documentId}
+                    originalFilename={pdfPlacement.originalFilename}
+                    processingStatus={pdfPlacement.processingStatus}
+                    displayMode={pdfPlacement.displayMode}
+                  />
+                );
+              })()}
 
               {/* Drawing Card Display */}
               {padlet.type === 'drawing' && (

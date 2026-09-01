@@ -263,6 +263,22 @@ export interface Padlet {
     // section-heading-only keys. JSONB only; no schema column.
     accentColor?: string;
 
+    // PDF-C1: a canvas PLACEMENT of a Knowledge document, never the document
+    // itself. The board post is a reference -- deleting it removes only this
+    // placement, and the knowledge_documents row, its pages, chunks and
+    // source references all survive. Identity is the document id: filenames
+    // are not unique and are display text only. Nothing derived or secret is
+    // stored here (no storage_path, no signed URL, no page text, no chunks).
+    knowledgeDocumentId?: string;
+    knowledgeOriginalFilename?: string;
+    knowledgeProcessingStatus?: 'uploaded' | 'processing' | 'ready' | 'failed';
+    /**
+     * Presentation only. 'expanded' is deliberately declared but unused in
+     * PDF-C1 so adding it later is a rendering change, not a change to how a
+     * placement identifies its document.
+     */
+    knowledgeDisplayMode?: 'compact' | 'preview' | 'expanded';
+
     // AI Component specific
     aiComponentCode?: string;
     aiPrompt?: string;

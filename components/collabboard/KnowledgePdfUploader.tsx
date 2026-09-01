@@ -37,6 +37,18 @@ export interface KnowledgePdfUploaderHandle {
 export interface KnowledgePdfUploaderProps {
   /** Fired whenever this uploader has learned that server state changed. */
   onKnowledgeChanged?: () => void;
+  /**
+   * PDF-C1. Fired once the document row exists server-side and BEFORE polling
+   * waits for processing, so the canvas can place the object immediately
+   * rather than making the user wait on PDF parsing. Carries the server's own
+   * document id -- identity is never the filename, which is not unique.
+   */
+  onDocumentUploaded?: (document: KnowledgePdfUploadResult) => void;
+  /**
+   * Terminal processing state for a document already placed on the canvas, so
+   * the placement's stored status can converge without a second poll loop.
+   */
+  onDocumentSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -184,7 +196,7 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({ onKnowledgeChanged }, ref) {
+const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({ onKnowledgeChanged, onDocumentUploaded, onDocumentSettled }, ref) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -224,8 +236,11 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
     try {
       const uploaded = await uploadKnowledgePdf(boardId, file);
       // The row exists server-side from here on, so any read surface should be
-      // able to show it as `uploaded` before processing has finished.
+      // able to show it as `uploaded` before processing has finished. PDF-C1
+      // places the canvas object HERE, on the same signal and for the same
+      // reason -- deliberately before the wait below, never after it.
       onKnowledgeChanged?.();
+      onDocumentUploaded?.(uploaded);
       setNotice({ tone: 'info', message: `Processing ${uploaded.originalFilename}…` });
 
       const completed = await waitForKnowledgePdf(boardId, uploaded.id, {
@@ -235,6 +250,9 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       // Terminal status, or polling gave up while the worker continues: either
       // way the last known server state is newer than what was fetched above.
       onKnowledgeChanged?.();
+      // Only a real terminal answer updates a placement. Giving up polling is
+      // not a status, so the surface keeps converging on its own.
+      if (completed) onDocumentSettled?.(uploaded.id, completed.processingStatus);
 
       if (!completed) {
         setNotice({

@@ -23,6 +23,7 @@ import { IMAGE_CROP_TO_GRID_HEIGHT_PX } from "@/components/collabboard/canvas/en
 import { useScrollbarLane } from "./useScrollbarLane";
 import { BookOpen } from "lucide-react";
 import { useKnowledgeSourceReferencesForPadlet } from "./KnowledgeSourceReferenceContext";
+import KnowledgePdfCanvasSurface, { readKnowledgePdfPlacement } from "./KnowledgePdfCanvasSurface";
 import { knowledgeSourceCardLabel } from "@/lib/domain/knowledge/knowledgeSourceNavigation";
 import { knowledgeSourceCardExcerpt } from "@/lib/domain/knowledge/knowledgeSourceCardExcerpt";
 import { getKnowledgeSourceCardRegionCrop } from "@/lib/domain/knowledge/knowledgeSourceCardRegionCrop";
@@ -286,6 +287,13 @@ export default function PostCardContent({
 
     const type = normalizeType(padlet.type);
     const rawContent = asStringContent(padlet.content);
+
+    // --- KNOWLEDGE PDF PLACEMENT (PDF-C1) ---
+    // Keyed on the placement metadata, not on `type` alone: an ordinary file
+    // post carries no document reference and must keep its existing rendering.
+    // This is the COMMON host, so Wall/Grid/Columns/Drawing all get the one
+    // surface from here; Freeform renders the same component itself.
+    const knowledgePdfPlacement = readKnowledgePdfPlacement(padlet);
     // PATCH 9E.1: called unconditionally (rules of hooks -- several early
     // `return`s for other padlet types follow below) but only ever attached
     // to an element when this padlet actually renders the nested-Container
@@ -293,6 +301,19 @@ export default function PostCardContent({
     // reservation instead of PATCH 9E's guessed 6px constant.
     const nestedContainerScrollRef = useRef<HTMLDivElement>(null);
     const nestedContainerScrollbarLane = useScrollbarLane(nestedContainerScrollRef, type === "container");
+
+    // Placed after the unconditional hooks above, like every other early return.
+    if (knowledgePdfPlacement) {
+        return (
+            <KnowledgePdfCanvasSurface
+                boardId={padlet.board_id}
+                documentId={knowledgePdfPlacement.documentId}
+                originalFilename={knowledgePdfPlacement.originalFilename}
+                processingStatus={knowledgePdfPlacement.processingStatus}
+                displayMode={knowledgePdfPlacement.displayMode}
+            />
+        );
+    }
 
     // --- LINK TYPE ---
     if (type === "link") {
