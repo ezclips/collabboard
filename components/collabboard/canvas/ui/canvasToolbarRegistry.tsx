@@ -35,7 +35,28 @@ export type CanvasToolbarFlags = {
   canUseFreeformEditButton: boolean;
   /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
   isDrawingLayout: boolean;
+  /**
+   * PDF-C1 spatial scope. True only on the two spatial object canvases, where a
+   * raw PDF is a legitimate canvas object. Derive it with
+   * {@link isDirectPdfCanvasLayout} -- never from `isFreeformLayout`, which is
+   * a catch-all that also swallows Table/Stream and any unrecognised layout.
+   */
+  isDirectPdfLayout: boolean;
 };
+
+/**
+ * PDF-C1 spatial scope. THE allowlist for direct PDF canvas objects: Freeform
+ * and Drawing are spatial object canvases, so a PDF placed there is just
+ * another object the host positions. Every structured layout (Wall, Columns,
+ * Grid, Table, Timeline, Scheduler, Map, Stream, Kanban, Gantt, ...) has
+ * semantic placement structures instead, and will eventually reference a
+ * Knowledge PDF from an ordinary Note/Post/Container rather than hold a raw
+ * PDF object. Both the toolbar gate and the defensive placement guard read
+ * this one predicate, so no per-layout PDF switch exists anywhere.
+ */
+export function isDirectPdfCanvasLayout(layout: string | null | undefined): boolean {
+  return layout === 'freeform' || layout === 'drawing';
+}
 
 function GraphLineToolIcon({ size = 18, className, ...rest }: { size?: number; className?: string; [key: string]: unknown }) {
   return (
@@ -70,6 +91,7 @@ export function buildCanvasToolbarGroups({
   canManageCanvasShare,
   canUseFreeformEditButton,
   isDrawingLayout,
+  isDirectPdfLayout,
 }: CanvasToolbarFlags): SidebarToolGroup[] {
   const canvasSpecificTools = [
     { icon: MoveRight, label: "Line", color: "text-gray-600", bg: "hover:bg-gray-50", type: "line" },
@@ -133,7 +155,13 @@ export function buildCanvasToolbarGroups({
       tools: [
         { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
         { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
-        { icon: FileUp, label: "Add PDF", color: "text-rose-700", bg: "hover:bg-rose-50", type: "knowledge-pdf" },
+        // PDF-C1 spatial scope: on structured layouts the tool is absent from
+        // the registry entirely rather than rendered disabled, so no
+        // unsupported host can mount a control that opens the picker. This is
+        // the PRIMARY prevention -- it stops the flow before a file is chosen.
+        ...(isDirectPdfLayout ? [
+          { icon: FileUp, label: "Add PDF", color: "text-rose-700", bg: "hover:bg-rose-50", type: "knowledge-pdf" },
+        ] : []),
         { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
         { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
       ],

@@ -130,6 +130,10 @@ test.describe('PATCH-134 Document toolbar registry', () => {
       canManageCanvasShare: true,
       canUseFreeformEditButton: true,
       isDrawingLayout: false,
+      // This PATCH-134 inventory snapshot predates Add PDF, so it keeps asking
+      // for a registry without it. Which layouts do offer it is asserted in
+      // components/collabboard/knowledgePdfSpatialScope.test.tsx.
+      isDirectPdfLayout: false,
     });
     const inventory = groups.map((group) => ({
       id: group.id,

@@ -114,6 +114,10 @@ describe('P6C Knowledge PDF upload client', () => {
       canManageCanvasShare: false,
       canUseFreeformEditButton: true,
       isDrawingLayout: false,
+      // PDF-C1 spatial scope: Add PDF only exists on a direct-PDF layout, so
+      // this registration proof has to ask on one. Which layouts qualify is
+      // asserted in knowledgePdfSpatialScope.test.tsx.
+      isDirectPdfLayout: true,
     });
 
     const media = groups.find((group) => group.id === 'media');
