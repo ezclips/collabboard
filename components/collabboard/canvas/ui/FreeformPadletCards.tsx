@@ -3276,6 +3276,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             {/* Top strip — 3-column grid: [pencil | title centered | mirror] */}
             {(() => {
               if (isFullView) return null;
+              // PDF-C1. A Knowledge PDF placement draws its OWN toolbar -- the
+              // filename plus collapse/parsed-content/open/side-panel/new-tab --
+              // so the generic strip would stack a second header on the same
+              // object. Suppressed for this surface ONLY: every other post type
+              // keeps the strip, and nothing here changes selection, which the
+              // root's onMouseDownCapture owns for all posts alike.
+              if (readKnowledgePdfPlacement(padlet)) return null;
               const freeformStripBg = isStripVisible(padlet.metadata?.topStrip)
                 ? (padlet.metadata?.topStrip as string)
                 : 'rgba(0,0,0,0.04)';

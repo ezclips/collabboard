@@ -296,7 +296,7 @@ describe('16-18. parsed content and collapse', () => {
 });
 
 describe('19-21. canvas interaction is preserved', () => {
-  it('19. scrolling or pressing in the body never reaches the canvas', async () => {
+  it('19. wheel scrolling in the body never pans the canvas', async () => {
     const spies = { wheel: vi.fn(), pointerDown: vi.fn() };
     const host = await card({ hostSpies: spies });
 
@@ -306,8 +306,11 @@ describe('19-21. canvas interaction is preserved', () => {
       bodyEl.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
     });
 
-    // Both are stopped inside the card, so the Freeform host neither pans nor
-    // starts a drag while the reader scrolls a long document.
+    // Wheel is the one that matters for reading a long document: it must not
+    // reach the canvas. Bubble-phase pointer isolation is kept for the same
+    // reason, but note it does NOT (and must not) block selection -- the
+    // Freeform root selects in CAPTURE phase, deliberately so that a child's
+    // stopPropagation cannot make a post unselectable. See test 5b.
     expect(spies.wheel).not.toHaveBeenCalled();
     expect(spies.pointerDown).not.toHaveBeenCalled();
   });
@@ -365,6 +368,46 @@ describe('22-23. permissions', () => {
 describe('30-35. one frame, square corners, real resize handle', () => {
   const FREEFORM = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
   const POLICY = read('lib/domain/canvas/postResizePolicy.ts');
+
+  /** The strip's own early-return block, taken forward from its comment. */
+  const stripGuard = () => {
+    const at = FREEFORM.indexOf('{/* Top strip');
+    expect(at, 'the generic top strip must still exist for other posts').toBeGreaterThan(-1);
+    return FREEFORM.slice(at, at + 1200);
+  };
+
+  it('36. exactly ONE header: the generic top strip is suppressed for a PDF', () => {
+    // The strip and the PDF toolbar were stacking two bars on one object.
+    const strip = stripGuard();
+    expect(strip).toContain('if (readKnowledgePdfPlacement(padlet)) return null;');
+    // Suppressed for the PDF surface ONLY -- the guard is inside the strip's
+    // own early-return block, beside the pre-existing isFullView case.
+    expect(strip).toContain('if (isFullView) return null;');
+  });
+
+  it('37. every other post type keeps its generic strip', () => {
+    const strip = stripGuard();
+    // No type list, no blanket suppression: exactly one PDF-shaped condition.
+    expect((strip.match(/return null;/g) || []).length).toBe(2);
+    expect(strip).not.toMatch(/padlet\.type === '(note|text|todo|image|link|card|table)'/);
+  });
+
+  it('38. selection stays the host authority, and a child cannot block it', () => {
+    // The PDF needed no selection code of its own: the root selects in capture
+    // phase precisely so a child's stopPropagation cannot suppress it.
+    expect(FREEFORM).toContain('onMouseDownCapture={(e) => {');
+    expect(FREEFORM).toContain('handlePadletMouseDown(e, padlet.id);');
+    expect(FREEFORM).toContain('Fires in capture phase so child stopPropagation cannot block it.');
+    // And the card introduces no selection state of its own.
+    const code = executable(SURFACE);
+    expect(code).not.toMatch(/setSelected|isSelected|selectPadlet/);
+  });
+
+  it('39. the resize handle stays selection-gated, never permanently visible', () => {
+    expect(FREEFORM).toContain("isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked");
+    // The PDF gets the shared grip through policy alone.
+    expect(POLICY).toContain("case 'file':");
+  });
 
   it('30-31. the card draws no frame of its own -- the host owns the only one', async () => {
     const host = await card();
