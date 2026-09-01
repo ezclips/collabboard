@@ -1,8 +1,9 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { ExternalLink, FileText, PanelRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
+import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
@@ -165,38 +166,141 @@ export default function KnowledgePdfCanvasSurface({
   }, [openDocument, documentId]);
 
   const isReady = status === 'ready';
-  const showPreview = isReady && displayMode !== 'compact';
+
+  /**
+   * Card-local view state. NEITHER is persisted: collapsing a card or switching
+   * to parsed text changes nothing on the board, writes no padlet metadata and
+   * issues no request. That is deliberate -- it keeps both controls usable by a
+   * read-only viewer without inventing a permission rule for them, and it is
+   * why this surface still performs no mutation of any kind.
+   */
+  const [collapsed, setCollapsed] = useState(false);
+  const [view, setView] = useState<'page' | 'text'>('page');
+
+  /**
+   * The canonical page text, from the SAME endpoint the reader uses. Fetched
+   * once per ready document and only while expanded, so a collapsed card costs
+   * nothing. It serves two jobs: the parsed-content view, and the per-page
+   * fallback whenever a page has no rendered image.
+   */
+  const [pages, setPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(null);
+  const [pagesFailed, setPagesFailed] = useState(false);
+  const [imagelessPages, setImagelessPages] = useState<ReadonlySet<number>>(() => new Set());
+
+  useEffect(() => {
+    if (!isReady || collapsed || pages || pagesFailed || !boardId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(
+          `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`,
+        );
+        const payload = await response.json().catch(() => null) as { pages?: unknown } | null;
+        if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('pages unavailable');
+        if (!cancelled) setPages(payload.pages as readonly KnowledgeDocumentDetailPage[]);
+      } catch {
+        // Text is enhancement over the status the card already shows truthfully.
+        if (!cancelled) setPagesFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isReady, collapsed, pages, pagesFailed, boardId, documentId]);
+
+  const markImageless = useCallback((pageNumber: number) => {
+    setImagelessPages((current) => {
+      if (current.has(pageNumber)) return current;
+      const next = new Set(current);
+      next.add(pageNumber);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Loading is deliberately NOT a percentage.
+   *
+   * The reference design shows a faint number, but the only page-load authority
+   * this client has is a single all-or-nothing `/pages` request, and page
+   * images load lazily -- an off-screen page never settles, so "loaded of
+   * total" would stall short of 100 and never clear. A number derived from
+   * elapsed time or poll count would be invented. So the truthful narrow form
+   * is a non-numeric state that disappears the moment content is available.
+   */
+  const documentLoading = isReady && !collapsed && !pages && !pagesFailed;
+
+  const snippet = pages?.find((page) => page.text.trim().length > 0)?.text.trim().slice(0, 90) ?? null;
+
+  const headerButton = 'inline-flex h-5 w-5 items-center justify-center rounded text-gray-500 '
+    + 'hover:bg-gray-200 hover:text-gray-700 focus-visible:outline focus-visible:outline-1';
 
   return (
-    <div className="select-none space-y-1.5" data-knowledge-pdf-surface="true" data-knowledge-document-id={documentId}>
-      <div className="flex items-center gap-1.5">
-        <FileText className="h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden="true" />
-        <span className="truncate text-[11px] font-medium text-gray-700" title={originalFilename}>
+    <div
+      className="flex h-full flex-col overflow-hidden rounded-md border border-gray-200 bg-white"
+      data-knowledge-pdf-surface="true"
+      data-knowledge-document-id={documentId}
+      data-knowledge-pdf-collapsed={collapsed ? 'true' : 'false'}
+    >
+      {/*
+        Permanent header. Never hover-revealed and never drawn over the page:
+        the controls have their own band, so nothing ever covers the document.
+        This strip is also the card's drag handle -- the body below stops
+        pointer events so scrolling a long PDF cannot move the card.
+      */}
+      <div
+        data-knowledge-pdf-header="true"
+        className="flex select-none items-center gap-1 border-b border-gray-200 bg-gray-100 px-1.5 py-1"
+      >
+        <button
+          type="button"
+          data-knowledge-pdf-action="collapse"
+          title={collapsed ? 'Expand' : 'Collapse'}
+          aria-label={collapsed ? 'Expand' : 'Collapse'}
+          aria-expanded={!collapsed}
+          className={headerButton}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); setCollapsed((value) => !value); }}
+        >
+          {collapsed
+            ? <ChevronRight className="h-3 w-3" aria-hidden="true" />
+            : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+        </button>
+
+        <FileText className="h-3 w-3 shrink-0 text-red-500" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-gray-700" title={originalFilename}>
           {originalFilename}
         </span>
-      </div>
 
-      {showPreview ? (
-        <div className="overflow-hidden rounded border border-gray-200 bg-white">
-          {/* The ONE raster authority: authenticated same-origin route, worker
-              output, safe failure. No Storage client, no signed URL. */}
-          <KnowledgeDocumentPageImage
-            boardId={boardId}
-            documentId={documentId}
-            pageNumber={1}
-            originalFilename={originalFilename}
-          />
-        </div>
-      ) : null}
+        {documentLoading ? (
+          <span data-knowledge-pdf-loading="true" className="shrink-0 text-[9px] italic text-gray-400">
+            Loading…
+          </span>
+        ) : null}
 
-      <div
-        data-knowledge-pdf-status={status}
-        className={`text-[10px] leading-none ${status === 'failed' ? 'text-red-600' : 'text-gray-500'}`}
-      >
-        {STATUS_LABEL[status]}
-      </div>
+        <span
+          data-knowledge-pdf-status={status}
+          className={`shrink-0 text-[9px] ${status === 'failed' ? 'text-red-600' : 'text-gray-400'}`}
+        >
+          {STATUS_LABEL[status]}
+        </span>
 
-      <div className="flex flex-wrap items-center gap-1">
+        {isReady ? (
+          <button
+            type="button"
+            data-knowledge-pdf-action="parsed-content"
+            data-knowledge-pdf-view={view}
+            title={view === 'page' ? 'Show parsed content' : 'Show pages'}
+            aria-label={view === 'page' ? 'Show parsed content' : 'Show pages'}
+            aria-pressed={view === 'text'}
+            className={headerButton}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              setView((value) => (value === 'page' ? 'text' : 'page'));
+            }}
+          >
+            <Type className="h-3 w-3" aria-hidden="true" />
+          </button>
+        ) : null}
+
         {openDocument ? (
           <>
             <button
@@ -204,10 +308,11 @@ export default function KnowledgePdfCanvasSurface({
               data-knowledge-pdf-action="open"
               title="Open"
               aria-label="Open"
-              className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-50"
+              className={headerButton}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); open(); }}
             >
-              Open
+              <Maximize2 className="h-3 w-3" aria-hidden="true" />
             </button>
             {/* PDF-C1: deliberately the SAME reader as Open. One side-panel
                 state machine, not two. */}
@@ -216,14 +321,15 @@ export default function KnowledgePdfCanvasSurface({
               data-knowledge-pdf-action="side-panel"
               title="Add to side panel"
               aria-label="Add to side panel"
-              className="inline-flex items-center gap-1 rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-50"
+              className={headerButton}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); open(); }}
             >
-              <PanelRight className="h-2.5 w-2.5" aria-hidden="true" />
-              Side panel
+              <PanelRight className="h-3 w-3" aria-hidden="true" />
             </button>
           </>
         ) : null}
+
         {isReady ? (
           <a
             data-knowledge-pdf-action="new-tab"
@@ -232,14 +338,80 @@ export default function KnowledgePdfCanvasSurface({
             href={`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/original`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-50"
+            className={headerButton}
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >
-            <ExternalLink className="h-2.5 w-2.5" aria-hidden="true" />
-            New tab
+            <ExternalLink className="h-3 w-3" aria-hidden="true" />
           </a>
         ) : null}
       </div>
+
+      {collapsed ? (
+        <div data-knowledge-pdf-collapsed-body="true" className="min-w-0 px-2 py-1.5">
+          <div className="truncate text-[10px] text-gray-600">{originalFilename}</div>
+          {snippet ? (
+            <div data-knowledge-pdf-snippet="true" className="truncate text-[9px] text-gray-400">
+              {snippet}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        /*
+          The document itself, and the only scrolling region. Wheel and pointer
+          events stop here so a long PDF scrolls in place instead of panning the
+          canvas or dragging the card -- the header above stays the drag handle.
+        */
+        <div
+          data-knowledge-pdf-body="true"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-1.5 py-1.5"
+          onWheel={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          {!isReady ? (
+            <div className="px-1 py-2 text-[10px] text-gray-500">{STATUS_LABEL[status]}</div>
+          ) : documentLoading ? (
+            <div className="px-1 py-2 text-[10px] italic text-gray-400">Loading document…</div>
+          ) : pages && pages.length > 0 ? (
+            pages.map((page) => (
+              <section
+                key={page.pageNumber}
+                data-knowledge-pdf-page={page.pageNumber}
+                className="mb-1.5 border-b border-gray-100 pb-1.5 last:mb-0 last:border-b-0 last:pb-0"
+              >
+                <div className="mb-0.5 select-none text-[8px] uppercase tracking-wider text-gray-400">
+                  Page {page.pageNumber}
+                </div>
+                {view === 'page' && !imagelessPages.has(page.pageNumber) ? (
+                  <KnowledgeDocumentPageImage
+                    boardId={boardId}
+                    documentId={documentId}
+                    pageNumber={page.pageNumber}
+                    originalFilename={originalFilename}
+                    widthPoints={page.widthPoints}
+                    heightPoints={page.heightPoints}
+                    rotation={page.rotation}
+                    onUnavailable={() => markImageless(page.pageNumber)}
+                  />
+                ) : null}
+                {view === 'text' || imagelessPages.has(page.pageNumber) ? (
+                  <p
+                    data-knowledge-pdf-page-text="true"
+                    className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
+                  >
+                    {page.text}
+                  </p>
+                ) : null}
+              </section>
+            ))
+          ) : (
+            <div className="px-1 py-2 text-[10px] text-gray-500">
+              Page content is not available for this document.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

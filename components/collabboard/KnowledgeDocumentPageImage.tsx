@@ -25,6 +25,14 @@ export interface KnowledgeDocumentPageImageProps {
   readonly widthPoints?: number | null;
   readonly heightPoints?: number | null;
   readonly rotation?: number | null;
+  /**
+   * Optional: told once when this page has no usable derivative, so a host that
+   * shows the image INSTEAD of the text (rather than above it, as the reader
+   * does) can fall back to the canonical page text. Purely a notification --
+   * this component still removes itself either way, so every existing caller
+   * keeps today's behaviour by omitting it.
+   */
+  readonly onUnavailable?: () => void;
 }
 
 /** Reserves pre-load space only. Never page-coordinate authority. */
@@ -76,6 +84,7 @@ export default function KnowledgeDocumentPageImage({
   widthPoints,
   heightPoints,
   rotation,
+  onUnavailable,
 }: KnowledgeDocumentPageImageProps) {
   const src = knowledgePageImageUrl(boardId, documentId, pageNumber);
   const reserved = knowledgePageDisplayDimensions(widthPoints, heightPoints, rotation);
@@ -109,7 +118,7 @@ export default function KnowledgeDocumentPageImage({
       // are attributes, not styling, so h-auto still governs the drawn size.
       width={reserved.width}
       height={reserved.height}
-      onError={() => setFailedSrc(src)}
+      onError={() => { setFailedSrc(src); onUnavailable?.(); }}
       className="mb-2 block h-auto w-full rounded border border-gray-200 bg-gray-50"
     />
   );

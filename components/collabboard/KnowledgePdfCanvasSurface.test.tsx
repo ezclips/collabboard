@@ -146,9 +146,11 @@ describe('5. processing states are shown truthfully', () => {
 });
 
 describe('6. the ready preview reuses the one raster authority', () => {
-  it('renders KnowledgeDocumentPageImage for page 1 and never touches Storage', () => {
+  it('renders KnowledgeDocumentPageImage per page and never touches Storage', () => {
     expect(SURFACE).toContain('KnowledgeDocumentPageImage');
-    expect(SURFACE).toContain('pageNumber={1}');
+    // The card now renders every page rather than only page 1, so the page
+    // number comes from the page itself. Still the ONE raster authority.
+    expect(SURFACE).toContain('pageNumber={page.pageNumber}');
     const code = executable(SURFACE).toLowerCase();
     for (const forbidden of ['supabase', 'createsignedurl', 'storage', '.from(']) {
       expect(code, `${forbidden} must not appear in executable source`).not.toContain(forbidden);
@@ -317,7 +319,14 @@ describe('R1-B. reopen-resolved terminal status is reported to the board once', 
 
     await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    // The STATUS poll is what must not run for a terminal document. The card
+    // may still read page content once -- that is document rendering, not
+    // status polling -- so this asserts against the list authority by name
+    // rather than against every request the surface makes.
+    // Exact match: the page-content URL is prefixed by the list URL, so a
+    // startsWith filter would count document rendering as status polling.
+    const listCalls = fetchMock.mock.calls.filter(([url]) => String(url) === listUrl);
+    expect(listCalls).toHaveLength(0);
     expect(report).not.toHaveBeenCalled();
   });
 
