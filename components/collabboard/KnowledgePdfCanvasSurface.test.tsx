@@ -375,7 +375,7 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
 
   it('1. the public gate delegates to the existing checkPlacementRequired', () => {
     expect(HOOK).toContain('requestPlacementIfRequired:');
-    expect(HOOK).toContain('checkPlacementRequired(draft, closeEditor)');
+    expect(HOOK).toContain('checkPlacementRequired(draft, closeEditor, {');
     // Exactly one definition of the policy still exists.
     expect((HOOK.match(/const checkPlacementRequired = \(/g) || []).length).toBe(1);
   });
@@ -442,5 +442,79 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
     expect(handler.indexOf('if (alreadyPlaced) return;'))
       .toBeLessThan(handler.indexOf('placementTaken'));
     expect(handler).not.toContain('originalFilename ===');
+  });
+});
+
+/**
+ * R2. The placement policy must judge an EXTERNAL draft on the draft itself.
+ * Source-level, because checkPlacementRequired is a closure inside a hook wired
+ * through the whole board shell -- but these assert the exact mechanism the
+ * race depended on, not merely that some code exists.
+ */
+describe('R2. external draft placement is isolated from editor state', () => {
+  const HOOK = read('hooks/canvas/usePadletSave.ts');
+  const policy = HOOK.slice(
+    HOOK.indexOf('const checkPlacementRequired = ('),
+    HOOK.indexOf('const withSchedulerDefaults'),
+  );
+  const wrapper = HOOK.slice(HOOK.indexOf('requestPlacementIfRequired:'));
+  const wrapperBody = wrapper.slice(0, wrapper.indexOf('}),') + 3);
+
+  it('1 + 2. an external draft declares isNewPost itself, so an open editor cannot suppress it', () => {
+    // The wrapper always asserts NEW; padletToEdit is not consulted for it.
+    expect(wrapperBody).toContain('isNewPost: true');
+    // And the policy prefers the explicit subject over the editor-derived one.
+    expect(policy).toContain('placementSubject ?? {');
+    const explicitAt = policy.indexOf('placementSubject ?? {');
+    const editorAt = policy.indexOf('!padletToEdit || padletToEdit.id');
+    expect(explicitAt).toBeGreaterThan(-1);
+    expect(explicitAt).toBeLessThan(editorAt); // editor form is only the fallback
+  });
+
+  it('3 + 4. parent/section come from the draft, never from the editor', () => {
+    expect(wrapperBody).toContain("hasParentId: Boolean(draft.metadata?.parentId)");
+    expect(wrapperBody).toContain("hasSectionId: Boolean(draft.metadata?.sectionId)");
+    expect(wrapperBody).not.toContain('padletToEdit');
+  });
+
+  it('5 + 6. editor-driven saves keep the padletToEdit-derived behaviour', () => {
+    // The fallback branch is exactly today's derivation, unchanged.
+    expect(policy).toContain("isNewPost: !padletToEdit || padletToEdit.id === 'new'");
+    expect(policy).toContain('hasParentId: !!padletToEdit?.metadata?.parentId');
+    expect(policy).toContain('hasSectionId: !!padletToEdit?.metadata?.sectionId');
+    // Exactly ONE call site supplies an explicit subject -- the external
+    // wrapper. Every editor-driven saveX still calls with two arguments and so
+    // keeps the padletToEdit-derived fallback above.
+    expect((HOOK.match(/isNewPost: true/g) || []).length).toBe(1);
+    expect(wrapperBody).toContain('isNewPost: true');
+    expect((HOOK.match(/checkPlacementRequired\(/g) || []).length).toBeGreaterThan(7);
+  });
+
+  it('7. the wrapper still performs no persistence', () => {
+    for (const forbidden of ['supabase', 'insert(', 'Repository', 'fetch(']) {
+      expect(wrapperBody).not.toContain(forbidden);
+    }
+  });
+
+  it('8. exactly one placement policy body remains', () => {
+    expect((HOOK.match(/const checkPlacementRequired = \(/g) || []).length).toBe(1);
+    // and the layout rules live only there, not in the wrapper
+    for (const branch of ['isDrawingLayout', 'isTimelineLayout', 'isSchedulerLayout']) {
+      expect(policy).toContain(branch);
+      expect(wrapperBody).not.toContain(branch);
+    }
+  });
+
+  it('9. the PDF handler still has no per-layout logic and no editor inspection', () => {
+    const handler = CLIENT.slice(
+      CLIENT.indexOf('const handleKnowledgePdfUploaded'),
+      CLIENT.indexOf('const handleKnowledgePdfSettled'),
+    );
+    for (const forbidden of [
+      'isDrawingLayout', 'isTimelineLayout', 'isSchedulerLayout', 'isMapLayout',
+      'isGridLayout', 'isColumnsLayout', 'isWallLayout', 'padletToEdit',
+    ]) {
+      expect(handler, `${forbidden} must not appear in the PDF handler`).not.toContain(forbidden);
+    }
   });
 });

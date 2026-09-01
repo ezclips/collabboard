@@ -318,15 +318,22 @@ export function usePadletSave(params: UsePadletSaveParams) {
     sourceReference?: KnowledgeSourceReferenceDraft;
   };
 
+  // R2. What the policy judges a draft on. An EXTERNAL draft (created outside any
+  // editor, e.g. a finished PDF upload) supplies these explicitly so it is judged
+  // on its OWN metadata; omitted keeps today's editor-derived saveX behaviour.
+  type PlacementSubject = { isNewPost: boolean; hasParentId: boolean; hasSectionId: boolean };
+
   const checkPlacementRequired = (
     draft: PlacementDraft,
-    closeEditor: () => void
+    closeEditor: () => void,
+    placementSubject?: PlacementSubject
   ): boolean => {
-    const hasParentId = !!padletToEdit?.metadata?.parentId;
-    const hasSectionId = !!padletToEdit?.metadata?.sectionId;
-
-    // Check if this is a new post (either no padletToEdit or id is 'new')
-    const isNewPost = !padletToEdit || padletToEdit.id === 'new';
+    const { isNewPost, hasParentId, hasSectionId } = placementSubject ?? {
+      // new post = no padletToEdit, or its id is 'new'
+      isNewPost: !padletToEdit || padletToEdit.id === 'new',
+      hasParentId: !!padletToEdit?.metadata?.parentId,
+      hasSectionId: !!padletToEdit?.metadata?.sectionId,
+    };
     if (!isNewPost) {
       return false;
     }
@@ -1544,6 +1551,12 @@ export function usePadletSave(params: UsePadletSaveParams) {
     requestPlacementIfRequired: (
       draft: PlacementDraft,
       closeEditor: () => void = () => {},
-    ): boolean => checkPlacementRequired(draft, closeEditor),
+      // R2: an external draft is always NEW, and its parent/section come from
+      // the draft itself -- never from an unrelated open editor.
+    ): boolean => checkPlacementRequired(draft, closeEditor, {
+      isNewPost: true,
+      hasParentId: Boolean(draft.metadata?.parentId),
+      hasSectionId: Boolean(draft.metadata?.sectionId),
+    }),
   };
 }
