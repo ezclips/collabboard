@@ -948,6 +948,42 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return () => window.removeEventListener('dragend', handleGlobalDragEnd);
   }, []);
 
+  /**
+   * The blocking, full-screen editor modals ONLY -- the `fixed inset-0`
+   * z-[1000] tier. Deliberately narrower than isAnyEditorOpen below, which also
+   * counts drawing mode, crop mode, colour pickers and popups: those leave the
+   * canvas usable and must not take the toolbar with them.
+   *
+   * CanvasSidebar lives inside an `absolute ... z-[3000]` wrapper, which is a
+   * stacking context sitting ABOVE that editor tier by design (see the reader's
+   * own z-[1200] note further down). Rather than invert that shared boundary --
+   * one edit that would re-order seven-plus modal surfaces at once, against the
+   * guard in canvasLayerStackingBoundary.architecture.test.tsx -- the toolbar
+   * simply steps out of the way for as long as a modal owns the screen.
+   */
+  const isBlockingEditorModalOpen = useMemo(() => (
+    isNoteEditorOpen
+    || isTableEditorOpen
+    || isLinkEditorOpen
+    || isTodoEditorOpen
+    || isContainerEditorOpen
+    || isCommentEditorOpen
+    || isImageEditorOpen
+    || isDrawingEditorOpen
+    || isAIComponentEditorOpen
+    || isAIContentEditModalOpen
+    || isAIContentConvertModalOpen
+    || isCardEditorOpen
+    || isCardViewerOpen
+    || isClipartDraftModalOpen
+  ), [
+    isNoteEditorOpen, isTableEditorOpen, isLinkEditorOpen, isTodoEditorOpen,
+    isContainerEditorOpen, isCommentEditorOpen, isImageEditorOpen,
+    isDrawingEditorOpen, isAIComponentEditorOpen, isAIContentEditModalOpen,
+    isAIContentConvertModalOpen, isCardEditorOpen, isCardViewerOpen,
+    isClipartDraftModalOpen,
+  ]);
+
   // Guard flag to check if any editor or modal is open
   const isAnyEditorOpen = useMemo(() => {
     return (
@@ -7153,7 +7189,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         {/* Container size controls removed */}
         {canUseCanvasToolbar && !effectiveToolbarCollapsed && (
           <div
-            className="absolute left-0 bottom-0 z-[3000]"
+            data-canvas-toolbar-wrapper="true"
+            data-toolbar-yielded={isBlockingEditorModalOpen ? 'true' : 'false'}
+            className={`absolute left-0 bottom-0 z-[3000] transition-opacity duration-150 ${
+              isBlockingEditorModalOpen ? 'pointer-events-none opacity-0' : ''
+            }`}
             style={{ top: showCanvasTitleHeader ? CANVAS_TITLE_HEADER_HEIGHT : 0 }}
           >
             <CanvasSidebar

@@ -3344,13 +3344,49 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     {(() => {
                       const pdfPlacement = readKnowledgePdfPlacement(padlet);
                       if (!pdfPlacement) return null;
-                      const pdfTitle = (
+                      /**
+                       * The BOARD's label for this placement, which is the
+                       * filename only until someone renames it. Renaming edits
+                       * padlet.title and nothing else: the Knowledge document
+                       * keeps its own originalFilename, because the source is
+                       * durable authority this card merely references.
+                       */
+                      const pdfCardTitle = padlet.title?.trim() || pdfPlacement.originalFilename;
+                      const pdfTitle = editingNoteTitleId === padlet.id ? (
+                        <input
+                          type="text"
+                          value={noteTitleDraft}
+                          onChange={(e) => setNoteTitleDraft(e.target.value)}
+                          onBlur={() => {
+                            setEditingNoteTitleId(null);
+                            updatePadletTitle(padlet.id, noteTitleDraft.trim());
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') setEditingNoteTitleId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          data-no-drag="true"
+                          data-knowledge-pdf-title-input="true"
+                          placeholder="PDF name"
+                          className="w-[150px] bg-transparent border-b border-blue-400 text-[10px] font-medium outline-none"
+                          style={{ color: freeformTitleColor }}
+                          autoFocus
+                        />
+                      ) : (
                         <span
+                          data-knowledge-pdf-title="true"
                           className="block max-w-[150px] truncate text-[10px] font-medium"
                           style={{ color: freeformTitleColor }}
-                          title={pdfPlacement.originalFilename}
+                          title={canUseFreeformEditButton ? 'Double-click to rename' : pdfCardTitle}
+                          onDoubleClick={canUseFreeformEditButton ? (e) => {
+                            e.stopPropagation();
+                            setEditingNoteTitleId(padlet.id);
+                            setNoteTitleDraft(pdfCardTitle);
+                          } : undefined}
                         >
-                          {pdfPlacement.originalFilename}
+                          {pdfCardTitle}
                         </span>
                       );
                       // Read-only: the strip stays a label. No hover reveal at
@@ -3362,9 +3398,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         <>
                           {/* Default state is the document's name; hovering the
                               card swaps the whole set of controls in at once,
-                              the same reveal the strip's pencil uses. */}
-                          <span className="group-hover:hidden">{pdfTitle}</span>
-                          <span className="hidden items-center gap-0.5 group-hover:flex">
+                              the same reveal the strip's pencil uses. While the
+                              name is actually being edited the swap is off, or
+                              the input would vanish under the pointer. */}
+                          <span className={editingNoteTitleId === padlet.id ? '' : 'group-hover:hidden'}>{pdfTitle}</span>
+                          <span className={editingNoteTitleId === padlet.id
+                            ? 'hidden'
+                            : 'hidden items-center gap-0.5 group-hover:flex'}>
                             <KnowledgePdfCardControls
                               boardId={padlet.board_id}
                               documentId={pdfPlacement.documentId}

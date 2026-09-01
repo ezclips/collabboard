@@ -365,6 +365,52 @@ describe('22-23. permissions', () => {
   });
 });
 
+describe('46-49. renaming a PDF card, and the toolbar yielding to a modal', () => {
+  const FREEFORM_SRC = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+  const CLIENT_SRC = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+
+  it('46. the strip renames the BOARD label, never the Knowledge source', () => {
+    expect(FREEFORM_SRC).toContain('const pdfCardTitle = padlet.title?.trim() || pdfPlacement.originalFilename;');
+    expect(FREEFORM_SRC).toContain('updatePadletTitle(padlet.id, noteTitleDraft.trim());');
+    // The document's own filename is display fallback only -- never written.
+    expect(FREEFORM_SRC).not.toContain('originalFilename =');
+    expect(FREEFORM_SRC).not.toMatch(/knowledgeOriginalFilename\s*:/);
+  });
+
+  it('47. renaming reuses the strip title-edit machinery, not a new one', () => {
+    expect(FREEFORM_SRC).toContain('data-knowledge-pdf-title-input="true"');
+    expect(FREEFORM_SRC).toContain('setEditingNoteTitleId(padlet.id);');
+    // The SAME editing-id the note title already uses, taken from the one
+    // host prop -- not a second rename state of its own.
+    expect(FREEFORM_SRC).toContain('editingNoteTitleId === padlet.id ? (');
+    expect(FREEFORM_SRC).not.toContain('editingPdfTitleId');
+    expect(FREEFORM_SRC).not.toContain('pdfTitleDraft');
+  });
+
+  it('48. a read-only viewer cannot start a rename', () => {
+    // The double-click handler is undefined without edit rights, and the
+    // read-only branch returns the plain label before any of it.
+    expect(FREEFORM_SRC).toContain('onDoubleClick={canUseFreeformEditButton ? (e) => {');
+    expect(FREEFORM_SRC).toContain('if (!canUseFreeformEditButton) return pdfTitle;');
+  });
+
+  it('49. the toolbar yields to a blocking modal instead of re-ordering z-index', () => {
+    expect(CLIENT_SRC).toContain('const isBlockingEditorModalOpen = useMemo(');
+    expect(CLIENT_SRC).toContain("isBlockingEditorModalOpen ? 'pointer-events-none opacity-0' : ''");
+    // Narrower than isAnyEditorOpen on purpose: modes and popups leave the
+    // canvas usable and must not take the toolbar with them.
+    const flag = CLIENT_SRC.slice(
+      CLIENT_SRC.indexOf('const isBlockingEditorModalOpen = useMemo('),
+      CLIENT_SRC.indexOf('// Guard flag to check if any editor or modal is open'),
+    );
+    for (const excluded of ['isDrawingMode', 'isCropMode', 'isMapStylePanelOpen', 'commentPopupOpen', 'isLibraryOpen']) {
+      expect(flag, excluded + ' must not hide the toolbar').not.toContain(excluded);
+    }
+    // The shared stacking boundary itself is untouched.
+    expect(CLIENT_SRC).toContain('z-[3000]');
+  });
+});
+
 describe('43-45. converted text carries the side-panel highlights', () => {
   it('43. the card paints citations with the SAME domain authority as the reader', () => {
     const code = executable(SURFACE);
@@ -411,23 +457,27 @@ describe('30-35. one frame, square corners, real resize handle', () => {
 
   /** The strip's PDF cell: title by default, controls on hover. */
   const pdfCell = () => {
-    const at = FREEFORM.indexOf("const pdfTitle = (");
+    const at = FREEFORM.indexOf('const pdfCardTitle =');
     expect(at, 'the strip must render a PDF title cell').toBeGreaterThan(-1);
-    return FREEFORM.slice(at - 400, at + 2600);
+    const end = FREEFORM.indexOf('{/* Center: title', at);
+    expect(end, 'the PDF cell must sit before the centre column').toBeGreaterThan(at);
+    return FREEFORM.slice(at - 1200, end);
   };
 
-  it('40. the strip shows the PDF filename by default', () => {
+  it('40. the strip shows the PDF name by default, falling back to the filename', () => {
     const cell = pdfCell();
-    expect(cell).toContain('{pdfPlacement.originalFilename}');
+    expect(cell).toContain('padlet.title?.trim() || pdfPlacement.originalFilename');
+    expect(cell).toContain('{pdfCardTitle}');
     // Truncated, so a long filename cannot push the strip's pencil off again.
     expect(cell).toContain('truncate');
   });
 
   it('41. hovering swaps the title out and every control in, together', () => {
     const cell = pdfCell();
-    // One reveal for the whole set -- the same group-hover the pencil uses.
-    expect(cell).toContain('<span className="group-hover:hidden">{pdfTitle}</span>');
-    expect(cell).toContain('<span className="hidden items-center gap-0.5 group-hover:flex">');
+    // One reveal for the whole set -- the same group-hover the pencil uses,
+    // suspended only while the name is actually being edited.
+    expect(cell).toContain("editingNoteTitleId === padlet.id ? '' : 'group-hover:hidden'");
+    expect(cell).toContain("'hidden items-center gap-0.5 group-hover:flex'");
     expect(FREEFORM).toContain('opacity-0 group-hover:opacity-100');
   });
 
