@@ -70,6 +70,18 @@ const KnowledgeSourceNoteSummaryContext = createContext<KnowledgeSourceNoteSumma
   EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
 );
 
+/**
+ * Opening one source in the board's reader, carried on the SAME provider and
+ * for the same reason as the four indexes above: the card marker lives inside
+ * PostCardContent, whose eleven call sites must not each grow a prop.
+ *
+ * Deliberately the reference-level opener, not a document-level one: it is the
+ * only authority that preserves which reference (and therefore which page
+ * span) was clicked. Null outside a provider, which renders the marker as the
+ * inert label it has always been rather than a control that does nothing.
+ */
+const KnowledgeSourceOpenContext = createContext<((reference: SourceReference) => void) | null>(null);
+
 /** Stable empty result so a padlet with no references never re-renders on identity. */
 const NO_REFERENCES: readonly SourceReference[] = [];
 const NO_BACKLINKS: readonly KnowledgeSourceBacklink[] = [];
@@ -81,6 +93,7 @@ export function KnowledgeSourceReferenceProvider({
   backlinks = EMPTY_KNOWLEDGE_SOURCE_BACKLINK_INDEX,
   noteColors = NO_NOTE_COLORS,
   noteSummaries = EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
+  onOpenSourceReference = null,
   children,
 }: {
   index: KnowledgeSourceReferenceIndex;
@@ -90,6 +103,8 @@ export function KnowledgeSourceReferenceProvider({
   noteColors?: KnowledgeSourceNoteColors;
   /** Optional: omitting it leaves the Source Notes panel showing nothing. */
   noteSummaries?: KnowledgeSourceNoteSummaryIndex;
+  /** Optional: omitting it leaves card source markers as plain labels. */
+  onOpenSourceReference?: ((reference: SourceReference) => void) | null;
   children: React.ReactNode;
 }) {
   // All four are already new Maps only when they actually changed, so this
@@ -99,12 +114,22 @@ export function KnowledgeSourceReferenceProvider({
       <KnowledgeSourceBacklinkContext.Provider value={backlinks}>
         <KnowledgeSourceNoteColorContext.Provider value={noteColors}>
           <KnowledgeSourceNoteSummaryContext.Provider value={noteSummaries}>
-            {children}
+            <KnowledgeSourceOpenContext.Provider value={onOpenSourceReference}>
+              {children}
+            </KnowledgeSourceOpenContext.Provider>
           </KnowledgeSourceNoteSummaryContext.Provider>
         </KnowledgeSourceNoteColorContext.Provider>
       </KnowledgeSourceBacklinkContext.Provider>
     </KnowledgeSourceReferenceContext.Provider>
   );
+}
+
+/**
+ * The board's reader-open authority for one source reference, or null when the
+ * host wired none. Transport only: this never opens anything itself.
+ */
+export function useKnowledgeSourceOpen(): ((reference: SourceReference) => void) | null {
+  return useContext(KnowledgeSourceOpenContext);
 }
 
 /**

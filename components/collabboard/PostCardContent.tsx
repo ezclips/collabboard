@@ -22,7 +22,7 @@ import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canva
 import { IMAGE_CROP_TO_GRID_HEIGHT_PX } from "@/components/collabboard/canvas/engine/utils";
 import { useScrollbarLane } from "./useScrollbarLane";
 import { BookOpen } from "lucide-react";
-import { useKnowledgeSourceReferencesForPadlet } from "./KnowledgeSourceReferenceContext";
+import { useKnowledgeSourceOpen, useKnowledgeSourceReferencesForPadlet } from "./KnowledgeSourceReferenceContext";
 import KnowledgePdfCanvasSurface, { readKnowledgePdfPlacement } from "./KnowledgePdfCanvasSurface";
 import { knowledgeSourceCardLabel } from "@/lib/domain/knowledge/knowledgeSourceNavigation";
 import { knowledgeSourceCardExcerpt } from "@/lib/domain/knowledge/knowledgeSourceCardExcerpt";
@@ -1172,10 +1172,30 @@ const SOURCE_EXCERPT_CLAMP: React.CSSProperties = {
  */
 export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {
     const references = useKnowledgeSourceReferencesForPadlet(padletId);
+    const openSource = useKnowledgeSourceOpen();
     const label = knowledgeSourceCardLabel(references);
     const excerpt = knowledgeSourceCardExcerpt(references, noteContent);
     const crop = getKnowledgeSourceCardRegionCrop(references);
     if (label === null) return null;
+
+    // The first reference in the index's own order. A single-source Note --
+    // the common case, and the one whose label already names a page -- opens
+    // exactly the reference it advertises; a multi-source Note opens the first
+    // rather than inventing a disambiguation UI the card has no room for.
+    const openTarget = references.length > 0 ? references[0] : null;
+    const isInteractive = openSource !== null && openTarget !== null;
+
+    /**
+     * The marker sits inside a card that is itself selectable, draggable and
+     * double-click editable, so opening the source must not also reach the
+     * card. Pointer/mouse down are stopped as well as click: the hosts start a
+     * drag from the down event, so stopping click alone would still let a
+     * press-and-move turn into a drag of the whole Note.
+     */
+    const swallow = (event: React.SyntheticEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+    };
 
     return (
         <>
@@ -1189,14 +1209,35 @@ export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: str
                     {excerpt.text}
                 </div>
             )}
-            <div
-                data-knowledge-source-marker="true"
-                className="mt-1.5 flex items-center gap-1 text-[10px] leading-none text-gray-400"
-                title={label}
-            >
-                <BookOpen className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
-                <span className="truncate">{label}</span>
-            </div>
+            {isInteractive ? (
+                <button
+                    type="button"
+                    data-knowledge-source-marker="true"
+                    data-knowledge-source-open="true"
+                    className="mt-1.5 flex w-full items-center gap-1 text-left text-[10px] leading-none text-gray-400 hover:text-gray-600 hover:underline focus-visible:outline focus-visible:outline-1"
+                    title={label}
+                    aria-label={`Open ${label}`}
+                    onPointerDown={swallow}
+                    onMouseDown={swallow}
+                    onDoubleClick={swallow}
+                    onClick={(event) => {
+                        swallow(event);
+                        openSource(openTarget);
+                    }}
+                >
+                    <BookOpen className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{label}</span>
+                </button>
+            ) : (
+                <div
+                    data-knowledge-source-marker="true"
+                    className="mt-1.5 flex items-center gap-1 text-[10px] leading-none text-gray-400"
+                    title={label}
+                >
+                    <BookOpen className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{label}</span>
+                </div>
+            )}
         </>
     );
 }

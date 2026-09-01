@@ -7131,6 +7131,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       backlinks={knowledgeSourceBacklinkIndex}
       noteColors={knowledgeSourceNoteColors}
       noteSummaries={knowledgeSourceNoteSummaries}
+      onOpenSourceReference={requestKnowledgeSourceOpen}
     >
     <KnowledgePdfOpenProvider
       onOpenDocument={requestKnowledgeDocumentOpen}

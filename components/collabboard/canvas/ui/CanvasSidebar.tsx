@@ -68,6 +68,19 @@ const GROUP_H = (toolCount: number) => 20 + toolCount * 44; // label row + tools
 
 const CORE_GROUP_PRIORITIES = new Set([1, 2]);
 
+/**
+ * Tools whose action must run while the browser still counts the click as a
+ * user gesture, and which therefore cannot use the overflow menu's deferred
+ * dispatch (see onCloseAutoFocus below).
+ *
+ * Only the PDF picker qualifies today: it ends in a native
+ * `<input type="file">` click, and browsers ignore that outside a transient
+ * user activation -- silently, with no error. Opening a React modal or setting
+ * board state has no such requirement, which is why everything else stays
+ * deferred.
+ */
+const USER_GESTURE_TOOL_TYPES: ReadonlySet<string> = new Set(['knowledge-pdf']);
+
 type OverflowState = {
   signature: string;
   overflowIds: string[];
@@ -410,9 +423,20 @@ export default function CanvasSidebar({
                         key={tool.type}
                         disabled={isDisabled}
                         // Queued rather than dispatched here; see the
-                        // onCloseAutoFocus handler above.
+                        // onCloseAutoFocus handler above. The one exception is
+                        // a gesture-bound tool: Radix runs onSelect
+                        // synchronously inside the originating click, so the
+                        // file picker opens here while the activation is still
+                        // live. Deferring it to onCloseAutoFocus is what made
+                        // "Add PDF" do nothing whenever Media collapsed into
+                        // this menu. Nothing is queued in that case, so the
+                        // menu closes and restores focus exactly as normal.
                         onSelect={() => {
                           if (isDisabled) return;
+                          if (USER_GESTURE_TOOL_TYPES.has(tool.type)) {
+                            dispatchTool(tool.type, isDisabled);
+                            return;
+                          }
                           pendingToolRef.current = tool.type;
                         }}
                         className="cursor-pointer focus:bg-gray-100 data-[highlighted]:bg-gray-100"
