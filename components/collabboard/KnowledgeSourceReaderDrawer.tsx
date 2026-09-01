@@ -36,6 +36,15 @@ import type {
 /** The library modal's own marker. Read ONLY to yield Escape to it. */
 const KNOWLEDGE_LIBRARY_SELECTOR = '[data-knowledge-documents="true"]';
 
+/**
+ * How long the reader will wait out a still-extracting document before it
+ * reports the source unavailable. Bounded on both sides deliberately: long
+ * enough to cover the normal extraction window, short enough that a document
+ * which never becomes readable stops spinning and says so.
+ */
+const READER_PAGES_RETRY_LIMIT = 12;
+const READER_PAGES_RETRY_DELAY_MS = 2000;
+
 export interface KnowledgeSourceReaderDrawerProps {
   /**
    * A Note asking for its exact citation. Handled at most once per requestId,
@@ -162,22 +171,38 @@ export default function KnowledgeSourceReaderDrawer({
       documentId, originalFilename: '', pageCount: null, pages: [],
       loading: true, error: false, initialPageNumber, sourceTarget, aiSession: null,
     });
-    try {
-      const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`);
-      const payload = await response.json().catch(() => null) as { pages?: unknown; document?: unknown } | null;
-      if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('details unavailable');
-      if (generation !== readGenerationRef.current) return;
-      setReader({
-        documentId,
-        ...documentMetadata(payload.document),
-        pages: payload.pages.filter(isDetailPage),
-        loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
-      });
-    } catch {
-      if (generation !== readGenerationRef.current) return;
-      setReader((current) => (current?.documentId === documentId
-        ? { ...current, loading: false, error: true }
-        : current));
+    // A 409 means extraction has not finished, which is a normal state for a
+    // freshly uploaded document -- not a failure. Treating it as one is what
+    // used to strand the reader on "Extracted text unavailable" (and, because
+    // the metadata never arrived, on the filename fallback) until it was
+    // closed and reopened. The generation check is the cancellation: a newer
+    // pick, or a close, retires this loop at every await boundary.
+    for (let attempt = 0; attempt <= READER_PAGES_RETRY_LIMIT; attempt += 1) {
+      try {
+        const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`);
+        if (generation !== readGenerationRef.current) return;
+        if (response.status === 409 && attempt < READER_PAGES_RETRY_LIMIT) {
+          await new Promise((resolve) => { window.setTimeout(resolve, READER_PAGES_RETRY_DELAY_MS); });
+          if (generation !== readGenerationRef.current) return;
+          continue;
+        }
+        const payload = await response.json().catch(() => null) as { pages?: unknown; document?: unknown } | null;
+        if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('details unavailable');
+        if (generation !== readGenerationRef.current) return;
+        setReader({
+          documentId,
+          ...documentMetadata(payload.document),
+          pages: payload.pages.filter(isDetailPage),
+          loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
+        });
+        return;
+      } catch {
+        if (generation !== readGenerationRef.current) return;
+        setReader((current) => (current?.documentId === documentId
+          ? { ...current, loading: false, error: true }
+          : current));
+        return;
+      }
     }
   };
 

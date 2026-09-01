@@ -130,7 +130,9 @@ describe('4. the placement stores a reference and nothing derived', () => {
 
 describe('5. processing states are shown truthfully', () => {
   it.each([
-    ['uploaded', 'Uploading…'],
+    // The row exists only once the transfer finished, so "uploaded" is a
+    // document awaiting EXTRACTION -- never one still being uploaded.
+    ['uploaded', 'Processing…'],
     ['processing', 'Processing…'],
     ['ready', 'Ready'],
     ['failed', 'Processing failed'],
@@ -525,5 +527,141 @@ describe('R2. external draft placement is isolated from editor state', () => {
     ]) {
       expect(handler, `${forbidden} must not appear in the PDF handler`).not.toContain(forbidden);
     }
+  });
+});
+
+/**
+ * PDF-C1 transient-processing recovery.
+ *
+ * A document can answer `ready` from the list authority a moment before its
+ * pages are queryable, so `/pages` returns 409 for a short window. That used
+ * to set the terminal `pagesFailed` latch, whose own effect guard then blocked
+ * every further attempt -- stranding the card on "Page content is not
+ * available for this document." until it was remounted. These are behavioural
+ * proofs, deliberately not source-string ones: the defect was a state machine,
+ * and only running it can show that it recovers.
+ */
+describe('10. a still-extracting document recovers without a remount', () => {
+  const pagesUrl = `/api/boards/${BOARD_ID}/knowledge/${DOC_ID}/pages`;
+  const PAGE = { pageNumber: 1, text: 'Extracted page one.', widthPoints: 1, heightPoints: 1, rotation: 0 };
+
+  /** 409 for the first `conflicts` page reads, then a normal 200 payload. */
+  function stubPages(conflicts: number) {
+    let seen = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url) === pagesUrl) {
+        seen += 1;
+        if (seen <= conflicts) {
+          return new Response(JSON.stringify({ error: 'Knowledge document is not ready' }),
+            { status: 409, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ document: { id: DOC_ID }, pages: [PAGE] }),
+          { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const pageReads = (m: ReturnType<typeof vi.fn>) =>
+    m.mock.calls.filter(([url]) => String(url) === pagesUrl).length;
+
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it('409 is not a failure: the card keeps a truthful preparing state and retries', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubPages(2);
+    const host = surface('ready');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // First answer was 409. The terminal copy must NOT be what the user sees.
+    expect(host.textContent).not.toContain('Page content is not available for this document.');
+    expect(host.textContent).toContain('Preparing document…');
+    expect(pageReads(fetchMock)).toBe(1);
+
+    // The retry is the production timer, not a re-render or a remount.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(pageReads(fetchMock)).toBe(2);
+  });
+
+  it('a later 200 renders the recovered page into the SAME mounted card', async () => {
+    vi.useFakeTimers();
+    stubPages(2);
+    const host = surface('ready');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const body = host.querySelector('[data-knowledge-pdf-body="true"]');
+    expect(host.textContent).toContain('Preparing document…');
+    expect(host.querySelector('[data-knowledge-pdf-page="1"]')).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+
+    // The recovered pages are rendered, and the waiting state is gone.
+    expect(host.querySelector('[data-knowledge-pdf-page="1"]')).not.toBeNull();
+    expect(host.textContent).not.toContain('Preparing document…');
+    expect(host.textContent).not.toContain('Page content is not available for this document.');
+    // Same element instance: recovery happened in place, with no remount.
+    expect(host.querySelector('[data-knowledge-pdf-body="true"]')).toBe(body);
+  });
+
+  it('after recovery an unavailable page image still falls back to the parsed text', async () => {
+    vi.useFakeTimers();
+    stubPages(1);
+    const host = surface('ready');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+
+    // Page view first: the raster is preferred while it might exist.
+    const image = host.querySelector('img');
+    expect(image).not.toBeNull();
+    expect(host.textContent).not.toContain('Extracted page one.');
+
+    // A 404 raster reports itself unavailable, exactly as it does live.
+    await act(async () => { image!.dispatchEvent(new Event('error')); });
+
+    expect(host.querySelector('[data-knowledge-pdf-page-text="true"]')).not.toBeNull();
+    expect(host.textContent).toContain('Extracted page one.');
+  });
+
+  it('retrying is bounded -- a document that never becomes ready stops asking', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubPages(Number.MAX_SAFE_INTEGER);
+    const host = surface('ready');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    for (let i = 0; i < 30; i += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    }
+
+    // Bounded: far fewer reads than elapsed intervals would allow.
+    expect(pageReads(fetchMock)).toBeLessThanOrEqual(13);
+    // And still truthful -- never claims the document failed.
+    expect(host.textContent).not.toContain('Page content is not available for this document.');
+  });
+
+  it('a genuine failure is still terminal, and is not retried', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (url: string) => (String(url) === pagesUrl
+      ? new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+      : new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+    const host = surface('ready');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+
+    expect(host.textContent).toContain('Page content is not available for this document.');
+    expect(pageReads(fetchMock)).toBe(1);
+  });
+
+  it('invents no numeric progress while waiting', async () => {
+    vi.useFakeTimers();
+    stubPages(3);
+    const host = surface('ready');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(host.textContent ?? '').not.toMatch(/\d+\s*%/);
   });
 });

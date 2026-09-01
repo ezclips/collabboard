@@ -396,16 +396,36 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     }
   });
 
-  it('D: the card marker is non-interactive', () => {
-    // P6J-F9-C2 widened this window: the eligibility check and the crop's
-    // own conditional line now sit before the marker div inside this
-    // function, pushing it further from the anchor than before.
-    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 1000);
+  /**
+   * B2's original premise -- "no click surface of any kind, the clickable
+   * affordance is the editor's" -- was deliberately retired by `4b47982`
+   * (freeform PDF interactions), which made the marker open its own source.
+   * The premise is replaced rather than deleted, because what it was really
+   * protecting still has to hold: the marker must not become a second
+   * navigation authority, and it must not steal the card's drag gesture.
+   */
+  it('D: the card marker opens its source safely, and still navigates nowhere itself', () => {
+    // A scan bound, not an invariant: the excerpt block pushed the marker
+    // roughly 1750 characters past the anchor.
+    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 2400);
 
     expect(marker).toContain('data-knowledge-source-marker="true"');
-    // No click surface of any kind: the clickable affordance is the editor's.
-    for (const forbidden of ['onClick', 'onPointerDown', 'onMouseDown', '<button', '<a ', 'pointer-events-auto', 'role="button"']) {
-      expect(marker).not.toContain(forbidden);
+    // The interactive form is a real, named control -- not a div wearing a
+    // click handler, and not a link.
+    expect(marker).toContain('<button');
+    expect(marker).toContain('type="button"');
+    expect(marker).toContain('aria-label={`Open ${label}`}');
+    // It swallows the pointer sequence, so pressing it can never start the
+    // card drag underneath it -- the reason a bare click surface was banned.
+    for (const swallowed of ['onPointerDown={swallow}', 'onMouseDown={swallow}', 'onDoubleClick={swallow}']) {
+      expect(marker, `the marker must swallow ${swallowed}`).toContain(swallowed);
+    }
+    // A non-interactive fallback still exists for cards that cannot open one.
+    expect(marker).toContain('isInteractive ?');
+    // Navigation authority is unchanged: it delegates, and never routes.
+    expect(marker).toContain('openSource(openTarget)');
+    for (const forbidden of ['<a ', 'href', 'router.', 'openPadlet=', 'scrollIntoView(']) {
+      expect(marker, `the marker must not contain ${forbidden}`).not.toContain(forbidden);
     }
   });
 
@@ -490,10 +510,18 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     expect(clear).toContain('}, [sourceReferenceScopeKey]);');
   });
 
-  it('K: CanvasSidebar still owns knowledgeOpen (library only)', () => {
-    expect(canvasSidebar).toContain('const [knowledgeOpen, setKnowledgeOpen] = useState(false);');
-    // The normal trigger is untouched.
-    expect(canvasSidebar).toContain('onClick={() => setKnowledgeOpen(true)}');
+  it('K: CanvasSidebar owns Add PDF only -- never the reader, never a library modal', () => {
+    /**
+     * PDF-C1 retired the sidebar's Knowledge library launcher: a PDF is placed
+     * on the canvas rather than opened in a modal, so `knowledgeOpen` and its
+     * trigger are gone by design (KnowledgePdfCanvasSurface.test.tsx asserts
+     * that removal positively). What survives from B2 is the boundary this
+     * test really defends -- the sidebar owns the PICKER and nothing else, and
+     * CanvasClient never grew library state of its own.
+     */
+    expect(canvasSidebar).not.toContain('knowledgeOpen');
+    expect(canvasSidebar).toContain("type === 'knowledge-pdf'");
+    expect(canvasSidebar).toContain('openPicker()');
     expect(canvasClient).not.toContain('const [knowledgeOpen');
 
     /**
@@ -599,7 +627,7 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     // summary transport, bringing the total to four and no further.
     expect(referenceContext).toContain('export function useKnowledgeSourceReferencesForDocument');
     expect(referenceContext).toContain('useContext(KnowledgeSourceReferenceContext)');
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(4);
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(5);
     for (const forbidden of ['fetch(', 'supabase', 'useState', 'useEffect', '.insert(', '.update(']) {
       expect(referenceContext, forbidden).not.toContain(forbidden);
     }
@@ -903,7 +931,7 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
     // Interaction introduced no context of its own. The third is F8-B3's Note
     // colour transport and the fourth is the Source Notes Panel phase's Note
     // summary transport, and neither carries state either.
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(4);
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(5);
   });
 
   it('target identity comes from the resolved spans, never from the DOM count attribute', () => {
@@ -1011,7 +1039,7 @@ describe('P6J-F8-B2 source excerpt boundaries', () => {
     // Canonical PDF text is not markup, and the row it comes from is writable
     // by any board editor: parsing it as HTML would be both wrong and a
     // rendering path for text this component never authored.
-    const marker = after(postCardContent, 'export function KnowledgeSourceMarker(', 900);
+    const marker = after(postCardContent, 'export function KnowledgeSourceMarker(', 2400);
 
     expect(marker).toContain('{excerpt.text}');
     for (const forbidden of ['dangerouslySetInnerHTML', 'DOMPurify', 'decodeHtmlEntities', 'innerHTML']) {

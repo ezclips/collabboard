@@ -1050,3 +1050,69 @@ describe('PDF Source AI Phase 1 right pane', () => {
     expect(pageRequests()).toHaveLength(1);
   });
 });
+
+// ============================================================================
+// PDF-C1 -- transient processing recovery
+// ============================================================================
+/**
+ * A freshly uploaded document answers `/pages` with 409 until extraction
+ * finishes. The reader used to treat that as terminal, which left it showing
+ * "Extracted text unavailable" -- and, because the document metadata never
+ * arrived with it, the empty-filename fallback -- until the drawer was closed
+ * and reopened. Behavioural proof: only running the state machine shows that
+ * a 409 now resolves itself.
+ */
+describe('PDF-C1 a still-extracting source recovers without reopening', () => {
+  const READY = () => jsonResponse({
+    document: { id: SOURCE_A, originalFilename: 'lesson.pdf', pageCount: 1 },
+    pages: [{ pageNumber: 1, text: 'Recovered page text.' }],
+  });
+  const NOT_READY = () => jsonResponse({ error: 'Knowledge document is not ready' }, 409);
+
+  it('retries a 409 in place, then renders the real filename and the parsed content', async () => {
+    let seen = 0;
+    fetchMock.mockImplementation(async () => {
+      seen += 1;
+      return seen === 1 ? NOT_READY() : READY();
+    });
+
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+
+    // First answer was the 409. The reader must not have given up on it.
+    expect(drawerEl()).not.toBeNull();
+    expect(drawerEl()!.textContent).not.toContain('Extracted text unavailable.');
+    const drawerBefore = drawerEl();
+
+    // The production retry timer, not a reopen: nothing here closes the reader.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2300)); });
+
+    const drawer = drawerEl()!;
+    expect(pageRequests().length).toBeGreaterThanOrEqual(2);
+    // Recovered: real filename in the tab AND in the Library panel header.
+    expect(drawer.querySelector('[data-knowledge-reader-tab="active"]')!.textContent).toContain('lesson.pdf');
+    expect(drawer.querySelector('[data-knowledge-library-filename="true"]')!.textContent).toContain('lesson.pdf');
+    // Recovered content, and no terminal copy anywhere.
+    expect(drawer.textContent).toContain('Recovered page text.');
+    expect(drawer.textContent).not.toContain('Extracted text unavailable.');
+    // The Library pane survived the recovery, and the reader never remounted.
+    expect(drawer.querySelector('[data-knowledge-library-panel="true"]')).not.toBeNull();
+    expect(drawerEl()).toBe(drawerBefore);
+  }, 15000);
+
+  it('a genuine failure is still reported, and is not retried forever', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ error: 'Not found' }, 404));
+
+    await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
+
+    expect(drawerEl()!.textContent).toContain('Extracted text unavailable.');
+    expect(pageRequests()).toHaveLength(1);
+  });
+
+  it('the two-pane reader layout is untouched by the recovery path', () => {
+    // Widths and panes stay exactly as the reader-workspace commit set them.
+    expect(drawerCode).toContain('lg:w-[880px]');
+    expect(drawerCode).toContain('w-[300px] flex-none');
+    expect(drawerCode).toContain('data-knowledge-reader-workspace="true"');
+    expect(drawerCode).toContain('data-knowledge-library-panel="true"');
+  });
+});

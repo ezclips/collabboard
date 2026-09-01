@@ -140,10 +140,27 @@ export function readKnowledgePdfPlacement(padlet: unknown): {
   };
 }
 
-/** Truthful backend state only. No percentage is derived from polls or time. */
+/**
+ * Truthful backend state only. No percentage is derived from polls or time.
+ *
+ * `uploaded` reads as "Processing…" rather than "Uploading…": the row only
+ * exists once the file has finished uploading, so the transfer is already
+ * complete by the time this label can be shown. What the viewer is actually
+ * waiting on is extraction.
+ */
 const STATUS_LABEL: Record<KnowledgePdfProcessingStatus, string> = {
-  uploaded: 'Uploading…', processing: 'Processing…', ready: 'Ready', failed: 'Processing failed',
+  uploaded: 'Processing…', processing: 'Processing…', ready: 'Ready', failed: 'Processing failed',
 };
+
+/**
+ * A document can report `ready` a moment before its pages are queryable, so
+ * `/pages` answers 409 for a short window. That is a normal lifecycle state,
+ * not a failure, and it must not latch: the card polls it out rather than
+ * declaring the document empty. Bounded so a genuinely stuck document costs a
+ * finite number of requests and then simply stops asking.
+ */
+const PAGES_RETRY_LIMIT = 12;
+const PAGES_RETRY_DELAY_MS = 2000;
 const TERMINAL = (status: KnowledgePdfProcessingStatus) => status === 'ready' || status === 'failed';
 
 export interface KnowledgePdfCanvasSurfaceProps {
@@ -386,26 +403,48 @@ export default function KnowledgePdfCanvasSurface({
    */
   const [pages, setPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(null);
   const [pagesFailed, setPagesFailed] = useState(false);
+  /** A 409 was seen: extraction is still finishing, so the wait is expected. */
+  const [pagesPreparing, setPagesPreparing] = useState(false);
+  /** Bumped only by a 409, which is what re-runs the effect for another try. */
+  const [pagesAttempt, setPagesAttempt] = useState(0);
   const [imagelessPages, setImagelessPages] = useState<ReadonlySet<number>>(() => new Set());
 
   useEffect(() => {
     if (!isReady || collapsed || pages || pagesFailed || !boardId) return;
+    // The attempt counter is the loop bound. Past it the card stops asking and
+    // keeps the preparing state: nothing observed says the document failed, so
+    // claiming it did would be the same false terminal this patch removes.
+    if (pagesAttempt >= PAGES_RETRY_LIMIT) return;
     let cancelled = false;
+    let retryTimer = 0;
     (async () => {
       try {
         const response = await fetch(
           `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`,
         );
+        // 409 is "not ready yet", the one status that must never latch. Only
+        // the timer advances the attempt, so exactly one request is ever in
+        // flight and a retry cannot stack on the request that scheduled it.
+        if (response.status === 409) {
+          if (cancelled) return;
+          setPagesPreparing(true);
+          retryTimer = window.setTimeout(() => {
+            if (!cancelled) setPagesAttempt((attempt) => attempt + 1);
+          }, PAGES_RETRY_DELAY_MS);
+          return;
+        }
         const payload = await response.json().catch(() => null) as { pages?: unknown } | null;
         if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('pages unavailable');
-        if (!cancelled) setPages(payload.pages as readonly KnowledgeDocumentDetailPage[]);
+        if (cancelled) return;
+        setPagesPreparing(false);
+        setPages(payload.pages as readonly KnowledgeDocumentDetailPage[]);
       } catch {
         // Text is enhancement over the status the card already shows truthfully.
         if (!cancelled) setPagesFailed(true);
       }
     })();
-    return () => { cancelled = true; };
-  }, [isReady, collapsed, pages, pagesFailed, boardId, documentId]);
+    return () => { cancelled = true; window.clearTimeout(retryTimer); };
+  }, [isReady, collapsed, pages, pagesFailed, pagesAttempt, boardId, documentId]);
 
   const markImageless = useCallback((pageNumber: number) => {
     setImagelessPages((current) => {
@@ -511,7 +550,11 @@ export default function KnowledgePdfCanvasSurface({
                without hovering -- the strip's controls are hover-revealed, so
                an indicator there could never be seen while it mattered. */
             <div data-knowledge-pdf-loading="true" className="px-1 py-2 text-[10px] italic text-gray-400">
-              Loading document…
+              {/* Still a non-numeric state, and now it distinguishes the two
+                  reasons for waiting: fetching pages that exist, versus pages
+                  the backend has not finished extracting. No estimate is
+                  shown -- the duration is not something this client knows. */}
+              {pagesPreparing ? 'Preparing document…' : 'Loading document…'}
             </div>
           ) : pages && pages.length > 0 ? (
             pages.map((page) => (
