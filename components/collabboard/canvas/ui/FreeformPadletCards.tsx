@@ -3181,6 +3181,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const resizeMode = getPostResizeCapability(padlet);
         const manualGeometry = resizeMode !== 'none' ? getManualResizeDimensions(padlet) : null;
         const boxManualHeight = resizeMode === 'box' && padlet.type !== 'ai-component' && manualGeometry ? `${manualGeometry.height}px` : undefined;
+        /**
+         * PDF-C1. A PDF's height is content-driven and its resized height is a
+         * CAP, not a fixed size. Reflowable page text is why: widening the card
+         * makes the same text shorter, and a pinned height would leave a block
+         * of empty white below it down to the old bottom edge. As a max-height
+         * the card hugs its content when the content is shorter, and still
+         * clips-and-scrolls (needsContentScroll, below) when it is taller.
+         * Every other box type keeps its exact pinned height.
+         */
+        const isPdfPlacementCard = !!readKnowledgePdfPlacement(padlet);
+        const pdfMaxHeight = isPdfPlacementCard ? boxManualHeight : undefined;
         const needsContentScroll = resizeMode === 'box' && padlet.type !== 'ai-component' && !!manualGeometry;
         // Interaction chrome belongs to the immediate relative wrapper used
         // by each generic root branch, not to this overflow-hidden semantic
@@ -3267,9 +3278,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   : padlet.type === 'ai-component'
                     ? `${Math.max(Number(padlet.width) || 500, 200)}px`
                     : (manualGeometry ? `${manualGeometry.width}px` : '180px'),
-              height: boxManualHeight,
+              height: isPdfPlacementCard ? undefined : boxManualHeight,
+              maxHeight: pdfMaxHeight,
+              // A PDF hugs its content, so it must not be padded up to the
+              // generic 80px floor when its own content is shorter.
               minHeight: padlet.type === 'container' ? '150px'
-                : padlet.type === 'ai-component' ? undefined
+                : (padlet.type === 'ai-component' || isPdfPlacementCard) ? undefined
                 : '80px',
               border: isFullView ? 'none' : '1px solid #e5e7eb',
               backgroundColor: isFullView ? 'transparent' : (padlet.metadata?.cardColor || '#ffffff'),

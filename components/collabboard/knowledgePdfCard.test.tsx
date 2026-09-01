@@ -376,6 +376,29 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     return FREEFORM.slice(at, at + 1200);
   };
 
+  it('35z. a resized PDF hugs its content: manual height is a CAP, not a pin', () => {
+    // Widening the card reflows the same page text into fewer lines. With a
+    // pinned height that left a block of empty white below the text down to
+    // the old bottom edge; as a max-height the card shrinks to fit and still
+    // clips-and-scrolls when the content is taller.
+    expect(FREEFORM).toContain('const isPdfPlacementCard = !!readKnowledgePdfPlacement(padlet);');
+    expect(FREEFORM).toContain('const pdfMaxHeight = isPdfPlacementCard ? boxManualHeight : undefined;');
+    expect(FREEFORM).toContain('height: isPdfPlacementCard ? undefined : boxManualHeight,');
+    expect(FREEFORM).toContain('maxHeight: pdfMaxHeight,');
+    // It must also escape the generic 80px floor, or a short document would
+    // still be padded out with white space.
+    expect(FREEFORM).toContain("(padlet.type === 'ai-component' || isPdfPlacementCard) ? undefined");
+    // Every other box type keeps its exact pinned height.
+    expect(FREEFORM).toContain("const boxManualHeight = resizeMode === 'box' && padlet.type !== 'ai-component' && manualGeometry");
+  });
+
+  it('35y. the card body still scrolls when the document exceeds the cap', async () => {
+    const host = await card();
+    // The cap clips; this is what makes the remaining pages reachable.
+    expect(body(host)!.className).toContain('overflow-y-auto');
+    expect(FREEFORM).toContain("needsContentScroll ? 'overflow-y-auto'");
+  });
+
   it('35a. selection STICKS: a PDF click never reaches the canvas deselect', () => {
     // The blue ring appeared on press and vanished on release, because a file
     // placement falls into the shared fallback wrapper whose click was only
