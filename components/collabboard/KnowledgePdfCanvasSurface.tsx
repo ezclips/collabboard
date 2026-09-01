@@ -5,6 +5,12 @@ import { ChevronDown, ChevronRight, ExternalLink, FileText, Maximize2, PanelRigh
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
 import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
+  useKnowledgeSourceNoteColors,
+  useKnowledgeSourceReferencesForDocument,
+} from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
+import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
+import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
 } from '@/components/collabboard/KnowledgePdfUploader';
@@ -202,12 +208,6 @@ export function KnowledgePdfCardControls({
 
       <FileText className="h-3 w-3 shrink-0 text-red-500" aria-hidden="true" />
 
-      {loading ? (
-        <span data-knowledge-pdf-loading="true" className="shrink-0 text-[9px] italic opacity-60">
-          Loading…
-        </span>
-      ) : null}
-
       {hideStatusWhenReady && isReady ? null : (
         <span
           data-knowledge-pdf-status={status}
@@ -403,6 +403,16 @@ export default function KnowledgePdfCanvasSurface({
 
   const snippet = pages?.find((page) => page.text.trim().length > 0)?.text.trim().slice(0, 90) ?? null;
 
+  /**
+   * The SAME citations the reader paints, and the same note colours, resolved
+   * by the same domain functions. Nothing here decides what a highlight is:
+   * the span resolver is the sole authority, so a drifted or page-only
+   * reference paints nothing in the card exactly as it paints nothing in the
+   * side panel. A card outside the provider simply gets no highlights.
+   */
+  const references = useKnowledgeSourceReferencesForDocument(documentId);
+  const noteColors = useKnowledgeSourceNoteColors();
+
   const headerButton = 'inline-flex h-5 w-5 items-center justify-center rounded text-gray-500 '
     + 'hover:bg-gray-200 hover:text-gray-700 focus-visible:outline focus-visible:outline-1';
 
@@ -470,7 +480,12 @@ export default function KnowledgePdfCanvasSurface({
           {!isReady ? (
             <div className="px-1 py-2 text-[10px] text-gray-500">{STATUS_LABEL[status]}</div>
           ) : documentLoading ? (
-            <div className="px-1 py-2 text-[10px] italic text-gray-400">Loading document…</div>
+            /* The one loading indicator, in the body where it is visible
+               without hovering -- the strip's controls are hover-revealed, so
+               an indicator there could never be seen while it mattered. */
+            <div data-knowledge-pdf-loading="true" className="px-1 py-2 text-[10px] italic text-gray-400">
+              Loading document…
+            </div>
           ) : pages && pages.length > 0 ? (
             pages.map((page) => (
               <section
@@ -498,7 +513,25 @@ export default function KnowledgePdfCanvasSurface({
                     data-knowledge-pdf-page-text="true"
                     className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
                   >
-                    {page.text}
+                    {knowledgeSourceHighlightSegments(references, page.pageNumber, page.text)
+                      .map((segment) => {
+                        const highlight = segment.spans.length > 0
+                          ? knowledgeSourceHighlightColor(segment.spans, noteColors)
+                          : null;
+                        if (!highlight) {
+                          return <React.Fragment key={segment.start}>{segment.text}</React.Fragment>;
+                        }
+                        return (
+                          <mark
+                            key={segment.start}
+                            data-knowledge-pdf-highlight="true"
+                            className="rounded-[2px] bg-transparent px-0 text-inherit"
+                            style={{ backgroundColor: highlight.backgroundColor }}
+                          >
+                            {segment.text}
+                          </mark>
+                        );
+                      })}
                   </p>
                 ) : null}
               </section>

@@ -365,6 +365,39 @@ describe('22-23. permissions', () => {
   });
 });
 
+describe('43-45. converted text carries the side-panel highlights', () => {
+  it('43. the card paints citations with the SAME domain authority as the reader', () => {
+    const code = executable(SURFACE);
+    // One resolver, one colour rule -- the card decides neither.
+    expect(code).toContain('knowledgeSourceHighlightSegments(references, page.pageNumber, page.text)');
+    expect(code).toContain('knowledgeSourceHighlightColor(segment.spans, noteColors)');
+    expect(code).toContain('useKnowledgeSourceReferencesForDocument(documentId)');
+    expect(code).toContain('useKnowledgeSourceNoteColors()');
+    // No second notion of a highlight, and no colour invented here.
+    expect(code).not.toMatch(/charStart|quoteText|indexOf\(reference/);
+  });
+
+  it('44. an unhighlighted document renders its text with no marks at all', async () => {
+    // No provider above the card => no references => plain text, unchanged.
+    const host = await card();
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(3);
+    expect(host.querySelectorAll('[data-knowledge-pdf-highlight]')).toHaveLength(0);
+    // The text is still reconstructed verbatim.
+    expect(host.textContent).toContain('Text of page 2');
+  });
+
+  it('45. converted text is embedded in the card and scrolls in place', async () => {
+    const host = await card();
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    const bodyEl = body(host)!;
+    // Embedded in the card body -- not a popup, not a second surface.
+    expect(bodyEl.querySelectorAll('[data-knowledge-pdf-page-text]').length).toBeGreaterThan(0);
+    expect(bodyEl.className).toContain('overflow-y-auto');
+    expect(bodyEl.className).toContain('overscroll-contain');
+  });
+});
+
 describe('30-35. one frame, square corners, real resize handle', () => {
   const FREEFORM = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
   const POLICY = read('lib/domain/canvas/postResizePolicy.ts');
@@ -415,7 +448,10 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     // the old bottom edge; as a max-height the card shrinks to fit and still
     // clips-and-scrolls when the content is taller.
     expect(FREEFORM).toContain('const isPdfPlacementCard = !!readKnowledgePdfPlacement(padlet);');
-    expect(FREEFORM).toContain('const pdfMaxHeight = isPdfPlacementCard ? boxManualHeight : undefined;');
+    expect(FREEFORM).toContain('const pdfMaxHeight = isPdfPlacementCard');
+    // Even before a first resize the card is capped, so a long converted
+    // document scrolls instead of drawing one enormous card.
+    expect(FREEFORM).toContain('boxManualHeight ?? `${Math.max(Number(padlet.height) || 0, 160)}px`');
     expect(FREEFORM).toContain('height: isPdfPlacementCard ? undefined : boxManualHeight,');
     expect(FREEFORM).toContain('maxHeight: pdfMaxHeight,');
     // It must also escape the generic 80px floor, or a short document would

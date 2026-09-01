@@ -3191,7 +3191,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
          * Every other box type keeps its exact pinned height.
          */
         const isPdfPlacementCard = !!readKnowledgePdfPlacement(padlet);
-        const pdfMaxHeight = isPdfPlacementCard ? boxManualHeight : undefined;
+        /**
+         * Before the card has ever been resized there is no manual height to
+         * cap it, and a converted document is arbitrarily long -- a 200-page
+         * PDF would otherwise draw one enormous card. The default cap is the
+         * placement's own creation height, so an untouched card looks exactly
+         * as it did on import and scrolls its text instead of growing.
+         */
+        const pdfMaxHeight = isPdfPlacementCard
+          ? (boxManualHeight ?? `${Math.max(Number(padlet.height) || 0, 160)}px`)
+          : undefined;
         const needsContentScroll = resizeMode === 'box' && padlet.type !== 'ai-component' && !!manualGeometry;
         // Interaction chrome belongs to the immediate relative wrapper used
         // by each generic root branch, not to this overflow-hidden semantic
