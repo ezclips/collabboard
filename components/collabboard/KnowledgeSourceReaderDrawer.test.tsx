@@ -791,19 +791,22 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(drawer.textContent).toContain(PAGE_ONE);
   });
 
-  it('R: the drawer widens to lg:w-[760px] for the two-pane desktop layout', async () => {
+  it('R: the drawer widens to lg:w-[880px] for the two-pane desktop layout', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
-    expect(drawerEl()!.className).toContain('lg:w-[760px]');
+    // Widened with the Library split so the document workspace keeps the
+    // majority of the drawer rather than surrendering it to the side panel.
+    expect(drawerEl()!.className).toContain('lg:w-[880px]');
   });
 
   it('S: the source pane and the Source Notes pane render as siblings, never nested', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
     const drawer = drawerEl()!;
-    // The FIRST .overflow-y-auto is the pre-existing source pane (test O's
-    // own selector): it must stay the reading pane, not the new one.
-    const sourcePane = drawer.querySelector('.overflow-y-auto') as HTMLElement;
+    // The document workspace and the Library pane are siblings; the workspace
+    // now scrolls internally, so it is addressed by its own marker rather than
+    // by being the first scrolling element.
+    const sourcePane = drawer.querySelector('[data-knowledge-reader-workspace]') as HTMLElement;
     const notesPane = drawer.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
     expect(sourcePane).not.toBeNull();
     expect(notesPane).not.toBeNull();
@@ -812,20 +815,27 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(notesPane.contains(sourcePane)).toBe(false);
   });
 
-  it('T: the source pane keeps its 420px width at desktop', async () => {
+  it('T: the document workspace takes the majority width, not a fixed column', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
-    const sourcePane = drawerEl()!.querySelector('.overflow-y-auto') as HTMLElement;
-    expect(sourcePane.className).toContain('lg:w-[420px]');
+    const workspace = drawerEl()!.querySelector('[data-knowledge-reader-workspace]') as HTMLElement;
+    expect(workspace).not.toBeNull();
+    // flex-1 against a 300px Library pane: the document gets what is left,
+    // which is most of an 880px drawer.
+    expect(workspace.className).toContain('flex-1');
+    expect(workspace.className).not.toContain('lg:w-[420px]');
+    expect(workspace.className).not.toContain('flex-none');
   });
 
-  it('U: the Source Notes pane is 340px wide and hidden below lg', async () => {
+  it('U: the Library pane is 300px wide and hidden below lg', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
     const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
-    expect(notesPane.className).toContain('w-[340px]');
+    expect(notesPane.className).toContain('w-[300px]');
     expect(notesPane.className).toContain('hidden');
     expect(notesPane.className).toContain('lg:block');
+    // Same element, now also the Library panel -- one side pane, not two.
+    expect(notesPane.getAttribute('data-knowledge-library-panel')).toBe('true');
   });
 
   it('V: the Source Notes panel receives the currently open document id', async () => {
@@ -944,15 +954,15 @@ describe('PDF Source AI Phase 1 right pane', () => {
     expect(aiPanel()).toBeNull();
   });
 
-  it('AB: activating AI snapshots the exact selection, switches the pane, and keeps the 340px/760px layout', async () => {
+  it('AB: activating AI snapshots the exact selection, switches the pane, and keeps the 300px/880px layout', async () => {
     await openWithAi();
     await activateAi();
 
     expect(aiPanel()).not.toBeNull();
     expect(notesPanel()).toBeNull();
     expect(aiPanel()!.textContent).toContain('safety');
-    expect(drawerEl()!.className).toContain('lg:w-[760px]');
-    expect(rightPane().className).toContain('w-[340px]');
+    expect(drawerEl()!.className).toContain('lg:w-[880px]');
+    expect(rightPane().className).toContain('w-[300px]');
   });
 
   it('AD: Back to Source Notes returns the pane with no new pages fetch', async () => {

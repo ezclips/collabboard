@@ -67,6 +67,13 @@ export interface KnowledgeDocumentDetailsProps {
   error: boolean;
   onBack: () => void;
   /**
+   * Set by a host that renders the document's identity itself -- the reader's
+   * Library panel does. The workspace then starts at the document instead of
+   * repeating Back / filename / page count / Used in Notes above it, which is
+   * the whole point of splitting the two regions.
+   */
+  hostRendersDocumentHeader?: boolean;
+  /**
    * Absent for readers who cannot create posts on this board. The action is
    * then not rendered at all rather than rendered disabled -- the same
    * capability the canvas toolbar itself is gated on decides this.
@@ -246,7 +253,7 @@ function captureExactSelection(
  * the not-yet-loaded pages would claim "0 pages" about a document we simply have
  * not read yet. Absent knowledge is rendered as no claim at all.
  */
-function pageCountSummary(pageCount: number | null, pageLength: number, loading: boolean): string | null {
+export function pageCountSummary(pageCount: number | null, pageLength: number, loading: boolean): string | null {
   if (pageCount !== null) return pageCount === 1 ? '1 page' : `${pageCount} pages`;
   if (loading || pageLength === 0) return null;
   return pageLength === 1 ? '1 page' : `${pageLength} pages`;
@@ -476,7 +483,7 @@ function highlightedText(
  * a canvas never offers an action that cannot work. Either way the target id
  * rides on the row as a data attribute -- the visible text is never looked up.
  */
-function UsedInNotes({ scope, rows, onOpen }: {
+export function UsedInNotes({ scope, rows, onOpen }: {
   scope: 'document' | 'page';
   rows: readonly KnowledgeSourceBacklinkRow[];
   onOpen?: (targetPadletId: string) => void;
@@ -515,6 +522,7 @@ export default function KnowledgeDocumentDetails({
   boardId,
   originalFilename,
   pageCount,
+  hostRendersDocumentHeader = false,
   pages,
   loading,
   error,
@@ -780,77 +788,31 @@ export default function KnowledgeDocumentDetails({
   };
 
   return (
-    <div className="min-w-0">
-      <button
-        type="button"
-        className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
-        onClick={onBack}
-      >
-        ← Back to PDFs
-      </button>
-      <div className="mb-3 border-b border-gray-100 pb-2">
-        <h2 className="truncate text-sm font-medium text-gray-800" title={originalFilename}>
-          {originalFilename}
-        </h2>
-        {pageSummary !== null ? (
-          <p className="text-[11px] text-gray-500">{pageSummary}</p>
-        ) : null}
-        <UsedInNotes scope="document" rows={documentRows} onOpen={onOpenBacklinkTarget} />
-      </div>
-
-      <div className="mb-3">
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Search in this PDF…"
-          aria-label="Search in this PDF"
-          className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
-        />
-        {query ? (
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500">
-            <span>{matches.length === 0 ? 'No matches' : `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}</span>
-            {matches.length > 1 ? (
-              <>
-                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(-1)}>Previous</button>
-                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(1)}>Next</button>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      {/* P6J-F9-B2. ONE mode, off by default: always-on image dragging would
-          fight the reader's own vertical scrolling. */}
-      {onCreateNoteFromPage && documentId ? (
-        <div className="mb-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* The document's identity belongs to whichever surface owns it. In the
+          reader that is the Library panel, so the workspace starts at the
+          document itself rather than repeating Back / filename / page count /
+          Used in Notes above it. */}
+      {hostRendersDocumentHeader ? null : (
+        <>
           <button
             type="button"
-            aria-pressed={regionMode}
-            className={`rounded border px-1.5 py-0.5 text-[11px] ${regionMode
-              ? 'border-blue-300 bg-blue-50 text-blue-700'
-              : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            // Leaving the mode abandons whatever was drawn in it. Entering it
-            // drops any captured text-selection toolbar state so the text
-            // toolbar (and its AI activation) can never coexist with an armed
-            // region -- the same exclusivity the AI toolbar gate asserts.
-            onClick={() => {
-              setRegionMode((current) => {
-                const next = !current;
-                if (next) {
-                  setCapturedSelection(null);
-                  setSelectionColor(null);
-                  setSelectionRect(null);
-                }
-                return next;
-              });
-              setArmedRegion(null);
-            }}
+            className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
+            onClick={onBack}
           >
-            Select area
+            ← Back to PDFs
           </button>
-        </div>
-      ) : null}
+          <div className="mb-3 border-b border-gray-100 pb-2">
+            <h2 className="truncate text-sm font-medium text-gray-800" title={originalFilename}>
+              {originalFilename}
+            </h2>
+            {pageSummary !== null ? (
+              <p className="text-[11px] text-gray-500">{pageSummary}</p>
+            ) : null}
+            <UsedInNotes scope="document" rows={documentRows} onOpen={onOpenBacklinkTarget} />
+          </div>
+        </>
+      )}
 
       {loading ? (
         <p className="text-[11px] text-gray-500">Loading extracted text…</p>
@@ -864,7 +826,7 @@ export default function KnowledgeDocumentDetails({
           onMouseUp={handleSelectionSettled}
           onKeyUp={handleSelectionSettled}
           onDragStart={suppressNativePageTextDrag}
-          className="max-h-[60vh] space-y-4 overflow-y-auto pr-1"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
         >
           {pages.map((page, pageIndex) => {
             // Only the page the selection actually lives on offers the exact
@@ -993,6 +955,83 @@ export default function KnowledgeDocumentDetails({
           })}
         </div>
       )}
+
+      {/*
+        The document-working toolbar: search, area selection and where you are
+        in the document, collected at the foot of the workspace instead of
+        stacked above the text. Every control here drives an EXISTING function
+        -- there is no zoom, because the reader has no zoom to expose, and a
+        control that did nothing would be worse than its absence.
+      */}
+      <div
+        data-knowledge-viewer-toolbar="true"
+        className="mt-2 flex flex-none flex-wrap items-center gap-2 border-t border-gray-100 pt-2"
+      >
+        <div className="relative min-w-0 flex-1">
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Search in this PDF…"
+            aria-label="Search in this PDF"
+            className="w-full rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+          />
+        </div>
+
+        {query ? (
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+            <span>{matches.length === 0 ? 'No matches' : `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}</span>
+            {matches.length > 1 ? (
+              <>
+                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(-1)}>Previous</button>
+                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(1)}>Next</button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* P6J-F9-B2. ONE mode, off by default: always-on image dragging would
+            fight the reader's own vertical scrolling. Editor-only, exactly as
+            before -- a viewer never sees it. */}
+        {onCreateNoteFromPage && documentId ? (
+          <button
+            type="button"
+            aria-pressed={regionMode}
+            data-knowledge-viewer-action="select-area"
+            className={`flex-none rounded border px-1.5 py-0.5 text-[11px] ${regionMode
+              ? 'border-blue-300 bg-blue-50 text-blue-700'
+              : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            // Leaving the mode abandons whatever was drawn in it. Entering it
+            // drops any captured text-selection toolbar state so the text
+            // toolbar (and its AI activation) can never coexist with an armed
+            // region -- the same exclusivity the AI toolbar gate asserts.
+            onClick={() => {
+              setRegionMode((current) => {
+                const next = !current;
+                if (next) {
+                  setCapturedSelection(null);
+                  setSelectionColor(null);
+                  setSelectionRect(null);
+                }
+                return next;
+              });
+              setArmedRegion(null);
+            }}
+          >
+            Select area
+          </button>
+        ) : null}
+
+        {/* Counted from the pages actually rendered, never a stored guess. */}
+        {pages.length > 0 ? (
+          <span
+            data-knowledge-viewer-page-indicator="true"
+            className="flex-none text-[11px] tabular-nums text-gray-500"
+          >
+            {pages.length} {pages.length === 1 ? 'page' : 'pages'}
+          </span>
+        ) : null}
+      </div>
 
       {/*
         Text Phase 1 -- the ONE floating selection toolbar, a SIBLING of the

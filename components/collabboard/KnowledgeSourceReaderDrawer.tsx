@@ -1,8 +1,14 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useMemo, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
+import KnowledgeDocumentDetails, {
+  UsedInNotes,
+  pageCountSummary,
+  type KnowledgeDocumentDetailPage,
+} from '@/components/collabboard/KnowledgeDocumentDetails';
+import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
@@ -272,7 +278,19 @@ export default function KnowledgeSourceReaderDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  // Library data for the right pane. Read BEFORE the closed-reader early return
+  // below, because hooks cannot sit behind a conditional -- the hook reads the
+  // SAME board-level index the workspace reads, in the same direction, so it
+  // issues no request and holds no second notion of what a backlink row is.
+  const libraryBacklinks = useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null);
+  const libraryBacklinkRows = useMemo(
+    () => knowledgeSourceBacklinkDocumentRows(libraryBacklinks),
+    [libraryBacklinks],
+  );
+
   if (!boardId || reader === null) return null;
+
+  const libraryPageSummary = pageCountSummary(reader.pageCount, reader.pages.length, reader.loading);
 
   return (
     <aside
@@ -283,24 +301,44 @@ export default function KnowledgeSourceReaderDrawer({
       // no layout implementation learns that this drawer exists. `lg:w-[760px]`
       // is the SAME overlay, merely wide enough to also fit the Source Notes
       // pane beside the unchanged 420px reading experience.
-      className="fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[760px]"
+      className="fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[880px]"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-        <span className="select-none text-[9px] font-medium uppercase leading-none tracking-wider text-gray-400">
-          Knowledge
-        </span>
+      {/*
+        The open document, named as a tab. Deliberately the smallest useful
+        form of one: it identifies what the workspace is showing and carries
+        the existing close action. No tab strip, no reordering, no persistence
+        -- the reader still holds exactly one document at a time, and pretending
+        otherwise would be chrome with nothing behind it.
+      */}
+      <div
+        data-knowledge-reader-tabs="true"
+        className="flex flex-none items-center gap-3 border-b border-gray-100 bg-gray-50 px-3 pt-2"
+      >
+        <div
+          data-knowledge-reader-tab="active"
+          title={reader.originalFilename}
+          className="min-w-0 max-w-[60%] truncate rounded-t-md border border-b-0 border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800"
+        >
+          {reader.originalFilename || 'Document'}
+        </div>
+        <span className="flex-1" />
         <button
           ref={closeButtonRef}
           type="button"
           aria-label="Close Knowledge reader"
-          className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          className="mb-1 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
           onClick={closeReader}
         >
           ×
         </button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 lg:w-[420px] lg:flex-none">
+        {/* The document workspace: the majority of the drawer, and the only
+            place the document itself is read and worked with. */}
+        <div
+          data-knowledge-reader-workspace="true"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-3"
+        >
           <KnowledgeDocumentDetails
             documentId={reader.documentId}
             boardId={boardId}
@@ -313,6 +351,11 @@ export default function KnowledgeSourceReaderDrawer({
             initialSourceReferenceId={reader.sourceTarget?.referenceId}
             initialSourceRequestId={reader.sourceTarget?.requestId}
             onBack={closeReader}
+            // The Library panel owns the document's identity -- but only when
+            // it is actually rendered. Without it (no backlink target, or below
+            // `lg`) the workspace keeps its own header, so Back to PDFs and the
+            // filename can never disappear entirely.
+            hostRendersDocumentHeader={!!onOpenBacklinkTarget}
             onCreateNoteFromPage={onCreateNoteFromPage}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
             // PDF Source AI Phase 1. Only offered when there both IS a
@@ -346,7 +389,8 @@ export default function KnowledgeSourceReaderDrawer({
         {onOpenBacklinkTarget ? (
           <div
             data-knowledge-source-notes-pane="true"
-            className="hidden min-h-0 w-[340px] flex-none overflow-y-auto overscroll-contain border-l border-gray-100 px-4 py-3 lg:block"
+            data-knowledge-library-panel="true"
+            className="hidden min-h-0 w-[300px] flex-none overflow-y-auto overscroll-contain border-l border-gray-100 px-4 py-3 lg:block"
           >
             {reader.aiSession && onCreateNoteFromPage ? (
               <KnowledgeSourceAIPanel
@@ -356,7 +400,39 @@ export default function KnowledgeSourceReaderDrawer({
                 onClose={closeAiSession}
               />
             ) : (
-              <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} />
+              <>
+                {/*
+                  What is this source, where did it come from, and where is it
+                  used -- answered once, here. The workspace beside it shows the
+                  document and nothing about it, so no metadata is duplicated.
+                  Both the rows and the page phrasing are the reader's existing
+                  ones, imported rather than reimplemented.
+                */}
+                <button
+                  type="button"
+                  data-knowledge-library-back="true"
+                  className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
+                  onClick={closeReader}
+                >
+                  ← Back to PDFs
+                </button>
+                <div className="mb-3 border-b border-gray-100 pb-2">
+                  <h2
+                    data-knowledge-library-filename="true"
+                    className="truncate text-sm font-medium text-gray-800"
+                    title={reader.originalFilename}
+                  >
+                    {reader.originalFilename}
+                  </h2>
+                  {libraryPageSummary !== null ? (
+                    <p data-knowledge-library-pagecount="true" className="text-[11px] text-gray-500">
+                      {libraryPageSummary}
+                    </p>
+                  ) : null}
+                  <UsedInNotes scope="document" rows={libraryBacklinkRows} onOpen={onOpenBacklinkTarget} />
+                </div>
+                <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} />
+              </>
             )}
           </div>
         ) : null}
