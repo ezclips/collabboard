@@ -376,20 +376,44 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     return FREEFORM.slice(at, at + 1200);
   };
 
-  it('36. exactly ONE header: the generic top strip is suppressed for a PDF', () => {
-    // The strip and the PDF toolbar were stacking two bars on one object.
+  it('36. exactly ONE bar: the PDF puts its controls in the post strip', async () => {
+    // The two bars became one by MOVING the controls into the strip the post
+    // already had -- not by deleting either bar.
     const strip = stripGuard();
-    expect(strip).toContain('if (readKnowledgePdfPlacement(padlet)) return null;');
-    // Suppressed for the PDF surface ONLY -- the guard is inside the strip's
-    // own early-return block, beside the pre-existing isFullView case.
-    expect(strip).toContain('if (isFullView) return null;');
+    expect(strip, 'the generic strip must be intact for every post').toContain('if (isFullView) return null;');
+    expect(strip).not.toContain('readKnowledgePdfPlacement');
+
+    // The controls sit in the strip's right column, before its pencil.
+    const rightColumn = FREEFORM.slice(
+      FREEFORM.indexOf('{/* Right: PDF controls'),
+      FREEFORM.indexOf('{/* Right: PDF controls') + 1800,
+    );
+    expect(rightColumn).toContain('<KnowledgePdfCardControls');
+    expect(rightColumn.indexOf('<KnowledgePdfCardControls'))
+      .toBeLessThan(rightColumn.indexOf('showModalEditButton'));
+
+    // And the surface itself renders no second header when the host has them.
+    expect(FREEFORM).toContain('hostRendersControls');
+    const host = await card();
+    expect(host.querySelector('[data-knowledge-pdf-header]'), 'fallback header only').not.toBeNull();
   });
 
-  it('37. every other post type keeps its generic strip', () => {
+  it('37. the strip is untouched for every other post type', () => {
     const strip = stripGuard();
-    // No type list, no blanket suppression: exactly one PDF-shaped condition.
-    expect((strip.match(/return null;/g) || []).length).toBe(2);
+    // No PDF condition and no type list inside the strip's guard: the only
+    // PDF-specific thing is what the right column renders.
+    expect((strip.match(/return null;/g) || []).length).toBe(1);
     expect(strip).not.toMatch(/padlet\.type === '(note|text|todo|image|link|card|table)'/);
+    // A non-PDF post renders no PDF controls: the column returns null first.
+    expect(FREEFORM).toContain('if (!pdfPlacement) return null;');
+  });
+
+  it('37b. the host owns the view state the strip controls toggle', () => {
+    // Same per-padlet record convention the strip already uses for expand.
+    expect(FREEFORM).toContain('const [pdfCardCollapsed, setPdfCardCollapsed]');
+    expect(FREEFORM).toContain('const [pdfCardView, setPdfCardView]');
+    expect(FREEFORM).toContain('collapsed={pdfCardCollapsed[padlet.id] ?? false}');
+    expect(FREEFORM).toContain("view={pdfCardView[padlet.id] ?? 'page'}");
   });
 
   it('38. selection stays the host authority, and a child cannot block it', () => {

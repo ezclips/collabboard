@@ -26,6 +26,22 @@ import {
 
 export type KnowledgePdfDisplayMode = 'compact' | 'preview' | 'expanded';
 
+/** Page images, or the canonical parsed text for the same pages. */
+export type KnowledgePdfCardView = 'page' | 'text';
+
+export interface KnowledgePdfCardControlsProps {
+  readonly boardId: string;
+  readonly documentId: string;
+  readonly status: KnowledgePdfProcessingStatus;
+  readonly collapsed: boolean;
+  readonly view: KnowledgePdfCardView;
+  readonly loading?: boolean;
+  readonly onToggleCollapse: () => void;
+  readonly onToggleView: () => void;
+  /** Inherits the host strip's icon colour when it renders these. */
+  readonly iconColor?: string;
+}
+
 export interface KnowledgePdfOpenRequest {
   readonly documentId: string;
   readonly pageNumber?: number;
@@ -118,6 +134,145 @@ export interface KnowledgePdfCanvasSurfaceProps {
   readonly processingStatus: KnowledgePdfProcessingStatus;
   readonly displayMode?: KnowledgePdfDisplayMode;
   readonly onStatusResolved?: (status: KnowledgePdfProcessingStatus) => void;
+  /**
+   * Set by a host that renders {@link KnowledgePdfCardControls} in its own post
+   * chrome (Freeform's top strip). The surface then draws no header, so the
+   * object has exactly one bar, and takes its view state from the host below.
+   */
+  readonly hostRendersControls?: boolean;
+  readonly collapsed?: boolean;
+  readonly view?: KnowledgePdfCardView;
+}
+
+/**
+ * The PDF placement's controls, as bare buttons with no bar of their own.
+ *
+ * Rendered by whichever chrome the host already has -- on Freeform that is the
+ * post's existing top strip, so a PDF shows ONE bar carrying these controls
+ * alongside the strip's own pencil, rather than a second header stacked under
+ * it. Every action is read-only navigation or local view state, so nothing here
+ * is permission-gated; see the surface's own note.
+ */
+export function KnowledgePdfCardControls({
+  boardId,
+  documentId,
+  status,
+  collapsed,
+  view,
+  loading = false,
+  onToggleCollapse,
+  onToggleView,
+  iconColor,
+}: KnowledgePdfCardControlsProps) {
+  const openDocument = useKnowledgePdfOpen();
+  const isReady = status === 'ready';
+  const button = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded '
+    + 'hover:bg-black/10 focus-visible:outline focus-visible:outline-1';
+  // `data-no-drag` is the host strip's own convention for interactive children.
+  const guard = {
+    'data-no-drag': 'true',
+    onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+  } as const;
+
+  return (
+    <>
+      <button
+        type="button"
+        {...guard}
+        data-knowledge-pdf-action="collapse"
+        title={collapsed ? 'Expand' : 'Collapse'}
+        aria-label={collapsed ? 'Expand' : 'Collapse'}
+        aria-expanded={!collapsed}
+        className={button}
+        style={{ color: iconColor }}
+        onClick={(event) => { event.stopPropagation(); onToggleCollapse(); }}
+      >
+        {collapsed
+          ? <ChevronRight className="h-3 w-3" aria-hidden="true" />
+          : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+      </button>
+
+      <FileText className="h-3 w-3 shrink-0 text-red-500" aria-hidden="true" />
+
+      {loading ? (
+        <span data-knowledge-pdf-loading="true" className="shrink-0 text-[9px] italic opacity-60">
+          Loading…
+        </span>
+      ) : null}
+
+      <span
+        data-knowledge-pdf-status={status}
+        className={`shrink-0 text-[9px] ${status === 'failed' ? 'text-red-600' : 'opacity-60'}`}
+      >
+        {STATUS_LABEL[status]}
+      </span>
+
+      {isReady ? (
+        <button
+          type="button"
+          {...guard}
+          data-knowledge-pdf-action="parsed-content"
+          data-knowledge-pdf-view={view}
+          title={view === 'page' ? 'Show parsed content' : 'Show pages'}
+          aria-label={view === 'page' ? 'Show parsed content' : 'Show pages'}
+          aria-pressed={view === 'text'}
+          className={button}
+          style={{ color: iconColor }}
+          onClick={(event) => { event.stopPropagation(); onToggleView(); }}
+        >
+          <Type className="h-3 w-3" aria-hidden="true" />
+        </button>
+      ) : null}
+
+      {openDocument ? (
+        <>
+          <button
+            type="button"
+            {...guard}
+            data-knowledge-pdf-action="open"
+            title="Open"
+            aria-label="Open"
+            className={button}
+            style={{ color: iconColor }}
+            onClick={(event) => { event.stopPropagation(); openDocument({ documentId }); }}
+          >
+            <Maximize2 className="h-3 w-3" aria-hidden="true" />
+          </button>
+          {/* PDF-C1: deliberately the SAME reader as Open. One side-panel
+              state machine, not two. */}
+          <button
+            type="button"
+            {...guard}
+            data-knowledge-pdf-action="side-panel"
+            title="Add to side panel"
+            aria-label="Add to side panel"
+            className={button}
+            style={{ color: iconColor }}
+            onClick={(event) => { event.stopPropagation(); openDocument({ documentId }); }}
+          >
+            <PanelRight className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </>
+      ) : null}
+
+      {isReady ? (
+        <a
+          {...guard}
+          data-knowledge-pdf-action="new-tab"
+          title="Open in new tab"
+          aria-label="Open in new tab"
+          href={`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/original`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={button}
+          style={{ color: iconColor }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+      ) : null}
+    </>
+  );
 }
 
 export default function KnowledgePdfCanvasSurface({
@@ -127,6 +282,9 @@ export default function KnowledgePdfCanvasSurface({
   processingStatus,
   displayMode = 'preview',
   onStatusResolved,
+  hostRendersControls = false,
+  collapsed: collapsedProp,
+  view: viewProp,
 }: KnowledgePdfCanvasSurfaceProps) {
   const openDocument = useKnowledgePdfOpen();
   const reportStatus = useKnowledgePdfStatusReporter();
@@ -174,8 +332,14 @@ export default function KnowledgePdfCanvasSurface({
    * read-only viewer without inventing a permission rule for them, and it is
    * why this surface still performs no mutation of any kind.
    */
-  const [collapsed, setCollapsed] = useState(false);
-  const [view, setView] = useState<'page' | 'text'>('page');
+  const [ownCollapsed, setOwnCollapsed] = useState(false);
+  const [ownView, setOwnView] = useState<KnowledgePdfCardView>('page');
+  // Controlled by the host when it owns the chrome; otherwise the surface keeps
+  // its own state, so the fallback header behaves exactly as before.
+  const collapsed = collapsedProp ?? ownCollapsed;
+  const view = viewProp ?? ownView;
+  const toggleCollapse = useCallback(() => setOwnCollapsed((value) => !value), []);
+  const toggleView = useCallback(() => setOwnView((value) => (value === 'page' ? 'text' : 'page')), []);
 
   /**
    * The canonical page text, from the SAME endpoint the reader uses. Fetched
@@ -243,112 +407,33 @@ export default function KnowledgePdfCanvasSurface({
       data-knowledge-pdf-collapsed={collapsed ? 'true' : 'false'}
     >
       {/*
-        Permanent header. Never hover-revealed and never drawn over the page:
-        the controls have their own band, so nothing ever covers the document.
-        This strip is also the card's drag handle -- the body below stops
-        pointer events so scrolling a long PDF cannot move the card.
+        PDF-C1. On Freeform the host renders KnowledgePdfCardControls inside
+        the post's own top strip, so this surface draws NO header of its own --
+        one object, one bar. A host that does not (the common card content)
+        still gets the fallback header below.
       */}
-      <div
-        data-knowledge-pdf-header="true"
-        className="flex select-none items-center gap-1 border-b border-gray-200 bg-gray-100 px-1.5 py-1"
-      >
-        <button
-          type="button"
-          data-knowledge-pdf-action="collapse"
-          title={collapsed ? 'Expand' : 'Collapse'}
-          aria-label={collapsed ? 'Expand' : 'Collapse'}
-          aria-expanded={!collapsed}
-          className={headerButton}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => { event.stopPropagation(); setCollapsed((value) => !value); }}
+      {hostRendersControls ? null : (
+        <div
+          data-knowledge-pdf-header="true"
+          className="flex select-none items-center gap-1 border-b border-gray-200 bg-gray-100 px-1.5 py-1"
         >
-          {collapsed
-            ? <ChevronRight className="h-3 w-3" aria-hidden="true" />
-            : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
-        </button>
-
-        <FileText className="h-3 w-3 shrink-0 text-red-500" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-gray-700" title={originalFilename}>
-          {originalFilename}
-        </span>
-
-        {documentLoading ? (
-          <span data-knowledge-pdf-loading="true" className="shrink-0 text-[9px] italic text-gray-400">
-            Loading…
+          <KnowledgePdfCardControls
+            boardId={boardId}
+            documentId={documentId}
+            status={status}
+            collapsed={collapsed}
+            view={view}
+            loading={documentLoading}
+            onToggleCollapse={toggleCollapse}
+            onToggleView={toggleView}
+          />
+          {/* The host strip shows the filename as the post's title; this
+              fallback header has no title row, so it names the file itself. */}
+          <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-gray-700" title={originalFilename}>
+            {originalFilename}
           </span>
-        ) : null}
-
-        <span
-          data-knowledge-pdf-status={status}
-          className={`shrink-0 text-[9px] ${status === 'failed' ? 'text-red-600' : 'text-gray-400'}`}
-        >
-          {STATUS_LABEL[status]}
-        </span>
-
-        {isReady ? (
-          <button
-            type="button"
-            data-knowledge-pdf-action="parsed-content"
-            data-knowledge-pdf-view={view}
-            title={view === 'page' ? 'Show parsed content' : 'Show pages'}
-            aria-label={view === 'page' ? 'Show parsed content' : 'Show pages'}
-            aria-pressed={view === 'text'}
-            className={headerButton}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              setView((value) => (value === 'page' ? 'text' : 'page'));
-            }}
-          >
-            <Type className="h-3 w-3" aria-hidden="true" />
-          </button>
-        ) : null}
-
-        {openDocument ? (
-          <>
-            <button
-              type="button"
-              data-knowledge-pdf-action="open"
-              title="Open"
-              aria-label="Open"
-              className={headerButton}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => { event.stopPropagation(); open(); }}
-            >
-              <Maximize2 className="h-3 w-3" aria-hidden="true" />
-            </button>
-            {/* PDF-C1: deliberately the SAME reader as Open. One side-panel
-                state machine, not two. */}
-            <button
-              type="button"
-              data-knowledge-pdf-action="side-panel"
-              title="Add to side panel"
-              aria-label="Add to side panel"
-              className={headerButton}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => { event.stopPropagation(); open(); }}
-            >
-              <PanelRight className="h-3 w-3" aria-hidden="true" />
-            </button>
-          </>
-        ) : null}
-
-        {isReady ? (
-          <a
-            data-knowledge-pdf-action="new-tab"
-            title="Open in new tab"
-            aria-label="Open in new tab"
-            href={`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/original`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={headerButton}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <ExternalLink className="h-3 w-3" aria-hidden="true" />
-          </a>
-        ) : null}
-      </div>
+        </div>
+      )}
 
       {collapsed ? (
         <div data-knowledge-pdf-collapsed-body="true" className="min-w-0 px-2 py-1.5">

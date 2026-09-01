@@ -33,7 +33,11 @@ import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import PostCardContent, { KnowledgeSourceMarker } from '@/components/collabboard/PostCardContent';
-import KnowledgePdfCanvasSurface, { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
+import KnowledgePdfCanvasSurface, {
+  KnowledgePdfCardControls,
+  readKnowledgePdfPlacement,
+  type KnowledgePdfCardView,
+} from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import { KNOWLEDGE_SOURCE_CLIP_MIME } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMenu';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
@@ -873,6 +877,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   // interaction state; it is not persisted metadata.
   const [containerManualMinRequiredWidths, setContainerManualMinRequiredWidths] = React.useState<Record<string, number>>({});
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
+  /**
+   * PDF-C1. The PDF card's controls live in the post's own top strip, so the
+   * view state they toggle has to live here with the strip -- same per-padlet
+   * record convention as expandedContainers/expandedAIPosts above. Neither is
+   * persisted: collapsing a PDF or reading its parsed text writes nothing.
+   */
+  const [pdfCardCollapsed, setPdfCardCollapsed] = React.useState<Record<string, boolean>>({});
+  const [pdfCardView, setPdfCardView] = React.useState<Record<string, KnowledgePdfCardView>>({});
   const [expandableAIPosts, setExpandableAIPosts] = React.useState<Record<string, boolean>>({});
   const aiExportTargetsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
   // PATCH POST-RESIZE-B2: rendered rects of the generic post card shells
@@ -3276,13 +3288,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             {/* Top strip — 3-column grid: [pencil | title centered | mirror] */}
             {(() => {
               if (isFullView) return null;
-              // PDF-C1. A Knowledge PDF placement draws its OWN toolbar -- the
-              // filename plus collapse/parsed-content/open/side-panel/new-tab --
-              // so the generic strip would stack a second header on the same
-              // object. Suppressed for this surface ONLY: every other post type
-              // keeps the strip, and nothing here changes selection, which the
-              // root's onMouseDownCapture owns for all posts alike.
-              if (readKnowledgePdfPlacement(padlet)) return null;
               const freeformStripBg = isStripVisible(padlet.metadata?.topStrip)
                 ? (padlet.metadata?.topStrip as string)
                 : 'rgba(0,0,0,0.04)';
@@ -3482,8 +3487,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       })();
                     })() : null}
                   </div>
-                  {/* Right: pencil hover-only */}
-                  <div className="flex items-center pr-1.5">
+                  {/* Right: PDF controls (when this post is a PDF) then the
+                      pencil. The PDF contributes its actions to THIS strip
+                      rather than adding a second bar of its own. */}
+                  <div className="flex items-center gap-0.5 pr-1.5">
+                    {(() => {
+                      const pdfPlacement = readKnowledgePdfPlacement(padlet);
+                      if (!pdfPlacement) return null;
+                      return (
+                        <KnowledgePdfCardControls
+                          boardId={padlet.board_id}
+                          documentId={pdfPlacement.documentId}
+                          status={pdfPlacement.processingStatus}
+                          collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                          view={pdfCardView[padlet.id] ?? 'page'}
+                          iconColor={freeformIconColor}
+                          onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
+                          onToggleView={() => setPdfCardView((prev) => ({
+                            ...prev,
+                            [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
+                          }))}
+                        />
+                      );
+                    })()}
                     {showModalEditButton && (
                       <button
                         data-no-drag="true"
@@ -3903,6 +3929,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     originalFilename={pdfPlacement.originalFilename}
                     processingStatus={pdfPlacement.processingStatus}
                     displayMode={pdfPlacement.displayMode}
+                    hostRendersControls
+                    collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                    view={pdfCardView[padlet.id] ?? 'page'}
                   />
                 );
               })()}
