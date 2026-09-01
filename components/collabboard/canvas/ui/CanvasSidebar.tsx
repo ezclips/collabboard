@@ -30,6 +30,20 @@ export interface SidebarToolItem {
   color: string;
   disabled?: boolean;
   hint?: string;
+  /**
+   * Kept as a direct, always-clickable control even when its group overflows
+   * into the More menu, and excluded from that menu so it never appears twice.
+   * For a tool whose action must happen inside the browser's own click -- see
+   * `activatesInputId` -- the menu is not a usable host at all.
+   */
+  pinned?: boolean;
+  /**
+   * Renders this tool as a real `<label htmlFor>` for the given input id, so
+   * the BROWSER opens the file dialog itself. Nothing is dispatched through
+   * `handleToolClick` for such a tool: native activation is the whole point,
+   * and adding a JS click on top would open two dialogs.
+   */
+  activatesInputId?: string;
 }
 
 export interface SidebarToolGroup {
@@ -120,7 +134,23 @@ export default function CanvasSidebar({
   const overflowIdSet = useMemo(() => new Set(overflowIds), [overflowIds]);
   const measuringNaturalLayout = overflowState?.signature !== groupSignature;
   const visibleGroups = measuringNaturalLayout ? groups : groups.filter((group) => !overflowIdSet.has(group.id));
-  const overflowGroups = measuringNaturalLayout ? [] : groups.filter((group) => overflowIdSet.has(group.id));
+  const collapsedGroups = measuringNaturalLayout ? [] : groups.filter((group) => overflowIdSet.has(group.id));
+  /**
+   * A collapsed group still surrenders its ordinary tools to the More menu, but
+   * its pinned ones stay on the toolbar. They render together just above the
+   * More trigger, so a pinned tool never becomes unreachable just because the
+   * window got short.
+   */
+  const pinnedFromCollapsed = useMemo(
+    () => collapsedGroups.flatMap((group) => group.tools.filter((tool) => tool.pinned)),
+    [collapsedGroups],
+  );
+  const overflowGroups = useMemo(
+    () => collapsedGroups
+      .map((group) => ({ ...group, tools: group.tools.filter((tool) => !tool.pinned) }))
+      .filter((group) => group.tools.length > 0),
+    [collapsedGroups],
+  );
 
   const setGroupRef = useCallback((id: string) => (node: HTMLDivElement | null) => {
     if (node) {
@@ -158,6 +188,74 @@ export default function CanvasSidebar({
   }, []);
 
   const hasOverflowMenu = overflowGroups.length > 0;
+
+  /**
+   * One toolbar tool. Identical chrome either way; only the ELEMENT differs.
+   *
+   * A tool naming an input renders as a `<label htmlFor>` and carries no click
+   * handler at all -- the browser opens the file dialog from the label itself,
+   * which is the one activation path that cannot be lost to gesture timing.
+   * Adding onClick here would open two dialogs. Keyboard users get the same
+   * thing from Enter/Space, still inside the real key event.
+   */
+  const renderTool = (tool: SidebarToolItem) => {
+    const IconComponent = tool.icon;
+    const isLineActive = tool.type === 'line' && isLineMode;
+    const isGraphLineActive = tool.type === 'graph-line' && isGraphConnectMode;
+    const isDisabled = !!tool.disabled;
+    const chrome = `relative flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150 ${
+      isLineActive
+        ? 'bg-blue-100 ring-2 ring-blue-400'
+        : isGraphLineActive
+          ? 'bg-indigo-100 ring-2 ring-indigo-400'
+          : tool.bg
+    } ${isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:scale-105'}`;
+
+    const body = (
+      <div
+        className={`group relative flex items-center justify-center transition-transform duration-150 ${
+          isLineActive ? 'text-blue-600' : isGraphLineActive ? 'text-indigo-700' : tool.color
+        }`}
+      >
+        <IconComponent size={18} strokeWidth={1.5} />
+        <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-[100] pointer-events-none">
+          {isDisabled && tool.hint ? tool.hint : tool.label}
+        </span>
+      </div>
+    );
+
+    if (tool.activatesInputId && !isDisabled) {
+      return (
+        <label
+          key={tool.type}
+          htmlFor={tool.activatesInputId}
+          data-toolbar-tool={tool.type}
+          data-toolbar-native-picker="true"
+          className={chrome}
+          title={tool.label}
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            document.getElementById(tool.activatesInputId!)?.click();
+          }}
+        >
+          {body}
+        </label>
+      );
+    }
+
+    return (
+      <div
+        key={tool.type}
+        data-toolbar-tool={tool.type}
+        className={chrome}
+        onClick={() => dispatchTool(tool.type, isDisabled)}
+      >
+        {body}
+      </div>
+    );
+  };
 
   // Kept current for as long as the More trigger exists -- including while the
   // menu is open -- so a resize mid-interaction repositions correctly instead
@@ -315,39 +413,16 @@ export default function CanvasSidebar({
               {group.label}
             </span>
           ) : null}
-          {group.tools.map((tool) => {
-            const IconComponent = tool.icon;
-            const isLineActive = tool.type === 'line' && isLineMode;
-            const isGraphLineActive = tool.type === 'graph-line' && isGraphConnectMode;
-            const isDisabled = !!tool.disabled;
-
-            return (
-              <div
-                key={tool.type}
-                className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150 ${
-                  isLineActive
-                    ? 'bg-blue-100 ring-2 ring-blue-400'
-                    : isGraphLineActive
-                      ? 'bg-indigo-100 ring-2 ring-indigo-400'
-                      : tool.bg
-                } ${isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:scale-105'}`}
-                onClick={() => dispatchTool(tool.type, isDisabled)}
-              >
-                <div
-                  className={`group relative flex items-center justify-center transition-transform duration-150 ${
-                    isLineActive ? 'text-blue-600' : isGraphLineActive ? 'text-indigo-700' : tool.color
-                  }`}
-                >
-                  <IconComponent size={18} strokeWidth={1.5} />
-                  <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-[100] pointer-events-none">
-                    {isDisabled && tool.hint ? tool.hint : tool.label}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          {group.tools.map((tool) => renderTool(tool))}
         </div>
       ))}
+
+      {/* Pinned tools rescued from collapsed groups -- see `pinned`. */}
+      {pinnedFromCollapsed.length > 0 ? (
+        <div data-toolbar-pinned="true" className="flex flex-col items-center w-full gap-1">
+          {pinnedFromCollapsed.map((tool) => renderTool(tool))}
+        </div>
+      ) : null}
 
       {overflowGroups.length > 0 ? (
         <DropdownMenu>

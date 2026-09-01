@@ -30,6 +30,16 @@ export interface KnowledgePdfUploadResult {
   processingStatus: 'uploaded';
 }
 
+/**
+ * The one hidden PDF input's DOM id, so a toolbar control can be a real
+ * `<label htmlFor>` and let the BROWSER open the file dialog. That path needs
+ * no ref, no imperative call and no user-activation bookkeeping, which is the
+ * whole point: a programmatic `input.click()` is silently ignored whenever the
+ * browser no longer considers the click a user gesture, and it fails with no
+ * error to observe.
+ */
+export const KNOWLEDGE_PDF_INPUT_ID = 'knowledge-pdf-file-input';
+
 export interface KnowledgePdfUploaderHandle {
   openPicker(): void;
 }
@@ -287,6 +297,7 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
     <>
       <input
         ref={inputRef}
+        id={KNOWLEDGE_PDF_INPUT_ID}
         type="file"
         accept="application/pdf,.pdf"
         className="sr-only"

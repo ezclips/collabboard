@@ -107,16 +107,16 @@ describe('1, 4. the rendered toolbar offers Add PDF on Freeform', () => {
     expect(hasAddPdf(layoutCase)).toBe(true);
   });
 
-  it('renders it as a live pinned tool, never a disabled stub', () => {
+  it('renders it as a live pinned Media tool, never a disabled stub', () => {
     for (const layoutCase of SUPPORTED) {
-      const groups = toolbarFor(layoutCase);
-      const owner = groups.find((group) => group.tools.some((t) => t.type === 'knowledge-pdf'))!;
-      const tool = owner.tools.find((t) => t.type === 'knowledge-pdf')!;
+      const media = toolbarFor(layoutCase).find((group) => group.id === 'media')!;
+      const tool = media.tools.find((t) => t.type === 'knowledge-pdf')!;
       expect(tool.label).toBe('Add PDF');
       expect(tool.disabled).toBeFalsy();
-      // Pinned: the sidebar never overflows an alwaysVisible core group, which
-      // is what keeps the native file picker reachable from a real click.
-      expect(owner.alwaysVisible).toBe(true);
+      // Pinned + label-driven: the sidebar keeps it on the toolbar even when
+      // Media collapses, and the browser opens the dialog natively.
+      expect(tool.pinned).toBe(true);
+      expect(tool.activatesInputId).toBeTruthy();
     }
   });
 });
@@ -135,7 +135,8 @@ describe('2-3, 5. every unsupported layout renders no Add PDF at all', () => {
     for (const layoutCase of UNSUPPORTED) {
       const tools = toolbarFor(layoutCase).flatMap((group) => group.tools);
       expect(tools.some((tool) => tool.label === 'Add PDF')).toBe(false);
-      // Media is untouched -- this scopes PDFs, it does not thin the toolbar.
+      // The rest of Media is untouched -- this scopes PDFs, it does not thin
+      // the toolbar.
       expect(tools.some((tool) => tool.type === 'image')).toBe(true);
       expect(tools.some((tool) => tool.type === 'upload')).toBe(true);
       expect(tools.some((tool) => tool.type === 'import')).toBe(true);

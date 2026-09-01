@@ -11,6 +11,7 @@ import {
 } from './canvas/ui/canvasToolbarRegistry';
 import { KnowledgeSourceMarker } from './PostCardContent';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
+import { KNOWLEDGE_PDF_INPUT_ID } from './KnowledgePdfUploader';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
 /**
@@ -39,8 +40,25 @@ class NoopResizeObserver {
 }
 (globalThis as typeof globalThis & { ResizeObserver?: unknown }).ResizeObserver ??= NoopResizeObserver;
 
-/** Mirrors CanvasSidebar's CORE_GROUP_PRIORITIES: groups it never overflows. */
-const CORE_GROUP_PRIORITIES = [1, 2];
+/**
+ * Makes the sidebar's own overflow calculation fire in jsdom, which reports
+ * every box as 0x0. Groups get a real height and the container a short one, so
+ * the component -- not the test -- decides what collapses.
+ */
+function forceOverflow() {
+  const realRect = Element.prototype.getBoundingClientRect;
+  const realClientHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight');
+  Element.prototype.getBoundingClientRect = function rect(this: Element) {
+    const height = this.hasAttribute('data-toolbar-group') ? 120 : 36;
+    return { x: 0, y: 0, top: 0, left: 0, right: 36, bottom: height, width: 36, height, toJSON() {} } as DOMRect;
+  };
+  Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => 160 });
+  return () => {
+    Element.prototype.getBoundingClientRect = realRect;
+    if (realClientHeight) Object.defineProperty(Element.prototype, 'clientHeight', realClientHeight);
+    else delete (Element.prototype as unknown as Record<string, unknown>).clientHeight;
+  };
+}
 
 let mounted: Array<{ root: Root; host: HTMLElement }> = [];
 
@@ -90,10 +108,10 @@ function sidebar(layout: string, extra: Partial<React.ComponentProps<typeof Canv
   );
 }
 
-/** The visible Add PDF control: the element carrying the click, not the label. */
+/** The visible Add PDF control, found the way a person finds it: by its label. */
 function visibleAddPdfControl(host: HTMLElement): HTMLElement | null {
-  const label = [...host.querySelectorAll('span')].find((el) => el.textContent?.trim() === 'Add PDF');
-  return (label?.closest('[class*="w-9"]') as HTMLElement | null) ?? null;
+  const tip = [...host.querySelectorAll('span')].find((el) => el.textContent?.trim() === 'Add PDF');
+  return (tip?.closest('[data-toolbar-tool="knowledge-pdf"]') as HTMLElement | null) ?? null;
 }
 
 /**
@@ -118,13 +136,20 @@ describe('1-4. Add PDF works from the element a person clicks', () => {
     expect(visibleAddPdfControl(host)).not.toBeNull();
   });
 
-  it('2. clicking the visible inline control opens the picker exactly once', () => {
+  it('2. the control is a real label bound to the one hidden PDF input', () => {
+    // THE fix for "clicking does nothing". A <label htmlFor> makes the BROWSER
+    // open the file dialog; a programmatic input.click() is discarded silently
+    // whenever the browser no longer treats the click as a user gesture.
     const host = sidebar('freeform');
-    const clicks = watchPdfInput(host);
     const control = visibleAddPdfControl(host)!;
+    expect(control.tagName).toBe('LABEL');
+    expect(control.getAttribute('for')).toBe(KNOWLEDGE_PDF_INPUT_ID);
 
+    const input = host.querySelector<HTMLInputElement>('input[type="file"][accept*="pdf"]')!;
+    expect(input.id).toBe(KNOWLEDGE_PDF_INPUT_ID);
+    // jsdom implements label->control activation, so this is the real path.
+    const clicks = watchPdfInput(host);
     act(() => { control.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-
     expect(clicks.count).toBe(1);
   });
 
@@ -136,23 +161,21 @@ describe('1-4. Add PDF works from the element a person clicks', () => {
     act(() => { visibleAddPdfControl(host)!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // The uploader owns this action; routing it onward would mean a second
-    // upload implementation could grow behind the same button.
+    // upload implementation could grow behind the same button. It also must not
+    // carry its own onClick, or the label would open two dialogs.
     expect(handleToolClick).not.toHaveBeenCalled();
   });
 
-  it('4. Add PDF is pinned to a group the overflow calculation can never move', () => {
-    // THE fix. Overflow moves whole GROUPS, so while Add PDF lived in Media it
-    // collapsed into the More menu at ordinary window heights -- and the menu
-    // dispatches after it closes, once the browser's user activation is gone,
-    // so the native picker was silently ignored. Pinning it to a core,
-    // always-visible group is what keeps it a direct control.
+  it('4. Add PDF lives in Media, marked pinned, and exists exactly once', () => {
     const groups = groupsFor('freeform');
     const owner = groups.find((g) => g.tools.some((t) => t.type === 'knowledge-pdf'))!;
-    expect(owner, 'some group must own Add PDF').toBeDefined();
-    expect(CORE_GROUP_PRIORITIES).toContain(owner.priority);
-    expect(owner.alwaysVisible).toBe(true);
+    expect(owner.id, 'Add PDF belongs in Media').toBe('media');
 
-    // Exactly one Add PDF anywhere in the toolbar -- never a second copy in More.
+    const tool = owner.tools.find((t) => t.type === 'knowledge-pdf')!;
+    // Pinned is what keeps it on the toolbar when Media collapses into More.
+    expect(tool.pinned).toBe(true);
+    expect(tool.activatesInputId).toBe(KNOWLEDGE_PDF_INPUT_ID);
+
     const total = groups.flatMap((g) => g.tools).filter((t) => t.type === 'knowledge-pdf');
     expect(total).toHaveLength(1);
   });
@@ -167,20 +190,27 @@ describe('1-4. Add PDF works from the element a person clicks', () => {
     expect(onSelect).toContain('pendingToolRef.current = tool.type;');
   });
 
-  it('4c. Add PDF survives an overflow that genuinely collapses other groups', () => {
-    // Simulates the real failure condition: the sidebar decides Media, Blocks
-    // and Draw must overflow. Add PDF must still render directly, and must not
-    // appear among the overflowed tools.
-    const groups = groupsFor('freeform');
-    const overflowIds = new Set(['media', 'structure', 'draw']);
-    const stillVisible = groups.filter((g) => !overflowIds.has(g.id));
-    const overflowed = groups.filter((g) => overflowIds.has(g.id));
+  it('4c. when Media actually collapses, Add PDF stays out on the toolbar', () => {
+    // The real failure condition, driven through the component rather than
+    // asserted about the registry: jsdom has no layout, so the sidebar is given
+    // measurable heights in a short container and its own overflow calculation
+    // decides -- and it does collapse Media, exactly as a short window does.
+    const restore = forceOverflow();
+    try {
+      const host = sidebar('freeform');
+      expect(host.querySelector('[data-toolbar-group="media"]'), 'Media must have collapsed').toBeNull();
 
-    expect(stillVisible.flatMap((g) => g.tools).some((t) => t.type === 'knowledge-pdf')).toBe(true);
-    expect(overflowed.flatMap((g) => g.tools).some((t) => t.type === 'knowledge-pdf')).toBe(false);
-    // The groups that legitimately overflow still do -- this pins one tool, it
-    // does not disable overflow.
-    expect(overflowed.flatMap((g) => g.tools).length).toBeGreaterThan(0);
+      const control = visibleAddPdfControl(host);
+      expect(control, 'Add PDF must survive its group collapsing').not.toBeNull();
+      expect(control!.tagName).toBe('LABEL');
+      expect(host.querySelector('[data-toolbar-pinned="true"]')).not.toBeNull();
+
+      // Exactly one Add PDF control in the whole toolbar -- never a second copy
+      // inside the More menu, whose deferred dispatch cannot open a dialog.
+      expect(host.querySelectorAll('[data-toolbar-tool="knowledge-pdf"]')).toHaveLength(1);
+    } finally {
+      restore();
+    }
   });
 });
 
