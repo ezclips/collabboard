@@ -35,6 +35,11 @@ export function getPostResizeCapability(post: Pick<Padlet, 'type'>): PostResizeM
     case 'note':
     case 'todo':
     case 'card':
+    // PDF-C1. A Knowledge PDF placement is a document viewport: both axes
+    // matter, because height decides how much of the page is readable before
+    // the body scrolls. It resizes through this same authority as every other
+    // box post -- there is no PDF-specific resize path.
+    case 'file':
       return 'box';
     case 'link':
     case 'table':
@@ -67,6 +72,8 @@ export interface PostResizeConstraints {
  * - table: minWidth 180, height content-derived (horizontal-only). The
  *   historical Freeform table shell is 180px wide, so a first resize must not
  *   jump above the usable legacy width merely because it becomes manual.
+ * - file: 180x160 -- a Knowledge PDF placement; narrower than this and the
+ *   header controls wrap, shorter and the page viewport shows almost nothing.
  * - card: Document vs Clipart differ because their content natures differ --
  *   a Document's paragraphs do not reflow usefully below the historical
  *   default 180x220, while a Clipart SVG scales freely (min 100x100, like
@@ -81,6 +88,9 @@ export const POST_RESIZE_CONSTRAINTS: Record<string, PostResizeConstraints> = {
   link: { minWidth: 240, minHeight: 0 },
   table: { minWidth: 180, minHeight: 0 },
   document: { minWidth: 180, minHeight: 220 },
+  // The PDF card's own header is ~26px; below roughly this the page viewport
+  // stops showing a usable amount of a page.
+  file: { minWidth: 180, minHeight: 160 },
   clipart: { minWidth: 100, minHeight: 100 },
 };
 

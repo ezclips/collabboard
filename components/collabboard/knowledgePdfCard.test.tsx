@@ -362,6 +362,51 @@ describe('22-23. permissions', () => {
   });
 });
 
+describe('30-35. one frame, square corners, real resize handle', () => {
+  const FREEFORM = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+  const POLICY = read('lib/domain/canvas/postResizePolicy.ts');
+
+  it('30-31. the card draws no frame of its own -- the host owns the only one', async () => {
+    const host = await card();
+    const surface = host.querySelector('[data-knowledge-pdf-surface]')!;
+    // A border/background here would sit inside the host's card border and
+    // read as a second nested frame.
+    expect(surface.className).not.toMatch(/border/);
+    expect(surface.className).not.toMatch(/border-gray/);
+    // And the document body must not become a card either.
+    expect(body(host)!.className).not.toMatch(/border/);
+    expect(body(host)!.className).not.toMatch(/rounded-(sm|md|lg|xl)/);
+  });
+
+  it('32. corners are square, and the host still draws the selection ring', async () => {
+    const host = await card();
+    const surface = host.querySelector('[data-knowledge-pdf-surface]')!;
+    expect(surface.className).toContain('rounded-none');
+    expect(surface.className).not.toMatch(/rounded-(sm|md|lg|xl|full)/);
+    // Untouched host chrome: one square border and the blue selection ring.
+    expect(FREEFORM).toContain("border: isFullView ? 'none' : '1px solid #e5e7eb'");
+    expect(FREEFORM).toContain('ring-2 ring-blue-500');
+  });
+
+  it('33. exactly one toolbar exists on the card', async () => {
+    const host = await card();
+    expect(host.querySelectorAll('[data-knowledge-pdf-header]')).toHaveLength(1);
+  });
+
+  it('34-35. resize reuses the one Freeform authority, no second implementation', () => {
+    // The handle itself is the shared bottom-right grip, rendered by the host
+    // as a sibling of the card -- the PDF only had to become resizable.
+    expect(POLICY).toContain("case 'file':");
+    expect(POLICY).toContain('file: { minWidth: 180, minHeight: 160 }');
+    expect(FREEFORM).toContain('{content}');
+    expect(FREEFORM).toContain('{resizeHandle}');
+    // No resize UI or gesture may be reimplemented inside the card.
+    const code = executable(SURFACE);
+    expect(code).not.toMatch(/resize/i);
+    expect(code).not.toContain('PostResizeHandle');
+  });
+});
+
 describe('24-29. nothing outside the card moved', () => {
   it('24-26. Add PDF is untouched: Media, pinned, native label', () => {
     expect(REGISTRY).toContain('type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_INPUT_ID,');

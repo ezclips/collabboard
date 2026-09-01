@@ -65,10 +65,22 @@ describe('PATCH POST-RESIZE-B1/B2 capability matrix', () => {
     expect(getPostResizeCapability(post('table'))).toBe('horizontal-only');
   });
 
-  it('B2 exposes nothing else: container/file/comment/drawing -> none', () => {
-    for (const type of ['container', 'file', 'comment', 'drawing']) {
+  it('B2 exposes nothing else: container/comment/drawing -> none', () => {
+    for (const type of ['container', 'comment', 'drawing']) {
       expect(getPostResizeCapability(post(type)), type).toBe('none');
     }
+  });
+
+  it('PDF-C1: a file post is the Knowledge PDF placement and resizes as a box', () => {
+    // It had no renderer when B2 was written, so it was correctly 'none' then.
+    // The placement is now a document viewport whose height decides how much
+    // of a page is readable, so both axes matter -- through this same policy,
+    // not a PDF-specific resize path.
+    expect(getPostResizeCapability(post('file'))).toBe('box');
+  });
+
+  it('an unrecognised type still exposes no resize capability', () => {
+    expect(getPostResizeCapability(post('something-new'))).toBe('none');
   });
 });
 
@@ -97,7 +109,13 @@ describe('PATCH POST-RESIZE-B1 constraints', () => {
 
   it('types without constraints return null', () => {
     expect(getPostResizeConstraints(post('container'))).toBeNull();
-    expect(getPostResizeConstraints(post('file'))).toBeNull();
+    expect(getPostResizeConstraints(post('something-new'))).toBeNull();
+  });
+
+  it('PDF-C1: a file post carries the PDF placement minimum', () => {
+    // Below this the card's own header controls wrap and the page viewport
+    // shows almost nothing.
+    expect(getPostResizeConstraints(post('file'))).toEqual({ minWidth: 180, minHeight: 160 });
   });
 });
 

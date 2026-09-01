@@ -234,7 +234,10 @@ export default function KnowledgePdfCanvasSurface({
 
   return (
     <div
-      className="flex h-full flex-col overflow-hidden rounded-md border border-gray-200 bg-white"
+      /* One frame only: the Freeform host already draws the card's border and
+         background, so this surface contributes neither. Square corners are
+         deliberate -- a radius here would read as a second nested card. */
+      className="flex h-full flex-col overflow-hidden rounded-none bg-white"
       data-knowledge-pdf-surface="true"
       data-knowledge-document-id={documentId}
       data-knowledge-pdf-collapsed={collapsed ? 'true' : 'false'}
