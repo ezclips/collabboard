@@ -122,7 +122,11 @@ describe('P6C Knowledge PDF upload client', () => {
 
     const media = groups.find((group) => group.id === 'media');
     const create = groups.find((group) => group.id === 'create');
-    expect(media?.tools.some((tool) => tool.type === 'knowledge-pdf' && tool.label === 'Add PDF')).toBe(true);
+    // Add PDF lives in Create, pinned: Create is never an overflow candidate,
+    // which is what keeps the native picker reachable from a real click. It
+    // does not displace Document, and Media keeps its own tools.
+    expect(create?.tools.some((tool) => tool.type === 'knowledge-pdf' && tool.label === 'Add PDF')).toBe(true);
+    expect(media?.tools.some((tool) => tool.type === 'knowledge-pdf')).toBe(false);
     expect(create?.tools.some((tool) => tool.type === 'document' && tool.label === 'Document')).toBe(true);
   });
 

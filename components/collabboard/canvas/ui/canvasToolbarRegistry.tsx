@@ -37,9 +37,12 @@ export type CanvasToolbarFlags = {
   isDrawingLayout: boolean;
   /**
    * PDF-C1 release scope. True only on the one layout that ships direct PDF
-   * canvas objects. Derive it with {@link isDirectPdfCanvasLayout} -- never
-   * from `isFreeformLayout`, which is a catch-all that also swallows
-   * Table/Stream and any unrecognised layout.
+   * canvas objects; gates the pinned Add PDF entry in the Create group. Derive
+   * it with {@link isDirectPdfCanvasLayout} -- never from `isFreeformLayout`,
+   * which is a catch-all that also swallows Table/Stream and any unrecognised
+   * layout. Outside the allowlist the tool is absent from the registry
+   * entirely rather than rendered disabled, so no unsupported host can mount a
+   * control that opens the picker.
    */
   isDirectPdfLayout: boolean;
 };
@@ -130,6 +133,17 @@ export function buildCanvasToolbarGroups({
         { icon: Sparkles, label: "AI", color: "text-purple-600", bg: "hover:bg-purple-50", type: "ai-component" },
         { icon: StickyNote, label: "Note", color: "text-yellow-600", bg: "hover:bg-yellow-50", type: "note" },
         { icon: FileText, label: "Document", color: "text-sky-700", bg: "hover:bg-sky-50", type: "document" },
+        // PDF-C1: pinned here, NOT in Media, and that placement is load-bearing.
+        // Add PDF is the one tool that ends in a native <input type="file">
+        // click, which browsers honour only inside a live user activation. The
+        // overflow menu dispatches after it closes, so any tool that reaches
+        // the picker through More is silently dead. Create has a core priority
+        // and alwaysVisible, so it is never an overflow candidate -- the tool
+        // therefore always renders as a direct control with a real onClick.
+        // Moving it back into an overflowable group reintroduces the defect.
+        ...(isDirectPdfLayout ? [
+          { icon: FileUp, label: "Add PDF", color: "text-rose-700", bg: "hover:bg-rose-50", type: "knowledge-pdf" },
+        ] : []),
         { icon: CheckSquare, label: "To-do", color: "text-green-600", bg: "hover:bg-green-50", type: "todo" },
         { icon: MessageCircle, label: "Comment", color: "text-orange-600", bg: "hover:bg-orange-50", type: "comment" },
         { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
@@ -163,13 +177,6 @@ export function buildCanvasToolbarGroups({
       tools: [
         { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
         { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
-        // PDF-C1 release scope: outside the allowlist the tool is absent from
-        // the registry entirely rather than rendered disabled, so no
-        // unsupported host can mount a control that opens the picker. This is
-        // the PRIMARY prevention -- it stops the flow before a file is chosen.
-        ...(isDirectPdfLayout ? [
-          { icon: FileUp, label: "Add PDF", color: "text-rose-700", bg: "hover:bg-rose-50", type: "knowledge-pdf" },
-        ] : []),
         { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
         { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
       ],

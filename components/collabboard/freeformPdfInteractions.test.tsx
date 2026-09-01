@@ -39,6 +39,9 @@ class NoopResizeObserver {
 }
 (globalThis as typeof globalThis & { ResizeObserver?: unknown }).ResizeObserver ??= NoopResizeObserver;
 
+/** Mirrors CanvasSidebar's CORE_GROUP_PRIORITIES: groups it never overflows. */
+const CORE_GROUP_PRIORITIES = [1, 2];
+
 let mounted: Array<{ root: Root; host: HTMLElement }> = [];
 
 function mount(node: React.ReactElement) {
@@ -137,22 +140,47 @@ describe('1-4. Add PDF works from the element a person clicks', () => {
     expect(handleToolClick).not.toHaveBeenCalled();
   });
 
-  it('4. the overflow menu dispatches the picker inside the click, not after it', () => {
-    // THE regression this patch fixes. When Media collapses into the More
-    // menu, the overflow path used to queue every tool and run it from
-    // onCloseAutoFocus -- after the browser's user activation had expired, so
-    // the native file picker was silently ignored. A gesture-bound tool must
-    // therefore be dispatched from onSelect, synchronously.
+  it('4. Add PDF is pinned to a group the overflow calculation can never move', () => {
+    // THE fix. Overflow moves whole GROUPS, so while Add PDF lived in Media it
+    // collapsed into the More menu at ordinary window heights -- and the menu
+    // dispatches after it closes, once the browser's user activation is gone,
+    // so the native picker was silently ignored. Pinning it to a core,
+    // always-visible group is what keeps it a direct control.
+    const groups = groupsFor('freeform');
+    const owner = groups.find((g) => g.tools.some((t) => t.type === 'knowledge-pdf'))!;
+    expect(owner, 'some group must own Add PDF').toBeDefined();
+    expect(CORE_GROUP_PRIORITIES).toContain(owner.priority);
+    expect(owner.alwaysVisible).toBe(true);
+
+    // Exactly one Add PDF anywhere in the toolbar -- never a second copy in More.
+    const total = groups.flatMap((g) => g.tools).filter((t) => t.type === 'knowledge-pdf');
+    expect(total).toHaveLength(1);
+  });
+
+  it('4b. the menu no longer carries a gesture special case, and still defers', () => {
     const source = readSidebarSource();
-    const onSelect = slice(source, 'onSelect={() => {', '}}');
-    expect(onSelect).toContain('USER_GESTURE_TOOL_TYPES.has(tool.type)');
-    expect(onSelect).toContain('dispatchTool(tool.type, isDisabled);');
-    // It must return before queueing, or it would also run again on close.
-    expect(onSelect.indexOf('dispatchTool(tool.type, isDisabled);'))
-      .toBeLessThan(onSelect.indexOf('pendingToolRef.current = tool.type;'));
-    expect(source).toContain("const USER_GESTURE_TOOL_TYPES: ReadonlySet<string> = new Set(['knowledge-pdf']);");
-    // Everything else still defers -- the Canvas-settings fix must survive.
+    // The workaround existed only because Add PDF could reach the menu.
+    expect(source).not.toContain('USER_GESTURE_TOOL_TYPES');
+    // The Canvas-settings deferral it was bolted onto must survive untouched.
     expect(source).toContain('dispatchTool(pending);');
+    const onSelect = slice(source, 'onSelect={() => {', '}}');
+    expect(onSelect).toContain('pendingToolRef.current = tool.type;');
+  });
+
+  it('4c. Add PDF survives an overflow that genuinely collapses other groups', () => {
+    // Simulates the real failure condition: the sidebar decides Media, Blocks
+    // and Draw must overflow. Add PDF must still render directly, and must not
+    // appear among the overflowed tools.
+    const groups = groupsFor('freeform');
+    const overflowIds = new Set(['media', 'structure', 'draw']);
+    const stillVisible = groups.filter((g) => !overflowIds.has(g.id));
+    const overflowed = groups.filter((g) => overflowIds.has(g.id));
+
+    expect(stillVisible.flatMap((g) => g.tools).some((t) => t.type === 'knowledge-pdf')).toBe(true);
+    expect(overflowed.flatMap((g) => g.tools).some((t) => t.type === 'knowledge-pdf')).toBe(false);
+    // The groups that legitimately overflow still do -- this pins one tool, it
+    // does not disable overflow.
+    expect(overflowed.flatMap((g) => g.tools).length).toBeGreaterThan(0);
   });
 });
 
