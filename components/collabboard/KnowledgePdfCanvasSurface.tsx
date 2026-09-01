@@ -40,6 +40,13 @@ export interface KnowledgePdfCardControlsProps {
   readonly onToggleView: () => void;
   /** Inherits the host strip's icon colour when it renders these. */
   readonly iconColor?: string;
+  /**
+   * Drops the status chip once the document is ready. Set by a host whose bar
+   * is shared with other controls: "Ready" is the steady state and the page
+   * body already shows it, so the words only cost width the pencil needs.
+   * Non-terminal and failed states are always shown.
+   */
+  readonly hideStatusWhenReady?: boolean;
 }
 
 export interface KnowledgePdfOpenRequest {
@@ -163,6 +170,7 @@ export function KnowledgePdfCardControls({
   onToggleCollapse,
   onToggleView,
   iconColor,
+  hideStatusWhenReady = false,
 }: KnowledgePdfCardControlsProps) {
   const openDocument = useKnowledgePdfOpen();
   const isReady = status === 'ready';
@@ -200,12 +208,14 @@ export function KnowledgePdfCardControls({
         </span>
       ) : null}
 
-      <span
-        data-knowledge-pdf-status={status}
-        className={`shrink-0 text-[9px] ${status === 'failed' ? 'text-red-600' : 'opacity-60'}`}
-      >
-        {STATUS_LABEL[status]}
-      </span>
+      {hideStatusWhenReady && isReady ? null : (
+        <span
+          data-knowledge-pdf-status={status}
+          className={`shrink-0 text-[9px] ${status === 'failed' ? 'text-red-600' : 'opacity-60'}`}
+        >
+          {STATUS_LABEL[status]}
+        </span>
+      )}
 
       {isReady ? (
         <button

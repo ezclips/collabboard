@@ -3311,8 +3311,33 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   className="w-full flex-shrink-0 grid"
                   style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: isContainer ? '28px' : '22px', backgroundColor: freeformStripBg }}
                 >
-                  {/* Left: expand/export cluster for containers and AI posts */}
-                  <div className="flex items-center pl-1.5">
+                  {/* Left: the PDF's own controls when this post is a PDF,
+                      otherwise the expand/export cluster for containers and AI
+                      posts. The PDF contributes its actions to THIS strip
+                      rather than adding a second bar of its own, and they sit
+                      on the LEFT so a narrow card never pushes the strip's
+                      pencil off the right-hand end. */}
+                  <div className="flex items-center gap-0.5 pl-1.5">
+                    {(() => {
+                      const pdfPlacement = readKnowledgePdfPlacement(padlet);
+                      if (!pdfPlacement) return null;
+                      return (
+                        <KnowledgePdfCardControls
+                          boardId={padlet.board_id}
+                          documentId={pdfPlacement.documentId}
+                          status={pdfPlacement.processingStatus}
+                          collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                          view={pdfCardView[padlet.id] ?? 'page'}
+                          iconColor={freeformIconColor}
+                          hideStatusWhenReady
+                          onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
+                          onToggleView={() => setPdfCardView((prev) => ({
+                            ...prev,
+                            [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
+                          }))}
+                        />
+                      );
+                    })()}
                     {showExpandButton || isAIPost ? (
                       <div className="flex items-center gap-1">
                         {showExpandButton && (
@@ -3487,29 +3512,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       })();
                     })() : null}
                   </div>
-                  {/* Right: PDF controls (when this post is a PDF) then the
-                      pencil. The PDF contributes its actions to THIS strip
-                      rather than adding a second bar of its own. */}
-                  <div className="flex items-center gap-0.5 pr-1.5">
-                    {(() => {
-                      const pdfPlacement = readKnowledgePdfPlacement(padlet);
-                      if (!pdfPlacement) return null;
-                      return (
-                        <KnowledgePdfCardControls
-                          boardId={padlet.board_id}
-                          documentId={pdfPlacement.documentId}
-                          status={pdfPlacement.processingStatus}
-                          collapsed={pdfCardCollapsed[padlet.id] ?? false}
-                          view={pdfCardView[padlet.id] ?? 'page'}
-                          iconColor={freeformIconColor}
-                          onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
-                          onToggleView={() => setPdfCardView((prev) => ({
-                            ...prev,
-                            [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
-                          }))}
-                        />
-                      );
-                    })()}
+                  {/* Right: pencil hover-only */}
+                  <div className="flex items-center pr-1.5">
                     {showModalEditButton && (
                       <button
                         data-no-drag="true"
@@ -4761,15 +4765,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onToggleFullView={padlet.type === 'drawing' || padlet.type === 'ai-component' ? () => toggleFullView(padlet.id) : undefined}
           >
             {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table, scoped to
-                Note/AI-component ONLY -- this wrapper is also the fallback
-                for Drawing (and any other type without its own dedicated
-                branch above), which stays untouched. Note and AI-component
-                were selected on mousedown, but their click was never
-                stopped, so it bubbled to CanvasClient's blank-canvas
-                deselect and cleared selection right after it was set. */}
+                Note/AI-component/PDF ONLY -- this wrapper is also the
+                fallback for Drawing (and any other type without its own
+                dedicated branch above), which stays untouched. Note and
+                AI-component were selected on mousedown, but their click was
+                never stopped, so it bubbled to CanvasClient's blank-canvas
+                deselect and cleared selection right after it was set.
+                PDF-C1: a file placement lands in this same fallback and had
+                the same defect -- its blue selection ring appeared on press
+                and vanished again on release, so the resize grip could never
+                be reached. */}
             <div
               className="relative"
-              onClick={(padlet.type === 'text' || padlet.type === 'ai-component') ? (e) => e.stopPropagation() : undefined}
+              onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file') ? (e) => e.stopPropagation() : undefined}
             >
               {content}
               {resizeHandle}

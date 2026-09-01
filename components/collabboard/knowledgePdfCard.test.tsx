@@ -376,6 +376,39 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     return FREEFORM.slice(at, at + 1200);
   };
 
+  it('35a. selection STICKS: a PDF click never reaches the canvas deselect', () => {
+    // The blue ring appeared on press and vanished on release, because a file
+    // placement falls into the shared fallback wrapper whose click was only
+    // stopped for text/ai-component. Without this the resize grip -- which is
+    // selection-gated -- can never be reached.
+    expect(FREEFORM).toContain(
+      "onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file') ? (e) => e.stopPropagation() : undefined}",
+    );
+  });
+
+  it('35b. the controls sit in the strip LEFT column so the pencil survives', () => {
+    // In the right column the controls pushed the strip's pencil off the end
+    // of a narrow card. Left of the title, the 1fr centre absorbs the squeeze
+    // and both auto columns keep their content.
+    const left = FREEFORM.indexOf("{/* Left: the PDF's own controls");
+    const right = FREEFORM.indexOf('{/* Right: pencil hover-only */}');
+    expect(left, 'PDF controls must be in the left column').toBeGreaterThan(-1);
+    expect(left).toBeLessThan(right);
+    expect(FREEFORM.slice(left, right)).toContain('<KnowledgePdfCardControls');
+    // The pencil column is back to exactly what it was.
+    expect(FREEFORM.slice(right, right + 300)).not.toContain('KnowledgePdfCardControls');
+  });
+
+  it('35c. the strip drops the redundant Ready chip, but never a real state', async () => {
+    const host = await card();
+    // Standalone (fallback header) still reports every state, as before.
+    expect(host.querySelector('[data-knowledge-pdf-status]')).not.toBeNull();
+    expect(FREEFORM).toContain('hideStatusWhenReady');
+    const code = executable(SURFACE);
+    // Only the ready steady-state is droppable; failure must always show.
+    expect(code).toContain('hideStatusWhenReady && isReady ? null : (');
+  });
+
   it('36. exactly ONE bar: the PDF puts its controls in the post strip', async () => {
     // The two bars became one by MOVING the controls into the strip the post
     // already had -- not by deleting either bar.
@@ -383,14 +416,9 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     expect(strip, 'the generic strip must be intact for every post').toContain('if (isFullView) return null;');
     expect(strip).not.toContain('readKnowledgePdfPlacement');
 
-    // The controls sit in the strip's right column, before its pencil.
-    const rightColumn = FREEFORM.slice(
-      FREEFORM.indexOf('{/* Right: PDF controls'),
-      FREEFORM.indexOf('{/* Right: PDF controls') + 1800,
-    );
-    expect(rightColumn).toContain('<KnowledgePdfCardControls');
-    expect(rightColumn.indexOf('<KnowledgePdfCardControls'))
-      .toBeLessThan(rightColumn.indexOf('showModalEditButton'));
+    // The controls sit in the strip, ahead of its pencil.
+    expect(FREEFORM.indexOf('<KnowledgePdfCardControls'))
+      .toBeLessThan(FREEFORM.indexOf('{/* Right: pencil hover-only */}'));
 
     // And the surface itself renders no second header when the host has them.
     expect(FREEFORM).toContain('hostRendersControls');
