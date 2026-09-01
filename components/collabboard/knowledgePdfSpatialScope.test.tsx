@@ -10,13 +10,18 @@ import {
 } from './canvas/ui/canvasToolbarRegistry';
 
 /**
- * PDF-C1 spatial scope correction. Direct PDF canvas objects belong only on the
- * two spatial object canvases; every structured layout keeps its semantic
- * placement structures and will reference a Knowledge PDF from an ordinary
- * Note/Post/Container instead. This suite pins BOTH layers of that scope: the
- * rendered toolbar (the primary, pre-upload prevention) and the defensive guard
- * at the placement owner (source-level, because CanvasClient is the whole board
- * shell and cannot be mounted here).
+ * PDF-C1 final release scope. Direct PDF canvas objects ship on Freeform ONLY.
+ * Structured layouts keep their semantic placement structures and will
+ * reference a Knowledge PDF from an ordinary Note/Post/Container instead.
+ * Drawing is excluded too: its PDF placement works on insert, but
+ * container-hosted posts vanish from its rendering after a board reload -- a
+ * defect generic to the Drawing host (an ordinary Note reproduces it), tracked
+ * as DRAWING_CONTAINER_HOST_RELOAD_DEFECT and deliberately not fixed here.
+ *
+ * This suite pins BOTH layers of the scope: the rendered toolbar (the primary,
+ * pre-upload prevention) and the defensive guard at the placement owner
+ * (source-level, because CanvasClient is the whole board shell and cannot be
+ * mounted here).
  */
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -55,10 +60,13 @@ type LayoutCase = { layout: string; flags: Partial<CanvasToolbarFlags> };
 
 const SUPPORTED: LayoutCase[] = [
   { layout: 'freeform', flags: { isFreeformLayout: true } },
-  { layout: 'drawing', flags: { isDrawingLayout: true } },
 ];
 
-const STRUCTURED: LayoutCase[] = [
+const UNSUPPORTED: LayoutCase[] = [
+  // Drawing is a spatial object canvas whose PDF insert path works, and it is
+  // still withheld -- see DRAWING_CONTAINER_HOST_RELOAD_DEFECT. This row is the
+  // release-scope decision itself, not an incidental structured-layout case.
+  { layout: 'drawing', flags: { isDrawingLayout: true } },
   { layout: 'wall', flags: {} },
   { layout: 'columns', flags: {} },
   { layout: 'grid', flags: {} },
@@ -94,7 +102,7 @@ function toolbarFor({ layout, flags }: LayoutCase) {
 const hasAddPdf = (layoutCase: LayoutCase) =>
   toolbarFor(layoutCase).some((group) => group.tools.some((tool) => tool.type === 'knowledge-pdf'));
 
-describe('1-2. the rendered toolbar offers Add PDF on the spatial canvases', () => {
+describe('1, 4. the rendered toolbar offers Add PDF on Freeform', () => {
   it.each(SUPPORTED)('$layout renders Add PDF', (layoutCase) => {
     expect(hasAddPdf(layoutCase)).toBe(true);
   });
@@ -109,13 +117,18 @@ describe('1-2. the rendered toolbar offers Add PDF on the spatial canvases', () 
   });
 });
 
-describe('3-11. every structured layout renders no Add PDF at all', () => {
-  it.each(STRUCTURED)('$layout omits Add PDF', (layoutCase) => {
+describe('2-3, 5. every unsupported layout renders no Add PDF at all', () => {
+  it.each(UNSUPPORTED)('$layout omits Add PDF', (layoutCase) => {
     expect(hasAddPdf(layoutCase)).toBe(false);
   });
 
+  it('5. the predicate itself is the release scope: freeform in, drawing out', () => {
+    expect(isDirectPdfCanvasLayout('freeform')).toBe(true);
+    expect(isDirectPdfCanvasLayout('drawing')).toBe(false);
+  });
+
   it('omits the tool from the registry rather than mounting it disabled', () => {
-    for (const layoutCase of STRUCTURED) {
+    for (const layoutCase of UNSUPPORTED) {
       const tools = toolbarFor(layoutCase).flatMap((group) => group.tools);
       expect(tools.some((tool) => tool.label === 'Add PDF')).toBe(false);
       // The rest of Media is untouched -- this scopes PDFs, it does not thin
@@ -134,19 +147,19 @@ describe('3-11. every structured layout renders no Add PDF at all', () => {
   });
 });
 
-describe('12-13. the placement owner defends the same allowlist', () => {
-  it('12. an unsupported layout returns before any file placement is built', () => {
+describe('6-7. the placement owner defends the same allowlist', () => {
+  it('6. an unsupported layout returns before any file placement is built', () => {
     const guardAt = PDF_HANDLER.indexOf(GUARD);
     expect(guardAt).toBeGreaterThan(-1);
     // Nothing that builds or persists a placement may precede the guard.
     for (const creation of ['crypto.randomUUID()', 'setPadlets', 'insertPostPreservingFailureChannels']) {
       const at = PDF_HANDLER.indexOf(creation);
-      expect(at, creation + ' must come after the spatial-scope guard').toBeGreaterThan(guardAt);
+      expect(at, creation + ' must come after the release-scope guard').toBeGreaterThan(guardAt);
     }
     expect(guardBody()).toContain('return;');
   });
 
-  it('13. an unsupported layout never reaches requestPlacementIfRequired', () => {
+  it('7. Drawing (and every unsupported layout) never reaches requestPlacementIfRequired', () => {
     const guardAt = PDF_HANDLER.indexOf(GUARD);
     const gateAt = PDF_HANDLER.indexOf('requestPlacementIfRequiredRef.current');
     expect(gateAt).toBeGreaterThan(guardAt);
@@ -161,7 +174,9 @@ describe('12-13. the placement owner defends the same allowlist', () => {
     // Exactly one definition of the allowlist exists, and it is a predicate --
     // not a per-layout switch duplicated at the toolbar and at the guard.
     expect((REGISTRY.match(/export function isDirectPdfCanvasLayout/g) || []).length).toBe(1);
-    expect(executable(REGISTRY)).toContain("layout === 'freeform' || layout === 'drawing'");
+    expect(executable(REGISTRY)).toContain("return layout === 'freeform';");
+    // The withheld layout must not survive anywhere in the executable gate.
+    expect(executable(REGISTRY)).not.toContain("layout === 'drawing'");
     for (const layoutFlag of [
       'isDrawingLayout', 'isTimelineLayout', 'isSchedulerLayout',
       'isMapLayout', 'isGridLayout', 'isColumnsLayout', 'isWallLayout', 'isFreeformLayout',
@@ -177,8 +192,8 @@ describe('12-13. the placement owner defends the same allowlist', () => {
   });
 });
 
-describe('14-16. the supported paths are untouched', () => {
-  it('14. the Freeform direct path still builds the one file placement it owns', () => {
+describe('8-10. the kept architecture is untouched', () => {
+  it('8. the Freeform direct path still builds the one file placement it owns', () => {
     expect(PDF_HANDLER).toContain('knowledgeDocumentId: document.id');
     expect(PDF_HANDLER).toContain("type: 'file'");
     expect(PDF_HANDLER).toContain('insertPostPreservingFailureChannels(placement');
@@ -186,13 +201,16 @@ describe('14-16. the supported paths are untouched', () => {
     expect(PDF_HANDLER).toContain('if (alreadyPlaced) return;');
   });
 
-  it('15. Drawing still enters the existing shared placement gate', () => {
+  it('9. the generic placement infrastructure is kept, not churned away', () => {
+    // Freeform needs no prompt, so this gate is currently a no-op for the only
+    // shipped layout. It stays: R1/R2 are reviewed architecture, and re-adding
+    // a layout must not mean rebuilding the file-draft path from scratch.
     expect(PDF_HANDLER).toContain('const placementTaken = requestPlacementIfRequiredRef.current?.({');
     expect(PDF_HANDLER).toContain("kind: 'file'");
     expect(PDF_HANDLER).toContain('if (placementTaken) return;');
   });
 
-  it('16. placement policy is still the shared one, never PDF-specific', () => {
+  it('10. placement policy is still the shared one, never PDF-specific', () => {
     const HOOK = executable(read('hooks/canvas/usePadletSave.ts'));
     expect((HOOK.match(/const checkPlacementRequired = \(/g) || []).length).toBe(1);
     expect(HOOK).not.toContain('canPlaceDirectPdf');
@@ -200,15 +218,15 @@ describe('14-16. the supported paths are untouched', () => {
   });
 });
 
-describe('17-21. nothing outside the scope gate moved', () => {
-  it('17. the canvas PDF surface keeps its own behaviour and mounting', () => {
+describe('9-10. nothing outside the scope gate moved', () => {
+  it('9. the canvas PDF surface keeps its own behaviour and mounting', () => {
     const SURFACE = read('components/collabboard/KnowledgePdfCanvasSurface.tsx');
     expect(SURFACE).not.toContain('canPlaceDirectPdf');
     expect(SURFACE).not.toContain('isDirectPdfCanvasLayout');
     expect(CLIENT).toContain('onStatusResolved={handleKnowledgePdfSettled}');
   });
 
-  it('18-19. Knowledge authority and the status lifecycle are unchanged', () => {
+  it('10. Knowledge authority and the status lifecycle are unchanged', () => {
     const settled = CLIENT_CODE.slice(
       CLIENT_CODE.indexOf('const handleKnowledgePdfSettled'),
       CLIENT_CODE.indexOf('const persistKnowledgeSourceReference'),
@@ -218,7 +236,7 @@ describe('17-21. nothing outside the scope gate moved', () => {
     expect(settled).not.toContain('canPlaceDirectPdf');
   });
 
-  it('20-21. reader, provenance and AI/BYOK wiring are not touched by the gate', () => {
+  it('10. reader, provenance and AI/BYOK wiring are not touched by the gate', () => {
     expect(CLIENT).toContain('const requestKnowledgeDocumentOpen = useCallback');
     for (const forbidden of ['byok', 'BYOK', 'anthropic', 'openai', 'fetch(', 'supabase']) {
       expect(REGISTRY).not.toContain(forbidden);

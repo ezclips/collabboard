@@ -1160,10 +1160,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
-  // PDF-C1 spatial scope. Deliberately NOT isFreeformLayout: that flag is the
-  // catch-all for Table/Stream and any unrecognised layout, none of which are
-  // spatial object canvases. One allowlist, shared by the toolbar gate below
-  // and by the defensive guard in the PDF placement owner.
+  // PDF-C1 release scope. Deliberately NOT isFreeformLayout: that flag is the
+  // catch-all for Table/Stream and any unrecognised layout, none of which ship
+  // direct PDF objects. One allowlist, shared by the toolbar gate below and by
+  // the defensive guard in the PDF placement owner.
   const canPlaceDirectPdf = isDirectPdfCanvasLayout(canvas?.layout);
 
   // PATCH FREEFORM-ZOOM-C: the initial camera's focal point, reusing the
@@ -1740,14 +1740,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const handleKnowledgePdfUploaded = useCallback(async (document: KnowledgePdfUploadResult) => {
     if (!canvasId) return;
-    // PDF-C1 spatial scope, defensive layer. The toolbar already withholds Add
+    // PDF-C1 release scope, defensive layer. The toolbar already withholds Add
     // PDF outside the allowlist, so this only catches a stale or impossible
     // invocation. It returns BEFORE the placement gate is consulted, so an
     // unsupported layout never enters requestPlacementIfRequired and can never
     // acquire a raw PDF canvas object. The Knowledge document itself stays --
     // it is durable board-independent authority, not this board's to delete.
     if (!canPlaceDirectPdf) {
-      toast.error('PDFs can be added directly on Freeform and Drawing canvases only');
+      toast.error('PDFs can be added directly on Freeform canvases only');
       return;
     }
     const alreadyPlaced = padlets.some(

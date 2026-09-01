@@ -36,26 +36,34 @@ export type CanvasToolbarFlags = {
   /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
   isDrawingLayout: boolean;
   /**
-   * PDF-C1 spatial scope. True only on the two spatial object canvases, where a
-   * raw PDF is a legitimate canvas object. Derive it with
-   * {@link isDirectPdfCanvasLayout} -- never from `isFreeformLayout`, which is
-   * a catch-all that also swallows Table/Stream and any unrecognised layout.
+   * PDF-C1 release scope. True only on the one layout that ships direct PDF
+   * canvas objects. Derive it with {@link isDirectPdfCanvasLayout} -- never
+   * from `isFreeformLayout`, which is a catch-all that also swallows
+   * Table/Stream and any unrecognised layout.
    */
   isDirectPdfLayout: boolean;
 };
 
 /**
- * PDF-C1 spatial scope. THE allowlist for direct PDF canvas objects: Freeform
- * and Drawing are spatial object canvases, so a PDF placed there is just
- * another object the host positions. Every structured layout (Wall, Columns,
- * Grid, Table, Timeline, Scheduler, Map, Stream, Kanban, Gantt, ...) has
- * semantic placement structures instead, and will eventually reference a
- * Knowledge PDF from an ordinary Note/Post/Container rather than hold a raw
- * PDF object. Both the toolbar gate and the defensive placement guard read
- * this one predicate, so no per-layout PDF switch exists anywhere.
+ * PDF-C1 release scope. THE allowlist for direct PDF canvas objects, and the
+ * only gate: both the toolbar and the defensive placement guard read this one
+ * predicate, so no per-layout PDF switch exists anywhere.
+ *
+ * Freeform alone ships in C1. Every structured layout (Wall, Columns, Grid,
+ * Table, Timeline, Scheduler, Map, Stream, Kanban, Gantt, ...) has semantic
+ * placement structures instead, and will eventually reference a Knowledge PDF
+ * from an ordinary Note/Post/Container rather than hold a raw PDF object.
+ *
+ * Drawing is a spatial object canvas and its PDF placement path works on
+ * insert, but it is deliberately EXCLUDED here: container-hosted posts vanish
+ * from Drawing's rendering after a board reload. That defect is generic to the
+ * Drawing host -- an ordinary Note reproduces it -- so it is not fixed by this
+ * predicate and is tracked as DRAWING_CONTAINER_HOST_RELOAD_DEFECT. Shipping
+ * Add PDF there would expose a known-broken experience. Re-add 'drawing' here,
+ * and nowhere else, once that host defect is fixed and independently verified.
  */
 export function isDirectPdfCanvasLayout(layout: string | null | undefined): boolean {
-  return layout === 'freeform' || layout === 'drawing';
+  return layout === 'freeform';
 }
 
 function GraphLineToolIcon({ size = 18, className, ...rest }: { size?: number; className?: string; [key: string]: unknown }) {
@@ -155,7 +163,7 @@ export function buildCanvasToolbarGroups({
       tools: [
         { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
         { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
-        // PDF-C1 spatial scope: on structured layouts the tool is absent from
+        // PDF-C1 release scope: outside the allowlist the tool is absent from
         // the registry entirely rather than rendered disabled, so no
         // unsupported host can mount a control that opens the picker. This is
         // the PRIMARY prevention -- it stops the flow before a file is chosen.
