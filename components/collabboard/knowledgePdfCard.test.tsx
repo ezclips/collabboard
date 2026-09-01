@@ -376,6 +376,39 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     return FREEFORM.slice(at, at + 1200);
   };
 
+  /** The strip's PDF cell: title by default, controls on hover. */
+  const pdfCell = () => {
+    const at = FREEFORM.indexOf("const pdfTitle = (");
+    expect(at, 'the strip must render a PDF title cell').toBeGreaterThan(-1);
+    return FREEFORM.slice(at - 400, at + 2600);
+  };
+
+  it('40. the strip shows the PDF filename by default', () => {
+    const cell = pdfCell();
+    expect(cell).toContain('{pdfPlacement.originalFilename}');
+    // Truncated, so a long filename cannot push the strip's pencil off again.
+    expect(cell).toContain('truncate');
+  });
+
+  it('41. hovering swaps the title out and every control in, together', () => {
+    const cell = pdfCell();
+    // One reveal for the whole set -- the same group-hover the pencil uses.
+    expect(cell).toContain('<span className="group-hover:hidden">{pdfTitle}</span>');
+    expect(cell).toContain('<span className="hidden items-center gap-0.5 group-hover:flex">');
+    expect(FREEFORM).toContain('opacity-0 group-hover:opacity-100');
+  });
+
+  it('42. a read-only viewer gets NO hover reveal -- the strip stays a label', () => {
+    const cell = pdfCell();
+    // Returns the plain title before any hover markup is reached, so no
+    // control can be uncovered by moving the mouse over the card.
+    expect(cell).toContain('if (!canUseFreeformEditButton) return pdfTitle;');
+    expect(cell.indexOf('if (!canUseFreeformEditButton) return pdfTitle;'))
+      .toBeLessThan(cell.indexOf('group-hover:hidden'));
+    // Same capability that already withholds the pencil.
+    expect(FREEFORM).toContain('const showModalEditButton = canUseFreeformEditButton');
+  });
+
   it('35z. a resized PDF hugs its content: manual height is a CAP, not a pin', () => {
     // Widening the card reflows the same page text into fewer lines. With a
     // pinned height that left a block of empty white below the text down to

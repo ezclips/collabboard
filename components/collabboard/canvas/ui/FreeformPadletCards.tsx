@@ -3335,21 +3335,43 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     {(() => {
                       const pdfPlacement = readKnowledgePdfPlacement(padlet);
                       if (!pdfPlacement) return null;
+                      const pdfTitle = (
+                        <span
+                          className="block max-w-[150px] truncate text-[10px] font-medium"
+                          style={{ color: freeformTitleColor }}
+                          title={pdfPlacement.originalFilename}
+                        >
+                          {pdfPlacement.originalFilename}
+                        </span>
+                      );
+                      // Read-only: the strip stays a label. No hover reveal at
+                      // all, matching the pencil, which is likewise withheld
+                      // from a viewer -- so a viewer never uncovers a control
+                      // by moving the mouse across the card.
+                      if (!canUseFreeformEditButton) return pdfTitle;
                       return (
-                        <KnowledgePdfCardControls
-                          boardId={padlet.board_id}
-                          documentId={pdfPlacement.documentId}
-                          status={pdfPlacement.processingStatus}
-                          collapsed={pdfCardCollapsed[padlet.id] ?? false}
-                          view={pdfCardView[padlet.id] ?? 'page'}
-                          iconColor={freeformIconColor}
-                          hideStatusWhenReady
-                          onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
-                          onToggleView={() => setPdfCardView((prev) => ({
-                            ...prev,
-                            [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
-                          }))}
-                        />
+                        <>
+                          {/* Default state is the document's name; hovering the
+                              card swaps the whole set of controls in at once,
+                              the same reveal the strip's pencil uses. */}
+                          <span className="group-hover:hidden">{pdfTitle}</span>
+                          <span className="hidden items-center gap-0.5 group-hover:flex">
+                            <KnowledgePdfCardControls
+                              boardId={padlet.board_id}
+                              documentId={pdfPlacement.documentId}
+                              status={pdfPlacement.processingStatus}
+                              collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                              view={pdfCardView[padlet.id] ?? 'page'}
+                              iconColor={freeformIconColor}
+                              hideStatusWhenReady
+                              onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
+                              onToggleView={() => setPdfCardView((prev) => ({
+                                ...prev,
+                                [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
+                              }))}
+                            />
+                          </span>
+                        </>
                       );
                     })()}
                     {showExpandButton || isAIPost ? (
