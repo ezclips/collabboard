@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import EmojiPicker from 'emoji-picker-react';
+import { toast } from 'sonner';
 import {
     canCreateBoardForEntitlements,
     getBoardLimitForEntitlements,
@@ -65,6 +66,9 @@ export default function DashboardPage() {
     const router = useRouter();
     const supabase = supabaseBrowser();
     const [canvases, setCanvases] = useState<Canvas[]>([]);
+    // Trash-only permanent deletion. Holds the canvas awaiting confirmation.
+    const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Canvas | null>(null);
+    const [isDeletingPermanently, setIsDeletingPermanently] = useState(false);
     const [folders, setFolders] = useState<Folder[]>([]);
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState<any>(null);
@@ -235,6 +239,39 @@ export default function DashboardPage() {
             ));
         } catch (err) {
             console.error('Error deleting canvas:', err);
+        }
+    };
+
+    const handleRequestPermanentDelete = (canvasId: string | number) => {
+        const target = canvases.find(c => String(c.id) === String(canvasId)) || null;
+        setPermanentDeleteTarget(target);
+    };
+
+    /**
+     * Permanent deletion goes through the existing authenticated board route,
+     * which is already the deletion authority: it authorises, cascades the
+     * board's Knowledge documents and cleans their Storage objects. The browser
+     * deliberately performs no direct Supabase delete here.
+     */
+    const handleConfirmPermanentDelete = async () => {
+        if (!permanentDeleteTarget || isDeletingPermanently) return;
+        const target = permanentDeleteTarget;
+        setIsDeletingPermanently(true);
+        try {
+            const response = await fetch(`/api/boards/${encodeURIComponent(String(target.id))}`, {
+                method: 'DELETE',
+            });
+            if (!response.ok) {
+                toast.error('Could not delete the canvas permanently. Please try again.');
+                return;
+            }
+            setCanvases(prev => prev.filter(c => String(c.id) !== String(target.id)));
+            setPermanentDeleteTarget(null);
+            toast.success(`"${target.title}" was permanently deleted.`);
+        } catch {
+            toast.error('Could not delete the canvas permanently. Please try again.');
+        } finally {
+            setIsDeletingPermanently(false);
         }
     };
 
@@ -593,6 +630,7 @@ export default function DashboardPage() {
                                                         lastVisitedAt={canvas.last_visited_at}
                                                         isFavorite={canvas.is_favorite}
                                                         onDelete={activeFilter === 'trash' ? undefined : handleDelete}
+                                                        onDeletePermanently={activeFilter === 'trash' ? handleRequestPermanentDelete : undefined}
                                                         onToggleFavorite={handleToggleFavorite}
                                                     />
                                                 ))}
@@ -605,6 +643,42 @@ export default function DashboardPage() {
                     </div>
                 </main>
             </div>
+
+            <Dialog
+                open={permanentDeleteTarget !== null}
+                onOpenChange={(open) => { if (!open && !isDeletingPermanently) setPermanentDeleteTarget(null); }}
+            >
+                <DialogContent className="sm:max-w-[480px]">
+                    <DialogHeader>
+                        <DialogTitle>Delete canvas permanently?</DialogTitle>
+                        <DialogDescription>
+                            &quot;{permanentDeleteTarget?.title}&quot; and all of its contents will be
+                            permanently deleted. This cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isDeletingPermanently}
+                            onClick={() => setPermanentDeleteTarget(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            disabled={isDeletingPermanently}
+                            onClick={handleConfirmPermanentDelete}
+                        >
+                            {isDeletingPermanently ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : null}
+                            Delete permanently
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={isCreateFolderOpen}

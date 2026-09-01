@@ -21,6 +21,7 @@ export default defineConfig({
       'workers/knowledge-embedding/**/*.test.ts',
       'workers/knowledge-query/**/*.test.ts',
       'components/collabboard/*.test.tsx',
+      'components/dashboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',
       'components/collabboard/comments/*.test.tsx',
       'components/collabboard/canvas/engine/*.test.ts',

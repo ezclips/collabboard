@@ -48,6 +48,12 @@ export interface CanvasCardProps {
     onDuplicate?: (id: string | number) => void;
     onRename?: (id: string | number) => void;
     onMoveToFolder?: (id: string | number) => void;
+    /**
+     * Trash only. Present exclusively for a canvas already in Trash, so an
+     * active card's menu is unchanged: the item below renders only when a
+     * caller supplies this handler.
+     */
+    onDeletePermanently?: (id: string | number) => void;
 }
 
 // Layout icons mapping
@@ -110,6 +116,7 @@ export default function CanvasCard({
     onDuplicate,
     onRename,
     onMoveToFolder,
+    onDeletePermanently,
 }: CanvasCardProps) {
     const router = useRouter();
     const [isHovered, setIsHovered] = useState(false);
@@ -135,6 +142,10 @@ export default function CanvasCard({
 
     const handleContextDelete = () => {
         onDelete?.(id);
+    };
+
+    const handleContextDeletePermanently = () => {
+        onDeletePermanently?.(id);
     };
 
     return (
@@ -280,6 +291,12 @@ export default function CanvasCard({
                     <ContextMenuItem onClick={handleContextDelete} variant="destructive">
                         <Trash2 className="w-4 h-4 mr-2" />
                         Move to Trash
+                    </ContextMenuItem>
+                )}
+                {onDeletePermanently && (
+                    <ContextMenuItem onClick={handleContextDeletePermanently} variant="destructive">
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete permanently
                     </ContextMenuItem>
                 )}
             </ContextMenuContent>
