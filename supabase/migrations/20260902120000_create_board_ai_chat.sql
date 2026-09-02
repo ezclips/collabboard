@@ -210,3 +210,49 @@ CREATE POLICY board_ai_messages_delete
               )
         )
     );
+
+-- ---------------------------------------------------------------------------
+-- Privileges: the associations are immutable after INSERT
+-- ---------------------------------------------------------------------------
+--
+-- RLS alone cannot express this. A policy's WITH CHECK sees only the NEW row,
+-- so "this thread is mine and I can read this board" is satisfied just as well
+-- by a row whose board_id has been changed to a DIFFERENT board the caller can
+-- also read. The same holds for a message moved to another thread of the
+-- caller's. Either move re-points a conversation at a board it did not come
+-- from, and board-bound revocation stops meaning anything: lose access to the
+-- original board and the history stays readable under the new one.
+--
+-- So the columns that bind a conversation to its board are made immutable at
+-- the privilege layer, which RLS cannot override.
+--
+-- Order matters, and this is the trap the correction exists to avoid.
+-- Supabase grants new public-schema tables to anon and authenticated through
+-- ALTER DEFAULT PRIVILEGES (see the note in
+-- 20260821_add_knowledge_extraction_lifecycle.sql), so both roles start with
+-- TABLE-level UPDATE -- which authorizes every column. A column-level
+-- `REVOKE UPDATE (board_id)` underneath that table-level grant changes
+-- nothing. The table-level privilege must be removed FIRST; only then does a
+-- column-level grant become the complete list of what may be written.
+REVOKE UPDATE ON public.board_ai_threads FROM anon, authenticated;
+REVOKE UPDATE ON public.board_ai_messages FROM anon, authenticated;
+
+-- Threads: exactly the two mutable pieces of metadata. Renaming a thread and
+-- re-ordering the list are the only writes V1 performs, and id, board_id,
+-- user_id and created_at are absent from this list, which is what makes them
+-- unwritable rather than merely policed.
+GRANT UPDATE (title, updated_at) ON public.board_ai_threads TO authenticated;
+
+-- Messages get NO update privilege at all: V1 has no message-edit feature, so
+-- the smallest correct grant is none. board_ai_messages_update above is
+-- therefore unreachable through PostgREST; it is deliberately kept rather than
+-- dropped, so that if an editing feature is ever added the ownership and
+-- board-read conditions are already written and a grant alone cannot open a
+-- hole.
+
+-- Board AI Chat has no anonymous use case in any direction. RLS policies are
+-- all TO authenticated, so anon already fails them; revoking outright is the
+-- second, independent lock this schema uses for anything sensitive (see
+-- ai_provider_credentials in 20260831120000_create_ai_provider_foundation.sql).
+REVOKE ALL ON public.board_ai_threads FROM anon;
+REVOKE ALL ON public.board_ai_messages FROM anon;

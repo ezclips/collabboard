@@ -221,3 +221,107 @@ describe('the slice touches nothing it was not authorized to', () => {
     expect(roles).not.toContain('AI_ROLE_CHAT');
   });
 });
+
+/**
+ * The association columns are immutable after INSERT.
+ *
+ * This is a PRIVILEGE property, not an RLS one, and the distinction is the
+ * whole point of these tests. A policy's WITH CHECK only ever sees the NEW
+ * row, so "mine, on a board I can read" is satisfied just as well by a thread
+ * whose board_id was changed to a different readable board. RLS cannot express
+ * "and it must be the same board it was created on". Removing the privilege
+ * can.
+ *
+ * The ordering assertions matter as much as the presence ones: Supabase grants
+ * new public tables to anon and authenticated through ALTER DEFAULT
+ * PRIVILEGES, so both start with TABLE-level UPDATE, which authorizes every
+ * column. A column-level REVOKE underneath that grant is a no-op. These tests
+ * fail if the migration ever drifts back to that shape.
+ */
+describe('association columns are locked at the privilege layer', () => {
+  /** Privilege statements only, in source order. */
+  const grants = sql
+    .split(/;\s*/)
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter((s) => /^(GRANT|REVOKE)\b/i.test(s));
+
+  const stmt = (pattern: RegExp): string | undefined => grants.find((g) => pattern.test(g));
+  const indexOfStmt = (pattern: RegExp): number => grants.findIndex((g) => pattern.test(g));
+
+  it('1/6. table-level UPDATE is removed from both PostgREST roles', () => {
+    // Named explicitly, not left to a PUBLIC revoke: the default privileges
+    // are explicit grants to these two roles.
+    const threads = stmt(/^REVOKE UPDATE ON public\.board_ai_threads FROM .*authenticated/i);
+    const messages = stmt(/^REVOKE UPDATE ON public\.board_ai_messages FROM .*authenticated/i);
+    expect(threads, 'threads must lose table-wide UPDATE').toBeDefined();
+    expect(messages, 'messages must lose table-wide UPDATE').toBeDefined();
+    expect(threads).toMatch(/\banon\b/);
+    expect(messages).toMatch(/\banon\b/);
+  });
+
+  it('the fix is NOT a column REVOKE beneath a retained table grant', () => {
+    // `REVOKE UPDATE (col) ON t` while the role still holds table-level UPDATE
+    // authorizes every column anyway. That shape must never appear here.
+    for (const g of grants) {
+      expect(g, 'column-level REVOKE UPDATE is the superficial fix').not.toMatch(/^REVOKE UPDATE \(/i);
+    }
+    // And no table-wide UPDATE is granted back afterwards.
+    expect(stmt(/^GRANT UPDATE ON public\.board_ai_(threads|messages)/i)).toBeUndefined();
+  });
+
+  it('the table-level REVOKE precedes the column GRANT', () => {
+    // Postgres order: revoke the broad privilege first, then grant the narrow
+    // one. Reversed, the revoke would strip the grant that was just made.
+    const revoke = indexOfStmt(/^REVOKE UPDATE ON public\.board_ai_threads/i);
+    const grant = indexOfStmt(/^GRANT UPDATE \(.*\) ON public\.board_ai_threads/i);
+    expect(revoke, 'the thread revoke must exist').toBeGreaterThan(-1);
+    expect(grant, 'the thread column grant must exist').toBeGreaterThan(-1);
+    expect(revoke).toBeLessThan(grant);
+  });
+
+  it('2/3/4/5. only title and updated_at are UPDATE-authorized on threads', () => {
+    const grant = stmt(/^GRANT UPDATE \(.*\) ON public\.board_ai_threads TO authenticated/i);
+    expect(grant, 'threads need exactly one column grant').toBeDefined();
+    const columns = grant!.match(/GRANT UPDATE \(([^)]*)\)/i)![1]
+      .split(',')
+      .map((c) => c.trim())
+      .sort();
+    expect(columns).toEqual(['title', 'updated_at']);
+    // Named individually so a regression reads as the specific column it broke.
+    for (const locked of ['board_id', 'user_id', 'id', 'created_at']) {
+      expect(columns, `${locked} must not be writable`).not.toContain(locked);
+    }
+  });
+
+  it('6/7. messages receive no UPDATE privilege at all, so thread_id cannot move', () => {
+    // V1 has no message-edit feature, so the smallest correct grant is none.
+    expect(grants.filter((g) => /^GRANT UPDATE/i.test(g) && /board_ai_messages/i.test(g)))
+      .toHaveLength(0);
+  });
+
+  it('8/9. SELECT, INSERT and DELETE privacy is untouched by the correction', () => {
+    // Only UPDATE is revoked; the other three still reach their policies.
+    for (const verb of ['SELECT', 'INSERT', 'DELETE']) {
+      expect(stmt(new RegExp(`^REVOKE ${verb} ON public\\.board_ai_(threads|messages) FROM .*authenticated`, 'i')),
+        `${verb} must remain available to authenticated`).toBeUndefined();
+    }
+    // And the policies that gate them still carry both conditions.
+    for (const name of ['board_ai_threads_select', 'board_ai_messages_select']) {
+      const block = policyBlock(name);
+      expect(block).toContain('auth.uid()');
+      expect(block).toContain(MEMBER_BOARD);
+    }
+  });
+
+  it('anon keeps no privilege on either table', () => {
+    expect(stmt(/^REVOKE ALL ON public\.board_ai_threads FROM anon/i)).toBeDefined();
+    expect(stmt(/^REVOKE ALL ON public\.board_ai_messages FROM anon/i)).toBeDefined();
+  });
+
+  it('10. the correction introduces no service-role or definer bypass', () => {
+    expect(grants.filter((g) => /service_role/i.test(g))).toHaveLength(0);
+    expect(sql).not.toContain('SECURITY DEFINER');
+    expect(sql).not.toContain('CREATE FUNCTION');
+    expect(sql).not.toContain('CREATE TRIGGER');
+  });
+});

@@ -283,3 +283,30 @@ describe('the repository never reaches for an admin client', () => {
     expect(raw).toContain('client: BoardAiChatSupabaseClient');
   });
 });
+
+describe('the repository exposes no way to re-associate a conversation', () => {
+  it('writes no association column, and offers no API that would', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const raw = fs.readFileSync(
+      path.join(process.cwd(), 'lib/infra/ai/boardAiThreadRepository.ts'),
+      'utf8',
+    );
+    const source = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    // No method whose job would be moving a thread or a message.
+    for (const forbidden of ['updateThreadBoard', 'updateMessageThread', 'moveThread', 'moveMessage', 'updateMessage']) {
+      expect(source, `${forbidden} must not exist`).not.toContain(forbidden);
+    }
+
+    // Exactly one update, and its payload is the ordering timestamp alone.
+    const updates = source.match(/\.update\(\{[^}]*\}\)/g) ?? [];
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toContain('updated_at');
+    for (const column of ['board_id', 'user_id', 'thread_id', 'created_at', 'id:']) {
+      expect(updates[0], `${column} must never be in an update payload`).not.toContain(column);
+    }
+    // Messages are inserted and read, never updated.
+    expect(source).not.toMatch(/from\('board_ai_messages'\)\s*\.update/);
+  });
+});
