@@ -1750,19 +1750,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [isBoardAiChatOpen, setIsBoardAiChatOpen] = useState(false);
   const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);
 
-  const openBoardAiChat = useCallback(() => {
+  /**
+   * The ONE reachable way Board AI opens, so direction A of the dock rule
+   * lives in exactly one place. An `open`-only helper beside this one was
+   * unreachable dead code and put the same rule in two.
+   *
+   * The branch reads state rather than deciding inside a setState updater:
+   * bumping the close request from within an updater made it a side effect of
+   * a function React may call more than once, which could advance the id
+   * twice for a single click.
+   */
+  const toggleBoardAiChat = useCallback(() => {
+    if (isBoardAiChatOpen) {
+      setIsBoardAiChatOpen(false);
+      return;
+    }
     setIsBoardAiChatOpen(true);
     // Direction A: Chat takes the dock, so an open side-panel reader yields it.
     setCloseSidePanelRequestId((current) => current + 1);
-  }, []);
-
-  const toggleBoardAiChat = useCallback(() => {
-    setIsBoardAiChatOpen((open) => {
-      if (open) return false;
-      setCloseSidePanelRequestId((current) => current + 1);
-      return true;
-    });
-  }, []);
+  }, [isBoardAiChatOpen]);
 
   const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
 

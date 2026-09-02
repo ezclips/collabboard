@@ -19,7 +19,7 @@
 // try/catch then covers resolve-and-generate. The repositories keep returning
 // Results; translating them here is this module's job.
 
-import { AI_ROLE_EDIT, AI_ROLE_SOURCE, type AIRole } from '../../ai/aiRoles';
+import type { AIRole } from '../../ai/aiRoles';
 import { isAIProviderType } from '../../domain/settings/aiProviderConnection';
 import type { AIProviderConnection, AIRolePreference } from '../../domain/settings/aiProviderConnection';
 import type { DomainError } from '../../domain/core/errors';
@@ -60,7 +60,6 @@ export interface AIModelResolverDeps {
   readonly credentials: AIProviderCredentialReader;
 }
 
-export const AI_RESOLVER_ROLES: readonly AIRole[] = [AI_ROLE_SOURCE, AI_ROLE_EDIT];
 
 function trimmedOrNull(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;

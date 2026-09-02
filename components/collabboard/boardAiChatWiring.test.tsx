@@ -198,10 +198,42 @@ describe('1-9. the reader close seam', () => {
 });
 
 describe('10-15. one right-side dock, two directions', () => {
-  it('11. opening Chat asks the docked reader to yield', () => {
-    expect(CLIENT).toContain('const openBoardAiChat = useCallback(() => {');
-    expect(CLIENT).toContain('setCloseSidePanelRequestId((current) => current + 1);');
+  it('1-3. exactly one reachable Board AI open authority, and the button uses it', () => {
+    // The dead `openBoardAiChat` helper is gone: it held the same dock rule in
+    // a second, unreachable place, so a reader could believe either was live.
+    expect(CLIENT).not.toContain('openBoardAiChat');
+    // The entry point names the authority that actually runs.
+    const marker = CLIENT.indexOf('data-board-ai-chat-open="true"');
+    const button = CLIENT.slice(CLIENT.lastIndexOf('<button', marker), CLIENT.indexOf('</button>', marker));
+    expect(button).toContain('onClick={toggleBoardAiChat}');
+    expect(CLIENT).toContain('const toggleBoardAiChat = useCallback(() => {');
+  });
+
+  it('4-5. that authority both opens Chat and advances the close request', () => {
+    // Traced through the reachable handler's own body rather than counting
+    // call sites anywhere in the file -- a count cannot tell a live path from
+    // a dead one, which is exactly how the dead helper hid.
+    const handler = CLIENT.slice(
+      CLIENT.indexOf('const toggleBoardAiChat = useCallback(() => {'),
+      CLIENT.indexOf('const closeBoardAiChat'),
+    );
+    expect(handler).toContain('setIsBoardAiChatOpen(true);');
+    expect(handler).toContain('setCloseSidePanelRequestId((current) => current + 1);');
+    // Closing takes neither action beyond closing.
+    expect(handler).toContain('setIsBoardAiChatOpen(false);');
+    // The id the reader observes is the one this advances.
     expect(CLIENT).toContain('closeSidePanelRequestId={closeSidePanelRequestId}');
+  });
+
+  it('the request is advanced outside a setState updater, so one click is one id', () => {
+    // Bumping from inside an updater made it a side effect of a function React
+    // may invoke more than once.
+    const handler = CLIENT.slice(
+      CLIENT.indexOf('const toggleBoardAiChat = useCallback(() => {'),
+      CLIENT.indexOf('const closeBoardAiChat'),
+    );
+    expect(handler).not.toMatch(/setIsBoardAiChatOpen\(\(open\)/);
+    expect(handler).toContain('if (isBoardAiChatOpen) {');
   });
 
   it('12. opening the docked reader closes Chat', () => {
@@ -213,10 +245,15 @@ describe('10-15. one right-side dock, two directions', () => {
     expect(opener).toContain("const presentation = request.presentation ?? 'side-panel';");
   });
 
-  it('13. the two directions are the ONLY ownership rule, and it lives in one place', () => {
+  it('13. the ownership rule has one writer per direction, both reachable', () => {
     // Monotonic and never reset, so every open is a fresh intent.
     expect(CLIENT).toContain('const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);');
-    expect((CLIENT.match(/setCloseSidePanelRequestId\(/g) ?? []).length).toBe(2);
+    // Direction A is written only by the reachable open authority...
+    const outsideToggle = CLIENT.slice(0, CLIENT.indexOf('const toggleBoardAiChat'))
+      + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'));
+    expect(outsideToggle).not.toContain('setCloseSidePanelRequestId((current) => current + 1);');
+    // ...and direction B only by the reader's own opener.
+    expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(3);
   });
 
   it('14-15. the workspace is untouched and the reader is never unmounted', () => {
