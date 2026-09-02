@@ -17,6 +17,21 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
 import { asBoardId, asUserId } from '@/lib/domain/core/ids';
+import type { BoardAiJsonValue } from '@/lib/domain/ai/boardAiChat';
+import {
+  resolveBoardAiChatContext,
+  resolveHistoricalBoardAiChatContext,
+  type BoardAiContextSupabaseClient,
+} from '@/lib/server/ai/boardAiChatContext';
+import {
+  BOARD_AI_CONTEXT_MAX_ITEMS,
+  boardAiContextRequestsFromStored,
+  boardAiContextViewFromStored,
+  boundResolvedContext,
+  buildBoardAiContextEnvelope,
+  type BoardAiContextRequestItem,
+  type ResolvedBoardAiContextBlock,
+} from '@/lib/domain/ai/boardAiChatContext';
 
 /**
  * Private Board AI Chat.
@@ -26,11 +41,12 @@ import { asBoardId, asUserId } from '@/lib/domain/core/ids';
  * this route writes nothing to the shared board. Editor permission belongs to
  * the later slice that turns an answer into a Note.
  *
- * The request carries a message and, optionally, which of the caller's own
- * threads it belongs to. It carries no provider, model, key, endpoint or
- * context -- the schema below is strict, so a field this slice does not
- * implement is a validation error rather than something silently ignored that
- * a client might believe was honoured.
+ * The request carries a message, optionally which of the caller's own threads
+ * it belongs to, and optionally which sources the user explicitly attached --
+ * by identity only. It carries no provider, model, key or endpoint, and the
+ * schema below is strict, so a field this route does not implement is a
+ * validation error rather than something silently ignored that a client might
+ * believe was honoured.
  */
 
 export const runtime = 'nodejs';
@@ -70,14 +86,47 @@ function checkRateLimit(userId: string): boolean {
 const threadIdSchema = z.string().uuid();
 
 /**
- * Strict on purpose. `knowledgeDocumentId`, `pageNumber`, `selectedText`,
- * `charStart`, `charEnd`, `postId`, `context` and `citations` all belong to
- * the later context slice, which must re-authorize each of them server-side.
- * Accepting them now -- even ignored -- would teach a client they work.
+ * Context is IDENTITY only. A client may name a document, a page, a verified
+ * span or a post; it may never describe one. There is no field here for
+ * source text, a title, an excerpt or a label, because every one of those is
+ * something the server reads for itself -- accepting them would let a browser
+ * decide what a source says.
+ *
+ * Each variant is strict, so an unknown field is a validation error rather
+ * than something quietly dropped into the persistence column.
  */
+const contextItemSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('knowledge-document'),
+    knowledgeDocumentId: z.string().uuid(),
+  }).strict(),
+  z.object({
+    type: z.literal('knowledge-page'),
+    knowledgeDocumentId: z.string().uuid(),
+    pageNumber: z.number().int().positive(),
+  }).strict(),
+  z.object({
+    type: z.literal('knowledge-selection'),
+    knowledgeDocumentId: z.string().uuid(),
+    pageNumber: z.number().int().positive(),
+    charStart: z.number().int().min(0),
+    charEnd: z.number().int().positive(),
+    selectedText: z.string().min(1).max(BOARD_AI_CHAT_MESSAGE_MAX),
+  }).strict().refine((item) => item.charEnd > item.charStart, {
+    message: 'charEnd must be greater than charStart',
+  }),
+  z.object({
+    type: z.literal('padlet'),
+    padletId: z.string().uuid(),
+  }).strict(),
+]);
+
 const chatRequestSchema = z.object({
   threadId: z.string().uuid().optional(),
   message: z.string().trim().min(1).max(BOARD_AI_CHAT_MESSAGE_MAX),
+  context: z.object({
+    items: z.array(contextItemSchema).min(1).max(BOARD_AI_CONTEXT_MAX_ITEMS),
+  }).strict().optional(),
 }).strict();
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -106,7 +155,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // is a contract detail, not something to enumerate back to a caller.
       return NextResponse.json({ error: 'Invalid chat request.' }, { status: 400 });
     }
-    const { threadId, message } = parsed.data;
+    // Renamed: the route handler already binds `context` to Next.js params.
+    const { threadId, message, context: contextRequest } = parsed.data;
 
     const { id: boardId } = await context.params;
 
@@ -134,6 +184,31 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const scopedUser = asUserId(user.id);
     const scopedBoard = asBoardId(boardId);
 
+    // CURRENT context is authorized BEFORE anything is written.
+    //
+    // Fail closed, and fail early: a rejected attachment must leave no thread
+    // and no message behind, or a user probing ids would litter their board
+    // with orphan conversations. Every block below was read on this turn,
+    // through this caller's own client, scoped to this route board.
+    let currentContext: readonly ResolvedBoardAiContextBlock[] = [];
+    if (contextRequest) {
+      const resolved = await resolveBoardAiChatContext(
+        sessionClient as unknown as BoardAiContextSupabaseClient,
+        boardId,
+        contextRequest.items as readonly BoardAiContextRequestItem[],
+      );
+      if (!resolved.ok) {
+        // The same shape the Knowledge routes use: a source on another board,
+        // a page that does not exist and a post this caller cannot see are
+        // indistinguishable here.
+        const status = resolved.error.code === 'not_found' ? 404
+          : resolved.error.code === 'validation' ? 400
+            : resolved.error.code === 'conflict' ? 409 : 503;
+        return NextResponse.json({ error: 'Context is not available.' }, { status });
+      }
+      currentContext = resolved.value;
+    }
+
     // Resolve or create, always through the three-part scope. A thread id
     // belonging to another user or another board is simply not found: the
     // response does not distinguish the two, so it discloses nothing about
@@ -158,6 +233,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const stored = await repository.appendMessage(scopedUser, scopedBoard, thread.id, {
       role: 'user',
       content: message,
+      // The server's own envelope, built from what it resolved -- never the
+      // request object. Identity plus a short label and excerpt the server
+      // authored, so a chip can be redrawn later without any of it ever being
+      // read back as source text.
+      // The envelope is plain JSON by construction; the cast only crosses the
+      // repository's structural JSON type, which an interface cannot satisfy
+      // nominally.
+      context: buildBoardAiContextEnvelope(currentContext) as unknown as BoardAiJsonValue | null,
     });
     if (!stored.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
 
@@ -172,12 +255,37 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       content: entry.content,
     }));
 
+    // Context carried in EARLIER messages, proved again from identity alone.
+    //
+    // A stored envelope is a claim written by the same person who could have
+    // typed anything into their own private thread, so none of its text is
+    // read back: only the ids are, and each one goes through the same
+    // authorization a fresh attachment does. Newest first, and the current
+    // message's own blocks lead, so what the user just attached can never be
+    // squeezed out by something they attached ten turns ago.
+    const historical: BoardAiContextRequestItem[] = [];
+    for (let index = history.value.length - 1; index >= 0; index -= 1) {
+      const entry = history.value[index];
+      if (entry.id === stored.value.id) continue;
+      historical.push(...boardAiContextRequestsFromStored(entry.context));
+    }
+    const historicalContext = historical.length === 0
+      ? []
+      : await resolveHistoricalBoardAiChatContext(
+        sessionClient as unknown as BoardAiContextSupabaseClient,
+        boardId,
+        historical,
+      );
+    // ONE budget across the whole request, so twenty historical attachments
+    // cannot multiply it.
+    const modelContext = boundResolvedContext([...currentContext, ...historicalContext]);
+
     let result;
     try {
       result = await executeBoardAiChat(scopedUser, turns, {
         preferences: createAIRolePreferenceRepository(),
         credentials: createAIProviderCredentialRepository(),
-      });
+      }, modelContext);
     } catch (error) {
       // The user's message stays. No assistant row is written, because there
       // is no assistant answer -- inventing one would be a lie in their
@@ -244,10 +352,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
  * through the same authenticated client, the same board-read check and the
  * same three-part scope as POST, so neither can see further than a send can.
  *
- * The projection is explicit rather than a row spread: `context` and
- * `citations` are unused in this slice, and nothing about a credential --
- * connection id, key hint, endpoint -- exists on these rows to leak. Only
- * `provider` and `model` names travel, which is what a client may display.
+ * The projection is explicit rather than a row spread: `citations` is unused
+ * here, `context` is re-derived from stored JSON rather than forwarded, and
+ * nothing about a credential -- connection id, key hint, endpoint -- exists on
+ * these rows to leak. Only `provider` and `model` names travel, which is what
+ * a client may display.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -330,6 +439,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         provider: entry.provider,
         model: entry.model,
         createdAt: entry.createdAt,
+        // Re-derived from the stored JSON, never forwarded: a row a user
+        // hand-wrote can hold anything, so only fields the contract defines
+        // reach a browser -- and none of them is authorization.
+        context: boardAiContextViewFromStored(entry.context),
       })),
     });
   } catch {

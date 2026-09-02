@@ -169,7 +169,7 @@ describe('16-20. persistence order and metadata', () => {
   it('16. the user message is persisted before generation', async () => {
     const repo = repository();
     await post({ message: 'hello' });
-    expect(repo.appended[0]).toEqual({ role: 'user', content: 'hello' });
+    expect(repo.appended[0]).toEqual({ role: 'user', content: 'hello', context: null });
     const userAppendOrder = repo.appendMessage.mock.invocationCallOrder[0];
     expect(userAppendOrder).toBeLessThan(mocks.executeBoardAiChat.mock.invocationCallOrder[0]);
   });
@@ -192,11 +192,13 @@ describe('16-20. persistence order and metadata', () => {
     expect(repo.appended[0]).not.toHaveProperty('provider');
   });
 
-  it('20. context and citations are never written in this slice', async () => {
+  it('20. a message with no attachment persists no context and no citations', async () => {
     const repo = repository();
     await post({ message: 'hello' });
     for (const input of repo.appended as Record<string, unknown>[]) {
-      expect(input.context).toBeUndefined();
+      // The user turn carries an explicit null rather than an envelope; the
+      // assistant turn never carries the field at all.
+      expect(input.context ?? null).toBeNull();
       expect(input.citations).toBeUndefined();
     }
   });
@@ -268,14 +270,15 @@ describe('26-30. failure behaviour', () => {
   });
 });
 
-describe('context fields belong to a later slice and are rejected, not ignored', () => {
-  it('refuses every future context field rather than silently dropping it', async () => {
+describe('unimplemented and execution-naming fields are rejected, not ignored', () => {
+  it('refuses every field the contract does not define', async () => {
     const repo = repository();
     for (const extra of [
+      // Context identity belongs INSIDE `context.items`; flat is not the shape.
       { knowledgeDocumentId: THREAD_ID }, { pageNumber: 3 }, { selectedText: 'x' },
       { charStart: 0 }, { charEnd: 5 }, { postId: THREAD_ID },
-      { context: { a: 1 } }, { citations: [] },
-      // And nothing may name execution.
+      { citations: [] },
+      // 30. And nothing may name execution.
       { provider: 'openai' }, { model: 'gpt-4' }, { apiKey: 'sk-x' },
     ]) {
       const response = await post({ message: 'hello', ...extra });

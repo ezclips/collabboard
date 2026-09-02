@@ -163,6 +163,9 @@ export default function BoardAiChatDrawer({
       provider: null,
       model: null,
       createdAt: new Date().toISOString(),
+      // BCHAT-D1 types the field; attaching context is D2, so nothing here
+      // can carry one yet.
+      context: null,
     };
     setMessages((current) => [...current, pending]);
     setDraft('');

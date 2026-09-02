@@ -13,6 +13,7 @@
  */
 
 import { BOARD_AI_MESSAGE_ROLES, type BoardAiMessageRole } from './boardAiChat';
+import type { BoardAiContextView } from './boardAiChatContext';
 
 /** Re-exported so a client bounds its composer by the SAME number the route enforces. */
 export const BOARD_AI_CHAT_MESSAGE_MAX = 4000;
@@ -35,4 +36,11 @@ export interface BoardAiChatMessageView {
   readonly provider: string | null;
   readonly model: string | null;
   readonly createdAt: string;
+  /**
+   * The sanitized view of what this message had attached, or null. Identity
+   * plus the server's own label and excerpt -- enough to redraw a chip after a
+   * reload, and never the source text itself, which the server reloads from
+   * identity on every turn.
+   */
+  readonly context: BoardAiContextView | null;
 }

@@ -171,11 +171,14 @@ describe('10. the read projection carries nothing private', () => {
   it('sends only display fields, never storage or credential ones', async () => {
     const body = await (await get(`?threadId=${THREAD_ID}`)).json();
     expect(Object.keys(body.messages[0]).sort())
-      .toEqual(['content', 'createdAt', 'id', 'model', 'provider', 'role']);
-    // threadId, context and citations are storage; connectionId and keyHint do
-    // not exist on these rows at all, and must not appear by accident either.
+      .toEqual(['content', 'context', 'createdAt', 'id', 'model', 'provider', 'role']);
+    // `context` is the re-derived view, not the stored row -- and it is null
+    // for a message with no attachment, as here.
+    expect(body.messages[0].context).toBeNull();
+    // threadId and citations are storage; connectionId and keyHint do not
+    // exist on these rows at all, and must not appear by accident either.
     const serialized = JSON.stringify(body);
-    for (const forbidden of ['threadId', 'context', 'citations', 'connectionId', 'keyHint', 'apiKey', 'userId']) {
+    for (const forbidden of ['threadId', 'citations', 'connectionId', 'keyHint', 'apiKey', 'userId']) {
       expect(serialized, `${forbidden} must not be sent`).not.toContain(forbidden);
     }
   });
