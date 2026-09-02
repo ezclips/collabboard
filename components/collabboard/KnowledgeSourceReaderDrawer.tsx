@@ -54,6 +54,14 @@ export interface KnowledgeSourceReaderDrawerProps {
   /** A library or semantic-result pick. Same once-per-requestId contract. */
   documentOpenRequest?: KnowledgeDocumentOpenRequest | null;
   /**
+   * Which host draws this reader. 'side-panel' is the docked drawer beside a
+   * usable board; 'workspace' gives the document the whole surface. ONE reader
+   * either way -- same content, same source, same panels -- so this changes
+   * geometry and nothing else. The board stays mounted underneath a workspace,
+   * which is what makes returning to it lossless.
+   */
+  presentation?: 'workspace' | 'side-panel';
+  /**
    * Forwarded verbatim for an ordinary Note Post. PDF Source AI Phase 1 adds
    * the optional second argument ONLY for the AI panel's own Note Post -- the
    * canvas still owns placement and every write; this only lets it seed the
@@ -134,6 +142,7 @@ function isDetailPage(value: unknown): value is KnowledgeDocumentDetailPage {
 export default function KnowledgeSourceReaderDrawer({
   sourceOpenRequest = null,
   documentOpenRequest = null,
+  presentation = 'side-panel',
   onCreateNoteFromPage,
   onOpenBacklinkTarget,
 }: KnowledgeSourceReaderDrawerProps) {
@@ -316,6 +325,7 @@ export default function KnowledgeSourceReaderDrawer({
   if (!boardId || reader === null) return null;
 
   const libraryPageSummary = pageCountSummary(reader.pageCount, reader.pages.length, reader.loading);
+  const isWorkspace = presentation === 'workspace';
 
   return (
     <aside
@@ -326,7 +336,20 @@ export default function KnowledgeSourceReaderDrawer({
       // no layout implementation learns that this drawer exists. `lg:w-[760px]`
       // is the SAME overlay, merely wide enough to also fit the Source Notes
       // pane beside the unchanged 420px reading experience.
-      className="fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[880px]"
+      data-knowledge-reader-presentation={presentation}
+      className={isWorkspace
+        // The focused workspace: the document owns the surface. The board is
+        // covered rather than unmounted, so its camera, placements and every
+        // other piece of live state survive the visit untouched.
+        //
+        // Above the toolbar's own z-[3000] wrapper, unlike the docked drawer
+        // below. That is the difference between the two hosts: the board's
+        // toolbar belongs to the board, and while the document owns the whole
+        // surface the board is not the active workspace -- leaving the strip
+        // floating on top would also let it swallow clicks meant for the
+        // reader, including the Board tab that leads back.
+        ? 'fixed inset-0 z-[3100] flex flex-col bg-white'
+        : 'fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[880px]'}
     >
       {/*
         The open document, named as a tab. Deliberately the smallest useful
@@ -339,6 +362,18 @@ export default function KnowledgeSourceReaderDrawer({
         data-knowledge-reader-tabs="true"
         className="flex flex-none items-center gap-3 border-b border-gray-100 bg-gray-50 px-3 pt-2"
       >
+        {isWorkspace ? (
+          <button
+            type="button"
+            data-knowledge-reader-tab="board"
+            title="Back to board"
+            aria-label="Back to board"
+            className="min-w-0 shrink-0 rounded-t-md px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-white hover:text-gray-800"
+            onClick={closeReader}
+          >
+            Board
+          </button>
+        ) : null}
         <div
           data-knowledge-reader-tab="active"
           title={reader.originalFilename}

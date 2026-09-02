@@ -190,8 +190,8 @@ describe('7. presentation is a separate axis from identity', () => {
   });
 });
 
-describe('8 + 9. Open and Add to side panel are the same one reader', () => {
-  it('both call the shared open path with the document id', () => {
+describe('8 + 9. Open and Add to side panel are one reader in two hosts', () => {
+  it('both call the shared open path with the SAME document, in different hosts', () => {
     const onOpen = vi.fn();
     const host = surface('ready', onOpen);
     act(() => {
@@ -201,8 +201,10 @@ describe('8 + 9. Open and Add to side panel are the same one reader', () => {
       host.querySelector<HTMLButtonElement>('[data-knowledge-pdf-action="side-panel"]')!.click();
     });
     expect(onOpen).toHaveBeenCalledTimes(2);
-    expect(onOpen).toHaveBeenNthCalledWith(1, { documentId: DOC_ID });
-    expect(onOpen).toHaveBeenNthCalledWith(2, { documentId: DOC_ID });
+    // One reader, one document -- only the host differs. Open takes the whole
+    // surface; Add to side panel docks it beside a board that stays usable.
+    expect(onOpen).toHaveBeenNthCalledWith(1, { documentId: DOC_ID, presentation: 'workspace' });
+    expect(onOpen).toHaveBeenNthCalledWith(2, { documentId: DOC_ID, presentation: 'side-panel' });
   });
 
   it('routes into the existing shell reader, adding no second one', () => {

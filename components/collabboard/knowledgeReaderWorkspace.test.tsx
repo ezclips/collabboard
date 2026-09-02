@@ -184,6 +184,76 @@ describe('26-29. permissions are the existing capability, unchanged', () => {
   });
 });
 
+describe('38-45. Open and Side panel are two hosts for one reader', () => {
+  const CARD = read('components/collabboard/KnowledgePdfCanvasSurface.tsx');
+  const CLIENT = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+
+  it('38-39. the two controls request different hosts, never the same action', () => {
+    const code = executable(CARD);
+    expect(code).toContain("openDocument({ documentId, presentation: 'workspace' })");
+    expect(code).toContain("openDocument({ documentId, presentation: 'side-panel' })");
+    // The old collision -- both calling the bare open path -- must not return.
+    expect((code.match(/openDocument\(\{ documentId \}\)/g) || []).length).toBe(0);
+  });
+
+  it('40. both still address the SAME document -- one source, no copy', () => {
+    const code = executable(CARD);
+    // Identical identity on both paths; only `presentation` differs. Both
+    // pass the SAME `documentId` binding -- neither mints or derives an id.
+    expect((code.match(/openDocument\(\{ documentId, presentation/g) || []).length).toBe(2);
+    expect(code).not.toMatch(/openDocument\(\{\s*documentId:\s*[^}]/);
+  });
+
+  it('41. the workspace host covers the board instead of unmounting it', () => {
+    const code = executable(DRAWER);
+    expect(code).toContain("'fixed inset-0 z-[3100] flex flex-col bg-white'");
+    // Above the toolbar wrapper, so the board's own chrome cannot float over
+    // -- or steal clicks from -- a workspace that has taken the whole surface.
+    expect(code).toContain('z-[3100]');
+    // Still the docked geometry for the side panel.
+    expect(code).toContain("'fixed inset-y-0 right-0 z-[1200] flex w-full flex-col");
+    // The reader is mounted unconditionally, so entering the workspace never
+    // unmounts the board -- which is what keeps camera, placements and live
+    // state intact on return.
+    expect(CLIENT).not.toContain("knowledgeReaderPresentation === 'workspace' ?");
+    const mountSite = CLIENT.slice(CLIENT.indexOf('<KnowledgeSourceReaderDrawer') - 200,
+                                   CLIENT.indexOf('<KnowledgeSourceReaderDrawer'));
+    expect(mountSite).not.toContain('knowledgeReaderPresentation');
+  });
+
+  it('42. the workspace offers a way back to the board; the drawer does not need one', () => {
+    const code = executable(DRAWER);
+    expect(code).toContain('data-knowledge-reader-tab="board"');
+    expect(code).toContain('{isWorkspace ? (');
+    expect(code).toContain('onClick={closeReader}');
+  });
+
+  it('43. the host is carried beside the request, not baked into it', () => {
+    // The persisted navigation request keeps the exact shape the citation and
+    // library paths already build.
+    expect(CLIENT).toContain("const [knowledgeReaderPresentation, setKnowledgeReaderPresentation]");
+    expect(CLIENT).toContain("setKnowledgeReaderPresentation(request.presentation ?? 'side-panel')");
+    expect(CLIENT).toContain('presentation={knowledgeReaderPresentation}');
+    // Every other opener keeps the drawer.
+    expect(CLIENT).toContain("useState<'workspace' | 'side-panel'>('side-panel')");
+  });
+
+  it('44. still exactly ONE reader implementation', () => {
+    expect((CLIENT.match(/<KnowledgeSourceReaderDrawer/g) || []).length).toBe(1);
+    for (const forbidden of ['KnowledgePdfCentralReader', 'PdfWorkspaceReaderV2', 'ReaderV2']) {
+      expect(CLIENT + DRAWER, forbidden + ' would be a second reader').not.toContain(forbidden);
+    }
+  });
+
+  it('45. both hosts keep the same panels and functions', () => {
+    const code = executable(DRAWER);
+    // One workspace slot, one Library slot, whichever host draws them.
+    expect((code.match(/data-knowledge-reader-workspace="true"/g) || []).length).toBe(1);
+    expect((code.match(/data-knowledge-library-panel="true"/g) || []).length).toBe(1);
+    expect((code.match(/<KnowledgeDocumentDetails/g) || []).length).toBe(1);
+  });
+});
+
 describe('30-37. everything outside the reader is untouched', () => {
   it('30. the canvas PDF card is unchanged', () => {
     expect(SURFACE).toContain('data-knowledge-pdf-surface="true"');

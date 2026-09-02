@@ -431,17 +431,30 @@ describe('P6J-F7-B1 Knowledge reader drawer stacking band', () => {
     expect(canvasClientSrc).toContain('absolute left-0 bottom-0 z-[3000]');
   });
 
-  it('1000 < 1200 < 3000, read from the drawer\'s own className', () => {
-    // Comment-stripped: the file's prose explains the 3000 wrapper it avoids,
-    // and matching that number would prove nothing about what actually renders.
+  it('one band per reader host, and nothing ambiguous in between', () => {
+    // Comment-stripped: the file's prose explains the 3000 wrapper, and
+    // matching that number would prove nothing about what actually renders.
     const code = readerDrawerSrc.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
     const bands = code.match(/z-\[(\d+)\]/g) ?? [];
-    // Exactly one z-index in the rendered drawer: a second makes it ambiguous.
-    expect(bands).toEqual(['z-[1200]']);
 
-    const drawer = Number(/z-\[(\d+)\]/.exec(bands[0] ?? '')![1]);
-    expect(1000, 'editor tier').toBeLessThan(drawer);
-    expect(drawer).toBeLessThan(3000);
+    // PDF-C1: the reader now has TWO hosts, and each declares exactly one
+    // band -- they are the two arms of a single ternary, so only one can ever
+    // apply. More than these two would be genuinely ambiguous again.
+    expect(bands.sort()).toEqual(['z-[1200]', 'z-[3100]']);
+
+    // The DOCKED drawer keeps the original band: above the editor tier so it
+    // can sit beside a Note, below the toolbar so the board stays operable
+    // beside it.
+    const docked = 1200;
+    expect(1000, 'editor tier').toBeLessThan(docked);
+    expect(docked).toBeLessThan(3000);
+
+    // The focused WORKSPACE deliberately sits above the toolbar instead: it
+    // takes the whole surface, the board is no longer the active workspace,
+    // and a toolbar floating on top would swallow clicks meant for the reader
+    // -- including the Board tab that leads back.
+    const workspace = 3100;
+    expect(workspace).toBeGreaterThan(3000);
   });
 
   it('the drawer is a CanvasClient-level sibling AFTER </CanvasViewport>, never inside the toolbar wrapper', () => {

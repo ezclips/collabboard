@@ -1724,6 +1724,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const knowledgeDocumentRequestIdRef = useRef(0);
   const [knowledgeDocumentOpenRequest, setKnowledgeDocumentOpenRequest] =
     useState<KnowledgeDocumentOpenRequest | null>(null);
+  /**
+   * Which host the reader is currently drawn in. Every other opener -- a Note's
+   * citation, a library pick -- keeps the docked drawer, so only the card's
+   * Open asks for the focused workspace.
+   */
+  const [knowledgeReaderPresentation, setKnowledgeReaderPresentation] =
+    useState<'workspace' | 'side-panel'>('side-panel');
 
   // A request belongs to the scope that produced it. Clearing on scope change
   // is what stops an old board's source from opening inside a new one.
@@ -1746,9 +1753,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * picking the same document twice is two genuine intents rather than one
    * already-handled one.
    */
-  const requestKnowledgeDocumentOpen = useCallback((request: { documentId: string; pageNumber?: number }) => {
+  const requestKnowledgeDocumentOpen = useCallback((request: {
+    documentId: string;
+    pageNumber?: number;
+    presentation?: 'workspace' | 'side-panel';
+  }) => {
     if (!sourceReferenceScopeKey) return;
     knowledgeDocumentRequestIdRef.current += 1;
+    // Which host draws the reader travels beside the request rather than
+    // inside it: the persisted navigation request stays exactly the shape the
+    // library and citation paths already build.
+    setKnowledgeReaderPresentation(request.presentation ?? 'side-panel');
     setKnowledgeDocumentOpenRequest(
       buildKnowledgeDocumentOpenRequest(knowledgeDocumentRequestIdRef.current, request.documentId, request.pageNumber),
     );
@@ -9285,6 +9300,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         <KnowledgeSourceReaderDrawer
           sourceOpenRequest={knowledgeSourceOpenRequest}
           documentOpenRequest={knowledgeDocumentOpenRequest}
+          presentation={knowledgeReaderPresentation}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
         />

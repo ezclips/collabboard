@@ -61,9 +61,18 @@ export interface KnowledgePdfCardControlsProps {
   readonly disabled?: boolean;
 }
 
+/** Which host should show the document. Same reader either way. */
+export type KnowledgePdfPresentation = 'workspace' | 'side-panel';
+
 export interface KnowledgePdfOpenRequest {
   readonly documentId: string;
   readonly pageNumber?: number;
+  /**
+   * Open = the focused workspace; Add to side panel = the docked drawer beside
+   * a still-usable board. The DOCUMENT is identical -- only the host differs --
+   * so this never becomes a second reader or a second source.
+   */
+  readonly presentation?: KnowledgePdfPresentation;
 }
 
 /**
@@ -307,12 +316,17 @@ export function KnowledgePdfCardControls({
             aria-label="Open"
             className={button}
             style={{ color: iconColor }}
-            onClick={(event) => { event.stopPropagation(); openDocument({ documentId }); }}
+            onClick={(event) => {
+              event.stopPropagation();
+              openDocument({ documentId, presentation: 'workspace' });
+            }}
           >
             <Maximize2 className="h-3 w-3" aria-hidden="true" />
           </button>
-          {/* PDF-C1: deliberately the SAME reader as Open. One side-panel
-              state machine, not two. */}
+          {/* The SAME reader and the same document as Open -- one reader
+              implementation, one source. Only the host differs: this docks it
+              beside a board that stays usable, where Open gives the document
+              the whole surface. */}
           <button
             type="button"
             {...guard}
@@ -322,7 +336,10 @@ export function KnowledgePdfCardControls({
             aria-label="Add to side panel"
             className={button}
             style={{ color: iconColor }}
-            onClick={(event) => { event.stopPropagation(); openDocument({ documentId }); }}
+            onClick={(event) => {
+              event.stopPropagation();
+              openDocument({ documentId, presentation: 'side-panel' });
+            }}
           >
             <PanelRight className="h-3 w-3" aria-hidden="true" />
           </button>
