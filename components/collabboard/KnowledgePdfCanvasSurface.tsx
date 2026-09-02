@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
 import {
@@ -18,6 +18,18 @@ import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
 } from '@/components/collabboard/KnowledgePdfUploader';
+/**
+ * PDF-C1 Text -- the reader's OWN exact-span contract, imported rather than
+ * re-derived. The card captures a selection with it and hands the resulting
+ * request to the board; it never resolves offsets, quotes or hashes itself.
+ */
+import {
+  PAGE_TEXT_ROOT,
+  buildSelectionSourceRequest,
+  captureExactSelection,
+  type CapturedPageSelection,
+} from '@/components/collabboard/knowledgeSourceTextSelection';
+import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 /**
  * PDF-C1 -- the ONE canvas rendering of a Knowledge document placement.
@@ -101,20 +113,39 @@ export type KnowledgePdfStatusReporter = (
 
 const KnowledgePdfStatusContext = createContext<KnowledgePdfStatusReporter | null>(null);
 
+/**
+ * PDF-C1 Text -- the board's EXISTING Note-creation authority, carried on the
+ * SAME transport as `onOpenDocument` and for the same reason: the card is
+ * rendered from two hosts and eleven PostCardContent call sites, none of which
+ * should grow a prop.
+ *
+ * This is `CanvasClient.handleCreateNoteFromKnowledgePage` and nothing else.
+ * The card produces a `KnowledgeSourcePageRequest` and delegates; every draft,
+ * every editor and every write stays where it already lives. Null for a reader
+ * who cannot create posts, which is what removes the action from the card
+ * rather than rendering it disabled -- the reader's own convention.
+ */
+const KnowledgePdfCreateNoteContext = createContext<((request: KnowledgeSourcePageRequest) => void) | null>(null);
+
 export function KnowledgePdfOpenProvider({
   onOpenDocument,
   onStatusResolved = null,
+  onCreateNoteFromPage = null,
   children,
 }: {
   onOpenDocument: ((request: KnowledgePdfOpenRequest) => void) | null;
   /** Optional so a host without durable posts stays inert, as before. */
   onStatusResolved?: KnowledgePdfStatusReporter | null;
+  /** Optional: omitting it leaves the card read-only, exactly as before. */
+  onCreateNoteFromPage?: ((request: KnowledgeSourcePageRequest) => void) | null;
   children: React.ReactNode;
 }) {
   return (
     <KnowledgePdfOpenContext.Provider value={onOpenDocument}>
       <KnowledgePdfStatusContext.Provider value={onStatusResolved}>
-        {children}
+        <KnowledgePdfCreateNoteContext.Provider value={onCreateNoteFromPage}>
+          {children}
+        </KnowledgePdfCreateNoteContext.Provider>
       </KnowledgePdfStatusContext.Provider>
     </KnowledgePdfOpenContext.Provider>
   );
@@ -126,6 +157,14 @@ export function useKnowledgePdfOpen() {
 
 export function useKnowledgePdfStatusReporter() {
   return useContext(KnowledgePdfStatusContext);
+}
+
+/**
+ * The board's Note-creation authority for one source page, or null when the
+ * host wired none. Transport only: this never creates anything itself.
+ */
+export function useKnowledgePdfCreateNote() {
+  return useContext(KnowledgePdfCreateNoteContext);
 }
 
 /** Reads a placement off any padlet-shaped value. Identity is the id alone. */
@@ -588,6 +627,55 @@ export default function KnowledgePdfCanvasSurface({
   const references = useKnowledgeSourceReferencesForDocument(documentId);
   const noteColors = useKnowledgeSourceNoteColors();
 
+  /**
+   * PDF-C1 Text -- selecting source text on the page that is actually visible.
+   *
+   * Everything below is the READER's contract, imported: the same capture, the
+   * same refusals, the same request builder, the same board callback. What is
+   * local here is one piece of transient UI state -- which selection the user
+   * has right now -- exactly as the reader keeps its own. No second state
+   * machine, no second provenance model, and no persistence: this component
+   * still never writes anything.
+   */
+  const createNoteFromPage = useKnowledgePdfCreateNote();
+  const pageTextContainerRef = useRef<HTMLDivElement | null>(null);
+  const [capturedSelection, setCapturedSelection] = useState<CapturedPageSelection | null>(null);
+
+  /**
+   * Proved against the page ON SCREEN, never a remembered one. `pages` is the
+   * cached document and `pageNumber` the displayed index, so a selection made
+   * on page 3 can only ever resolve to page 3 -- the capture reads the page
+   * number off the paragraph it measured and refuses a range whose text does
+   * not match that page's canonical string.
+   */
+  const handleSelectionSettled = useCallback(() => {
+    setCapturedSelection(captureExactSelection(pageTextContainerRef.current, pages ?? []));
+  }, [pages]);
+
+  /**
+   * A selection belongs to the page and representation it was made in. Paging
+   * away or switching PDF/T unmounts that paragraph, so keeping the capture
+   * would leave an action pointing at text nobody can see any more.
+   */
+  useEffect(() => { setCapturedSelection(null); }, [pageNumber, view, collapsed]);
+
+  /**
+   * The one place a captured selection becomes the board's problem. Delegates
+   * verbatim: the card builds no draft, opens no editor, touches no reference
+   * table and calls no API. Absent authority means no action was rendered.
+   */
+  const createNoteFromSelection = useCallback(() => {
+    if (!createNoteFromPage || !capturedSelection) return;
+    createNoteFromPage(buildSelectionSourceRequest(
+      documentId,
+      originalFilename,
+      pages ?? [],
+      capturedSelection,
+      null,
+    ));
+    setCapturedSelection(null);
+  }, [createNoteFromPage, capturedSelection, documentId, originalFilename, pages]);
+
   /** The pager's two arrows: the toolbar's disabled convention, one place. */
   const pagerButton = (enabled: boolean) =>
     'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded '
@@ -652,11 +740,16 @@ export default function KnowledgePdfCanvasSurface({
           canvas or dragging the card -- the header above stays the drag handle.
         */
         <div
+          ref={pageTextContainerRef}
           data-knowledge-pdf-body="true"
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-1.5 py-1.5"
           onWheel={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
+          /* The reader's own settle points, for the same reason: a selection is
+             only real once the gesture has ended. */
+          onMouseUp={handleSelectionSettled}
+          onKeyUp={handleSelectionSettled}
         >
           {!isReady ? (
             <div className="px-1 py-2 text-[10px] text-gray-500">{STATUS_LABEL[status]}</div>
@@ -700,6 +793,29 @@ export default function KnowledgePdfCanvasSurface({
               {view === 'text' || imagelessPages.has(currentPageData.pageNumber) ? (
                 <p
                   data-knowledge-pdf-page-text="true"
+                  /*
+                    PDF-C1 Text. Two attributes, both load-bearing.
+
+                    PAGE_TEXT_ROOT is the reader's coordinate-space marker: the
+                    capture measures offsets from this paragraph's start and
+                    reads its page number straight off this attribute, so the
+                    displayed page is the only page a selection here can
+                    produce.
+
+                    data-no-drag is the canvas's OWN existing exemption.
+                    `handlePadletMouseDown` runs in capture phase on every card
+                    and calls `lockBodySelection()` -- document.body
+                    user-select: none for the duration of the gesture -- unless
+                    the target is inside `[data-no-drag="true"]`, in which case
+                    it returns before both the lock AND the drag arming. That
+                    single early return is what makes real text selection
+                    possible here and what stops a selection gesture from
+                    dragging the card. The pager already relies on it; nothing
+                    outside this paragraph changes, so a drag begun anywhere
+                    else on the card still moves it exactly as before.
+                  */
+                  data-no-drag="true"
+                  {...{ [PAGE_TEXT_ROOT]: currentPageData.pageNumber }}
                   className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
                 >
                   {/*
@@ -733,6 +849,34 @@ export default function KnowledgePdfCanvasSurface({
                       );
                     })}
                 </p>
+              ) : null}
+              {/*
+                The reader's action, on the card. Rendered only when there is
+                a proved selection AND the board wired its creation authority
+                -- the same two conditions the reader's own floating Note Post
+                is gated on (`onCreateNoteFromPage && documentId && selection`).
+                A viewer is given no callback, so no mutation action exists to
+                click rather than a disabled one to explain.
+              */}
+              {createNoteFromPage && capturedSelection
+                && capturedSelection.pageNumber === currentPageData.pageNumber ? (
+                <div className="mt-1 flex justify-end">
+                  <button
+                    type="button"
+                    data-no-drag="true"
+                    data-knowledge-pdf-action="create-note"
+                    aria-label={`Create Note from selection on page ${capturedSelection.pageNumber}`}
+                    className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+                    /* The card is dragged by its chrome and the canvas pans
+                       under it, so a press that begins on this action belongs
+                       to the action alone -- the pager's own rule. */
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => { event.stopPropagation(); createNoteFromSelection(); }}
+                  >
+                    Create Note
+                  </button>
+                </div>
               ) : null}
             </section>
           ) : (

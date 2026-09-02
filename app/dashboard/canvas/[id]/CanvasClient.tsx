@@ -7187,6 +7187,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     <KnowledgePdfOpenProvider
       onOpenDocument={requestKnowledgeDocumentOpen}
       onStatusResolved={handleKnowledgePdfSettled}
+      /*
+        PDF-C1 Text -- the SAME handler the Knowledge reader already uses, on
+        the same transport as the reader-open request above. Nothing new is
+        built for the card: it produces a KnowledgeSourcePageRequest and this
+        existing authority does the rest (draft, editor, and the ordinary Save
+        that writes the source reference).
+
+        Gated on the capability the creation toolbar itself is gated on, so a
+        viewer's card renders no mutation action at all. The handler repeats
+        that check internally -- this only decides whether the affordance
+        exists, exactly as the reader decides by withholding the prop.
+      */
+      onCreateNoteFromPage={canUseCanvasToolbar ? handleCreateNoteFromKnowledgePage : null}
     >
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}

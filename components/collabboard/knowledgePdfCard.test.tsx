@@ -10,6 +10,7 @@ import KnowledgePdfCanvasSurface, {
   KnowledgePdfCardControls,
   KnowledgePdfOpenProvider,
 } from './KnowledgePdfCanvasSurface';
+import { buildKnowledgeSourceNoteDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 /**
  * PDF-C1 Step 1 -- the Freeform PDF object is a DOCUMENT, not an upload
@@ -75,8 +76,13 @@ async function card(options: {
   onOpen?: (request: { documentId: string }) => void;
   withProvider?: boolean;
   hostSpies?: HostSpies;
+  /**
+   * PDF-C1 Text -- the board's creation authority, as the provider carries it.
+   * Undefined leaves it unwired, which is exactly a read-only viewer's card.
+   */
+  onCreateNote?: ((request: unknown) => void) | null;
 } = {}) {
-  const { status = 'ready', onOpen = vi.fn(), withProvider = true, hostSpies } = options;
+  const { status = 'ready', onOpen = vi.fn(), withProvider = true, hostSpies, onCreateNote = null } = options;
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -94,7 +100,11 @@ async function card(options: {
     : node);
   await act(async () => {
     root.render(withHost(withProvider
-      ? <KnowledgePdfOpenProvider onOpenDocument={onOpen}>{surface}</KnowledgePdfOpenProvider>
+      ? (
+        <KnowledgePdfOpenProvider onOpenDocument={onOpen} onCreateNoteFromPage={onCreateNote}>
+          {surface}
+        </KnowledgePdfOpenProvider>
+      )
       : surface));
   });
   // Let the page fetch resolve.
@@ -984,12 +994,41 @@ describe('PDF-C1 page switcher', () => {
     expect(code).toContain('documentId={documentId}');
   });
 
-  it('23-24. no second provenance or highlight implementation was introduced', async () => {
+  /**
+   * PDF-C1 Text supersedes the previous form of this guard, which asserted the
+   * card had NO source-creation path at all. That product decision changed: the
+   * card now creates Notes from a selection. What must not change is HOW --
+   * every authority is still someone else's, so the guard is rewritten to hold
+   * the boundary rather than the absence.
+   */
+  it('23-24. the card creates Notes only by delegating to the existing authorities', async () => {
     const code = executable(SURFACE);
-    // Still purely a consumer of the existing authority: the card resolves no
-    // spans of its own and creates no references.
-    expect(code).not.toMatch(/charStart|charEnd|quoteText|selectedText/);
-    expect(code).not.toMatch(/getSelection\(|createSourceReference|buildKnowledgeSource/);
+
+    // 1. No second provenance model. The card owns no offset arithmetic, no
+    //    quote and no hash: it names the imported builder and nothing else.
+    expect(code).not.toMatch(/charStart\s*[:=]|charEnd\s*[:=]|quoteText/);
+    expect(code).not.toMatch(/buildKnowledgeSourceNoteDraft/);
+    expect(code).toContain('buildSelectionSourceRequest(');
+    expect(code).toContain('captureExactSelection(');
+    // Both come from the READER's extracted contract, not a local copy.
+    expect(code).toMatch(
+      /import \{[^}]*captureExactSelection[^}]*\} from '@\/components\/collabboard\/knowledgeSourceTextSelection'/,
+    );
+
+    // 2. No persistence of any kind from the card.
+    expect(code).not.toMatch(/createSourceReference|persistKnowledgeSourceReference|source_references/);
+    expect(code).not.toMatch(/supabase/i);
+    // Its only request is the existing read-side page fetch.
+    expect(code).not.toMatch(/method:\s*'(POST|PATCH|PUT|DELETE)'/);
+
+    // 3. No duplicate Note implementation: no draft, no editor, no padlet write.
+    expect(code).not.toMatch(/setPadletToEdit|setIsNoteEditorOpen|setSourceNoteReference/);
+
+    // 4. It delegates a PAGE-AWARE request to the board's own callback.
+    expect(code).toContain('useKnowledgePdfCreateNote()');
+    expect(code).toMatch(/createNoteFromPage\(buildSelectionSourceRequest\(/);
+
+    // 5. The highlight side is untouched -- still exactly one resolver call.
     expect((code.match(/knowledgeSourceHighlightSegments\(/g) || []).length).toBe(1);
     expect((code.match(/knowledgeSourceHighlightColor\(/g) || []).length).toBe(1);
   });
@@ -1049,5 +1088,230 @@ describe('PDF-C1 page switcher', () => {
     expect(indicator(host)).toBe('1 / 1');
     expect(prev(host)!.disabled).toBe(true);
     expect(next(host)!.disabled).toBe(true);
+  });
+});
+
+/**
+ * PDF-C1 Text -- selecting source text on the canvas card.
+ *
+ * The contract under test is the READER's, imported wholesale: these tests
+ * assert the card obeys it and delegates, never that it re-implements it. The
+ * page text served by `pagePayload` is the coordinate space, so every expected
+ * offset below is checked back against that string rather than hand-counted.
+ */
+describe('PDF-C1 canvas text selection', () => {
+  const indicator = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-page-indicator="true"]')?.textContent?.trim() ?? null;
+  const next = (host: HTMLElement) => action(host, 'page-next') as HTMLButtonElement | null;
+  const pageText = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-page-text="true"]') as HTMLElement | null;
+  const createNote = (host: HTMLElement) => action(host, 'create-note') as HTMLButtonElement | null;
+
+  /** Puts a real DOM Range on the real Selection -- the reader's own helper. */
+  const selectRange = (start: Node, startOffset: number, end: Node, endOffset: number) => {
+    const range = document.createRange();
+    range.setStart(start, startOffset);
+    range.setEnd(end, endOffset);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
+  /** The mouseup that ends the gesture, where the card listens for it. */
+  const finishSelection = async (host: HTMLElement) => {
+    await act(async () => {
+      host.querySelector('[data-knowledge-pdf-body="true"]')!
+        .dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+  };
+
+  /** Select `length` units from `from` in the currently rendered page text. */
+  const selectOnPage = async (host: HTMLElement, from: number, length: number) => {
+    const root = pageText(host)!;
+    selectRange(root.firstChild!, from, root.firstChild!, from + length);
+    await finishSelection(host);
+  };
+
+  const toText = async (host: HTMLElement) => {
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+  };
+
+  beforeEach(() => {
+    stubPages(5);
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('1-2. the page text is the readers coordinate space, and is drag-exempt', async () => {
+    const host = await card({ onCreateNote: vi.fn() });
+    await toText(host);
+    const root = pageText(host)!;
+    // The reader's marker, carrying the page ACTUALLY on screen.
+    expect(root.getAttribute('data-knowledge-page-text-root')).toBe('1');
+    // The canvas's own drag exemption. `handlePadletMouseDown` returns on this
+    // attribute BEFORE lockBodySelection(), which is the only reason a real
+    // selection can form here at all -- and the reason the same gesture does
+    // not arm a card drag.
+    expect(root.getAttribute('data-no-drag')).toBe('true');
+  });
+
+  it('3. the exemption is scoped to the text, so the rest of the card still drags', async () => {
+    const host = await card({ onCreateNote: vi.fn() });
+    await toText(host);
+    const surface = host.querySelector('[data-knowledge-pdf-surface="true"]')!;
+    // The card body and its page label carry no exemption: a gesture beginning
+    // there reaches the drag system exactly as it did before this change.
+    expect(host.querySelector('[data-knowledge-pdf-body="true"]')!.getAttribute('data-no-drag')).toBeNull();
+    expect(surface.getAttribute('data-no-drag')).toBeNull();
+    const label = Array.from(surface.querySelectorAll('div'))
+      .find((node) => node.textContent?.trim() === 'Page 1')!;
+    expect(label.getAttribute('data-no-drag')).toBeNull();
+  });
+
+  it('4-5. the captured span is exact and page-relative', async () => {
+    const onCreateNote = vi.fn();
+    const host = await card({ onCreateNote });
+    await toText(host);
+    await selectOnPage(host, 8, 6);
+    await act(async () => { createNote(host)!.click(); });
+
+    const request = onCreateNote.mock.calls[0][0];
+    expect(request.selection.charStart).toBe(8);
+    expect(request.selection.charEnd).toBe(14);
+    // Proved against the page string itself, never a hand-counted literal.
+    expect(pagePayload(5).pages[0].text.slice(8, 14)).toBe(request.selection.selectedText);
+  });
+
+  it('6. a selection that does not resolve to the page is refused', async () => {
+    const onCreateNote = vi.fn();
+    const host = await card({ onCreateNote });
+    await toText(host);
+    const root = pageText(host)!;
+
+    // A range whose endpoints lie OUTSIDE any page paragraph is not an exact
+    // span and is never salvaged into one.
+    // The counter renders {pageNumber}{' / '}{pageTotal} as separate text
+    // nodes, so this spans the first of them entirely -- a real, non-collapsed
+    // range that simply is not in any page paragraph.
+    const outside = host.querySelector('[data-knowledge-pdf-page-indicator="true"]')!;
+    selectRange(outside.firstChild!, 0, outside.childNodes[1], 1);
+    await finishSelection(host);
+    expect(createNote(host), 'no action for a selection outside the page').toBeNull();
+
+    // A collapsed range is not a selection either.
+    selectRange(root.firstChild!, 4, root.firstChild!, 4);
+    await finishSelection(host);
+    expect(createNote(host)).toBeNull();
+    expect(onCreateNote).not.toHaveBeenCalled();
+  });
+
+  it('7,9. an editor gets the action, and it delegates to the board callback', async () => {
+    const onCreateNote = vi.fn();
+    const host = await card({ onCreateNote });
+    await toText(host);
+    expect(createNote(host), 'nothing to act on before a selection').toBeNull();
+
+    await selectOnPage(host, 0, 4);
+    expect(createNote(host)).not.toBeNull();
+    await act(async () => { createNote(host)!.click(); });
+
+    expect(onCreateNote).toHaveBeenCalledTimes(1);
+    expect(onCreateNote.mock.calls[0][0]).toMatchObject({
+      sourceDocumentId: DOC_ID,
+      originalFilename: 'lesson.pdf',
+      pageNumber: 1,
+    });
+  });
+
+  it('8. a viewer -- no creation authority -- gets no mutation action', async () => {
+    const host = await card();
+    await toText(host);
+    await selectOnPage(host, 0, 6);
+    // The selection is real; the action simply does not exist for this reader.
+    expect(window.getSelection()!.toString().length).toBeGreaterThan(0);
+    expect(createNote(host)).toBeNull();
+  });
+
+  it('10. the card performs no request when a Note is created', async () => {
+    const onCreateNote = vi.fn();
+    const fetchMock = stubPages(5);
+    const host = await card({ onCreateNote });
+    await toText(host);
+    const before = fetchMock.mock.calls.length;
+    await selectOnPage(host, 2, 5);
+    await act(async () => { createNote(host)!.click(); });
+    expect(fetchMock.mock.calls.length, 'creation is delegated, not performed').toBe(before);
+  });
+
+  it('11-15. the request carries the page ON SCREEN, pages 1 / 3 / 5', async () => {
+    const onCreateNote = vi.fn();
+    const host = await card({ onCreateNote });
+    await toText(host);
+
+    await selectOnPage(host, 0, 5);
+    await act(async () => { createNote(host)!.click(); });
+
+    await act(async () => { next(host)!.click(); });
+    await act(async () => { next(host)!.click(); });
+    expect(indicator(host)).toBe('3 / 5');
+    await selectOnPage(host, 0, 5);
+    await act(async () => { createNote(host)!.click(); });
+
+    await act(async () => { next(host)!.click(); });
+    await act(async () => { next(host)!.click(); });
+    expect(indicator(host)).toBe('5 / 5');
+    await selectOnPage(host, 0, 5);
+    await act(async () => { createNote(host)!.click(); });
+
+    const pageNumbers = onCreateNote.mock.calls.map((call) => call[0].pageNumber);
+    expect(pageNumbers).toEqual([1, 3, 5]);
+    // One document throughout -- identity is the document id, never the page.
+    expect(new Set(onCreateNote.mock.calls.map((call) => call[0].sourceDocumentId))).toEqual(new Set([DOC_ID]));
+    // Each request quotes the text of ITS OWN page, which is what the draft
+    // turns into pageStart === pageEnd === that page.
+    for (const call of onCreateNote.mock.calls) {
+      const request = call[0];
+      expect(request.pageText).toBe(pagePayload(5).pages[request.pageNumber - 1].text);
+      expect(request.pageText.slice(request.selection.charStart, request.selection.charEnd))
+        .toBe(request.selection.selectedText);
+    }
+  });
+
+  it('16. paging or switching representation drops a stale selection', async () => {
+    const onCreateNote = vi.fn();
+    const host = await card({ onCreateNote });
+    await toText(host);
+    await selectOnPage(host, 0, 5);
+    expect(createNote(host)).not.toBeNull();
+
+    // The paragraph it was measured in is gone; so is the action.
+    await act(async () => { next(host)!.click(); });
+    expect(createNote(host), 'a selection cannot outlive its page').toBeNull();
+
+    await selectOnPage(host, 0, 5);
+    expect(createNote(host)).not.toBeNull();
+    await act(async () => { action(host, 'page-view')!.click(); });
+    expect(createNote(host), 'nor its representation').toBeNull();
+    expect(indicator(host), 'but the page itself is untouched').toBe('2 / 5');
+  });
+
+  it('18-19. the request seeds an EXACT_SPAN draft, body separate from provenance', async () => {
+    const onCreateNote = vi.fn();
+    const host = await card({ onCreateNote });
+    await toText(host);
+    await selectOnPage(host, 8, 6);
+    await act(async () => { createNote(host)!.click(); });
+
+    // The card hands over a request; the EXISTING draft authority decides what
+    // a Note body and a source reference are. Running it here proves the card's
+    // payload lands in the exact-span branch rather than a page-only one.
+    const draft = buildKnowledgeSourceNoteDraft(onCreateNote.mock.calls[0][0]);
+    expect(draft.sourceReference.pageStart).toBe(1);
+    expect(draft.sourceReference.pageEnd).toBe(1);
+    expect(draft.sourceReference.charStart).toBe(8);
+    expect(draft.sourceReference.charEnd).toBe(14);
+    // An exact span sends no client quote: the server slices its own page.
+    expect(draft.sourceReference.quoteText).toBeNull();
+    // Body seeded from the selection, and independent of the reference.
+    expect(draft.content).toContain(draft.sourceReference.selectedText!);
   });
 });
