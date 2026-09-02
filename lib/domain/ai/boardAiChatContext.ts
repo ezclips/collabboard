@@ -42,6 +42,16 @@ export const BOARD_AI_CONTEXT_MAX_ITEMS = 4;
 export const BOARD_AI_CONTEXT_MAX_TOTAL_CHARS = 14_000;
 export const BOARD_AI_CONTEXT_MAX_SINGLE_CHARS = 6_000;
 export const BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES = 8;
+/**
+ * How many DISTINCT historical sources one request may re-resolve.
+ *
+ * The character budget is not enough on its own: it caps the prompt, but
+ * resolution happens first, so an ever-growing thread would buy an
+ * ever-growing pile of database reads for a payload that stays 14k. This cap
+ * is applied to identities BEFORE any source is read, which is what keeps the
+ * work per request constant instead of a function of thread length.
+ */
+export const BOARD_AI_CONTEXT_MAX_HISTORICAL_IDENTITIES = 8;
 /** What a stored envelope may carry for display; never the source itself. */
 export const BOARD_AI_CONTEXT_MAX_EXCERPT_CHARS = 300;
 export const BOARD_AI_CONTEXT_MAX_LABEL_CHARS = 200;
@@ -168,26 +178,40 @@ export function buildBoardAiContextEnvelope(
 }
 
 /**
- * Strictly reads a stored envelope back into request items.
+ * One stored item that parsed: its identity, plus the display strings written
+ * on THAT SAME raw item.
  *
- * Deliberately returns REQUESTS, not the stored item: a later turn must go
- * back through the same authorization the original attachment did, from
- * identity alone. Anything malformed, unknown or out of range is dropped
- * rather than throwing -- one bad row a user wrote by hand must not brick the
- * rest of their conversation.
+ * Carrying the two together is what stops a dropped neighbour from lending its
+ * label to a survivor. Neither string is authority -- `request` is what gets
+ * re-resolved; `label` and `excerpt` only redraw a chip.
  */
-export function boardAiContextRequestsFromStored(value: unknown): readonly BoardAiContextRequestItem[] {
+export interface ParsedBoardAiContextItem {
+  readonly request: BoardAiContextRequestItem;
+  readonly label?: string;
+  readonly excerpt?: string;
+}
+
+/**
+ * Strictly reads a stored envelope back, item by item.
+ *
+ * Each raw item is parsed on its own and keeps its own display strings, so a
+ * malformed item is dropped whole rather than shifting the ones behind it.
+ * Anything malformed, unknown or out of range is dropped rather than thrown --
+ * one bad row a user wrote by hand must not brick the rest of their
+ * conversation.
+ */
+export function boardAiContextItemsFromStored(value: unknown): readonly ParsedBoardAiContextItem[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   const envelope = value as { version?: unknown; items?: unknown };
   if (envelope.version !== BOARD_AI_CONTEXT_VERSION) return [];
   if (!Array.isArray(envelope.items)) return [];
 
-  const requests: BoardAiContextRequestItem[] = [];
+  const parsed: ParsedBoardAiContextItem[] = [];
   for (const raw of envelope.items) {
     // The cap counts ACCEPTED items, not scanned ones: applying it to the raw
     // list would let a few malformed rows at the front swallow the budget and
     // silently drop the valid attachments behind them.
-    if (requests.length >= BOARD_AI_CONTEXT_MAX_ITEMS) break;
+    if (parsed.length >= BOARD_AI_CONTEXT_MAX_ITEMS) break;
     const item = raw as Record<string, unknown>;
     if (!isBoardAiContextType(item.type)) continue;
     const documentId = typeof item.knowledgeDocumentId === 'string' ? item.knowledgeDocumentId : null;
@@ -195,10 +219,11 @@ export function boardAiContextRequestsFromStored(value: unknown): readonly Board
     const page = item.pageNumber;
     const isPage = typeof page === 'number' && Number.isInteger(page) && page >= 1;
 
+    let request: BoardAiContextRequestItem | null = null;
     if (item.type === 'knowledge-document' && documentId) {
-      requests.push({ type: 'knowledge-document', knowledgeDocumentId: documentId });
+      request = { type: 'knowledge-document', knowledgeDocumentId: documentId };
     } else if (item.type === 'knowledge-page' && documentId && isPage) {
-      requests.push({ type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber: page as number });
+      request = { type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber: page as number };
     } else if (item.type === 'knowledge-selection' && documentId && isPage) {
       const { charStart, charEnd, selectedText } = item;
       if (typeof charStart === 'number' && Number.isInteger(charStart) && charStart >= 0
@@ -206,20 +231,86 @@ export function boardAiContextRequestsFromStored(value: unknown): readonly Board
         && typeof selectedText === 'string' && selectedText.length > 0) {
         // The stored slice is re-verified against the live page on this turn;
         // it is a claim carried forward, never accepted as text.
-        requests.push({
+        request = {
           type: 'knowledge-selection',
           knowledgeDocumentId: documentId,
           pageNumber: page as number,
           charStart,
           charEnd,
           selectedText,
-        });
+        };
       }
     } else if (item.type === 'padlet' && padletId) {
-      requests.push({ type: 'padlet', padletId });
+      request = { type: 'padlet', padletId };
+    }
+    if (request === null) continue;
+
+    // Read at the same moment the identity is accepted, so a display string
+    // can never travel further than the item it was written on.
+    const label = typeof item.label === 'string' ? boardAiContextLabel(item.label) : undefined;
+    const excerpt = typeof item.excerpt === 'string' ? boardAiContextExcerpt(item.excerpt) : undefined;
+    parsed.push({
+      request,
+      ...(label ? { label } : {}),
+      ...(excerpt ? { excerpt } : {}),
+    });
+  }
+  return parsed;
+}
+
+/** Identity only, for callers that re-resolve rather than display. */
+export function boardAiContextRequestsFromStored(value: unknown): readonly BoardAiContextRequestItem[] {
+  return boardAiContextItemsFromStored(value).map((item) => item.request);
+}
+
+/**
+ * A stable key for "the same source, named the same way".
+ *
+ * Built from identity alone. A label or an excerpt would be the wrong basis:
+ * both are user-writable display strings, so two rows pointing at one page
+ * could dodge de-duplication just by disagreeing about what to call it.
+ */
+export function boardAiContextIdentityKey(item: BoardAiContextRequestItem): string {
+  switch (item.type) {
+    case 'knowledge-document':
+      return `knowledge-document:${item.knowledgeDocumentId}`;
+    case 'knowledge-page':
+      return `knowledge-page:${item.knowledgeDocumentId}:${item.pageNumber}`;
+    case 'knowledge-selection':
+      return `knowledge-selection:${item.knowledgeDocumentId}:${item.pageNumber}:${item.charStart}:${item.charEnd}`;
+    case 'padlet':
+      return `padlet:${item.padletId}`;
+  }
+}
+
+/**
+ * Chooses WHICH historical sources are worth reading, before any are read.
+ *
+ * `envelopes` arrives newest message first. The walk keeps the newest
+ * occurrence of each distinct identity and stops at the cap, so the database
+ * work a request can buy is fixed no matter how long the thread grows -- a
+ * thread with two hundred messages costs exactly what one with ten does.
+ *
+ * De-duplication matters as much as the cap: a source re-attached every turn
+ * would otherwise fill all eight slots by itself and crowd out everything
+ * else the user referred to.
+ */
+export function selectHistoricalContextIdentities(
+  envelopes: readonly unknown[],
+  limit: number = BOARD_AI_CONTEXT_MAX_HISTORICAL_IDENTITIES,
+): readonly BoardAiContextRequestItem[] {
+  const seen = new Set<string>();
+  const selected: BoardAiContextRequestItem[] = [];
+  for (const envelope of envelopes) {
+    for (const request of boardAiContextRequestsFromStored(envelope)) {
+      if (selected.length >= limit) return selected;
+      const key = boardAiContextIdentityKey(request);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      selected.push(request);
     }
   }
-  return requests;
+  return selected;
 }
 
 /**
@@ -259,13 +350,12 @@ export interface BoardAiContextView {
  * contract defines, so nothing unexpected reaches a browser.
  */
 export function boardAiContextViewFromStored(value: unknown): BoardAiContextView | null {
-  const requests = boardAiContextRequestsFromStored(value);
-  if (requests.length === 0) return null;
-  const stored = (value as { items?: unknown[] }).items ?? [];
-  const items: BoardAiContextItem[] = requests.map((request, index) => {
-    const raw = (stored[index] ?? {}) as Record<string, unknown>;
-    const label = typeof raw.label === 'string' ? boardAiContextLabel(raw.label) : undefined;
-    const excerpt = typeof raw.excerpt === 'string' ? boardAiContextExcerpt(raw.excerpt) : undefined;
+  const parsed = boardAiContextItemsFromStored(value);
+  if (parsed.length === 0) return null;
+  // Each surviving item carries the label and excerpt from its OWN raw entry.
+  // Zipping parsed identities against raw indexes would hand a dropped item's
+  // label to whichever item happened to follow it.
+  const items: BoardAiContextItem[] = parsed.map(({ request, label, excerpt }) => {
     return {
       type: request.type,
       ...('knowledgeDocumentId' in request ? { knowledgeDocumentId: request.knowledgeDocumentId } : {}),

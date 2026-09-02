@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AI_ROLES } from '@/lib/ai/aiRoles';
+
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getSupabaseAdmin: vi.fn(),
@@ -89,10 +91,15 @@ describe('GET /api/settings/ai-roles', () => {
     expect(res.status).toBe(401);
   });
 
-  it('2. both roles are always present, even with no stored rows', async () => {
+  it('2. every canonical role is always present, even with no stored rows', async () => {
     const res = await route.GET(request('GET'));
     const body = await res.json();
-    expect(Object.keys(body.roles).sort()).toEqual(['edit', 'source-ai']);
+    // Derived from the registry rather than a hardcoded list: the route builds
+    // its answer from AI_ROLES, so adding a role there (board-chat did exactly
+    // this) must not need an edit here to stay honest.
+    expect(Object.keys(body.roles).sort()).toEqual([...AI_ROLES].sort());
+    // Naming them once, so the registry itself cannot silently lose one.
+    expect(Object.keys(body.roles).sort()).toEqual(['board-chat', 'edit', 'source-ai']);
   });
 
   it('3. an absent row reads as CollabBoard Default', async () => {

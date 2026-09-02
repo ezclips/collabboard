@@ -178,12 +178,38 @@ describe('13,17,18,19. posts resolve to safe plain text', () => {
     }
   });
 
-  it('17. an unsupported post type is refused', async () => {
-    for (const type of ['image', 'drawing', 'file', 'map', 'link']) {
-      const { client: c } = client({ padlet: { id: PAD, type, title: 't', content: 'x' } });
+  it('1,2. the two types with a real text authority are accepted', async () => {
+    for (const type of ['text', 'note']) {
+      const { client: c } = client({ padlet: { id: PAD, type, title: 'T', content: '<p>body</p>' } });
+      const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]);
+      expect(result.ok, type).toBe(true);
+      if (result.ok) expect(result.value[0].text).toContain('body');
+    }
+  });
+
+  it('3,4,17. every other post type is refused, todo and card included', async () => {
+    for (const type of [
+      // Refused because their substance is not in `content`: a to-do keeps its
+      // tasks in metadata, and `card` is clipart or the Document card for a
+      // PDF. Both used to resolve to a bare title and answer 200.
+      'todo', 'card',
+      'image', 'drawing', 'file', 'map', 'link', 'table', 'comment', 'container',
+    ]) {
+      const { client: c } = client({
+        padlet: { id: PAD, type, title: 'Sprint list', content: '<p>x</p>' },
+      });
       const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]);
       expect(result.ok, type).toBe(false);
-      if (!result.ok) expect(result.error.code).toBe('validation');
+      if (!result.ok) expect(result.error.code, type).toBe('validation');
+    }
+  });
+
+  it('5,6. an unsupported stored reference is DROPPED from history, not fatal', async () => {
+    for (const type of ['todo', 'card']) {
+      const { client: c } = client({ padlet: { id: PAD, type, title: 'T', content: '<p>x</p>' } });
+      // The thread stays usable; the reference just stops arriving.
+      expect(await resolveHistoricalBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]))
+        .toEqual([]);
     }
   });
 

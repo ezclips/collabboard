@@ -50,8 +50,21 @@ interface ContextQuery extends PromiseLike<{ data: ContextRow[] | null; error: u
   maybeSingle(): Promise<{ data: ContextRow | null; error: unknown }>;
 }
 
-/** Post types whose text this server can extract safely today. */
-const SUPPORTED_PADLET_TYPES = new Set(['text', 'note', 'card', 'todo']);
+/**
+ * Post types whose text this server can extract safely today.
+ *
+ * Only the two whose substance genuinely lives in `content` as TipTap HTML.
+ * `todo` and `card` were removed after review measured what they actually
+ * resolve to: a to-do keeps its tasks in `metadata.tasks`, so it arrived as a
+ * bare heading, and `card` is not a text post at all -- it is clipart, or the
+ * Document card standing in for a PDF, and arrived as a filename. Both were
+ * accepted with a 200, which is worse than refusing: the user believes they
+ * attached a list or a document, and the model answers from a title.
+ *
+ * Extraction for those types is a product decision, not a widening of this
+ * set. Nothing here may be added without a defined text authority.
+ */
+const SUPPORTED_PADLET_TYPES = new Set(['text', 'note']);
 
 /**
  * TipTap bodies are HTML. Tags are stripped and entities decoded so the model

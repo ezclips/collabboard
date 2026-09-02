@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BOARD_AI_CONTEXT_MAX_HISTORICAL_IDENTITIES,
   BOARD_AI_CONTEXT_MAX_ITEMS,
+  boardAiContextIdentityKey,
+  selectHistoricalContextIdentities,
   BOARD_AI_CONTEXT_MAX_SINGLE_CHARS,
   BOARD_AI_CONTEXT_MAX_TOTAL_CHARS,
   BOARD_AI_CONTEXT_VERSION,
@@ -89,6 +92,118 @@ describe('22-27. a stored envelope is a claim, never content', () => {
   it('never reads back more items than the cap allows', () => {
     const items = Array.from({ length: 20 }, () => ({ type: 'padlet', padletId: PAD }));
     expect(boardAiContextRequestsFromStored({ version: 1, items })).toHaveLength(BOARD_AI_CONTEXT_MAX_ITEMS);
+  });
+});
+
+describe('10-14. WHICH history is worth reading is decided before any read', () => {
+  const envelope = (items: unknown[]) => ({ version: 1, items });
+  const page = (n: number) => ({ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: n });
+
+  it('10,11. at most 8 distinct identities are ever selected', () => {
+    // Fifty messages, four fresh sources each -- two hundred identities.
+    const envelopes = Array.from({ length: 50 }, (_, m) =>
+      envelope(Array.from({ length: 4 }, (_, i) => page(m * 4 + i + 1))));
+    const selected = selectHistoricalContextIdentities(envelopes);
+    expect(selected).toHaveLength(BOARD_AI_CONTEXT_MAX_HISTORICAL_IDENTITIES);
+    // The ninth distinct identity is never handed to a resolver, so it is
+    // never read: the cost of a request stops growing with the thread.
+    expect(selected.map((item) => (item as { pageNumber: number }).pageNumber)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('12. the NEWEST occurrence wins when the budget runs out', () => {
+    // Caller order is newest message first.
+    const envelopes = [envelope([page(99)]), envelope([page(1)])];
+    expect(selectHistoricalContextIdentities(envelopes, 1))
+      .toEqual([{ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 99 }]);
+  });
+
+  it('13,14. an identity re-attached every turn takes exactly one slot', () => {
+    const envelopes = [
+      ...Array.from({ length: 20 }, () => envelope([page(7)])),
+      envelope([{ type: 'padlet', padletId: PAD }]),
+    ];
+    const selected = selectHistoricalContextIdentities(envelopes);
+    // Without de-duplication the repeated page would fill all eight slots and
+    // the note the user also referred to would never be read.
+    expect(selected).toHaveLength(2);
+    expect(selected[1]).toEqual({ type: 'padlet', padletId: PAD });
+  });
+
+  it('deduplicates on identity, never on the label a user wrote', () => {
+    const envelopes = [
+      envelope([{ ...page(3), label: 'one name', excerpt: 'a' }]),
+      envelope([{ ...page(3), label: 'a different name', excerpt: 'b' }]),
+    ];
+    expect(selectHistoricalContextIdentities(envelopes)).toHaveLength(1);
+  });
+
+  it('tells the four identity kinds apart, and a selection by its range', () => {
+    const selected = selectHistoricalContextIdentities([envelope([
+      { type: 'knowledge-document', knowledgeDocumentId: DOC },
+      page(1),
+      { type: 'knowledge-selection', knowledgeDocumentId: DOC, pageNumber: 1, charStart: 0, charEnd: 5, selectedText: 'abcde' },
+      { type: 'padlet', padletId: PAD },
+    ])]);
+    expect(selected).toHaveLength(4);
+    expect(new Set(selected.map(boardAiContextIdentityKey)).size).toBe(4);
+
+    // Two selections on the same page differing only in range stay distinct.
+    const ranges = selectHistoricalContextIdentities([envelope([
+      { type: 'knowledge-selection', knowledgeDocumentId: DOC, pageNumber: 1, charStart: 0, charEnd: 5, selectedText: 'abcde' },
+      { type: 'knowledge-selection', knowledgeDocumentId: DOC, pageNumber: 1, charStart: 5, charEnd: 9, selectedText: 'fghi' },
+    ])]);
+    expect(ranges).toHaveLength(2);
+  });
+
+  it('9. malformed rows are skipped without consuming a slot', () => {
+    const envelopes = [
+      envelope([{ type: 'nonsense' }, { type: 'knowledge-page', knowledgeDocumentId: DOC }]),
+      envelope([page(1)]),
+    ];
+    expect(selectHistoricalContextIdentities(envelopes))
+      .toEqual([{ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1 }]);
+  });
+
+  it('a thread with no stored context asks for no reads at all', () => {
+    expect(selectHistoricalContextIdentities([null, undefined, { version: 1, items: [] }])).toEqual([]);
+  });
+});
+
+describe('19-21. display strings stay bound to their own stored item', () => {
+  it('19,20. a dropped item never lends its label to the survivor', () => {
+    const view = boardAiContextViewFromStored({
+      version: 1,
+      items: [
+        // Malformed -- no pageNumber. Dropped whole.
+        { type: 'knowledge-page', knowledgeDocumentId: DOC, label: 'LABEL-OF-DROPPED', excerpt: 'EXCERPT-OF-DROPPED' },
+        { type: 'padlet', padletId: PAD, label: 'LABEL-OF-KEPT', excerpt: 'EXCERPT-OF-KEPT' },
+      ],
+    })!;
+    expect(view.items).toHaveLength(1);
+    expect(view.items[0].type).toBe('padlet');
+    expect(view.items[0].label).toBe('LABEL-OF-KEPT');
+    // 21. The excerpt travels with its own item too.
+    expect(view.items[0].excerpt).toBe('EXCERPT-OF-KEPT');
+    expect(JSON.stringify(view)).not.toContain('DROPPED');
+  });
+
+  it('keeps each label with its own item across several survivors', () => {
+    const view = boardAiContextViewFromStored({
+      version: 1,
+      items: [
+        { type: 'bogus', label: 'ZERO' },
+        { type: 'padlet', padletId: PAD, label: 'FIRST' },
+        { type: 'knowledge-page', knowledgeDocumentId: DOC, label: 'SKIPPED-NO-PAGE' },
+        { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 2, label: 'SECOND' },
+      ],
+    })!;
+    expect(view.items.map((item) => item.label)).toEqual(['FIRST', 'SECOND']);
+  });
+
+  it('an item with no display strings simply has none', () => {
+    const view = boardAiContextViewFromStored({ version: 1, items: [{ type: 'padlet', padletId: PAD }] })!;
+    expect(view.items[0].label).toBeUndefined();
+    expect(view.items[0].excerpt).toBeUndefined();
   });
 });
 

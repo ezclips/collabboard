@@ -25,10 +25,10 @@ import {
 } from '@/lib/server/ai/boardAiChatContext';
 import {
   BOARD_AI_CONTEXT_MAX_ITEMS,
-  boardAiContextRequestsFromStored,
   boardAiContextViewFromStored,
   boundResolvedContext,
   buildBoardAiContextEnvelope,
+  selectHistoricalContextIdentities,
   type BoardAiContextRequestItem,
   type ResolvedBoardAiContextBlock,
 } from '@/lib/domain/ai/boardAiChatContext';
@@ -263,12 +263,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // authorization a fresh attachment does. Newest first, and the current
     // message's own blocks lead, so what the user just attached can never be
     // squeezed out by something they attached ten turns ago.
-    const historical: BoardAiContextRequestItem[] = [];
+    //
+    // WHICH identities are worth reading is decided BEFORE a single source is
+    // read. A thread grows without limit and each message may name four
+    // sources, so resolving them all would make the database work a function
+    // of thread length while the prompt stayed capped at 14k. Selecting the
+    // newest distinct handful first makes that work constant.
+    const envelopesNewestFirst: unknown[] = [];
     for (let index = history.value.length - 1; index >= 0; index -= 1) {
       const entry = history.value[index];
       if (entry.id === stored.value.id) continue;
-      historical.push(...boardAiContextRequestsFromStored(entry.context));
+      envelopesNewestFirst.push(entry.context);
     }
+    const historical = selectHistoricalContextIdentities(envelopesNewestFirst);
     const historicalContext = historical.length === 0
       ? []
       : await resolveHistoricalBoardAiChatContext(

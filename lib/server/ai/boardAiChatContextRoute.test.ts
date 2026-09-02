@@ -268,6 +268,103 @@ describe('24,26,43,44. history is re-authorized from identity alone', () => {
   });
 });
 
+describe('9-18. history is bounded BEFORE any source is read', () => {
+  const page = (n: number) => ({ type: 'knowledge-page', knowledgeDocumentId: DOC_ID, pageNumber: n });
+  const envelope = (items: unknown[]) => ({ version: 1, items });
+
+  /** A thread of `count` user messages, each naming `perMessage` sources. */
+  const thread = (count: number, perMessage: (m: number) => unknown[]) => repository([
+    ...Array.from({ length: count }, (_, m) => ({
+      ...row, id: `m${m}`, role: 'user' as const, content: `turn ${m}`,
+      context: envelope(perMessage(m)),
+    })),
+    { ...row, id: 'u1', role: 'user' as const, content: 'hello' },
+  ]);
+
+  it('9,10,11. a 200-message thread resolves at most 8 identities', async () => {
+    // Eight hundred distinct sources named across the thread.
+    thread(200, (m) => Array.from({ length: 4 }, (_, i) => page(m * 4 + i + 1)));
+    await post({ message: 'hello', threadId: THREAD_ID });
+
+    const requested = mocks.resolveHistoricalBoardAiChatContext.mock.calls[0][2] as { pageNumber: number }[];
+    expect(requested).toHaveLength(8);
+    // The ninth distinct identity never reaches the resolver, so it is never
+    // read: the work is constant, not a function of thread length.
+    expect(requested.every((item) => item.pageNumber <= 800)).toBe(true);
+    expect(requested).not.toContainEqual(expect.objectContaining({ pageNumber: 9 }));
+  });
+
+  it('12. the newest turns are the ones that get resolved', async () => {
+    // Message 199 is the newest, so its page 800 leads.
+    thread(200, (m) => [page(m + 1)]);
+    await post({ message: 'hello', threadId: THREAD_ID });
+    const requested = mocks.resolveHistoricalBoardAiChatContext.mock.calls[0][2] as { pageNumber: number }[];
+    expect(requested[0].pageNumber).toBe(200);
+    expect(requested.map((item) => item.pageNumber)).toEqual([200, 199, 198, 197, 196, 195, 194, 193]);
+  });
+
+  it('13,14. one source re-attached 200 times is resolved once', async () => {
+    thread(200, () => [page(7)]);
+    await post({ message: 'hello', threadId: THREAD_ID });
+    expect(mocks.resolveHistoricalBoardAiChatContext.mock.calls[0][2]).toEqual([page(7)]);
+  });
+
+  it('15,16. the current 4 attachments are separate from the historical 8', async () => {
+    thread(50, (m) => [page(m + 100)]);
+    const items = [
+      { type: 'padlet', padletId: PAD_ID },
+      page(1), page(2), page(3),
+    ];
+    mocks.resolveBoardAiChatContext.mockResolvedValue(ok(items.map((_, i) => ({
+      ...pageBlock, label: `CURRENT-${i}`,
+    }))));
+    const response = await post({ message: 'hello', threadId: THREAD_ID, context: { items } });
+
+    expect(response.status).toBe(200);
+    // Four current attachments accepted, and eight historical still selected.
+    expect(mocks.resolveBoardAiChatContext.mock.calls[0][2]).toHaveLength(4);
+    expect(mocks.resolveHistoricalBoardAiChatContext.mock.calls[0][2]).toHaveLength(8);
+  });
+
+  it('17,18. the final budget still applies, and the oldest history drops first', async () => {
+    thread(20, (m) => [page(m + 1)]);
+    // Each block alone fills the single-block clamp, so the 14k total decides.
+    const big = (label: string) => ({ ...pageBlock, label, text: 'x'.repeat(6_000) });
+    mocks.resolveBoardAiChatContext.mockResolvedValue(ok([big('CURRENT')]));
+    mocks.resolveHistoricalBoardAiChatContext.mockResolvedValue([
+      big('NEWEST-HISTORY'), big('OLDER-HISTORY'), big('OLDEST-HISTORY'),
+    ]);
+    await post({ message: 'hello', threadId: THREAD_ID, context: { items: [page(1)] } });
+
+    const reached = modelContext().map((block) => block.label);
+    expect(reached).toEqual(['CURRENT', 'NEWEST-HISTORY']);
+    expect(modelContext().reduce((n, block) => n + block.text.length, 0)).toBeLessThanOrEqual(14_000);
+  });
+
+  it('7. a thread full of unsupported stored context still answers', async () => {
+    thread(20, () => [{ type: 'padlet', padletId: PAD_ID }]);
+    // Everything the history names now resolves to nothing.
+    mocks.resolveHistoricalBoardAiChatContext.mockResolvedValue([]);
+    const response = await post({ message: 'hello', threadId: THREAD_ID });
+    expect(response.status).toBe(200);
+    expect(modelContext()).toEqual([]);
+  });
+});
+
+describe('3,4. an unsupported CURRENT post type has no side effects', () => {
+  it('is refused before a thread, a message or a provider call', async () => {
+    const repo = repository();
+    // What the narrowed resolver now answers for todo and card.
+    mocks.resolveBoardAiChatContext.mockResolvedValue(err('validation'));
+    const response = await post(attach([{ type: 'padlet', padletId: PAD_ID }]));
+
+    expect(response.status).toBe(400);
+    expect(repo.createThread).not.toHaveBeenCalled();
+    expect(repo.appendMessage).not.toHaveBeenCalled();
+    expect(mocks.executeBoardAiChat).not.toHaveBeenCalled();
+  });
+});
+
 describe('32-34. reading a thread back re-derives the context view', () => {
   it('returns contract fields only, never the raw stored row', async () => {
     repository([{
