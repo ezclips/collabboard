@@ -3339,31 +3339,44 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       posts. The PDF contributes its actions to THIS strip
                       rather than adding a second bar of its own, and they sit
                       on the LEFT so a narrow card never pushes the strip's
-                      pencil off the right-hand end. */}
+                      pencil off the right-hand end. Hover-revealed, like the
+                      pencil: at rest the strip shows only the document's
+                      name. */}
                   <div className="flex items-center gap-0.5 pl-1.5">
                     {(() => {
                       const pdfPlacement = readKnowledgePdfPlacement(padlet);
                       if (!pdfPlacement) return null;
-                      // Always rendered, never hover-revealed: a person should
-                      // see what a PDF offers without probing it. A read-only
-                      // viewer sees the same set, visibly inert -- the board's
-                      // own edit capability decides, not a second rule.
+                      // A viewer gets no action cell at all -- not a disabled
+                      // row of them. The same capability withholds the pencil,
+                      // so nothing appears for a viewer by moving the mouse.
+                      if (!canUseFreeformEditButton) return null;
                       return (
-                        <KnowledgePdfCardControls
-                          boardId={padlet.board_id}
-                          documentId={pdfPlacement.documentId}
-                          status={pdfPlacement.processingStatus}
-                          collapsed={pdfCardCollapsed[padlet.id] ?? false}
-                          view={pdfCardView[padlet.id] ?? 'page'}
-                          iconColor={freeformIconColor}
-                          hideStatusWhenReady
-                          disabled={!canUseFreeformEditButton}
-                          onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
-                          onToggleView={() => setPdfCardView((prev) => ({
-                            ...prev,
-                            [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
-                          }))}
-                        />
+                        // Hidden at rest, revealed together on hover, through
+                        // the card shell's existing `group` -- the SAME hover
+                        // authority the strip's pencil uses, so both appear and
+                        // leave as one gesture. CSS only: no hover state, no
+                        // listener, nothing to fall out of sync. The filename
+                        // is NOT swapped out with them; it stays in the strip's
+                        // centre title cell and remains readable throughout.
+                        <span
+                          data-knowledge-pdf-controls="true"
+                          className="hidden items-center gap-0.5 group-hover:flex"
+                        >
+                          <KnowledgePdfCardControls
+                            boardId={padlet.board_id}
+                            documentId={pdfPlacement.documentId}
+                            status={pdfPlacement.processingStatus}
+                            collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                            view={pdfCardView[padlet.id] ?? 'page'}
+                            iconColor={freeformIconColor}
+                            hideStatusWhenReady
+                            onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
+                            onToggleView={() => setPdfCardView((prev) => ({
+                              ...prev,
+                              [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
+                            }))}
+                          />
+                        </span>
                       );
                     })()}
                     {showExpandButton || isAIPost ? (
