@@ -208,13 +208,39 @@ export default function PostEditorShell({
 
   if (!isOpen) return null;
 
+  /**
+   * Where the press STARTED, which is the only thing that makes an interaction
+   * a backdrop dismissal.
+   *
+   * A `click` is dispatched on the nearest common ancestor of its mousedown and
+   * mouseup targets. So when the editor reflows while the button is held -- the
+   * Note title's focus opens the Text Style panel, the row grows, and this
+   * vertically centred overlay re-centres the card out from under the pointer --
+   * mouseup lands on the backdrop and the browser retargets the click to this
+   * overlay. Testing the click target alone cannot tell that apart from a real
+   * backdrop click, so the editor dismissed itself mid-interaction.
+   *
+   * Recording the origin on pointerdown settles it before any focus handler can
+   * move anything. No geometry, no timers, and no second dismissal path: the
+   * close still happens only in the click handler below.
+   */
+  const pressBeganOnBackdropRef = useRef(false);
+
+  const handleOverlayPointerDown = (e: React.PointerEvent) => {
+    pressBeganOnBackdropRef.current = e.target === e.currentTarget;
+  };
+
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onBackdropClick();
+    const beganOnBackdrop = pressBeganOnBackdropRef.current;
+    // Consumed either way, so a stale origin can never authorise a later close.
+    pressBeganOnBackdropRef.current = false;
+    if (beganOnBackdrop && e.target === e.currentTarget) onBackdropClick();
   };
 
   return (
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50"
+      onPointerDown={handleOverlayPointerDown}
       onClick={handleOverlayClick}
       role={role}
       aria-modal={ariaModal}

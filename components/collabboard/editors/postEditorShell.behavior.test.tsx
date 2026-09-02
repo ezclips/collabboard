@@ -42,6 +42,15 @@ afterEach(() => {
 function click(el: Element) {
   act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 }
+/** Where a press began. The shell reads this to decide a backdrop dismissal. */
+function pressOn(el: Element) {
+  act(() => { el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+}
+/** A whole interaction that starts and ends on the same element. */
+function pressAndClick(el: Element) {
+  pressOn(el);
+  click(el);
+}
 function btn(c: HTMLElement, title: string) {
   return c.querySelector(`button[title="${title}"]`) as HTMLButtonElement | null;
 }
@@ -91,9 +100,62 @@ describe('PostEditorShell: sibling order, single toolbar, backdrop and mode owne
       <PostEditorShell isOpen onBackdropClick={onBackdropClick} hasSelection={false} toolbar={{}}
         centre={<button data-testid="inside">x</button>} sharedPanel={null} />,
     );
-    click(c.querySelector('[data-testid="inside"]')!);
+    pressAndClick(c.querySelector('[data-testid="inside"]')!);
     expect(onBackdropClick).not.toHaveBeenCalled();
-    click(c.firstElementChild as HTMLElement);
+    pressAndClick(c.firstElementChild as HTMLElement);
+    expect(onBackdropClick).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The reflow defect: a press that begins inside the editor must never become
+   * a dismissal, however the editor moves before release. When the editor
+   * reflows under a held button the browser retargets the resulting click to
+   * the nearest common ancestor -- this overlay -- so the click target alone
+   * cannot distinguish it from a real backdrop click.
+   */
+  it('ignores a click retargeted to the overlay when the press began inside the editor', () => {
+    const onBackdropClick = vi.fn();
+    const c = mount(
+      <PostEditorShell isOpen onBackdropClick={onBackdropClick} hasSelection={false} toolbar={{}}
+        centre={<input data-testid="title" placeholder="Post name" />} sharedPanel={null} />,
+    );
+    const overlay = c.firstElementChild as HTMLElement;
+
+    // Press starts on the editor's own field...
+    pressOn(c.querySelector('[data-testid="title"]')!);
+    // ...the editor moves, so the browser dispatches the click on the overlay.
+    click(overlay);
+
+    expect(onBackdropClick).not.toHaveBeenCalled();
+  });
+
+  it('still dismisses when the press began on the backdrop and the editor moved', () => {
+    const onBackdropClick = vi.fn();
+    const c = mount(
+      <PostEditorShell isOpen onBackdropClick={onBackdropClick} hasSelection={false} toolbar={{}}
+        centre={<input data-testid="title" placeholder="Post name" />} sharedPanel={null} />,
+    );
+    const overlay = c.firstElementChild as HTMLElement;
+
+    pressOn(overlay);
+    click(overlay);
+
+    expect(onBackdropClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('consumes the origin, so one backdrop press cannot authorise a later close', () => {
+    const onBackdropClick = vi.fn();
+    const c = mount(
+      <PostEditorShell isOpen onBackdropClick={onBackdropClick} hasSelection={false} toolbar={{}}
+        centre={<input data-testid="title" placeholder="Post name" />} sharedPanel={null} />,
+    );
+    const overlay = c.firstElementChild as HTMLElement;
+
+    pressAndClick(overlay);
+    expect(onBackdropClick).toHaveBeenCalledTimes(1);
+
+    // A second click with no press of its own must not close again.
+    click(overlay);
     expect(onBackdropClick).toHaveBeenCalledTimes(1);
   });
 
