@@ -96,6 +96,21 @@ export interface KnowledgeSourceReaderDrawerProps {
    * modal had to close first only because it painted over the editor.
    */
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
+  /**
+   * BCHAT-C. A monotonic id the board bumps when another right-side surface --
+   * today Board AI Chat -- takes the dock. Two docked drawers must not stack,
+   * and the board cannot reach this one's open state: `reader` lives here.
+   *
+   * Deliberately a REQUEST, not a boolean `closed` flag. A flag would fight
+   * the reader for authority every render, and could not express "close once,
+   * then leave the user free to reopen"; an id handled at most once is the
+   * same contract the two open requests above already use.
+   *
+   * Scoped to the DOCKED presentation on purpose. The focused workspace owns
+   * the whole surface, so nothing can be docked beside it -- closing it here
+   * would discard a reading session for a conflict that cannot arise.
+   */
+  closeSidePanelRequestId?: number;
 }
 
 /**
@@ -149,6 +164,7 @@ export default function KnowledgeSourceReaderDrawer({
   presentation = 'side-panel',
   blockingEditorOpen = false,
   onCreateNoteFromPage,
+  closeSidePanelRequestId,
   onOpenBacklinkTarget,
 }: KnowledgeSourceReaderDrawerProps) {
   const params = useParams<{ id: string }>();
@@ -162,6 +178,7 @@ export default function KnowledgeSourceReaderDrawer({
   // holding the request, so re-expanding the toolbar reopened the last source.
   const handledSourceRequestRef = useRef<number | null>(null);
   const handledDocumentRequestRef = useRef<number | null>(null);
+  const handledCloseRequestRef = useRef<number | null>(null);
   // Two rapid picks are a race; only the newest read may commit.
   const readGenerationRef = useRef(0);
   const openerRef = useRef<HTMLElement | null>(null);
@@ -295,6 +312,26 @@ export default function KnowledgeSourceReaderDrawer({
     readGenerationRef.current += 1;
     setReader(null);
   };
+
+  /**
+   * BCHAT-C. Yield the dock, once per request id.
+   *
+   * Reuses `closeReader` rather than resetting anything itself, so there is
+   * still exactly one way this drawer closes and the read-generation guard
+   * that protects an in-flight fetch is not bypassed. Doing nothing is the
+   * right answer three times over: for a repeated id (a rerender, not a new
+   * intent), for an already-closed reader, and for the focused workspace,
+   * which nothing can be docked beside.
+   */
+  useEffect(() => {
+    if (closeSidePanelRequestId === undefined) return;
+    if (handledCloseRequestRef.current === closeSidePanelRequestId) return;
+    handledCloseRequestRef.current = closeSidePanelRequestId;
+    if (presentation !== 'side-panel') return;
+    if (reader === null) return;
+    closeReader();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeSidePanelRequestId, presentation]);
 
   /**
    * PDF Source AI Phase 1. A monotonic id, never reused, so a session B

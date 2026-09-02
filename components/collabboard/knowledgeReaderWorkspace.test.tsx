@@ -233,7 +233,11 @@ describe('38-45. Open and Side panel are two hosts for one reader', () => {
     // The persisted navigation request keeps the exact shape the citation and
     // library paths already build.
     expect(CLIENT).toContain("const [knowledgeReaderPresentation, setKnowledgeReaderPresentation]");
-    expect(CLIENT).toContain("setKnowledgeReaderPresentation(request.presentation ?? 'side-panel')");
+    // The default is still the docked drawer and it is still derived from the
+    // request; BCHAT-C only lifted it into a local so the same value can also
+    // decide whether Board AI Chat yields the dock.
+    expect(CLIENT).toContain("const presentation = request.presentation ?? 'side-panel';");
+    expect(CLIENT).toContain('setKnowledgeReaderPresentation(presentation);');
     expect(CLIENT).toContain('presentation={knowledgeReaderPresentation}');
     // Every other opener keeps the drawer.
     expect(CLIENT).toContain("useState<'workspace' | 'side-panel'>('side-panel')");

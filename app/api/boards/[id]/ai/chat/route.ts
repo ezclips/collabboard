@@ -66,6 +66,9 @@ function checkRateLimit(userId: string): boolean {
   return true;
 }
 
+/** Shared by the POST body and the GET query, so both refuse the same shapes. */
+const threadIdSchema = z.string().uuid();
+
 /**
  * Strict on purpose. `knowledgeDocumentId`, `pageNumber`, `selectedText`,
  * `charStart`, `charEnd`, `postId`, `context` and `citations` all belong to
@@ -205,7 +208,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       provider: result.provider,
       model: result.model,
     });
-    if (!assistant.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    if (!assistant.ok) {
+      // The thread id travels even on this failure. The answer was generated
+      // and then lost, which is what the 503 says; but the thread and the
+      // user's question ARE durable, and a client that opened a NEW thread
+      // with this request would otherwise have no way to name it again --
+      // every retry would strand another thread holding one message. Saying
+      // which conversation this was is not a claim that the reply survived.
+      return NextResponse.json({ error: 'Unavailable', threadId: thread.id }, { status: 503 });
+    }
 
     return NextResponse.json({
       threadId: thread.id,
@@ -220,6 +231,108 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
   } catch {
     // No cause, no stack: a thrown value here could carry provider detail.
+    return NextResponse.json({ error: 'Unexpected error.' }, { status: 500 });
+  }
+}
+
+/**
+ * Reading a private conversation back.
+ *
+ * Two shapes, one route: without `threadId` this answers the caller's own
+ * thread summaries for THIS board, newest first and carrying no messages;
+ * with one it answers that single thread and its messages in order. Both go
+ * through the same authenticated client, the same board-read check and the
+ * same three-part scope as POST, so neither can see further than a send can.
+ *
+ * The projection is explicit rather than a row spread: `context` and
+ * `citations` are unused in this slice, and nothing about a credential --
+ * connection id, key hint, endpoint -- exists on these rows to leak. Only
+ * `provider` and `model` names travel, which is what a client may display.
+ */
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const cookieStore = await cookies();
+    const sessionClient = createChatRouteClient(cookieStore);
+    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    const { id: boardId } = await context.params;
+
+    let allowed: boolean;
+    try {
+      allowed = await canReadBoardKnowledge(
+        sessionClient as unknown as KnowledgeBoardReadAuthorizationClient,
+        boardId,
+        user.id,
+      );
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    const repository = createBoardAiThreadRepository(
+      sessionClient as unknown as BoardAiChatSupabaseClient,
+    );
+    const scopedUser = asUserId(user.id);
+    const scopedBoard = asBoardId(boardId);
+
+    const requestedThreadId = new URL(request.url).searchParams.get('threadId');
+    if (requestedThreadId === null) {
+      const threads = await repository.listThreads(scopedUser, scopedBoard);
+      if (!threads.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      return NextResponse.json({
+        threads: threads.value.map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        })),
+      });
+    }
+
+    // A malformed id is refused before it reaches the database, and answers
+    // the same way a valid-but-foreign one does: nothing here reveals whether
+    // an id exists somewhere the caller cannot see.
+    if (!threadIdSchema.safeParse(requestedThreadId).success) {
+      return NextResponse.json({ error: 'Chat thread not found' }, { status: 404 });
+    }
+
+    const messages = await repository.listMessages(scopedUser, scopedBoard, requestedThreadId);
+    if (!messages.ok) {
+      // The repository reports a thread outside this user+board scope as
+      // not_found; every other failure is infrastructure.
+      const status = messages.error.code === 'not_found' ? 404 : 503;
+      return NextResponse.json(
+        { error: status === 404 ? 'Chat thread not found' : 'Unavailable' },
+        { status },
+      );
+    }
+
+    const thread = await repository.getThread(scopedUser, scopedBoard, requestedThreadId);
+    if (!thread.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    if (thread.value === null) {
+      return NextResponse.json({ error: 'Chat thread not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      thread: {
+        id: thread.value.id,
+        title: thread.value.title,
+        createdAt: thread.value.createdAt,
+        updatedAt: thread.value.updatedAt,
+      },
+      messages: messages.value.map((entry) => ({
+        id: entry.id,
+        role: entry.role,
+        content: entry.content,
+        provider: entry.provider,
+        model: entry.model,
+        createdAt: entry.createdAt,
+      })),
+    });
+  } catch {
     return NextResponse.json({ error: 'Unexpected error.' }, { status: 500 });
   }
 }

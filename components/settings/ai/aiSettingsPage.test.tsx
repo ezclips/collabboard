@@ -3,6 +3,7 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AI_ROLES } from '@/lib/ai/aiRoles';
 
 /**
  * BYOK AI Settings UI -- Phase 2B.
@@ -192,13 +193,19 @@ describe('AI settings: initial load', () => {
     expect(text()).not.toContain('ciphertext');
   });
 
-  it('4. renders exactly the two role rows', async () => {
+  it('4. renders one row per configurable role, and no more', async () => {
+    // Board Chat joined at BCHAT-C: its provider/model is the SAME per-user
+    // role preference every other AI surface uses, so it is configured here
+    // rather than in a second settings screen. The count follows the canonical
+    // registry instead of a hard-coded number, so the next role needs no edit.
     await render();
-    expect(container.querySelector('[data-testid="ai-role-row-source-ai"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="ai-role-row-edit"]')).not.toBeNull();
-    expect(container.querySelectorAll('[data-testid^="ai-role-row-"]')).toHaveLength(2);
+    for (const role of AI_ROLES) {
+      expect(container.querySelector(`[data-testid="ai-role-row-${role}"]`), role).not.toBeNull();
+    }
+    expect(container.querySelectorAll('[data-testid^="ai-role-row-"]')).toHaveLength(AI_ROLES.length);
     expect(text()).toContain('Source AI');
     expect(text()).toContain('Edit & Rewrite');
+    expect(text()).toContain('Board Chat');
   });
 
   it('5. reflects a stored role selection', async () => {

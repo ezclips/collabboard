@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { authenticateSettingsRequest } from '@/lib/server/settings/settingsRequestAuth';
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
-import { AI_ROLE_EDIT, AI_ROLE_SOURCE, isAIRole } from '@/lib/ai/aiRoles';
+import { AI_ROLES, isAIRole } from '@/lib/ai/aiRoles';
 import { MODEL_ID_MAX } from '@/lib/domain/settings/aiProviderConnection';
 import type { UserId } from '@/lib/domain/core/ids';
 
@@ -19,7 +19,10 @@ import type { UserId } from '@/lib/domain/core/ids';
 
 export const runtime = 'nodejs';
 
-const ROLES = [AI_ROLE_SOURCE, AI_ROLE_EDIT] as const;
+// The canonical registry, not a fourth copy: GET answers for every role the
+// application knows, so a role added in lib/ai/aiRoles.ts is readable here
+// without a second edit -- which is how AI_ROLE_CHAT became configurable.
+const ROLES = AI_ROLES;
 
 interface RoleAssignment {
   readonly connectionId: string | null;

@@ -120,13 +120,14 @@ import type {
 import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
+import BoardAiChatDrawer from '@/components/collabboard/BoardAiChatDrawer';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
 import {
   Link,
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X,
-  Plus, Palette, Strikethrough, Settings
+  Plus, Palette, Strikethrough, Settings, Bot
 } from 'lucide-react';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
@@ -1732,6 +1733,39 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [knowledgeReaderPresentation, setKnowledgeReaderPresentation] =
     useState<'workspace' | 'side-panel'>('side-panel');
 
+  /**
+   * BCHAT-C. The board's own private AI conversation, and the ONE rule that
+   * keeps the right dock single-tenant.
+   *
+   * Two docked drawers must never stack, and neither owns the other: the
+   * reader holds its own open state, this holds Chat's. So the rule is
+   * expressed as two requests in opposite directions, both issued from here --
+   * the only place that can see both surfaces.
+   *
+   * The counter is monotonic and never reset, so every open is a NEW intent
+   * the reader handles at most once. The FOCUSED workspace is deliberately
+   * untouched: nothing can be docked beside it, so there is no conflict to
+   * resolve and no reading session to discard.
+   */
+  const [isBoardAiChatOpen, setIsBoardAiChatOpen] = useState(false);
+  const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);
+
+  const openBoardAiChat = useCallback(() => {
+    setIsBoardAiChatOpen(true);
+    // Direction A: Chat takes the dock, so an open side-panel reader yields it.
+    setCloseSidePanelRequestId((current) => current + 1);
+  }, []);
+
+  const toggleBoardAiChat = useCallback(() => {
+    setIsBoardAiChatOpen((open) => {
+      if (open) return false;
+      setCloseSidePanelRequestId((current) => current + 1);
+      return true;
+    });
+  }, []);
+
+  const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
+
   // A request belongs to the scope that produced it. Clearing on scope change
   // is what stops an old board's source from opening inside a new one.
   useEffect(() => {
@@ -1763,7 +1797,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // Which host draws the reader travels beside the request rather than
     // inside it: the persisted navigation request stays exactly the shape the
     // library and citation paths already build.
-    setKnowledgeReaderPresentation(request.presentation ?? 'side-panel');
+    const presentation = request.presentation ?? 'side-panel';
+    // Direction B: the docked reader takes the dock back, so Chat closes. The
+    // focused workspace covers the whole surface and needs no such rule, but
+    // closing Chat there too keeps one behaviour rather than two.
+    setIsBoardAiChatOpen(false);
+    setKnowledgeReaderPresentation(presentation);
     setKnowledgeDocumentOpenRequest(
       buildKnowledgeDocumentOpenRequest(knowledgeDocumentRequestIdRef.current, request.documentId, request.pageNumber),
     );
@@ -9317,7 +9356,36 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           blockingEditorOpen={isBlockingEditorModalOpen}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
+          closeSidePanelRequestId={closeSidePanelRequestId}
         />
+
+        {/* Board AI Chat. A shell-level sibling for the same reason the reader
+            is one: mounted under CanvasSidebar's z-[3000] wrapper it would be
+            pinned above every editor modal. Here it sits in the docked band and
+            yields to a blocking editor on the board's own flag. */}
+        <BoardAiChatDrawer
+          boardId={canvasId}
+          isOpen={isBoardAiChatOpen}
+          onClose={closeBoardAiChat}
+          blockingEditorOpen={isBlockingEditorModalOpen}
+        />
+
+        {/* The one board-level Board AI entry point. Available to every reader
+            of the board, viewers included -- private reasoning is a read -- so
+            it is deliberately NOT behind canUseCanvasToolbar. Hidden while an
+            editor owns the screen, like every other floating board control. */}
+        {!isBlockingEditorModalOpen && !isBoardAiChatOpen && (
+          <button
+            type="button"
+            data-board-ai-chat-open="true"
+            aria-label="Board AI"
+            title="Board AI"
+            className="fixed right-4 top-4 z-[1300] flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
+            onClick={toggleBoardAiChat}
+          >
+            <Bot className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
 
         {/* Library Panel. PATCH 9W.1: deliberately rendered as a sibling
             OUTSIDE CanvasViewport rather than as one of its children. Root

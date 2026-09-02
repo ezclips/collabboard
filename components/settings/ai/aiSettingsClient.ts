@@ -3,7 +3,7 @@
 import { getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 import type { AIProviderConnection, AIProviderType } from '@/lib/domain/settings/aiProviderConnection';
 import { DISPLAY_NAME_MAX, MODEL_ID_MAX } from '@/lib/domain/settings/aiProviderConnection';
-import { AI_ROLE_EDIT, AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
+import { AI_ROLE_CHAT, AI_ROLE_EDIT, AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
 
 /**
  * Client-side access to the BYOK Settings API.
@@ -14,8 +14,13 @@ import { AI_ROLE_EDIT, AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
  * and is never stored, logged, or read back -- no endpoint returns one.
  */
 
-/** The two configurable roles, in display order. */
-export const AI_ROLES = [AI_ROLE_SOURCE, AI_ROLE_EDIT] as const;
+/**
+ * The configurable roles, in display order. Board Chat joined at BCHAT-C,
+ * which is what lets its provider/model be chosen at all -- the chat route
+ * resolves AI_ROLE_CHAT through the same per-user preference every other role
+ * uses, so this list is the whole of the chooser's authority.
+ */
+export const AI_ROLES = [AI_ROLE_SOURCE, AI_ROLE_EDIT, AI_ROLE_CHAT] as const;
 
 export type AISettingsRole = (typeof AI_ROLES)[number];
 
@@ -37,11 +42,13 @@ export const AI_PROVIDER_LABELS: Record<AIProviderType, string> = {
 export const AI_ROLE_LABELS: Record<AISettingsRole, string> = {
   [AI_ROLE_SOURCE]: 'Source AI',
   [AI_ROLE_EDIT]: 'Edit & Rewrite',
+  [AI_ROLE_CHAT]: 'Board Chat',
 };
 
 export const AI_ROLE_DESCRIPTIONS: Record<AISettingsRole, string> = {
   [AI_ROLE_SOURCE]: 'AI actions on selected source text and research material.',
   [AI_ROLE_EDIT]: 'Improve, shorten, fix grammar, and other selected-text editing actions.',
+  [AI_ROLE_CHAT]: 'Your private Board AI conversation.',
 };
 
 /** What CollabBoard Default resolves to, shown read-only. */
