@@ -150,9 +150,12 @@ describe('5. processing states are shown truthfully', () => {
 describe('6. the ready preview reuses the one raster authority', () => {
   it('renders KnowledgeDocumentPageImage per page and never touches Storage', () => {
     expect(SURFACE).toContain('KnowledgeDocumentPageImage');
-    // The card now renders every page rather than only page 1, so the page
-    // number comes from the page itself. Still the ONE raster authority.
-    expect(SURFACE).toContain('pageNumber={page.pageNumber}');
+    // Superseded by 6b101e4: the card mounts exactly ONE page at a time, so
+    // there is no per-page loop variable to read a number off. The raster is
+    // addressed by the page actually displayed -- the same authority the
+    // citation resolver is given -- and this assertion follows it rather than
+    // the historical multi-page render. Still the ONE raster authority.
+    expect(SURFACE).toContain('pageNumber={currentPageData.pageNumber}');
     const code = executable(SURFACE).toLowerCase();
     for (const forbidden of ['supabase', 'createsignedurl', 'storage', '.from(']) {
       expect(code, `${forbidden} must not appear in executable source`).not.toContain(forbidden);

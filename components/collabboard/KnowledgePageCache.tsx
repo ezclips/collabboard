@@ -211,11 +211,23 @@ export function KnowledgePageCacheProvider({ children }: { children: React.React
     const request = (async (): Promise<KnowledgePagesLoad> => {
       try {
         const result = await fetchKnowledgeReadyPages(boardId, documentId);
+        // N1/N2. The scope check now gates the RETURN as well as the write.
+        //
+        // Guarding only the write left the awaiting caller holding the old
+        // user's page text: the store it would have been written into was
+        // correctly rejected, but `result` was handed back regardless, and a
+        // surface that rendered it would show one user's document to the next.
+        // A store swap means the answer belongs to a session that no longer
+        // exists here, so it is reported as a plain failure -- the same
+        // neutral, non-Ready result a transient error already produces, which
+        // every consumer of this function already handles. Nothing new is
+        // stored, nothing is retried, and the new user's own request goes out
+        // normally.
+        if (storeRef.current !== store) return { status: 'failed' };
         // Only a genuinely Ready answer is ever stored, and only into the store
-        // that asked -- a user change mid-flight must not adopt this result.
-        // A 409 or a transient failure writes NOTHING, so an already-cached
-        // document keeps its last known-good pages.
-        if (result.status === 'ready' && storeRef.current === store) {
+        // that asked. A 409 or a transient failure writes NOTHING, so an
+        // already-cached document keeps its last known-good pages.
+        if (result.status === 'ready') {
           store.entries.set(documentId, result.entry);
         }
         return result;

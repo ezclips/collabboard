@@ -625,7 +625,12 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     // Hidden until the card is hovered, then the whole set appears at once --
     // the SAME `group` the strip's pencil already hangs off, so both arrive
     // and leave as one gesture.
-    expect(cell).toContain('hidden items-center gap-0.5 group-hover:flex');
+    // Asserted as the two properties rather than one literal class string:
+    // the header-overlay fix added positioning and background classes between
+    // them, and what matters is that the set is hidden at rest and revealed by
+    // the shared group -- not the order Tailwind classes happen to be written in.
+    expect(cell).toContain('hidden items-center gap-0.5');
+    expect(cell).toContain('group-hover:flex');
     expect(cell).toContain('<KnowledgePdfCardControls');
     expect(FREEFORM).toContain('group group/image-container relative');
     expect(FREEFORM).toContain('opacity-0 group-hover:opacity-100');
@@ -1313,5 +1318,104 @@ describe('PDF-C1 canvas text selection', () => {
     expect(draft.sourceReference.quoteText).toBeNull();
     // Body seeded from the selection, and independent of the reference.
     expect(draft.content).toContain(draft.sourceReference.selectedText!);
+  });
+});
+
+/**
+ * PDF-C1 header -- the title stays put while the controls are shown.
+ *
+ * The defect was purely a layout one: the controls were a grid child, so
+ * revealing them widened the strip's `auto` left column and pushed the `1fr`
+ * title cell sideways -- on a narrow card the filename survived only as a
+ * fragment. Taking the controls OUT of flow is the whole fix, so these tests
+ * hold the structural properties that make it true. The geometry itself
+ * (bounding boxes before/during hover, at normal and minimum width) is proved
+ * in the Playwright pass, where a real layout engine is doing the work.
+ */
+describe('PDF-C1 header overlay', () => {
+  const FREEFORM_HEADER = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+  /** The strip element itself, from its grid declaration to its first cell. */
+  const strip = () => {
+    // The post strip specifically -- another three-column grid exists earlier
+    // in this file, so the minHeight rule disambiguates which one this is.
+    const at = FREEFORM_HEADER.indexOf(
+      "gridTemplateColumns: 'auto 1fr auto', minHeight: isContainer ? '28px' : '22px'",
+    );
+    expect(at, 'the three-column post strip must exist').toBeGreaterThan(-1);
+    return FREEFORM_HEADER.slice(Math.max(0, at - 900), at + 200);
+  };
+  /** The PDF control overlay, from its marker to the component it renders. */
+  const overlay = () => {
+    const at = FREEFORM_HEADER.indexOf('data-knowledge-pdf-controls="true"');
+    expect(at, 'the PDF control cluster must exist').toBeGreaterThan(-1);
+    return FREEFORM_HEADER.slice(at, FREEFORM_HEADER.indexOf('<KnowledgePdfCardControls', at));
+  };
+
+  it('18-19. the controls are out of flow, so they cannot consume title width', () => {
+    // `absolute` is the fix. As a grid child this cluster widened the strip's
+    // auto left column on hover; out of flow it contributes no column width,
+    // so the title's cell measures the same hovered and unhovered.
+    expect(overlay()).toContain('absolute');
+    expect(strip()).toContain('relative w-full flex-shrink-0 grid');
+    // The columns themselves are untouched.
+    expect(strip()).toContain("gridTemplateColumns: 'auto 1fr auto'");
+  });
+
+  it('20. the overlay starts at the left edge of the strip, inside the card', () => {
+    expect(overlay()).toContain('left-0');
+    expect(overlay()).toContain('inset-y-0');
+    // The same left inset the cell had, so the controls begin where they always did.
+    expect(overlay()).toContain('pl-1.5');
+  });
+
+  it('21. the overlay background is opaque, not a translucent tint', () => {
+    // The strip tint is usually an rgba, so the card's own colour is painted
+    // underneath it. Same appearance as the strip; the title cannot read through.
+    expect(overlay()).toContain("backgroundColor: padlet.metadata?.cardColor || '#ffffff'");
+    expect(overlay()).toContain('backgroundImage: `linear-gradient(${freeformStripBg}, ${freeformStripBg})`');
+    // And it paints above the title rather than beside it.
+    expect(overlay()).toContain('z-10');
+  });
+
+  it('22. the pencil keeps its own column at the right edge', () => {
+    // Never overlapped by the cluster, which is why it stays fully visible:
+    // the overlay is anchored left and the pencil is a separate auto column.
+    expect(FREEFORM_HEADER).toContain('{/* Right: pencil hover-only */}');
+    expect(FREEFORM_HEADER).toContain('<div className="flex items-center pr-1.5">');
+  });
+
+  it('23-24. no wrapping, no second row and no horizontal scroller', () => {
+    const cluster = overlay();
+    expect(cluster).not.toContain('flex-wrap');
+    expect(cluster).not.toContain('overflow-x');
+    expect(cluster).not.toContain('whitespace-normal');
+  });
+
+  it('9. the fix is CSS only -- nothing measures the card', () => {
+    const cluster = overlay();
+    for (const forbidden of ['ResizeObserver', 'offsetWidth', 'clientWidth', 'getBoundingClientRect', 'setTimeout']) {
+      expect(cluster, forbidden + ' must not appear in the header overlay').not.toContain(forbidden);
+    }
+    // Reveal is still the card shell's existing group-hover, not a hover state.
+    expect(cluster).toContain('group-hover:flex');
+    expect(cluster).toContain('hidden');
+    expect(cluster).not.toContain('useState');
+    expect(cluster).not.toContain('onMouseEnter');
+  });
+
+  it('25. the title cell keeps the geometry it always had', () => {
+    // Unchanged: centred, padded, and free to shrink. Nothing about the title
+    // was moved into a PDF-specific cell, so rename stays the shared authority.
+    expect(FREEFORM_HEADER).toContain('<div className="flex items-center justify-center px-1 min-w-0">');
+    expect(FREEFORM_HEADER).toContain('block w-full text-xs font-semibold text-center truncate cursor-pointer');
+  });
+
+  it('13. a viewer gets no overlay at all', () => {
+    // The same early return that withholds every control also withholds the
+    // element that would cover the filename.
+    const at = FREEFORM_HEADER.indexOf('const pdfPlacement = readKnowledgePdfPlacement(padlet);');
+    const cell = FREEFORM_HEADER.slice(at, FREEFORM_HEADER.indexOf('})()}', at));
+    expect(cell.indexOf('if (!canUseFreeformEditButton) return null;'))
+      .toBeLessThan(cell.indexOf('data-knowledge-pdf-controls="true"'));
   });
 });

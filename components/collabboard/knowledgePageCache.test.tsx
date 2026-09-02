@@ -307,3 +307,94 @@ describe('13-15. scope, isolation and storage', () => {
       .not.toContain('KnowledgePageCacheProvider');
   });
 });
+
+/**
+ * N1/N2 -- a request that outlives the user who started it.
+ *
+ * The write side was already guarded. What was not is the RETURN: the awaiting
+ * consumer still received the old user's page text and would have rendered it.
+ * These tests hold both halves, and the fetch is kept pending deliberately so
+ * the switch really does happen mid-flight rather than before or after.
+ */
+describe('N1/N2. a mid-flight user switch cannot leak the previous user\'s pages', () => {
+  /** A fetch whose one response is released by the test, not by the clock. */
+  const pendingPages = () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      await gate;
+      const match = String(input).match(/knowledge\/([^/]+)\/pages$/);
+      return match ? jsonResponse(pagesBody(match[1], `${match[1]}.pdf`)) : jsonResponse({}, 404);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+    return () => release!();
+  };
+
+  it('14-15. the old user\'s result reaches neither the new store nor the caller', async () => {
+    await mountProvider();
+    const release = pendingPages();
+
+    // 2-3. User A starts the load; the response is held open.
+    let pending: Promise<Awaited<ReturnType<KnowledgePageCache['load']>>>;
+    await act(async () => { pending = cache!.load(BOARD_ID, DOC_A); });
+    expect(pagesCalls(), 'the request really is in flight').toHaveLength(1);
+
+    // 4. The user changes while that request is still open.
+    await act(async () => { auth.listener?.('SIGNED_IN', { user: { id: 'user-2' } }); });
+
+    // 5. Only now does user A's response arrive.
+    let result!: Awaited<ReturnType<KnowledgePageCache['load']>>;
+    await act(async () => { release(); result = await pending!; });
+
+    // 6a. User B's store never adopted it.
+    expect(cache!.read(DOC_A), 'the new user\'s store stays empty').toBeNull();
+    // 6b. And the awaiting caller is not handed the old user's page text: a
+    //     scope change is reported as a plain failure, which every consumer
+    //     already treats as "nothing to render".
+    expect(result.status, 'no Ready data may cross the switch').toBe('failed');
+    expect(JSON.stringify(result)).not.toContain('page 1');
+  });
+
+  it('16. user B can load the same document normally afterwards', async () => {
+    await mountProvider();
+    const release = pendingPages();
+    let pending: Promise<Awaited<ReturnType<KnowledgePageCache['load']>>>;
+    await act(async () => { pending = cache!.load(BOARD_ID, DOC_A); });
+    await act(async () => { auth.listener?.('SIGNED_IN', { user: { id: 'user-2' } }); });
+    await act(async () => { release(); await pending!; });
+
+    // The abandoned request left nothing behind -- neither an entry nor a
+    // stuck in-flight promise -- so user B's own read goes out and succeeds.
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+    let second!: Awaited<ReturnType<KnowledgePageCache['load']>>;
+    const releaseSecond = pendingPages();
+    await act(async () => {
+      const p = cache!.load(BOARD_ID, DOC_A);
+      releaseSecond();
+      second = await p;
+    });
+    expect(second.status).toBe('ready');
+    expect(cache!.read(DOC_A), 'and it is cached for the new user').not.toBeNull();
+  });
+
+  it('the guard is the store identity, not the elapsed time', async () => {
+    // Mutation evidence: with the scope comparison removed the first test
+    // cannot fail on timing alone, so pin the exact expression it relies on.
+    const source = executable(read('components/collabboard/KnowledgePageCache.tsx'));
+    expect(source).toMatch(/if \(storeRef\.current !== store\) return \{ status: 'failed' \}/);
+  });
+
+  it('a same-user request in flight is unaffected by a token refresh', async () => {
+    await mountProvider();
+    const release = pendingPages();
+    let pending: Promise<Awaited<ReturnType<KnowledgePageCache['load']>>>;
+    await act(async () => { pending = cache!.load(BOARD_ID, DOC_A); });
+    // 20. Not a user change: the store is the same object, so the result is
+    //     kept exactly as it would have been without the event.
+    await act(async () => { auth.listener?.('TOKEN_REFRESHED', { user: { id: 'user-1' } }); });
+    let result!: Awaited<ReturnType<KnowledgePageCache['load']>>;
+    await act(async () => { release(); result = await pending!; });
+    expect(result.status).toBe('ready');
+    expect(cache!.read(DOC_A)).not.toBeNull();
+  });
+});

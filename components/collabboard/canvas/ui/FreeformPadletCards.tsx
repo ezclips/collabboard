@@ -3331,7 +3331,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               const isExpanded = isContainer ? isContainerExpanded : isAIPostExpanded;
               return (
                 <div
-                  className="w-full flex-shrink-0 grid"
+                  /*
+                    `relative` positions the PDF action overlay below. The grid
+                    itself is unchanged: the overlay is taken OUT of flow, so
+                    the three columns measure the same whether or not the card
+                    is hovered, which is what keeps the title still.
+                  */
+                  className="relative w-full flex-shrink-0 grid"
                   style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: isContainer ? '28px' : '22px', backgroundColor: freeformStripBg }}
                 >
                   {/* Left: the PDF's own controls when this post is a PDF,
@@ -3355,12 +3361,32 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         // the card shell's existing `group` -- the SAME hover
                         // authority the strip's pencil uses, so both appear and
                         // leave as one gesture. CSS only: no hover state, no
-                        // listener, nothing to fall out of sync. The filename
-                        // is NOT swapped out with them; it stays in the strip's
-                        // centre title cell and remains readable throughout.
+                        // listener, no measurement, nothing to fall out of sync.
+                        //
+                        // ABSOLUTE, and that is the whole fix. As a grid child
+                        // these controls widened the strip's `auto` left column
+                        // the moment they appeared, which pushed the `1fr`
+                        // title cell sideways and, on a narrow card, truncated
+                        // the filename to a fragment. Out of flow they consume
+                        // no column width at all, so the title's geometry is
+                        // identical hovered and unhovered -- it is COVERED for
+                        // the duration of the hover, never moved. The card
+                        // shell's own `overflow-hidden` keeps the overlay
+                        // inside the card.
+                        //
+                        // The background is opaque on purpose: the strip tint
+                        // is often a translucent rgba, so painting the card's
+                        // own colour underneath it reproduces exactly what the
+                        // strip looks like while still hiding the title text
+                        // behind it. A translucent overlay would leave the
+                        // filename legible through the icons.
                         <span
                           data-knowledge-pdf-controls="true"
-                          className="hidden items-center gap-0.5 group-hover:flex"
+                          className="absolute inset-y-0 left-0 z-10 hidden items-center gap-0.5 pl-1.5 pr-1 group-hover:flex"
+                          style={{
+                            backgroundColor: padlet.metadata?.cardColor || '#ffffff',
+                            backgroundImage: `linear-gradient(${freeformStripBg}, ${freeformStripBg})`,
+                          }}
                         >
                           <KnowledgePdfCardControls
                             boardId={padlet.board_id}
