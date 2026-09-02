@@ -9301,6 +9301,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           sourceOpenRequest={knowledgeSourceOpenRequest}
           documentOpenRequest={knowledgeDocumentOpenRequest}
           presentation={knowledgeReaderPresentation}
+          blockingEditorOpen={isBlockingEditorModalOpen}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
         />

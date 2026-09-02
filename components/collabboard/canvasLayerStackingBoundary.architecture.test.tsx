@@ -419,6 +419,12 @@ describe('P6J-F7-B1 Knowledge reader drawer stacking band', () => {
   const readerDrawerSrc = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
   const postEditorShellSrc = read('components/collabboard/editors/PostEditorShell.tsx');
 
+  /** Source with comments removed: prose naming a band is not a declaration. */
+  const executable = (source: string) => source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const executableLines = (source: string) => executable(source).split(/\r?\n/);
+
   it('the editor tier is still z-[1000], unmodified by this patch', () => {
     expect(postEditorShellSrc).toContain('fixed inset-0 z-[1000]');
   });
@@ -431,30 +437,140 @@ describe('P6J-F7-B1 Knowledge reader drawer stacking band', () => {
     expect(canvasClientSrc).toContain('absolute left-0 bottom-0 z-[3000]');
   });
 
+  /**
+   * The band a surface ACTUALLY declares, read out of the class string that
+   * declares it. Every number below is derived this way: a hardcoded literal
+   * compared against another hardcoded literal proves the arithmetic, not the
+   * source, and would keep passing while the classes drifted underneath it.
+   */
+  const bandOf = (source: string, marker: string, label: string): number => {
+    const line = executableLines(source).find((l) => l.includes(marker));
+    expect(line, `${label}: no source line declares "${marker}" any more`).toBeDefined();
+    const match = /z-\[(\d+)\]/.exec(line!);
+    expect(match, `${label}: the line declaring "${marker}" carries no z-[n] band`).not.toBeNull();
+    return Number(match![1]);
+  };
+
+  it('every band in the relationship is still declared where it is read from', () => {
+    // Guards the guard: if any anchor stops existing, bandOf fails here first
+    // rather than silently narrowing what the assertions below actually cover.
+    expect(() => bandOf(readerDrawerSrc, 'fixed inset-y-0 right-0', 'docked reader')).not.toThrow();
+    expect(() => bandOf(readerDrawerSrc, 'fixed inset-0', 'focused workspace')).not.toThrow();
+    expect(() => bandOf(postEditorShellSrc, 'fixed inset-0', 'shared editor')).not.toThrow();
+    expect(() => bandOf(canvasClientSrc, 'absolute left-0 bottom-0', 'canvas toolbar')).not.toThrow();
+  });
+
   it('one band per reader host, and nothing ambiguous in between', () => {
     // Comment-stripped: the file's prose explains the 3000 wrapper, and
     // matching that number would prove nothing about what actually renders.
-    const code = readerDrawerSrc.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const code = executable(readerDrawerSrc);
     const bands = code.match(/z-\[(\d+)\]/g) ?? [];
 
-    // PDF-C1: the reader now has TWO hosts, and each declares exactly one
-    // band -- they are the two arms of a single ternary, so only one can ever
-    // apply. More than these two would be genuinely ambiguous again.
-    expect(bands.sort()).toEqual(['z-[1200]', 'z-[3100]']);
+    // The reader has TWO hosts, and each declares exactly one band -- they are
+    // the two arms of a single ternary, so only one can ever apply. A third
+    // would make which one renders ambiguous again.
+    expect(bands.length, 'one band per host, no more').toBe(2);
 
-    // The DOCKED drawer keeps the original band: above the editor tier so it
-    // can sit beside a Note, below the toolbar so the board stays operable
-    // beside it.
-    const docked = 1200;
-    expect(1000, 'editor tier').toBeLessThan(docked);
-    expect(docked).toBeLessThan(3000);
+    const docked = bandOf(readerDrawerSrc, 'fixed inset-y-0 right-0', 'docked reader');
+    const workspace = bandOf(readerDrawerSrc, 'fixed inset-0', 'focused workspace');
+    const editorTier = bandOf(postEditorShellSrc, 'fixed inset-0', 'shared editor');
+    const toolbar = bandOf(canvasClientSrc, 'absolute left-0 bottom-0', 'canvas toolbar');
+    // The two hosts are genuinely different layers, not the same number twice.
+    expect(new Set([docked, workspace]).size, 'the hosts must not collapse into one band').toBe(2);
 
-    // The focused WORKSPACE deliberately sits above the toolbar instead: it
-    // takes the whole surface, the board is no longer the active workspace,
-    // and a toolbar floating on top would swallow clicks meant for the reader
-    // -- including the Board tab that leads back.
-    const workspace = 3100;
-    expect(workspace).toBeGreaterThan(3000);
+    // The DOCKED drawer: above the editor tier so it can sit beside a Note,
+    // below the toolbar so the board stays operable beside it. Both halves are
+    // source-to-source comparisons -- change either class and this fails.
+    expect(editorTier, 'editor tier must stay below the docked reader').toBeLessThan(docked);
+    expect(docked, 'docked reader must stay below the toolbar').toBeLessThan(toolbar);
+
+    // The focused WORKSPACE deliberately sits ABOVE the toolbar instead: it
+    // takes the whole surface, the board is no longer the active workspace, and
+    // a toolbar floating on top would swallow clicks meant for the reader --
+    // including the Board tab that leads back.
+    expect(workspace, 'focused workspace must stay above the toolbar').toBeGreaterThan(toolbar);
+  });
+
+  /**
+   * PDF-C1 workspace yield. The focused workspace is `fixed inset-0` and opaque
+   * ABOVE the shared editor tier, so on its own it would cover any editor
+   * opened from inside it -- Create Note leaves the editor open in state and
+   * invisible in fact. The band is correct and deliberately unchanged; what
+   * makes it safe is that the host steps aside while a blocking editor owns the
+   * screen. These assertions pin that pairing, because the numbers alone cannot.
+   */
+  describe('a full-viewport host above the editor tier must yield to it', () => {
+    it('the covering condition this contract exists for is still real', () => {
+      const workspace = bandOf(readerDrawerSrc, 'fixed inset-0', 'focused workspace');
+      const editorTier = bandOf(postEditorShellSrc, 'fixed inset-0', 'shared editor');
+      const code = executable(readerDrawerSrc);
+      // Full-viewport, opaque, and above the editor: all three together are
+      // what make yielding mandatory rather than cosmetic.
+      expect(code).toContain('fixed inset-0');
+      expect(code, 'an opaque host is what makes covering total').toContain('bg-white');
+      expect(workspace).toBeGreaterThan(editorTier);
+    });
+
+    it('the workspace host yields visually AND interactively', () => {
+      const code = executable(readerDrawerSrc);
+      expect(code).toContain('const yieldsToEditor = isWorkspace && blockingEditorOpen');
+      // The same pair the canvas toolbar already yields with -- inert as well as
+      // invisible, so a transparent host cannot still eat the editor's clicks.
+      expect(code).toContain("yieldsToEditor ? ' pointer-events-none opacity-0' : ''");
+      expect(code).toContain("data-knowledge-reader-yielded={yieldsToEditor ? 'true' : 'false'}");
+    });
+
+    it('only the covering host yields -- the docked drawer is untouched', () => {
+      const code = executable(readerDrawerSrc);
+      // `isWorkspace &&` is the whole guard: the docked drawer occupies one
+      // edge, an editor is already visible beside it, and yielding there would
+      // break reading a source next to the Note it supports.
+      expect(code).toMatch(/yieldsToEditor\s*=\s*isWorkspace\s*&&/);
+      expect(code).toContain("'fixed inset-y-0 right-0 z-[1200]");
+    });
+
+    it('the yield runs off the GENERIC blocking-editor authority, not a Note-only flag', () => {
+      expect(canvasClientSrc).toContain('blockingEditorOpen={isBlockingEditorModalOpen}');
+      // That memo answers for every blocking editor, so no editor added later
+      // has to remember this contract exists.
+      const memo = canvasClientSrc.slice(
+        canvasClientSrc.indexOf('const isBlockingEditorModalOpen'),
+        canvasClientSrc.indexOf('], ['),
+      );
+      expect(memo).toContain('isNoteEditorOpen');
+      expect(
+        (memo.match(/\bis[A-Za-z]+(?:Editor|Modal)Open\b/g) || []).length,
+        'a Note-only condition would be the workaround this must not become',
+      ).toBeGreaterThan(5);
+      // No editor is named inside the reader: it only ever sees the flag.
+      const code = executable(readerDrawerSrc);
+      for (const leak of ['isNoteEditorOpen', 'NoteEditor', 'PostEditorShell']) {
+        expect(code, leak + ' would make this a Note-only special case').not.toContain(leak);
+      }
+    });
+
+    it('yielding hides the host without unmounting it, so reader state survives', () => {
+      const code = executable(readerDrawerSrc);
+      // opacity/pointer-events, never an early return: the document, scroll
+      // position and search are all still there when the editor closes.
+      expect(code).not.toMatch(/if \(yieldsToEditor\)[\s\S]{0,40}return null/);
+      // And yielding never CAUSES a close. `if (yieldsToEditor) return;` ahead
+      // of closeReader() is the opposite -- a guard -- so the shape that would
+      // be wrong is a yield leading to closeReader with no return in between.
+      expect(code).not.toMatch(/yieldsToEditor\)?\s*(\{[^}]*)?closeReader\(\)/);
+      expect(code).not.toMatch(/yieldsToEditor[\s\S]{0,60}setReader\(null\)/);
+    });
+
+    it('Escape belongs to the editor while the host is yielded', () => {
+      const code = executable(readerDrawerSrc);
+      // The reader's existing Escape precedence, extended by one surface. A
+      // yielded host is invisible and inert, so closing it on Escape would tear
+      // down the workspace the user is about to come back to -- and leave
+      // nothing for the editor's own Escape to return to.
+      expect(code).toMatch(/if \(yieldsToEditor\) return;[\s\S]{0,40}closeReader\(\);/);
+      // Still the same one handler, standing down for the library modal too.
+      expect(code).toContain('KNOWLEDGE_LIBRARY_SELECTOR');
+    });
   });
 
   it('the drawer is a CanvasClient-level sibling AFTER </CanvasViewport>, never inside the toolbar wrapper', () => {

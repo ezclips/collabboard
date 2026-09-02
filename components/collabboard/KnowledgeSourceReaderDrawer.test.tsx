@@ -1116,3 +1116,180 @@ describe('PDF-C1 a still-extracting source recovers without reopening', () => {
     expect(drawerCode).toContain('data-knowledge-library-panel="true"');
   });
 });
+
+// ============================================================================
+// PDF-C1: the focused workspace yields to a blocking editor modal
+// ============================================================================
+// The focused workspace is `fixed inset-0`, opaque, and above the shared editor
+// tier. A Note created FROM it therefore opened UNDERNEATH it -- present in
+// state, invisible and unclickable in fact. The band is right and stays; the
+// host steps aside instead, exactly as the canvas toolbar already does on the
+// same board-level flag. The docked drawer never needs to: it occupies one edge
+// of the viewport, so an editor is already visible beside it.
+
+describe('PDF-C1 focused workspace yields to a blocking editor modal', () => {
+  const pagesFor = (documentId: string, originalFilename: string, pageCount = 3) =>
+    jsonResponse({
+      document: { id: documentId, originalFilename, pageCount },
+      pages: Array.from({ length: pageCount }, (_, index) => ({
+        pageNumber: index + 1,
+        text: `${originalFilename} body for page ${index + 1}`,
+      })),
+    });
+
+  beforeEach(() => {
+    fetchMock.mockImplementation(async () => pagesFor(SOURCE_A, 'synthetic.pdf'));
+  });
+
+  /** Opens the reader in one host, with the board's blocking-editor flag. */
+  const openIn = async (
+    presentation: 'workspace' | 'side-panel',
+    blockingEditorOpen: boolean,
+    onCreateNoteFromPage = vi.fn(),
+  ) => mount({
+    documentOpenRequest: docRequest(1),
+    presentation,
+    blockingEditorOpen,
+    onCreateNoteFromPage,
+    onOpenBacklinkTarget: vi.fn(),
+  });
+
+  const yielded = () => drawerEl()!.getAttribute('data-knowledge-reader-yielded');
+  const cls = () => drawerEl()!.className;
+
+  it('the workspace host receives and acts on the blocking-editor authority', async () => {
+    await openIn('workspace', false);
+    expect(yielded(), 'nothing is open, so nothing yields').toBe('false');
+    expect(cls()).not.toContain('pointer-events-none');
+    expect(cls()).not.toContain('opacity-0');
+    // The band itself is unchanged -- yielding is not a restacking.
+    expect(cls()).toContain('z-[3100]');
+  });
+
+  it('yields visually AND interactively while a blocking editor is open', async () => {
+    await openIn('workspace', true);
+    expect(yielded()).toBe('true');
+    // Invisible is not enough: an opaque full-viewport host that stayed
+    // clickable would still swallow every click meant for the editor.
+    expect(cls(), 'must not intercept the editor').toContain('pointer-events-none');
+    expect(cls(), 'must not cover the editor').toContain('opacity-0');
+    // Still the same host, at the same band: it stepped aside, it did not move.
+    expect(cls()).toContain('fixed inset-0');
+    expect(cls()).toContain('z-[3100]');
+  });
+
+  it('restores the SAME workspace when the editor closes -- no remount, no reload', async () => {
+    const onCreateNoteFromPage = vi.fn();
+    await openIn('workspace', false, onCreateNoteFromPage);
+    const before = drawerEl();
+    const tabBefore = drawerEl()!.querySelector('[data-knowledge-reader-tab="active"]')!.textContent;
+    const requestsBefore = pageRequests().length;
+
+    // The editor opens...
+    await renderInto({
+      documentOpenRequest: docRequest(1),
+      presentation: 'workspace',
+      blockingEditorOpen: true,
+      onCreateNoteFromPage,
+      onOpenBacklinkTarget: vi.fn(),
+    });
+    expect(yielded()).toBe('true');
+    // ...and closes.
+    await renderInto({
+      documentOpenRequest: docRequest(1),
+      presentation: 'workspace',
+      blockingEditorOpen: false,
+      onCreateNoteFromPage,
+      onOpenBacklinkTarget: vi.fn(),
+    });
+
+    expect(yielded()).toBe('false');
+    expect(cls()).not.toContain('pointer-events-none');
+    expect(cls()).not.toContain('opacity-0');
+    // The same element throughout: hidden, never unmounted, so the document,
+    // its pages and the reader's own state were never torn down.
+    expect(drawerEl(), 'the workspace must not remount').toBe(before);
+    expect(drawerEl()!.querySelector('[data-knowledge-reader-tab="active"]')!.textContent).toBe(tabBefore);
+    expect(drawerEl()!.textContent).toContain('synthetic.pdf body for page 1');
+    // Same document, and not re-fetched: yielding is not a reload.
+    expect(pageRequests().length, 'yielding must not refetch the document').toBe(requestsBefore);
+    expect(drawerEl()!.querySelector('[data-knowledge-library-panel="true"]')).not.toBeNull();
+  });
+
+  it('the docked side panel does NOT yield, and keeps its geometry', async () => {
+    await openIn('side-panel', true);
+    // An editor is already visible beside a 420/880px edge drawer -- reading a
+    // source next to the Note it supports is the entire point of this host.
+    expect(yielded()).toBe('false');
+    expect(cls()).not.toContain('pointer-events-none');
+    expect(cls()).not.toContain('opacity-0');
+    // Unchanged docked geometry and band.
+    expect(cls()).toContain('fixed inset-y-0 right-0');
+    expect(cls()).toContain('z-[1200]');
+    expect(cls()).toContain('lg:w-[880px]');
+  });
+
+  it('the Create Note callback is forwarded unchanged in both hosts', async () => {
+    const onCreateNoteFromPage = vi.fn();
+    for (const presentation of ['workspace', 'side-panel'] as const) {
+      await openIn(presentation, false, onCreateNoteFromPage);
+      // The reader still offers the same document workspace the create flow
+      // reads its selection from; nothing about that path was rewired.
+      expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace="true"]')).not.toBeNull();
+      expect(onCreateNoteFromPage, 'yielding never invokes it by itself').not.toHaveBeenCalled();
+    }
+  });
+
+  /**
+   * Escape precedence, the existing concept extended by exactly one surface.
+   * The reader already stands down for the library modal because closing the
+   * panel underneath first would be wrong. A yielded workspace is the same
+   * situation in a stronger form: it is invisible and inert, so the editor on
+   * screen is the only thing Escape can sensibly mean. Without this a single
+   * Escape closes both at once and there is no workspace left to return to.
+   */
+  describe('Escape belongs to the editor while the workspace is yielded', () => {
+    const escape = async () => {
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+      await settle();
+    };
+
+    it('does not close the yielded workspace -- the editor owns that Escape', async () => {
+      await openIn('workspace', true);
+      expect(drawerEl()).not.toBeNull();
+      await escape();
+      // Still mounted, still yielded, still the same document: the editor took
+      // the key, and the workspace is intact behind it.
+      expect(drawerEl(), 'a yielded workspace must survive the editor closing').not.toBeNull();
+      expect(yielded()).toBe('true');
+      expect(drawerEl()!.textContent).toContain('synthetic.pdf body for page 1');
+    });
+
+    it('still closes the workspace when no editor is open', async () => {
+      await openIn('workspace', false);
+      expect(drawerEl()).not.toBeNull();
+      await escape();
+      // The pre-existing behaviour, unchanged wherever it was already right.
+      expect(drawerEl(), 'Escape must still close an unyielded reader').toBeNull();
+    });
+
+    it('leaves the docked drawer Escape behaviour exactly as it was', async () => {
+      await openIn('side-panel', true);
+      await escape();
+      // The docked drawer never yields, so nothing about its Escape changes --
+      // even with a blocking editor open.
+      expect(drawerEl()).toBeNull();
+    });
+  });
+
+  it('the same reader instance serves both hosts and both flag states', async () => {
+    // One implementation, one document identity: the flag changes geometry and
+    // nothing else, and the id it opened on is the id it still shows.
+    expect((drawerCode.match(/data-knowledge-reader="true"/g) || []).length).toBe(1);
+    await openIn('workspace', true);
+    expect(pageRequests()).toHaveLength(1);
+    expect(pageRequests()[0]).toContain(SOURCE_A);
+  });
+});

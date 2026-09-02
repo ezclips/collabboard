@@ -62,6 +62,24 @@ export interface KnowledgeSourceReaderDrawerProps {
    */
   presentation?: 'workspace' | 'side-panel';
   /**
+   * The board's OWN blocking-editor authority (`isBlockingEditorModalOpen`),
+   * forwarded unchanged. It is already the single generic answer to "does a
+   * modal own the screen right now" for all fourteen editors, and the canvas
+   * toolbar's z-[3000] wrapper already steps aside on exactly this flag.
+   *
+   * The focused workspace needs the same courtesy for the same reason. It is
+   * `fixed inset-0` and opaque, so a Note created FROM it -- via Create Note or
+   * the AI panel's Note Post -- would open at the shared editor tier underneath
+   * a surface covering the whole viewport: open in state, invisible in fact.
+   * Yielding is the same one-line answer the toolbar already gives, and it
+   * leaves the shared editor tier and both reader bands exactly where they are.
+   *
+   * The docked drawer never yields: it occupies one edge of the viewport, so an
+   * editor is already visible beside it -- reading a source next to the Note it
+   * supports is the whole point of that host.
+   */
+  blockingEditorOpen?: boolean;
+  /**
    * Forwarded verbatim for an ordinary Note Post. PDF Source AI Phase 1 adds
    * the optional second argument ONLY for the AI panel's own Note Post -- the
    * canvas still owns placement and every write; this only lets it seed the
@@ -143,6 +161,7 @@ export default function KnowledgeSourceReaderDrawer({
   sourceOpenRequest = null,
   documentOpenRequest = null,
   presentation = 'side-panel',
+  blockingEditorOpen = false,
   onCreateNoteFromPage,
   onOpenBacklinkTarget,
 }: KnowledgeSourceReaderDrawerProps) {
@@ -161,6 +180,17 @@ export default function KnowledgeSourceReaderDrawer({
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
   const isOpen = reader !== null;
+
+  const isWorkspace = presentation === 'workspace';
+  /**
+   * Yield only where covering is actually possible. Hidden and inert rather
+   * than closed: the reader stays mounted, so the document, the scroll
+   * position, the search and every other piece of reader state are still
+   * there when the editor goes away -- nothing is restored because nothing
+   * was torn down. Declared up here because the Escape handler below reads
+   * it too, and hooks cannot sit behind the closed-reader early return.
+   */
+  const yieldsToEditor = isWorkspace && blockingEditorOpen;
 
   /**
    * Opens a source by DOCUMENT ID. Identity is the id and only the id: two
@@ -305,12 +335,17 @@ export default function KnowledgeSourceReaderDrawer({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector(KNOWLEDGE_LIBRARY_SELECTOR)) return;
+      // Same precedence, one more topmost surface: while this host has yielded
+      // it is invisible and inert, so Escape belongs to the editor that is
+      // actually on screen. Without this a single Escape closes both at once
+      // and there is no workspace left to come back to.
+      if (yieldsToEditor) return;
       closeReader();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, yieldsToEditor]);
 
   // Library data for the right pane. Read BEFORE the closed-reader early return
   // below, because hooks cannot sit behind a conditional -- the hook reads the
@@ -325,8 +360,6 @@ export default function KnowledgeSourceReaderDrawer({
   if (!boardId || reader === null) return null;
 
   const libraryPageSummary = pageCountSummary(reader.pageCount, reader.pages.length, reader.loading);
-  const isWorkspace = presentation === 'workspace';
-
   return (
     <aside
       data-knowledge-reader="true"
@@ -337,7 +370,8 @@ export default function KnowledgeSourceReaderDrawer({
       // is the SAME overlay, merely wide enough to also fit the Source Notes
       // pane beside the unchanged 420px reading experience.
       data-knowledge-reader-presentation={presentation}
-      className={isWorkspace
+      data-knowledge-reader-yielded={yieldsToEditor ? 'true' : 'false'}
+      className={`${isWorkspace
         // The focused workspace: the document owns the surface. The board is
         // covered rather than unmounted, so its camera, placements and every
         // other piece of live state survive the visit untouched.
@@ -349,7 +383,11 @@ export default function KnowledgeSourceReaderDrawer({
         // floating on top would also let it swallow clicks meant for the
         // reader, including the Board tab that leads back.
         ? 'fixed inset-0 z-[3100] flex flex-col bg-white'
-        : 'fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[880px]'}
+        : 'fixed inset-y-0 right-0 z-[1200] flex w-full flex-col border-l border-gray-200 bg-white shadow-2xl md:w-[420px] lg:w-[880px]'}${
+        // The toolbar's own yield transition, so the two surfaces that
+        // step aside for a modal do it the same way.
+        isWorkspace ? ' transition-opacity duration-150' : ''}${
+        yieldsToEditor ? ' pointer-events-none opacity-0' : ''}`}
     >
       {/*
         The open document, named as a tab. Deliberately the smallest useful
