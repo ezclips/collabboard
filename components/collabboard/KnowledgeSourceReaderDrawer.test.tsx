@@ -32,6 +32,12 @@ vi.mock('next/navigation', () => ({
 const drawerCode = fs
   .readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgeSourceReaderDrawer.tsx'), 'utf8')
   .replace(/^\s*\/\/.*$/gm, '');
+/** The one place the `/pages` request is allowed to live. Block comments
+ *  stripped too: this module's prose names the endpoint repeatedly. */
+const pageCacheCode = fs
+  .readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgePageCache.tsx'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -232,8 +238,13 @@ describe('P6J-F6-B2 source-open requests (relocated)', () => {
   });
 
   it('J: source opening adds no endpoint and no filename-keyed lookup', async () => {
-    // One pages endpoint, reused -- not a second fetch implementation.
-    expect((drawerCode.match(/\/pages`\)/g) ?? []).length).toBe(1);
+    // One pages endpoint, reused -- not a second fetch implementation. Since
+    // the shared page cache took ownership of that request, the guarantee is
+    // now stronger than "one fetch in this file": the drawer has NO fetch of
+    // its own, and the endpoint has exactly one home in the whole client.
+    expect((drawerCode.match(/fetch\(/g) ?? []).length, 'the drawer fetches nothing itself').toBe(0);
+    expect((pageCacheCode.match(/fetch\(/g) ?? []).length, 'exactly one implementation').toBe(1);
+    expect(pageCacheCode).toContain('/pages`');
     // The document lookup is keyed on id. A filename-keyed find would open the
     // wrong one of two same-named sources.
     expect(drawerCode).not.toMatch(/find\([^)]*originalFilename/);

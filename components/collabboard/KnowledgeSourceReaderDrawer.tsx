@@ -8,6 +8,10 @@ import KnowledgeDocumentDetails, {
   type KnowledgeDocumentDetailPage,
 } from '@/components/collabboard/KnowledgeDocumentDetails';
 import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import {
+  useKnowledgePageCache,
+  fetchKnowledgeReadyPages,
+} from '@/components/collabboard/KnowledgePageCache';
 import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
@@ -139,24 +143,6 @@ interface KnowledgeSourceAiSession {
  * fully supported. Identity is never taken from the payload -- the id we asked
  * for is the id we show.
  */
-function documentMetadata(value: unknown): { originalFilename: string; pageCount: number | null } {
-  if (!value || typeof value !== 'object') return { originalFilename: '', pageCount: null };
-  const record = value as Record<string, unknown>;
-  return {
-    originalFilename: typeof record.originalFilename === 'string' ? record.originalFilename : '',
-    pageCount: typeof record.pageCount === 'number' && Number.isInteger(record.pageCount) && record.pageCount > 0
-      ? record.pageCount
-      : null,
-  };
-}
-
-function isDetailPage(value: unknown): value is KnowledgeDocumentDetailPage {
-  return !!value
-    && typeof value === 'object'
-    && typeof (value as KnowledgeDocumentDetailPage).pageNumber === 'number'
-    && typeof (value as KnowledgeDocumentDetailPage).text === 'string';
-}
-
 export default function KnowledgeSourceReaderDrawer({
   sourceOpenRequest = null,
   documentOpenRequest = null,
@@ -168,6 +154,8 @@ export default function KnowledgeSourceReaderDrawer({
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [reader, setReader] = useState<KnowledgeReaderState | null>(null);
+  /** The same shared page memory the canvas card reads. */
+  const pageCache = useKnowledgePageCache();
   // Each request is acted on at most once, and the latch has the same lifetime
   // as this permanently-mounted drawer. That pairing is the fix for the old
   // replay: the latch used to unmount with the toolbar while CanvasClient kept
@@ -206,6 +194,41 @@ export default function KnowledgeSourceReaderDrawer({
   ) => {
     if (!boardId) return;
     const generation = ++readGenerationRef.current;
+
+    /**
+     * Stale-while-revalidate. A document this session already read opens on its
+     * known-good pages IMMEDIATELY -- no empty reader, no "Loading", because
+     * closing a reader was only ever throwing away data the server had already
+     * made permanent. Reopening is therefore instant and issues no request at
+     * all while the entry is fresh.
+     */
+    const cached = pageCache?.read(documentId) ?? null;
+    if (cached) {
+      setReader({
+        documentId,
+        originalFilename: cached.originalFilename,
+        pageCount: cached.pageCount,
+        pages: cached.pages,
+        loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
+      });
+      // Fresh enough to trust: nothing further to do.
+      if (!pageCache || !pageCache.isStale(cached)) return;
+      // Stale: revalidate BEHIND the content already on screen, and keep the
+      // last known-good pages if that quiet read fails.
+      const revalidated = await pageCache.load(boardId, documentId);
+      if (generation !== readGenerationRef.current) return;
+      if (revalidated.status !== 'ready') return;
+      setReader((current) => (current?.documentId === documentId
+        ? {
+          ...current,
+          originalFilename: revalidated.entry.originalFilename,
+          pageCount: revalidated.entry.pageCount,
+          pages: revalidated.entry.pages,
+        }
+        : current));
+      return;
+    }
+
     setReader({
       documentId, originalFilename: '', pageCount: null, pages: [],
       loading: true, error: false, initialPageNumber, sourceTarget, aiSession: null,
@@ -218,20 +241,24 @@ export default function KnowledgeSourceReaderDrawer({
     // pick, or a close, retires this loop at every await boundary.
     for (let attempt = 0; attempt <= READER_PAGES_RETRY_LIMIT; attempt += 1) {
       try {
-        const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`);
+        // Shared with any identical request already open -- a card mounting at
+        // the same moment and this reader now cost ONE `/pages` read between
+        // them. The retry policy below is this reader's own and is unchanged.
+        const result = pageCache
+          ? await pageCache.load(boardId, documentId)
+          : await fetchKnowledgeReadyPages(boardId, documentId);
         if (generation !== readGenerationRef.current) return;
-        if (response.status === 409 && attempt < READER_PAGES_RETRY_LIMIT) {
+        if (result.status === 'preparing' && attempt < READER_PAGES_RETRY_LIMIT) {
           await new Promise((resolve) => { window.setTimeout(resolve, READER_PAGES_RETRY_DELAY_MS); });
           if (generation !== readGenerationRef.current) return;
           continue;
         }
-        const payload = await response.json().catch(() => null) as { pages?: unknown; document?: unknown } | null;
-        if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('details unavailable');
-        if (generation !== readGenerationRef.current) return;
+        if (result.status !== 'ready') throw new Error('details unavailable');
         setReader({
           documentId,
-          ...documentMetadata(payload.document),
-          pages: payload.pages.filter(isDetailPage),
+          originalFilename: result.entry.originalFilename,
+          pageCount: result.entry.pageCount,
+          pages: result.entry.pages,
           loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
         });
         return;

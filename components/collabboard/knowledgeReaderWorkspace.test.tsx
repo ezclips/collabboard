@@ -92,9 +92,10 @@ describe('7-13. the Library panel owns the document identity', () => {
     // And the rows come from the same board index, not a second fetch.
     expect(DRAWER).toContain('useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null)');
     expect(DRAWER).toContain('knowledgeSourceBacklinkDocumentRows(libraryBacklinks)');
-    // The drawer's own page fetch is pre-existing and untouched; what matters
-    // is that the Library rows add no second request of their own.
-    expect((executable(DRAWER).match(/fetch\(/g) || []).length).toBe(1);
+    // The Library rows add no request of their own -- and since the shared
+    // page cache took ownership of the `/pages` read, the drawer now issues
+    // none at all.
+    expect((executable(DRAWER).match(/fetch\(/g) || []).length).toBe(0);
   });
 
   it('13. the workspace no longer repeats that metadata above the document', () => {

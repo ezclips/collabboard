@@ -3,6 +3,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
+import {
+  useKnowledgePageCache,
+  fetchKnowledgeReadyPages,
+} from '@/components/collabboard/KnowledgePageCache';
 import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
   useKnowledgeSourceNoteColors,
@@ -452,7 +456,20 @@ export default function KnowledgePdfCanvasSurface({
    * nothing. It serves two jobs: the parsed-content view, and the per-page
    * fallback whenever a page has no rendered image.
    */
-  const [pages, setPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(null);
+  /**
+   * The shared, user-scoped memory of every Ready document this session has
+   * already read. Null outside a provider, in which case everything below is
+   * exactly the fetch-on-mount path it always was.
+   */
+  const pageCache = useKnowledgePageCache();
+  /**
+   * Seeded from the cache, so a card remounting onto a document this session
+   * already knows paints its text on the FIRST render -- there is no null
+   * state to flash, and `documentLoading` below is false from the start.
+   */
+  const [pages, setPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(
+    () => pageCache?.read(documentId)?.pages ?? null,
+  );
   const [pagesFailed, setPagesFailed] = useState(false);
   /** A 409 was seen: extraction is still finishing, so the wait is expected. */
   const [pagesPreparing, setPagesPreparing] = useState(false);
@@ -469,42 +486,46 @@ export default function KnowledgePdfCanvasSurface({
     let cancelled = false;
     let retryTimer = 0;
     (async () => {
-      try {
-        const response = await fetch(
-          `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`,
-        );
-        // 409 is "not ready yet", the one status that must never latch. Only
-        // the timer advances the attempt, so exactly one request is ever in
-        // flight and a retry cannot stack on the request that scheduled it.
-        if (response.status === 409) {
-          if (cancelled) return;
-          setPagesPreparing(true);
-          retryTimer = window.setTimeout(() => {
-            if (!cancelled) setPagesAttempt((attempt) => attempt + 1);
-          }, PAGES_RETRY_DELAY_MS);
-          return;
-        }
-        const payload = await response.json().catch(() => null) as { pages?: unknown } | null;
-        if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('pages unavailable');
-        if (cancelled) return;
-        setPagesPreparing(false);
-        setPages(payload.pages as readonly KnowledgeDocumentDetailPage[]);
-      } catch {
-        // Text is enhancement over the status the card already shows truthfully.
-        if (!cancelled) setPagesFailed(true);
+      // The SAME `/pages` read, now shared: a request already in flight for
+      // this document is joined rather than duplicated, and a Ready answer is
+      // remembered for every other view of the same document.
+      const result = pageCache
+        ? await pageCache.load(boardId, documentId)
+        : await fetchKnowledgeReadyPages(boardId, documentId);
+      if (cancelled) return;
+      // 409 is "not ready yet", the one status that must never latch, and the
+      // one the cache deliberately refuses to store. Only the timer advances
+      // the attempt, so exactly one request is ever in flight and a retry
+      // cannot stack on the request that scheduled it.
+      if (result.status === 'preparing') {
+        setPagesPreparing(true);
+        retryTimer = window.setTimeout(() => {
+          if (!cancelled) setPagesAttempt((attempt) => attempt + 1);
+        }, PAGES_RETRY_DELAY_MS);
+        return;
       }
+      if (result.status === 'failed') {
+        // Text is enhancement over the status the card already shows truthfully.
+        setPagesFailed(true);
+        return;
+      }
+      setPagesPreparing(false);
+      setPages(result.entry.pages);
     })();
     return () => { cancelled = true; window.clearTimeout(retryTimer); };
   }, [isReady, collapsed, pages, pagesFailed, pagesAttempt, boardId, documentId]);
 
   const markImageless = useCallback((pageNumber: number) => {
+    // Also remembered session-wide, so this document's missing derivative is
+    // not re-probed by every later mount of every view.
+    pageCache?.markPageImageless(documentId, pageNumber);
     setImagelessPages((current) => {
       if (current.has(pageNumber)) return current;
       const next = new Set(current);
       next.add(pageNumber);
       return next;
     });
-  }, []);
+  }, [pageCache, documentId]);
 
   /**
    * Loading is deliberately NOT a percentage.

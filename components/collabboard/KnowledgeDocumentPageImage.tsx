@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 /**
  * P6J-F9-A2b -- one worker-generated PDF page image, fetched through the
@@ -16,6 +16,8 @@ import React, { useState } from 'react';
  * document predates A1, Storage is unavailable -- must leave the reader's text
  * exactly as it was, so a failure here removes the visual and nothing else.
  */
+
+import { useKnowledgePageCache } from '@/components/collabboard/KnowledgePageCache';
 
 export interface KnowledgeDocumentPageImageProps {
   readonly boardId: string;
@@ -88,12 +90,29 @@ export default function KnowledgeDocumentPageImage({
 }: KnowledgeDocumentPageImageProps) {
   const src = knowledgePageImageUrl(boardId, documentId, pageNumber);
   const reserved = knowledgePageDisplayDimensions(widthPoints, heightPoints, rotation);
+  /**
+   * The session-wide memory of derivatives that answered 404. This is the ONE
+   * component that requests a page image, so remembering it here is what stops
+   * every card and every reader remount from re-probing the same missing
+   * artifact -- the document goes straight to its canonical text instead.
+   * Deliberately not durable: a later session probes again, because the worker
+   * may have produced the derivative by then.
+   */
+  const pageCache = useKnowledgePageCache();
+  const knownMissing = pageCache?.isPageImageless(documentId, pageNumber) ?? false;
   // The FAILED URL is remembered, not a bare boolean: when the reader switches
   // document or page the src changes, and the stale failure clears itself
   // without an effect. A boolean would survive the identity change and hide a
   // perfectly good image for the newly opened document.
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  // Telling the host is a side effect -- its handler sets state -- so it runs
+  // after render, never during it. The <img> is simply never mounted, so the
+  // known-missing derivative is not requested again.
+  useEffect(() => {
+    if (knownMissing) onUnavailable?.();
+  }, [knownMissing, onUnavailable]);
   if (failedSrc === src) return null;
+  if (knownMissing) return null;
 
   return (
     <img
@@ -118,7 +137,11 @@ export default function KnowledgeDocumentPageImage({
       // are attributes, not styling, so h-auto still governs the drawn size.
       width={reserved.width}
       height={reserved.height}
-      onError={() => { setFailedSrc(src); onUnavailable?.(); }}
+      onError={() => {
+        pageCache?.markPageImageless(documentId, pageNumber);
+        setFailedSrc(src);
+        onUnavailable?.();
+      }}
       className="mb-2 block h-auto w-full rounded border border-gray-200 bg-gray-50"
     />
   );
