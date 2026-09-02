@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
 import {
   useKnowledgePageCache,
@@ -476,6 +476,18 @@ export default function KnowledgePdfCanvasSurface({
   /** Bumped only by a 409, which is what re-runs the effect for another try. */
   const [pagesAttempt, setPagesAttempt] = useState(0);
   const [imagelessPages, setImagelessPages] = useState<ReadonlySet<number>>(() => new Set());
+  /**
+   * PDF-C1 single-page preview. The canvas object is a strong preview and page
+   * CONTROLLER, not a second reader: exactly one page is on screen and the
+   * navigator below moves between them. Full-document reading stays in Open and
+   * the side panel, which is why nothing here scrolls through a whole document.
+   *
+   * Presentation only, and deliberately card-local: which page you are looking
+   * at is not a property of the board, writes no padlet metadata and issues no
+   * request -- the same reasoning that keeps `collapsed` and `view` local, and
+   * what keeps all three usable by a read-only viewer.
+   */
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     if (!isReady || collapsed || pages || pagesFailed || !boardId) return;
@@ -542,6 +554,31 @@ export default function KnowledgePdfCanvasSurface({
   const snippet = pages?.find((page) => page.text.trim().length > 0)?.text.trim().slice(0, 90) ?? null;
 
   /**
+   * The navigator's range comes from the pages actually in hand, not from the
+   * document's declared pageCount: a page this client cannot render is one it
+   * must not offer to navigate to.
+   */
+  const pageTotal = pages?.length ?? 0;
+  /**
+   * Clamped on read rather than corrected in an effect. Pages arrive after the
+   * first render, and a document can be replaced under a longer-lived card, so
+   * the displayed page is derived from what exists right now -- there is no
+   * intermediate render where the index points past the end.
+   */
+  const pageNumber = pageTotal > 0 ? Math.min(Math.max(currentPage, 1), pageTotal) : 1;
+  const currentPageData = pages && pageTotal > 0 ? pages[pageNumber - 1] : null;
+  const canPagePrevious = pageNumber > 1;
+  const canPageNext = pageNumber < pageTotal;
+  /** Movement is clamped here too, so no caller can push the page out of range. */
+  const goToPage = useCallback((next: number) => {
+    setCurrentPage((current) => {
+      const total = pages?.length ?? 0;
+      if (total <= 0) return current;
+      return Math.min(Math.max(next, 1), total);
+    });
+  }, [pages]);
+
+  /**
    * The SAME citations the reader paints, and the same note colours, resolved
    * by the same domain functions. Nothing here decides what a highlight is:
    * the span resolver is the sole authority, so a drifted or page-only
@@ -550,6 +587,12 @@ export default function KnowledgePdfCanvasSurface({
    */
   const references = useKnowledgeSourceReferencesForDocument(documentId);
   const noteColors = useKnowledgeSourceNoteColors();
+
+  /** The pager's two arrows: the toolbar's disabled convention, one place. */
+  const pagerButton = (enabled: boolean) =>
+    'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded '
+    + 'focus-visible:outline focus-visible:outline-1 '
+    + (enabled ? 'text-gray-600 hover:bg-gray-200' : 'cursor-not-allowed text-gray-300');
 
   const headerButton = 'inline-flex h-5 w-5 items-center justify-center rounded text-gray-500 '
     + 'hover:bg-gray-200 hover:text-gray-700 focus-visible:outline focus-visible:outline-1';
@@ -628,56 +671,70 @@ export default function KnowledgePdfCanvasSurface({
                   shown -- the duration is not something this client knows. */}
               {pagesPreparing ? 'Preparing document…' : 'Loading document…'}
             </div>
-          ) : pages && pages.length > 0 ? (
-            pages.map((page) => (
-              <section
-                key={page.pageNumber}
-                data-knowledge-pdf-page={page.pageNumber}
-                className="mb-1.5 border-b border-gray-100 pb-1.5 last:mb-0 last:border-b-0 last:pb-0"
-              >
-                <div className="mb-0.5 select-none text-[8px] uppercase tracking-wider text-gray-400">
-                  Page {page.pageNumber}
-                </div>
-                {view === 'page' && !imagelessPages.has(page.pageNumber) ? (
-                  <KnowledgeDocumentPageImage
-                    boardId={boardId}
-                    documentId={documentId}
-                    pageNumber={page.pageNumber}
-                    originalFilename={originalFilename}
-                    widthPoints={page.widthPoints}
-                    heightPoints={page.heightPoints}
-                    rotation={page.rotation}
-                    onUnavailable={() => markImageless(page.pageNumber)}
-                  />
-                ) : null}
-                {view === 'text' || imagelessPages.has(page.pageNumber) ? (
-                  <p
-                    data-knowledge-pdf-page-text="true"
-                    className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
-                  >
-                    {knowledgeSourceHighlightSegments(references, page.pageNumber, page.text)
-                      .map((segment) => {
-                        const highlight = segment.spans.length > 0
-                          ? knowledgeSourceHighlightColor(segment.spans, noteColors)
-                          : null;
-                        if (!highlight) {
-                          return <React.Fragment key={segment.start}>{segment.text}</React.Fragment>;
-                        }
-                        return (
-                          <mark
-                            key={segment.start}
-                            data-knowledge-pdf-highlight="true"
-                            className="rounded-[2px] bg-transparent px-0 text-inherit"
-                            style={{ backgroundColor: highlight.backgroundColor }}
-                          >
-                            {segment.text}
-                          </mark>
-                        );
-                      })}
-                  </p>
-                ) : null}
-              </section>
-            ))
+          ) : currentPageData ? (
+            /*
+              EXACTLY ONE page is mounted -- not one visible among many. A
+              hidden sibling would still request its image and still be found by
+              a search of the card, which is precisely the multi-page reader
+              this object is not.
+            */
+            <section
+              key={currentPageData.pageNumber}
+              data-knowledge-pdf-page={currentPageData.pageNumber}
+            >
+              <div className="mb-0.5 select-none text-[8px] uppercase tracking-wider text-gray-400">
+                Page {currentPageData.pageNumber}
+              </div>
+              {view === 'page' && !imagelessPages.has(currentPageData.pageNumber) ? (
+                <KnowledgeDocumentPageImage
+                  boardId={boardId}
+                  documentId={documentId}
+                  pageNumber={currentPageData.pageNumber}
+                  originalFilename={originalFilename}
+                  widthPoints={currentPageData.widthPoints}
+                  heightPoints={currentPageData.heightPoints}
+                  rotation={currentPageData.rotation}
+                  onUnavailable={() => markImageless(currentPageData.pageNumber)}
+                />
+              ) : null}
+              {view === 'text' || imagelessPages.has(currentPageData.pageNumber) ? (
+                <p
+                  data-knowledge-pdf-page-text="true"
+                  className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
+                >
+                  {/*
+                    The SAME resolver, given the page actually on screen. This is
+                    the whole provenance contract of the switcher: the displayed
+                    page number is what reaches the citation authority, so a
+                    reference recorded against p.3 paints on page 3 and nowhere
+                    else. Nothing here decides what a highlight is.
+                  */}
+                  {knowledgeSourceHighlightSegments(
+                    references,
+                    currentPageData.pageNumber,
+                    currentPageData.text,
+                  )
+                    .map((segment) => {
+                      const highlight = segment.spans.length > 0
+                        ? knowledgeSourceHighlightColor(segment.spans, noteColors)
+                        : null;
+                      if (!highlight) {
+                        return <React.Fragment key={segment.start}>{segment.text}</React.Fragment>;
+                      }
+                      return (
+                        <mark
+                          key={segment.start}
+                          data-knowledge-pdf-highlight="true"
+                          className="rounded-[2px] bg-transparent px-0 text-inherit"
+                          style={{ backgroundColor: highlight.backgroundColor }}
+                        >
+                          {segment.text}
+                        </mark>
+                      );
+                    })}
+                </p>
+              ) : null}
+            </section>
           ) : (
             <div className="px-1 py-2 text-[10px] text-gray-500">
               Page content is not available for this document.
@@ -685,6 +742,60 @@ export default function KnowledgePdfCanvasSurface({
           )}
         </div>
       )}
+
+      {/*
+        The page navigator. Permanent while expanded -- it is how this object is
+        read, so hiding it behind hover would hide the only way to move. It sits
+        outside the body so the page can never scroll it out of reach, and it is
+        absent entirely when there is nothing to page through (collapsed, still
+        processing, or a document with no usable pages).
+      */}
+      {!collapsed && currentPageData && pageTotal > 0 ? (
+        <div
+          data-knowledge-pdf-pager="true"
+          data-no-drag="true"
+          className="flex shrink-0 select-none items-center justify-center gap-2 border-t border-gray-200 bg-gray-50 px-1.5 py-1"
+          /* The card is dragged by its header and the canvas pans under it, so
+             a press that begins on the pager belongs to the pager alone. */
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            data-no-drag="true"
+            data-knowledge-pdf-action="page-previous"
+            title="Previous page"
+            aria-label="Previous page"
+            disabled={!canPagePrevious}
+            className={pagerButton(canPagePrevious)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); goToPage(pageNumber - 1); }}
+          >
+            <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+          </button>
+          <span
+            data-knowledge-pdf-page-indicator="true"
+            className="min-w-0 text-[9px] tabular-nums text-gray-600"
+          >
+            {pageNumber} / {pageTotal}
+          </span>
+          <button
+            type="button"
+            data-no-drag="true"
+            data-knowledge-pdf-action="page-next"
+            title="Next page"
+            aria-label="Next page"
+            disabled={!canPageNext}
+            className={pagerButton(canPageNext)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); goToPage(pageNumber + 1); }}
+          >
+            <ChevronRight className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

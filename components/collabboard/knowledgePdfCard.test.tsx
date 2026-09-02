@@ -212,12 +212,14 @@ describe('8-12. page content and fallback', () => {
     expect(first.textContent).toContain('Page 1');
   });
 
-  it('9-10. every page is a bounded section inside one scroll container', async () => {
+  it('9-10. exactly one page is mounted, and it is the current one', async () => {
     const host = await card();
-    expect(pageSections(host)).toHaveLength(3);
-    // Boundaries preserved: each page is its own section, in order.
-    expect(pageSections(host).map((s) => s.getAttribute('data-knowledge-pdf-page'))).toEqual(['1', '2', '3']);
-    // Exactly one scrolling region, and it is the document body.
+    // PDF-C1 supersedes the vertical multi-page preview: the canvas object is a
+    // page CONTROLLER, so one page is mounted -- not one visible among several.
+    // A hidden sibling would still fetch its image and still be findable here.
+    expect(pageSections(host)).toHaveLength(1);
+    expect(pageSections(host)[0].getAttribute('data-knowledge-pdf-page')).toBe('1');
+    // The body still scrolls, but now only ever over a single page.
     expect(body(host)!.className).toContain('overflow-y-auto');
   });
 
@@ -291,8 +293,10 @@ describe('16-18. parsed content and collapse', () => {
 
     await act(async () => { action(host, 'parsed-content')!.click(); });
 
-    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(3);
-    expect(body(host)!.textContent).toContain('Text of page 2');
+    // One page's parsed text, the page currently on screen.
+    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(1);
+    expect(body(host)!.textContent).toContain('Text of page 1');
+    expect(body(host)!.textContent, 'never a second page').not.toContain('Text of page 2');
     // The text came from the pages endpoint; nothing re-parses the PDF.
     expect(executable(SURFACE)).not.toMatch(/pdfjs|pdf-parse|getDocument\(/i);
   });
@@ -329,7 +333,7 @@ describe('16-18. parsed content and collapse', () => {
 
     for (let round = 0; round < 2; round += 1) {
       await act(async () => { action(host, 'parsed-content')!.click(); });
-      expect(host.querySelectorAll('[data-knowledge-pdf-page-text]').length).toBe(3);
+      expect(host.querySelectorAll('[data-knowledge-pdf-page-text]').length).toBe(1);
       await act(async () => { action(host, 'page-view')!.click(); });
       expect(host.querySelectorAll('[data-knowledge-pdf-page-text]').length).toBe(0);
     }
@@ -435,7 +439,7 @@ describe('22-23. permissions', () => {
     await act(async () => { action(host, 'collapse')!.click(); });
     await act(async () => { action(host, 'collapse')!.click(); });
     await act(async () => { action(host, 'parsed-content')!.click(); });
-    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(3);
+    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(1);
   });
 
   it('23. the surface performs no mutation, so nothing here needs gating', () => {
@@ -543,7 +547,11 @@ describe('43-45. converted text carries the side-panel highlights', () => {
   it('43. the card paints citations with the SAME domain authority as the reader', () => {
     const code = executable(SURFACE);
     // One resolver, one colour rule -- the card decides neither.
-    expect(code).toContain('knowledgeSourceHighlightSegments(references, page.pageNumber, page.text)');
+    // Same resolver, now handed the page the card is actually displaying --
+    // that substitution IS the switcher's provenance contract.
+    expect(code).toMatch(
+      /knowledgeSourceHighlightSegments\(\s*references,\s*currentPageData\.pageNumber,\s*currentPageData\.text,?\s*\)/,
+    );
     expect(code).toContain('knowledgeSourceHighlightColor(segment.spans, noteColors)');
     expect(code).toContain('useKnowledgeSourceReferencesForDocument(documentId)');
     expect(code).toContain('useKnowledgeSourceNoteColors()');
@@ -555,10 +563,10 @@ describe('43-45. converted text carries the side-panel highlights', () => {
     // No provider above the card => no references => plain text, unchanged.
     const host = await card();
     await act(async () => { action(host, 'parsed-content')!.click(); });
-    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(3);
+    expect(host.querySelectorAll('[data-knowledge-pdf-page-text]')).toHaveLength(1);
     expect(host.querySelectorAll('[data-knowledge-pdf-highlight]')).toHaveLength(0);
     // The text is still reconstructed verbatim.
-    expect(host.textContent).toContain('Text of page 2');
+    expect(host.textContent).toContain('Text of page 1');
   });
 
   it('45. converted text is embedded in the card and scrolls in place', async () => {
@@ -822,5 +830,224 @@ describe('24-29. nothing outside the card moved', () => {
     const code = executable(SURFACE);
     expect(code).not.toMatch(/anthropic|openai|byok/i);
     expect(code).not.toMatch(/migration|supabase\/functions|workers\//i);
+  });
+});
+
+// ============================================================================
+// PDF-C1: single-page canvas preview and its page switcher
+// ============================================================================
+// The Freeform PDF object stops being a miniature reader. One page is on
+// screen, a pager moves between them, and full-document reading stays in Open
+// and the side panel. Every page already arrived in the one cached `/pages`
+// payload, so paging is a choice of index -- never another request.
+
+describe('PDF-C1 page switcher', () => {
+  const pager = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-pager="true"]') as HTMLElement | null;
+  const indicator = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-page-indicator="true"]')?.textContent?.trim() ?? null;
+  const prev = (host: HTMLElement) => action(host, 'page-previous') as HTMLButtonElement | null;
+  const next = (host: HTMLElement) => action(host, 'page-next') as HTMLButtonElement | null;
+  const shownPage = (host: HTMLElement) =>
+    pageSections(host)[0]?.getAttribute('data-knowledge-pdf-page') ?? null;
+  const step = async (button: HTMLElement | null) => {
+    await act(async () => { button!.click(); });
+  };
+
+  it('1-3. opens on page 1, shows 1 / N, and cannot go back from there', async () => {
+    const host = await card();
+    expect(shownPage(host)).toBe('1');
+    expect(indicator(host)).toBe('1 / 3');
+    expect(prev(host)!.disabled, 'nothing precedes page 1').toBe(true);
+    expect(next(host)!.disabled).toBe(false);
+  });
+
+  it('4-6. Next advances, the counter follows, and Previous comes back', async () => {
+    const host = await card();
+    await step(next(host));
+    expect(shownPage(host)).toBe('2');
+    expect(indicator(host)).toBe('2 / 3');
+    await step(prev(host));
+    expect(shownPage(host)).toBe('1');
+    expect(indicator(host)).toBe('1 / 3');
+  });
+
+  it('7-8. the range is closed at both ends, and pressing past it is a no-op', async () => {
+    const host = await card();
+    // Forward to the last page.
+    await step(next(host));
+    await step(next(host));
+    expect(indicator(host)).toBe('3 / 3');
+    expect(next(host)!.disabled, 'nothing follows the last page').toBe(true);
+
+    // A disabled control cannot fire, and the state clamps regardless.
+    await step(next(host));
+    expect(indicator(host)).toBe('3 / 3');
+    expect(shownPage(host)).toBe('3');
+
+    await step(prev(host));
+    await step(prev(host));
+    expect(indicator(host)).toBe('1 / 3');
+    await step(prev(host));
+    expect(indicator(host), 'clamped at the first page').toBe('1 / 3');
+  });
+
+  it('9-11. only the current page exists in the DOM -- no hidden siblings', async () => {
+    const host = await card();
+    for (const expected of ['1', '2', '3']) {
+      expect(pageSections(host), 'exactly one page mounted').toHaveLength(1);
+      expect(shownPage(host)).toBe(expected);
+      // The superseded model rendered every page at once; nothing may keep a
+      // hidden copy, which would still request images and still be searchable.
+      expect(host.querySelectorAll('[data-knowledge-pdf-page]')).toHaveLength(1);
+      if (expected !== '3') await step(next(host));
+    }
+  });
+
+  it('12-13. each mode shows the current page only', async () => {
+    const host = await card();
+    await step(next(host));
+
+    // PAGE mode: one page representation.
+    expect(host.querySelectorAll('[data-knowledge-pdf-page]')).toHaveLength(1);
+
+    // T mode: one page's parsed text, and it is page 2's.
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    const texts = host.querySelectorAll('[data-knowledge-pdf-page-text]');
+    expect(texts).toHaveLength(1);
+    expect(texts[0].textContent).toContain('Text of page 2');
+    expect(host.textContent).not.toContain('Text of page 1');
+    expect(host.textContent).not.toContain('Text of page 3');
+  });
+
+  it('14-15. switching PDF <-> T keeps the page, and paging works in either mode', async () => {
+    const host = await card();
+    await step(next(host));
+    await step(next(host));
+    expect(indicator(host)).toBe('3 / 3');
+
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    expect(indicator(host), 'mode is not a page reset').toBe('3 / 3');
+    expect(host.querySelector('[data-knowledge-pdf-page-text]')!.textContent).toContain('Text of page 3');
+
+    // Paging still works while parsed text is showing.
+    await step(prev(host));
+    expect(indicator(host)).toBe('2 / 3');
+    expect(host.querySelector('[data-knowledge-pdf-page-text]')!.textContent).toContain('Text of page 2');
+
+    await act(async () => { action(host, 'page-view')!.click(); });
+    expect(indicator(host), 'and back again').toBe('2 / 3');
+    expect(shownPage(host)).toBe('2');
+  });
+
+  it('16. a missing derivative falls back to the SAME page it failed on', async () => {
+    const host = await card();
+    await step(next(host));
+    const image = pageSections(host)[0].querySelector('img')!;
+    expect(image).not.toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-page-text]')).toBeNull();
+
+    await act(async () => { image.dispatchEvent(new Event('error')); });
+    // Page 2's text, not page 1's, and the pager has not moved.
+    expect(host.querySelector('[data-knowledge-pdf-page-text]')!.textContent).toContain('Text of page 2');
+    expect(indicator(host)).toBe('2 / 3');
+  });
+
+  it('17-18. paging issues no request and retriggers no processing', async () => {
+    const fetchMock = stubPages(3);
+    const host = await card();
+    const before = fetchMock.mock.calls.length;
+    await step(next(host));
+    await step(next(host));
+    await step(prev(host));
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    await step(prev(host));
+    // Every page arrived in the single cached payload; paging is an index.
+    expect(fetchMock.mock.calls.length, 'no request of any kind').toBe(before);
+    expect(host.textContent).not.toContain('Preparing document');
+    expect(host.textContent).not.toContain('Loading document');
+  });
+
+  it('19-22. the displayed page is what reaches the citation authority', async () => {
+    const code = executable(SURFACE);
+    // The resolver is handed the page on screen, so a reference recorded
+    // against p.3 paints on page 3 and nowhere else. A literal 1, or the loop
+    // variable of a superseded multi-page render, would silently mis-attribute.
+    expect(code).toMatch(
+      /knowledgeSourceHighlightSegments\(\s*references,\s*currentPageData\.pageNumber,\s*currentPageData\.text,?\s*\)/,
+    );
+    expect(code).not.toMatch(/knowledgeSourceHighlightSegments\(\s*references,\s*1\s*,/);
+    // The page image is addressed by the same displayed page number.
+    expect(code).toContain('pageNumber={currentPageData.pageNumber}');
+    // Identity throughout is the document id, never the placement or filename.
+    expect(code).toContain('useKnowledgeSourceReferencesForDocument(documentId)');
+    expect(code).toContain('documentId={documentId}');
+  });
+
+  it('23-24. no second provenance or highlight implementation was introduced', async () => {
+    const code = executable(SURFACE);
+    // Still purely a consumer of the existing authority: the card resolves no
+    // spans of its own and creates no references.
+    expect(code).not.toMatch(/charStart|charEnd|quoteText|selectedText/);
+    expect(code).not.toMatch(/getSelection\(|createSourceReference|buildKnowledgeSource/);
+    expect((code.match(/knowledgeSourceHighlightSegments\(/g) || []).length).toBe(1);
+    expect((code.match(/knowledgeSourceHighlightColor\(/g) || []).length).toBe(1);
+  });
+
+  it('25. the pager is isolated from card drag and canvas panning', async () => {
+    const host = await card();
+    // The same isolation the existing card controls use.
+    expect(pager(host)!.getAttribute('data-no-drag')).toBe('true');
+    expect(prev(host)!.getAttribute('data-no-drag')).toBe('true');
+    expect(next(host)!.getAttribute('data-no-drag')).toBe('true');
+
+    // A press that begins on the pager must not reach the host that would drag.
+    // Counted on an ancestor ABOVE the React root, which is where the Freeform
+    // host's drag/selection handlers live. `mousedown` is measured too, and
+    // deliberately: the buttons stop pointerdown and click themselves, so only
+    // the pager container's own guard can stop this one -- without it, a press
+    // on the pager reaches the card and starts a drag.
+    const seen = { pointerdown: 0, mousedown: 0, click: 0 };
+    const outer = host.parentElement!;
+    const listeners = (Object.keys(seen) as Array<keyof typeof seen>)
+      .map((type) => [type, () => { seen[type] += 1; }] as const);
+    for (const [type, fn] of listeners) outer.addEventListener(type, fn);
+    await act(async () => {
+      next(host)!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      next(host)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      next(host)!.click();
+    });
+    for (const [type, fn] of listeners) outer.removeEventListener(type, fn);
+    expect(seen.pointerdown, 'drag would start here').toBe(0);
+    expect(seen.mousedown, 'drag would start here too').toBe(0);
+    expect(seen.click, 'selection/edit would trigger here').toBe(0);
+    // And it still did its job.
+    expect(indicator(host)).toBe('2 / 3');
+  });
+
+  it('26-27. collapsing hides the pager; expanding restores it and the page', async () => {
+    const host = await card();
+    await step(next(host));
+    expect(indicator(host)).toBe('2 / 3');
+
+    await act(async () => { action(host, 'collapse')!.click(); });
+    expect(pager(host), 'nothing to page through while collapsed').toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-page]')).toBeNull();
+    // The compact form is unchanged.
+    expect(host.querySelector('[data-knowledge-pdf-collapsed-body="true"]')).not.toBeNull();
+
+    await act(async () => { action(host, 'collapse')!.click(); });
+    expect(pager(host)).not.toBeNull();
+    // Local state survived the round trip, so the reader comes back where it was.
+    expect(indicator(host)).toBe('2 / 3');
+    expect(shownPage(host)).toBe('2');
+  });
+
+  it('a single-page document gets a pager with both ends closed', async () => {
+    stubPages(1);
+    const host = await card();
+    expect(indicator(host)).toBe('1 / 1');
+    expect(prev(host)!.disabled).toBe(true);
+    expect(next(host)!.disabled).toBe(true);
   });
 });
