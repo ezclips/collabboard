@@ -8,7 +8,7 @@ import {
   KEY_HINT_LENGTH,
   type AIProviderConnection,
 } from './aiProviderConnection';
-import { AI_ROLES, AI_ROLE_EDIT, AI_ROLE_SOURCE, isAIRole } from '../../ai/aiRoles';
+import { AI_ROLES, AI_ROLE_CHAT, AI_ROLE_EDIT, AI_ROLE_SOURCE, isAIRole } from '../../ai/aiRoles';
 
 describe('AI provider domain contract', () => {
   it('ships exactly the four reviewed provider types, and no custom endpoint', () => {
@@ -83,16 +83,23 @@ describe('AI provider domain contract', () => {
 });
 
 describe('AI roles', () => {
-  it('starts with the two roles the existing AI surfaces need', () => {
-    expect([...AI_ROLES]).toEqual([AI_ROLE_SOURCE, AI_ROLE_EDIT]);
+  it('carries the roles the AI surfaces need, in registration order', () => {
+    // Board Chat joined at BCHAT-B. A role is a plain string over a text
+    // column, so the list grows by an application change -- no enum, no
+    // migration -- which is the property this assertion exists to hold.
+    expect([...AI_ROLES]).toEqual([AI_ROLE_SOURCE, AI_ROLE_EDIT, AI_ROLE_CHAT]);
     expect(AI_ROLE_SOURCE).toBe('source-ai');
     expect(AI_ROLE_EDIT).toBe('edit');
+    expect(AI_ROLE_CHAT).toBe('board-chat');
   });
 
   it('recognises only known roles', () => {
     expect(isAIRole('source-ai')).toBe(true);
     expect(isAIRole('edit')).toBe(true);
+    expect(isAIRole('board-chat')).toBe(true);
+    // Still not a free-for-all: an unregistered name is refused.
     expect(isAIRole('chat')).toBe(false);
+    expect(isAIRole('research')).toBe(false);
     expect(isAIRole(null)).toBe(false);
   });
 });

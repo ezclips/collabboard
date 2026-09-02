@@ -216,9 +216,19 @@ describe('the slice touches nothing it was not authorized to', () => {
     expect(sql).not.toContain('source_references');
   });
 
-  it('adds no AI execution role in this slice', () => {
+  it('the chat role stays an application change, never a schema one', () => {
+    // BCHAT-A asserted this role did not exist yet. BCHAT-B added it, which is
+    // exactly what aiRoles.ts anticipated: a role is text end to end. What
+    // still matters -- and what this now guards -- is that adding one required
+    // no migration and no enum, so THIS migration is unchanged by it.
     const roles = fs.readFileSync(path.join(process.cwd(), 'lib/ai/aiRoles.ts'), 'utf8');
-    expect(roles).not.toContain('AI_ROLE_CHAT');
+    expect(roles).toContain('AI_ROLE_CHAT');
+    // No enum anywhere, and the AI role's own value never reaches the schema:
+    // the only `role` here is the message author column, which is a CHECK over
+    // 'user' and 'assistant' and has nothing to do with model selection.
+    expect(sql).not.toContain('CREATE TYPE');
+    expect(sql).not.toContain('board-chat');
+    expect(sql).toContain("CHECK (role IN ('user', 'assistant'))");
   });
 });
 
