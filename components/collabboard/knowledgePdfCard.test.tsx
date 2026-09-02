@@ -173,7 +173,7 @@ describe('1-3. the card is a document with a permanent header', () => {
 
   it('3. the header carries every action, and they live only there', async () => {
     const host = await card();
-    for (const name of ['collapse', 'parsed-content', 'open', 'side-panel', 'new-tab']) {
+    for (const name of ['collapse', 'page-view', 'parsed-content', 'open', 'side-panel', 'new-tab']) {
       const control = action(host, name);
       expect(control, `${name} must exist`).not.toBeNull();
       expect(header(host)!.contains(control!), `${name} must be in the header`).toBe(true);
@@ -297,12 +297,69 @@ describe('16-18. parsed content and collapse', () => {
     expect(executable(SURFACE)).not.toMatch(/pdfjs|pdf-parse|getDocument\(/i);
   });
 
-  it('16b. the control toggles back to the page view', async () => {
+  it('16b. the two view controls are one selector, not two toggles', async () => {
     const host = await card();
+    const mode = () => action(host, 'parsed-content')!.getAttribute('data-knowledge-pdf-view');
+
+    // Page is the initial mode, and its own control is the active one.
+    expect(mode()).toBe('page');
+    expect(action(host, 'page-view')!.getAttribute('aria-pressed')).toBe('true');
+    expect(action(host, 'parsed-content')!.getAttribute('aria-pressed')).toBe('false');
+
+    // T selects parsed text; pressing it again must NOT bounce back to pages.
     await act(async () => { action(host, 'parsed-content')!.click(); });
-    expect(action(host, 'parsed-content')!.getAttribute('data-knowledge-pdf-view')).toBe('text');
+    expect(mode()).toBe('text');
     await act(async () => { action(host, 'parsed-content')!.click(); });
-    expect(action(host, 'parsed-content')!.getAttribute('data-knowledge-pdf-view')).toBe('page');
+    expect(mode(), 'selecting the active mode is a no-op').toBe('text');
+    expect(action(host, 'parsed-content')!.getAttribute('aria-pressed')).toBe('true');
+    expect(action(host, 'page-view')!.getAttribute('aria-pressed')).toBe('false');
+
+    // The document icon is what returns to pages -- it is a real control now.
+    await act(async () => { action(host, 'page-view')!.click(); });
+    expect(mode()).toBe('page');
+    await act(async () => { action(host, 'page-view')!.click(); });
+    expect(mode(), 'and it is a no-op when already active').toBe('page');
+  });
+
+  it('16c. the selector survives repeated switching without a remount', async () => {
+    const host = await card();
+    const surfaceId = () => host.querySelector('[data-knowledge-pdf-surface]')!
+      .getAttribute('data-knowledge-document-id');
+    const before = surfaceId();
+
+    for (let round = 0; round < 2; round += 1) {
+      await act(async () => { action(host, 'parsed-content')!.click(); });
+      expect(host.querySelectorAll('[data-knowledge-pdf-page-text]').length).toBe(3);
+      await act(async () => { action(host, 'page-view')!.click(); });
+      expect(host.querySelectorAll('[data-knowledge-pdf-page-text]').length).toBe(0);
+    }
+    // Same document throughout: switching view never re-creates the surface.
+    expect(surfaceId()).toBe(before);
+  });
+
+  it('16d. the document icon is a real control, not decoration', async () => {
+    const host = await card();
+    const pageBtn = action(host, 'page-view')!;
+    expect(pageBtn, 'the PDF/page control must exist').not.toBeNull();
+    expect(pageBtn.tagName).toBe('BUTTON');
+    expect(pageBtn.getAttribute('title')).toBe('PDF pages');
+    expect(action(host, 'parsed-content')!.getAttribute('title')).toBe('Parsed text');
+    // The two halves are distinct actions, never the same one twice.
+    expect(pageBtn).not.toBe(action(host, 'parsed-content'));
+  });
+
+  it('16e. navigation actions all address the SAME knowledge document', async () => {
+    const onOpen = vi.fn();
+    const host = await card({ onOpen });
+    const docId = host.querySelector('[data-knowledge-pdf-surface]')!
+      .getAttribute('data-knowledge-document-id');
+
+    await act(async () => { action(host, 'open')!.click(); });
+    await act(async () => { action(host, 'side-panel')!.click(); });
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    for (const call of onOpen.mock.calls) expect(call[0].documentId).toBe(docId);
+    // New tab targets the same document's original file -- no copy, no re-upload.
+    expect(action(host, 'new-tab')!.getAttribute('href')).toContain(docId);
   });
 
   it('17-18. collapse hides the document and shows filename plus a snippet', async () => {
@@ -425,7 +482,7 @@ describe('50-53. a read-only viewer sees a name, never an action', () => {
 
   it('53. an editor still gets every control, wired to its own callback', async () => {
     const host = await card();
-    for (const name of ['collapse', 'parsed-content', 'open', 'side-panel', 'new-tab']) {
+    for (const name of ['collapse', 'page-view', 'parsed-content', 'open', 'side-panel', 'new-tab']) {
       expect(action(host, name), name + ' must exist for an editor').not.toBeNull();
     }
     const cell = pdfCell();

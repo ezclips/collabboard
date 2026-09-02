@@ -208,6 +208,17 @@ export function KnowledgePdfCardControls({
     + 'focus-visible:outline focus-visible:outline-1 '
     // The toolbar's own disabled convention: dimmed and visibly inert.
     + (disabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-black/10');
+  /**
+   * The view selector's two halves. Active reuses the toolbar's own hover tint
+   * as a pressed state rather than inventing a colour; inactive is dimmed, so
+   * which mode you are in reads at a glance without a new visual language.
+   */
+  const viewButton = (active: boolean) => `${button} ${active ? 'bg-black/10' : 'opacity-60'}`;
+  /** Selecting the mode you are already in is a no-op, not a toggle back. */
+  const selectView = (next: KnowledgePdfCardView) => (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (view !== next) onToggleView();
+  };
   // `data-no-drag` is the host strip's own convention for interactive children.
   const guard = {
     'data-no-drag': 'true',
@@ -233,7 +244,48 @@ export function KnowledgePdfCardControls({
           : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
       </button>
 
-      <FileText className="h-3 w-3 shrink-0 text-red-500" aria-hidden="true" />
+      {/*
+        The view selector: two halves of ONE choice, not two toggles. Each
+        button selects its own mode and does nothing when that mode is already
+        active, so neither can bounce you out of the view you asked for. Before
+        the document is ready there is no parsed text to choose, so the icon
+        stays the plain document marker it has always been.
+      */}
+      {isReady ? (
+        <>
+          <button
+            type="button"
+            {...guard}
+            disabled={disabled}
+            data-knowledge-pdf-action="page-view"
+            data-knowledge-pdf-view={view}
+            title="PDF pages"
+            aria-label="PDF pages"
+            aria-pressed={view === 'page'}
+            className={viewButton(view === 'page')}
+            onClick={selectView('page')}
+          >
+            <FileText className="h-3 w-3 text-red-500" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            {...guard}
+            disabled={disabled}
+            data-knowledge-pdf-action="parsed-content"
+            data-knowledge-pdf-view={view}
+            title="Parsed text"
+            aria-label="Parsed text"
+            aria-pressed={view === 'text'}
+            className={viewButton(view === 'text')}
+            style={{ color: iconColor }}
+            onClick={selectView('text')}
+          >
+            <Type className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </>
+      ) : (
+        <FileText className="h-3 w-3 shrink-0 text-red-500" aria-hidden="true" />
+      )}
 
       {hideStatusWhenReady && isReady ? null : (
         <span
@@ -243,24 +295,6 @@ export function KnowledgePdfCardControls({
           {STATUS_LABEL[status]}
         </span>
       )}
-
-      {isReady ? (
-        <button
-          type="button"
-          {...guard}
-          disabled={disabled}
-          data-knowledge-pdf-action="parsed-content"
-          data-knowledge-pdf-view={view}
-          title={view === 'page' ? 'Show parsed content' : 'Show pages'}
-          aria-label={view === 'page' ? 'Show parsed content' : 'Show pages'}
-          aria-pressed={view === 'text'}
-          className={button}
-          style={{ color: iconColor }}
-          onClick={(event) => { event.stopPropagation(); onToggleView(); }}
-        >
-          <Type className="h-3 w-3" aria-hidden="true" />
-        </button>
-      ) : null}
 
       {openDocument ? (
         <>
