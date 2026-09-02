@@ -704,7 +704,7 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     // of a narrow card. Left of the title, the 1fr centre absorbs the squeeze
     // and both auto columns keep their content.
     const left = FREEFORM.indexOf("{/* Left: the PDF's own controls");
-    const right = FREEFORM.indexOf('{/* Right: pencil hover-only */}');
+    const right = FREEFORM.indexOf('{/* Right: pencil hover-only');
     expect(left, 'PDF controls must be in the left column').toBeGreaterThan(-1);
     expect(left).toBeLessThan(right);
     expect(FREEFORM.slice(left, right)).toContain('<KnowledgePdfCardControls');
@@ -731,7 +731,7 @@ describe('30-35. one frame, square corners, real resize handle', () => {
 
     // The controls sit in the strip, ahead of its pencil.
     expect(FREEFORM.indexOf('<KnowledgePdfCardControls'))
-      .toBeLessThan(FREEFORM.indexOf('{/* Right: pencil hover-only */}'));
+      .toBeLessThan(FREEFORM.indexOf('{/* Right: pencil hover-only'));
 
     // And the surface itself renders no second header when the host has them.
     expect(FREEFORM).toContain('hostRendersControls');
@@ -1361,11 +1361,24 @@ describe('PDF-C1 header overlay', () => {
     expect(strip()).toContain("gridTemplateColumns: 'auto 1fr auto'");
   });
 
-  it('20. the overlay starts at the left edge of the strip, inside the card', () => {
-    expect(overlay()).toContain('left-0');
-    expect(overlay()).toContain('inset-y-0');
-    // The same left inset the cell had, so the controls begin where they always did.
+  it('20. the overlay spans the whole strip, so no title tail can show through', () => {
+    // `inset-0`, not `left-0`: sized to its own content the overlay stopped
+    // where the icons ended, and any title longer than the icon cluster kept a
+    // visible tail. Spanning the strip covers zone A at every card width.
+    expect(overlay()).toContain('inset-0');
+    expect(overlay()).not.toMatch(/inset-y-0/);
+    // The controls still begin at the same left inset they always did.
     expect(overlay()).toContain('pl-1.5');
+  });
+
+  it('20b. the overlay passes pointer events through, so rename still works', () => {
+    // Covering the title visually must not swallow the strip's own
+    // double-click-to-rename. The backdrop takes no events; the controls
+    // take theirs back, so every button behaves exactly as before.
+    expect(overlay()).toContain('pointer-events-none');
+    expect(overlay()).toContain('pointer-events-auto');
+    expect(overlay().indexOf('pointer-events-none'))
+      .toBeLessThan(overlay().indexOf('pointer-events-auto'));
   });
 
   it('21. the overlay background is opaque, not a translucent tint', () => {
@@ -1380,8 +1393,13 @@ describe('PDF-C1 header overlay', () => {
   it('22. the pencil keeps its own column at the right edge', () => {
     // Never overlapped by the cluster, which is why it stays fully visible:
     // the overlay is anchored left and the pencil is a separate auto column.
-    expect(FREEFORM_HEADER).toContain('{/* Right: pencil hover-only */}');
-    expect(FREEFORM_HEADER).toContain('<div className="flex items-center pr-1.5">');
+    expect(FREEFORM_HEADER).toContain('{/* Right: pencil hover-only');
+    // Raised ABOVE the overlay, which now spans the whole strip: zone B is the
+    // one part of it that stays visible and clickable.
+    expect(FREEFORM_HEADER).toContain('<div className="relative z-20 flex items-center pr-1.5">');
+    const overlayLayer = overlay().match(/z-(\d+)/);
+    expect(overlayLayer, 'the overlay must declare a layer').not.toBeNull();
+    expect(Number(overlayLayer![1]), 'the pencil must outrank the overlay').toBeLessThan(20);
   });
 
   it('23-24. no wrapping, no second row and no horizontal scroller', () => {

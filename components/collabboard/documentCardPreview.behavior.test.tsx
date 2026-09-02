@@ -266,7 +266,10 @@ describe('follow-up correction: Document Freeform card has square corners and a 
   it("the Note post's top-strip bar shows nothing until the user sets a meaningful title (no ghost 'Title' text on the canvas itself), editable in place via the same double-click pattern as Comment/Document, backed by the shared getMeaningfulTitle placeholder check", () => {
     const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
     const start = src.indexOf('{/* Center: title -- containers show their real title');
-    const end = src.indexOf('{/* Right: pencil hover-only */}');
+    // Prefix, not the whole comment: the pencil cell's own commentary gained
+    // an explanation when the PDF hover overlay was made to span the strip.
+    // This slice only needs the marker that ends the title cell.
+    const end = src.indexOf('{/* Right: pencil hover-only');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const block = src.slice(start, end);
