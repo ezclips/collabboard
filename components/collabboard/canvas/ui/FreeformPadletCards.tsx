@@ -3382,26 +3382,46 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         // filename legible through the icons.
                         <span
                           data-knowledge-pdf-controls="true"
-                          className="absolute inset-y-0 left-0 z-10 hidden items-center gap-0.5 pl-1.5 pr-1 group-hover:flex"
+                          /*
+                            `inset-0`, not `left-0`. Sized to its own content
+                            the overlay stopped wherever the icons ended, so a
+                            title longer than the icon cluster kept a visible
+                            tail -- the wider the card, the more of the filename
+                            showed through. Spanning the whole strip covers the
+                            title zone completely at every width, with no
+                            measurement and nothing to keep in sync.
+                            The pencil cell below sits at a higher layer, so the
+                            one thing this must not hide stays visible.
+                          */
+                          className="pointer-events-none absolute inset-0 z-10 hidden items-center gap-0.5 pl-1.5 pr-1 group-hover:flex"
                           style={{
                             backgroundColor: padlet.metadata?.cardColor || '#ffffff',
                             backgroundImage: `linear-gradient(${freeformStripBg}, ${freeformStripBg})`,
                           }}
                         >
-                          <KnowledgePdfCardControls
-                            boardId={padlet.board_id}
-                            documentId={pdfPlacement.documentId}
-                            status={pdfPlacement.processingStatus}
-                            collapsed={pdfCardCollapsed[padlet.id] ?? false}
-                            view={pdfCardView[padlet.id] ?? 'page'}
-                            iconColor={freeformIconColor}
-                            hideStatusWhenReady
-                            onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
-                            onToggleView={() => setPdfCardView((prev) => ({
-                              ...prev,
-                              [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
-                            }))}
-                          />
+                          {/*
+                            The overlay itself takes no pointer events, so the
+                            strip's own double-click-to-rename still reaches the
+                            title underneath everywhere the icons do not sit.
+                            The controls take theirs back, so every button
+                            behaves exactly as it did.
+                          */}
+                          <span className="pointer-events-auto flex items-center gap-0.5">
+                            <KnowledgePdfCardControls
+                              boardId={padlet.board_id}
+                              documentId={pdfPlacement.documentId}
+                              status={pdfPlacement.processingStatus}
+                              collapsed={pdfCardCollapsed[padlet.id] ?? false}
+                              view={pdfCardView[padlet.id] ?? 'page'}
+                              iconColor={freeformIconColor}
+                              hideStatusWhenReady
+                              onToggleCollapse={() => setPdfCardCollapsed((prev) => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? false) }))}
+                              onToggleView={() => setPdfCardView((prev) => ({
+                                ...prev,
+                                [padlet.id]: (prev[padlet.id] ?? 'page') === 'page' ? 'text' : 'page',
+                              }))}
+                            />
+                          </span>
                         </span>
                       );
                     })()}
@@ -3579,8 +3599,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       })();
                     })() : null}
                   </div>
-                  {/* Right: pencil hover-only */}
-                  <div className="flex items-center pr-1.5">
+                  {/* Right: pencil hover-only.
+                      `relative z-20` puts this cell ABOVE the PDF control
+                      overlay, which now spans the whole strip. Zone A (left
+                      edge through the title) is covered; the pencil is not,
+                      and it keeps its own column, its own hover reveal and its
+                      own click. Harmless for every non-PDF post, which draws
+                      no overlay for this to sit above. */}
+                  <div className="relative z-20 flex items-center pr-1.5">
                     {showModalEditButton && (
                       <button
                         data-no-drag="true"
