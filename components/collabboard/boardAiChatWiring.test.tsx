@@ -138,9 +138,16 @@ describe('36-42. the provider/model chooser is the existing role preference', ()
     // Asserted on the REQUEST, not on the file: the drawer legitimately reads
     // provider/model off a stored assistant turn to display it. What must not
     // happen is either travelling with a send.
-    const body = drawer.slice(drawer.indexOf('body: JSON.stringify('), drawer.indexOf('});', drawer.indexOf('body: JSON.stringify(')));
-    expect(body).toContain('{ message: content }');
-    expect(body).toContain('{ threadId: activeThreadId, message: content }');
+    const start = drawer.indexOf('body: JSON.stringify(');
+    // Up to the response handling: the whole request body, and nothing after.
+    const body = drawer.slice(start, drawer.indexOf('const payload', start));
+    // D2 lets the body carry `context`, so the shape is no longer one literal.
+    // What it must still carry is only these fields: a message, optionally the
+    // thread it continues, and identity-only context built by the payload
+    // helper -- which is separately proved to strip every display field.
+    expect(body).toContain('message: content');
+    expect(body).toContain('threadId: activeThreadId');
+    expect(body).toContain('context: contextPayload');
     expect(body).not.toMatch(/provider|model|apiKey|connectionId/);
   });
 });
@@ -248,10 +255,19 @@ describe('10-15. one right-side dock, two directions', () => {
   it('13. the ownership rule has one writer per direction, both reachable', () => {
     // Monotonic and never reset, so every open is a fresh intent.
     expect(CLIENT).toContain('const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);');
-    // Direction A is written only by the reachable open authority...
-    const outsideToggle = CLIENT.slice(0, CLIENT.indexOf('const toggleBoardAiChat'))
-      + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'));
-    expect(outsideToggle).not.toContain('setCloseSidePanelRequestId((current) => current + 1);');
+    // Direction A is written only by the REACHABLE open authorities. D2 adds
+    // a second one -- the context handoff, which opens Chat from an outside
+    // surface and so must make the docked reader yield exactly as a toggle
+    // does. Both are entry points a user can actually reach; anything else
+    // writing this counter would be a third, unreviewed dock rule.
+    const bumps = (CLIENT.match(/setCloseSidePanelRequestId\(\(current\) => current \+ 1\)/g) ?? []).length;
+    expect(bumps).toBe(2);
+    const toggle = CLIENT.indexOf('const toggleBoardAiChat');
+    const handoff = CLIENT.indexOf('const addBoardAiChatContext');
+    const outsideBoth = CLIENT.slice(0, toggle)
+      + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'), handoff)
+      + CLIENT.slice(CLIENT.indexOf('const boardAiChatSelectedItem'));
+    expect(outsideBoth).not.toContain('setCloseSidePanelRequestId((current) => current + 1)');
     // ...and direction B only by the reader's own opener.
     expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(3);
   });

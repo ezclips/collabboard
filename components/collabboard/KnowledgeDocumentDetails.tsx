@@ -99,6 +99,12 @@ export interface KnowledgeDocumentDetailsProps {
    */
   onAiFromSelection?: (request: KnowledgeSourcePageRequest) => void;
   /**
+   * BCHAT-D2. Hands one page, or one exact selection, to Board AI as an
+   * IDENTITY. Never the text: the server reloads that from the id on every
+   * turn, so nothing here is a source of truth about what a page says.
+   */
+  onAddBoardAiContext?: (item: BoardAiDraftContextItem) => void;
+  /**
    * P6J-F6-B2. Page-level navigation only -- scroll the page into view once,
    * when the reader was opened from a Note's source. No highlight, no
    * geometry, no char offsets.
@@ -218,6 +224,12 @@ function eligibleTargetsOf(
   }
   return targets;
 }
+
+import {
+  boardAiDraftFromPage,
+  boardAiDraftFromSelection,
+  type BoardAiDraftContextItem,
+} from '@/lib/domain/ai/boardAiChatDraftContext';
 
 /** Text Phase 1. One not-yet-saved highlight color choice, page-relative. */
 interface SelectionColorPreview {
@@ -439,6 +451,7 @@ export default function KnowledgeDocumentDetails({
   onBack,
   onCreateNoteFromPage,
   onAiFromSelection,
+  onAddBoardAiContext,
   initialPageNumber,
   initialSourceReferenceId,
   initialSourceRequestId,
@@ -779,6 +792,25 @@ export default function KnowledgeDocumentDetails({
                     Create Note
                   </button>
                 ) : null}
+                {/*
+                  The page the user actually names, rather than a guess at
+                  which one is "current": no scroll tracking, no observer, and
+                  no change to how pages render. Sits in the existing page
+                  action cluster for the same reason Create Note does.
+                */}
+                {onAddBoardAiContext && documentId && !pageSelection ? (
+                  <button
+                    type="button"
+                    data-knowledge-page-add-to-chat={page.pageNumber}
+                    aria-label={`Add page ${page.pageNumber} to Board AI`}
+                    className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    onClick={() => onAddBoardAiContext(
+                      boardAiDraftFromPage(documentId, originalFilename, page.pageNumber),
+                    )}
+                  >
+                    Add page to Board AI
+                  </button>
+                ) : null}
                 {/* Only for the page owning the armed rectangle, the F8 clip
                     chip's rule, in the same cluster: no new toolbar. */}
                 {onCreateNoteFromPage && documentId && pageRegion ? (
@@ -951,7 +983,7 @@ export default function KnowledgeDocumentDetails({
         not from a live selection -- pressing a button here would otherwise
         collapse the very selection it is acting on.
       */}
-      {onCreateNoteFromPage && documentId && activeSelection && !regionMode ? (
+      {(onCreateNoteFromPage || onAddBoardAiContext) && documentId && activeSelection && !regionMode ? (
         <div
           data-knowledge-selection-toolbar="true"
           style={selectionRect
@@ -964,6 +996,7 @@ export default function KnowledgeDocumentDetails({
             : { display: 'none' }}
           className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 shadow-lg"
         >
+          {onCreateNoteFromPage ? (
           <button
             type="button"
             {...{ [CLIP_CHIP]: 'true' }}
@@ -995,6 +1028,8 @@ export default function KnowledgeDocumentDetails({
           >
             <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
+          ) : null}
+          {onCreateNoteFromPage ? (
           <button
             type="button"
             aria-label={`Create Note from selection on page ${activeSelection.pageNumber}`}
@@ -1005,6 +1040,7 @@ export default function KnowledgeDocumentDetails({
           >
             Note Post
           </button>
+          ) : null}
           <button
             type="button"
             aria-label="Copy selected text"
@@ -1013,6 +1049,29 @@ export default function KnowledgeDocumentDetails({
           >
             Copy
           </button>
+          {onAddBoardAiContext ? (
+            <button
+              type="button"
+              data-knowledge-selection-add-to-chat="true"
+              aria-label="Use the selected text in Board AI"
+              title="Use in Board AI"
+              className="rounded px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+              onClick={() => {
+                // The reader's OWN re-proved span, passed through untouched.
+                // Recomputing it from the DOM here would produce a second
+                // provenance authority that could disagree with the first.
+                const draft = boardAiDraftFromSelection(documentId, originalFilename, {
+                  pageNumber: activeSelection.pageNumber,
+                  charStart: activeSelection.charStart,
+                  charEnd: activeSelection.charEnd,
+                  selectedText: activeSelection.selectedText,
+                });
+                if (draft) onAddBoardAiContext(draft);
+              }}
+            >
+              Use in Board AI
+            </button>
+          ) : null}
           {onAiFromSelection ? (
             <button
               type="button"

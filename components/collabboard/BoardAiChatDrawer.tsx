@@ -1,10 +1,21 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, MessageSquarePlus, SendHorizontal, X } from 'lucide-react';
+import { Loader2, MessageSquarePlus, Paperclip, SendHorizontal, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
+import {
+  BoardAiChatDraftChips,
+  BoardAiChatPersistedChips,
+} from '@/components/collabboard/BoardAiChatContextChips';
 import { BOARD_AI_CHAT_MESSAGE_MAX } from '@/lib/domain/ai/boardAiChatClient';
+import {
+  BOARD_AI_DRAFT_CONTEXT_MAX,
+  addBoardAiDraftContext,
+  boardAiDraftContextPayload,
+  removeBoardAiDraftContext,
+  type BoardAiDraftContextItem,
+} from '@/lib/domain/ai/boardAiChatDraftContext';
 import type {
   BoardAiChatMessageView,
   BoardAiChatThreadSummary,
@@ -19,10 +30,10 @@ import type {
  * the docked reader's band, so a blocking editor still owns the screen when one
  * opens.
  *
- * What it is not: it is not a Reader pane, it holds no board content, and it
- * sends none. V1 is conversation text. There is no context chip, no citation
- * and no Save as Note, because none of those exist yet -- and a control that
- * did nothing would be worse than its absence.
+ * What it is not: it is not a Reader pane, and it holds no board content. It
+ * sends IDENTITIES the user explicitly attached -- never text it read off the
+ * board. There is still no citation and no Save as Note, because neither
+ * exists yet, and a control that did nothing would be worse than its absence.
  *
  * Privacy is the product: this thread belongs to one user on one board. Two
  * collaborators on the same board never see each other's, which the server
@@ -42,16 +53,38 @@ export interface BoardAiChatDrawerProps {
    * keeps the screen without this surface fighting it for clicks.
    */
   readonly blockingEditorOpen?: boolean;
+  /**
+   * Attachments the board shell has queued for the NEXT message.
+   *
+   * Owned there rather than here because the surfaces that produce them --
+   * a selected card, the PDF reader, a text selection -- are the shell's, and
+   * a handoff from one of them has to survive this drawer being closed at the
+   * moment it happens.
+   */
+  readonly draftContext?: readonly BoardAiDraftContextItem[];
+  readonly onDraftContextChange?: (items: readonly BoardAiDraftContextItem[]) => void;
+  /**
+   * The one supported board object currently selected, already reduced to a
+   * draft by the shell's own selection authority. Null when the selection is
+   * empty, multiple, or something Board AI cannot honestly use.
+   */
+  readonly selectedBoardItem?: BoardAiDraftContextItem | null;
 }
 
 /** A thread the user has, or the not-yet-created one a New chat represents. */
 type ActiveThread = string | null;
+
+/** A stable empty default, so an absent prop is not a new array each render. */
+const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
 
 export default function BoardAiChatDrawer({
   boardId,
   isOpen,
   onClose,
   blockingEditorOpen = false,
+  draftContext = EMPTY_DRAFT_CONTEXT,
+  onDraftContextChange,
+  selectedBoardItem = null,
 }: BoardAiChatDrawerProps) {
   const [threads, setThreads] = useState<readonly BoardAiChatThreadSummary[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<ActiveThread>(null);
@@ -61,6 +94,8 @@ export default function BoardAiChatDrawer({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [contextNotice, setContextNotice] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   const yieldsToEditor = blockingEditorOpen;
@@ -116,6 +151,27 @@ export default function BoardAiChatDrawer({
     return () => { cancelled = true; };
   }, [isOpen, boardId, activeThreadId]);
 
+  /**
+   * Re-reads one thread from the server.
+   *
+   * Used after a turn that carried context, in BOTH the success and the
+   * provider-failure paths: what a user message really carried is the envelope
+   * the SERVER built, and only a read can show that. Guessing chips from the
+   * draft would show the user what they asked for rather than what was
+   * authorized.
+   */
+  const reloadThread = useCallback(async (threadId: string) => {
+    try {
+      const response = await fetch(`${CHAT_PATH(boardId)}?threadId=${encodeURIComponent(threadId)}`);
+      if (!response.ok) return;
+      const payload = await response.json() as { messages?: BoardAiChatMessageView[] };
+      setMessages(payload.messages ?? []);
+    } catch {
+      // The turn on screen is already truthful enough; a failed refresh only
+      // costs the chips, never correctness of the conversation.
+    }
+  }, [boardId]);
+
   // Newest turn in view, without stealing focus from the composer.
   useEffect(() => {
     const body = bodyRef.current;
@@ -149,11 +205,35 @@ export default function BoardAiChatDrawer({
 
   const canSend = draft.trim().length > 0 && !sending;
 
+  const setDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
+    onDraftContextChange?.(items);
+  }, [onDraftContextChange]);
+
+  const attach = useCallback((item: BoardAiDraftContextItem) => {
+    const result = addBoardAiDraftContext(draftContext, item);
+    setContextMenuOpen(false);
+    if (result.outcome === 'added') {
+      setContextNotice(null);
+      setDraftContext(result.items);
+      return;
+    }
+    // Both refusals are said out loud. Silently doing nothing would read as a
+    // broken button, and silently replacing an item would discard a choice.
+    setContextNotice(result.outcome === 'duplicate'
+      ? 'That is already attached.'
+      : `Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
+  }, [draftContext, setDraftContext]);
+
   const send = useCallback(async () => {
     const content = draft.trim();
     if (content.length === 0 || sending) return;
     setSending(true);
     setError(null);
+    setContextNotice(null);
+    // Captured for this ONE message. Attachments are not standing state: the
+    // next question starts empty unless the user attaches again.
+    const outgoingContext = draftContext;
+    const contextPayload = boardAiDraftContextPayload(outgoingContext);
     // Shown immediately because the server persists the user turn BEFORE it
     // generates: this is what was really stored, not an optimistic guess.
     const pending: BoardAiChatMessageView = {
@@ -163,8 +243,9 @@ export default function BoardAiChatDrawer({
       provider: null,
       model: null,
       createdAt: new Date().toISOString(),
-      // BCHAT-D1 types the field; attaching context is D2, so nothing here
-      // can carry one yet.
+      // Null until the server answers. What a message really carried is the
+      // envelope the SERVER built from what it authorized, so this pending row
+      // shows no chips rather than chips that might not survive the request.
       context: null,
     };
     setMessages((current) => [...current, pending]);
@@ -175,10 +256,13 @@ export default function BoardAiChatDrawer({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // No provider, model or key: execution is the user's stored role
-        // preference, resolved server-side.
-        body: JSON.stringify(activeThreadId === null
-          ? { message: content }
-          : { threadId: activeThreadId, message: content }),
+        // preference, resolved server-side. `context` is identity only --
+        // built by the payload helper, which never forwards a chip's label.
+        body: JSON.stringify({
+          ...(activeThreadId === null ? {} : { threadId: activeThreadId }),
+          message: content,
+          ...(contextPayload ? { context: contextPayload } : {}),
+        }),
       });
       const payload = await response.json().catch(() => null) as
         | { threadId?: string; message?: BoardAiChatMessageView; error?: string }
@@ -190,13 +274,33 @@ export default function BoardAiChatDrawer({
 
       if (!response.ok) {
         setError(safeError(response.status, payload?.error));
-        // The user's turn stays on screen because it stays in the database. A
-        // failed answer does not unask the question.
+        // Two very different failures, told apart by what the ROUTE does
+        // rather than by the status alone.
+        //
+        // A context refusal happens BEFORE anything is written, and the route
+        // returns no thread id for it. Nothing was asked, so the question comes
+        // back to the composer with its attachments intact -- the user needs
+        // them to see which one to remove.
+        if (!payload?.threadId) {
+          setMessages((current) => current.filter((entry) => entry.id !== pending.id));
+          setDraft(content);
+          return;
+        }
+        // Otherwise the user's turn IS in the database. It stays, its
+        // attachments were consumed with it, and a re-read replaces the
+        // optimistic row with the real one so its chips are the server's.
+        setDraftContext(EMPTY_DRAFT_CONTEXT);
+        await reloadThread(payload.threadId);
         return;
       }
+      // Sent and persisted: the attachments belonged to that one message.
+      setDraftContext(EMPTY_DRAFT_CONTEXT);
       if (payload?.message) {
         setMessages((current) => [...current, payload.message as BoardAiChatMessageView]);
       }
+      // Only when something was attached: a plain turn has no chips to fetch,
+      // and the optimistic row is already exactly what was stored.
+      if (contextPayload && payload?.threadId) await reloadThread(payload.threadId);
       if (payload?.threadId) await refreshThreads();
     } catch {
       setError('Could not reach Board AI.');
@@ -204,7 +308,7 @@ export default function BoardAiChatDrawer({
       setSending(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, sending, boardId, activeThreadId]);
+  }, [draft, sending, boardId, activeThreadId, draftContext, setDraftContext, reloadThread]);
 
   const refreshThreads = useCallback(async () => {
     try {
@@ -303,7 +407,7 @@ export default function BoardAiChatDrawer({
             {/* Says exactly what is true today. It does not claim the board is
                 analysed, because nothing from the board is sent. */}
             <p className="mt-1 text-[11px] text-gray-500">
-              Only you can see it. No board content is shared with the AI yet.
+              Only you can see it. Only items you attach are shared with Board AI.
             </p>
           </div>
         ) : null}
@@ -330,6 +434,10 @@ export default function BoardAiChatDrawer({
               {message.role === 'assistant' && message.model ? (
                 <span className="mt-1 block text-[10px] text-gray-400">{message.model}</span>
               ) : null}
+              {/* Read-only, and drawn from the server's sanitized view alone.
+                  Not a citation: it says what this message was allowed to
+                  use, not where the answer came from. */}
+              {message.role === 'user' ? <BoardAiChatPersistedChips context={message.context} /> : null}
             </div>
           </div>
         ))}
@@ -349,6 +457,74 @@ export default function BoardAiChatDrawer({
       ) : null}
 
       <div className="shrink-0 border-t border-gray-200 p-2">
+        <BoardAiChatDraftChips
+          items={draftContext}
+          disabled={sending}
+          onRemove={(key) => {
+            setContextNotice(null);
+            setDraftContext(removeBoardAiDraftContext(draftContext, key));
+          }}
+        />
+
+        {contextNotice ? (
+          <p data-board-ai-context-notice="true" className="mb-1.5 text-[10px] text-gray-500">
+            {contextNotice}
+          </p>
+        ) : null}
+
+        <div className="relative mb-1.5">
+          <button
+            type="button"
+            data-board-ai-context-add="true"
+            aria-label="Add context"
+            aria-expanded={contextMenuOpen}
+            disabled={sending}
+            className="flex items-center gap-1 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => {
+              setContextNotice(null);
+              setContextMenuOpen((open) => !open);
+            }}
+          >
+            <Paperclip className="h-3 w-3" aria-hidden="true" />
+            Context
+            {draftContext.length > 0 ? (
+              <span className="text-gray-400">{draftContext.length}/{BOARD_AI_DRAFT_CONTEXT_MAX}</span>
+            ) : null}
+          </button>
+
+          {contextMenuOpen ? (
+            <div
+              data-board-ai-context-menu="true"
+              role="menu"
+              className="absolute bottom-full left-0 z-10 mb-1 w-60 rounded-md border border-gray-200 bg-white p-1 shadow-lg"
+            >
+              {selectedBoardItem ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-board-ai-context-use-selected="true"
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-gray-700 hover:bg-gray-50"
+                  onClick={() => attach(selectedBoardItem)}
+                >
+                  <span className="min-w-0 truncate">Use selected item</span>
+                  <span className="ml-auto min-w-0 shrink truncate text-gray-400">
+                    {selectedBoardItem.label}
+                  </span>
+                </button>
+              ) : (
+                /* No misleading action. Naming the requirement is more use
+                   than a disabled button that says nothing. */
+                <p data-board-ai-context-empty="true" className="px-2 py-1.5 text-[11px] text-gray-500">
+                  Select a Note or PDF on the board, or add a page from the PDF reader.
+                </p>
+              )}
+              <p className="mt-0.5 border-t border-gray-100 px-2 pb-0.5 pt-1 text-[10px] text-gray-400">
+                Only attached items are shared with Board AI.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
         <div className="flex items-end gap-1.5">
           <textarea
             data-board-ai-chat-input="true"

@@ -121,6 +121,12 @@ import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } fr
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import BoardAiChatDrawer from '@/components/collabboard/BoardAiChatDrawer';
+import { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
+import {
+  addBoardAiDraftContext,
+  boardAiDraftFromBoardItem,
+  type BoardAiDraftContextItem,
+} from '@/lib/domain/ai/boardAiChatDraftContext';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
@@ -1751,6 +1757,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);
 
   /**
+   * BCHAT-D2. Attachments queued for the next Board AI message.
+   *
+   * Owned HERE rather than in the drawer because the surfaces that produce
+   * them are the shell's -- a selected card, the docked reader, a text
+   * selection inside it -- and a handoff has to survive Chat being closed at
+   * the moment it is made. It is draft state only: identities the user picked,
+   * never board content, and never authorization. The server re-proves every
+   * one on send.
+   */
+  const [boardAiChatDraftContext, setBoardAiChatDraftContext] = useState<
+    readonly BoardAiDraftContextItem[]
+  >([]);
+
+  /**
    * The ONE reachable way Board AI opens, so direction A of the dock rule
    * lives in exactly one place. An `open`-only helper beside this one was
    * unreachable dead code and put the same rule in two.
@@ -1771,6 +1791,46 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [isBoardAiChatOpen]);
 
   const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
+
+  /**
+   * The ONE way an outside surface hands Board AI something to attach.
+   *
+   * It does the three things such a handoff always has to do together: queue
+   * the identity (deduplicated and capped by the shared draft contract), bring
+   * Chat forward so the user can see it landed, and let the docked reader
+   * yield the dock through the SAME request counter a normal Chat open uses.
+   * Doing them separately at each call site is how the dock rule drifts.
+   */
+  const addBoardAiChatContext = useCallback((item: BoardAiDraftContextItem) => {
+    setBoardAiChatDraftContext((current) => addBoardAiDraftContext(current, item).items);
+    setIsBoardAiChatOpen(true);
+    setCloseSidePanelRequestId((current) => current + 1);
+  }, []);
+
+  /**
+   * The selected board object, reduced to what Board AI could attach.
+   *
+   * Exactly one selection, and only a type with a real text authority: a PDF
+   * placement contributes its DOCUMENT, a text/note post contributes itself.
+   * Anything else -- several posts, a clipart card, a to-do, an image --
+   * yields null, so the drawer offers no action rather than a promise the
+   * server would refuse.
+   */
+  const boardAiChatSelectedItem = useMemo<BoardAiDraftContextItem | null>(() => {
+    if (selectedPadletIds.length > 1) return null;
+    const id = selectedPadletId ?? (selectedPadletIds.length === 1 ? selectedPadletIds[0] : null);
+    if (!id) return null;
+    const post = padlets.find((candidate) => String(candidate.id) === String(id));
+    if (!post) return null;
+    const placement = readKnowledgePdfPlacement(post);
+    return boardAiDraftFromBoardItem({
+      id: String(post.id),
+      type: String(post.type ?? ''),
+      title: post.title ?? null,
+      knowledgeDocumentId: placement?.documentId ?? null,
+      knowledgeOriginalFilename: placement?.originalFilename ?? null,
+    });
+  }, [padlets, selectedPadletId, selectedPadletIds]);
 
   // A request belongs to the scope that produced it. Clearing on scope change
   // is what stops an old board's source from opening inside a new one.
@@ -9363,6 +9423,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
+          onAddBoardAiContext={addBoardAiChatContext}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader
@@ -9374,6 +9435,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           isOpen={isBoardAiChatOpen}
           onClose={closeBoardAiChat}
           blockingEditorOpen={isBlockingEditorModalOpen}
+          draftContext={boardAiChatDraftContext}
+          onDraftContextChange={setBoardAiChatDraftContext}
+          selectedBoardItem={boardAiChatSelectedItem}
         />
 
         {/* The one board-level Board AI entry point. Available to every reader

@@ -49,6 +49,11 @@ const KNOWLEDGE_LIBRARY_SELECTOR = '[data-knowledge-documents="true"]';
 const READER_PAGES_RETRY_LIMIT = 12;
 const READER_PAGES_RETRY_DELAY_MS = 2000;
 
+import {
+  boardAiDraftFromDocument,
+  type BoardAiDraftContextItem,
+} from '@/lib/domain/ai/boardAiChatDraftContext';
+
 export interface KnowledgeSourceReaderDrawerProps {
   /**
    * A Note asking for its exact citation. Handled at most once per requestId,
@@ -96,6 +101,16 @@ export interface KnowledgeSourceReaderDrawerProps {
    * modal had to close first only because it painted over the editor.
    */
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
+  /**
+   * BCHAT-D2. Hands one identity to Board AI: this document, one of its pages,
+   * or an exact selection inside it.
+   *
+   * Identity only. The reader never sends what a page SAYS -- the server
+   * reloads that from the id on every turn -- so this is a pointer, not a
+   * copy. The board shell owns what happens next (queue, open Chat, and let
+   * this drawer yield the dock through the existing close request).
+   */
+  onAddBoardAiContext?: (item: BoardAiDraftContextItem) => void;
   /**
    * BCHAT-C. A monotonic id the board bumps when another right-side surface --
    * today Board AI Chat -- takes the dock. Two docked drawers must not stack,
@@ -164,6 +179,7 @@ export default function KnowledgeSourceReaderDrawer({
   presentation = 'side-panel',
   blockingEditorOpen = false,
   onCreateNoteFromPage,
+  onAddBoardAiContext,
   closeSidePanelRequestId,
   onOpenBacklinkTarget,
 }: KnowledgeSourceReaderDrawerProps) {
@@ -484,6 +500,20 @@ export default function KnowledgeSourceReaderDrawer({
           {reader.originalFilename || 'Document'}
         </div>
         <span className="flex-1" />
+        {onAddBoardAiContext ? (
+          <button
+            type="button"
+            data-knowledge-reader-add-document-to-chat="true"
+            title="Add document to Board AI"
+            aria-label="Add document to Board AI"
+            className="mb-1 rounded-md px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-50"
+            onClick={() => onAddBoardAiContext(
+              boardAiDraftFromDocument(reader.documentId, reader.originalFilename),
+            )}
+          >
+            Add to Board AI
+          </button>
+        ) : null}
         <button
           ref={closeButtonRef}
           type="button"
@@ -527,6 +557,10 @@ export default function KnowledgeSourceReaderDrawer({
             // mode a read-only viewer, or one with no visible pane at all,
             // could never complete.
             onAiFromSelection={onCreateNoteFromPage && onOpenBacklinkTarget ? activateAiFromSelection : undefined}
+            // BCHAT-D2. Page and exact-selection handoffs live where the page
+            // rows and the selection toolbar already are; both carry identity
+            // only, and neither writes anything.
+            onAddBoardAiContext={onAddBoardAiContext}
           />
         </div>
         {/*

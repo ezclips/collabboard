@@ -138,8 +138,10 @@ describe('17-18. opening reads, and never writes', () => {
     await mount();
     const empty = q('[data-board-ai-chat-empty="true"]')!;
     expect(empty.textContent).toContain('private');
-    expect(empty.textContent).toMatch(/No board content is shared/i);
-    // It must not promise analysis that does not happen.
+    // D2 adds attachments, so the wording says what is true now: nothing is
+    // shared EXCEPT what the user explicitly attaches.
+    expect(empty.textContent).toMatch(/Only items you attach are shared/i);
+    // It must still not promise analysis that does not happen.
     expect(empty.textContent).not.toMatch(/analys|reads your board|sees everything/i);
   });
 });
