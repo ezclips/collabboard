@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @next/next/no-img-element */
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
@@ -14,6 +15,7 @@ import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimen
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
+import { useBackdropDismiss } from '@/components/collabboard/editors/PostEditorShell';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
 import CardPreview from '@/components/collabboard/CardPreview';
@@ -898,6 +900,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const activeImageToolbarPadlet = imageToolbarPadletId
     ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
     : null;
+  /**
+   * R6C. The ONE backdrop-dismissal authority, shared with PostEditorShell.
+   *
+   * This overlay used to close on any `onClick` reaching the backdrop. Clicking
+   * the Title input below re-targets the Text style panel, which reflows this
+   * centred grid out from under the pointer, so mouseup landed on the backdrop
+   * and the browser retargeted the click to it -- the editor dismissed itself
+   * on the first title interaction. Dragging to select the title does the same
+   * thing. Requiring the press to have BEGUN on the backdrop settles it without
+   * a timer, geometry, or a second close path.
+   */
+  const imageOverlayBackdropDismiss = useBackdropDismiss(
+    React.useCallback(() => setImageToolbarPadletId(null), [setImageToolbarPadletId]),
+  );
   // Image editing modal's own Title field -- independent of the caption
   // below it. `activeImageStyleTarget` tracks which of the two the Text
   // style panel is currently formatting (default 'caption' preserves the
@@ -5074,10 +5090,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onChangeColor={setSectionHeadingColor}
         />
       )}
-      {imageToolbarPadletId && (
+      {imageToolbarPadletId && createPortal(
+        /**
+         * R6C. Portalled to <body>, and for a structural reason rather than a
+         * z-index one.
+         *
+         * This overlay renders inside FreeformPadletCards, which sits inside
+         * CanvasViewport's `isolation: 'isolate'` boundary (PATCH 9M). That
+         * boundary makes the entire canvas subtree paint as ONE atomic layer
+         * at z-index:auto among its root-level siblings, so no z-index asked
+         * for in here -- 60000 included -- can ever raise this above the
+         * Knowledge reader (a root-level sibling). The overlay is a blocking
+         * modal, not a canvas object, so it belongs beside CanvasModals in the
+         * root stacking context; portalling it there leaves PATCH 9M's actual
+         * guarantee (canvas objects stay contained) completely untouched.
+         *
+         * Its pair is CanvasClient's isBlockingEditorModalOpen, which now
+         * counts imageToolbarPadletId so the reader yields the same way it
+         * does for every other blocking editor.
+         */
         <div
           className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
-          onClick={() => setImageToolbarPadletId(null)}
+          data-ui="freeform-image-editor-overlay"
+          {...imageOverlayBackdropDismiss}
         >
           {/* Three-column grid, not a centered flex row (see PostEditorShell.tsx
               for the same fix and rationale): the two flanking columns are
@@ -5678,7 +5713,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
     </>

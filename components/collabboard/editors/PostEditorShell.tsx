@@ -186,6 +186,45 @@ function useSelectionOverlayRect(
 // toolbar it renders. Knows nothing about the centre's content, persistence,
 // or serialization -- the caller supplies the centre as an opaque node.
 // ---------------------------------------------------------------------------
+/**
+ * The ONE backdrop-dismissal authority for blocking editor overlays.
+ *
+ * Where the press STARTED is the only thing that makes an interaction a
+ * backdrop dismissal.
+ *
+ * A `click` is dispatched on the nearest common ancestor of its mousedown and
+ * mouseup targets. So when the editor reflows while the button is held -- the
+ * Note title's focus opens the Text Style panel, the row grows, and a
+ * centred overlay re-centres the card out from under the pointer -- mouseup
+ * lands on the backdrop and the browser retargets the click to the overlay.
+ * The same thing happens when a press begins inside the panel and drifts out,
+ * which is what selecting a title by dragging does. Testing the click target
+ * alone cannot tell either apart from a real backdrop click, so the editor
+ * dismissed itself mid-interaction.
+ *
+ * Recording the origin on pointerdown settles it before any focus handler can
+ * move anything. No geometry, no timers, and no second dismissal path: the
+ * close still happens only in the click handler.
+ *
+ * Exported so every blocking overlay shares this one implementation rather
+ * than re-deriving it -- R6C adopted it for the freeform image editor, whose
+ * own naive `onClick={close}` backdrop had exactly this defect.
+ */
+export function useBackdropDismiss(onDismiss: () => void) {
+  const pressBeganOnBackdropRef = useRef(false);
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      pressBeganOnBackdropRef.current = e.target === e.currentTarget;
+    },
+    onClick: (e: React.MouseEvent) => {
+      const beganOnBackdrop = pressBeganOnBackdropRef.current;
+      // Consumed either way, so a stale origin can never authorise a later close.
+      pressBeganOnBackdropRef.current = false;
+      if (beganOnBackdrop && e.target === e.currentTarget) onDismiss();
+    },
+  };
+}
+
 export default function PostEditorShell({
   isOpen,
   onBackdropClick,
@@ -206,36 +245,12 @@ export default function PostEditorShell({
   const rowRef = useRef<HTMLDivElement>(null);
   const overlayRect = useSelectionOverlayRect(selectionEditor, selectionRange, selectionIndicator, rowRef);
 
+  // Declared BEFORE the `isOpen` early return: a hook that runs only while open
+  // changes this component's hook count when it toggles.
+  const { onPointerDown: handleOverlayPointerDown, onClick: handleOverlayClick } =
+    useBackdropDismiss(onBackdropClick);
+
   if (!isOpen) return null;
-
-  /**
-   * Where the press STARTED, which is the only thing that makes an interaction
-   * a backdrop dismissal.
-   *
-   * A `click` is dispatched on the nearest common ancestor of its mousedown and
-   * mouseup targets. So when the editor reflows while the button is held -- the
-   * Note title's focus opens the Text Style panel, the row grows, and this
-   * vertically centred overlay re-centres the card out from under the pointer --
-   * mouseup lands on the backdrop and the browser retargets the click to this
-   * overlay. Testing the click target alone cannot tell that apart from a real
-   * backdrop click, so the editor dismissed itself mid-interaction.
-   *
-   * Recording the origin on pointerdown settles it before any focus handler can
-   * move anything. No geometry, no timers, and no second dismissal path: the
-   * close still happens only in the click handler below.
-   */
-  const pressBeganOnBackdropRef = useRef(false);
-
-  const handleOverlayPointerDown = (e: React.PointerEvent) => {
-    pressBeganOnBackdropRef.current = e.target === e.currentTarget;
-  };
-
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    const beganOnBackdrop = pressBeganOnBackdropRef.current;
-    // Consumed either way, so a stale origin can never authorise a later close.
-    pressBeganOnBackdropRef.current = false;
-    if (beganOnBackdrop && e.target === e.currentTarget) onBackdropClick();
-  };
 
   return (
     <div

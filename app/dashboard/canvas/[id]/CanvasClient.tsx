@@ -985,12 +985,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     || isCardEditorOpen
     || isCardViewerOpen
     || isClipartDraftModalOpen
+    // R6C. Opening an EXISTING image post does not use ImageEditor at all:
+    // openFreeformImageEditModal explicitly sets isImageEditorOpen(false) and
+    // raises imageToolbarPadletId instead, which drives its own full-screen
+    // blocking overlay. Without it here the Knowledge reader never learned an
+    // editor was open, so it stayed in its z-[1200] band and covered it.
+    || imageToolbarPadletId !== null
   ), [
     isNoteEditorOpen, isTableEditorOpen, isLinkEditorOpen, isTodoEditorOpen,
     isContainerEditorOpen, isCommentEditorOpen, isImageEditorOpen,
     isDrawingEditorOpen, isAIComponentEditorOpen, isAIContentEditModalOpen,
     isAIContentConvertModalOpen, isCardEditorOpen, isCardViewerOpen,
-    isClipartDraftModalOpen,
+    isClipartDraftModalOpen, imageToolbarPadletId,
   ]);
 
   // Guard flag to check if any editor or modal is open
