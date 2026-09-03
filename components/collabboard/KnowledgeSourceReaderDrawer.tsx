@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, {
   UsedInNotes,
@@ -431,6 +431,25 @@ export default function KnowledgeSourceReaderDrawer({
   // below, because hooks cannot sit behind a conditional -- the hook reads the
   // SAME board-level index the workspace reads, in the same direction, so it
   // issues no request and holds no second notion of what a backlink row is.
+  /**
+   * PDF-R1 / BCHAT-D2 follow-up. Every explicit Board AI handoff goes through
+   * here so the workspace case is handled once.
+   *
+   * The focused workspace is `fixed inset-0 z-[3100]` and Chat sits at
+   * z-[1200], so queuing context from here used to look like nothing had
+   * happened: the attachment was real, but invisible underneath the reader.
+   * Returning to the board is what makes the result visible, and it uses the
+   * reader's OWN existing close path rather than a new one.
+   *
+   * The docked case is deliberately untouched -- the board already closes it
+   * through the Chat-open request counter, and doing it twice here would take
+   * that rule out of its single home.
+   */
+  const handOffToBoardAi = useCallback((item: BoardAiDraftContextItem) => {
+    onAddBoardAiContext?.(item);
+    if (presentation === 'workspace') closeReader();
+  }, [onAddBoardAiContext, presentation, closeReader]);
+
   const libraryBacklinks = useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null);
   const libraryBacklinkRows = useMemo(
     () => knowledgeSourceBacklinkDocumentRows(libraryBacklinks),
@@ -507,7 +526,7 @@ export default function KnowledgeSourceReaderDrawer({
             title="Add document to Board AI"
             aria-label="Add document to Board AI"
             className="mb-1 rounded-md px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-50"
-            onClick={() => onAddBoardAiContext(
+            onClick={() => handOffToBoardAi(
               boardAiDraftFromDocument(reader.documentId, reader.originalFilename),
             )}
           >
@@ -560,7 +579,7 @@ export default function KnowledgeSourceReaderDrawer({
             // BCHAT-D2. Page and exact-selection handoffs live where the page
             // rows and the selection toolbar already are; both carry identity
             // only, and neither writes anything.
-            onAddBoardAiContext={onAddBoardAiContext}
+            onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}
           />
         </div>
         {/*

@@ -2,6 +2,13 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import {
+  knowledgeETagMatches,
+  knowledgePagesETag,
+} from '@/lib/domain/knowledge/knowledgePdfRenderPolicy';
+
+/** Private, and revalidated every time, so authorization never goes stale. */
+const PAGES_CACHEABLE = 'private, max-age=0, must-revalidate';
 
 export const runtime = 'nodejs';
 
@@ -15,7 +22,7 @@ function createKnowledgeRouteClient(cookieStore: ResolvedNextCookieStore) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string; documentId: string }> },
 ) {
   try {
@@ -51,7 +58,9 @@ export async function GET(
     const adminClient = getSupabaseAdmin();
     const { data: document, error: documentError } = await adminClient
       .from('knowledge_documents')
-      .select('id, original_filename, page_count, processing_status')
+      // content_sha256 joins the read the route already performs; the ready
+      // page set is derived from exactly those bytes, so it is the validator.
+      .select('id, original_filename, page_count, processing_status, content_sha256')
       .eq('id', documentId)
       .eq('board_id', boardId)
       .maybeSingle();
@@ -59,6 +68,26 @@ export async function GET(
     if (!document) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     if (document.processing_status !== 'ready') {
       return NextResponse.json({ error: 'Knowledge document is not ready' }, { status: 409 });
+    }
+
+    /**
+     * Revalidated on every request, never blindly reused.
+     *
+     * The page text is already durable in Postgres; what cost the user time was
+     * re-sending it on every reader open. `must-revalidate` keeps the bytes in
+     * the browser while forcing this route -- and therefore the authorization
+     * above -- to run each time. No durable browser copy of document text is
+     * created anywhere.
+     */
+    const etag = typeof document.content_sha256 === 'string'
+      ? knowledgePagesETag(document.content_sha256, typeof document.page_count === 'number' ? document.page_count : null)
+      : null;
+    if (etag !== null && knowledgeETagMatches(request.headers.get('if-none-match'), etag)) {
+      // Authorization already ran; a 304 is only ever reached through it.
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': PAGES_CACHEABLE },
+      });
     }
 
     const { data: pages, error: pagesError } = await adminClient
@@ -88,7 +117,12 @@ export async function GET(
           rotation: page.rotation,
         })),
       },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      {
+        status: 200,
+        headers: etag === null
+          ? { 'Cache-Control': 'no-store' }
+          : { ETag: etag, 'Cache-Control': PAGES_CACHEABLE },
+      },
     );
   } catch {
     return NextResponse.json({ error: 'Unavailable' }, { status: 503 });

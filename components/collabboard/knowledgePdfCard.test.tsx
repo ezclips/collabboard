@@ -233,20 +233,26 @@ describe('8-12. page content and fallback', () => {
     expect(body(host)!.className).toContain('overflow-y-auto');
   });
 
-  it('11. a page with no rendered image falls back to its parsed text', async () => {
+  it('11. a page with no rendered image says so instead of showing text', async () => {
     const host = await card();
     const firstPage = pageSections(host)[0];
     const image = firstPage.querySelector('img')!;
     expect(image, 'the image is attempted first').not.toBeNull();
     expect(firstPage.querySelector('[data-knowledge-pdf-page-text]')).toBeNull();
 
-    // The local environment's real behaviour: no derivative exists, so the
-    // image errors and the canonical text must take its place.
+    // No derivative exists, so the image errors.
     await act(async () => { image.dispatchEvent(new Event('error')); });
 
+    /**
+     * PDF-R1. This used to swap in the parsed text while the selector still
+     * read PDF/page -- the user was shown text and told it was the document.
+     * The visual mode now admits the picture is missing and a repair is under
+     * way; the text is one explicit click away in T.
+     */
     const after = pageSections(host)[0];
-    expect(after.querySelector('[data-knowledge-pdf-page-text]')).not.toBeNull();
-    expect(after.textContent).toContain('Text of page 1');
+    expect(after.querySelector('[data-knowledge-pdf-page-text]')).toBeNull();
+    expect(after.textContent).not.toContain('Text of page 1');
+    expect(after.querySelector('[data-knowledge-pdf-page-visual-state]')).not.toBeNull();
   });
 
   it('12. a failed image leaves no broken-image element behind', async () => {
@@ -955,7 +961,7 @@ describe('PDF-C1 page switcher', () => {
     expect(shownPage(host)).toBe('2');
   });
 
-  it('16. a missing derivative falls back to the SAME page it failed on', async () => {
+  it('16. a missing derivative reports on the SAME page it failed on', async () => {
     const host = await card();
     await step(next(host));
     const image = pageSections(host)[0].querySelector('img')!;
@@ -963,8 +969,10 @@ describe('PDF-C1 page switcher', () => {
     expect(host.querySelector('[data-knowledge-pdf-page-text]')).toBeNull();
 
     await act(async () => { image.dispatchEvent(new Event('error')); });
-    // Page 2's text, not page 1's, and the pager has not moved.
-    expect(host.querySelector('[data-knowledge-pdf-page-text]')!.textContent).toContain('Text of page 2');
+    // PDF-R1: the unavailable state replaces the old silent text fallback, and
+    // the property that mattered still holds -- the pager has not moved.
+    expect(host.querySelector('[data-knowledge-pdf-page-visual-state]')).not.toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-page-text]')).toBeNull();
     expect(indicator(host)).toBe('2 / 3');
   });
 

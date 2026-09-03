@@ -611,7 +611,7 @@ describe('10. a still-extracting document recovers without a remount', () => {
     expect(host.querySelector('[data-knowledge-pdf-body="true"]')).toBe(body);
   });
 
-  it('after recovery an unavailable page image still falls back to the parsed text', async () => {
+  it('an unavailable page image says so instead of impersonating PDF mode', async () => {
     vi.useFakeTimers();
     stubPages(1);
     const host = surface('ready');
@@ -627,8 +627,103 @@ describe('10. a still-extracting document recovers without a remount', () => {
     // A 404 raster reports itself unavailable, exactly as it does live.
     await act(async () => { image!.dispatchEvent(new Event('error')); });
 
-    expect(host.querySelector('[data-knowledge-pdf-page-text="true"]')).not.toBeNull();
-    expect(host.textContent).toContain('Extracted page one.');
+    /**
+     * PDF-R1. This used to silently render the parsed text while the control
+     * still read PDF/page -- so the user was shown text and told it was the
+     * document. Now the visual mode admits the picture is missing and a repair
+     * is under way; the text is still one explicit click away in T.
+     */
+    expect(host.querySelector('[data-knowledge-pdf-page-text="true"]')).toBeNull();
+    expect(host.textContent).not.toContain('Extracted page one.');
+    expect(host.querySelector('[data-knowledge-pdf-page-visual-state]')).not.toBeNull();
+    expect(host.textContent).toContain('Preparing page preview…');
+  });
+
+  it('41. a missing visual asks for repair at most once, not on every render', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubPages(1);
+    const host = surface('ready');
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+
+    const image = host.querySelector('img')!;
+    // Three separate failures, exactly as a re-rendering component produces.
+    await act(async () => { image.dispatchEvent(new Event('error')); });
+    await act(async () => { image.dispatchEvent(new Event('error')); });
+    await act(async () => { image.dispatchEvent(new Event('error')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    const posts = (fetchMock.mock.calls as unknown as unknown[][]).filter(
+      (call) => String(call[0]).includes('/render-pages')
+        && (call[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    // The latch is what stops a discovery loop becoming a POST loop.
+    expect(posts).toHaveLength(1);
+  });
+
+  it('43. a failed repair offers an explicit retry rather than pretending', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/render-pages')) {
+        // The route refuses: the document cannot be prepared right now.
+        return new Response(JSON.stringify({ error: 'Unavailable' }), { status: 503 });
+      }
+      if (String(url) === pagesUrl) {
+        return new Response(JSON.stringify({ document: { id: DOC_ID }, pages: [PAGE] }),
+          { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const host = surface('ready');
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const image = host.querySelector('img')!;
+    await act(async () => { image.dispatchEvent(new Event('error')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(host.querySelector('[data-knowledge-pdf-page-visual-state="unavailable"]')).not.toBeNull();
+    expect(host.textContent).toContain('Page preview unavailable');
+    const retry = host.querySelector('[data-knowledge-pdf-action="retry-page-visual"]');
+    expect(retry).not.toBeNull();
+
+    // 43. Retry clears the latch and genuinely asks again.
+    const before = fetchMock.mock.calls.filter((call) => String(call[0]).includes('/render-pages')).length;
+    await act(async () => { (retry as HTMLElement).click(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).includes('/render-pages')).length)
+      .toBeGreaterThan(before);
+  });
+
+  it('44,45. a completed repair clears the session marker so the image is probed again', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/render-pages')) {
+        // POST accepts, then the first poll reports the render finished.
+        return new Response(JSON.stringify({ state: 'complete' }), {
+          status: (init as RequestInit | undefined)?.method === 'POST' ? 202 : 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (String(url) === pagesUrl) {
+        return new Response(JSON.stringify({ document: { id: DOC_ID }, pages: [PAGE] }),
+          { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const host = surface('ready');
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { host.querySelector('img')!.dispatchEvent(new Event('error')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(host.querySelector('img')).toBeNull();
+
+    // The poll reports completion; the earlier 404 must not outlive it.
+    await act(async () => { await vi.advanceTimersByTimeAsync(4100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(host.querySelector('img')).not.toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-page-visual-state]')).toBeNull();
   });
 
   it('retrying is bounded -- a document that never becomes ready stops asking', async () => {

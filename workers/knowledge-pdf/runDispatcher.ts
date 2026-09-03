@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { asKnowledgeDocumentId } from '../../lib/domain/core/ids';
 import { SupabaseKnowledgeExtractionRepository } from '../../lib/infra/knowledge/knowledgeExtractionAdapters';
+import { SupabaseKnowledgeRenderLifecycleRepository } from '../../lib/infra/knowledge/knowledgeRenderLifecycleAdapters';
+import { createKnowledgeWorkerStorage } from './processKnowledgePdfDocument';
+import { runKnowledgePageRenderPass } from './repairKnowledgePageDerivatives';
 import { createKnowledgePdfWorkerFromEnvironment, processKnowledgePdfDocument } from './processKnowledgePdfDocument';
 import {
   runKnowledgePdfDispatcher,
@@ -38,10 +41,24 @@ try {
     pollIntervalMs: positiveEnv('KNOWLEDGE_PDF_POLL_INTERVAL_MS', 5_000),
     discoveryLimit: positiveEnv('KNOWLEDGE_PDF_DISCOVERY_LIMIT', 16),
   });
+  /**
+   * PDF-R1. The repair path shares this process but nothing else: its own
+   * lifecycle repository, its own candidate RPC, its own lease. It reuses the
+   * worker's Storage seam because the bytes it needs are the same bytes.
+   */
+  const renderLifecycle = new SupabaseKnowledgeRenderLifecycleRepository(client as never);
+  const renderStorage = createKnowledgeWorkerStorage(client);
   const summary = await runKnowledgePdfDispatcher(
     {
       discovery,
       processDocument: (documentId) => processKnowledgePdfDocument(worker, asKnowledgeDocumentId(documentId)),
+      renderPass: async (limit) => {
+        const results = await runKnowledgePageRenderPass(
+          { lifecycle: renderLifecycle, storage: renderStorage },
+          limit,
+        );
+        return results.filter((result) => result.status === 'completed').length;
+      },
     },
     { ...config, signal: controller.signal },
   );

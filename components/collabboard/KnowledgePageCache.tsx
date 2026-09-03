@@ -78,6 +78,15 @@ export interface KnowledgePageCache {
   readonly load: (boardId: string, documentId: string) => Promise<KnowledgePagesLoad>;
   readonly isPageImageless: (documentId: string, pageNumber: number) => boolean;
   readonly markPageImageless: (documentId: string, pageNumber: number) => void;
+  /**
+   * PDF-R1. Forget that a document's pages had no derivative.
+   *
+   * A repair can produce the artifact minutes after a 404 was recorded, and
+   * the marker is what stops the image being requested again -- so a
+   * successful render MUST be able to clear it. Without this the session
+   * would keep hiding a picture that now exists.
+   */
+  readonly clearPageImageless: (documentId: string) => void;
 }
 
 const Context = createContext<KnowledgePageCache | null>(null);
@@ -251,6 +260,10 @@ export function KnowledgePageCacheProvider({ children }: { children: React.React
    * exist today may exist tomorrow once the worker produces it, so this must
    * never become durable knowledge -- a later app session probes again.
    */
+  const clearPageImageless = useCallback((documentId: string) => {
+    storeRef.current.imageless.delete(documentId);
+  }, []);
+
   const markPageImageless = useCallback((documentId: string, pageNumber: number) => {
     const store = storeRef.current;
     const known = store.imageless.get(documentId);
@@ -259,8 +272,8 @@ export function KnowledgePageCacheProvider({ children }: { children: React.React
   }, []);
 
   const value = useMemo<KnowledgePageCache>(
-    () => ({ read, isStale, load, isPageImageless, markPageImageless }),
-    [read, isStale, load, isPageImageless, markPageImageless],
+    () => ({ read, isStale, load, isPageImageless, markPageImageless, clearPageImageless }),
+    [read, isStale, load, isPageImageless, markPageImageless, clearPageImageless],
   );
 
   return <Context.Provider value={value}>{children}</Context.Provider>;

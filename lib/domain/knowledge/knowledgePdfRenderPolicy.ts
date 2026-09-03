@@ -18,6 +18,18 @@ export const KNOWLEDGE_DERIVATIVE_MAX_SOURCE_BYTES = 52_428_800;
 /** Pages beyond this are not rendered. Deletion still enumerates past it. */
 export const KNOWLEDGE_DERIVATIVE_MAX_PAGES = 200;
 
+/**
+ * The renderer's identity, and the ONE place it is written.
+ *
+ * It travels two ways from here: the worker records it when a render
+ * completes, and the image route folds it into the HTTP validator. Bumping it
+ * therefore does two useful things at once -- every cached page image stops
+ * matching, and every requested document becomes a render candidate again --
+ * so a genuine change in what a page looks like can never be served from a
+ * stale cache. Duplicating the literal anywhere would break that link.
+ */
+export const KNOWLEDGE_PDF_RENDERER_VERSION = '1';
+
 export const KNOWLEDGE_DERIVATIVE_CONTENT_TYPE = 'image/webp';
 export const KNOWLEDGE_DERIVATIVE_EXTENSION = 'webp';
 
@@ -67,12 +79,71 @@ export function knowledgeDerivativeEligibility(
 }
 
 /**
+ * The HTTP validator for one rendered page.
+ *
+ * Built only from server-side identity: the source bytes' hash, the page
+ * number, and the renderer version. No filename, no user input, no Storage
+ * metadata -- so nothing a caller supplies can steer it, and it is a strong
+ * ETag because those three values fully determine the bytes.
+ *
+ * Different bytes, a different page or a different renderer all produce a
+ * different validator, which is the whole invalidation story: there is nothing
+ * to purge, because the name changes.
+ */
+export function knowledgePageImageETag(
+  contentSha256: string,
+  pageNumber: number,
+  rendererVersion: string = KNOWLEDGE_PDF_RENDERER_VERSION,
+): string | null {
+  if (typeof contentSha256 !== 'string' || !SHA256.test(contentSha256)) return null;
+  if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
+  if (!VERSION.test(rendererVersion)) return null;
+  return `"${contentSha256}:${pageNumber}:${rendererVersion}"`;
+}
+
+/**
+ * The validator for one document's ready page list.
+ *
+ * The page set is derived from the same bytes the hash names, so the hash
+ * alone already determines it; the page count travels with it because the same
+ * read already has it and it makes a truncated or partially written extraction
+ * visible as a different validator.
+ */
+export function knowledgePagesETag(
+  contentSha256: string,
+  pageCount: number | null,
+): string | null {
+  if (typeof contentSha256 !== 'string' || !SHA256.test(contentSha256)) return null;
+  const pages = pageCount === null ? 'null' : String(pageCount);
+  if (!/^(?:null|[0-9]{1,9})$/.test(pages)) return null;
+  return `"${contentSha256}:pages:${pages}"`;
+}
+
+/**
+ * Whether a conditional request already holds this exact representation.
+ *
+ * Handles the comma-separated list form and the weak-validator prefix, and
+ * answers false for `*`: a wildcard means "if any representation exists",
+ * which is a precondition question, not the cache revalidation this serves.
+ */
+export function knowledgeETagMatches(header: string | null, etag: string): boolean {
+  if (!header || typeof etag !== 'string' || etag.length === 0) return false;
+  return header
+    .split(',')
+    .map((candidate) => candidate.trim())
+    .some((candidate) => candidate === etag || candidate === `W/${etag}`);
+}
+
+/**
  * Board and document ids are Postgres `uuid` columns, so anything that is not
  * one is rejected outright rather than escaped or sanitised. Repairing a
  * crafted id into a valid-looking path is exactly how one document ends up
  * reading or deleting another's objects.
  */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Validator inputs are checked, never escaped: a bad one yields no ETag. */
+const SHA256 = /^[0-9a-f]{64}$/i;
+const VERSION = /^[0-9A-Za-z._-]{1,32}$/;
 
 /**
  * The deterministic derivative path, or null when it cannot be built.

@@ -537,6 +537,15 @@ export async function processKnowledgePdfDocument(
   }
 }
 
+/**
+ * PDF-R1. Exported so the derivative repair path can reuse the SAME Storage
+ * authority rather than opening a second one: identical bucket, identical
+ * credentials, identical error handling.
+ */
+export function createKnowledgeWorkerStorage(client: SupabaseClient): KnowledgeWorkerStorage {
+  return new SupabaseKnowledgeWorkerStorage(client);
+}
+
 class SupabaseKnowledgeWorkerStorage implements KnowledgeWorkerStorage {
   constructor(private readonly client: SupabaseClient) {}
 

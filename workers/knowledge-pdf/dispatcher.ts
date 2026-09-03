@@ -18,6 +18,15 @@ export interface KnowledgeProcessingCandidateRepository {
 export interface KnowledgePdfDispatcherDependencies {
   readonly discovery: KnowledgeProcessingCandidateRepository;
   readonly processDocument: (documentId: KnowledgeDocumentId) => Promise<KnowledgePdfWorkerResult>;
+  /**
+   * PDF-R1. One bounded derivative-render pass per dispatcher cycle.
+   *
+   * A SEPARATE path on purpose: it uses its own candidate RPC and its own
+   * lease, so a ready document being repaired can never appear to the
+   * extraction discovery above or reach claim_knowledge_extraction. Optional,
+   * so a deployment that has not enabled repair behaves exactly as before.
+   */
+  readonly renderPass?: (limit: number) => Promise<number>;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   readonly log?: (event: Record<string, unknown>) => void;
 }
@@ -39,6 +48,9 @@ export interface KnowledgePdfDispatcherSummary {
   readonly stale: number;
   readonly conflicts: number;
   readonly discoveryErrors: number;
+  /** PDF-R1: documents whose page visuals this dispatcher repaired. */
+  readonly rendered: number;
+  readonly renderErrors: number;
   readonly stopped: boolean;
 }
 
@@ -131,6 +143,8 @@ export async function runKnowledgePdfDispatcher(
     stale: 0,
     conflicts: 0,
     discoveryErrors: 0,
+    rendered: 0,
+    renderErrors: 0,
   };
   let stopping = signal?.aborted ?? false;
   const onAbort = () => { stopping = true; };
@@ -192,6 +206,28 @@ export async function runKnowledgePdfDispatcher(
       }
 
       if (started === 0) {
+        /**
+         * Only when extraction has nothing to do. Text is the product; a
+         * missing picture never delays a document that has none yet, and this
+         * ordering means the repair path cannot starve extraction.
+         */
+        if (deps.renderPass) {
+          try {
+            const repaired = await deps.renderPass(config.discoveryLimit);
+            if (repaired > 0) {
+              summary.rendered += repaired;
+              log({ event: 'knowledge-pdf-render-pass', repaired });
+              continue;
+            }
+          } catch (error: unknown) {
+            // A render failure is never allowed to stop extraction dispatch.
+            summary.renderErrors += 1;
+            log({
+              event: 'knowledge-pdf-render-pass-error',
+              error: error instanceof Error ? error.message.slice(0, 200) : 'render pass failed',
+            });
+          }
+        }
         if (active.size > 0) await Promise.race(active.values());
         else await sleep(config.pollIntervalMs, signal);
       } else if (active.size >= config.concurrency) {

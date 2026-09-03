@@ -246,3 +246,50 @@ describe('the shell owns draft context, and owns it narrowly', () => {
     expect(render).toContain('selectedBoardItem={boardAiChatSelectedItem}');
   });
 });
+
+describe('52-57. PDF-R1: the focused workspace returns to the board on handoff', () => {
+  const drawer = executable(read('components/collabboard/KnowledgeSourceReaderDrawer.tsx'));
+
+  it('52,53,54. every explicit handoff goes through one wrapper', () => {
+    const wrapper = drawer.slice(
+      drawer.indexOf('const handOffToBoardAi'),
+      drawer.indexOf('const handOffToBoardAi') + 400,
+    );
+    // Queue first, then leave: the attachment must be safe before the reader
+    // that produced it goes away.
+    expect(wrapper.indexOf('onAddBoardAiContext?.(item)'))
+      .toBeLessThan(wrapper.indexOf('closeReader()'));
+    expect(wrapper).toContain("presentation === 'workspace'");
+
+    // 52. The document action, 53/54 the page and selection actions inside
+    // KnowledgeDocumentDetails, all use the wrapper rather than the raw prop.
+    expect(drawer).toContain('onClick={() => handOffToBoardAi(');
+    expect(drawer).toContain('onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}');
+  });
+
+  it('55. only the explicit handoff closes it -- not Chat opening elsewhere', () => {
+    // The board's Chat-open request still reaches the docked reader only; the
+    // workspace has no other path to closeReader from Board AI.
+    const closes = drawer.split('closeReader()').length - 1;
+    const handoffCloses = drawer.slice(
+      drawer.indexOf('const handOffToBoardAi'),
+      drawer.indexOf('const handOffToBoardAi') + 400,
+    ).split('closeReader()').length - 1;
+    expect(handoffCloses).toBe(1);
+    // Every other close is a pre-existing one (the tab, the × button, the
+    // docked close request), none of which this patch touched.
+    expect(closes).toBeGreaterThan(handoffCloses);
+  });
+
+  it('56. the docked path still defers to the existing mutual exclusion', () => {
+    // Scoped in the reader, exactly as before: a side-panel handoff is closed
+    // by the board's request counter, not by the wrapper.
+    expect(drawer).toContain("if (presentation !== 'side-panel') return;");
+  });
+
+  it('57. the reader is still mounted unconditionally', () => {
+    const canvas = executable(read('app/dashboard/canvas/[id]/CanvasClient.tsx'));
+    expect(canvas).toMatch(/<KnowledgeSourceReaderDrawer\b/);
+    expect(canvas).not.toMatch(/&&\s*<KnowledgeSourceReaderDrawer/);
+  });
+});

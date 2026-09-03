@@ -3,7 +3,9 @@ import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import {
   KNOWLEDGE_DERIVATIVE_CONTENT_TYPE,
+  knowledgeETagMatches,
   knowledgePageDerivativePath,
+  knowledgePageImageETag,
 } from '@/lib/domain/knowledge/knowledgePdfRenderPolicy';
 import { KNOWLEDGE_STORAGE_BUCKET } from '@/lib/infra/knowledge/knowledgeIngestionAdapters';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
@@ -53,7 +55,25 @@ function isMissingObject(error: unknown): boolean {
   return status !== null && MISSING_OBJECT_STATUSES.has(status);
 }
 
-const notFound = () => NextResponse.json({ error: 'Not found' }, { status: 404 });
+/**
+ * Private, and revalidated every single time.
+ *
+ * `max-age=0, must-revalidate` lets the browser KEEP the bytes but never reuse
+ * them without asking, so authorization runs on every view while the image
+ * itself crosses the wire once. Storage stays private, no URL carries
+ * authority, and a revoked collaborator is refused on the very next request.
+ */
+const CACHEABLE = 'private, max-age=0, must-revalidate';
+
+/**
+ * A missing derivative is deliberately NOT cacheable. A repair may produce it
+ * moments later, and a stored negative answer would hide it for the life of
+ * the cache entry.
+ */
+const notFound = () => NextResponse.json(
+  { error: 'Not found' },
+  { status: 404, headers: { 'Cache-Control': 'private, no-store' } },
+);
 const unavailable = () => NextResponse.json({ error: 'Unavailable' }, { status: 503 });
 
 /**
@@ -62,7 +82,7 @@ const unavailable = () => NextResponse.json({ error: 'Unavailable' }, { status: 
  * access at once rather than when a token expires, and no bearer URL can leak.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string; documentId: string; pageNumber: string }> },
 ) {
   try {
@@ -92,7 +112,9 @@ export async function GET(
     // storage_path is deliberately not selected: this route serves the derivative.
     const { data: document, error: documentError } = await adminClient
       .from('knowledge_documents')
-      .select('page_count, processing_status')
+      // content_sha256 rides along on the read that already had to happen: it
+      // is the validator's whole basis and costs no extra round trip.
+      .select('page_count, processing_status, content_sha256')
       .eq('id', documentId)
       .eq('board_id', boardId)
       .maybeSingle();
@@ -112,6 +134,25 @@ export async function GET(
       return notFound();
     }
 
+    /**
+     * The validator, derived from server state alone. R1: the bytes at this
+     * mutable path are fully determined by the source hash, the page and the
+     * renderer version, so a strong ETag is honest here even though the path
+     * is upserted -- when any of the three changes, so does the name.
+     */
+    const etag = typeof document.content_sha256 === 'string'
+      ? knowledgePageImageETag(document.content_sha256, pageNumber)
+      : null;
+
+    /**
+     * Existence is still proved before a 304.
+     *
+     * A matching validator says "you already hold this representation"; it does
+     * not say the representation exists. Answering 304 from the hash alone
+     * would keep serving a deleted derivative from the browser's cache and hide
+     * a repair that has not run yet. Authorization has ALREADY run above, so
+     * revalidation is never a way around it.
+     */
     const { data: blob, error: storageError } = await adminClient.storage
       .from(KNOWLEDGE_STORAGE_BUCKET)
       .download(objectPath);
@@ -122,15 +163,24 @@ export async function GET(
     if (storageError) return isMissingObject(storageError) ? notFound() : unavailable();
     if (!blob) return notFound();
 
+    if (etag !== null && knowledgeETagMatches(request.headers.get('if-none-match'), etag)) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': CACHEABLE },
+      });
+    }
+
     return new NextResponse(await blob.arrayBuffer(), {
       status: 200,
       headers: {
         // Canonical policy, never the Blob's own type or Storage metadata.
         'Content-Type': KNOWLEDGE_DERIVATIVE_CONTENT_TYPE,
-        // A1 re-renders overwrite this exact path (upsert), so it is a mutable
-        // slot, not an immutable content address: its stored cache-control of
-        // 31536000 must never reach the browser.
-        'Cache-Control': 'private, no-store',
+        ...(etag === null
+          // No usable validator means no conditional story to tell, so the old
+          // behaviour stands rather than a cacheable response nothing can
+          // revalidate.
+          ? { 'Cache-Control': 'private, no-store' }
+          : { ETag: etag, 'Cache-Control': CACHEABLE }),
       },
     });
   } catch {

@@ -3,6 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
+import { useKnowledgePageRenderRepair } from '@/components/collabboard/useKnowledgePageRenderRepair';
 import {
   useKnowledgePageCache,
   fetchKnowledgeReadyPages,
@@ -566,6 +567,18 @@ export default function KnowledgePdfCanvasSurface({
     return () => { cancelled = true; window.clearTimeout(retryTimer); };
   }, [isReady, collapsed, pages, pagesFailed, pagesAttempt, boardId, documentId]);
 
+  /**
+   * PDF-R1. A missing derivative is now a recoverable state, not a silent
+   * downgrade to text. The repair is requested at most once per document per
+   * mount; when it completes, every imageless marker for this document is
+   * dropped so the page is genuinely probed again.
+   */
+  const onRepairComplete = useCallback(() => {
+    pageCache?.clearPageImageless(documentId);
+    setImagelessPages(new Set());
+  }, [pageCache, documentId]);
+  const repair = useKnowledgePageRenderRepair(boardId, documentId, onRepairComplete);
+
   const markImageless = useCallback((pageNumber: number) => {
     // Also remembered session-wide, so this document's missing derivative is
     // not re-probed by every later mount of every view.
@@ -787,10 +800,44 @@ export default function KnowledgePdfCanvasSurface({
                   widthPoints={currentPageData.widthPoints}
                   heightPoints={currentPageData.heightPoints}
                   rotation={currentPageData.rotation}
-                  onUnavailable={() => markImageless(currentPageData.pageNumber)}
+                  onUnavailable={() => {
+                    markImageless(currentPageData.pageNumber);
+                    // Discovering the gap is what asks for it to be filled.
+                    repair.request();
+                  }}
                 />
               ) : null}
-              {view === 'text' || imagelessPages.has(currentPageData.pageNumber) ? (
+              {/*
+                PDF/page means the VISUAL page. When the derivative is missing
+                this says so and offers to build it, rather than quietly
+                rendering parsed text under a control that claims to be showing
+                the document -- which is what it used to do.
+              */}
+              {view === 'page' && imagelessPages.has(currentPageData.pageNumber) ? (
+                <div
+                  data-knowledge-pdf-page-visual-state={
+                    repair.state === 'unavailable' ? 'unavailable' : 'preparing'
+                  }
+                  className="mb-2 flex flex-col items-center justify-center gap-1 rounded border border-dashed border-gray-300 bg-gray-50 px-2 py-6 text-center"
+                >
+                  {repair.state === 'unavailable' ? (
+                    <>
+                      <span className="text-[10px] text-gray-500">Page preview unavailable</span>
+                      <button
+                        type="button"
+                        data-knowledge-pdf-action="retry-page-visual"
+                        className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
+                        onClick={(event) => { event.stopPropagation(); repair.retry(); }}
+                      >
+                        Retry
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-gray-500">Preparing page preview…</span>
+                  )}
+                </div>
+              ) : null}
+              {view === 'text' ? (
                 <p
                   data-knowledge-pdf-page-text="true"
                   /*
