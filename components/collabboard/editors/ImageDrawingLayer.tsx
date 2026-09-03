@@ -81,12 +81,27 @@ type CompletedRect = DrawnRect;
 const RECT_HIT_STROKE_WIDTH = 14;
 
 /**
- * R6G. The Draw-on-top toolbar's fixed desktop width, in CSS px.
+ * The Draw-on-top toolbar's fixed desktop width, in CSS px.
  *
- * Sized for the widest state (Text: four basic tools + four styling controls +
- * undo/redo + Cancel/Save) so no state has to stretch it.
+ * R6G made it fixed so the bar stops changing length with the tool. R6G-C1
+ * widened it: 720 was not actually enough for the widest state, so the row
+ * scrolled and the user got a horizontal scrollbar under the toolbar.
+ *
+ * The widest state is Text with an annotation selected:
+ *
+ *   basic tools    4 x 40px + 3 x 6px gap + 12px padding + 1px rule  = 191
+ *   text controls  font-size ~101 + colour 46 + border 48 + opacity 48
+ *                  + 3 x 6px gap + 16px padding + 1px rule           = 278
+ *   history        2 x 40 + 4px gap + 12px padding + 1px rule        =  97
+ *   actions        Cancel ~79 + 8px gap + Save ~72 + 12px padding    = 171
+ *   shell          12px padding + 2px border + 3 x 4px group gaps    =  26
+ *                                                                     ----
+ *                                                                      763
+ *
+ * 820 leaves headroom for font-metric variance in the labels ("Medium",
+ * "Cancel", "Save") rather than sitting on the exact bound.
  */
-const DRAW_TOOLBAR_WIDTH = 720;
+const DRAW_TOOLBAR_WIDTH = 820;
 
 // Generate a slightly wobbly closed rect path to simulate a hand-drawn look.
 // Each corner gets a small random offset so it looks naturally imperfect.

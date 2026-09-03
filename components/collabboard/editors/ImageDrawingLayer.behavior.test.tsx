@@ -602,7 +602,7 @@ describe('R6G toolbar: one width in every tool state', () => {
 
     const distinct = [...new Set(Object.values(widths))];
     expect(distinct, `toolbar width varied by state: ${JSON.stringify(widths)}`).toHaveLength(1);
-    expect(distinct[0]).toBe('720px');
+    expect(distinct[0]).toBe('820px');
   });
 
   it('the width is a property of the toolbar, not of whatever is mounted in it', () => {
@@ -610,7 +610,7 @@ describe('R6G toolbar: one width in every tool state', () => {
     renderLayer();
     const shell = document.body.querySelector('[data-testid="draw-toolbar"]') as HTMLElement;
     expect(shell.className).not.toContain('w-fit');
-    expect(shell.style.width).toBe('720px');
+    expect(shell.style.width).toBe('820px');
     // ...and it still degrades on a narrow viewport rather than overflowing.
     expect(shell.style.maxWidth).toContain('100vw');
   });

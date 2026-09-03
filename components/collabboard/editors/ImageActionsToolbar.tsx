@@ -144,14 +144,29 @@ export default function ImageActionsToolbar({
     const imageModeTools = [
         { id: 'caption', icon: TextCursor, label: 'Caption', onClick: handleToggleMode, active: isCaptionMode },
         { id: 'edit', icon: Crop, label: 'Edit image', onClick: onEditImage, active: false },
-        { id: 'draw', icon: Pencil, label: 'Draw on top', onClick: onDrawOnTop, active: isDrawingMode },
+        // R6G-C1. Visible label shortened to "Draw"; the tooltip keeps the
+        // longer description. "Draw on top" was the widest label in the column
+        // and was what made this toolbar wider than its caption-mode state.
+        { id: 'draw', icon: Pencil, label: 'Draw', title: 'Draw on image', onClick: onDrawOnTop, active: isDrawingMode },
         { id: 'reaction', icon: Smile, label: 'Reaction', onClick: onAddReaction, active: false },
         { id: 'comment', icon: MessageSquare, label: 'Comment', onClick: onComment, active: false },
     ];
 
     return (
         <div
-            className="flex flex-col items-center bg-white rounded-lg shadow-xl border border-gray-200 p-2 gap-1 z-50 pointer-events-auto"
+            /**
+             * R6G-C1. ONE outer width, in every state.
+             *
+             * This column had no width of its own -- like its three sibling
+             * toolbars it was sized by its content, so the widest LABEL decided
+             * it. Image mode's "Draw on top" made it a few px wider than caption
+             * mode's "Text style", which is the two widths the user saw.
+             *
+             * w-16 is the narrowest standard step that still holds the longest
+             * remaining label ("Edit image") on one line at text-[9px]; the
+             * tokens the buttons already use (w-10 + p-2 = 56px) would wrap it.
+             */
+            className="w-16 flex flex-col items-center bg-white rounded-lg shadow-xl border border-gray-200 p-2 gap-1 z-50 pointer-events-auto"
             style={{ maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}
             onMouseDown={preventFocusLoss}
         >
@@ -196,7 +211,7 @@ export default function ImageActionsToolbar({
                                     <IconComponent className="w-5 h-5" />
                                     {tool.hasPopup && <span className="absolute right-0 bottom-0 text-[10px] pr-1">▶</span>}
                                 </button>
-                                <span className="text-[9px] text-gray-500 text-center">{tool.label}</span>
+                                <span className="text-[9px] leading-tight text-gray-500 text-center">{tool.label}</span>
                             </div>
                         );
                     })}
@@ -226,7 +241,7 @@ export default function ImageActionsToolbar({
                                         ? 'bg-blue-100 text-blue-600'
                                         : 'hover:bg-gray-100 text-gray-600'
                                         }`}
-                                    title={tool.label}
+                                    title={(tool as { title?: string }).title ?? tool.label}
                                 >
                                     <IconComponent className="w-5 h-5" />
                                     {tool.id === 'comment' && commentCount > 0 && (
@@ -238,7 +253,7 @@ export default function ImageActionsToolbar({
                                         </span>
                                     )}
                                 </button>
-                                <span className="text-[9px] text-gray-500 text-center">{tool.label}</span>
+                                <span className="text-[9px] leading-tight text-gray-500 text-center">{tool.label}</span>
                             </div>
                         );
                     })}
