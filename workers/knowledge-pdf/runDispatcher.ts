@@ -8,6 +8,7 @@ import { createKnowledgePdfWorkerFromEnvironment, processKnowledgePdfDocument } 
 import {
   runKnowledgePdfDispatcher,
   resolveKnowledgePdfDispatcherConfig,
+  resolveKnowledgePdfDispatchMode,
 } from './dispatcher';
 
 function required(name: string): string {
@@ -34,8 +35,23 @@ try {
   const client = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const discovery = new SupabaseKnowledgeExtractionRepository(client as never);
-  const worker = createKnowledgePdfWorkerFromEnvironment();
+  /**
+   * The mode is read BEFORE anything is constructed, because that is the whole
+   * point: in render-only the OpenDataLoader worker is never built, so its
+   * Java and JAR paths are never asserted. Repairing a derived page image
+   * needs Storage and a rasteriser, not a parser -- an operator recovering a
+   * missing preview should not have to provision an extraction runtime.
+   *
+   * There is no fallback from missing Java into render-only. A production
+   * worker that cannot parse must fail loudly, not quietly stop doing the job
+   * it exists for.
+   */
+  const mode = resolveKnowledgePdfDispatchMode(process.env.KNOWLEDGE_PDF_DISPATCH_MODE);
+  const extractionEnabled = mode === 'normal';
+  const discovery = extractionEnabled
+    ? new SupabaseKnowledgeExtractionRepository(client as never)
+    : undefined;
+  const worker = extractionEnabled ? createKnowledgePdfWorkerFromEnvironment() : undefined;
   const config = resolveKnowledgePdfDispatcherConfig({
     concurrency: positiveEnv('KNOWLEDGE_PDF_WORKER_CONCURRENCY', 2),
     pollIntervalMs: positiveEnv('KNOWLEDGE_PDF_POLL_INTERVAL_MS', 5_000),
@@ -48,10 +64,17 @@ try {
    */
   const renderLifecycle = new SupabaseKnowledgeRenderLifecycleRepository(client as never);
   const renderStorage = createKnowledgeWorkerStorage(client);
+  // Omitting BOTH halves is how render-only is expressed to the dispatcher, so
+  // it never lists or claims an extraction job.
   const summary = await runKnowledgePdfDispatcher(
     {
-      discovery,
-      processDocument: (documentId) => processKnowledgePdfDocument(worker, asKnowledgeDocumentId(documentId)),
+      ...(discovery && worker
+        ? {
+          discovery,
+          processDocument: (documentId: string) =>
+            processKnowledgePdfDocument(worker, asKnowledgeDocumentId(documentId)),
+        }
+        : {}),
       renderPass: async (limit) => {
         const results = await runKnowledgePageRenderPass(
           { lifecycle: renderLifecycle, storage: renderStorage },
@@ -60,9 +83,14 @@ try {
         return results.filter((result) => result.status === 'completed').length;
       },
     },
-    { ...config, signal: controller.signal },
+    {
+      ...config,
+      signal: controller.signal,
+      // One cycle then exit, for an operator draining a known queue.
+      once: process.env.KNOWLEDGE_PDF_DISPATCH_ONCE === '1',
+    },
   );
-  console.log(JSON.stringify({ event: 'knowledge-pdf-dispatcher-stopped', ...summary }));
+  console.log(JSON.stringify({ event: 'knowledge-pdf-dispatcher-stopped', mode, ...summary }));
 } catch (error: unknown) {
   console.error(JSON.stringify({
     event: 'knowledge-pdf-dispatcher-configuration-error',

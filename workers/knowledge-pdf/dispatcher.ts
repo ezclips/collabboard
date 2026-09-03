@@ -3,6 +3,38 @@ import type { KnowledgeDocumentId } from '../../lib/domain/core/ids';
 import type { Result } from '../../lib/domain/core/result';
 import type { KnowledgePdfWorkerResult } from './processKnowledgePdfDocument';
 
+/**
+ * How this dispatcher is allowed to spend a cycle.
+ *
+ * `normal` is production: extraction first, page-visual repair only when
+ * extraction is idle. `render-only` exists because repairing a derived image
+ * needs no parser at all -- no Java, no OpenDataLoader -- and an operator
+ * recovering a missing preview should not have to provision an extraction
+ * runtime to do it.
+ *
+ * The mode is always explicit. There is deliberately NO fallback from a
+ * missing Java configuration into render-only: that would turn a broken
+ * production worker into a silently degraded one that never processes text.
+ */
+export type KnowledgePdfDispatchMode = 'normal' | 'render-only';
+
+export const KNOWLEDGE_PDF_DISPATCH_MODES: readonly KnowledgePdfDispatchMode[] = ['normal', 'render-only'];
+
+/**
+ * Strict: an unset value is `normal`, an exact known value is itself, and
+ * anything else throws. A typo must not quietly select a mode that skips
+ * extraction for an entire deployment.
+ */
+export function resolveKnowledgePdfDispatchMode(value: string | undefined): KnowledgePdfDispatchMode {
+  if (value === undefined || value === '') return 'normal';
+  if ((KNOWLEDGE_PDF_DISPATCH_MODES as readonly string[]).includes(value)) {
+    return value as KnowledgePdfDispatchMode;
+  }
+  throw new Error(
+    `KNOWLEDGE_PDF_DISPATCH_MODE must be one of ${KNOWLEDGE_PDF_DISPATCH_MODES.join(', ')}`,
+  );
+}
+
 export const DEFAULT_KNOWLEDGE_PDF_WORKER_CONCURRENCY = 2;
 export const DEFAULT_KNOWLEDGE_PDF_POLL_INTERVAL_MS = 5_000;
 export const DEFAULT_KNOWLEDGE_PDF_DISCOVERY_LIMIT = 16;
@@ -16,8 +48,17 @@ export interface KnowledgeProcessingCandidateRepository {
 }
 
 export interface KnowledgePdfDispatcherDependencies {
-  readonly discovery: KnowledgeProcessingCandidateRepository;
-  readonly processDocument: (documentId: KnowledgeDocumentId) => Promise<KnowledgePdfWorkerResult>;
+  /**
+   * Extraction discovery and execution. Both are OPTIONAL, and omitting them
+   * is how render-only mode is expressed: with no discovery there is nothing
+   * to list, nothing to claim and nothing to parse, so a PDF uploaded while an
+   * operator repair is running is simply left alone for the real worker.
+   *
+   * They travel together -- a dispatcher that could discover extraction work
+   * but not process it would claim jobs it must then fail.
+   */
+  readonly discovery?: KnowledgeProcessingCandidateRepository;
+  readonly processDocument?: (documentId: KnowledgeDocumentId) => Promise<KnowledgePdfWorkerResult>;
   /**
    * PDF-R1. One bounded derivative-render pass per dispatcher cycle.
    *
@@ -38,6 +79,14 @@ export interface KnowledgePdfDispatcherOptions {
   readonly backoffBaseMs?: number;
   readonly backoffMaxMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Run exactly one cycle and return, instead of polling forever.
+   *
+   * For an operator draining a known queue: the run is deterministic and
+   * auditable rather than depending on someone interrupting a daemon at the
+   * right moment. Unset keeps the existing looping behaviour untouched.
+   */
+  readonly once?: boolean;
 }
 
 export interface KnowledgePdfDispatcherSummary {
@@ -150,12 +199,24 @@ export async function runKnowledgePdfDispatcher(
   const onAbort = () => { stopping = true; };
   signal?.addEventListener('abort', onAbort, { once: true });
 
+  /**
+   * Extraction runs only when BOTH halves are present. Their absence is not
+   * a degraded normal mode -- it is render-only, chosen explicitly by the
+   * caller, and it means this dispatcher never lists or claims an extraction
+   * job. A PDF uploaded during an operator repair is simply left for the
+   * real worker.
+   */
+  const extraction = deps.discovery !== undefined && deps.processDocument !== undefined
+    ? { discovery: deps.discovery, processDocument: deps.processDocument }
+    : null;
+  const once = options.once === true;
+
   const startJob = (documentId: KnowledgeDocumentId): void => {
     const key = String(documentId);
     if (active.has(key)) return;
     summary.started += 1;
     const job = Promise.resolve()
-      .then(() => deps.processDocument(documentId))
+      .then(() => extraction!.processDocument(documentId))
       .then((result) => {
         if (result.status === 'ready') summary.completed += 1;
         else if (result.status === 'failed') summary.failed += 1;
@@ -183,26 +244,29 @@ export async function runKnowledgePdfDispatcher(
         continue;
       }
 
-      const availableSlots = config.concurrency - active.size;
-      const discovered = await deps.discovery.listProcessingCandidates(
-        Math.min(config.discoveryLimit, availableSlots),
-      );
-      if (!discovered.ok) {
-        summary.discoveryErrors += 1;
-        log({ event: 'knowledge-pdf-discovery-error', error: discovered.error.message.split(/[\r\n]/, 1)[0].slice(0, 500) });
-        await sleep(backoffMs, signal);
-        backoffMs = Math.min(config.backoffMaxMs, backoffMs * 2);
-        continue;
-      }
-
-      backoffMs = config.backoffBaseMs;
-      summary.discovered += discovered.value.length;
       let started = 0;
-      for (const documentId of discovered.value) {
-        if (stopping || active.size >= config.concurrency) break;
-        const before = active.size;
-        startJob(documentId);
-        if (active.size > before) started += 1;
+      if (extraction) {
+        const availableSlots = config.concurrency - active.size;
+        const discovered = await extraction.discovery.listProcessingCandidates(
+          Math.min(config.discoveryLimit, availableSlots),
+        );
+        if (!discovered.ok) {
+          summary.discoveryErrors += 1;
+          log({ event: 'knowledge-pdf-discovery-error', error: discovered.error.message.split(/[\r\n]/, 1)[0].slice(0, 500) });
+          if (once) break;
+          await sleep(backoffMs, signal);
+          backoffMs = Math.min(config.backoffMaxMs, backoffMs * 2);
+          continue;
+        }
+
+        backoffMs = config.backoffBaseMs;
+        summary.discovered += discovered.value.length;
+        for (const documentId of discovered.value) {
+          if (stopping || active.size >= config.concurrency) break;
+          const before = active.size;
+          startJob(documentId);
+          if (active.size > before) started += 1;
+        }
       }
 
       if (started === 0) {
@@ -217,6 +281,7 @@ export async function runKnowledgePdfDispatcher(
             if (repaired > 0) {
               summary.rendered += repaired;
               log({ event: 'knowledge-pdf-render-pass', repaired });
+              if (once) break;
               continue;
             }
           } catch (error: unknown) {
@@ -228,8 +293,12 @@ export async function runKnowledgePdfDispatcher(
             });
           }
         }
+        if (once) break;
         if (active.size > 0) await Promise.race(active.values());
         else await sleep(config.pollIntervalMs, signal);
+      } else if (once) {
+        // One cycle. Jobs already started are awaited by the finally block.
+        break;
       } else if (active.size >= config.concurrency) {
         await Promise.race(active.values());
       } else {
