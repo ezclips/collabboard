@@ -1474,18 +1474,98 @@ describe('Text Phase 1 floating selection toolbar', () => {
     });
   });
 
-  it('5: native dragging of the page text itself is still suppressed', () => {
+  it('R6A-1: the FIRST selection shows the toolbar even when released outside', () => {
+    /**
+     * The reported regression. A drag-selection ends wherever the pointer
+     * happens to be, and in the side panel that is very often past the edge of
+     * the scrolling text. Settling only on the pages container missed exactly
+     * those releases, so the first selection produced no toolbar and a second
+     * one -- released inside the text by luck -- appeared to fix it.
+     */
+    const { container } = mountReader();
+    const pageOne = pageRoot(container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+
+    // Released over the surrounding chrome, not over the text.
+    act(() => { document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+
+    expect(selectionToolbar(container)).not.toBeNull();
+    expect(selectionGrip(container)).not.toBeNull();
+  });
+
+  it('R6A-2: the toolbar tracks the CURRENT range, never the previous one', () => {
     const { container } = armPageOne();
+    expect(toolbarButton(container, 'Create Note from selection on page 1')).not.toBeNull();
+
+    // A second selection on a different page must retarget the toolbar.
+    const pageTwo = pageRoot(container, 2);
+    selectRange(pageTwo.firstChild!, 2, pageTwo.firstChild!, 8);
+    act(() => { document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+
+    expect(toolbarButton(container, 'Create Note from selection on page 2')).not.toBeNull();
+    expect(toolbarButton(container, 'Create Note from selection on page 1')).toBeNull();
+  });
+
+  it('R6A-3: collapsing the selection dismisses the toolbar', () => {
+    const { container } = armPageOne();
+    expect(selectionToolbar(container)).not.toBeNull();
+
+    window.getSelection()!.removeAllRanges();
+    act(() => { document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+
+    expect(selectionToolbar(container)).toBeNull();
+  });
+
+  it('R6A-4: pressing a toolbar button never consumes the selection', () => {
+    // mouseup runs before click, so a document listener that settled on a
+    // button press would clear the very selection the action is about to use.
+    const { container } = armPageOne();
+    const copy = toolbarButton(container, 'Copy selected text')!;
+
+    act(() => { copy.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+
+    expect(selectionToolbar(container)).not.toBeNull();
+  });
+
+  it('5: page text with NO selection is still not draggable', () => {
+    // The original protection, unchanged: without a re-proved selection there
+    // is nothing authoritative to carry, so the browser starts no native text
+    // drag that could fling forgeable `text/plain` at the canvas.
+    const { container } = mountReader();
 
     const fromText = dragFrom(pageRoot(container, 1));
 
-    // Cancelled, so the browser starts no native text drag at all.
     expect(fromText.defaultPrevented).toBe(true);
     expect(fromText.transfer.store.size).toBe(0);
+  });
+
+  it('5b: a drag OUTSIDE the selection is still suppressed', () => {
+    // R6A widened the affordance to the highlight itself, not to the page.
+    // Page two is not part of the page-one selection, so it stays inert.
+    const { container } = armPageOne();
+
+    const fromOtherPage = dragFrom(pageRoot(container, 2));
+
+    expect(fromOtherPage.defaultPrevented).toBe(true);
+    expect(fromOtherPage.transfer.store.size).toBe(0);
+  });
+
+  it('5c: R6A -- the highlighted text itself drags, exactly as the grip does', () => {
+    const { container } = armPageOne();
+
+    // The user grabs the highlight rather than hunting for the six-dot target.
+    const fromText = dragFrom(pageRoot(container, 1));
+    expect(fromText.defaultPrevented).toBe(false);
+    expect(fromText.transfer.getData(CLIP_MIME)).not.toBe('');
+
     // The grip drag rides the same container handler and is NOT cancelled.
     const fromGrip = dragFrom(selectionGrip(container)!);
     expect(fromGrip.defaultPrevented).toBe(false);
     expect(fromGrip.transfer.getData(CLIP_MIME)).not.toBe('');
+
+    // Identical provenance: one payload builder serves both surfaces, so the
+    // board cannot tell which one the user used.
+    expect(fromText.transfer.getData(CLIP_MIME)).toBe(fromGrip.transfer.getData(CLIP_MIME));
   });
 
   it('2: a cross-page selection does NOT show the toolbar', () => {

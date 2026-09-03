@@ -231,6 +231,34 @@ import {
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
 
+/**
+ * Did this drag begin inside the text the user has selected?
+ *
+ * A pure geometry/containment question, used ONLY to decide whether the drag
+ * is a deliberate grab of the highlight. It never becomes provenance: the
+ * payload is always built from the re-proved activeSelection, so a live range
+ * that disagreed with it could not smuggle different offsets onto the board.
+ *
+ * Falls back to false whenever the answer is not clearly yes -- a drag that
+ * cannot be shown to start inside the selection is refused, as before.
+ */
+function dragStartsInsideSelection(event: React.DragEvent): boolean {
+  if (typeof window === 'undefined') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return false;
+  const range = selection.getRangeAt(0);
+  const target = event.target instanceof Node ? event.target : null;
+  if (target === null) return false;
+  // `intersectsNode` is the containment question; where it is unavailable the
+  // answer is simply "not proven", never "assume yes".
+  if (typeof range.intersectsNode !== 'function') return false;
+  try {
+    return range.intersectsNode(target);
+  } catch {
+    return false;
+  }
+}
+
 /** Text Phase 1. One not-yet-saved highlight color choice, page-relative. */
 interface SelectionColorPreview {
   readonly pageNumber: number;
@@ -655,8 +683,8 @@ export default function KnowledgeDocumentDetails({
    * for the same reason -- mouseup runs before click, and consuming the
    * selection there would clear it exactly when the action is about to use it.
    */
-  const handleSelectionSettled = (event: React.SyntheticEvent) => {
-    if (event.target instanceof Element && event.target.closest('button')) return;
+  const settleSelectionFrom = (target: EventTarget | null) => {
+    if (target instanceof Element && target.closest('button')) return;
     setCapturedSelection(captureExactSelection(pagesContainerRef.current, pages));
     // Best-effort positioning only, read separately from the pure capture
     // above: a prior color choice belongs to the selection that is ending,
@@ -670,6 +698,65 @@ export default function KnowledgeDocumentDetails({
   };
 
   /**
+   * A drag-selection ends wherever the pointer happens to be, which is very
+   * often past the edge of the scrolling text: in the side panel the user
+   * sweeps across a line and releases over the panel chrome or the board.
+   * Listening only on the pages container missed exactly those releases, so
+   * the first selection frequently produced no toolbar and a second one --
+   * released inside the text by luck -- appeared to fix it.
+   *
+   * Listening on the document removes the dependency on where the pointer
+   * came to rest. It widens nothing: captureExactSelection still requires
+   * both endpoints inside one page text root and still fails closed, so a
+   * release anywhere else simply clears the selection, which is what
+   * clicking away should do anyway.
+   */
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const settle = (event: Event) => settleSelectionFrom(event.target);
+    document.addEventListener('mouseup', settle);
+    document.addEventListener('keyup', settle);
+    return () => {
+      document.removeEventListener('mouseup', settle);
+      document.removeEventListener('keyup', settle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pages]);
+
+  /**
+   * The ONE place a selection becomes a drag payload.
+   *
+   * Both drag surfaces -- the grip and the highlighted text itself -- call
+   * this, so they cannot drift apart in provenance or in what the board
+   * ends up creating. It reads the RE-PROVED activeSelection, never a fresh
+   * DOM range, so the offsets are the ones the server will verify.
+   */
+  const writeSelectionClipTransfer = (
+    dataTransfer: DataTransfer,
+    // Passed in rather than closed over: both call sites have already proved
+    // the document identity, and the payload must never be built without it.
+    sourceDocumentId: string,
+    selection: { pageNumber: number; charStart: number; charEnd: number; selectedText: string },
+  ) => {
+    dataTransfer.setData(
+      KNOWLEDGE_SOURCE_CLIP_MIME,
+      buildKnowledgeSourceClipTransfer({
+        kind: 'text',
+        sourceDocumentId,
+        originalFilename,
+        pageNumber: selection.pageNumber,
+        charStart: selection.charStart,
+        charEnd: selection.charEnd,
+        selectedText: selection.selectedText,
+      }),
+    );
+    // Auxiliary hint only, on a SEPARATE type: the dedicated Knowledge
+    // payload above stays exactly as it always was.
+    if (selectionColor) dataTransfer.setData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT, selectionColor);
+    dataTransfer.effectAllowed = 'copy';
+  };
+
+  /**
    * P6J-F8-B1. Browsers make selected text natively draggable, carrying
    * `text/plain`. Left alone that is a second, uncontrolled way to fling page
    * text at the canvas -- racing the mouseup that is the ONLY path from a
@@ -680,6 +767,22 @@ export default function KnowledgeDocumentDetails({
   const suppressNativePageTextDrag = (event: React.DragEvent) => {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest(`[${CLIP_CHIP}]`)) return;
+
+    /**
+     * Dragging the highlighted text itself is a real affordance, not a
+     * second uncontrolled one: it is allowed ONLY when a re-proved exact
+     * selection exists and the drag actually starts inside that range, and
+     * it carries the SAME authoritative payload the grip carries. Everything
+     * else in the page is still refused, so a stray paragraph can never fling
+     * forgeable `text/plain` at the canvas.
+     *
+     * Gated on onCreateNoteFromPage exactly as the grip is, so this adds no
+     * capability a viewer did not already have.
+     */
+    if (onCreateNoteFromPage && documentId && activeSelection && dragStartsInsideSelection(event)) {
+      writeSelectionClipTransfer(event.dataTransfer, documentId, activeSelection);
+      return;
+    }
     event.preventDefault();
   };
 
@@ -746,8 +849,8 @@ export default function KnowledgeDocumentDetails({
       ) : (
         <div
           ref={pagesContainerRef}
-          onMouseUp={handleSelectionSettled}
-          onKeyUp={handleSelectionSettled}
+          onMouseUp={(event) => settleSelectionFrom(event.target)}
+          onKeyUp={(event) => settleSelectionFrom(event.target)}
           onDragStart={suppressNativePageTextDrag}
           className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
         >
@@ -1008,22 +1111,7 @@ export default function KnowledgeDocumentDetails({
               // The CAPTURED selection, never window.getSelection(): pressing
               // this control collapses the browser range, so reading it live
               // would find nothing exactly when needed.
-              event.dataTransfer.setData(
-                KNOWLEDGE_SOURCE_CLIP_MIME,
-                buildKnowledgeSourceClipTransfer({
-                  kind: 'text',
-                  sourceDocumentId: documentId,
-                  originalFilename,
-                  pageNumber: activeSelection.pageNumber,
-                  charStart: activeSelection.charStart,
-                  charEnd: activeSelection.charEnd,
-                  selectedText: activeSelection.selectedText,
-                }),
-              );
-              // Auxiliary hint only, on a SEPARATE type: the dedicated
-              // Knowledge payload above stays exactly as it always was.
-              if (selectionColor) event.dataTransfer.setData(KNOWLEDGE_SOURCE_CLIP_COLOR_HINT, selectionColor);
-              event.dataTransfer.effectAllowed = 'copy';
+              writeSelectionClipTransfer(event.dataTransfer, documentId, activeSelection);
             }}
           >
             <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
