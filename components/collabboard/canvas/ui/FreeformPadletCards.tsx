@@ -5584,7 +5584,30 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             )}
             {activeImageToolbarPadlet && cardCommentPopupPadletId === activeImageToolbarPadlet.id && (
               <div
-                className="absolute left-full top-0 ml-3 z-[1100] pointer-events-auto"
+                /**
+                 * R6E-C1. In-flow in the right grid track, NOT absolutely
+                 * positioned.
+                 *
+                 * The defect: `absolute left-full` resolves against the
+                 * nearest positioned ancestor, which here is the
+                 * `relative grid` row above -- and that row is
+                 * `calc(100vw - 80px)` wide. So `left: 100%` put the panel
+                 * at the VIEWPORT's right edge, not the card's, which is
+                 * the far-right detachment users saw. The class name reads
+                 * like "just right of my box"; the containing block made it
+                 * mean "just right of the screen".
+                 *
+                 * Adjacency is already the grid's job and needs no
+                 * positioning at all: this right track is justify-start, so
+                 * in-flow content begins exactly one `gap-6` (24px) after
+                 * the card's right edge -- the same way the toolbar track
+                 * (justify-end) sits 24px left of it, and the same way
+                 * DocumentEditor renders its own comment panel into
+                 * PostEditorShell's sharedPanel slot. Width is explicit
+                 * because CommentPopup's panel is `width: 100%`.
+                 */
+                className="relative z-[1100] pointer-events-auto"
+                style={{ width: '300px' }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >

@@ -103,27 +103,171 @@ describe('T1-T6: the image editor is a blocking editor, above the reader', () =>
   });
 });
 
+/**
+ * R6E-C1. The comment panel's placement is asserted as GEOMETRY, not as class
+ * names.
+ *
+ * R6E reported "comment adjacent: PASS" while the user's browser showed the
+ * panel pinned to the right of the screen -- because the old T7/T8 asserted
+ * only that the right grid TRACK was declared `justify-start`. That was true,
+ * and irrelevant: the panel opted out of the track entirely with
+ * `absolute left-full`, whose containing block is the `relative grid` row --
+ * a `calc(100vw - 80px)` box. `left: 100%` of that is the viewport's right
+ * edge. A structural test can never catch that, because every structure it
+ * inspected was correct.
+ *
+ * So the layout is resolved instead: parse what the source actually declares,
+ * then compute where a browser would put the panel under the same
+ * containing-block rules. A viewport-anchored declaration yields a
+ * viewport-anchored number, and fails.
+ */
+
+/** The declared inputs of the overlay's layout, read from the real source. */
+const LAYOUT = {
+  /** `width: calc(100vw - 80px)` on the grid row -- 40px each side. */
+  inset: 80,
+  /** `gap-6`. */
+  gap: 24,
+  /** The image card's fixed width. */
+  cardWidth: 360,
+  /** The comment wrapper's declared width. */
+  panelWidth: 300,
+} as const;
+
+/** The comment panel's wrapper: its opening tag, straight from the source. */
+function commentWrapperTag(): string {
+  const subtree = portalledSubtree();
+  const popup = subtree.indexOf('<CommentPopup');
+  expect(popup, 'the overlay renders no CommentPopup').toBeGreaterThan(-1);
+  // Walk back to the wrapper element that opens immediately before it.
+  const open = subtree.lastIndexOf('<div', popup);
+  expect(open, 'no wrapper element before the CommentPopup').toBeGreaterThan(-1);
+  // Comments are prose, not declarations -- and this wrapper's own comment
+  // names the very classes the contract below forbids.
+  return subtree.slice(open, popup).replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+type Placement =
+  /** `position: absolute` resolved against an ancestor's box. */
+  | { mode: 'anchored-to-containing-block'; marginLeft: number }
+  /** A normal in-flow child of its grid track. */
+  | { mode: 'in-flow' };
+
+/** How the source declares the panel to be placed. */
+function declaredPlacement(tag: string): Placement {
+  const className = /className="([^"]*)"/.exec(tag)?.[1] ?? '';
+  const classes = className.split(/\s+/);
+  const isAbsolute = classes.includes('absolute') || classes.includes('fixed');
+  if (!isAbsolute) return { mode: 'in-flow' };
+  // Tailwind's inset utilities are what pick the containing block's edge.
+  const ml = /(?:^|\s)ml-(\d+)(?:\s|$)/.exec(className);
+  return { mode: 'anchored-to-containing-block', marginLeft: ml ? Number(ml[1]) * 4 : 0 };
+}
+
+/**
+ * Where the panel's left edge lands, for a given viewport, under the layout
+ * the source declares. This mirrors the browser: the grid row is the nearest
+ * positioned ancestor (it is `relative`), so an absolutely positioned child
+ * measures from the ROW's box -- which spans the viewport -- while an in-flow
+ * child starts at its `justify-start` track's leading edge, one gap after the
+ * card.
+ */
+function resolveLayout(viewportWidth: number) {
+  const rowLeft = LAYOUT.inset / 2;
+  const rowWidth = viewportWidth - LAYOUT.inset;
+  // 1fr | auto | 1fr: the flanking tracks split what the card and gaps leave.
+  const flankingTrack = (rowWidth - LAYOUT.cardWidth - 2 * LAYOUT.gap) / 2;
+  const cardLeft = rowLeft + flankingTrack + LAYOUT.gap;
+  const cardRight = cardLeft + LAYOUT.cardWidth;
+  const rightTrackLeft = cardRight + LAYOUT.gap;
+
+  const placement = declaredPlacement(commentWrapperTag());
+  const commentLeft =
+    placement.mode === 'in-flow' ? rightTrackLeft : rowLeft + rowWidth + placement.marginLeft;
+
+  return {
+    placement,
+    cardLeft,
+    cardRight,
+    commentLeft,
+    commentRight: commentLeft + LAYOUT.panelWidth,
+    viewportRight: viewportWidth,
+  };
+}
+
 describe('T7-T13: the comment panel sits beside the editor, not at the viewport edge', () => {
-  it('T7,T8: it lives in the grid track immediately right of the card', () => {
+  it('the layout inputs this contract computes from are the ones the source declares', () => {
+    // If any of these drift, the numbers below stop describing the real
+    // overlay -- so they are asserted rather than assumed.
     const grid = overlay();
-    // Three tracks: toolbar | card | panel. The flanking tracks are equal so
-    // the card never shifts when a panel opens.
     expect(grid).toContain("gridTemplateColumns: '1fr auto 1fr'");
-    expect(grid).toContain('className="relative grid items-start gap-6"');
-    // The right track starts its content AT the card edge -- justify-start is
-    // what keeps it beside the card instead of at the far viewport edge.
+    expect(grid).toContain('gap-6');
+    expect(grid).toContain("width: 'calc(100vw - 80px)'");
+    expect(freeform).toContain("style={{ width: '360px', backgroundColor:");
+    // The right track start-aligns its content, which is what makes an
+    // in-flow panel land at the card's edge rather than the track's middle.
     expect(freeform).toContain('<div className="flex items-start justify-start" style={{ pointerEvents: \'none\' }}>');
-    // ...and the left (toolbar) track mirrors it.
-    expect(freeform).toContain('<div className="flex items-start justify-end" style={{ pointerEvents: \'none\' }}>');
+    expect(commentWrapperTag()).toContain("width: '300px'");
   });
 
-  it('T9: the panel cannot overlap the card -- they are separate grid tracks with a gap', () => {
-    const grid = overlay();
-    expect(grid).toContain('gap-6');
-    // Not absolute/viewport-anchored positioning, which is what "far right"
-    // would look like.
-    expect(grid).not.toContain('right-0');
-    expect(grid).not.toContain('position: fixed');
+  it('T7: the panel is placed by the grid, not resolved against a viewport-sized box', () => {
+    // THE regression guard. `absolute left-full` reads like "beside my box"
+    // but resolves against the viewport-wide `relative grid` row.
+    const tag = commentWrapperTag();
+    expect(declaredPlacement(tag).mode).toBe('in-flow');
+    for (const anchor of ['absolute', 'fixed', 'left-full', 'right-0', 'right-full']) {
+      expect(tag, `comment wrapper must not use ${anchor}`).not.toContain(anchor);
+    }
+    expect(tag).not.toContain('100vw');
+  });
+
+  it('T8: expected gap -- the panel begins exactly one gap-6 after the card', () => {
+    // The prompt's mocked bounds: card left 300, width 360, right 660, so the
+    // panel's left edge must be 684.
+    const MOCK_VIEWPORT = 960; // chosen so the card lands at exactly 300
+    const l = resolveLayout(MOCK_VIEWPORT);
+    expect(l.cardLeft).toBe(300);
+    expect(l.cardRight).toBe(660);
+    expect(l.commentLeft).toBe(684);
+    expect(l.commentLeft - l.cardRight).toBe(LAYOUT.gap);
+  });
+
+  it('T8b: the gap holds at every viewport width, because it is not viewport-derived', () => {
+    // An anchored panel's left edge is a function of the viewport; an in-flow
+    // one is a function of the card. Only the latter is invariant.
+    for (const viewportWidth of [960, 1280, 1440, 1920, 2560]) {
+      const l = resolveLayout(viewportWidth);
+      expect(l.commentLeft - l.cardRight, `at ${viewportWidth}px`).toBe(LAYOUT.gap);
+    }
+  });
+
+  it('T10: the panel is not anchored to the viewport right edge', () => {
+    const VIEWPORT = 1440;
+    const l = resolveLayout(VIEWPORT);
+    // Neither of the two shapes "far right" takes: flush to the edge, or
+    // hanging off it.
+    expect(l.commentLeft).not.toBe(l.viewportRight - LAYOUT.panelWidth);
+    expect(l.commentLeft).not.toBe(l.viewportRight);
+    expect(l.commentLeft).toBeLessThan(l.viewportRight - LAYOUT.panelWidth);
+    // ...and it is wholly on screen.
+    expect(l.commentRight).toBeLessThanOrEqual(l.viewportRight);
+    expect(l.commentLeft).toBe(924); // card right 900 + 24
+  });
+
+  it('T9,T11: the panel cannot overlap the card, and the card cannot overlap it', () => {
+    for (const viewportWidth of [1280, 1440, 1920]) {
+      const l = resolveLayout(viewportWidth);
+      expect(l.commentLeft, `at ${viewportWidth}px`).toBeGreaterThanOrEqual(l.cardRight);
+    }
+  });
+
+  it('the card keeps R6C no-shift behaviour -- opening the panel does not move it', () => {
+    // The equal 1fr flanking tracks are why. This is R6C's fix and it stays:
+    // the card's position is a function of the viewport alone, never of what
+    // is open beside it.
+    const withPanel = resolveLayout(1440);
+    expect(withPanel.cardLeft).toBe(540);
+    expect(withPanel.cardRight).toBe(900);
   });
 
   it('T12: the whole comment system rides above the reader with the editor', () => {
@@ -170,6 +314,15 @@ function Harness({ onDismiss }: { onDismiss: () => void }) {
           style={{ width: wide ? 400 : 200 }}
         />
       </div>
+      {/* The comment panel's real wrapper: a track sibling of the card that
+          stops both click and mousedown, exactly as the overlay declares. */}
+      <div
+        data-testid="comment"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <textarea data-testid="comment-input" />
+      </div>
     </div>
   );
 }
@@ -181,7 +334,14 @@ function mountHarness() {
   root = createRoot(host);
   act(() => { root!.render(<Harness onDismiss={onDismiss} />); });
   const q = (id: string) => host!.querySelector(`[data-testid="${id}"]`) as HTMLElement;
-  return { onDismiss, backdrop: q('backdrop'), panel: q('panel'), title: q('title') };
+  return {
+    onDismiss,
+    backdrop: q('backdrop'),
+    panel: q('panel'),
+    title: q('title'),
+    comment: q('comment'),
+    commentInput: q('comment-input') as HTMLTextAreaElement,
+  };
 }
 
 /** A press that begins on `from` and is released over `over`. The browser
@@ -255,5 +415,47 @@ describe('T14-T20: fresh first title interaction never closes the editor', () =>
     // One implementation, shared with every PostEditorShell editor.
     expect(shell).toContain('export function useBackdropDismiss(');
     expect((freeform.match(/pressBeganOnBackdrop/g) ?? [])).toHaveLength(0);
+  });
+});
+
+// --- R6E-C1: using the comment panel must not tear the editor down ---------
+
+describe('R6E-C1: comment interaction leaves the image editor open', () => {
+  it('focusing the comment input does not dismiss the editor', () => {
+    const h = mountHarness();
+    act(() => { h.commentInput.focus(); });
+    expect(h.commentInput.ownerDocument.activeElement).toBe(h.commentInput);
+    expect(h.onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('typing a comment does not dismiss the editor', () => {
+    const h = mountHarness();
+    act(() => { h.commentInput.focus(); });
+    for (const key of ['h', 'i', 'Enter', ' ']) {
+      act(() => {
+        h.commentInput.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+        h.commentInput.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+      });
+    }
+    expect(h.onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('a press that begins in the comment panel is never a dismissal', () => {
+    // Drag-selecting comment text and releasing over the backdrop is the same
+    // retargeting hazard the title had -- the panel must be covered too.
+    const h = mountHarness();
+    press(h.commentInput, h.backdrop);
+    expect(h.onDismiss).not.toHaveBeenCalled();
+    press(h.comment, h.backdrop);
+    expect(h.onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('the backdrop still dismisses after the comment panel has been used', () => {
+    // The fix must not be "dismissal disabled once a panel is open".
+    const h = mountHarness();
+    press(h.commentInput, h.commentInput);
+    expect(h.onDismiss).not.toHaveBeenCalled();
+    press(h.backdrop, h.backdrop);
+    expect(h.onDismiss).toHaveBeenCalledTimes(1);
   });
 });
