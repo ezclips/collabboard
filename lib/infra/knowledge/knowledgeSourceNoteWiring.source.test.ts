@@ -564,7 +564,7 @@ describe('P6J-F8-B1 source clip drop', () => {
 
   it('reads one dedicated transfer type and never text/plain', () => {
     const handler = dropHandler();
-    expect(handler).toContain('parseKnowledgeSourceClipPayload(');
+    expect(handler).toContain('parseKnowledgeSourceTextClipPayload(');
     expect(handler).toContain('event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME)');
     // text/plain accompanies every drag on the system. Reading it here would
     // let any dropped text impersonate a citation.
@@ -573,7 +573,7 @@ describe('P6J-F8-B1 source clip drop', () => {
     // The type is the domain constant, never a re-typed string literal that
     // could drift away from the one the reader publishes.
     expect(canvasClient).toContain("from '@/lib/domain/knowledge/knowledgeSourceClipPayload'");
-    for (const name of ['KNOWLEDGE_SOURCE_CLIP_MIME', 'knowledgeSourceClipPageRequest', 'parseKnowledgeSourceClipPayload']) {
+    for (const name of ['KNOWLEDGE_SOURCE_CLIP_MIME', 'knowledgeSourceClipPageRequest', 'parseKnowledgeSourceTextClipPayload']) {
       expect(canvasClient, name).toContain(name);
     }
     expect(canvasClient).not.toContain("'application/collabboard-knowledge-clip'");
@@ -581,7 +581,7 @@ describe('P6J-F8-B1 source clip drop', () => {
 
   it('refuses an unparseable payload before anything else happens', () => {
     const handler = dropHandler();
-    const parseIndex = handler.indexOf('parseKnowledgeSourceClipPayload(');
+    const parseIndex = handler.indexOf('parseKnowledgeSourceTextClipPayload(');
     const bailIndex = handler.indexOf('if (!payload) return false;');
     const buildIndex = handler.indexOf('buildKnowledgeSourceNoteDraft(');
     expect(bailIndex).toBeGreaterThan(parseIndex);
@@ -731,14 +731,22 @@ describe('P6J-F8-B1 source clip drop', () => {
     // It builds the transfer with the shared builder and reads no selection of
     // its own at drag time -- the captured state is the authority.
     expect(details).toContain('buildKnowledgeSourceClipTransfer({');
+    // R6A moved the transfer body into ONE helper shared by the grip and the
+    // direct-selection drag, so the grip now hands that helper the CAPTURED
+    // selection rather than assembling fields inline. The guarantee is
+    // unchanged and stronger: two gestures, one transfer authority.
     const dragStart = after(details, 'onDragStart={(event) => {', 900);
-    expect(dragStart).toContain('activeSelection.charStart');
-    expect(dragStart).toContain('activeSelection.charEnd');
-    expect(dragStart).toContain('activeSelection.selectedText');
+    expect(dragStart).toContain('writeSelectionClipTransfer(event.dataTransfer, documentId, activeSelection)');
     // window.getSelection() here would find nothing: pressing the grip collapses
     // the live range before dragstart fires.
     expect(dragStart).not.toContain('getSelection');
     expect(dragStart).not.toContain('captureExactSelection');
+    // And the one helper still reads exactly the captured span, never a live one.
+    const writer = after(details, 'const writeSelectionClipTransfer = (', 900);
+    for (const field of ['charStart', 'charEnd', 'selectedText']) {
+      expect(writer, field).toContain(field);
+    }
+    expect(writer).not.toContain('getSelection');
   });
 
   it('keeps the grip out of the canonical text root, in the ONE floating toolbar', () => {
@@ -767,7 +775,7 @@ describe('KNI-R2 existing-Note source clip drop', () => {
 
   it('parses the one dedicated clip, claims synchronously, then validates the target type', () => {
     const handler = existingNoteHandler();
-    const parseIndex = handler.indexOf('parseKnowledgeSourceClipPayload(');
+    const parseIndex = handler.indexOf('parseKnowledgeSourceTextClipPayload(');
     const bailIndex = handler.indexOf('if (!payload) return false;');
     const stopIndex = handler.indexOf('event.stopPropagation();');
     const typeGuardIndex = handler.indexOf("targetPadlet.type !== 'text' && targetPadlet.type !== 'note'");

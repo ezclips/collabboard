@@ -16,6 +16,10 @@ import {
   type NormalizedDisplayPoint,
   type PageImageContentBox,
 } from '@/lib/domain/knowledge/knowledgePageRegionPointer';
+import {
+  KNOWLEDGE_SOURCE_CLIP_MIME,
+  buildKnowledgeSourceClipTransfer,
+} from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 
 /**
  * P6J-F9-B2 -- region selection for ONE page image. It WRAPS the A2b image
@@ -198,6 +202,37 @@ export default function KnowledgeDocumentPageRegionSelector({
     ? null
     : sourceRegionToDisplayRegion(highlightRegion, turn);
 
+  /** Only a settled rectangle is draggable: mid-drag there is no answer yet. */
+  const draggableRegion = enabled && armedRegion !== null && live === null;
+
+  /**
+   * R6B. The transfer carries IDENTITY AND THE RECTANGLE, nothing else.
+   *
+   * No bytes, no data URL and no Storage path are placed on the DataTransfer:
+   * a crop of a private PDF must not be reconstructible from a drag, and the
+   * canvas is expected to ask the server to re-crop from its own stored page.
+   * `region` leaves in the intrinsic UNROTATED system the geometry authority
+   * produced, so the server can apply its own persisted rotation.
+   */
+  const startAreaClipDrag = (event: React.DragEvent<HTMLDivElement>) => {
+    if (armedRegion === null) {
+      event.preventDefault();
+      return;
+    }
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(
+      KNOWLEDGE_SOURCE_CLIP_MIME,
+      buildKnowledgeSourceClipTransfer({
+        kind: 'area',
+        sourceDocumentId: documentId,
+        originalFilename,
+        pageNumber,
+        region: armedRegion,
+      }),
+    );
+  };
+
   // React propagates the image's load/error here, so A2b needs no new prop, and
   // failure drops the armed rectangle: the page it described is gone.
   return (
@@ -225,7 +260,21 @@ export default function KnowledgeDocumentPageRegionSelector({
           {shown === null ? null : (
             <div
               data-knowledge-region-rectangle={pageNumber}
-              className="pointer-events-none absolute border-2 border-blue-500 bg-blue-500/20"
+              /**
+               * R6B, the R6A principle applied to areas: the thing you selected
+               * is the thing you drag. While a rectangle is armed it becomes the
+               * drag source itself, so there is no separate grip to find.
+               *
+               * It takes pointer events back for exactly that purpose, which is
+               * why `onPointerDown` stops here: the crosshair layer beneath
+               * treats any press as the start of a NEW rectangle and would clear
+               * this one before the drag could ever begin.
+               */
+              draggable={draggableRegion}
+              onPointerDown={draggableRegion ? (event) => event.stopPropagation() : undefined}
+              onDragStart={draggableRegion ? startAreaClipDrag : undefined}
+              className={`absolute border-2 border-blue-500 bg-blue-500/20 ${
+                draggableRegion ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
               style={{
                 left: percent(shown.x), top: percent(shown.y),
                 width: percent(shown.width), height: percent(shown.height) }}

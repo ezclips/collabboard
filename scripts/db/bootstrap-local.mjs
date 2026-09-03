@@ -437,6 +437,7 @@ function runKnowledgeIntegrationTests() {
     'workers/knowledge-pdf/knowledgePdfContainer.integration.test.ts',
     'lib/infra/knowledge/knowledgeEmbedding.integration.test.ts',
     'lib/infra/knowledge/knowledgeSourceReferenceRls.integration.test.ts',
+    'lib/server/knowledge/knowledgePdfAreaImage.integration.test.ts',
   ];
   const outputs = [];
   for (const testFile of testFiles) {

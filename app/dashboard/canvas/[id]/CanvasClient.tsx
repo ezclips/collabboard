@@ -93,8 +93,10 @@ import {
 import {
   KNOWLEDGE_SOURCE_CLIP_MIME,
   knowledgeSourceClipPageRequest,
-  parseKnowledgeSourceClipPayload,
+  parseKnowledgeSourceAreaClipPayload,
+  parseKnowledgeSourceTextClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
+import { requestKnowledgePdfAreaImage } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
 import {
   KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
   isKnowledgeSourceNoteTopStripColor,
@@ -6321,8 +6323,62 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * is gated on -- a viewer can synthesise a DataTransfer, so the surface that
    * eventually writes must authorise, not the chip being absent.
    */
+  /**
+   * R6B. An AREA clip dropped on the canvas becomes an ordinary Image card
+   * whose bytes stay private.
+   *
+   * Nothing is cropped, rasterised or uploaded here: the drop carries only a
+   * document id, a page and a rectangle, and the server re-crops from its own
+   * stored page derivative into the same private bucket the PDF lives in. The
+   * card's image address is a same-origin route that re-authorises on every
+   * read, so this path publishes nothing.
+   *
+   * It runs AHEAD of the text clip handler and claims the drop the moment the
+   * payload parses, so one gesture can never be read as both arms.
+   */
+  const handleKnowledgePdfAreaClipDrop = useCallback((event: React.DragEvent): boolean => {
+    const payload = parseKnowledgeSourceAreaClipPayload(
+      // The dedicated type only, exactly as the text arm requires.
+      event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME),
+    );
+    if (!payload) return false;
+    // Synchronous and before any await: the drop finishes dispatching the
+    // instant this handler yields, so a deferred stopPropagation is a no-op.
+    event.stopPropagation();
+    if (!canUseCanvasToolbar || !canvasId) return true;
+
+    if (!isFreeformLayout && !isDrawingLayout) {
+      toast.error('Drop PDF areas on a Freeform or Drawing board');
+      return true;
+    }
+
+    // Read now: `event` is only guaranteed live during this synchronous turn.
+    const dropPoint = getCanvasPointFromClient(event.clientX, event.clientY);
+
+    void (async () => {
+      const created = await requestKnowledgePdfAreaImage(canvasId, payload, {
+        positionX: Math.round(dropPoint.x),
+        positionY: Math.round(dropPoint.y),
+      });
+      if (!created.ok) {
+        // A viewer, a revoked board, or a page with no rendered derivative all
+        // end here. Nothing partial was placed, so there is nothing to undo.
+        toast.error(created.status === 403
+          ? 'You do not have permission to add cards to this board'
+          : 'Could not create the image from that area');
+        return;
+      }
+      setPadlets(prev => [...prev, created.padlet as unknown as Padlet]);
+      toast.success('Image added from PDF area');
+    })();
+    return true;
+  }, [
+    canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout,
+    getCanvasPointFromClient, setPadlets,
+  ]);
+
   const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
-    const payload = parseKnowledgeSourceClipPayload(
+    const payload = parseKnowledgeSourceTextClipPayload(
       // The dedicated type only. text/plain rides along with every drag on the
       // system, so honouring it would let any dropped text forge a citation.
       event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME),
@@ -6397,7 +6453,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     event: React.DragEvent,
     targetPadlet: Padlet,
   ): boolean => {
-    const payload = parseKnowledgeSourceClipPayload(
+    const payload = parseKnowledgeSourceTextClipPayload(
       event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME),
     );
     if (!payload) return false;
@@ -7517,6 +7573,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             // 0. P6J-F8-B1. Checked FIRST, and returns unconditionally once it
             // owns the drop, so a source clip can never also be read as a
             // padlet reposition below.
+            // R6B. The area arm first: one gesture, exactly one reading.
+            if (handleKnowledgePdfAreaClipDrop(e)) return;
             if (handleKnowledgeSourceClipDrop(e)) return;
             // 1. Try dealing with a line drop
             // (Lines logic if needed, usually Lines are drag-created, not dropped-moved,
@@ -7921,6 +7979,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               // propagation itself once it owns the drop: this handler does not
               // otherwise stop bubbling, so the CanvasViewport handler would
               // otherwise receive the same clip and create a second Note.
+              // R6B. The area arm first: one gesture, exactly one reading.
+              if (handleKnowledgePdfAreaClipDrop(e)) return;
               if (handleKnowledgeSourceClipDrop(e)) return;
               const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
               const dropX = dropPoint.x;

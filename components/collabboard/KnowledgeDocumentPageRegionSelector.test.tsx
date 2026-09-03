@@ -411,12 +411,90 @@ describe('P6J-F9-B2 isolation', () => {
   const source = fs.readFileSync(
     path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentPageRegionSelector.tsx'), 'utf8');
 
-  it('S26/S27: emits no drag payload and renders no page text root', () => {
+  /**
+   * R6B RETIRES exactly one premise of the original S26/S27: that the selector
+   * emits no drag payload at all. B2 held it because there was nowhere for an
+   * area to go; R6B gives areas a destination and applies the R6A principle --
+   * the thing you selected IS the thing you drag.
+   *
+   * Everything else stands, and the retired half is INVERTED rather than
+   * deleted, so the payload can only ever be the identity-and-rectangle arm:
+   * bytes, a data URL or a Storage path on the transfer would be a crop of a
+   * private PDF escaping through a DataTransfer.
+   */
+  it('S26/S27: renders no page text root, and emits identity and a rectangle only', () => {
     const harness = mount();
     drag(harness, PORTRAIT);
     expect(harness.container.querySelector('[data-knowledge-page-text-root]')).toBeNull();
-    for (const forbidden of ['dataTransfer', 'KNOWLEDGE_SOURCE_CLIP_MIME', 'onDragStart', 'draggable']) {
-      expect(source, `the selector must not mention ${forbidden}`).not.toContain(forbidden);
+
+    // The payload it may publish: the shared builder, the area arm, the one
+    // dedicated MIME constant -- never a re-typed literal, never text/plain.
+    expect(source).toContain('buildKnowledgeSourceClipTransfer({');
+    expect(source).toContain("kind: 'area'");
+    expect(source).toContain('KNOWLEDGE_SOURCE_CLIP_MIME');
+    expect(source).not.toContain("'application/collabboard-knowledge-clip'");
+    expect(source).not.toContain('text/plain');
+
+    // And what it still may NOT publish, which is the whole privacy property.
+    for (const forbidden of ['toDataURL', 'toBlob', 'base64', 'data:image',
+      'storagePath', 'signedUrl', 'padlet-files']) {
+      expect(source, `the selector must not emit ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('S26b: the armed rectangle is the drag source, and only once it is settled', () => {
+    // An unarmed page has nothing to drag; the crosshair layer must stay the
+    // only thing receiving pointer events until a rectangle exists.
+    const harness = mount();
+    expect(harness.container.querySelector('[draggable="true"]')).toBeNull();
+
+    drag(harness, PORTRAIT);
+    harness.render({ armedRegion: armedRegionOf(harness) });
+    const armed = rectangle(harness.container) as HTMLElement;
+    expect(armed).not.toBeNull();
+    expect(armed.getAttribute('draggable')).toBe('true');
+    // It takes pointer events back specifically so it can be grabbed.
+    expect(armed.className).toContain('cursor-grab');
+    expect(armed.className).not.toContain('pointer-events-none');
+  });
+
+  it('S26c: dragging the armed rectangle emits the area arm, and nothing else', () => {
+    const harness = mount();
+    drag(harness, PORTRAIT);
+    const region = armedRegionOf(harness);
+    harness.render({ armedRegion: region });
+    const armed = rectangle(harness.container) as HTMLElement;
+
+    // A press on it must NOT reach the crosshair layer, which treats any press
+    // as a new rectangle and would clear the very thing being dragged.
+    harness.onClear.mockClear();
+    firePointer(armed, 'pointerdown', at(0.3, 0.3, PORTRAIT));
+    expect(harness.onClear).not.toHaveBeenCalled();
+
+    const written = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: '',
+      setData: (type: string, value: string) => { written.set(type, value); },
+      getData: (type: string) => written.get(type) ?? '',
+    };
+    const event = new Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+    act(() => { armed.dispatchEvent(event); });
+
+    // Exactly one type, and it is the dedicated one.
+    expect([...written.keys()]).toEqual(['application/collabboard-knowledge-clip']);
+    const payload = JSON.parse(written.get('application/collabboard-knowledge-clip')!) as Record<string, unknown>;
+    expect(Object.keys(payload).sort())
+      .toEqual(['kind', 'originalFilename', 'pageNumber', 'region', 'sourceDocumentId']);
+    expect(payload.kind).toBe('area');
+    expect(payload.sourceDocumentId).toBe('doc-1');
+    expect(payload.pageNumber).toBe(1);
+    // The INTRINSIC unrotated rectangle the geometry authority produced.
+    expectRegion(payload.region as NormalizedPageRegion, region);
+    // No bytes, no path: a crop must not be reconstructible from a drag.
+    const raw = written.get('application/collabboard-knowledge-clip')!;
+    for (const forbidden of ['base64', 'data:image', 'storagePath', 'padlet-files']) {
+      expect(raw, forbidden).not.toContain(forbidden);
     }
   });
 
