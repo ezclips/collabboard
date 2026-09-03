@@ -189,7 +189,10 @@ describe('R6H-8..11: it costs nothing, and follows the resolved source', () => {
   it('every image surface the user waits on is covered', () => {
     // Card, modal preview, Draw, and Edit image.
     expect((freeform.match(/<ImageWithLoadingIndicator/g) ?? [])).toHaveLength(2);
-    expect(drawingLayer).toContain('<ImageWithLoadingIndicator');
+    // R6H-C1 gave the Draw layer a two-phase base of its own, so it composes
+    // with the hook directly rather than using the wrapper component.
+    expect(drawingLayer).toContain('useDelayedImageLoading(imageUrl)');
+    expect(drawingLayer).toContain('<ImageLoadingOverlay visible={showBaseLoadingIndicator} />');
     expect(cropLayer).toContain('<ImageLoadingOverlay visible={showImageLoading} />');
   });
 

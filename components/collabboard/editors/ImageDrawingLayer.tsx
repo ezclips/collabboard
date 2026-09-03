@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
 import { DrawingColorPopup, DrawingStylePopup, IMAGE_SUBTOOL_POPUP_Z_CLASS } from './DrawingPopups';
-import { ImageWithLoadingIndicator } from './useDelayedImageLoading';
+import { ImageLoadingOverlay, useDelayedImageLoading } from './useDelayedImageLoading';
 import * as Popover from '@radix-ui/react-popover';
 import {
     DEFAULT_TEXT_ANNOTATION_BOX_WIDTH,
@@ -117,6 +117,12 @@ const DRAW_TOOLBAR_WIDTH = 820;
  */
 const DRAW_TOOLBAR_HEIGHT = 58;
 
+/**
+ * R6H-C1. The one layout box shared by the composite preview and the clean
+ * original, so the swap between them cannot resize or recentre the image.
+ */
+const BASE_IMAGE_STYLE: React.CSSProperties = { maxWidth: '90vw', maxHeight: 'calc(100vh - 150px)' };
+
 // Generate a slightly wobbly closed rect path to simulate a hand-drawn look.
 // Each corner gets a small random offset so it looks naturally imperfect.
 function makeWobblyRectPath(
@@ -195,6 +201,55 @@ export default function ImageDrawingLayer({
      * history would grow every time you pressed Redo.
      */
     const applyingCanvasHistoryRef = useRef(false);
+
+    /**
+     * R6H-C1. Whether the clean original is on screen yet.
+     *
+     * Phase 1 shows the flattened composite and paints no live overlays; phase 2
+     * swaps in the original and enables them. An ERROR also ends phase 1 -- the
+     * surface's own error handling is authoritative from there, and sitting on a
+     * stale preview forever would be worse than showing what actually happened.
+     */
+    const [baseReady, setBaseReady] = useState(false);
+    const { showIndicator: showBaseLoadingIndicator, imgProps: baseLoadingProps, markSettled: markBaseSettled } =
+        useDelayedImageLoading(imageUrl);
+
+    /**
+     * IMAGE_DRAWING_COMPOSITE_PAYLOAD_DEBT
+     *
+     * `initialDrawing` is metadata.drawing: a flattened data URL that a measured
+     * example showed at ~1,150,294 characters (~843 KB), against a whole
+     * board-posts response of ~1.18 MB. One drawing therefore dominates board
+     * payload. R6H-C1 only READS what is already there and does not make this
+     * worse, but the durable fix belongs to Image Library architecture -- move
+     * composited bytes out of padlet metadata and replace the data URL with
+     * durable asset identity plus private serving. Deliberately NOT fixed here.
+     *
+     * The composite is only a PREVIEW when it is genuinely a different image.
+     * A post with no drawing resolves its display source back to imageUrl, and
+     * rendering that as a second <img> would issue a second authenticated GET
+     * for bytes already in flight.
+     */
+    const previewSrc = initialDrawing && initialDrawing !== imageUrl ? initialDrawing : null;
+    const showCompositePreview = !baseReady && previewSrc !== null;
+    const overlaysActive = baseReady;
+
+    const handleBaseSettled = useCallback(() => {
+        markBaseSettled();
+        setBaseReady(true);
+    }, [markBaseSettled]);
+
+    const baseImageProps = {
+        ref: baseLoadingProps.ref,
+        onLoad: handleBaseSettled,
+        onError: handleBaseSettled,
+    };
+
+    // A warm or `data:` base can finish before React attaches onLoad, in which
+    // case that event never arrives and phase 1 would never end.
+    React.useEffect(() => {
+        if (baseLoadingProps.ref.current?.complete) setBaseReady(true);
+    }, [imageUrl, baseLoadingProps.ref]);
 
     /**
      * R6F. The container's measured size.
@@ -706,22 +761,69 @@ export default function ImageDrawingLayer({
                         className="relative"
                         style={{ maxWidth: '90vw', maxHeight: 'calc(100vh - 150px)' }}
                     >
-                        {/* R6H. The first load here is the same authenticated
-                            private route, so it gets the same delayed
-                            indicator. The <img> itself is unchanged -- the
-                            indicator rides its existing load/error events and
-                            adds no request, so R6D's mounted-image saving
-                            stands. */}
-                        <ImageWithLoadingIndicator
+                        {/**
+                          * R6H-C1. Phase 1: the already-flattened composite,
+                          * shown while the clean original is still in flight.
+                          *
+                          * The private PDF-area route answers `private,
+                          * no-store`, so every open is a real round trip --
+                          * ~1.9s cold. The modal's opaque backdrop was simply
+                          * showing through for that whole time. The composite is
+                          * a `data:` URL already in memory, so this costs no
+                          * request and paints immediately.
+                          *
+                          * It defines the layout box during phase 1 and the
+                          * original takes over in phase 2. They are the same
+                          * pixels at the same intrinsic size -- handleSave
+                          * flattens at `originalImg.width/height` -- so the swap
+                          * cannot resize or recentre anything.
+                          */}
+                        {showCompositePreview && (
+                            <img
+                                src={previewSrc!}
+                                alt=""
+                                aria-hidden="true"
+                                data-testid="drawing-composite-preview"
+                                className="block w-full h-auto object-contain"
+                                style={BASE_IMAGE_STYLE}
+                                draggable={false}
+                            />
+                        )}
+
+                        {/**
+                          * The editable base, and the only thing ever edited --
+                          * never the composite, which already contains the
+                          * annotations that are about to be re-painted live.
+                          *
+                          * Mounted from the first render whether or not it is
+                          * visible, so the browser issues exactly ONE
+                          * authenticated GET and its own load event is what
+                          * drives the swap. Hidden rather than unmounted during
+                          * phase 1: unmounting would re-request it.
+                          */}
+                        <img
+                            {...baseImageProps}
                             src={imageUrl}
                             alt="Drawing background"
-                            className="block w-full h-auto object-contain"
-                            style={{ maxWidth: '90vw', maxHeight: 'calc(100vh - 150px)' }}
+                            data-testid="drawing-base-image"
+                            className={showCompositePreview
+                                ? 'absolute top-0 left-0 block w-full h-auto object-contain opacity-0 pointer-events-none'
+                                : 'block w-full h-auto object-contain'}
+                            style={BASE_IMAGE_STYLE}
                             draggable={false}
                         />
+                        <ImageLoadingOverlay visible={showBaseLoadingIndicator} />
 
-                        {/* Canvas Overlay for Drawing */}
-                        <div className="absolute inset-0 pointer-events-auto">
+                        {/* Canvas Overlay for Drawing.
+                            R6H-C1: kept MOUNTED but inert and invisible until
+                            the clean original is ready -- the composite already
+                            shows these annotations, so painting them live too
+                            would double them. Mounted rather than gated because
+                            the initialPaths loader retries for only ~1s after
+                            mount, and a slow image would outlast it. */}
+                        <div className={overlaysActive
+                            ? 'absolute inset-0 pointer-events-auto'
+                            : 'absolute inset-0 pointer-events-none opacity-0'}>
                             <ReactSketchCanvas
                                 ref={canvasRef}
                                 className="!w-full !h-full"
@@ -744,13 +846,16 @@ export default function ImageDrawingLayer({
                                     backgroundColor: 'transparent',
                                     cursor: tool === 'text' ? 'text' : 'crosshair',
                                     touchAction: 'none',
-                                    pointerEvents: tool === 'text' ? 'none' : 'auto'
+                                    // R6H-C1: never accept input before the
+                                    // clean original is ready. Input is refused
+                                    // outright rather than buffered and replayed.
+                                    pointerEvents: !overlaysActive || tool === 'text' ? 'none' : 'auto'
                                 }}
                             />
                         </div>
 
                         {/* Permanent rectangle layer — native SVG, renders instantly with hand-drawn style */}
-                        {completedRects.length > 0 && (
+                        {overlaysActive && completedRects.length > 0 && (
                             /**
                              * R6F. The <svg> stays pointer-events:none, and only
                              * the Square tool's own hit bands opt back in.
@@ -828,7 +933,7 @@ export default function ImageDrawingLayer({
 
                         {/* R6F. Delete control for the selected rectangle. Same
                             Trash2 language as the text annotation's own. */}
-                        {selectedRect && (
+                        {overlaysActive && selectedRect && (
                             <div
                                 className="absolute z-[56] pointer-events-auto"
                                 style={{ left: selectedRect.x2 + 6, top: Math.max(0, selectedRect.y1 - 10) }}
@@ -848,7 +953,7 @@ export default function ImageDrawingLayer({
                         )}
 
                         {/* Square Tool Overlay */}
-                        {tool === 'square' && (
+                        {overlaysActive && tool === 'square' && (
                             <div
                                 className="absolute inset-0 z-50 cursor-crosshair touch-none"
                                 onPointerDown={handleShapePointerDown}
@@ -878,7 +983,7 @@ export default function ImageDrawingLayer({
                         )}
 
                         {/* Text Tool Overlay - Click to Add Text OR Deselect */}
-                        {tool === 'text' && (
+                        {overlaysActive && tool === 'text' && (
                             <div
                                 className="absolute inset-0 z-50 cursor-text touch-none"
                                 onClick={handleCanvasClick}
@@ -886,7 +991,7 @@ export default function ImageDrawingLayer({
                         )}
 
                         {/* Text Elements Layer - Above overlay */}
-                        <div className="absolute inset-0 z-[60] pointer-events-none">
+                        <div className={overlaysActive ? "absolute inset-0 z-[60] pointer-events-none" : "absolute inset-0 z-[60] pointer-events-none opacity-0"}>
                             {textElements.map(el => {
                                 const maxAllowedWidth = containerRef.current
                                     ? Math.max(80, containerRef.current.clientWidth - el.x - 20)

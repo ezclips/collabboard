@@ -138,9 +138,13 @@ describe('R6G-C1 bottom toolbar: wide enough that nothing scrolls', () => {
   const imageUrl = 'data:image/png;base64,stub';
 
   function renderDrawLayer() {
-    return render(
+    const result = render(
       <ImageDrawingLayer imageUrl={imageUrl} initialTextElements={[]} onSave={vi.fn()} onCancel={vi.fn()} />
     );
+    // R6H-C1: the editing surfaces only exist once the clean original is ready.
+    const base = document.body.querySelector('[data-testid="drawing-base-image"]');
+    if (base) fireEvent.load(base);
+    return result;
   }
 
   const bar = () => document.body.querySelector('[data-testid="draw-toolbar"]') as HTMLElement;

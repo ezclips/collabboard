@@ -41,8 +41,20 @@ function mockCanvasMetrics() {
   }) as unknown as CanvasRenderingContext2D);
 }
 
+/**
+ * R6H-C1. Lets the clean original "arrive".
+ *
+ * Editing is gated on the base image being ready, so every test that draws has
+ * to get past phase 1 first -- which is what the real editor does within a
+ * second or two. jsdom never loads images, so the event is dispatched by hand.
+ */
+function settleBaseImage() {
+  const base = document.body.querySelector('[data-testid="drawing-base-image"]');
+  if (base) fireEvent.load(base);
+}
+
 function renderLayer() {
-  return render(
+  const result = render(
     <ImageDrawingLayer
       imageUrl={imageUrl}
       initialTextElements={[
@@ -61,6 +73,8 @@ function renderLayer() {
       onCancel={vi.fn()}
     />
   );
+  settleBaseImage();
+  return result;
 }
 
 function openTextToolbar() {
@@ -163,7 +177,7 @@ function mockContainerSize(width = 400, height = 300) {
 
 /** x=280 leaves 100px of width, which wraps "Hallo World" into two lines. */
 function renderBottomText(y = 280, x = 280) {
-  return render(
+  const result = render(
     <ImageDrawingLayer
       imageUrl={imageUrl}
       initialTextElements={[{
@@ -174,6 +188,8 @@ function renderBottomText(y = 280, x = 280) {
       onCancel={vi.fn()}
     />
   );
+  settleBaseImage();
+  return result;
 }
 
 const boxTop = (textarea: HTMLTextAreaElement) => parseFloat((textarea.parentElement as HTMLElement).style.top);
@@ -468,9 +484,11 @@ describe('R6F rectangles: one can be selected and deleted on its own', () => {
 
 /** The editor with no pre-existing annotations, so "the" text box is unambiguous. */
 function renderEmptyLayer() {
-  return render(
+  const result = render(
     <ImageDrawingLayer imageUrl={imageUrl} initialTextElements={[]} onSave={vi.fn()} onCancel={vi.fn()} />
   );
+  settleBaseImage();
+  return result;
 }
 
 /** A fresh text annotation, created through the real Add Text flow. */
