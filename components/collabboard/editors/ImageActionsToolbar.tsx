@@ -42,6 +42,17 @@ interface ImageActionsToolbarProps {
     isDrawingMode?: boolean;
     isCaptionMode?: boolean;
     isTextStyleMode?: boolean;
+    /**
+     * R6I-C2. Tools that cannot work yet, by id ('caption' | 'edit' | 'draw' |
+     * 'reaction' | 'comment' | 'color' | 'mode').
+     *
+     * The pre-save PDF-area draft shows this toolbar so the editor is
+     * structurally the real one, but several actions write straight to a row
+     * that does not exist until Save. Those are disabled rather than wired to
+     * no-ops: a control that looks live and does nothing is worse than one that
+     * says it is not available yet.
+     */
+    disabledToolIds?: readonly string[];
 }
 
 const COLORS = [
@@ -95,7 +106,9 @@ export default function ImageActionsToolbar({
     isDrawingMode = false,
     isCaptionMode = false,
     isTextStyleMode = false,
+    disabledToolIds,
 }: ImageActionsToolbarProps) {
+    const isToolDisabled = (id: string) => (disabledToolIds ?? []).includes(id);
     const [internalMode, setInternalMode] = useState<ToolbarMode>('image');
 
     // Use external mode if provided, otherwise use internal
@@ -222,8 +235,11 @@ export default function ImageActionsToolbar({
                     <div className="flex flex-col items-center shrink-0">
                         <button
                             onClick={onColorClick}
-                            className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors hover:bg-gray-100 ${isColorPickerOpen ? 'bg-gray-100' : ''}`}
-                            title="Color"
+                            disabled={isToolDisabled('color')}
+                            className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${isToolDisabled('color')
+                                ? 'text-gray-300 cursor-not-allowed'
+                                : `hover:bg-gray-100 ${isColorPickerOpen ? 'bg-gray-100' : ''}`}`}
+                            title={isToolDisabled('color') ? 'Color is available once the image is saved' : 'Color'}
                         >
                             <Palette className="w-5 h-5 text-gray-600" />
                         </button>
@@ -237,11 +253,16 @@ export default function ImageActionsToolbar({
                             <div key={index} className="flex flex-col items-center shrink-0">
                                 <button
                                     onClick={tool.onClick}
-                                    className={`relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${tool.active
-                                        ? 'bg-blue-100 text-blue-600'
-                                        : 'hover:bg-gray-100 text-gray-600'
+                                    disabled={isToolDisabled(tool.id)}
+                                    className={`relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${isToolDisabled(tool.id)
+                                        ? 'text-gray-300 cursor-not-allowed'
+                                        : tool.active
+                                            ? 'bg-blue-100 text-blue-600'
+                                            : 'hover:bg-gray-100 text-gray-600'
                                         }`}
-                                    title={(tool as { title?: string }).title ?? tool.label}
+                                    title={isToolDisabled(tool.id)
+                                        ? `${tool.label} is available once the image is saved`
+                                        : ((tool as { title?: string }).title ?? tool.label)}
                                 >
                                     <IconComponent className="w-5 h-5" />
                                     {tool.id === 'comment' && commentCount > 0 && (

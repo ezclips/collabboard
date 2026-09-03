@@ -1,35 +1,46 @@
 'use client';
 
 import React from 'react';
-import { createPortal } from 'react-dom';
 import { Loader2 } from 'lucide-react';
+import ImagePostEditorShell from './ImagePostEditorShell';
 import ImagePostEditorCard from './ImagePostEditorCard';
+import ImageActionsToolbar from './ImageActionsToolbar';
 import { useBackdropDismiss } from './PostEditorShell';
 
 /**
- * R6I-C1 -- the Image post editor, before the Image exists.
+ * R6I-C2 -- the REAL Image post editor, in creation mode.
  *
- * R6I reused the clipart draft modal, which was wrong twice over: it looked
- * like a generic card editor rather than the Image editor the user has been
- * accepting since R6C, and it rendered `fixed inset-0 z-[160]` with no portal,
- * so it opened UNDERNEATH the PDF reader (z-1200, and still 900 when yielding).
+ * Two earlier attempts got this wrong in the same way: they showed something
+ * that was not the Image editor. R6I reused the clipart card modal; R6I-C1
+ * replaced it with a preview card and a pair of buttons. Neither is the editor
+ * the user has been accepting since R6C, which is a portalled three-track
+ * overlay with the vertical Image toolbar on the left and the titled image card
+ * in the middle.
  *
- * Both are fixed by adopting the accepted Image editor's own architecture
- * rather than a new one:
+ * So this composes the same parts the persisted editor does -- the same shell,
+ * the same ImageActionsToolbar, the same ImagePostEditorCard -- rather than
+ * approximating them. The only thing it adds is an explicit Save, because
+ * unlike the persisted editor there is nothing to autosave to yet.
  *
- *  - the same card composition, via the shared ImagePostEditorCard;
- *  - portalled to <body>, because this renders from inside CanvasViewport's
- *    `isolation: isolate` boundary where the whole canvas subtree paints as one
- *    atomic layer -- no z-index asked for in there can clear a root-level
- *    sibling, which is exactly what R6C established;
- *  - the same z-[60000] tier the persisted image overlay uses, so the two
- *    cannot drift apart.
+ * What draft mode changes, and why:
  *
- * DISMISSAL IS DELIBERATELY NOT THE CLIPART CONTRACT. There, closing saves.
- * Here, nothing exists yet and Save publishes to a shared board, so every way
- * out except the Save button discards: Cancel, X, backdrop and Escape all
- * leave no card, no private crop and no board mutation.
+ *  - the right track is empty. Text style, emoji and comment panels all write
+ *    to a row that does not exist.
+ *  - Edit image, Draw, Reaction and Comment are DISABLED, not wired to no-ops.
+ *    Each needs a persisted padlet (Draw and Edit image edit a stored
+ *    imageUrl; Reaction and Comment write metadata). A control that looks live
+ *    and silently does nothing is worse than one that says "not yet".
+ *  - Colour and Caption are disabled for the same reason: both persist through
+ *    the padlet update path.
+ *
+ * DISMISSAL IS NOT THE CLIPART CONTRACT. There, closing saves. Here Save
+ * publishes to a shared board, so only the Save button does: Cancel, backdrop
+ * and Escape all discard, through the shared press-origin guard so a first
+ * click in the title cannot be retargeted into losing the draft.
  */
+
+/** Everything that needs a row before it can do anything. */
+const DRAFT_DISABLED_TOOLS = ['caption', 'edit', 'draw', 'reaction', 'comment', 'color'] as const;
 
 export interface PdfAreaImageDraftModalProps {
   readonly isOpen: boolean;
@@ -53,9 +64,6 @@ export default function PdfAreaImageDraftModal({
   onCancel,
   isSaving = false,
 }: PdfAreaImageDraftModalProps) {
-  // The shared press-origin guard (R6C): a first click that begins inside the
-  // title or a control and is released over the backdrop must not be
-  // retargeted into a dismissal -- which here would silently discard the draft.
   const backdropDismiss = useBackdropDismiss(() => {
     if (!isSaving) onCancel();
   });
@@ -69,35 +77,46 @@ export default function PdfAreaImageDraftModal({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, isSaving, onCancel]);
 
-  if (!isOpen || typeof document === 'undefined') return null;
+  if (!isOpen) return null;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
-      data-ui="pdf-area-image-draft-overlay"
-      {...backdropDismiss}
+  const unavailable = () => {};
+
+  return (
+    <ImagePostEditorShell
+      dataUi="pdf-area-image-draft-overlay"
+      backdropProps={backdropDismiss}
+      toolbar={
+        <ImageActionsToolbar
+          mode="image"
+          disabledToolIds={DRAFT_DISABLED_TOOLS}
+          // Every handler below belongs to a disabled control, so none of them
+          // can be reached. They are present because the props are required.
+          onColorClick={unavailable}
+          onCardColor={unavailable}
+          onCaption={unavailable}
+          onTextStyle={unavailable}
+          onSelectColor={unavailable}
+          onSelectHighlight={unavailable}
+          onEditImage={unavailable}
+          onDrawOnTop={unavailable}
+          onAddReaction={unavailable}
+          onComment={unavailable}
+        />
+      }
     >
-      <div className="flex flex-col items-center gap-4" style={{ pointerEvents: 'none' }}>
-        <div style={{ pointerEvents: 'auto' }}>
-          {/*
-            No reactions, caption, comment or reaction controls: every one of
-            them writes to a row that does not exist yet. Showing them disabled
-            would be more honest than showing them broken, but showing them at
-            all would suggest this draft is further along than it is.
-          */}
-          <ImagePostEditorCard
-            imageSrc={previewSrc ?? undefined}
-            imageAlt="Selected PDF area"
-            title={title}
-            onTitleChange={onTitleChange}
-            titlePlaceholder="Title"
-          />
-        </div>
+      <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <ImagePostEditorCard
+          imageSrc={previewSrc ?? undefined}
+          imageAlt="Selected PDF area"
+          title={title}
+          onTitleChange={onTitleChange}
+          titlePlaceholder="Title"
+        />
 
+        {/* The persisted editor autosaves, so it needs no such row. This one
+            has nothing to save to until the user says so. */}
         <div
-          className="flex items-center gap-2"
-          style={{ pointerEvents: 'auto' }}
-          onClick={(e) => e.stopPropagation()}
+          className="mt-4 flex items-center justify-end gap-2"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
@@ -121,7 +140,6 @@ export default function PdfAreaImageDraftModal({
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+    </ImagePostEditorShell>
   );
 }

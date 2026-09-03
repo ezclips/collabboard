@@ -361,23 +361,28 @@ describe('R6I-C1: the creation modal opens ABOVE the PDF side panel', () => {
     // R6C's lesson: this renders inside CanvasViewport's `isolation: isolate`,
     // where the whole canvas subtree paints as ONE layer at z-index:auto. The
     // clipart modal it replaced was `fixed inset-0 z-[160]` with no portal,
-    // which is exactly why the reader covered it.
-    expect(modal).toContain("import { createPortal } from 'react-dom';");
-    expect(modal).toContain('document.body,');
-    // Comments are prose -- this component's own doc names the tier it replaced.
+    // which is exactly why the reader covered it. R6I-C2 moved the portal into
+    // the shared shell, so the draft inherits it rather than re-deciding.
+    const shell = read('components/collabboard/editors/ImagePostEditorShell.tsx');
+    expect(shell).toContain("import { createPortal } from 'react-dom';");
+    expect(shell).toContain('document.body,');
+    expect(modal).toContain('<ImagePostEditorShell');
     expect(code(modal)).not.toContain('z-[160]');
+    expect(code(modal)).not.toContain('fixed inset-0');
   });
 
   it('it paints at the SAME tier as the accepted persisted image overlay', () => {
-    const tierOf = (source: string, anchor: string) => {
-      const at = source.indexOf(anchor);
-      expect(at, anchor).toBeGreaterThan(-1);
-      const match = /className="fixed inset-0 z-\[(\d+)\]/.exec(source.slice(Math.max(0, at - 400), at + 400));
-      expect(match, anchor).not.toBeNull();
+    const shell = read('components/collabboard/editors/ImagePostEditorShell.tsx');
+    const tierIn = (source: string) => {
+      // Comments are prose -- the shell's own doc names the tier it replaced.
+      const match = /z-\[(\d+)\]/.exec(code(source));
+      expect(match, 'no tier declared').not.toBeNull();
       return Number(match![1]);
     };
-    expect(tierOf(modal, 'data-ui="pdf-area-image-draft-overlay"'))
-      .toBe(tierOf(freeform, 'data-ui="freeform-image-editor-overlay"'));
+    const overlayAt = freeform.indexOf('data-ui="freeform-image-editor-overlay"');
+    const overlayTier = tierIn(freeform.slice(Math.max(0, overlayAt - 400), overlayAt));
+    expect(tierIn(shell)).toBe(overlayTier);
+    expect(overlayTier).toBe(60000);
   });
 
   it('the reader yields through the ONE shared authority, not a new z-index', () => {
@@ -396,5 +401,72 @@ describe('R6I-C1: the creation modal opens ABOVE the PDF side panel', () => {
     for (const absent of ['CommentPopup', 'EmojiReactionPicker', 'ReactionDisplay', 'CardEditor', 'CardPreview']) {
       expect(modal, absent).not.toContain(absent);
     }
+  });
+});
+
+describe('R6I-C2: the draft IS the real Image post editor, not a preview dialog', () => {
+  const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+  const shell = read('components/collabboard/editors/ImagePostEditorShell.tsx');
+  const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+
+  it('the shape is Title + large image + the LEFT Image toolbar', () => {
+    // The reported failure: a title, a preview and Cancel/Save underneath,
+    // with no Image toolbar. That is a confirmation dialog, not the editor.
+    expect(modal).toContain('<ImagePostEditorShell');
+    expect(modal).toContain('<ImageActionsToolbar');
+    expect(modal).toContain('<ImagePostEditorCard');
+    // The toolbar goes in the shell's LEFT track.
+    expect(modal).toMatch(/toolbar=\{[\s\S]{0,120}<ImageActionsToolbar/);
+    expect(shell).toContain('className="flex items-start justify-end"');
+  });
+
+  it('it uses the SAME toolbar component the persisted editor does', () => {
+    expect(freeform).toContain('<ImageActionsToolbar');
+    for (const source of [modal, freeform]) {
+      expect(source).toContain('<ImageActionsToolbar');
+    }
+    // ...and the same card.
+    expect(freeform).toContain('<ImagePostEditorCard');
+  });
+
+  it('actions that need a persisted row are DISABLED, never wired to no-ops that look live', () => {
+    expect(modal).toContain("const DRAFT_DISABLED_TOOLS = ['caption', 'edit', 'draw', 'reaction', 'comment', 'color']");
+    expect(modal).toContain('disabledToolIds={DRAFT_DISABLED_TOOLS}');
+    const toolbar = read('components/collabboard/editors/ImageActionsToolbar.tsx');
+    expect(toolbar).toContain('disabled={isToolDisabled(tool.id)}');
+    expect(toolbar).toContain("disabled={isToolDisabled('color')}");
+    expect(toolbar).toContain('cursor-not-allowed');
+  });
+
+  it('the draft and the persisted overlay declare the SAME shell, so they cannot drift', () => {
+    // The persisted overlay was deliberately not restructured -- see the note
+    // in the report -- so this pins its declarations to the shared shell's.
+    const overlayAt = freeform.indexOf('data-ui="freeform-image-editor-overlay"');
+    expect(overlayAt).toBeGreaterThan(-1);
+    const overlay = freeform.slice(Math.max(0, overlayAt - 600), overlayAt + 900);
+
+    expect(overlay).toContain('fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm');
+    expect(shell).toContain('fixed inset-0 ${IMAGE_POST_EDITOR_OVERLAY_Z_CLASS} flex items-center justify-center bg-black/35 backdrop-blur-sm');
+    expect(shell).toContain("export const IMAGE_POST_EDITOR_OVERLAY_Z_CLASS = 'z-[60000]';");
+
+    for (const declaration of [
+      "gridTemplateColumns: '1fr auto 1fr'",
+      "width: 'calc(100vw - 80px)'",
+      "maxHeight: 'calc(100vh - 80px)'",
+      'className="relative grid items-start gap-6"',
+      'className="flex items-start justify-end"',
+      'className="flex items-start justify-start"',
+    ]) {
+      expect(overlay + freeform, `overlay: ${declaration}`).toContain(declaration);
+      expect(shell, `shell: ${declaration}`).toContain(declaration);
+    }
+  });
+
+  it('there is no intermediate confirmation step between the drop and the editor', () => {
+    // The drop stages the draft and the editor renders off it. Nothing else.
+    const handler = dropHandler();
+    expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
+    expect(handler).not.toContain('Confirm');
+    expect(draftModal()).toContain('isOpen={pendingPdfAreaDraft !== null}');
   });
 });
