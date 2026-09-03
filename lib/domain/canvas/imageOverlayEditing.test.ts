@@ -141,6 +141,14 @@ describe('D13-D19: a new text annotation is horizontal', () => {
     expect(box.boxHeight).toBeCloseTo(3 * 24 + 24, 5);
   });
 
+  it('D17b: a width cap wraps live text onto multiple rendered lines', () => {
+    const box = measureTextAnnotationBox('Hello World', 24, measure(24), 80);
+    expect(box.lines.length).toBeGreaterThan(1);
+    expect(box.lines.join('').replace(/\s/g, '')).toBe('HelloWorld');
+    expect(box.boxWidth).toBe(80);
+    expect(box.boxHeight).toBeCloseTo(4 * (24 * 1.2) + 24, 5);
+  });
+
   it('D19: EXISTING saved text keeps exactly the geometry it had', () => {
     // The only behaviour that changed is the empty case. Any content string
     // still goes through the untouched max(50, measured + padding) formula.
@@ -159,7 +167,8 @@ describe('D13-D19: a new text annotation is horizontal', () => {
   it('D16,D18: the editor and the saved canvas read the SAME box', () => {
     // One helper, called once per element per render, feeding both the
     // textarea's width/height and handleSave's canvas geometry.
-    expect(drawingLayer).toContain('measureTextAnnotationBox(content, fontSize,');
+    expect(drawingLayer).toContain('measureTextBox(text.content, text.fontSize, maxAllowedWidth)');
+    expect(drawingLayer).toContain('measureTextBox(el.content, el.fontSize, maxAllowedWidth)');
     // Exactly two consumers: the textarea's width/height, and handleSave's
     // canvas geometry. Neither may grow its own second measurement.
     expect((drawingLayer.match(/measureTextBox\(/g) ?? []).length).toBe(2);

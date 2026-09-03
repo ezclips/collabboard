@@ -196,7 +196,7 @@ export default function ImageDrawingLayer({
         };
     }, [draggingId, dragOffset]);
 
-    const measureTextBox = useCallback((content: string, fontSize: number) => {
+    const measureTextBox = useCallback((content: string, fontSize: number, maxWidth?: number) => {
         if (!measureCanvasRef.current) {
             measureCanvasRef.current = document.createElement('canvas');
         }
@@ -204,7 +204,12 @@ export default function ImageDrawingLayer({
         if (ctx) ctx.font = `600 ${fontSize}px "Inter", sans-serif`;
         // R6D: the sizing policy lives in one testable domain helper, shared by
         // the textarea below and the flattened canvas render in handleSave.
-        return measureTextAnnotationBox(content, fontSize, (line) => (ctx ? ctx.measureText(line).width : 0));
+        return measureTextAnnotationBox(
+            content,
+            fontSize,
+            (line) => (ctx ? ctx.measureText(line).width : 0),
+            maxWidth,
+        );
     }, []);
 
     const handleSave = async () => {
@@ -261,7 +266,10 @@ export default function ImageDrawingLayer({
             const textScaleX = containerRef.current ? (canvas.width / containerRef.current.clientWidth) : 1;
             const textScaleY = containerRef.current ? (canvas.height / containerRef.current.clientHeight) : 1;
             textElements.forEach(text => {
-                const measured = measureTextBox(text.content, text.fontSize);
+                const maxAllowedWidth = containerRef.current
+                    ? Math.max(80, containerRef.current.clientWidth - text.x - 20)
+                    : undefined;
+                const measured = measureTextBox(text.content, text.fontSize, maxAllowedWidth);
                 const x = text.x * textScaleX;
                 const y = text.y * textScaleY;
                 const boxWidth = measured.boxWidth * textScaleX;
@@ -529,11 +537,11 @@ export default function ImageDrawingLayer({
                         {/* Text Elements Layer - Above overlay */}
                         <div className="absolute inset-0 z-[60] pointer-events-none">
                             {textElements.map(el => {
-                                const measured = measureTextBox(el.content, el.fontSize);
                                 const maxAllowedWidth = containerRef.current
                                     ? Math.max(80, containerRef.current.clientWidth - el.x - 20)
                                     : 400;
-                                const editorWidth = Math.min(measured.boxWidth, maxAllowedWidth);
+                                const measured = measureTextBox(el.content, el.fontSize, maxAllowedWidth);
+                                const editorWidth = measured.boxWidth;
                                 const editorHeight = measured.boxHeight;
 
                                 return (
@@ -543,7 +551,7 @@ export default function ImageDrawingLayer({
                                     style={{
                                         left: el.x,
                                         top: el.y,
-                                        maxWidth: containerRef.current ? `${containerRef.current.clientWidth - el.x - 20}px` : '400px'
+                                        maxWidth: `${maxAllowedWidth}px`
                                     }}
                                 >
                                     {/* Action Group: Move & Delete */}
@@ -607,7 +615,9 @@ export default function ImageDrawingLayer({
                                             width: `${editorWidth}px`,
                                             height: `${editorHeight}px`,
                                             minWidth: '50px',
-                                            lineHeight: '1.2'
+                                            lineHeight: '1.2',
+                                            whiteSpace: 'pre-wrap',
+                                            overflowWrap: 'break-word',
                                         }}
                                         rows={1}
                                     />

@@ -32,6 +32,78 @@ export interface TextAnnotationBox {
 /** Measures one line at the annotation's font. */
 export type TextWidthMeasurer = (line: string) => number;
 
+function wrapLine(line: string, maxTextWidth: number, measure: TextWidthMeasurer): string[] {
+  if (line.length === 0) return [''];
+  if (measure(line) <= maxTextWidth) return [line];
+
+  const tokens = line.split(/(\s+)/u).filter((token) => token.length > 0);
+  const wrapped: string[] = [];
+  let current = '';
+
+  const pushCurrent = () => {
+    if (current.length > 0) {
+      wrapped.push(current.trimEnd());
+      current = '';
+    }
+  };
+
+  for (const token of tokens) {
+    const candidate = current + token;
+    if (current.length === 0 && measure(token) > maxTextWidth && !/^\s+$/u.test(token)) {
+      let chunk = '';
+      for (const char of token) {
+        const next = chunk + char;
+        if (chunk.length === 0 || measure(next) <= maxTextWidth) {
+          chunk = next;
+        } else {
+          wrapped.push(chunk);
+          chunk = char;
+        }
+      }
+      current = chunk;
+      continue;
+    }
+
+    if (measure(candidate.trimEnd()) <= maxTextWidth) {
+      current = candidate;
+      continue;
+    }
+
+    pushCurrent();
+    if (/^\s+$/u.test(token)) {
+      continue;
+    }
+
+    if (measure(token) <= maxTextWidth) {
+      current = token;
+      continue;
+    }
+
+    let chunk = '';
+    for (const char of token) {
+      const next = chunk + char;
+      if (chunk.length === 0 || measure(next) <= maxTextWidth) {
+        chunk = next;
+      } else {
+        wrapped.push(chunk);
+        chunk = char;
+      }
+    }
+    current = chunk;
+  }
+
+  pushCurrent();
+  return wrapped.length > 0 ? wrapped : [''];
+}
+
+function wrapTextToWidth(text: string, maxTextWidth: number, measure: TextWidthMeasurer): string[] {
+  const wrapped: string[] = [];
+  for (const line of text.split('\n')) {
+    wrapped.push(...wrapLine(line, maxTextWidth, measure));
+  }
+  return wrapped.length > 0 ? wrapped : [''];
+}
+
 /**
  * Sizes the box for `content`.
  *
@@ -49,28 +121,41 @@ export function measureTextAnnotationBox(
   content: string,
   fontSize: number,
   measure: TextWidthMeasurer,
+  maxBoxWidth?: number,
+  font = `600 ${fontSize}px "Inter", sans-serif`,
 ): TextAnnotationBox {
   const isEmpty = !content || content.length === 0;
-  const lines = (isEmpty ? '' : content).split('\n');
-  const measuredAgainst = isEmpty ? [EMPTY_TEXT_ANNOTATION_PLACEHOLDER] : lines;
+  const hardLines = (isEmpty ? '' : content).split('\n');
+  const measuredAgainst = isEmpty ? [EMPTY_TEXT_ANNOTATION_PLACEHOLDER] : hardLines;
 
   const padding = TEXT_ANNOTATION_PADDING;
   const lineHeight = fontSize * 1.2;
+  const boxWidthLimit = Number.isFinite(maxBoxWidth as number) && (maxBoxWidth as number) > 0
+    ? (maxBoxWidth as number)
+    : null;
 
-  let maxWidth = 0;
+  let measuredMaxWidth = 0;
   for (const line of measuredAgainst) {
     // A blank line still occupies a line box; measuring '' would collapse it.
     const width = measure(line.length > 0 ? line : ' ');
-    if (Number.isFinite(width) && width > maxWidth) maxWidth = width;
+    if (Number.isFinite(width) && width > measuredMaxWidth) measuredMaxWidth = width;
   }
 
+  const naturalBoxWidth = Math.max(MIN_TEXT_ANNOTATION_BOX_WIDTH, measuredMaxWidth + padding * 2);
+  const shouldWrap = !isEmpty && boxWidthLimit !== null && naturalBoxWidth > boxWidthLimit;
+  const wrappedLines = shouldWrap
+    ? wrapTextToWidth(content, Math.max(1, boxWidthLimit - padding * 2), measure)
+    : hardLines;
+
   return {
-    lines,
+    lines: wrappedLines,
     padding,
     lineHeight,
-    boxWidth: Math.max(MIN_TEXT_ANNOTATION_BOX_WIDTH, maxWidth + padding * 2),
-    // Height counts REAL lines, so an empty box is one line tall even though
-    // its width came from the placeholder.
-    boxHeight: Math.max(lineHeight + padding * 2, lines.length * lineHeight + padding * 2),
+    boxWidth: boxWidthLimit !== null && naturalBoxWidth > boxWidthLimit
+      ? boxWidthLimit
+      : naturalBoxWidth,
+    // Height counts rendered lines, so wrapped text grows vertically while the
+    // textarea stays on the same persisted box width.
+    boxHeight: Math.max(lineHeight + padding * 2, wrappedLines.length * lineHeight + padding * 2),
   };
 }
