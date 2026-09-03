@@ -190,4 +190,67 @@ describe('R6G-C1 bottom toolbar: wide enough that nothing scrolls', () => {
     renderDrawLayer();
     expect(bar().style.maxWidth).toContain('100vw');
   });
+
+  // --- R6G-C2: the same bar must not change HEIGHT either -----------------
+
+  /** Walks the bar through every state the user can put it in. */
+  function heightInEveryState(): Record<string, string> {
+    const seen: Record<string, string> = { initial: bar().style.minHeight };
+    for (const tool of ['Add Text', 'Pencil', 'Highlighter', 'Eraser']) {
+      fireEvent.click(screen.getByTitle(tool));
+      seen[tool] = bar().style.minHeight;
+    }
+    fireEvent.click(screen.getByTitle('Pencil'));
+    fireEvent.click(screen.getByTitle('Square'));
+    seen.Square = bar().style.minHeight;
+
+    // The widest AND shortest state: Text with an annotation selected, which is
+    // the one that used to be 4px shorter than the rest.
+    fireEvent.click(screen.getByTitle('Add Text'));
+    const surface = document.body.querySelector('.cursor-text.touch-none') as HTMLElement;
+    fireEvent.click(surface);
+    fireEvent.focus(screen.getByPlaceholderText('Type here...'));
+    seen.selectedText = bar().style.minHeight;
+    return seen;
+  }
+
+  it('R6G-C2-1..6,10: the height is identical in every tool state', () => {
+    // The reported jump: the Colour swatch is w-6 where every other icon is
+    // w-5, so its button is 44px against 40px -- and that group only renders
+    // while the tool is not Text. Text sat at 54px, every drawing tool at 58px.
+    renderDrawLayer();
+    const heights = heightInEveryState();
+    const distinct = [...new Set(Object.values(heights))];
+    expect(distinct, JSON.stringify(heights)).toHaveLength(1);
+    // ...and it is a real declared height, not "every state is equally unset".
+    expect(distinct[0]).toMatch(/^\d+px$/);
+  });
+
+  it('R6G-C2: the height is the TALLEST state, so nothing had to be shrunk', () => {
+    renderDrawLayer();
+    // 44px Colour button + 12px shell padding + 2px border.
+    expect(parseInt(bar().style.minHeight, 10)).toBe(58);
+    // The swatch that sets it keeps its size.
+    const swatch = screen.getByTitle('Color').querySelector('div') as HTMLElement;
+    expect(swatch.className).toContain('w-6 h-6');
+  });
+
+  it('R6G-C2-9: groups stay vertically centred inside the fixed shell', () => {
+    // Without items-center the extra 4px in the Text state would push the row
+    // to one edge instead of splitting evenly.
+    renderDrawLayer();
+    expect(bar().className).toContain('items-center');
+    for (const group of Array.from(bar().children)) {
+      expect(group.className, group.className).toContain('items-center');
+    }
+  });
+
+  it('R6G-C2-7,8: width and the narrow-viewport guard are untouched by the height fix', () => {
+    renderDrawLayer();
+    const before = { w: bar().style.width, max: bar().style.maxWidth };
+    heightInEveryState();
+    expect(bar().style.width).toBe('820px');
+    expect(bar().style.width).toBe(before.w);
+    expect(bar().style.maxWidth).toBe(before.max);
+  });
 });

@@ -103,6 +103,19 @@ const RECT_HIT_STROKE_WIDTH = 14;
  */
 const DRAW_TOOLBAR_WIDTH = 820;
 
+/**
+ * R6G-C2. The Draw-on-top toolbar's fixed height, in CSS px.
+ *
+ * Derived from the existing control dimensions rather than picked: the tallest
+ * control is the Colour swatch button (p-2.5 + w-6 = 10 + 24 + 10 = 44px), and
+ * the shell adds p-1.5 top and bottom plus its 1px border (6 + 6 + 2 = 14).
+ *
+ * 58 is not a standard Tailwind step (h-14 is 56, h-16 is 64), and rounding to
+ * either would mean shrinking a control or padding the bar out further than any
+ * state needs -- so the measured value is used.
+ */
+const DRAW_TOOLBAR_HEIGHT = 58;
+
 // Generate a slightly wobbly closed rect path to simulate a hand-drawn look.
 // Each corner gets a small random offset so it looks naturally imperfect.
 function makeWobblyRectPath(
@@ -981,25 +994,46 @@ export default function ImageDrawingLayer({
 
                 {/* Bottom Floating Drawing Toolbar */}
                 <div
+                    // Positioning only. Both dimensions live on the bar itself,
+                    // one level down -- that is the element the user sees.
                     className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[210]"
-                    /**
-                     * R6G. ONE width, in every tool state.
-                     *
-                     * The shell used to be `w-fit`, so it sized itself around
-                     * whichever control group was mounted -- Text shows four
-                     * styling controls, the other tools show Square/Brush/Colour
-                     * -- and the bar visibly changed length, and re-centred,
-                     * every time the tool changed. The width is now a property of
-                     * the toolbar rather than of its current contents; the groups
-                     * inside it come and go against a fixed shell.
-                     *
-                     * Inline rather than a Tailwind class so the value is one
-                     * declared number that a test can read back per state.
-                     */
-                    style={{ width: DRAW_TOOLBAR_WIDTH, maxWidth: 'calc(100vw - 32px)' }}
-                    data-testid="draw-toolbar"
                 >
-                    <div className="bg-white rounded-xl shadow-2xl p-1.5 flex items-center justify-center gap-1 border border-gray-200 w-full overflow-x-auto">
+                    <div
+                        className="bg-white rounded-xl shadow-2xl p-1.5 flex items-center justify-center gap-1 border border-gray-200 overflow-x-auto"
+                        /**
+                         * ONE width and ONE height, in every tool state.
+                         *
+                         * R6G, width: the shell used to be `w-fit`, so it sized
+                         * itself around whichever control group was mounted --
+                         * Text shows four styling controls, the other tools show
+                         * Square/Brush/Colour -- and the bar changed length and
+                         * re-centred on every tool change.
+                         *
+                         * R6G-C2, height:
+                         * the bar was still content-sized vertically, so its
+                         * tallest child decided its height -- and that child is
+                         * only present in some states. The Colour swatch is
+                         * `w-6 h-6` where every other icon is `w-5 h-5`, so its
+                         * button is 44px against everyone else's 40px, and that
+                         * group renders only while `tool !== 'text'`. Text
+                         * therefore sat at 54px and every drawing tool at 58px:
+                         * the 4px vertical jump.
+                         *
+                         * Fixed to the TALLEST state rather than the shortest,
+                         * so no control had to be shrunk to fit. `items-center`
+                         * already centres every group, so the extra 4px in the
+                         * text state is split evenly instead of pushing the row.
+                         *
+                         * Both are inline rather than Tailwind classes so each
+                         * is one declared number a test can read back per state.
+                         */
+                        style={{
+                            width: DRAW_TOOLBAR_WIDTH,
+                            maxWidth: 'calc(100vw - 32px)',
+                            minHeight: DRAW_TOOLBAR_HEIGHT,
+                        }}
+                        data-testid="draw-toolbar"
+                    >
                         {/* Tool Group: Basic Tools */}
                         <div className="flex items-center gap-1.5 px-1.5 border-r border-gray-100">
                             <button
