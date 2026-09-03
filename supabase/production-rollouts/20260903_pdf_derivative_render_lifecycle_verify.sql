@@ -2,10 +2,15 @@
 -- This file creates no persistent objects and does not modify data. It is safe
 -- to run before a rollout, after one, or against a partial state.
 --
+-- Plain SQL only: the section headers are SELECTs rather than psql metacommands,
+-- so this runs unchanged in the Supabase dashboard SQL Editor as well as in
+-- psql. Each header returns a single labelled row, keeping the sections
+-- legible in either tool.
+--
 -- Every check yields a `pass` boolean so the whole output can be scanned for a
 -- single `false`. The last query is a roll-up.
 
-\echo '== 1. lifecycle columns exist, with the reviewed types and defaults =='
+SELECT '== 1. lifecycle columns exist, with the reviewed types and defaults ==' AS section;
 WITH expected(column_name, data_type, is_nullable, column_default) AS (
     VALUES
         ('derivatives_requested_at'::text,     'timestamp with time zone'::text, 'YES'::text, NULL::text),
@@ -33,7 +38,7 @@ LEFT JOIN information_schema.columns AS c
       AND c.column_name = e.column_name
 ORDER BY e.column_name;
 
-\echo '== 2. no table-wide UPDATE for browser roles =='
+SELECT '== 2. no table-wide UPDATE for browser roles ==' AS section;
 SELECT
     r.grantee,
     NOT EXISTS (
@@ -47,7 +52,7 @@ SELECT
 FROM (VALUES ('anon'), ('authenticated')) AS r(grantee)
 ORDER BY r.grantee;
 
-\echo '== 3. ZERO derivatives_* UPDATE column grants for browser roles =='
+SELECT '== 3. ZERO derivatives_* UPDATE column grants for browser roles ==' AS section;
 SELECT
     r.grantee,
     COALESCE((
@@ -71,7 +76,7 @@ SELECT
 FROM (VALUES ('anon'), ('authenticated')) AS r(grantee)
 ORDER BY r.grantee;
 
-\echo '== 4. authenticated keeps UPDATE on exactly the 21 pre-existing columns =='
+SELECT '== 4. authenticated keeps UPDATE on exactly the 21 pre-existing columns ==' AS section;
 WITH expected(column_name) AS (
     VALUES
         ('id'::text), ('board_id'), ('created_by'), ('kind'), ('original_filename'),
@@ -102,7 +107,7 @@ SELECT
                        WHERE NOT EXISTS (SELECT 1 FROM expected e WHERE e.column_name = g.column_name))
                                                                       AS pass;
 
-\echo '== 5. RPC execute grants: request is authenticated, worker RPCs are not =='
+SELECT '== 5. RPC execute grants: request is authenticated, worker RPCs are not ==' AS section;
 WITH fns(proname, browser_allowed) AS (
     VALUES
         ('request_knowledge_page_render'::text,    true),
@@ -143,7 +148,7 @@ SELECT
 FROM fns AS f
 ORDER BY f.proname;
 
-\echo '== 6. request RPC is SECURITY DEFINER; worker RPCs are not =='
+SELECT '== 6. request RPC is SECURITY DEFINER; worker RPCs are not ==' AS section;
 SELECT p.proname, p.prosecdef AS security_definer,
        (p.prosecdef = (p.proname = 'request_knowledge_page_render')) AS pass
   FROM pg_proc AS p
@@ -154,7 +159,7 @@ SELECT p.proname, p.prosecdef AS security_definer,
                      'fail_knowledge_page_render')
  ORDER BY p.proname;
 
-\echo '== 7. extraction functions still present and unchanged in signature =='
+SELECT '== 7. extraction functions still present and unchanged in signature ==' AS section;
 -- Identity arguments as pg_get_function_identity_arguments renders them,
 -- including parameter names: a signature change would be a real regression.
 WITH expected(proname, args) AS (
@@ -182,7 +187,7 @@ SELECT
 FROM expected AS e
 ORDER BY e.proname;
 
-\echo '== 8. knowledge_pages schema untouched by this rollout =='
+SELECT '== 8. knowledge_pages schema untouched by this rollout ==' AS section;
 SELECT
     (SELECT count(*) FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'knowledge_pages'
@@ -193,7 +198,7 @@ SELECT
       WHERE table_schema = 'public' AND table_name = 'knowledge_pages'
         AND column_name LIKE 'derivatives%') = 0 AS pass;
 
-\echo '== 9. this rollout implied no bucket or public Storage change =='
+SELECT '== 9. this rollout implied no bucket or public Storage change ==' AS section;
 SELECT
     b.id AS bucket,
     b.public,
@@ -201,7 +206,7 @@ SELECT
 FROM storage.buckets AS b
 WHERE b.id = 'knowledge-documents';
 
-\echo '== 10. roll-up: every gate in one row =='
+SELECT '== 10. roll-up: every gate in one row ==' AS section;
 SELECT
     (SELECT count(*) FROM information_schema.columns
       WHERE table_schema='public' AND table_name='knowledge_documents'
