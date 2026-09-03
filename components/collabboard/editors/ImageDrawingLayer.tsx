@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
 import { DrawingColorPopup, DrawingStylePopup, IMAGE_SUBTOOL_POPUP_Z_CLASS } from './DrawingPopups';
+import { ImageWithLoadingIndicator } from './useDelayedImageLoading';
 import * as Popover from '@radix-ui/react-popover';
 import {
     DEFAULT_TEXT_ANNOTATION_BOX_WIDTH,
@@ -705,7 +706,13 @@ export default function ImageDrawingLayer({
                         className="relative"
                         style={{ maxWidth: '90vw', maxHeight: 'calc(100vh - 150px)' }}
                     >
-                        <img
+                        {/* R6H. The first load here is the same authenticated
+                            private route, so it gets the same delayed
+                            indicator. The <img> itself is unchanged -- the
+                            indicator rides its existing load/error events and
+                            adds no request, so R6D's mounted-image saving
+                            stands. */}
+                        <ImageWithLoadingIndicator
                             src={imageUrl}
                             alt="Drawing background"
                             className="block w-full h-auto object-contain"

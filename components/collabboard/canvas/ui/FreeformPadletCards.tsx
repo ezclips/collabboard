@@ -16,6 +16,7 @@ import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimen
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
+import { ImageWithLoadingIndicator } from '@/components/collabboard/editors/useDelayedImageLoading';
 import { useBackdropDismiss } from '@/components/collabboard/editors/PostEditorShell';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
@@ -1924,9 +1925,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
                 title={padlet.metadata?.source === 'import' ? `Open in ${padlet.metadata?.importProvider === 'google-drive' ? 'Google Drive' : 'OneDrive'}` : undefined}
               >
-                <img
+                <ImageWithLoadingIndicator
                   // R6D: the same shared display authority the modal now uses,
                   // so card and preview can never drift apart again.
+                  //
+                  // R6H: and the loading indicator follows THIS resolved src,
+                  // so a post whose flattened composite is already available
+                  // never spins over the private route behind it.
                   src={resolveImagePostDisplaySrc(padlet) ?? undefined}
                   alt={padlet.metadata?.caption || 'Image'}
                   // PATCH FREEFORM-IMAGE-R7: manually-sized Images keep the
@@ -5377,8 +5382,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
                 {/* Image */}
                 <div className="relative overflow-hidden bg-gray-50 flex items-center justify-center min-h-[100px]">
-                  <img
-                    src={activeImageToolbarSrc}
+                  <ImageWithLoadingIndicator
+                    src={activeImageToolbarSrc ?? undefined}
                     alt={activeImageToolbarPadlet.metadata?.caption || 'Image'}
                     className="w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"
                   />

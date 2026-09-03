@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactCrop, { centerCrop, makeAspectCrop, Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import { ImageLoadingOverlay, useDelayedImageLoading } from './useDelayedImageLoading';
 import {
     X,
     RotateCcw,
@@ -29,6 +30,9 @@ export default function ImageCropLayer({
     const [rotation, setRotation] = useState(0);
     const [aspect, setAspect] = useState<number | undefined>(undefined);
     const [loadError, setLoadError] = useState(false);
+    // R6H. Reuses this layer's existing load/error events rather than adding a
+    // second request for the same bytes.
+    const { showIndicator: showImageLoading, markSettled: markImageSettled } = useDelayedImageLoading(imageUrl);
     const imgRef = useRef<HTMLImageElement>(null);
 
     useEffect(() => {
@@ -166,11 +170,13 @@ export default function ImageCropLayer({
                             alt="Crop preview"
                             style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease' }}
                             className="max-h-[70vh] object-contain"
-                            onLoad={onImageLoad}
-                            onError={() => setLoadError(true)}
+                            onLoad={(e) => { markImageSettled(); onImageLoad(e); }}
+                            onError={() => { markImageSettled(); setLoadError(true); }}
                         />
                     </ReactCrop>
                 )}
+                {/* R6H. Outside ReactCrop, which owns its own <img> child. */}
+                <ImageLoadingOverlay visible={showImageLoading} />
             </div>
 
             {/* Floating Toolbar */}
