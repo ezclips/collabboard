@@ -20,6 +20,57 @@ export const TEXT_ANNOTATION_PADDING = 12;
  */
 export const MIN_TEXT_ANNOTATION_BOX_WIDTH = 50;
 
+/**
+ * R6F. The breathing room kept between a text box and the image's bottom edge.
+ *
+ * Deliberately smaller than the horizontal reserve (20px, applied at the call
+ * site as `clientWidth - x - 20`): horizontally that gap also has to leave a
+ * usable amount of text width, whereas vertically it only has to read as "not
+ * touching the edge".
+ */
+export const TEXT_ANNOTATION_EDGE_MARGIN = 8;
+
+/**
+ * R6F. Keeps a text annotation's box inside the image VERTICALLY.
+ *
+ * The horizontal bound was always enforced (the box is measured against a max
+ * width, so text wraps instead of running off the right edge). The vertical one
+ * never was -- and wrapping is precisely what makes a box taller. So text near
+ * the bottom edge would wrap to a second line, grow downwards, and the extra
+ * lines fell off the bottom of the image, where the flatten step silently
+ * cropped them.
+ *
+ * This is a pure position rule, applied wherever the box is placed: the live
+ * editor, the flattened composite, and the geometry handed back on save. That
+ * is what keeps those three agreeing.
+ *
+ * `imageHeight` of 0 means "not measured yet" (the container has no layout on
+ * the first render pass), and clamping against it would slam every annotation
+ * to the top -- so it is treated as "no bound known", not as a zero-height
+ * image.
+ */
+export function clampTextAnnotationTop(
+  top: number,
+  boxHeight: number,
+  imageHeight: number,
+  margin: number = TEXT_ANNOTATION_EDGE_MARGIN,
+): number {
+  const safeTop = Number.isFinite(top) ? top : 0;
+  // Unmeasured container: keep the caller's position, minus a negative y.
+  if (!Number.isFinite(imageHeight) || imageHeight <= 0) return Math.max(0, safeTop);
+
+  const safeHeight = Number.isFinite(boxHeight) && boxHeight > 0 ? boxHeight : 0;
+  const lowestTop = imageHeight - margin - safeHeight;
+
+  // The annotation is taller than the image itself. There is no position that
+  // fits, so pin it to the top and show as much as there is room for, rather
+  // than resolving to a negative y and hiding the FIRST line instead of the
+  // last.
+  if (lowestTop <= 0) return 0;
+
+  return Math.min(Math.max(safeTop, 0), lowestTop);
+}
+
 export interface TextAnnotationBox {
   /** The REAL content lines. Never the placeholder: these get painted. */
   readonly lines: readonly string[];

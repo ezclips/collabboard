@@ -4,6 +4,28 @@ import React from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Palette, Highlighter } from 'lucide-react';
 
+/**
+ * R6F. The tier every Draw-on-top popup paints at.
+ *
+ * These popups are Radix `Popover.Portal` children, so they mount under
+ * <body> -- NOT inside the drawing modal. That makes their z-index directly
+ * comparable with the modal's own, and R6D raised the modal root from z-[200]
+ * to z-[60100] (so it could clear the retained image overlay and the Knowledge
+ * reader). The popups were left at z-[220] and therefore opened UNDERNEATH the
+ * opaque modal they belong to: Brush Size, Color, Font Size, Text Color, Box
+ * Border Color and Background Opacity all appeared to do nothing.
+ *
+ * Radix copies the content element's computed z-index onto its positioning
+ * wrapper, so putting the class on `Popover.Content` is what actually moves the
+ * portal -- see @radix-ui/react-popper.
+ *
+ * ImageDrawingLayer imports this for its own local popovers, so the drawing
+ * subtool has exactly one popup tier rather than six literals that can drift.
+ * The literal class string is spelled out (not composed) so Tailwind's scanner
+ * still emits the rule.
+ */
+export const IMAGE_SUBTOOL_POPUP_Z_CLASS = 'z-[60200]';
+
 const PRESET_COLORS = [
     '#1f2937', '#9ca3af', '#2dd4bf', '#4ade80', '#f97316',
     '#facc15', '#fb923c', '#ef4444', '#f472b6', '#a855f7',
@@ -29,7 +51,7 @@ export function DrawingColorPopup({ color, onSelect, children }: DrawingColorPop
             </Popover.Trigger>
             <Popover.Portal>
                 <Popover.Content
-                    className="z-[220] bg-white rounded-xl shadow-2xl border border-gray-200 p-4 w-64 animate-in fade-in zoom-in duration-200"
+                    className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-2xl border border-gray-200 p-4 w-64 animate-in fade-in zoom-in duration-200`}
                     sideOffset={5}
                 >
                     <div className="space-y-4">
@@ -88,7 +110,7 @@ export function DrawingStylePopup({ width, onSelect, children }: DrawingStylePop
             </Popover.Trigger>
             <Popover.Portal>
                 <Popover.Content
-                    className="z-[220] bg-white rounded-xl shadow-2xl border border-gray-200 p-2 animate-in fade-in zoom-in duration-200"
+                    className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-2xl border border-gray-200 p-2 animate-in fade-in zoom-in duration-200`}
                     sideOffset={5}
                 >
                     <div className="flex gap-1 p-1">
@@ -134,7 +156,7 @@ export function TextStylePopup({ currentStyle, currentColor, onStyleSelect, onCo
             </Popover.Trigger>
             <Popover.Portal>
                 <Popover.Content
-                    className="z-[220] bg-white rounded-xl shadow-xl border border-gray-200 w-56 animate-in fade-in zoom-in duration-200 overflow-hidden"
+                    className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-xl border border-gray-200 w-56 animate-in fade-in zoom-in duration-200 overflow-hidden`}
                     sideOffset={5}
                     align="start"
                 >

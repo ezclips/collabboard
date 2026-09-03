@@ -17,12 +17,20 @@ import {
     ChevronDown
 } from 'lucide-react';
 import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
-import { DrawingColorPopup, DrawingStylePopup } from './DrawingPopups';
+import { DrawingColorPopup, DrawingStylePopup, IMAGE_SUBTOOL_POPUP_Z_CLASS } from './DrawingPopups';
 import * as Popover from '@radix-ui/react-popover';
 import {
     EMPTY_TEXT_ANNOTATION_PLACEHOLDER,
+    clampTextAnnotationTop,
     measureTextAnnotationBox,
 } from '@/lib/domain/canvas/imageTextAnnotationBox';
+import {
+    applyRedo,
+    applyUndo,
+    isStrokeAction,
+    type DrawingAction,
+    type DrawnRect,
+} from '@/lib/domain/canvas/imageDrawingHistory';
 
 /**
  * R6D. The colour a fresh Draw-on-top session starts with. Taken from the
@@ -57,11 +65,15 @@ interface TextElement {
     bgOpacity?: number;
 }
 
-interface CompletedRect {
-    x1: number; y1: number; x2: number; y2: number;
-    color: string; strokeWidth: number;
-    path: string; // pre-computed hand-drawn SVG path
-}
+/**
+ * R6F. The completed-rectangle shape now lives in the history domain module as
+ * DrawnRect, because undo/redo has to carry whole rectangles around. The local
+ * alias is kept so the rest of this file reads as before.
+ */
+type CompletedRect = DrawnRect;
+
+/** R6F. How wide a rectangle's invisible selection band is, in display px. */
+const RECT_HIT_STROKE_WIDTH = 14;
 
 // Generate a slightly wobbly closed rect path to simulate a hand-drawn look.
 // Each corner gets a small random offset so it looks naturally imperfect.
@@ -124,9 +136,49 @@ export default function ImageDrawingLayer({
 
     // Completed rectangles — rendered via native SVG (no react-sketch-canvas async lag)
     const [completedRects, setCompletedRects] = useState<CompletedRect[]>([]);
-    // Unified action history for correct undo ordering across rects and strokes
-    const [actionHistory, setActionHistory] = useState<Array<'stroke' | 'rect'>>([]);
+    // Unified action history for correct undo ordering across rects and strokes.
+    // R6F: entries carry their rectangle, so undo can restore a specific one to
+    // its original position rather than only dropping the last.
+    const [undoStack, setUndoStack] = useState<DrawingAction[]>([]);
+    const [redoStack, setRedoStack] = useState<DrawingAction[]>([]);
+    // R6F. Which completed rectangle is selected for deletion, if any.
+    const [selectedRectId, setSelectedRectId] = useState<string | null>(null);
     const lastPathCountRef = useRef<number>(initialPaths?.length ?? 0);
+    /**
+     * R6F. True while WE are driving the sketch canvas' own undo/redo.
+     *
+     * Redoing a stroke makes react-sketch-canvas fire onChange with a higher
+     * path count, which is indistinguishable from the user drawing a new one --
+     * so without this the redo would push a fresh 'stroke' action and the
+     * history would grow every time you pressed Redo.
+     */
+    const applyingCanvasHistoryRef = useRef(false);
+
+    /**
+     * R6F. The container's measured size.
+     *
+     * Read from state rather than `containerRef.current` during render: the ref
+     * is null on the first pass, and the vertical clamp needs a real height to
+     * decide anything. A ResizeObserver keeps it true as the image lays out.
+     */
+    const [containerHeight, setContainerHeight] = useState(0);
+
+    React.useLayoutEffect(() => {
+        const element = containerRef.current;
+        if (!element) return;
+        const update = () => setContainerHeight(element.clientHeight);
+        update();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(update);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+
+    /** R6F. Records a new action, which invalidates anything that was redoable. */
+    const pushAction = useCallback((action: DrawingAction) => {
+        setUndoStack((prev) => [...prev, action]);
+        setRedoStack([]);
+    }, []);
 
     // Text tool state
     const [textElements, setTextElements] = useState<TextElement[]>(initialTextElements || []);
@@ -265,11 +317,27 @@ export default function ImageDrawingLayer({
             // Draw Text Elements (map display coordinates to original image pixels)
             const textScaleX = containerRef.current ? (canvas.width / containerRef.current.clientWidth) : 1;
             const textScaleY = containerRef.current ? (canvas.height / containerRef.current.clientHeight) : 1;
-            textElements.forEach(text => {
+            // R6F. The geometry actually painted, and the geometry handed back.
+            // Clamping happens in DISPLAY space -- the same space the live
+            // editor clamps in -- and is then scaled, so the composite cannot
+            // disagree with what the user was looking at. It also fails safe for
+            // legacy annotations whose stored y is already out of bounds.
+            const displayHeight = containerRef.current?.clientHeight ?? 0;
+            // Measured ONCE, then both used and handed back -- R6D's rule that
+            // handleSave owns exactly one measurement, so the flattened canvas
+            // can never be sized differently from what was on screen.
+            const placedTextElements = textElements.map((text) => {
                 const maxAllowedWidth = containerRef.current
                     ? Math.max(80, containerRef.current.clientWidth - text.x - 20)
                     : undefined;
                 const measured = measureTextBox(text.content, text.fontSize, maxAllowedWidth);
+                return {
+                    text: { ...text, y: clampTextAnnotationTop(text.y, measured.boxHeight, displayHeight) },
+                    measured,
+                };
+            });
+            const normalisedTextElements = placedTextElements.map((placed) => placed.text);
+            placedTextElements.forEach(({ text, measured }) => {
                 const x = text.x * textScaleX;
                 const y = text.y * textScaleY;
                 const boxWidth = measured.boxWidth * textScaleX;
@@ -308,22 +376,64 @@ export default function ImageDrawingLayer({
             });
 
             const paths = await canvasRef.current.exportPaths();
-            onSave(canvas.toDataURL(), paths, textElements);
+            // Persist the corrected y, so reopening the editor starts from the
+            // position that was saved rather than re-deriving it every time.
+            onSave(canvas.toDataURL(), paths, normalisedTextElements);
         }
     };
 
+    /** Runs a sketch-canvas history call without it re-recording as a new stroke. */
+    const runCanvasHistory = useCallback((run: () => void) => {
+        applyingCanvasHistoryRef.current = true;
+        run();
+        setTimeout(() => { applyingCanvasHistoryRef.current = false; }, 0);
+    }, []);
+
     const handleUndo = useCallback(() => {
-        const last = actionHistory[actionHistory.length - 1];
-        setActionHistory(prev => prev.slice(0, -1));
-        if (last === 'rect') {
-            setCompletedRects(prev => prev.slice(0, -1));
-        } else {
-            canvasRef.current?.undo();
+        const action = undoStack[undoStack.length - 1];
+        if (!action) return;
+        setUndoStack(prev => prev.slice(0, -1));
+        setRedoStack(prev => [...prev, action]);
+        setSelectedRectId(null);
+        if (isStrokeAction(action)) {
+            runCanvasHistory(() => canvasRef.current?.undo());
+            return;
         }
-    }, [actionHistory]);
+        setCompletedRects(prev => applyUndo(prev, action));
+    }, [undoStack, runCanvasHistory]);
+
+    const handleRedo = useCallback(() => {
+        const action = redoStack[redoStack.length - 1];
+        if (!action) return;
+        setRedoStack(prev => prev.slice(0, -1));
+        setUndoStack(prev => [...prev, action]);
+        setSelectedRectId(null);
+        if (isStrokeAction(action)) {
+            runCanvasHistory(() => canvasRef.current?.redo());
+            return;
+        }
+        setCompletedRects(prev => applyRedo(prev, action));
+    }, [redoStack, runCanvasHistory]);
+
+    /**
+     * R6F. Removes ONE rectangle, and records it so Undo can put it back where
+     * it was. Previously the only way to lose a rectangle was Undo, which meant
+     * undoing every later stroke first.
+     */
+    const handleDeleteSelectedRect = useCallback(() => {
+        if (!selectedRectId) return;
+        const index = completedRects.findIndex(r => r.id === selectedRectId);
+        if (index < 0) return;
+        const rect = completedRects[index];
+        setCompletedRects(prev => prev.filter(r => r.id !== rect.id));
+        pushAction({ type: 'rect-delete', rect, index });
+        setSelectedRectId(null);
+    }, [selectedRectId, completedRects, pushAction]);
 
     const handleToolSelect = useCallback((selectedTool: 'pencil' | 'eraser' | 'highlighter' | 'text' | 'square') => {
         setTool(selectedTool);
+        // R6F. A selection belongs to the tool that made it.
+        setSelectedRectId(null);
         if (selectedTool === 'eraser') {
             canvasRef.current?.eraseMode(true);
         } else {
@@ -342,6 +452,8 @@ export default function ImageDrawingLayer({
     // Handle click on canvas for text placement or deselection
     const handleCanvasClick = (e: React.MouseEvent) => {
         if (tool !== 'text') return;
+        // R6F. Text and rectangle selection are mutually exclusive.
+        setSelectedRectId(null);
 
         // If clicking on the overlay (not a text box), deselect current text
         if (editingTextId) {
@@ -373,6 +485,8 @@ export default function ImageDrawingLayer({
     // Shape Drawing Handlers
     const handleShapePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
         if (tool !== 'square' || !containerRef.current) return;
+        // R6F. Beginning a new shape ends the previous selection.
+        setSelectedRectId(null);
         const pt = getRelativePoint(e);
         e.currentTarget.setPointerCapture(e.pointerId);
         setShapeStart(pt);
@@ -397,8 +511,15 @@ export default function ImageDrawingLayer({
         // Only record if the rectangle has meaningful size
         if (x2 - x1 > 2 && y2 - y1 > 2) {
             const path = makeWobblyRectPath(x1, y1, x2, y2, strokeWidth);
-            setCompletedRects(prev => [...prev, { x1, y1, x2, y2, color, strokeWidth, path }]);
-            setActionHistory(prev => [...prev, 'rect']);
+            // R6F. An id, so this specific rectangle stays addressable through
+            // selection, deletion and undo.
+            const rect: CompletedRect = {
+                id: `rect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                x1, y1, x2, y2, color, strokeWidth, path,
+            };
+            setCompletedRects(prev => [...prev, rect]);
+            pushAction({ type: 'rect', rect });
+            setSelectedRectId(null);
         }
 
         setShapeStart(null);
@@ -407,6 +528,8 @@ export default function ImageDrawingLayer({
 
     // Get currently editing text element
     const editingText = textElements.find(t => t.id === editingTextId);
+    // R6F. The selected rectangle, if it still exists (undo can remove it).
+    const selectedRect = completedRects.find(r => r.id === selectedRectId) ?? null;
 
     // Helper to auto-resize textarea
     const adjustTextareaHeight = (element: HTMLTextAreaElement) => {
@@ -465,8 +588,12 @@ export default function ImageDrawingLayer({
                                 canvasColor="transparent"
                                 exportWithBackgroundImage={false}
                                 onChange={(paths) => {
-                                    if (paths.length > lastPathCountRef.current) {
-                                        setActionHistory(prev => [...prev, 'stroke']);
+                                    if (paths.length > lastPathCountRef.current && !applyingCanvasHistoryRef.current) {
+                                        pushAction({ type: 'stroke' });
+                                        // R6F. A fresh stroke over a selected
+                                        // rectangle is a new drawing action,
+                                        // not a continued selection.
+                                        setSelectedRectId(null);
                                     }
                                     lastPathCountRef.current = paths.length;
                                 }}
@@ -481,19 +608,92 @@ export default function ImageDrawingLayer({
 
                         {/* Permanent rectangle layer — native SVG, renders instantly with hand-drawn style */}
                         {completedRects.length > 0 && (
-                            <svg className="absolute inset-0 w-full h-full pointer-events-none z-10" overflow="visible">
-                                {completedRects.map((r, i) => (
-                                    <path
-                                        key={i}
-                                        d={r.path}
-                                        fill="none"
-                                        stroke={r.color}
-                                        strokeWidth={r.strokeWidth}
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
+                            /**
+                             * R6F. The <svg> stays pointer-events:none, and only
+                             * the Square tool's own hit bands opt back in.
+                             *
+                             * That is the whole reason rectangles are selectable
+                             * without breaking drawing: a full-surface catcher
+                             * here would swallow every Pencil/Highlighter/Eraser
+                             * stroke that crossed a rectangle. The band is on the
+                             * BORDER only (pointerEvents: 'stroke' on a
+                             * transparent, deliberately fat stroke), so a
+                             * rectangle's interior is never a target -- and it
+                             * exists at all only while the Square tool is active.
+                             */
+                            <svg
+                                className={`absolute inset-0 w-full h-full pointer-events-none ${tool === 'square' ? 'z-[55]' : 'z-10'}`}
+                                overflow="visible"
+                                data-testid="completed-rect-layer"
+                            >
+                                {completedRects.map((r) => (
+                                    <g key={r.id}>
+                                        <path
+                                            d={r.path}
+                                            fill="none"
+                                            stroke={r.color}
+                                            strokeWidth={r.strokeWidth}
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                        {selectedRectId === r.id && (
+                                            <path
+                                                d={r.path}
+                                                fill="none"
+                                                stroke="#3b82f6"
+                                                strokeWidth={Math.max(r.strokeWidth + 3, 4)}
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeDasharray="6 5"
+                                                opacity={0.9}
+                                                data-testid={`rect-selected-${r.id}`}
+                                                style={{ pointerEvents: 'none' }}
+                                            />
+                                        )}
+                                        {tool === 'square' && (
+                                            <path
+                                                d={r.path}
+                                                fill="none"
+                                                stroke="transparent"
+                                                strokeWidth={Math.max(r.strokeWidth, RECT_HIT_STROKE_WIDTH)}
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                data-testid={`rect-hit-${r.id}`}
+                                                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                                                onPointerDown={(e) => {
+                                                    // Selecting is not drawing: keep this
+                                                    // press away from the shape overlay
+                                                    // underneath.
+                                                    e.stopPropagation();
+                                                    setSelectedRectId(r.id);
+                                                    setEditingTextId(null);
+                                                }}
+                                            />
+                                        )}
+                                    </g>
                                 ))}
                             </svg>
+                        )}
+
+                        {/* R6F. Delete control for the selected rectangle. Same
+                            Trash2 language as the text annotation's own. */}
+                        {selectedRect && (
+                            <div
+                                className="absolute z-[56] pointer-events-auto"
+                                style={{ left: selectedRect.x2 + 6, top: Math.max(0, selectedRect.y1 - 10) }}
+                            >
+                                <button
+                                    className="bg-red-500/90 backdrop-blur-md rounded-md p-1 cursor-pointer hover:bg-red-600 text-white shadow-lg"
+                                    title="Delete rectangle"
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteSelectedRect();
+                                    }}
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
                         )}
 
                         {/* Square Tool Overlay */}
@@ -543,6 +743,11 @@ export default function ImageDrawingLayer({
                                 const measured = measureTextBox(el.content, el.fontSize, maxAllowedWidth);
                                 const editorWidth = measured.boxWidth;
                                 const editorHeight = measured.boxHeight;
+                                // R6F. Wrapping is what makes a box taller, so the
+                                // vertical bound has to be re-applied on every
+                                // render -- as the second line appears, not once
+                                // at placement time.
+                                const editorTop = clampTextAnnotationTop(el.y, editorHeight, containerHeight);
 
                                 return (
                                 <div
@@ -550,7 +755,7 @@ export default function ImageDrawingLayer({
                                     className={`absolute pointer-events-auto flex flex-col group ${draggingId === el.id ? 'opacity-70' : ''}`}
                                     style={{
                                         left: el.x,
-                                        top: el.y,
+                                        top: editorTop,
                                         maxWidth: `${maxAllowedWidth}px`
                                     }}
                                 >
@@ -676,7 +881,7 @@ export default function ImageDrawingLayer({
                                     </Popover.Trigger>
                                     <Popover.Portal>
                                         <Popover.Content
-                                            className="z-[220] bg-white rounded-xl shadow-2xl border border-gray-200 p-1 animate-in fade-in zoom-in duration-200"
+                                            className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-2xl border border-gray-200 p-1 animate-in fade-in zoom-in duration-200`}
                                             sideOffset={5}
                                             onOpenAutoFocus={(e) => e.preventDefault()} // Prevent stealing focus
                                         >
@@ -717,7 +922,7 @@ export default function ImageDrawingLayer({
                                     </Popover.Trigger>
                                     <Popover.Portal>
                                         <Popover.Content
-                                            className="z-[220] bg-white rounded-xl shadow-2xl border border-gray-200 p-3 animate-in fade-in zoom-in duration-200"
+                                            className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-2xl border border-gray-200 p-3 animate-in fade-in zoom-in duration-200`}
                                             sideOffset={5}
                                             onOpenAutoFocus={(e) => e.preventDefault()}
                                         >
@@ -753,7 +958,7 @@ export default function ImageDrawingLayer({
                                     </Popover.Trigger>
                                     <Popover.Portal>
                                         <Popover.Content
-                                            className="z-[220] bg-white rounded-xl shadow-2xl border border-gray-200 p-3 animate-in fade-in zoom-in duration-200"
+                                            className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-2xl border border-gray-200 p-3 animate-in fade-in zoom-in duration-200`}
                                             sideOffset={5}
                                             onOpenAutoFocus={(e) => e.preventDefault()}
                                         >
@@ -802,7 +1007,7 @@ export default function ImageDrawingLayer({
                                     </Popover.Trigger>
                                     <Popover.Portal>
                                         <Popover.Content
-                                            className="z-[220] bg-white rounded-xl shadow-2xl border border-gray-200 p-4 animate-in fade-in zoom-in duration-200 w-64"
+                                            className={`${IMAGE_SUBTOOL_POPUP_Z_CLASS} bg-white rounded-xl shadow-2xl border border-gray-200 p-4 animate-in fade-in zoom-in duration-200 w-64`}
                                             sideOffset={5}
                                             onOpenAutoFocus={(e) => e.preventDefault()}
                                         >
@@ -870,7 +1075,7 @@ export default function ImageDrawingLayer({
                                 <Undo2 className="w-5 h-5" />
                             </button>
                             <button
-                                onClick={() => canvasRef.current?.redo()}
+                                onClick={handleRedo}
                                 className="p-2.5 rounded-xl hover:bg-gray-50 text-gray-500 transition-colors"
                                 title="Redo"
                             >
