@@ -20,16 +20,20 @@ import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
 import { DrawingColorPopup, DrawingStylePopup, IMAGE_SUBTOOL_POPUP_Z_CLASS } from './DrawingPopups';
 import * as Popover from '@radix-ui/react-popover';
 import {
+    DEFAULT_TEXT_ANNOTATION_BOX_WIDTH,
     EMPTY_TEXT_ANNOTATION_PLACEHOLDER,
     clampTextAnnotationTop,
     measureTextAnnotationBox,
 } from '@/lib/domain/canvas/imageTextAnnotationBox';
 import {
     applyRedo,
+    applyTextRedo,
+    applyTextUndo,
     applyUndo,
     isStrokeAction,
     type DrawingAction,
     type DrawnRect,
+    type DrawnText,
 } from '@/lib/domain/canvas/imageDrawingHistory';
 
 /**
@@ -53,17 +57,18 @@ interface ImageDrawingLayerProps {
     onAddReaction?: () => void;
 }
 
-// Text element type
-interface TextElement {
-    id: string;
-    x: number;
-    y: number;
-    content: string;
-    fontSize: number;
-    color: string;
-    borderColor?: string;
-    bgOpacity?: number;
-}
+/**
+ * R6G. The text annotation shape now lives in the history domain module, for
+ * the same reason the rectangle's does: undo has to carry whole annotations.
+ * It gained an optional `width` -- see the box-width model below.
+ */
+type TextElement = DrawnText;
+
+/** R6G. How wide the drag handle's grab band is, in display px. */
+const TEXT_RESIZE_HANDLE_WIDTH = 10;
+
+/** R6G. The narrowest a manual resize may make a text box. */
+const MIN_MANUAL_TEXT_WIDTH = 60;
 
 /**
  * R6F. The completed-rectangle shape now lives in the history domain module as
@@ -74,6 +79,14 @@ type CompletedRect = DrawnRect;
 
 /** R6F. How wide a rectangle's invisible selection band is, in display px. */
 const RECT_HIT_STROKE_WIDTH = 14;
+
+/**
+ * R6G. The Draw-on-top toolbar's fixed desktop width, in CSS px.
+ *
+ * Sized for the widest state (Text: four basic tools + four styling controls +
+ * undo/redo + Cancel/Save) so no state has to stretch it.
+ */
+const DRAW_TOOLBAR_WIDTH = 720;
 
 // Generate a slightly wobbly closed rect path to simulate a hand-drawn look.
 // Each corner gets a small random offset so it looks naturally imperfect.
@@ -189,6 +202,8 @@ export default function ImageDrawingLayer({
     const [textBgOpacity, setTextBgOpacity] = useState(40);
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState<{ x: number, y: number } | null>(null);
+    /** R6G. An in-progress manual width drag: which box, and where it started. */
+    const [resizing, setResizing] = useState<{ id: string; startX: number; startWidth: number } | null>(null);
 
     // Load initial paths on mount
     React.useEffect(() => {
@@ -248,7 +263,48 @@ export default function ImageDrawingLayer({
         };
     }, [draggingId, dragOffset]);
 
-    const measureTextBox = useCallback((content: string, fontSize: number, maxWidth?: number) => {
+    /**
+     * R6G. The width an annotation keeps, whatever is typed into it.
+     *
+     * Before R6G the box width was a pure function of the CURRENT content, with
+     * only a 50px floor. An empty box measured the placeholder (~168px and
+     * looked fine), then the first keystroke dropped the placeholder and the box
+     * collapsed to 50px -- about 22px of content box once the textarea's padding
+     * and border come off -- so its own soft wrap broke "Hallo" into one or two
+     * characters per line. That is the reported "h / a".
+     *
+     * A resized box keeps the user's width; everything else keeps the default.
+     * Content may still WIDEN the box up to the space available, it just can no
+     * longer shrink it.
+     */
+    const textBoxFloor = useCallback(
+        (element: Pick<TextElement, 'width'>) => element.width ?? DEFAULT_TEXT_ANNOTATION_BOX_WIDTH,
+        [],
+    );
+
+    /**
+     * R6G. Manual width resize.
+     *
+     * Once the user sets a width it becomes authoritative -- stored on the
+     * annotation and used as its floor -- so nothing snaps it back to the
+     * default afterwards.
+     */
+    React.useEffect(() => {
+        if (!resizing) return;
+        const handleMove = (e: MouseEvent) => {
+            const next = Math.max(MIN_MANUAL_TEXT_WIDTH, resizing.startWidth + (e.clientX - resizing.startX));
+            setTextElements(prev => prev.map(t => (t.id === resizing.id ? { ...t, width: next } : t)));
+        };
+        const handleUp = () => setResizing(null);
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleUp);
+        return () => {
+            window.removeEventListener('mousemove', handleMove);
+            window.removeEventListener('mouseup', handleUp);
+        };
+    }, [resizing]);
+
+    const measureTextBox = useCallback((content: string, fontSize: number, maxWidth?: number, minWidth?: number) => {
         if (!measureCanvasRef.current) {
             measureCanvasRef.current = document.createElement('canvas');
         }
@@ -261,6 +317,8 @@ export default function ImageDrawingLayer({
             fontSize,
             (line) => (ctx ? ctx.measureText(line).width : 0),
             maxWidth,
+            undefined,
+            minWidth,
         );
     }, []);
 
@@ -330,7 +388,8 @@ export default function ImageDrawingLayer({
                 const maxAllowedWidth = containerRef.current
                     ? Math.max(80, containerRef.current.clientWidth - text.x - 20)
                     : undefined;
-                const measured = measureTextBox(text.content, text.fontSize, maxAllowedWidth);
+                const boxMaxWidth = Math.min(maxAllowedWidth ?? Number.POSITIVE_INFINITY, text.width ?? Number.POSITIVE_INFINITY);
+                const measured = measureTextBox(text.content, text.fontSize, boxMaxWidth, textBoxFloor(text));
                 return {
                     text: { ...text, y: clampTextAnnotationTop(text.y, measured.boxHeight, displayHeight) },
                     measured,
@@ -389,17 +448,29 @@ export default function ImageDrawingLayer({
         setTimeout(() => { applyingCanvasHistoryRef.current = false; }, 0);
     }, []);
 
+    /**
+     * R6G. ONE history authority behind the two toolbar buttons.
+     *
+     * The user reported Undo/Redo as dead. They were partly real: R6F's stack
+     * reached strokes and rectangles, but text annotations were never recorded,
+     * so adding text and pressing Undo did nothing at all -- and text is the
+     * most common thing to want back. Every action now lands in the same
+     * ordered stack, so undo walks the user's actual chronology across layers
+     * rather than per-layer.
+     */
     const handleUndo = useCallback(() => {
         const action = undoStack[undoStack.length - 1];
         if (!action) return;
         setUndoStack(prev => prev.slice(0, -1));
         setRedoStack(prev => [...prev, action]);
         setSelectedRectId(null);
+        setEditingTextId(null);
         if (isStrokeAction(action)) {
             runCanvasHistory(() => canvasRef.current?.undo());
             return;
         }
         setCompletedRects(prev => applyUndo(prev, action));
+        setTextElements(prev => applyTextUndo(prev, action));
     }, [undoStack, runCanvasHistory]);
 
     const handleRedo = useCallback(() => {
@@ -408,12 +479,42 @@ export default function ImageDrawingLayer({
         setRedoStack(prev => prev.slice(0, -1));
         setUndoStack(prev => [...prev, action]);
         setSelectedRectId(null);
+        setEditingTextId(null);
         if (isStrokeAction(action)) {
             runCanvasHistory(() => canvasRef.current?.redo());
             return;
         }
         setCompletedRects(prev => applyRedo(prev, action));
+        setTextElements(prev => applyTextRedo(prev, action));
     }, [redoStack, runCanvasHistory]);
+
+    const canUndo = undoStack.length > 0;
+    const canRedo = redoStack.length > 0;
+
+    /** R6G. Deletes one text annotation, recording it so Undo restores it. */
+    const deleteTextElement = useCallback((id: string) => {
+        setTextElements(prev => {
+            const index = prev.findIndex(t => t.id === id);
+            if (index < 0) return prev;
+            pushAction({ type: 'text-delete', text: prev[index], index });
+            return prev.filter(t => t.id !== id);
+        });
+        setEditingTextId(null);
+    }, [pushAction]);
+
+    /**
+     * R6G. Removes one rectangle by id, from either removal route -- the Square
+     * tool's trash, or the Eraser. Both record the same action, so both undo.
+     */
+    const removeRectById = useCallback((id: string) => {
+        setCompletedRects(prev => {
+            const index = prev.findIndex(r => r.id === id);
+            if (index < 0) return prev;
+            pushAction({ type: 'rect-delete', rect: prev[index], index });
+            return prev.filter(r => r.id !== id);
+        });
+        setSelectedRectId(prev => (prev === id ? null : prev));
+    }, [pushAction]);
 
     /**
      * R6F. Removes ONE rectangle, and records it so Undo can put it back where
@@ -422,13 +523,8 @@ export default function ImageDrawingLayer({
      */
     const handleDeleteSelectedRect = useCallback(() => {
         if (!selectedRectId) return;
-        const index = completedRects.findIndex(r => r.id === selectedRectId);
-        if (index < 0) return;
-        const rect = completedRects[index];
-        setCompletedRects(prev => prev.filter(r => r.id !== rect.id));
-        pushAction({ type: 'rect-delete', rect, index });
-        setSelectedRectId(null);
-    }, [selectedRectId, completedRects, pushAction]);
+        removeRectById(selectedRectId);
+    }, [selectedRectId, removeRectById]);
 
     const handleToolSelect = useCallback((selectedTool: 'pencil' | 'eraser' | 'highlighter' | 'text' | 'square') => {
         setTool(selectedTool);
@@ -469,7 +565,7 @@ export default function ImageDrawingLayer({
         const x = e.nativeEvent.offsetX;
         const y = e.nativeEvent.offsetY;
 
-        setTextElements(prev => [...prev, {
+        const created: TextElement = {
             id: newId,
             x,
             y,
@@ -477,8 +573,13 @@ export default function ImageDrawingLayer({
             fontSize: textFontSize,
             color: textColor,
             borderColor: textBorderColor,
-            bgOpacity: textBgOpacity
-        }]);
+            bgOpacity: textBgOpacity,
+            // R6G. An explicit starting width, so the box never sizes itself to
+            // whatever happens to be typed so far.
+            width: DEFAULT_TEXT_ANNOTATION_BOX_WIDTH,
+        };
+        setTextElements(prev => [...prev, created]);
+        pushAction({ type: 'text', text: created });
         setEditingTextId(newId);
     };
 
@@ -530,6 +631,13 @@ export default function ImageDrawingLayer({
     const editingText = textElements.find(t => t.id === editingTextId);
     // R6F. The selected rectangle, if it still exists (undo can remove it).
     const selectedRect = completedRects.find(r => r.id === selectedRectId) ?? null;
+    /**
+     * R6G. When a rectangle's border is clickable.
+     *
+     * Square selects it; Eraser erases it. Under Pencil/Highlighter there is no
+     * target at all, so a stroke crossing a rectangle is never intercepted.
+     */
+    const rectHitTargetsActive = tool === 'square' || tool === 'eraser';
 
     // Helper to auto-resize textarea
     const adjustTextareaHeight = (element: HTMLTextAreaElement) => {
@@ -622,7 +730,7 @@ export default function ImageDrawingLayer({
                              * exists at all only while the Square tool is active.
                              */
                             <svg
-                                className={`absolute inset-0 w-full h-full pointer-events-none ${tool === 'square' ? 'z-[55]' : 'z-10'}`}
+                                className={`absolute inset-0 w-full h-full pointer-events-none ${rectHitTargetsActive ? 'z-[55]' : 'z-10'}`}
                                 overflow="visible"
                                 data-testid="completed-rect-layer"
                             >
@@ -650,7 +758,7 @@ export default function ImageDrawingLayer({
                                                 style={{ pointerEvents: 'none' }}
                                             />
                                         )}
-                                        {tool === 'square' && (
+                                        {rectHitTargetsActive && (
                                             <path
                                                 d={r.path}
                                                 fill="none"
@@ -659,12 +767,20 @@ export default function ImageDrawingLayer({
                                                 strokeLinecap="round"
                                                 strokeLinejoin="round"
                                                 data-testid={`rect-hit-${r.id}`}
-                                                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                                                style={{ pointerEvents: 'stroke', cursor: tool === 'eraser' ? 'crosshair' : 'pointer' }}
                                                 onPointerDown={(e) => {
-                                                    // Selecting is not drawing: keep this
-                                                    // press away from the shape overlay
+                                                    // Selecting/erasing is not drawing: keep
+                                                    // this press away from the overlay
                                                     // underneath.
                                                     e.stopPropagation();
+                                                    if (tool === 'eraser') {
+                                                        // R6G. The Eraser erases a rectangle,
+                                                        // which is what users reach for. Only
+                                                        // the BORDER band is a target, so the
+                                                        // interior never swallows a stroke.
+                                                        removeRectById(r.id);
+                                                        return;
+                                                    }
                                                     setSelectedRectId(r.id);
                                                     setEditingTextId(null);
                                                 }}
@@ -740,7 +856,11 @@ export default function ImageDrawingLayer({
                                 const maxAllowedWidth = containerRef.current
                                     ? Math.max(80, containerRef.current.clientWidth - el.x - 20)
                                     : 400;
-                                const measured = measureTextBox(el.content, el.fontSize, maxAllowedWidth);
+                                // A width the user set is authoritative: it caps as well as
+                                // floors, so an empty box shows their width rather than
+                                // springing back out to the placeholder's.
+                                const boxMaxWidth = Math.min(maxAllowedWidth, el.width ?? Number.POSITIVE_INFINITY);
+                                const measured = measureTextBox(el.content, el.fontSize, boxMaxWidth, textBoxFloor(el));
                                 const editorWidth = measured.boxWidth;
                                 const editorHeight = measured.boxHeight;
                                 // R6F. Wrapping is what makes a box taller, so the
@@ -781,8 +901,7 @@ export default function ImageDrawingLayer({
                                             onMouseDown={(e) => {
                                                 e.stopPropagation();
                                                 e.preventDefault();
-                                                setTextElements(prev => prev.filter(t => t.id !== el.id));
-                                                setEditingTextId(null);
+                                                deleteTextElement(el.id);
                                             }}
                                             title="Delete"
                                         >
@@ -826,6 +945,18 @@ export default function ImageDrawingLayer({
                                         }}
                                         rows={1}
                                     />
+                                    {/* R6G. Manual width grip. Their width wins from then on. */}
+                                    <div
+                                        data-testid={`text-resize-${el.id}`}
+                                        title="Resize"
+                                        className={`absolute top-0 right-0 h-full cursor-ew-resize transition-opacity ${editingTextId === el.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                                        style={{ width: TEXT_RESIZE_HANDLE_WIDTH }}
+                                        onMouseDown={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            setResizing({ id: el.id, startX: e.clientX, startWidth: editorWidth });
+                                        }}
+                                    />
                                 </div>
                                 );
                             })}
@@ -834,8 +965,26 @@ export default function ImageDrawingLayer({
                 </div>
 
                 {/* Bottom Floating Drawing Toolbar */}
-                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[210] w-fit">
-                    <div className="bg-white rounded-xl shadow-2xl p-1.5 flex items-center gap-1 border border-gray-200">
+                <div
+                    className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[210]"
+                    /**
+                     * R6G. ONE width, in every tool state.
+                     *
+                     * The shell used to be `w-fit`, so it sized itself around
+                     * whichever control group was mounted -- Text shows four
+                     * styling controls, the other tools show Square/Brush/Colour
+                     * -- and the bar visibly changed length, and re-centred,
+                     * every time the tool changed. The width is now a property of
+                     * the toolbar rather than of its current contents; the groups
+                     * inside it come and go against a fixed shell.
+                     *
+                     * Inline rather than a Tailwind class so the value is one
+                     * declared number that a test can read back per state.
+                     */
+                    style={{ width: DRAW_TOOLBAR_WIDTH, maxWidth: 'calc(100vw - 32px)' }}
+                    data-testid="draw-toolbar"
+                >
+                    <div className="bg-white rounded-xl shadow-2xl p-1.5 flex items-center justify-center gap-1 border border-gray-200 w-full overflow-x-auto">
                         {/* Tool Group: Basic Tools */}
                         <div className="flex items-center gap-1.5 px-1.5 border-r border-gray-100">
                             <button
@@ -1069,14 +1218,18 @@ export default function ImageDrawingLayer({
                         <div className="flex items-center gap-1 px-1.5 border-r border-gray-100">
                             <button
                                 onClick={handleUndo}
-                                className="p-2.5 rounded-xl hover:bg-gray-50 text-gray-500 transition-colors"
+                                disabled={!canUndo}
+                                aria-disabled={!canUndo}
+                                className={`p-2.5 rounded-xl transition-colors ${canUndo ? 'hover:bg-gray-50 text-gray-500' : 'text-gray-300 cursor-not-allowed'}`}
                                 title="Undo"
                             >
                                 <Undo2 className="w-5 h-5" />
                             </button>
                             <button
                                 onClick={handleRedo}
-                                className="p-2.5 rounded-xl hover:bg-gray-50 text-gray-500 transition-colors"
+                                disabled={!canRedo}
+                                aria-disabled={!canRedo}
+                                className={`p-2.5 rounded-xl transition-colors ${canRedo ? 'hover:bg-gray-50 text-gray-500' : 'text-gray-300 cursor-not-allowed'}`}
                                 title="Redo"
                             >
                                 <Redo2 className="w-5 h-5" />

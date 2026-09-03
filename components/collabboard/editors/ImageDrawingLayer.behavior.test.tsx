@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ImageDrawingLayer from './ImageDrawingLayer';
 
 const exportImage = vi.fn(async () => 'data:image/png;base64,stub');
@@ -11,11 +11,14 @@ const eraseMode = vi.fn();
 const undo = vi.fn();
 const redo = vi.fn();
 const loadPaths = vi.fn();
+/** R6G. The component's onChange, captured so a stroke can be simulated. */
+let lastOnChange: ((paths: unknown[]) => void) | null = null;
 
 vi.mock('react-sketch-canvas', async () => {
   const React = (await import('react')) as typeof import('react');
   return {
-    ReactSketchCanvas: React.forwardRef((_props, ref) => {
+    ReactSketchCanvas: React.forwardRef((props: { onChange?: (paths: unknown[]) => void }, ref) => {
+      lastOnChange = props.onChange ?? null;
       React.useImperativeHandle(ref, () => ({
         exportImage,
         exportPaths,
@@ -452,5 +455,348 @@ describe('R6F rectangles: one can be selected and deleted on its own', () => {
     expect(eraseMode).toHaveBeenLastCalledWith(false);
     fireEvent.click(screen.getByTitle('Pencil'));
     expect(eraseMode).toHaveBeenLastCalledWith(false);
+  });
+});
+
+
+// --- R6G ------------------------------------------------------------------
+//
+// The four runtime defects the user's screenshots showed after R6F passed:
+// text boxes collapsing to one or two characters per line, a toolbar that
+// changed length with the tool, no way to erase a rectangle, and Undo/Redo
+// that appeared dead.
+
+/** The editor with no pre-existing annotations, so "the" text box is unambiguous. */
+function renderEmptyLayer() {
+  return render(
+    <ImageDrawingLayer imageUrl={imageUrl} initialTextElements={[]} onSave={vi.fn()} onCancel={vi.fn()} />
+  );
+}
+
+/** A fresh text annotation, created through the real Add Text flow. */
+function createTextAnnotation() {
+  const surface = document.body.querySelector('.cursor-text.touch-none') as HTMLElement | null;
+  expect(surface, 'text placement surface not rendered').not.toBeNull();
+  fireEvent.click(surface!);
+  const boxes = screen.getAllByPlaceholderText('Type here...');
+  return boxes[boxes.length - 1] as HTMLTextAreaElement;
+}
+
+const widthOf = (textarea: HTMLTextAreaElement) => parseFloat(textarea.style.width);
+
+describe('R6G text width: the box no longer collapses onto what you have typed', () => {
+  beforeEach(() => { mockContainerSize(900, 600); });
+
+  it('R6G-1,2,3,4: width never drops below the fresh box width as characters arrive', () => {
+    renderEmptyLayer();
+    openTextToolbar();
+    const textarea = createTextAnnotation();
+
+    // THE regression: an empty box measured the placeholder and looked fine,
+    // then the first keystroke dropped the placeholder and collapsed the box to
+    // the 50px floor -- about 22px of content box -- so the textarea's own soft
+    // wrap produced "h / a".
+    const initialWidth = widthOf(textarea);
+    expect(initialWidth).toBeGreaterThanOrEqual(160);
+    expect(initialWidth).toBeLessThanOrEqual(220);
+
+    for (const value of ['H', 'Ha', 'Hal', 'Hallo', 'Hallo World']) {
+      fireEvent.input(textarea, { target: { value } });
+      expect(widthOf(textarea), `width collapsed at "${value}"`).toBeGreaterThanOrEqual(initialWidth);
+    }
+  });
+
+  it('R6G-4b: "Hallo World" has room to stay horizontal rather than stacking characters', () => {
+    renderEmptyLayer();
+    openTextToolbar();
+    const textarea = createTextAnnotation();
+    fireEvent.input(textarea, { target: { value: 'Hallo World' } });
+
+    // 11 characters at the test measurer's 12px each = 132px of text; the box
+    // must be able to hold that on one line, plus its padding.
+    expect(widthOf(textarea)).toBeGreaterThanOrEqual(132 + 24);
+  });
+
+  it('R6G-5: extra lines grow the HEIGHT, not a narrower box', () => {
+    renderEmptyLayer();
+    openTextToolbar();
+    const textarea = createTextAnnotation();
+    fireEvent.input(textarea, { target: { value: 'one' } });
+    const oneLine = { w: widthOf(textarea), h: parseFloat(textarea.style.height) };
+
+    fireEvent.input(textarea, { target: { value: 'one\ntwo\nthree' } });
+    expect(widthOf(textarea)).toBeGreaterThanOrEqual(oneLine.w);
+    expect(parseFloat(textarea.style.height)).toBeGreaterThan(oneLine.h);
+  });
+
+  it('R6G-7: changing the font size does not collapse the width', async () => {
+    renderEmptyLayer();
+    openTextToolbar();
+    const textarea = createTextAnnotation();
+    fireEvent.input(textarea, { target: { value: 'Hallo' } });
+    fireEvent.focus(textarea);
+    const before = widthOf(textarea);
+
+    fireEvent.click(screen.getByTitle('Font Size'));
+    await clickBodyButtonByText('Large');
+    await waitFor(() => expect(textarea.style.fontSize).toBe('32px'));
+
+    expect(widthOf(textarea)).toBeGreaterThanOrEqual(before);
+  });
+
+  it('R6G-8: a manual resize wins, and is not snapped back by later typing', () => {
+    renderEmptyLayer();
+    openTextToolbar();
+    const textarea = createTextAnnotation();
+    const handle = document.body.querySelector('[data-testid^="text-resize-"]') as HTMLElement;
+    expect(handle, 'no resize grip').not.toBeNull();
+
+    const start = widthOf(textarea);
+    fireEvent.mouseDown(handle, { clientX: 100 });
+    fireEvent.mouseMove(window, { clientX: 40 });   // drag 60px narrower
+    fireEvent.mouseUp(window);
+
+    const resized = widthOf(textarea);
+    expect(resized).toBeLessThan(start);
+    expect(resized).toBeGreaterThanOrEqual(60);
+
+    // Typing must not restore the default width over their choice.
+    fireEvent.input(textarea, { target: { value: 'ab' } });
+    expect(widthOf(textarea)).toBe(resized);
+  });
+
+  it('R6G-6: the R6F bottom clamp still applies to the taller wrapped box', () => {
+    mockContainerSize(400, 300);
+    renderBottomText(280);
+    const textarea = screen.getByDisplayValue('Hallo World') as HTMLTextAreaElement;
+    expect(boxTop(textarea) + parseFloat(textarea.style.height)).toBeLessThanOrEqual(300);
+    expect(boxTop(textarea)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('R6G toolbar: one width in every tool state', () => {
+  beforeEach(() => { mockContainerSize(900, 600); });
+
+  const toolbarWidth = () =>
+    (document.body.querySelector('[data-testid="draw-toolbar"]') as HTMLElement).style.width;
+
+  it('R6G-10..15: switching tools never changes the toolbar width', () => {
+    renderLayer();
+    const widths: Record<string, string> = {};
+
+    widths.initial = toolbarWidth();
+    for (const tool of ['Add Text', 'Pencil', 'Highlighter', 'Eraser']) {
+      fireEvent.click(screen.getByTitle(tool));
+      widths[tool] = toolbarWidth();
+    }
+    // Square only exists outside the text tool, so reach it from Pencil.
+    fireEvent.click(screen.getByTitle('Pencil'));
+    fireEvent.click(screen.getByTitle('Square'));
+    widths.Square = toolbarWidth();
+
+    // Text WITH an annotation selected is the widest state -- four styling
+    // controls appear -- and is what used to stretch the bar.
+    fireEvent.click(screen.getByTitle('Add Text'));
+    fireEvent.focus(screen.getByPlaceholderText('Type here...'));
+    widths.selectedText = toolbarWidth();
+
+    const distinct = [...new Set(Object.values(widths))];
+    expect(distinct, `toolbar width varied by state: ${JSON.stringify(widths)}`).toHaveLength(1);
+    expect(distinct[0]).toBe('720px');
+  });
+
+  it('the width is a property of the toolbar, not of whatever is mounted in it', () => {
+    // `w-fit` is what made the bar size itself around its current children.
+    renderLayer();
+    const shell = document.body.querySelector('[data-testid="draw-toolbar"]') as HTMLElement;
+    expect(shell.className).not.toContain('w-fit');
+    expect(shell.style.width).toBe('720px');
+    // ...and it still degrades on a narrow viewport rather than overflowing.
+    expect(shell.style.maxWidth).toContain('100vw');
+  });
+});
+
+describe('R6G eraser: the Eraser removes a rectangle', () => {
+  beforeEach(() => {
+    mockContainerSize(900, 600);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+  });
+
+  const hitBands = () => Array.from(document.body.querySelectorAll('[data-testid^="rect-hit-"]'));
+  const rectCount = () => document.body.querySelectorAll('[data-testid="completed-rect-layer"] > g').length;
+
+  function drawSquare(x1: number, y1: number, x2: number, y2: number) {
+    const surface = document.body.querySelector('.cursor-crosshair.touch-none') as HTMLElement;
+    fireEvent.pointerDown(surface, { clientX: x1, clientY: y1, pointerId: 1 });
+    fireEvent.pointerMove(surface, { clientX: x2, clientY: y2, pointerId: 1 });
+    fireEvent.pointerUp(surface, { clientX: x2, clientY: y2, pointerId: 1 });
+  }
+
+  it('R6G-16,17,20,21,22: erasing one rectangle leaves the others, and undoes', () => {
+    renderLayer();
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);
+    drawSquare(200, 10, 300, 100);
+    expect(rectCount()).toBe(2);
+
+    fireEvent.click(screen.getByTitle('Eraser'));
+    // The Eraser gets a border target of its own -- that is the R6G change.
+    expect(hitBands()).toHaveLength(2);
+
+    fireEvent.pointerDown(hitBands()[0]);
+    expect(rectCount()).toBe(1);                       // only the one hit
+
+    fireEvent.click(screen.getByTitle('Undo'));
+    expect(rectCount()).toBe(2);                       // R6G-21
+    fireEvent.click(screen.getByTitle('Redo'));
+    expect(rectCount()).toBe(1);                       // R6G-22
+  });
+
+  it('R6G-19: erasing a rectangle does not disturb text annotations', () => {
+    renderLayer();                                     // renders with text-1
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);
+    fireEvent.click(screen.getByTitle('Eraser'));
+    fireEvent.pointerDown(hitBands()[0]);
+
+    expect(rectCount()).toBe(0);
+    expect(screen.getByDisplayValue('Hello')).toBeTruthy();
+  });
+
+  it('R6G-23,24: Square select/trash still works, and drawing tools keep the surface', () => {
+    renderLayer();
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);
+    fireEvent.pointerDown(hitBands()[0]);
+    expect(screen.queryByTitle('Delete rectangle')).toBeTruthy();
+    fireEvent.click(screen.getByTitle('Delete rectangle'));
+    expect(rectCount()).toBe(0);
+
+    // Pencil/Highlighter still own the whole surface: no rectangle target.
+    fireEvent.click(screen.getByTitle('Undo'));
+    expect(rectCount()).toBe(1);
+    for (const drawTool of ['Pencil', 'Highlighter']) {
+      fireEvent.click(screen.getByTitle(drawTool));
+      expect(hitBands(), drawTool).toHaveLength(0);
+    }
+  });
+});
+
+describe('R6G history: the two toolbar buttons are the one authority', () => {
+  beforeEach(() => {
+    mockContainerSize(900, 600);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+  });
+
+  const rectCount = () => document.body.querySelectorAll('[data-testid="completed-rect-layer"] > g').length;
+  const textCount = () => document.body.querySelectorAll('textarea').length;
+  const undoBtn = () => screen.getByTitle('Undo') as HTMLButtonElement;
+  const redoBtn = () => screen.getByTitle('Redo') as HTMLButtonElement;
+
+  function drawSquare(x1: number, y1: number, x2: number, y2: number) {
+    const surface = document.body.querySelector('.cursor-crosshair.touch-none') as HTMLElement;
+    fireEvent.pointerDown(surface, { clientX: x1, clientY: y1, pointerId: 1 });
+    fireEvent.pointerMove(surface, { clientX: x2, clientY: y2, pointerId: 1 });
+    fireEvent.pointerUp(surface, { clientX: x2, clientY: y2, pointerId: 1 });
+  }
+
+  function addText() {
+    fireEvent.click(screen.getByTitle('Add Text'));
+    const surface = document.body.querySelector('.cursor-text.touch-none') as HTMLElement;
+    fireEvent.click(surface);
+  }
+
+  it('R6G-28: adding a text annotation is undoable -- it was not recorded at all before', () => {
+    // THE reason the buttons looked dead: text never entered the history, so
+    // the most common thing to undo did nothing.
+    renderLayer();
+    const before = textCount();
+    addText();
+    expect(textCount()).toBe(before + 1);
+
+    fireEvent.click(undoBtn());
+    expect(textCount()).toBe(before);
+    fireEvent.click(redoBtn());
+    expect(textCount()).toBe(before + 1);
+  });
+
+  it('R6G-26: creating a rectangle is undoable and redoable', () => {
+    renderLayer();
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);
+    expect(rectCount()).toBe(1);
+    fireEvent.click(undoBtn());
+    expect(rectCount()).toBe(0);
+    fireEvent.click(redoBtn());
+    expect(rectCount()).toBe(1);
+  });
+
+  it('R6G-29: a mixed sequence undoes in the user\'s chronological order', () => {
+    renderLayer();
+    const baseText = textCount();
+
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);            // A: rectangle
+    addText();                               // C: text
+    expect(rectCount()).toBe(1);
+    expect(textCount()).toBe(baseText + 1);
+
+    fireEvent.click(undoBtn());              // undoes the TEXT, not the rect
+    expect(textCount()).toBe(baseText);
+    expect(rectCount()).toBe(1);
+
+    fireEvent.click(undoBtn());              // then the rectangle
+    expect(rectCount()).toBe(0);
+
+    fireEvent.click(redoBtn());              // and forward again, in order
+    expect(rectCount()).toBe(1);
+    fireEvent.click(redoBtn());
+    expect(textCount()).toBe(baseText + 1);
+  });
+
+  it('R6G-30: a new action after an undo clears the redo stack', () => {
+    renderLayer();
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);
+    fireEvent.click(undoBtn());
+    expect(redoBtn().disabled).toBe(false);
+
+    drawSquare(200, 10, 300, 100);           // branch
+    expect(redoBtn().disabled).toBe(true);
+    expect(rectCount()).toBe(1);             // the old one is not resurrected
+  });
+
+  it('R6G-31: the disabled states are truthful', () => {
+    renderLayer();
+    expect(undoBtn().disabled).toBe(true);
+    expect(redoBtn().disabled).toBe(true);
+
+    fireEvent.click(screen.getByTitle('Square'));
+    drawSquare(10, 10, 100, 100);
+    expect(undoBtn().disabled).toBe(false);
+    expect(redoBtn().disabled).toBe(true);
+
+    fireEvent.click(undoBtn());
+    expect(undoBtn().disabled).toBe(true);
+    expect(redoBtn().disabled).toBe(false);
+  });
+
+  it('R6G-25,32: a stroke reaches the sketch canvas through the same buttons', () => {
+    // The stroke payload belongs to react-sketch-canvas, so the history records
+    // THAT a stroke happened and forwards undo/redo to it. Driving the mock's
+    // onChange is what proves the button is wired to that path at all.
+    renderLayer();
+    const sketch = screen.getByTestId('sketch-canvas');
+    fireEvent.click(sketch);                 // no-op; the mock exposes onChange below
+    act(() => { lastOnChange?.([{ id: 1 }]); });
+
+    expect(undoBtn().disabled).toBe(false);
+    fireEvent.click(undoBtn());
+    expect(undo).toHaveBeenCalled();
+
+    fireEvent.click(redoBtn());
+    expect(redo).toHaveBeenCalled();
   });
 });

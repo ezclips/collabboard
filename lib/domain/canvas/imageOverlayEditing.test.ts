@@ -167,8 +167,11 @@ describe('D13-D19: a new text annotation is horizontal', () => {
   it('D16,D18: the editor and the saved canvas read the SAME box', () => {
     // One helper, called once per element per render, feeding both the
     // textarea's width/height and handleSave's canvas geometry.
-    expect(drawingLayer).toContain('measureTextBox(text.content, text.fontSize, maxAllowedWidth)');
-    expect(drawingLayer).toContain('measureTextBox(el.content, el.fontSize, maxAllowedWidth)');
+    // R6G added the width floor as a fourth argument. The contract is that the
+    // two call sites stay IDENTICAL -- same helper, same bounds, same floor --
+    // so the flattened canvas can never be sized differently from the textarea.
+    expect(drawingLayer).toContain('measureTextBox(text.content, text.fontSize, boxMaxWidth, textBoxFloor(text))');
+    expect(drawingLayer).toContain('measureTextBox(el.content, el.fontSize, boxMaxWidth, textBoxFloor(el))');
     // Exactly two consumers: the textarea's width/height, and handleSave's
     // canvas geometry. Neither may grow its own second measurement.
     expect((drawingLayer.match(/measureTextBox\(/g) ?? []).length).toBe(2);

@@ -2,17 +2,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_TEXT_ANNOTATION_BOX_WIDTH,
+  MIN_TEXT_ANNOTATION_BOX_WIDTH,
   TEXT_ANNOTATION_EDGE_MARGIN,
   clampTextAnnotationTop,
   measureTextAnnotationBox,
 } from './imageTextAnnotationBox';
 import {
+  actionLayer,
   applyRedo,
+  applyTextRedo,
+  applyTextUndo,
   applyUndo,
   insertRectAt,
   isStrokeAction,
   type DrawingAction,
   type DrawnRect,
+  type DrawnText,
 } from './imageDrawingHistory';
 
 /**
@@ -338,12 +344,20 @@ describe('R6F-28..32: rectangle selection does not take over the drawing surface
     expect(drawingLayer).toMatch(/className=\{`absolute inset-0 w-full h-full pointer-events-none/);
   });
 
-  it('R6F-28..31: only the border band opts in, and only under the Square tool', () => {
-    // A full-surface catcher here would swallow every Pencil/Highlighter/Eraser
-    // stroke crossing a rectangle. `pointerEvents: 'stroke'` on a transparent
-    // fat stroke makes the BORDER the target and leaves the interior inert.
-    expect(drawingLayer).toContain("style={{ pointerEvents: 'stroke', cursor: 'pointer' }}");
-    expect(drawingLayer).toMatch(/\{tool === 'square' && \([\s\S]{0,600}data-testid=\{`rect-hit-/);
+  it('R6F-28..31: only the border band opts in, and never under a drawing tool', () => {
+    // A full-surface catcher here would swallow every Pencil/Highlighter stroke
+    // crossing a rectangle. `pointerEvents: 'stroke'` on a transparent fat
+    // stroke makes the BORDER the target and leaves the interior inert.
+    //
+    // R6G widened WHICH tools get a target -- the Eraser now erases rectangles,
+    // so it needs one too -- but not the shape of the target, which is the part
+    // that protects drawing. Asserted as the invariant rather than as the exact
+    // literal, so adding a cursor did not have to look like a regression.
+    expect(drawingLayer).toMatch(/pointerEvents: 'stroke'/);
+    expect(drawingLayer).toMatch(/\{rectHitTargetsActive && \([\s\S]{0,600}data-testid=\{`rect-hit-/);
+    // ...and the tools that get one are exactly Square and Eraser: never Pencil
+    // or Highlighter, which must keep the whole surface.
+    expect(drawingLayer).toContain("const rectHitTargetsActive = tool === 'square' || tool === 'eraser';");
     // The visible path itself is never a target.
     expect(drawingLayer).not.toMatch(/stroke=\{r\.color\}[\s\S]{0,200}pointerEvents: 'auto'/);
     // The hit band is deliberately forgiving.
@@ -362,5 +376,125 @@ describe('R6F-28..32: rectangle selection does not take over the drawing surface
     }
     // Undo/redo and deletion clear it too.
     expect(drawingLayer).toMatch(/handleDeleteSelectedRect[\s\S]{0,700}setSelectedRectId\(null\)/);
+  });
+});
+
+
+// --- R6G ------------------------------------------------------------------
+
+describe('R6G: the box width floor, and text in the history', () => {
+  const measure = (fontSize: number) => (line: string) => line.length * fontSize * 0.5;
+
+  it('the default width sits in the stated 160-220 range', () => {
+    expect(DEFAULT_TEXT_ANNOTATION_BOX_WIDTH).toBeGreaterThanOrEqual(160);
+    expect(DEFAULT_TEXT_ANNOTATION_BOX_WIDTH).toBeLessThanOrEqual(220);
+  });
+
+  it('measuring on its own is unchanged -- the floor is opt-in, so saved geometry is safe', () => {
+    // R6D's D19 contract: any content string still goes through
+    // max(50, measured + padding). The floor is a CALLER policy, which is why
+    // it defaults to off rather than being baked into the measurement.
+    for (const content of ['a', 'Hello', 'A somewhat longer caption']) {
+      const widest = content.length * 8;
+      expect(measureTextAnnotationBox(content, 16, measure(16)).boxWidth, content)
+        .toBeCloseTo(Math.max(MIN_TEXT_ANNOTATION_BOX_WIDTH, widest + 24), 5);
+    }
+  });
+
+  it('with a floor, the box cannot shrink onto its own content as you type', () => {
+    const floor = DEFAULT_TEXT_ANNOTATION_BOX_WIDTH;
+    for (const content of ['', 'H', 'Ha', 'Hal', 'Hallo', 'Hallo World']) {
+      const box = measureTextAnnotationBox(content, 24, measure(24), undefined, undefined, floor);
+      expect(box.boxWidth, content).toBeGreaterThanOrEqual(floor);
+    }
+    // Without the floor the first keystroke collapses it -- this is exactly what
+    // the runtime screenshots showed as "h / a".
+    expect(measureTextAnnotationBox('H', 24, measure(24)).boxWidth).toBeLessThan(floor / 2);
+  });
+
+  it('content longer than the floor still widens the box, and then wraps', () => {
+    const floor = DEFAULT_TEXT_ANNOTATION_BOX_WIDTH;
+    const long = 'a considerably longer annotation than the default';
+    const unbounded = measureTextAnnotationBox(long, 24, measure(24), undefined, undefined, floor);
+    expect(unbounded.boxWidth).toBeGreaterThan(floor);
+
+    const bounded = measureTextAnnotationBox(long, 24, measure(24), 240, undefined, floor);
+    expect(bounded.boxWidth).toBe(240);
+    expect(bounded.lines.length).toBeGreaterThan(1);
+    expect(bounded.boxHeight).toBeGreaterThan(unbounded.boxHeight);
+  });
+
+  it('a manual width is authoritative: it caps as well as floors', () => {
+    // Passed as BOTH bounds, which is how the editor honours a resize -- even
+    // for an empty box, whose placeholder would otherwise measure wider.
+    expect(measureTextAnnotationBox('', 24, measure(24), 120, undefined, 120).boxWidth).toBe(120);
+  });
+
+  it('the floor never defeats the available space', () => {
+    // Near the right edge there may be less room than the default. Space wins.
+    const box = measureTextAnnotationBox('Hallo World', 24, measure(24), 90, undefined, DEFAULT_TEXT_ANNOTATION_BOX_WIDTH);
+    expect(box.boxWidth).toBe(90);
+    expect(box.lines.length).toBeGreaterThan(1);
+  });
+});
+
+describe('R6G: text annotations are part of the one history', () => {
+  const text = (id: string): DrawnText => ({
+    id, x: 0, y: 0, content: id, fontSize: 24, color: '#fff',
+  });
+  const A = text('A');
+  const B = text('B');
+  const RECT: DrawnRect = { id: 'r', x1: 0, y1: 0, x2: 1, y2: 1, color: '#f00', strokeWidth: 2, path: 'M' };
+
+  it('adding text undoes and redoes', () => {
+    const action: DrawingAction = { type: 'text', text: B };
+    expect(applyTextUndo([A, B], action).map((t) => t.id)).toEqual(['A']);
+    expect(applyTextRedo([A], action).map((t) => t.id)).toEqual(['A', 'B']);
+  });
+
+  it('deleting text restores to its original index', () => {
+    const action: DrawingAction = { type: 'text-delete', text: A, index: 0 };
+    expect(applyTextUndo([B], action).map((t) => t.id)).toEqual(['A', 'B']);
+    expect(applyTextRedo([A, B], action).map((t) => t.id)).toEqual(['B']);
+  });
+
+  it('each action touches only its own layer -- which is what makes ONE stack safe', () => {
+    for (const action of [{ type: 'stroke' }, { type: 'rect', rect: RECT }] as DrawingAction[]) {
+      expect(applyTextUndo([A, B], action).map((t) => t.id)).toEqual(['A', 'B']);
+      expect(applyTextRedo([A, B], action).map((t) => t.id)).toEqual(['A', 'B']);
+    }
+    expect(applyUndo([RECT], { type: 'text', text: A }).map((r) => r.id)).toEqual(['r']);
+    expect(applyRedo([RECT], { type: 'text-delete', text: A, index: 0 }).map((r) => r.id)).toEqual(['r']);
+  });
+
+  it('every action reports the layer it belongs to', () => {
+    expect(actionLayer({ type: 'stroke' })).toBe('stroke');
+    expect(actionLayer({ type: 'rect', rect: RECT })).toBe('rect');
+    expect(actionLayer({ type: 'text', text: A })).toBe('text');
+    expect(actionLayer({ type: 'text-delete', text: A, index: 0 })).toBe('text');
+    expect(isStrokeAction({ type: 'text', text: A })).toBe(false);
+  });
+
+  it('the reported chronology: rectangle, stroke, text -- undone newest first', () => {
+    const stack: DrawingAction[] = [{ type: 'rect', rect: RECT }, { type: 'stroke' }, { type: 'text', text: A }];
+    let rects: DrawnRect[] = [RECT];
+    let texts: DrawnText[] = [A];
+
+    // Undo 1: the TEXT goes, and nothing else.
+    let last = stack.pop()!;
+    texts = applyTextUndo(texts, last);
+    rects = applyUndo(rects, last);
+    expect(texts).toEqual([]);
+    expect(rects.map((r) => r.id)).toEqual(['r']);
+
+    // Undo 2: the stroke -- neither list changes; the canvas owns it.
+    last = stack.pop()!;
+    expect(isStrokeAction(last)).toBe(true);
+    expect(applyUndo(rects, last).map((r) => r.id)).toEqual(['r']);
+
+    // Undo 3: the rectangle.
+    last = stack.pop()!;
+    rects = applyUndo(rects, last);
+    expect(rects).toEqual([]);
   });
 });

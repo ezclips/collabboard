@@ -21,6 +21,28 @@ export const TEXT_ANNOTATION_PADDING = 12;
 export const MIN_TEXT_ANNOTATION_BOX_WIDTH = 50;
 
 /**
+ * R6G. The width a text annotation keeps regardless of what is in it.
+ *
+ * THE defect this fixes: box width was a pure function of the current content,
+ * floored only at MIN_TEXT_ANNOTATION_BOX_WIDTH. R6D made an EMPTY box measure
+ * the placeholder, so a fresh annotation looked right at ~168px -- but the first
+ * keystroke dropped the placeholder and the box collapsed to the 50px floor.
+ * After the textarea's own padding and border that leaves ~22px of content box,
+ * so its soft wrap broke "Hallo" into one or two characters per line. That is
+ * the reported "h / a" and "ha / l".
+ *
+ * A width that shrinks as you type is the wrong model. The right one is a
+ * stable width with an auto-growing height, so this is a FLOOR applied whether
+ * or not there is content. Text longer than this still widens the box up to the
+ * space available, and only then wraps.
+ *
+ * 180 sits in the editor's existing 160-220 range and just above the ~168px the
+ * placeholder already produced, so a fresh box is not visibly re-sized by its
+ * own first character.
+ */
+export const DEFAULT_TEXT_ANNOTATION_BOX_WIDTH = 180;
+
+/**
  * R6F. The breathing room kept between a text box and the image's bottom edge.
  *
  * Deliberately smaller than the horizontal reserve (20px, applied at the call
@@ -166,7 +188,10 @@ function wrapTextToWidth(text: string, maxTextWidth: number, measure: TextWidthM
  * sensible horizontal width.
  *
  * An annotation WITH content is measured exactly as before, which is what
- * keeps every already-saved text box at the geometry it was saved with.
+ * keeps every already-saved text box at the geometry it was saved with -- with
+ * one R6G addition: `minBoxWidth` floors the result, so content can widen the
+ * box but can never shrink it below the width it is supposed to keep. Pass the
+ * annotation's own width when the user has resized it, so their choice wins.
  */
 export function measureTextAnnotationBox(
   content: string,
@@ -174,6 +199,10 @@ export function measureTextAnnotationBox(
   measure: TextWidthMeasurer,
   maxBoxWidth?: number,
   font = `600 ${fontSize}px "Inter", sans-serif`,
+  // Defaults to "no floor", so measuring on its own is byte-for-byte what R6D
+  // specified. WHAT width an annotation keeps is a property of the annotation,
+  // not of the measurement, so the editor supplies it.
+  minBoxWidth = 0,
 ): TextAnnotationBox {
   const isEmpty = !content || content.length === 0;
   const hardLines = (isEmpty ? '' : content).split('\n');
@@ -192,7 +221,12 @@ export function measureTextAnnotationBox(
     if (Number.isFinite(width) && width > measuredMaxWidth) measuredMaxWidth = width;
   }
 
-  const naturalBoxWidth = Math.max(MIN_TEXT_ANNOTATION_BOX_WIDTH, measuredMaxWidth + padding * 2);
+  // R6G: the floor is what stops the box collapsing onto its own content.
+  const widthFloor = Math.max(
+    MIN_TEXT_ANNOTATION_BOX_WIDTH,
+    Number.isFinite(minBoxWidth) && minBoxWidth > 0 ? minBoxWidth : 0,
+  );
+  const naturalBoxWidth = Math.max(widthFloor, measuredMaxWidth + padding * 2);
   const shouldWrap = !isEmpty && boxWidthLimit !== null && naturalBoxWidth > boxWidthLimit;
   const wrappedLines = shouldWrap
     ? wrapTextToWidth(content, Math.max(1, boxWidthLimit - padding * 2), measure)
