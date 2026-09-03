@@ -999,6 +999,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     isClipartDraftModalOpen, imageToolbarPadletId,
   ]);
 
+
   // Guard flag to check if any editor or modal is open
   const isAnyEditorOpen = useMemo(() => {
     return (
@@ -1055,6 +1056,26 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     detachedPopupOpen,
     padletToEdit
   ]);
+
+  /**
+   * R6D. The image SUBTOOL modals -- Draw-on-top and Edit-image.
+   *
+   * Deliberately NOT folded into isBlockingEditorModalOpen: that flag also
+   * hides the canvas toolbar, and `isDrawingMode`/`isCropMode` on their own
+   * are canvas MODES that leave the canvas usable, which the toolbar contract
+   * (knowledgePdfCard 49) requires stay visible. A subtool MODAL is the
+   * narrower thing -- the mode plus an actual padlet to edit, exactly the
+   * condition each layer renders on below.
+   *
+   * The Knowledge reader must yield to these the same way it yields to every
+   * other blocking editor, so it is the drawers that combine the two.
+   */
+  const isImageSubtoolModalOpen = useMemo(() => (
+    (isDrawingMode && drawingPadlet !== null) || (isCropMode && cropPadlet !== null)
+  ), [isDrawingMode, drawingPadlet, isCropMode, cropPadlet]);
+
+  /** What a docked, above-the-editor-tier surface must step below. */
+  const isBlockingOverlayOpen = isBlockingEditorModalOpen || isImageSubtoolModalOpen;
 
   const handleColumnReorder = async (postId: string, fromSectionId: string, toSectionId: string, newIndex: number) => {
     const post = padlets.find(p => p.id === postId);
@@ -9485,7 +9506,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           sourceOpenRequest={knowledgeSourceOpenRequest}
           documentOpenRequest={knowledgeDocumentOpenRequest}
           presentation={knowledgeReaderPresentation}
-          blockingEditorOpen={isBlockingEditorModalOpen}
+          blockingEditorOpen={isBlockingOverlayOpen}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
@@ -9500,7 +9521,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           boardId={canvasId}
           isOpen={isBoardAiChatOpen}
           onClose={closeBoardAiChat}
-          blockingEditorOpen={isBlockingEditorModalOpen}
+          blockingEditorOpen={isBlockingOverlayOpen}
           draftContext={boardAiChatDraftContext}
           onDraftContextChange={setBoardAiChatDraftContext}
           selectedBoardItem={boardAiChatSelectedItem}

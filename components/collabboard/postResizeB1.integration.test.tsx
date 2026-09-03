@@ -323,7 +323,7 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
 
   it('PATCH FREEFORM-IMAGE-R7: a manually-resized Image drops the max-h-[500px] cap but keeps content-height sizing so the frame hugs the visible image', () => {
     const imgClassName = code(cardsSrc).slice(
-      code(cardsSrc).indexOf('src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}'),
+      code(cardsSrc).indexOf('src={resolveImagePostDisplaySrc(padlet) ?? undefined}'),
       code(cardsSrc).indexOf('style={(padlet.metadata as any)?.cropToGrid === true'),
     );
     // Manually-sized: h-auto, object-contain, NO height cap.
@@ -354,7 +354,7 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
 
   it('PATCH IMAGE-R6: default, crop-to-grid, and Full View image render branches remain explicit and unchanged', () => {
     const imgClassName = code(cardsSrc).slice(
-      code(cardsSrc).indexOf('src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}'),
+      code(cardsSrc).indexOf('src={resolveImagePostDisplaySrc(padlet) ?? undefined}'),
       code(cardsSrc).indexOf('style={(padlet.metadata as any)?.cropToGrid === true'),
     );
     expect(imgClassName).toContain('"w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"');

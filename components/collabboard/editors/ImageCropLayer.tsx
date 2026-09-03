@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import ReactCrop, { centerCrop, makeAspectCrop, Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import {
@@ -112,8 +113,15 @@ export default function ImageCropLayer({
         onSave(canvas.toDataURL('image/png'));
     };
 
-    return (
-        <div className="fixed inset-0 bg-black/90 z-[200] flex flex-col items-center justify-center backdrop-blur-md transition-all animate-in fade-in duration-300">
+    /**
+     * R6D. Portalled to <body>, for the same structural reason as
+     * ImageDrawingLayer: rendered inside CanvasViewport's `isolation: isolate`
+     * boundary (PATCH 9M), the whole canvas subtree paints as one atomic layer,
+     * so z-[200] could never raise this above the Knowledge reader or above the
+     * retained image overlay. A blocking editor is not a canvas object.
+     */
+    return createPortal(
+        <div className="fixed inset-0 bg-black/90 z-[60100] flex flex-col items-center justify-center backdrop-blur-md transition-all animate-in fade-in duration-300">
             {/* Header / Cancel Button */}
             <div className="absolute top-6 right-6 z-[210]">
                 <button
@@ -218,6 +226,7 @@ export default function ImageCropLayer({
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 }

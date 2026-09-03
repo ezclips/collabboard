@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Pencil,
     Eraser,
@@ -18,6 +19,17 @@ import {
 import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
 import { DrawingColorPopup, DrawingStylePopup } from './DrawingPopups';
 import * as Popover from '@radix-ui/react-popover';
+import {
+    EMPTY_TEXT_ANNOTATION_PLACEHOLDER,
+    measureTextAnnotationBox,
+} from '@/lib/domain/canvas/imageTextAnnotationBox';
+
+/**
+ * R6D. The colour a fresh Draw-on-top session starts with. Taken from the
+ * existing palette in DrawingPopups (PRESET_COLORS) rather than introduced as
+ * a new token, so the default is always a colour the picker itself offers.
+ */
+export const DEFAULT_DRAWING_COLOR = '#ef4444';
 
 interface ImageDrawingLayerProps {
     imageUrl: string;
@@ -97,7 +109,12 @@ export default function ImageDrawingLayer({
     const containerRef = useRef<HTMLDivElement>(null);
     const measureCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const [tool, setTool] = useState<'pencil' | 'eraser' | 'highlighter' | 'text' | 'square'>('pencil');
-    const [color, setColor] = useState('#ffffff');
+    // R6D. Red, not white: on a photo a white stroke is often invisible and the
+    // swatch read as "no colour chosen", so the control itself was easy to miss.
+    // `#ef4444` is the existing palette's red (DrawingPopups PRESET_COLORS) --
+    // no new token. This is the DEFAULT only: the picker still offers white and
+    // every other colour, and a choice made here is kept for the session.
+    const [color, setColor] = useState(DEFAULT_DRAWING_COLOR);
     const [strokeWidth, setStrokeWidth] = useState(5);
 
     // Shape drawing state
@@ -184,23 +201,10 @@ export default function ImageDrawingLayer({
             measureCanvasRef.current = document.createElement('canvas');
         }
         const ctx = measureCanvasRef.current.getContext('2d');
-        const safeContent = content && content.length > 0 ? content : ' ';
-        const lines = safeContent.split('\n');
-        const padding = 12;
-        const lineHeight = fontSize * 1.2;
-        let maxWidth = 0;
-
-        if (ctx) {
-            ctx.font = `600 ${fontSize}px "Inter", sans-serif`;
-            lines.forEach((line) => {
-                const width = ctx.measureText(line.length > 0 ? line : ' ').width;
-                if (width > maxWidth) maxWidth = width;
-            });
-        }
-
-        const boxWidth = Math.max(50, maxWidth + (padding * 2));
-        const boxHeight = Math.max((lineHeight + (padding * 2)), (lines.length * lineHeight) + (padding * 2));
-        return { lines, padding, lineHeight, boxWidth, boxHeight };
+        if (ctx) ctx.font = `600 ${fontSize}px "Inter", sans-serif`;
+        // R6D: the sizing policy lives in one testable domain helper, shared by
+        // the textarea below and the flattened canvas render in handleSave.
+        return measureTextAnnotationBox(content, fontSize, (line) => (ctx ? ctx.measureText(line).width : 0));
     }, []);
 
     const handleSave = async () => {
@@ -402,9 +406,23 @@ export default function ImageDrawingLayer({
         element.style.height = `${element.scrollHeight}px`;
     };
 
-    return (
+    /**
+     * R6D. Portalled to <body>, for the same structural reason R6C portalled
+     * the image overlay.
+     *
+     * This layer is rendered inside CanvasViewport's `isolation: isolate`
+     * boundary (PATCH 9M), which makes the whole canvas subtree paint as ONE
+     * atomic layer at z-index:auto among its root-level siblings. Its old
+     * z-[200] therefore could not raise it above the Knowledge reader, nor
+     * above the retained image overlay -- no number could. Only leaving the
+     * subtree can. A blocking editor is not a canvas object, so <body> is
+     * where it belongs; PATCH 9M's actual guarantee is untouched.
+     */
+    return createPortal(
         <div
-            className="fixed inset-0 z-[200] bg-black flex overflow-hidden animate-in fade-in duration-300"
+            // Just above the retained image overlay (z-[60000]). Both are now
+            // body-level, so the numbers are genuinely comparable.
+            className="fixed inset-0 z-[60100] bg-black flex overflow-hidden animate-in fade-in duration-300"
             onMouseDown={(e) => {
                 // Global click handler to handle deselection if clicking outside everything
                 // e.stopPropagation() is already on the root div, so this captures clicks inside the modal
@@ -562,7 +580,7 @@ export default function ImageDrawingLayer({
                                     <textarea
                                         autoFocus={editingTextId === el.id}
                                         value={el.content}
-                                        placeholder="Type here..."
+                                        placeholder={EMPTY_TEXT_ANNOTATION_PLACEHOLDER}
                                         onChange={(e) => {
                                             setTextElements(prev => prev.map(t => t.id === el.id ? { ...t, content: e.target.value } : t));
                                             adjustTextareaHeight(e.target);
@@ -868,6 +886,7 @@ export default function ImageDrawingLayer({
                     </div>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 }

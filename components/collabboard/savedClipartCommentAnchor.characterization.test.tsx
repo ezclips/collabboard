@@ -132,13 +132,34 @@ describe('PATCH 8M -- Site B is a simple card-relative anchor, not viewport-posi
     expect(block).toMatch(/onMouseDown=\{\(e\) => e\.stopPropagation\(\)\}/);
   });
 
-  it('production diff against bdebed5 (pre-8L-B) is limited to a harmless whitespace fix', () => {
-    // This is the strongest guarantee available at this layer: the file is
-    // byte-for-byte the pre-viewport-experiment implementation, aside from a
-    // trailing-space cleanup on one comment line.
+  it('Site B is still not viewport-anchored or portalled', () => {
+    /**
+     * Narrowed in R6D, deliberately, to the guarantee this test is named for.
+     *
+     * It used to assert the WHOLE file imports no `createPortal`, which was a
+     * fair proxy while nothing in it portalled anything. That stopped being
+     * true for an unrelated reason: R6C portals the image-editor OVERLAY out
+     * of CanvasViewport's `isolation: isolate` boundary, because a blocking
+     * modal trapped in that subtree can never paint above the Knowledge
+     * reader. R6D portals the Draw-on-top and crop layers for the same reason.
+     *
+     * None of that touches Site B, which is what 8M actually fixed: the saved-
+     * clipart comment panel must stay a plain card-relative absolute box. So
+     * the assertion now reads the Site B block itself rather than the file.
+     */
     const src = readFreeform();
     expect(src).not.toContain('ViewportAnchoredCommentShell');
-    expect(src).not.toContain("import { createPortal } from 'react-dom'");
+
+    const block = siteBBlock(src);
+    expect(block).not.toContain('createPortal');
+    expect(block).not.toContain('document.body');
+    expect(block).not.toContain('getBoundingClientRect');
+    expect(block).toMatch(/className="absolute left-full top-0 ml-3/);
+
+    // The portals that DO exist are modal overlays, never a comment anchor.
+    for (const portalled of ['{imageToolbarPadletId && createPortal(']) {
+      expect(src, portalled).toContain(portalled);
+    }
   });
 });
 

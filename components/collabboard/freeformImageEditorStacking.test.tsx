@@ -77,7 +77,13 @@ describe('T1-T6: the image editor is a blocking editor, above the reader', () =>
 
   it('T4: the reader yields to that flag through the SAME shared authority', () => {
     // No second ladder, no isImageEditorOpen special case inside the reader.
-    expect(canvasClient).toContain('blockingEditorOpen={isBlockingEditorModalOpen}');
+    // R6D widened what the drawer is handed -- isBlockingOverlayOpen is
+    // isBlockingEditorModalOpen plus the image subtool modals -- but it is
+    // still ONE flag, computed in one place, for every docked surface.
+    expect(canvasClient).toContain('blockingEditorOpen={isBlockingOverlayOpen}');
+    expect(canvasClient).toContain(
+      'const isBlockingOverlayOpen = isBlockingEditorModalOpen || isImageSubtoolModalOpen;',
+    );
     expect(readerDrawer).toContain('const sidePanelBelowEditor = !isWorkspace && blockingEditorOpen;');
     expect(readerDrawer).toContain('style={sidePanelBelowEditor ? { zIndex: 900 } : undefined}');
     for (const forbidden of ['imageToolbarPadletId', 'isImageEditorOpen']) {

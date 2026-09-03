@@ -287,7 +287,13 @@ describe('the board-level entry point', () => {
     const chatMount = CLIENT.indexOf('<BoardAiChatDrawer');
     expect(chatMount).toBeGreaterThan(readerMount);
     expect(CLIENT.indexOf('</CanvasViewport>')).toBeLessThan(chatMount);
-    expect(CLIENT).toContain('blockingEditorOpen={isBlockingEditorModalOpen}');
+    // R6D: both docked drawers are handed isBlockingOverlayOpen -- the same
+    // generic memo plus the image subtool modals. Chat still yields through
+    // one shared flag rather than learning about any specific editor.
+    expect(CLIENT).toContain('blockingEditorOpen={isBlockingOverlayOpen}');
+    expect(CLIENT).toContain(
+      'const isBlockingOverlayOpen = isBlockingEditorModalOpen || isImageSubtoolModalOpen;',
+    );
   });
 
   it('offers exactly one Board AI action, available to viewers', () => {

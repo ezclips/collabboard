@@ -530,7 +530,13 @@ describe('P6J-F7-B1 Knowledge reader drawer stacking band', () => {
     });
 
     it('the yield runs off the GENERIC blocking-editor authority, not a Note-only flag', () => {
-      expect(canvasClientSrc).toContain('blockingEditorOpen={isBlockingEditorModalOpen}');
+      // R6D: the drawer is handed isBlockingOverlayOpen, which is the SAME
+      // generic memo plus the image subtool modals (Draw-on-top / Edit-image).
+      // Still one flag, still not a Note-only condition -- strictly broader.
+      expect(canvasClientSrc).toContain('blockingEditorOpen={isBlockingOverlayOpen}');
+      expect(canvasClientSrc).toContain(
+        'const isBlockingOverlayOpen = isBlockingEditorModalOpen || isImageSubtoolModalOpen;',
+      );
       // That memo answers for every blocking editor, so no editor added later
       // has to remember this contract exists.
       const memo = canvasClientSrc.slice(

@@ -11,6 +11,7 @@ import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
 import { resizeImageOuterBoxToAspect } from '@/lib/domain/canvas/imageResizeGeometry';
+import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -947,16 +948,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on draft changes; activeImageToolbarPadlet is read fresh from the same render
   }, [imageTitleDraft]);
-  const activeImageToolbarSrc = activeImageToolbarPadlet
-    ? (
-      activeImageToolbarPadlet.metadata?.imageUrl ||
-      activeImageToolbarPadlet.metadata?.drawing ||
-      (activeImageToolbarPadlet as any).file_url ||
-      (typeof activeImageToolbarPadlet.content === 'string' && /^https?:\/\//i.test(activeImageToolbarPadlet.content)
-        ? activeImageToolbarPadlet.content
-        : null)
-    )
-    : null;
+  /**
+   * R6D. The modal is a PREVIEW of the post, so it shows what the board card
+   * shows -- via the one shared authority rather than a second ordering.
+   *
+   * This list used to start with `metadata.imageUrl`, which is always present,
+   * so `metadata.drawing` was unreachable: a saved Draw-on-top composite was
+   * visible on the card and invisible in the modal meant to preview it.
+   */
+  const activeImageToolbarSrc = resolveImagePostDisplaySrc(activeImageToolbarPadlet);
 
   const openFreeformImageEditModal = React.useCallback((padlet: Padlet) => {
     // imageToolbarPadletId drives a self-contained `fixed inset-0` overlay
@@ -1925,7 +1925,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 title={padlet.metadata?.source === 'import' ? `Open in ${padlet.metadata?.importProvider === 'google-drive' ? 'Google Drive' : 'OneDrive'}` : undefined}
               >
                 <img
-                  src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}
+                  // R6D: the same shared display authority the modal now uses,
+                  // so card and preview can never drift apart again.
+                  src={resolveImagePostDisplaySrc(padlet) ?? undefined}
                   alt={padlet.metadata?.caption || 'Image'}
                   // PATCH FREEFORM-IMAGE-R7: manually-sized Images keep the
                   // removed max-height cap from R5, but size by content
@@ -5271,14 +5273,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
                 currentColor={activeImageToolbarPadlet.metadata?.captionStyle?.color}
                 currentHighlight={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                /**
+                 * R6D. The main overlay stays MOUNTED behind a subtool.
+                 *
+                 * Tearing it down was the dominant avoidable cost of switching
+                 * tools: it destroys the `<img>`, and the R6B private image
+                 * route answers `Cache-Control: private, no-store`, so the
+                 * browser is forbidden from reusing the response and every
+                 * return had to re-download and re-decode the same unchanged
+                 * image -- which is the blank flash on the way back.
+                 *
+                 * Keeping it mounted keeps that decoded image alive for the
+                 * session, with no cache of any kind added. The subtools now
+                 * portal above it (see ImageDrawingLayer/ImageCropLayer), so
+                 * the retained overlay is fully covered and inert.
+                 */
                 onEditImage={() => {
-                  setImageToolbarPadletId(null);
                   setCropPadlet(activeImageToolbarPadlet);
                   setIsCropMode(true);
                 }}
                 onDrawOnTop={() => {
-                  closeAllToolbars();
-                  setImageToolbarPadletId(null);
+                  // `imageToolbar: true` -- closeAllToolbars() would otherwise
+                  // clear the very overlay being retained.
+                  closeAllToolbars({ imageToolbar: true });
                   setDrawingPadlet(activeImageToolbarPadlet);
                   setIsDrawingMode(true);
                 }}
