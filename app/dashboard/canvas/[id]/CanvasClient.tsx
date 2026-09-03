@@ -96,7 +96,8 @@ import {
   parseKnowledgeSourceAreaClipPayload,
   parseKnowledgeSourceTextClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
-import { requestKnowledgePdfAreaImage } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
+import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
+import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
   KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
   isKnowledgeSourceNoteTopStripColor,
@@ -670,6 +671,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const viewDrawingPadlet = canvasState.editors.viewDrawingPadlet; // SHARED: overlays + editors
   const setViewDrawingPadlet = (v: Padlet | null) => dispatch({ type: 'EDITORS_PATCH', payload: { viewDrawingPadlet: v } });
   const [isClipartDraftModalOpen, setIsClipartDraftModalOpen] = useState(false);
+  /**
+   * R6I. A dropped PDF area waiting to be confirmed.
+   *
+   * Non-null means the creation modal is showing a draft that has NO row, NO
+   * crop and no board presence -- nothing has been written, so Cancel leaves
+   * nothing behind, not even an orphaned private asset.
+   */
+  const [pendingPdfAreaDraft, setPendingPdfAreaDraft] = useState<KnowledgePdfAreaImageDraft | null>(null);
+  /** Guards the create call, so a second Save cannot make a second card. */
+  const [isPdfAreaDraftSaving, setIsPdfAreaDraftSaving] = useState(false);
   const [isClipartDraftReplaceMode, setIsClipartDraftReplaceMode] = useState(false);
   // PATCH-149B1b-ii: single destination slice (§25.4) -- isOpen is `!== null`,
   // readOnly is `=== 'document-viewer'`; never a separate boolean pair.
@@ -6381,27 +6392,98 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     // Read now: `event` is only guaranteed live during this synchronous turn.
     const dropPoint = getCanvasPointFromClient(event.clientX, event.clientY);
+    const placement = {
+      positionX: Math.round(dropPoint.x),
+      positionY: Math.round(dropPoint.y),
+    };
 
-    void (async () => {
-      const created = await requestKnowledgePdfAreaImage(canvasId, payload, {
-        positionX: Math.round(dropPoint.x),
-        positionY: Math.round(dropPoint.y),
-      });
-      if (!created.ok) {
-        // A viewer, a revoked board, or a page with no rendered derivative all
-        // end here. Nothing partial was placed, so there is nothing to undo.
-        toast.error(created.status === 403
-          ? 'You do not have permission to add cards to this board'
-          : 'Could not create the image from that area');
-        return;
-      }
-      setPadlets(prev => [...prev, created.padlet as unknown as Padlet]);
-      toast.success('Image added from PDF area');
-    })();
+    /**
+     * R6I. The drop no longer creates anything.
+     *
+     * It stages a local draft and opens the ordinary Image creation modal, the
+     * same shape the text arm already uses for Notes: capture the draft and the
+     * intended position, let the user confirm, and write only on Save.
+     *
+     * The privacy consequence is the point. The server crop is keyed by padlet
+     * id and is created in the SAME call as the row, so deferring that one call
+     * defers both -- a user who cancels leaves no card AND no private asset,
+     * where before every drop persisted a crop whether they wanted it or not.
+     */
+    const preview = takeKnowledgeAreaDraftPreview();
+    setPendingPdfAreaDraft({ payload, placement, preview });
+    setPadletToEdit({
+      id: 'new',
+      board_id: canvasId,
+      title: payload.originalFilename || 'PDF area',
+      content: '',
+      type: 'image',
+      position_x: placement.positionX,
+      position_y: placement.positionY,
+      width: 280,
+      height: 280,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      // Display only, and never saved: the PDF-area branch below never reaches
+      // the generic saveCard, so this preview cannot be written to a row.
+      metadata: preview ? { imageUrl: preview } : {},
+    } as Padlet);
+    setIsClipartDraftModalOpen(true);
     return true;
   }, [
     canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout,
-    getCanvasPointFromClient, setPadlets,
+    getCanvasPointFromClient, setPadletToEdit, setIsClipartDraftModalOpen,
+    setPendingPdfAreaDraft,
+  ]);
+
+  /** R6I. Discards a pending PDF-area draft, writing nothing. */
+  const discardPdfAreaDraft = useCallback(() => {
+    setPendingPdfAreaDraft(null);
+    setIsPdfAreaDraftSaving(false);
+    clearKnowledgeAreaDraftPreview();
+    setPadletToEdit(null);
+    setIsClipartDraftModalOpen(false);
+  }, [setPadletToEdit, setIsClipartDraftModalOpen]);
+
+  /**
+   * R6I. Confirms a pending PDF-area draft.
+   *
+   * This is the ONLY path that writes, and it is the same authenticated
+   * authority the drop used to call inline: the server re-checks board EDIT and
+   * source READ, re-validates the rectangle, crops from its own derivative into
+   * the private bucket and inserts the row. Nothing about that contract moved --
+   * only when it runs.
+   *
+   * On failure the modal deliberately stays open with the draft intact, so a
+   * retry costs the user nothing and a transient error cannot silently discard
+   * what they set up.
+   */
+  const savePdfAreaDraft = useCallback(async () => {
+    if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving) return;
+    setIsPdfAreaDraftSaving(true);
+    const created = await requestKnowledgePdfAreaImage(
+      canvasId,
+      pendingPdfAreaDraft.payload,
+      { ...pendingPdfAreaDraft.placement, title: padletToEdit?.title ?? undefined },
+    );
+    setIsPdfAreaDraftSaving(false);
+    if (!created.ok) {
+      // A viewer, a revoked board, or a page with no rendered derivative all
+      // end here. Nothing partial was placed, so there is nothing to undo --
+      // and the draft is still on screen to retry from.
+      toast.error(created.status === 403
+        ? 'You do not have permission to add cards to this board'
+        : 'Could not create the image from that area');
+      return;
+    }
+    setPadlets(prev => [...prev, created.padlet as unknown as Padlet]);
+    setPendingPdfAreaDraft(null);
+    clearKnowledgeAreaDraftPreview();
+    setPadletToEdit(null);
+    setIsClipartDraftModalOpen(false);
+    toast.success('Image added from PDF area');
+  }, [
+    canvasId, pendingPdfAreaDraft, isPdfAreaDraftSaving, padletToEdit,
+    setPadlets, setPadletToEdit, setIsClipartDraftModalOpen,
   ]);
 
   const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
@@ -9249,6 +9331,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               isOpen={isClipartDraftModalOpen}
               padlet={padletToEdit}
               onClose={() => {
+                // R6I. A pending PDF area is created through its own
+                // authenticated authority, never the generic card save -- which
+                // would write the local draft preview into a row.
+                if (pendingPdfAreaDraft) {
+                  void savePdfAreaDraft();
+                  return;
+                }
                 if (!padletToEdit) {
                   setIsClipartDraftModalOpen(false);
                   return;
@@ -9262,6 +9351,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 setIsClipartDraftModalOpen(false);
               }}
               onDiscard={() => {
+                // R6I. Cancel on a pending PDF area writes nothing at all:
+                // no row, no crop, no source reference.
+                if (pendingPdfAreaDraft) {
+                  discardPdfAreaDraft();
+                  return;
+                }
                 if (padletToEdit?.id && padletToEdit.id !== 'new') {
                   setIsClipartDraftModalOpen(false);
                   setIsClipartDraftReplaceMode(false);

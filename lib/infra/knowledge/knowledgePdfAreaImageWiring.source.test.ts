@@ -59,12 +59,20 @@ describe('F1-F5: the selected area is itself the drag source', () => {
   });
 
   it('F4: it publishes the area arm on the ONE dedicated type, via the shared builder', () => {
-    const dragStart = after(selector, 'const startAreaClipDrag = (', 1200);
+    const dragStart = after(selector, 'const startAreaClipDrag = (', 2400);
     expect(dragStart).toContain('event.dataTransfer.setData(');
     expect(dragStart).toContain('KNOWLEDGE_SOURCE_CLIP_MIME');
     expect(dragStart).toContain('buildKnowledgeSourceClipTransfer({');
     expect(dragStart).toContain("kind: 'area'");
     expect(dragStart).toContain('region: armedRegion');
+    // R6I. The drag now also prepares a local preview for the creation modal.
+    // It must stay OFF the transfer: crop bytes on a DataTransfer would make a
+    // private PDF reconstructible from a drag, which is the whole reason this
+    // payload is identity-and-a-rectangle in the first place.
+    const setData = dragStart.slice(dragStart.indexOf('event.dataTransfer.setData('));
+    for (const forbidden of ['stashKnowledgeAreaDraftPreview', 'renderAreaPreviewFromImage', 'toDataURL', 'data:image']) {
+      expect(setData, forbidden).not.toContain(forbidden);
+    }
     // The constant, never a re-typed literal that could drift.
     expect(selector).not.toContain("'application/collabboard-knowledge-clip'");
     // text/plain accompanies every drag on the system; honouring it anywhere
@@ -82,6 +90,16 @@ describe('F1-F5: the selected area is itself the drag source', () => {
     }
   });
 });
+
+/** R6I. The drop handler -- which now only stages a draft. */
+function areaDropHandler(): string {
+  return after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2600);
+}
+
+/** R6I. The Save path -- the only place that creates anything. */
+function areaSavePath(): string {
+  return after(canvasClient, 'const savePdfAreaDraft = useCallback(', 2400);
+}
 
 describe('F6-F10: the canvas asks the server, and claims the drop exactly once', () => {
   it('F6: the area arm is checked ahead of the text arm at EVERY drop site', () => {
@@ -101,16 +119,18 @@ describe('F6-F10: the canvas asks the server, and claims the drop exactly once',
   });
 
   it('F7: it claims the drop synchronously, before anything can await', () => {
-    const handler = after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2200);
+    const handler = areaDropHandler();
     const parse = handler.indexOf('parseKnowledgeSourceAreaClipPayload(');
     const bail = handler.indexOf('if (!payload) return false;');
     const stop = handler.indexOf('event.stopPropagation();');
-    const firstAwait = handler.indexOf('await ');
     expect(bail).toBeGreaterThan(parse);
     expect(stop).toBeGreaterThan(bail);
-    expect(firstAwait).toBeGreaterThan(stop);
-    // The drop point is read while the event is still live.
-    expect(handler.indexOf('getCanvasPointFromClient(event.clientX, event.clientY)')).toBeLessThan(firstAwait);
+    // R6I made this stronger rather than weaker: the drop stages a draft and
+    // returns, so there is no await on this path at all and nothing can be
+    // deferred past the event's lifetime.
+    expect(handler).not.toContain('await ');
+    // The drop point is still read while the event is live.
+    expect(handler).toContain('getCanvasPointFromClient(event.clientX, event.clientY)');
   });
 
   it('F8: it re-checks the creation capability rather than trusting the drag', () => {
@@ -123,23 +143,39 @@ describe('F6-F10: the canvas asks the server, and claims the drop exactly once',
   });
 
   it('F9: it reads only the dedicated type and creates nothing itself', () => {
-    const handler = after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2200);
+    const handler = areaDropHandler();
     expect(handler).toContain('event.dataTransfer.getData(KNOWLEDGE_SOURCE_CLIP_MIME)');
     expect(handler).not.toContain('text/plain');
-    // One transport helper; no direct insert, no upload, no public URL.
-    expect(handler).toContain('requestKnowledgePdfAreaImage(canvasId, payload, {');
+    // R6I. The drop creates NOTHING -- not even through the transport helper.
+    // It stages a draft and opens the ordinary creation modal.
+    expect(handler).not.toContain('requestKnowledgePdfAreaImage(');
+    expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
+    expect(handler).toContain('setIsClipartDraftModalOpen(true)');
     for (const forbidden of ['.insert(', '.upload(', 'getPublicUrl', 'storageGateway', 'toDataURL']) {
       expect(handler, forbidden).not.toContain(forbidden);
+    }
+    // ...and the one transport helper is still the only way anything is made,
+    // now on the Save path.
+    const save = areaSavePath();
+    expect(save).toContain('requestKnowledgePdfAreaImage(');
+    for (const forbidden of ['.insert(', '.upload(', 'getPublicUrl', 'storageGateway']) {
+      expect(save, forbidden).not.toContain(forbidden);
     }
   });
 
   it('F10: a refusal places nothing, and only tells the user', () => {
-    const handler = after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2200);
-    const refusal = handler.indexOf('if (!created.ok)');
-    const place = handler.indexOf('setPadlets(prev => [...prev, created.padlet');
+    // R6I. The refusal now lives with the create, on the Save path.
+    const save = areaSavePath();
+    const refusal = save.indexOf('if (!created.ok)');
+    const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
     expect(refusal).toBeGreaterThan(-1);
     expect(place).toBeGreaterThan(refusal);
-    expect(handler).toContain('toast.error(');
+    expect(save).toContain('toast.error(');
+    // A refusal must leave the draft alone so the user can retry: the modal is
+    // only closed after a successful create.
+    const close = save.indexOf('setIsClipartDraftModalOpen(false)');
+    expect(close).toBeGreaterThan(place);
+    expect(save.slice(refusal, place)).not.toContain('setPendingPdfAreaDraft(null)');
   });
 });
 

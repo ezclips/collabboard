@@ -1,0 +1,330 @@
+// @vitest-environment jsdom
+//
+// R6I -- a dropped PDF area is confirmed before it becomes a card.
+//
+// The privacy consequence is the reason this matters more than it looks. The
+// server crop is keyed by padlet id and is created in the SAME call as the row,
+// so the old flow persisted a private crop the instant anyone dragged a region
+// onto the board -- whether or not they wanted the card. Deferring that one
+// call to Save defers both, which is why Cancel can now leave no orphan.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  areaPreviewCropRect,
+  clearKnowledgeAreaDraftPreview,
+  renderAreaPreviewFromImage,
+  stashKnowledgeAreaDraftPreview,
+  takeKnowledgeAreaDraftPreview,
+} from './knowledgeAreaDraftPreview';
+import {
+  knowledgePdfAreaImageEndpoint,
+  requestKnowledgePdfAreaImage,
+} from './knowledgePdfAreaImageClient';
+import type { KnowledgeSourceAreaClipPayload } from '../../domain/knowledge/knowledgeSourceClipPayload';
+
+const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), 'utf8');
+const canvasClient = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+const selector = read('components/collabboard/KnowledgeDocumentPageRegionSelector.tsx');
+const previewModule = read('lib/infra/knowledge/knowledgeAreaDraftPreview.ts');
+const serveRoute = read('lib/server/knowledge/knowledgePdfAreaImageServeRoute.ts');
+
+/** Source with comments stripped: prose names what the contract forbids. */
+const code = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+
+function after(source: string, anchor: string, count: number): string {
+  const at = source.indexOf(anchor);
+  expect(at, `anchor not found: ${anchor}`).toBeGreaterThan(-1);
+  return source.slice(at, at + count);
+}
+
+const dropHandler = () => after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2600);
+const savePath = () => after(canvasClient, 'const savePdfAreaDraft = useCallback(', 2400);
+const discardPath = () => after(canvasClient, 'const discardPdfAreaDraft = useCallback(', 600);
+
+const PAYLOAD: KnowledgeSourceAreaClipPayload = {
+  kind: 'area',
+  sourceDocumentId: '11111111-1111-4111-8111-111111111111',
+  originalFilename: 'paper.pdf',
+  pageNumber: 3,
+  region: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+} as KnowledgeSourceAreaClipPayload;
+
+// --- Drop / draft ----------------------------------------------------------
+
+describe('R6I-1..4: the drop stages a draft instead of creating a card', () => {
+  it('R6I-1: nothing is created on drop -- not even through the transport helper', () => {
+    const handler = dropHandler();
+    expect(handler).not.toContain('requestKnowledgePdfAreaImage(');
+    for (const forbidden of ['.insert(', '.upload(', 'getPublicUrl', 'fetch(']) {
+      expect(handler, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('R6I-2: the drop opens the ordinary Image creation modal', () => {
+    // The existing Image draft modal, not a new "PDF crop" editor type.
+    const handler = dropHandler();
+    expect(handler).toContain('setIsClipartDraftModalOpen(true)');
+    expect(handler).toContain("type: 'image'");
+  });
+
+  it('R6I-3: the modal is given the region preview to show', () => {
+    const handler = dropHandler();
+    expect(handler).toContain('takeKnowledgeAreaDraftPreview()');
+    expect(handler).toContain('metadata: preview ? { imageUrl: preview } : {}');
+  });
+
+  it('R6I-4: the draft remembers document, page, rectangle AND the drop position', () => {
+    const handler = dropHandler();
+    expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
+    // The placement is read from the live event, not recomputed later.
+    expect(handler).toContain('getCanvasPointFromClient(event.clientX, event.clientY)');
+    expect(handler).toContain('positionX: Math.round(dropPoint.x)');
+    expect(handler).toContain('positionY: Math.round(dropPoint.y)');
+    // ...and the payload carries the identity/page/rect unaltered.
+    expect(savePath()).toContain('pendingPdfAreaDraft.payload');
+  });
+});
+
+// --- Stacking --------------------------------------------------------------
+
+describe('R6I-6,7: the creation modal is above the PDF side panel', () => {
+  it('R6I-6: it registers through the SHARED blocking-editor authority', () => {
+    // Not a one-off z-index: the modal this flow reuses is already part of the
+    // one flag every docked surface (the Reader included) yields to.
+    const memo = after(canvasClient, 'const isBlockingEditorModalOpen = useMemo(', 1600);
+    expect(memo).toContain('isClipartDraftModalOpen');
+    expect(canvasClient).toContain('blockingEditorOpen={isBlockingOverlayOpen}');
+    expect(canvasClient).toContain(
+      'const isBlockingOverlayOpen = isBlockingEditorModalOpen || isImageSubtoolModalOpen;',
+    );
+  });
+
+  it('R6I-5,7: the Reader stays mounted and yields rather than being torn down', () => {
+    const reader = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+    expect(reader).toContain('const sidePanelBelowEditor = !isWorkspace && blockingEditorOpen;');
+    expect(reader).toContain('style={sidePanelBelowEditor ? { zIndex: 900 } : undefined}');
+    // No unmount-on-editor path: it restacks, so nothing is re-fetched.
+    expect(reader).not.toContain('if (blockingEditorOpen) return null');
+  });
+});
+
+// --- Save ------------------------------------------------------------------
+
+describe('R6I-8..17: Save is the only thing that writes', () => {
+  it('R6I-8,14: the crop is requested through the existing authenticated authority, on Save', () => {
+    const save = savePath();
+    expect(save).toContain('requestKnowledgePdfAreaImage(');
+    expect(save).toContain('pendingPdfAreaDraft.payload');
+    expect(save).toContain('pendingPdfAreaDraft.placement');
+  });
+
+  it('R6I-12: the card is placed at the ORIGINAL drop position, not a fresh viewport read', () => {
+    const save = savePath();
+    expect(save).toContain('...pendingPdfAreaDraft.placement');
+    // The save path must never re-derive a position.
+    expect(save).not.toContain('getCanvasPointFromClient');
+    expect(save).not.toContain('viewport');
+  });
+
+  it('R6I-11,17: a second Save cannot create a second card', () => {
+    const save = savePath();
+    // The in-flight guard is checked before anything is sent...
+    expect(save).toContain('if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving) return;');
+    expect(save.indexOf('setIsPdfAreaDraftSaving(true)'))
+      .toBeLessThan(save.indexOf('await requestKnowledgePdfAreaImage'));
+    // ...and the draft is cleared on success, so a late second press finds none.
+    expect(save).toContain('setPendingPdfAreaDraft(null)');
+  });
+
+  it('R6I-16: a successful Save closes the modal and shows the created card', () => {
+    const save = savePath();
+    const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
+    const close = save.indexOf('setIsClipartDraftModalOpen(false)');
+    expect(place).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(place);
+  });
+
+  it('R6I-13: the created card is whatever the server returned -- no client-built row', () => {
+    const save = savePath();
+    expect(save).toContain('created.padlet as unknown as Padlet');
+    expect(save).not.toContain("type: 'image'");
+  });
+
+  it('the confirmed title reaches the server as display text only', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      calls.push(JSON.parse(String(init.body)));
+      return { ok: true, json: async () => ({ padlet: { id: 'p1' } }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await requestKnowledgePdfAreaImage('b1', PAYLOAD, { positionX: 5, positionY: 6, title: '  My area  ' }, fetchImpl);
+    expect(calls[0].title).toBe('My area');
+    // Identity, page and rectangle are unchanged by the title.
+    expect(calls[0].knowledgeDocumentId).toBe(PAYLOAD.sourceDocumentId);
+    expect(calls[0].pageNumber).toBe(3);
+    expect(calls[0].positionX).toBe(5);
+    expect(calls[0].positionY).toBe(6);
+    // No crop bytes are ever uploaded.
+    expect(Object.keys(calls[0])).not.toContain('preview');
+    expect(JSON.stringify(calls[0])).not.toContain('data:image');
+  });
+
+  it('an absent title falls back to the source filename, as the drop flow always did', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      calls.push(JSON.parse(String(init.body)));
+      return { ok: true, json: async () => ({ padlet: { id: 'p1' } }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await requestKnowledgePdfAreaImage('b1', PAYLOAD, { positionX: 1, positionY: 2 }, fetchImpl);
+    expect(calls[0].title).toBe('paper.pdf');
+    await requestKnowledgePdfAreaImage('b1', PAYLOAD, { positionX: 1, positionY: 2, title: '   ' }, fetchImpl);
+    expect(calls[1].title).toBe('paper.pdf');
+  });
+});
+
+// --- Cancel ----------------------------------------------------------------
+
+describe('R6I-18..21: Cancel writes nothing at all', () => {
+  it('R6I-18,19: the discard path creates no card and requests no crop', () => {
+    const discard = discardPath();
+    expect(discard).not.toContain('requestKnowledgePdfAreaImage');
+    expect(discard).not.toContain('setPadlets');
+    expect(discard).not.toContain('saveCard');
+  });
+
+  it('R6I-20: the temporary preview is released', () => {
+    const discard = discardPath();
+    expect(discard).toContain('clearKnowledgeAreaDraftPreview()');
+    expect(discard).toContain('setPendingPdfAreaDraft(null)');
+    expect(discard).toContain('setPadletToEdit(null)');
+  });
+
+  it('R6I-21: the modal closes, and the Reader is left to restack on its own', () => {
+    expect(discardPath()).toContain('setIsClipartDraftModalOpen(false)');
+  });
+
+  it('Cancel is wired to the modal, ahead of the generic discard', () => {
+    const modal = after(canvasClient, '<ClipartCardDraftModal', 2600);
+    const branch = modal.indexOf('discardPdfAreaDraft()');
+    const generic = modal.indexOf("if (padletToEdit?.id && padletToEdit.id !== 'new')");
+    expect(branch).toBeGreaterThan(-1);
+    expect(branch).toBeLessThan(generic);
+  });
+});
+
+// --- Failure ---------------------------------------------------------------
+
+describe('R6I-22..25: a failed Save keeps the work on screen', () => {
+  it('R6I-22,23: the modal stays open and the draft is retained', () => {
+    const save = savePath();
+    const refusal = save.indexOf('if (!created.ok)');
+    const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
+    // Everything that tears the draft down happens strictly AFTER the refusal
+    // returns, so a failure cannot discard it.
+    for (const teardown of ['setPendingPdfAreaDraft(null)', 'setIsClipartDraftModalOpen(false)', 'setPadletToEdit(null)']) {
+      expect(save.indexOf(teardown), teardown).toBeGreaterThan(place);
+    }
+    expect(save.slice(refusal, place)).toContain('return;');
+  });
+
+  it('R6I-24: no broken card is placed on the way out', () => {
+    const save = savePath();
+    expect(save.indexOf('setPadlets(prev => [...prev, created.padlet')).toBeGreaterThan(save.indexOf('if (!created.ok)'));
+  });
+
+  it('R6I-25: the in-flight guard is released so a retry can proceed', () => {
+    const save = savePath();
+    const release = save.indexOf('setIsPdfAreaDraftSaving(false)');
+    const refusal = save.indexOf('if (!created.ok)');
+    expect(release).toBeGreaterThan(-1);
+    expect(release).toBeLessThan(refusal);
+  });
+});
+
+// --- The preview: display only, never an authority -------------------------
+
+describe('R6I: the draft preview is display-only, and costs no request', () => {
+  beforeEach(() => { clearKnowledgeAreaDraftPreview(); });
+  afterEach(() => { clearKnowledgeAreaDraftPreview(); vi.restoreAllMocks(); });
+
+  it('maps a normalized display region onto source pixels', () => {
+    expect(areaPreviewCropRect({ x: 0.25, y: 0.5, width: 0.5, height: 0.25 }, 400, 800))
+      .toEqual({ sx: 100, sy: 400, sw: 200, sh: 200 });
+  });
+
+  it('refuses rather than reading outside the image', () => {
+    expect(areaPreviewCropRect({ x: 0, y: 0, width: 1, height: 1 }, 0, 0)).toBeNull();
+    expect(areaPreviewCropRect({ x: 0, y: 0, width: 0.0001, height: 0.0001 }, 10, 10)).toBeNull();
+    const edge = areaPreviewCropRect({ x: 0.99, y: 0.99, width: 0.5, height: 0.5 }, 100, 100)!;
+    expect(edge.sx + edge.sw).toBeLessThanOrEqual(100);
+    expect(edge.sy + edge.sh).toBeLessThanOrEqual(100);
+  });
+
+  it('is handed over exactly once, then the slot is empty', () => {
+    stashKnowledgeAreaDraftPreview('data:image/webp;base64,AAA');
+    expect(takeKnowledgeAreaDraftPreview()).toBe('data:image/webp;base64,AAA');
+    expect(takeKnowledgeAreaDraftPreview()).toBeNull();
+  });
+
+  it('a drag that never lands leaves nothing retained', () => {
+    stashKnowledgeAreaDraftPreview('data:image/webp;base64,AAA');
+    clearKnowledgeAreaDraftPreview();
+    expect(takeKnowledgeAreaDraftPreview()).toBeNull();
+  });
+
+  it('it is cut from the already-loaded page image, with no new request', () => {
+    // The one thing that must not happen here is a second fetch of private
+    // bytes. It draws from the element the Reader already has on screen.
+    expect(code(previewModule)).not.toContain('fetch(');
+    expect(code(previewModule)).not.toContain('new Image(');
+    expect(code(previewModule)).not.toContain('XMLHttpRequest');
+    expect(previewModule).toContain('context.drawImage(image,');
+    const drag = after(selector, 'const startAreaClipDrag = (', 2400);
+    expect(drag).toContain("wrapperRef.current?.querySelector('img')");
+  });
+
+  it('a canvas the browser refuses to export yields no preview, not an exception', () => {
+    const image = { naturalWidth: 100, naturalHeight: 100 } as HTMLImageElement;
+    vi.spyOn(document, 'createElement').mockImplementation((() => ({
+      width: 0, height: 0,
+      getContext: () => ({ drawImage: () => {} }),
+      toDataURL: () => { throw new Error('tainted'); },
+    })) as unknown as typeof document.createElement);
+    expect(renderAreaPreviewFromImage(image, { x: 0, y: 0, width: 1, height: 1 })).toBeNull();
+  });
+});
+
+// --- Privacy ---------------------------------------------------------------
+
+describe('R6I-9,10,15: the private serving contract is untouched', () => {
+  it('R6I-15: the crop is still served by the same authenticated route', () => {
+    expect(serveRoute).toContain('no-store');
+    expect(serveRoute).toContain('private');
+    expect(knowledgePdfAreaImageEndpoint('b1')).toBe('/api/boards/b1/knowledge/area-image');
+  });
+
+  it('R6I-9,10: authorisation still happens server-side, on the same call', () => {
+    // R6I moved WHEN this call runs, never who checks it. The route still
+    // re-authorises board EDIT and source READ for itself.
+    const route = read('lib/server/knowledge/knowledgePdfAreaImageRoute.ts');
+    expect(route).toContain('insertPadlet');
+    // The client never gained an authorisation decision of its own.
+    expect(code(read('lib/infra/knowledge/knowledgePdfAreaImageClient.ts')))
+      .not.toContain('serviceRole');
+  });
+
+  it('no public URL, signed URL or persistent client cache is introduced', () => {
+    for (const source of [previewModule, code(canvasClient)]) {
+      for (const forbidden of ['getPublicUrl', 'createSignedUrl', 'padlet-files', 'storage/v1']) {
+        expect(source, forbidden).not.toContain(forbidden);
+      }
+    }
+    for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB']) {
+      expect(code(previewModule), forbidden).not.toContain(forbidden);
+    }
+  });
+});

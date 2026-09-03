@@ -18,6 +18,28 @@ import type { KnowledgeSourceAreaClipPayload } from '../../domain/knowledge/know
 export interface KnowledgePdfAreaImagePlacement {
   readonly positionX: number;
   readonly positionY: number;
+  /**
+   * R6I. The title the user confirmed in the creation modal, when there was
+   * one. Display text only -- the server re-trims and caps it, and it is never
+   * a path, an id or an authorisation. Absent means "use the source filename",
+   * which is what the drop-time flow always did.
+   */
+  readonly title?: string;
+}
+
+/**
+ * R6I. Everything a dropped area needs to become a card LATER.
+ *
+ * Held in the browser while the creation modal is open. Nothing here is
+ * persisted, and `preview` in particular is display-only -- Save sends identity
+ * and a rectangle, exactly as the drop used to, and the server re-crops from
+ * its own stored derivative.
+ */
+export interface KnowledgePdfAreaImageDraft {
+  readonly payload: KnowledgeSourceAreaClipPayload;
+  readonly placement: KnowledgePdfAreaImagePlacement;
+  /** A local preview cut from the already-authorised page image, or null. */
+  readonly preview: string | null;
 }
 
 export type KnowledgePdfAreaImageResult =
@@ -45,7 +67,9 @@ export async function requestKnowledgePdfAreaImage(
         knowledgeDocumentId: payload.sourceDocumentId,
         pageNumber: payload.pageNumber,
         region: payload.region,
-        title: payload.originalFilename,
+        title: (typeof placement.title === 'string' && placement.title.trim().length > 0)
+          ? placement.title.trim()
+          : payload.originalFilename,
         positionX: placement.positionX,
         positionY: placement.positionY,
       }),

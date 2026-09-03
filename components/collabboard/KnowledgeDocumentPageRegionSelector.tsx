@@ -17,6 +17,10 @@ import {
   type PageImageContentBox,
 } from '@/lib/domain/knowledge/knowledgePageRegionPointer';
 import {
+  renderAreaPreviewFromImage,
+  stashKnowledgeAreaDraftPreview,
+} from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
+import {
   KNOWLEDGE_SOURCE_CLIP_MIME,
   buildKnowledgeSourceClipTransfer,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
@@ -220,6 +224,22 @@ export default function KnowledgeDocumentPageRegionSelector({
       return;
     }
     event.stopPropagation();
+    /**
+     * R6I. The picture the creation modal will show while nothing is saved yet.
+     *
+     * Cut from the page image ALREADY on screen and already authorised, so no
+     * request is made and nothing is reconstructed that the viewer could not
+     * see anyway. `shown` is the region mapped through
+     * sourceRegionToDisplayRegion, so it matches these pixels' orientation.
+     *
+     * Handed over out-of-band on purpose: putting crop bytes on the
+     * DataTransfer is exactly what R6B's transfer contract forbids, so the
+     * transfer below still carries identity and a rectangle only.
+     */
+    const pageImage = wrapperRef.current?.querySelector('img') ?? null;
+    stashKnowledgeAreaDraftPreview(
+      pageImage && shown ? renderAreaPreviewFromImage(pageImage, shown) : null,
+    );
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData(
       KNOWLEDGE_SOURCE_CLIP_MIME,
