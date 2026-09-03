@@ -150,7 +150,6 @@ describe('F6-F10: the canvas asks the server, and claims the drop exactly once',
     // It stages a draft and opens the ordinary creation modal.
     expect(handler).not.toContain('requestKnowledgePdfAreaImage(');
     expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
-    expect(handler).toContain('setIsClipartDraftModalOpen(true)');
     for (const forbidden of ['.insert(', '.upload(', 'getPublicUrl', 'storageGateway', 'toDataURL']) {
       expect(handler, forbidden).not.toContain(forbidden);
     }
@@ -173,7 +172,8 @@ describe('F6-F10: the canvas asks the server, and claims the drop exactly once',
     expect(save).toContain('toast.error(');
     // A refusal must leave the draft alone so the user can retry: the modal is
     // only closed after a successful create.
-    const close = save.indexOf('setIsClipartDraftModalOpen(false)');
+    // R6I-C1: the modal renders off the draft, so clearing it is the close.
+    const close = save.indexOf('setPendingPdfAreaDraft(null)');
     expect(close).toBeGreaterThan(place);
     expect(save.slice(refusal, place)).not.toContain('setPendingPdfAreaDraft(null)');
   });

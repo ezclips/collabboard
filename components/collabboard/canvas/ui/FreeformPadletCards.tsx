@@ -16,6 +16,7 @@ import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimen
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
+import ImagePostEditorCard from '@/components/collabboard/editors/ImagePostEditorCard';
 import { ImageWithLoadingIndicator } from '@/components/collabboard/editors/useDelayedImageLoading';
 import { useBackdropDismiss } from '@/components/collabboard/editors/PostEditorShell';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
@@ -5332,62 +5333,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             </div>
             </div>
             {activeImageToolbarPadlet && activeImageToolbarSrc && (
-              <div
-                className="overflow-hidden flex flex-col border border-gray-200 shadow-2xl"
-                style={{ width: '360px', backgroundColor: activeImageToolbarPadlet.metadata?.cardColor || '#ffffff', pointerEvents: 'auto' }}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
+              /**
+               * R6I-C1. The SAME card the PDF-area creation draft shows.
+               *
+               * The composition used to be inline here, which is why it could
+               * only ever be rendered for a padlet that already existed. It now
+               * lives in ImagePostEditorCard so the pre-save draft gets the
+               * real Image post editor rather than a generic card modal --
+               * one implementation, two callers.
+               *
+               * The rows below it stay here: reactions and caption write
+               * straight to the row, so they have nothing to do before Save.
+               */
+              <ImagePostEditorCard
+                imageSrc={activeImageToolbarSrc ?? undefined}
+                imageAlt={activeImageToolbarPadlet.metadata?.caption || 'Image'}
+                title={imageTitleDraft}
+                onTitleChange={setImageTitleDraft}
+                onTitleFocus={() => {
+                  setActiveImageStyleTarget('title');
+                  if (textStylePadletId !== activeImageToolbarPadlet.id) {
+                    setTextStylePadletId(activeImageToolbarPadlet.id);
+                  }
+                }}
+                onTitleBlur={() => updatePadletTitle(activeImageToolbarPadlet.id, imageTitleDraft.trim())}
+                titleActive={activeImageStyleTarget === 'title'}
+                cardColor={activeImageToolbarPadlet.metadata?.cardColor}
+                topStrip={activeImageToolbarPadlet.metadata?.topStrip}
+                titleStyle={activeImageToolbarPadlet.metadata?.titleStyle}
               >
-                {/* Top strip -- Title lives inside it, same as the canvas
-                    card's own top strip (a single colored bar with the
-                    title centered in it), not a separate row underneath.
-                    Modal-only placeholder: no ghost "Title" text is ever
-                    written to the canvas -- this is the real editable
-                    field, independent of the caption below. */}
-                <div
-                  className="w-full flex-shrink-0 flex items-center px-2"
-                  style={{
-                    minHeight: '28px',
-                    backgroundColor: isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
-                      ? activeImageToolbarPadlet.metadata?.topStrip
-                      : 'rgba(0,0,0,0.04)',
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={imageTitleDraft}
-                    onChange={(e) => setImageTitleDraft(e.target.value)}
-                    onFocus={() => {
-                      setActiveImageStyleTarget('title');
-                      if (textStylePadletId !== activeImageToolbarPadlet.id) {
-                        setTextStylePadletId(activeImageToolbarPadlet.id);
-                      }
-                    }}
-                    onBlur={() => updatePadletTitle(activeImageToolbarPadlet.id, imageTitleDraft.trim())}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') e.currentTarget.blur();
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    placeholder="Title"
-                    className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
-                      activeImageStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
-                    }`}
-                    style={resolveCaptionStyle(
-                      activeImageToolbarPadlet.metadata?.titleStyle,
-                      isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
-                        ? contrastIconColor(activeImageToolbarPadlet.metadata?.topStrip as string)
-                        : '#374151'
-                    )}
-                  />
-                </div>
-                {/* Image */}
-                <div className="relative overflow-hidden bg-gray-50 flex items-center justify-center min-h-[100px]">
-                  <ImageWithLoadingIndicator
-                    src={activeImageToolbarSrc ?? undefined}
-                    alt={activeImageToolbarPadlet.metadata?.caption || 'Image'}
-                    className="w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"
-                  />
-                </div>
                 {/* Reactions row */}
                 {(activeImageToolbarPadlet.metadata?.reactions?.length ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 px-3 py-1.5">
@@ -5479,7 +5453,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     }}
                   />
                 </div>
-              </div>
+              </ImagePostEditorCard>
             )}
             {/* Right-side grid column (same architecture as Note/Document's
                 sharedPanel slot in PostEditorShell.tsx): this column is

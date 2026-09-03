@@ -42,7 +42,8 @@ function after(source: string, anchor: string, count: number): string {
 
 const dropHandler = () => after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2600);
 const savePath = () => after(canvasClient, 'const savePdfAreaDraft = useCallback(', 2400);
-const discardPath = () => after(canvasClient, 'const discardPdfAreaDraft = useCallback(', 600);
+const discardPath = () => after(canvasClient, 'const discardPdfAreaDraft = useCallback(', 700);
+const draftModal = () => after(canvasClient, '<PdfAreaImageDraftModal', 700);
 
 const PAYLOAD: KnowledgeSourceAreaClipPayload = {
   kind: 'area',
@@ -63,17 +64,30 @@ describe('R6I-1..4: the drop stages a draft instead of creating a card', () => {
     }
   });
 
-  it('R6I-2: the drop opens the ordinary Image creation modal', () => {
-    // The existing Image draft modal, not a new "PDF crop" editor type.
+  it('R6I-2: the drop opens the REAL Image post editor, not a generic card modal', () => {
+    // R6I-C1: reusing the clipart draft modal gave the user the wrong editor.
+    // The draft is now its own state, and the Image editor opens off it.
     const handler = dropHandler();
-    expect(handler).toContain('setIsClipartDraftModalOpen(true)');
-    expect(handler).toContain("type: 'image'");
+    expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
+    expect(handler).not.toContain('setIsClipartDraftModalOpen');
+    // The modal is the Image post editor in creation mode...
+    expect(draftModal()).toContain('isOpen={pendingPdfAreaDraft !== null}');
+    expect(canvasClient).toContain("import PdfAreaImageDraftModal from '@/components/collabboard/editors/PdfAreaImageDraftModal';");
+    // ...and it renders the SAME card the persisted overlay does.
+    const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+    expect(modal).toContain('<ImagePostEditorCard');
+    expect(read('components/collabboard/canvas/ui/FreeformPadletCards.tsx')).toContain('<ImagePostEditorCard');
   });
 
   it('R6I-3: the modal is given the region preview to show', () => {
     const handler = dropHandler();
     expect(handler).toContain('takeKnowledgeAreaDraftPreview()');
-    expect(handler).toContain('metadata: preview ? { imageUrl: preview } : {}');
+    // R6I-C1: the draft owns the preview from the handoff onwards -- it is not
+    // smuggled through a stand-in padlet's metadata, where a generic save could
+    // have written it to a row.
+    expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
+    expect(handler).not.toContain('metadata:');
+    expect(draftModal()).toContain('previewSrc={pendingPdfAreaDraft?.preview ?? null}');
   });
 
   it('R6I-4: the draft remembers document, page, rectangle AND the drop position', () => {
@@ -142,7 +156,8 @@ describe('R6I-8..17: Save is the only thing that writes', () => {
   it('R6I-16: a successful Save closes the modal and shows the created card', () => {
     const save = savePath();
     const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
-    const close = save.indexOf('setIsClipartDraftModalOpen(false)');
+    // Clearing the draft IS closing the modal: it renders off that state.
+    const close = save.indexOf('setPendingPdfAreaDraft(null)');
     expect(place).toBeGreaterThan(-1);
     expect(close).toBeGreaterThan(place);
   });
@@ -200,19 +215,27 @@ describe('R6I-18..21: Cancel writes nothing at all', () => {
     const discard = discardPath();
     expect(discard).toContain('clearKnowledgeAreaDraftPreview()');
     expect(discard).toContain('setPendingPdfAreaDraft(null)');
-    expect(discard).toContain('setPadletToEdit(null)');
+    expect(discard).toContain("setPdfAreaDraftTitle('')");
   });
 
-  it('R6I-21: the modal closes, and the Reader is left to restack on its own', () => {
-    expect(discardPath()).toContain('setIsClipartDraftModalOpen(false)');
+  it('R6I-21: dropping the draft closes the modal, and the Reader restacks', () => {
+    // The modal renders off the draft, so clearing it is the close.
+    expect(discardPath()).toContain('setPendingPdfAreaDraft(null)');
+    expect(draftModal()).toContain('onCancel={discardPdfAreaDraft}');
   });
 
-  it('Cancel is wired to the modal, ahead of the generic discard', () => {
-    const modal = after(canvasClient, '<ClipartCardDraftModal', 2600);
-    const branch = modal.indexOf('discardPdfAreaDraft()');
-    const generic = modal.indexOf("if (padletToEdit?.id && padletToEdit.id !== 'new')");
-    expect(branch).toBeGreaterThan(-1);
-    expect(branch).toBeLessThan(generic);
+  it('R6I-C1: EVERY dismissal discards -- only the Save button publishes', () => {
+    // The clipart modal treats close as save. That contract must not reach a
+    // shared-board publication: an outside click must never place a card.
+    const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+    expect(modal).toContain('const backdropDismiss = useBackdropDismiss(');
+    expect(modal).toMatch(/useBackdropDismiss\(\(\) => \{[\s\S]{0,80}onCancel\(\);/);
+    expect(modal).toMatch(/event\.key === 'Escape'[\s\S]{0,40}onCancel\(\)/);
+    expect(modal).toContain('onClick={onCancel}');
+    // Save is reachable only from its own button.
+    const saveButton = modal.slice(modal.indexOf('data-ui="pdf-area-image-draft-save"') - 400);
+    expect(saveButton).toContain('onClick={onSave}');
+    expect(modal).not.toMatch(/onDismiss[\s\S]{0,60}onSave/);
   });
 });
 
@@ -225,7 +248,7 @@ describe('R6I-22..25: a failed Save keeps the work on screen', () => {
     const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
     // Everything that tears the draft down happens strictly AFTER the refusal
     // returns, so a failure cannot discard it.
-    for (const teardown of ['setPendingPdfAreaDraft(null)', 'setIsClipartDraftModalOpen(false)', 'setPadletToEdit(null)']) {
+    for (const teardown of ['setPendingPdfAreaDraft(null)', "setPdfAreaDraftTitle('')"]) {
       expect(save.indexOf(teardown), teardown).toBeGreaterThan(place);
     }
     expect(save.slice(refusal, place)).toContain('return;');
@@ -325,6 +348,53 @@ describe('R6I-9,10,15: the private serving contract is untouched', () => {
     }
     for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB']) {
       expect(code(previewModule), forbidden).not.toContain(forbidden);
+    }
+  });
+});
+
+
+describe('R6I-C1: the creation modal opens ABOVE the PDF side panel', () => {
+  const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+  const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+
+  it('it portals to <body>, because no z-index inside the canvas can win', () => {
+    // R6C's lesson: this renders inside CanvasViewport's `isolation: isolate`,
+    // where the whole canvas subtree paints as ONE layer at z-index:auto. The
+    // clipart modal it replaced was `fixed inset-0 z-[160]` with no portal,
+    // which is exactly why the reader covered it.
+    expect(modal).toContain("import { createPortal } from 'react-dom';");
+    expect(modal).toContain('document.body,');
+    // Comments are prose -- this component's own doc names the tier it replaced.
+    expect(code(modal)).not.toContain('z-[160]');
+  });
+
+  it('it paints at the SAME tier as the accepted persisted image overlay', () => {
+    const tierOf = (source: string, anchor: string) => {
+      const at = source.indexOf(anchor);
+      expect(at, anchor).toBeGreaterThan(-1);
+      const match = /className="fixed inset-0 z-\[(\d+)\]/.exec(source.slice(Math.max(0, at - 400), at + 400));
+      expect(match, anchor).not.toBeNull();
+      return Number(match![1]);
+    };
+    expect(tierOf(modal, 'data-ui="pdf-area-image-draft-overlay"'))
+      .toBe(tierOf(freeform, 'data-ui="freeform-image-editor-overlay"'));
+  });
+
+  it('the reader yields through the ONE shared authority, not a new z-index', () => {
+    const memo = after(canvasClient, 'const isBlockingEditorModalOpen = useMemo(', 1800);
+    expect(memo).toContain('pendingPdfAreaDraft !== null');
+    const reader = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+    expect(reader).toContain('const sidePanelBelowEditor = !isWorkspace && blockingEditorOpen;');
+    // No reader-specific hack was added anywhere for this modal.
+    expect(modal).not.toContain('KnowledgeSourceReaderDrawer');
+    expect(modal).not.toMatch(/z-\[9{4,}\]/);
+  });
+
+  it('it looks like an Image post: the image is the content, with no note chrome', () => {
+    expect(modal).toContain('<ImagePostEditorCard');
+    // Controls that need a row it does not have yet are absent, not faked.
+    for (const absent of ['CommentPopup', 'EmojiReactionPicker', 'ReactionDisplay', 'CardEditor', 'CardPreview']) {
+      expect(modal, absent).not.toContain(absent);
     }
   });
 });

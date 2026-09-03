@@ -181,14 +181,21 @@ describe('R6H-8..11: it costs nothing, and follows the resolved source', () => {
     // R6D can prefer a flattened data: composite over the private route. Keying
     // on the route would spin over an image that is already on screen.
     expect(freeform).toContain('src={resolveImagePostDisplaySrc(padlet) ?? undefined}');
-    expect(freeform).toContain('src={activeImageToolbarSrc ?? undefined}');
+    // R6I-C1 moved the card into ImagePostEditorCard; the overlay hands it the
+    // resolved source under the component's own prop name.
+    expect(freeform).toContain('imageSrc={activeImageToolbarSrc ?? undefined}');
     const cardTag = freeform.slice(freeform.indexOf('<ImageWithLoadingIndicator'));
     expect(cardTag.slice(0, 600)).toContain('resolveImagePostDisplaySrc');
   });
 
   it('every image surface the user waits on is covered', () => {
     // Card, modal preview, Draw, and Edit image.
-    expect((freeform.match(/<ImageWithLoadingIndicator/g) ?? [])).toHaveLength(2);
+    // The board card still renders it directly; the modal preview now goes
+    // through the shared Image post card, which renders the same component.
+    expect((freeform.match(/<ImageWithLoadingIndicator/g) ?? [])).toHaveLength(1);
+    const card = read('components/collabboard/editors/ImagePostEditorCard.tsx');
+    expect(card).toContain('<ImageWithLoadingIndicator');
+    expect(freeform).toContain('<ImagePostEditorCard');
     // R6H-C1 gave the Draw layer a two-phase base of its own, so it composes
     // with the hook directly rather than using the wrapper component.
     expect(drawingLayer).toContain('useDelayedImageLoading(imageUrl)');

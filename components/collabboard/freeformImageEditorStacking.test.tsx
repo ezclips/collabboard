@@ -203,7 +203,13 @@ describe('T7-T13: the comment panel sits beside the editor, not at the viewport 
     expect(grid).toContain("gridTemplateColumns: '1fr auto 1fr'");
     expect(grid).toContain('gap-6');
     expect(grid).toContain("width: 'calc(100vw - 80px)'");
-    expect(freeform).toContain("style={{ width: '360px', backgroundColor:");
+    // R6I-C1 moved the card composition into ImagePostEditorCard, shared with
+    // the pre-save PDF-area draft. The width this contract computes from is
+    // now declared there, as one constant.
+    const card = read('components/collabboard/editors/ImagePostEditorCard.tsx');
+    expect(card).toContain('export const IMAGE_POST_EDITOR_CARD_WIDTH_PX = 360;');
+    expect(card).toContain('width: `${IMAGE_POST_EDITOR_CARD_WIDTH_PX}px`');
+    expect(freeform).toContain('<ImagePostEditorCard');
     // The right track start-aligns its content, which is what makes an
     // in-flow panel land at the card's edge rather than the track's middle.
     expect(freeform).toContain('<div className="flex items-start justify-start" style={{ pointerEvents: \'none\' }}>');

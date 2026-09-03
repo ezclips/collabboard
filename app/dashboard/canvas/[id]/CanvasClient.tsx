@@ -6,6 +6,7 @@ import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLaye
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
 import CardEditor from '@/components/collabboard/CardEditor';
 import ClipartCardDraftModal from '@/components/collabboard/editors/ClipartCardDraftModal';
+import PdfAreaImageDraftModal from '@/components/collabboard/editors/PdfAreaImageDraftModal';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
@@ -681,6 +682,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [pendingPdfAreaDraft, setPendingPdfAreaDraft] = useState<KnowledgePdfAreaImageDraft | null>(null);
   /** Guards the create call, so a second Save cannot make a second card. */
   const [isPdfAreaDraftSaving, setIsPdfAreaDraftSaving] = useState(false);
+  /**
+   * R6I-C1. The draft's own title.
+   *
+   * Kept here rather than on a stand-in padlet: the draft is not a card, and
+   * borrowing `padletToEdit` was what dragged the generic card modal in.
+   */
+  const [pdfAreaDraftTitle, setPdfAreaDraftTitle] = useState('');
   const [isClipartDraftReplaceMode, setIsClipartDraftReplaceMode] = useState(false);
   // PATCH-149B1b-ii: single destination slice (§25.4) -- isOpen is `!== null`,
   // readOnly is `=== 'document-viewer'`; never a separate boolean pair.
@@ -1002,12 +1010,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // blocking overlay. Without it here the Knowledge reader never learned an
     // editor was open, so it stayed in its z-[1200] band and covered it.
     || imageToolbarPadletId !== null
+    // R6I-C1. The pre-save PDF-area Image editor is the same class of blocking
+    // image editor, so the reader yields to it through this one flag rather
+    // than through a z-index of its own.
+    || pendingPdfAreaDraft !== null
   ), [
     isNoteEditorOpen, isTableEditorOpen, isLinkEditorOpen, isTodoEditorOpen,
     isContainerEditorOpen, isCommentEditorOpen, isImageEditorOpen,
     isDrawingEditorOpen, isAIComponentEditorOpen, isAIContentEditModalOpen,
     isAIContentConvertModalOpen, isCardEditorOpen, isCardViewerOpen,
-    isClipartDraftModalOpen, imageToolbarPadletId,
+    isClipartDraftModalOpen, imageToolbarPadletId, pendingPdfAreaDraft,
   ]);
 
 
@@ -6409,40 +6421,29 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
      * defers both -- a user who cancels leaves no card AND no private asset,
      * where before every drop persisted a crop whether they wanted it or not.
      */
+    /**
+     * R6I-C1. The module handoff slot is consumed HERE and never read again:
+     * from this point the draft owns the preview, so a later drag cannot leave
+     * a stale one behind or hand one draft another's picture.
+     */
     const preview = takeKnowledgeAreaDraftPreview();
     setPendingPdfAreaDraft({ payload, placement, preview });
-    setPadletToEdit({
-      id: 'new',
-      board_id: canvasId,
-      title: payload.originalFilename || 'PDF area',
-      content: '',
-      type: 'image',
-      position_x: placement.positionX,
-      position_y: placement.positionY,
-      width: 280,
-      height: 280,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      // Display only, and never saved: the PDF-area branch below never reaches
-      // the generic saveCard, so this preview cannot be written to a row.
-      metadata: preview ? { imageUrl: preview } : {},
-    } as Padlet);
-    setIsClipartDraftModalOpen(true);
+    setPdfAreaDraftTitle(payload.originalFilename || '');
     return true;
   }, [
     canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout,
-    getCanvasPointFromClient, setPadletToEdit, setIsClipartDraftModalOpen,
-    setPendingPdfAreaDraft,
+    getCanvasPointFromClient, setPendingPdfAreaDraft, setPdfAreaDraftTitle,
   ]);
 
   /** R6I. Discards a pending PDF-area draft, writing nothing. */
   const discardPdfAreaDraft = useCallback(() => {
     setPendingPdfAreaDraft(null);
     setIsPdfAreaDraftSaving(false);
+    setPdfAreaDraftTitle('');
+    // The slot is normally already empty -- the drop consumed it -- but a drag
+    // that was abandoned before any drop would otherwise leave one behind.
     clearKnowledgeAreaDraftPreview();
-    setPadletToEdit(null);
-    setIsClipartDraftModalOpen(false);
-  }, [setPadletToEdit, setIsClipartDraftModalOpen]);
+  }, []);
 
   /**
    * R6I. Confirms a pending PDF-area draft.
@@ -6463,7 +6464,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const created = await requestKnowledgePdfAreaImage(
       canvasId,
       pendingPdfAreaDraft.payload,
-      { ...pendingPdfAreaDraft.placement, title: padletToEdit?.title ?? undefined },
+      { ...pendingPdfAreaDraft.placement, title: pdfAreaDraftTitle },
     );
     setIsPdfAreaDraftSaving(false);
     if (!created.ok) {
@@ -6477,13 +6478,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
     setPadlets(prev => [...prev, created.padlet as unknown as Padlet]);
     setPendingPdfAreaDraft(null);
+    setPdfAreaDraftTitle('');
     clearKnowledgeAreaDraftPreview();
-    setPadletToEdit(null);
-    setIsClipartDraftModalOpen(false);
     toast.success('Image added from PDF area');
   }, [
-    canvasId, pendingPdfAreaDraft, isPdfAreaDraftSaving, padletToEdit,
-    setPadlets, setPadletToEdit, setIsClipartDraftModalOpen,
+    canvasId, pendingPdfAreaDraft, isPdfAreaDraftSaving, pdfAreaDraftTitle,
+    setPadlets,
   ]);
 
   const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
@@ -9331,13 +9331,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               isOpen={isClipartDraftModalOpen}
               padlet={padletToEdit}
               onClose={() => {
-                // R6I. A pending PDF area is created through its own
-                // authenticated authority, never the generic card save -- which
-                // would write the local draft preview into a row.
-                if (pendingPdfAreaDraft) {
-                  void savePdfAreaDraft();
-                  return;
-                }
                 if (!padletToEdit) {
                   setIsClipartDraftModalOpen(false);
                   return;
@@ -9351,12 +9344,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 setIsClipartDraftModalOpen(false);
               }}
               onDiscard={() => {
-                // R6I. Cancel on a pending PDF area writes nothing at all:
-                // no row, no crop, no source reference.
-                if (pendingPdfAreaDraft) {
-                  discardPdfAreaDraft();
-                  return;
-                }
                 if (padletToEdit?.id && padletToEdit.id !== 'new') {
                   setIsClipartDraftModalOpen(false);
                   setIsClipartDraftReplaceMode(false);
@@ -9381,6 +9368,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               commentAccessMode={commentAccessMode}
               currentUserId={user?.id || 'anon'}
               currentUserName={user?.email?.split('@')[0] || 'You'}
+            />
+
+            {/**
+              * R6I-C1. The real Image post editor, in creation mode.
+              *
+              * Portalled to <body> from inside the component like the accepted
+              * persisted overlay, and at the same tier, so it clears the PDF
+              * reader instead of opening behind it. Only its Save button
+              * publishes -- Cancel, X, backdrop and Escape all discard.
+              */}
+            <PdfAreaImageDraftModal
+              isOpen={pendingPdfAreaDraft !== null}
+              previewSrc={pendingPdfAreaDraft?.preview ?? null}
+              title={pdfAreaDraftTitle}
+              onTitleChange={setPdfAreaDraftTitle}
+              onSave={() => { void savePdfAreaDraft(); }}
+              onCancel={discardPdfAreaDraft}
+              isSaving={isPdfAreaDraftSaving}
             />
 
             {/* Column Layout Placement Prompt */}
