@@ -53,6 +53,20 @@ interface ImageActionsToolbarProps {
      * says it is not available yet.
      */
     disabledToolIds?: readonly string[];
+    /**
+     * R6I-C3. Draft mode only: makes the top-left arrow COMPLETE the draft
+     * instead of switching to caption styling.
+     *
+     * That arrow is normally the Image/Text mode toggle -- it is not a back or
+     * exit control. In a pre-save draft caption styling is unavailable anyway
+     * (nothing to write it to), so the button is repurposed rather than a
+     * second Done being added somewhere. Absent means the persisted editor's
+     * behaviour, entirely unchanged.
+     */
+    onBack?: () => void;
+    /** The label under that arrow while `onBack` is supplied. */
+    backLabel?: string;
+    backDisabled?: boolean;
 }
 
 const COLORS = [
@@ -107,6 +121,9 @@ export default function ImageActionsToolbar({
     isCaptionMode = false,
     isTextStyleMode = false,
     disabledToolIds,
+    onBack,
+    backLabel = 'Done',
+    backDisabled = false,
 }: ImageActionsToolbarProps) {
     const isToolDisabled = (id: string) => (disabledToolIds ?? []).includes(id);
     const [internalMode, setInternalMode] = useState<ToolbarMode>('image');
@@ -186,14 +203,20 @@ export default function ImageActionsToolbar({
             {/* Toggle button - switches between image/caption modes */}
             <div className="flex flex-col items-center shrink-0">
                 <button
-                    onClick={handleToggleMode}
-                    className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
-                    title={mode === 'image' ? 'Switch to Caption Styling' : 'Switch to Image Actions'}
+                    onClick={onBack ?? handleToggleMode}
+                    disabled={onBack ? backDisabled : false}
+                    className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
+                        onBack && backDisabled ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-600'
+                    }`}
+                    title={onBack
+                        ? 'Place this image on the board'
+                        : (mode === 'image' ? 'Switch to Caption Styling' : 'Switch to Image Actions')}
+                    data-ui={onBack ? 'image-editor-draft-complete' : 'image-editor-mode-toggle'}
                 >
-                    <ArrowLeft className="w-5 h-5 text-black" />
+                    <ArrowLeft className={`w-5 h-5 ${onBack && backDisabled ? '' : 'text-black'}`} />
                 </button>
                 <span className="text-[9px] text-gray-500 text-center">
-                    {mode === 'image' ? 'Text' : 'Image'}
+                    {onBack ? backLabel : (mode === 'image' ? 'Text' : 'Image')}
                 </span>
             </div>
 

@@ -224,17 +224,18 @@ describe('R6I-18..21: Cancel writes nothing at all', () => {
     expect(draftModal()).toContain('onCancel={discardPdfAreaDraft}');
   });
 
-  it('R6I-C1: EVERY dismissal discards -- only the Save button publishes', () => {
+  it('R6I-C1/C3: EVERY dismissal discards -- only the deliberate finish publishes', () => {
     // The clipart modal treats close as save. That contract must not reach a
     // shared-board publication: an outside click must never place a card.
     const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
     expect(modal).toContain('const backdropDismiss = useBackdropDismiss(');
     expect(modal).toMatch(/useBackdropDismiss\(\(\) => \{[\s\S]{0,80}onCancel\(\);/);
     expect(modal).toMatch(/event\.key === 'Escape'[\s\S]{0,40}onCancel\(\)/);
-    expect(modal).toContain('onClick={onCancel}');
-    // Save is reachable only from its own button.
-    const saveButton = modal.slice(modal.indexOf('data-ui="pdf-area-image-draft-save"') - 400);
-    expect(saveButton).toContain('onClick={onSave}');
+    // R6I-C3: publishing is reachable ONLY from the toolbar's finish action.
+    expect(modal).toContain('onBack={onSave}');
+    // The only place onSave is USED: the prop declaration and destructure are
+    // the other two mentions, so there is exactly one way to publish.
+    expect((modal.match(/\{onSave\}/g) ?? [])).toHaveLength(1);
     expect(modal).not.toMatch(/onDismiss[\s\S]{0,60}onSave/);
   });
 });
@@ -468,5 +469,59 @@ describe('R6I-C2: the draft IS the real Image post editor, not a preview dialog'
     expect(handler).toContain('setPendingPdfAreaDraft({ payload, placement, preview })');
     expect(handler).not.toContain('Confirm');
     expect(draftModal()).toContain('isOpen={pendingPdfAreaDraft !== null}');
+  });
+});
+
+
+describe('R6I-C3: no Save/Cancel footer -- the editor is finished from its own toolbar', () => {
+  const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+  const toolbar = read('components/collabboard/editors/ImageActionsToolbar.tsx');
+
+  it('R6I-C3-1,2: the bottom Save and Cancel buttons are gone', () => {
+    // They recreated the confirmation dialog this flow exists to avoid, and
+    // the persisted Image editor has no such footer.
+    for (const gone of [
+      'data-ui="pdf-area-image-draft-save"',
+      'data-ui="pdf-area-image-draft-cancel"',
+      '>Cancel<',
+      "'Adding…'",
+    ]) {
+      expect(modal, gone).not.toContain(gone);
+    }
+    expect(code(modal)).not.toContain('button');
+  });
+
+  it('R6I-C3-3: the real Image toolbar and card are still what is rendered', () => {
+    expect(modal).toContain('<ImagePostEditorShell');
+    expect(modal).toContain('<ImageActionsToolbar');
+    expect(modal).toContain('<ImagePostEditorCard');
+  });
+
+  it('R6I-C3-4: finishing goes through the toolbar arrow, and publishes', () => {
+    expect(modal).toContain('onBack={onSave}');
+    expect(modal).toContain('backLabel="Done"');
+    // The toolbar routes that arrow to the caller only in draft mode.
+    expect(toolbar).toContain('onClick={onBack ?? handleToggleMode}');
+    expect(toolbar).toContain("data-ui={onBack ? 'image-editor-draft-complete' : 'image-editor-mode-toggle'}");
+  });
+
+  it('R6I-C3-7: a second finish while one is in flight is refused', () => {
+    expect(modal).toContain('backDisabled={isSaving}');
+    expect(toolbar).toContain('disabled={onBack ? backDisabled : false}');
+    // ...and the save path itself still guards, so the button is not the only
+    // thing standing between a double press and two cards.
+    expect(savePath()).toContain('if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving) return;');
+  });
+
+  it('R6I-C3-11: the PERSISTED editor keeps the arrow it always had', () => {
+    // Absent onBack means the Image/Text mode toggle, unchanged -- this was
+    // never a back or exit control there.
+    expect(toolbar).toContain("'Place this image on the board'");
+    expect(toolbar).toContain("(mode === 'image' ? 'Switch to Caption Styling' : 'Switch to Image Actions')");
+    expect(toolbar).toContain("{onBack ? backLabel : (mode === 'image' ? 'Text' : 'Image')}");
+    // FreeformPadletCards renders it without onBack.
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    const persisted = after(freeform, '<ImageActionsToolbar', 1200);
+    expect(persisted).not.toContain('onBack=');
   });
 });

@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 import ImagePostEditorShell from './ImagePostEditorShell';
 import ImagePostEditorCard from './ImagePostEditorCard';
 import ImageActionsToolbar from './ImageActionsToolbar';
@@ -33,10 +32,16 @@ import { useBackdropDismiss } from './PostEditorShell';
  *  - Colour and Caption are disabled for the same reason: both persist through
  *    the padlet update path.
  *
- * DISMISSAL IS NOT THE CLIPART CONTRACT. There, closing saves. Here Save
- * publishes to a shared board, so only the Save button does: Cancel, backdrop
- * and Escape all discard, through the shared press-origin guard so a first
- * click in the title cannot be retargeted into losing the draft.
+ * EXIT MODEL (R6I-C3). The persisted editor has no Save footer -- it autosaves
+ * and you leave it -- so neither does this. Finishing happens through the
+ * toolbar's own arrow, which in draft mode reads "Done" and places the image.
+ * Every accidental way out still discards: backdrop and Escape write nothing,
+ * through the shared press-origin guard so a first click in the title cannot be
+ * retargeted into losing the draft.
+ *
+ * That asymmetry is deliberate. Publishing to a shared board should take a
+ * deliberate action; dropping an unpublished draft should not be able to
+ * happen by accident, and should never place a card.
  */
 
 /** Everything that needs a row before it can do anything. */
@@ -89,6 +94,12 @@ export default function PdfAreaImageDraftModal({
         <ImageActionsToolbar
           mode="image"
           disabledToolIds={DRAFT_DISABLED_TOOLS}
+          // R6I-C3. Finishing the draft IS leaving the editor, so it happens
+          // through the toolbar's own arrow rather than a footer the persisted
+          // editor does not have. Only this publishes.
+          onBack={onSave}
+          backLabel="Done"
+          backDisabled={isSaving}
           // Every handler below belongs to a disabled control, so none of them
           // can be reached. They are present because the props are required.
           onColorClick={unavailable}
@@ -112,33 +123,6 @@ export default function PdfAreaImageDraftModal({
           onTitleChange={onTitleChange}
           titlePlaceholder="Title"
         />
-
-        {/* The persisted editor autosaves, so it needs no such row. This one
-            has nothing to save to until the user says so. */}
-        <div
-          className="mt-4 flex items-center justify-end gap-2"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isSaving}
-            data-ui="pdf-area-image-draft-cancel"
-            className="px-4 py-1.5 rounded-lg border border-white/30 bg-white/10 text-white hover:bg-white/20 text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={isSaving}
-            data-ui="pdf-area-image-draft-save"
-            className="px-5 py-1.5 rounded-lg bg-orange-500 text-white hover:bg-orange-600 text-sm font-bold shadow-sm transition-all disabled:opacity-60 flex items-center gap-2"
-          >
-            {isSaving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-            {isSaving ? 'Adding…' : 'Save'}
-          </button>
-        </div>
       </div>
     </ImagePostEditorShell>
   );
