@@ -1240,6 +1240,65 @@ describe('PDF-C1 focused workspace yields to a blocking editor modal', () => {
     expect(cls()).toContain('lg:w-[880px]');
   });
 
+  /** UI-STACK-1: the docked host's own way of letting the editor win. */
+  const belowEditor = () => drawerEl()!.getAttribute('data-knowledge-reader-below-editor');
+  const zIndex = () => (drawerEl() as HTMLElement).style.zIndex;
+
+  it('UI-STACK-1: the side panel drops BELOW the editor tier while a modal is open', async () => {
+    await openIn('side-panel', true);
+
+    // It stays visible and interactive -- it did not disappear...
+    expect(yielded()).toBe('false');
+    expect(cls()).not.toContain('opacity-0');
+    // ...but it no longer sits above the z-[1000] editor tier, so a Note modal
+    // and its inset-0 backdrop cover it instead of opening behind it.
+    expect(belowEditor()).toBe('true');
+    expect(Number(zIndex())).toBeLessThan(1000);
+    // And still above ordinary board UI: the z-[700] heading toolbar and the
+    // z-[800] library drawer must not end up on top of the reader.
+    expect(Number(zIndex())).toBeGreaterThan(800);
+  });
+
+  it('UI-STACK-1: with no editor open the docked band is exactly as before', async () => {
+    await openIn('side-panel', false);
+
+    expect(belowEditor()).toBe('false');
+    // No inline override at all -- the pinned class band governs.
+    expect(zIndex()).toBe('');
+    expect(cls()).toContain('z-[1200]');
+  });
+
+  it('UI-STACK-1: the side panel returns to its own band when the editor closes', async () => {
+    const onCreateNoteFromPage = vi.fn();
+    await openIn('side-panel', true);
+    const before = drawerEl();
+    expect(Number(zIndex())).toBeLessThan(1000);
+
+    await renderInto({
+      documentOpenRequest: docRequest(1),
+      presentation: 'side-panel',
+      blockingEditorOpen: false,
+      onCreateNoteFromPage,
+      onOpenBacklinkTarget: vi.fn(),
+    });
+
+    expect(belowEditor()).toBe('false');
+    expect(zIndex()).toBe('');
+    expect(cls()).toContain('z-[1200]');
+    // The same element throughout: restacked, never unmounted, so the open
+    // document and its scroll position survive the editor visit.
+    expect(drawerEl()).toBe(before);
+  });
+
+  it('UI-STACK-1: the workspace host is untouched by the docked correction', async () => {
+    await openIn('workspace', true);
+    // The workspace steps aside by disappearing; it never restacks.
+    expect(belowEditor()).toBe('false');
+    expect(zIndex()).toBe('');
+    expect(yielded()).toBe('true');
+    expect(cls()).toContain('z-[3100]');
+  });
+
   it('the Create Note callback is forwarded unchanged in both hosts', async () => {
     const onCreateNoteFromPage = vi.fn();
     for (const presentation of ['workspace', 'side-panel'] as const) {

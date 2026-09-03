@@ -214,6 +214,27 @@ export default function KnowledgeSourceReaderDrawer({
   const yieldsToEditor = isWorkspace && blockingEditorOpen;
 
   /**
+   * The docked drawer's half of the same rule.
+   *
+   * The workspace steps aside by disappearing, because it owns the whole
+   * surface. The side panel deliberately stays visible -- reading a source
+   * beside the Note it supports is the point of that host -- but it sat at
+   * z-[1200], ABOVE the z-[1000] editor tier, so a Note modal opened behind
+   * it and the panel swallowed clicks meant for the editor.
+   *
+   * So it steps aside in the only way that keeps it useful: it drops below
+   * the editor tier while a blocking editor is open, and returns the moment
+   * that editor closes. It stays above ordinary board UI (the z-[700] heading
+   * toolbar and the z-[800] library drawer) either way, and the modal's own
+   * inset-0 backdrop then dims it exactly as it dims the board.
+   *
+   * Applied inline rather than by swapping the class: the class string is a
+   * pinned stacking contract, and an inline z-index beats it deterministically
+   * instead of depending on which rule the generated CSS happens to emit last.
+   */
+  const sidePanelBelowEditor = !isWorkspace && blockingEditorOpen;
+
+  /**
    * Opens a source by DOCUMENT ID. Identity is the id and only the id: two
    * documents can share a filename, so a name-based lookup would open the
    * wrong one.
@@ -470,6 +491,8 @@ export default function KnowledgeSourceReaderDrawer({
       // pane beside the unchanged 420px reading experience.
       data-knowledge-reader-presentation={presentation}
       data-knowledge-reader-yielded={yieldsToEditor ? 'true' : 'false'}
+      data-knowledge-reader-below-editor={sidePanelBelowEditor ? 'true' : 'false'}
+      style={sidePanelBelowEditor ? { zIndex: 900 } : undefined}
       className={`${isWorkspace
         // The focused workspace: the document owns the surface. The board is
         // covered rather than unmounted, so its camera, placements and every
