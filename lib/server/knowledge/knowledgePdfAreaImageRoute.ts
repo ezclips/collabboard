@@ -70,7 +70,13 @@ export interface KnowledgePdfAreaImageSession {
   cropToWebp(bytes: Uint8Array, displayRegion: NormalizedPageRegion): Promise<Uint8Array>;
   uploadAreaImage(objectPath: string, bytes: Uint8Array): Promise<boolean>;
   removeAreaImage(objectPath: string): Promise<void>;
-  insertPadlet(row: KnowledgePdfAreaImagePadletRow): Promise<boolean>;
+  /**
+   * IMAGE-LIBRARY-1. Creates the durable Library object AND its board placement
+   * in ONE transaction, returning the library id the placement now references.
+   * `false` means neither exists: a placement without its durable identity is
+   * the state the product rule forbids, so there is nothing partial to undo.
+   */
+  insertPadlet(row: KnowledgePdfAreaImagePadletRow): Promise<false | { libraryItemId: string }>;
   /** Injected so the object path is deterministic under test. */
   newPadletId(): string;
 }
@@ -267,12 +273,17 @@ export function createKnowledgePdfAreaImageHandler(
     if (!insertAttempt.ok || !insertAttempt.value) {
       // The card is what makes the object reachable AND what authorises it.
       // Without the row the object is unreachable but still stored, so it is
-      // removed rather than left as an orphan of a private PDF.
+      // removed rather than left as an orphan of a private PDF. The Library
+      // object cannot survive this either: it and the placement share one
+      // transaction, so a failure leaves neither.
       await attempt(() => session.removeAreaImage(objectPath));
       return unavailable();
     }
 
-    return NextResponse.json({ padlet: row }, { status: 201 });
+    // The durable identity the placement now references. The image lives in the
+    // Library from here on: removing this card does not remove it.
+    const placed = { ...row, library_item_id: insertAttempt.value.libraryItemId };
+    return NextResponse.json({ padlet: placed }, { status: 201 });
   };
 }
 
@@ -334,8 +345,27 @@ export function createRealKnowledgePdfAreaImageSession(
       await adminClient.storage.from(KNOWLEDGE_STORAGE_BUCKET).remove([objectPath]);
     },
     async insertPadlet(row) {
-      const { error } = await adminClient.from('padlets').insert(row);
-      return !error;
+      // ONE transaction for the durable Library object and its placement. The
+      // board edit was already authorised above, and `userId` is the id this
+      // route authenticated -- the browser never names the owner.
+      const { data, error } = await adminClient.rpc('create_image_post_with_library_item', {
+        p_padlet_id: row.id,
+        p_board_id: row.board_id,
+        p_user_id: userId,
+        p_title: row.title,
+        p_content: row.content,
+        p_position_x: row.position_x,
+        p_position_y: row.position_y,
+        p_width: row.width,
+        p_height: row.height,
+        p_file_url: row.file_url,
+        p_metadata: row.metadata,
+      });
+      if (error) return false;
+      const created = (Array.isArray(data) ? data[0] : data) as
+        { library_item_id?: string } | null | undefined;
+      const libraryItemId = created?.library_item_id;
+      return typeof libraryItemId === 'string' ? { libraryItemId } : false;
     },
     newPadletId: () => randomUUID(),
   };

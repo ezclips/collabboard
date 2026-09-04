@@ -204,10 +204,19 @@ describe('F11-F13: nothing in this slice can publish a crop', () => {
   it('F13: this slice adds no migration and no new bucket', () => {
     // The crop lives in the bucket the PDF already lives in, so R6B needed no
     // schema change at all -- provenance rides in the existing metadata jsonb.
+    //
+    // IMAGE-LIBRARY-1 later added ONE reviewed RPC here, so that a saved Image
+    // Post gets its durable Library object and its board placement in a single
+    // transaction. `rpc(` is therefore no longer forbidden; everything this
+    // guard exists to prevent -- creating or widening a bucket, and running DDL
+    // from the request path -- still is.
     const server = sourceOf('lib/server/knowledge/knowledgePdfAreaImageRoute.ts');
     expect(server).toContain('KNOWLEDGE_STORAGE_BUCKET');
-    for (const forbidden of ['createBucket', 'updateBucket', 'alter table', 'ALTER TABLE', 'rpc(']) {
+    for (const forbidden of ['createBucket', 'updateBucket', 'alter table', 'ALTER TABLE']) {
       expect(server, forbidden).not.toContain(forbidden);
     }
+    // The one RPC it may call, and no other.
+    expect(server.match(/\.rpc\(/g) ?? []).toHaveLength(1);
+    expect(server).toContain("adminClient.rpc('create_image_post_with_library_item'");
   });
 });

@@ -23,6 +23,7 @@ import { KNOWLEDGE_PDF_AREA_SOURCE_KIND } from '../../domain/knowledge/knowledge
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const DOC_ID = '55555555-5555-4555-8555-555555555555';
 const NEW_PADLET_ID = '44444444-4444-4444-8444-444444444444';
+const LIBRARY_ITEM_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'user-1';
 const PAGE = 3;
 const REGION = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
@@ -62,7 +63,7 @@ function session(overrides: Partial<KnowledgePdfAreaImageSession> = {}): Knowled
     cropToWebp: vi.fn(async (bytes, region) => cropDerivativeToWebp(bytes, region)),
     uploadAreaImage: vi.fn(async () => true),
     removeAreaImage: vi.fn(async () => {}),
-    insertPadlet: vi.fn(async () => true),
+    insertPadlet: vi.fn(async () => ({ libraryItemId: LIBRARY_ITEM_ID })),
     newPadletId: () => NEW_PADLET_ID,
     ...overrides,
   };
@@ -259,7 +260,38 @@ describe('C22-C29: what is written, and where', () => {
     expect(response.status).toBe(201);
     const payload = await response.json() as { padlet: KnowledgePdfAreaImagePadletRow };
     expect(payload.padlet.id).toBe(NEW_PADLET_ID);
-    expect(payload.padlet).toEqual(await createdRow(session()));
+    // IMAGE-LIBRARY-1: the response is the inserted row PLUS the durable
+    // Library identity the placement now references, so the board learns the
+    // relationship without a second round trip.
+    expect(payload.padlet).toEqual({
+      ...await createdRow(session()),
+      library_item_id: LIBRARY_ITEM_ID,
+    });
+  });
+
+  it('C22b: the placement references the durable Library object it was created with', async () => {
+    const payload = await (await run(session())).json() as
+      { padlet: KnowledgePdfAreaImagePadletRow & { library_item_id?: string } };
+    expect(payload.padlet.library_item_id).toBe(LIBRARY_ITEM_ID);
+    // Same asset on both sides: the Library object shows the very image the
+    // card shows, not a re-uploaded copy.
+    expect(payload.padlet.file_url).toBe(payload.padlet.metadata.imageUrl);
+  });
+
+  it('C22c: a Library object is never created without its placement', async () => {
+    // The two rows share one transaction, so the failure path cannot leave a
+    // durable object behind for a card that was never placed.
+    const sess = session({ insertPadlet: vi.fn(async (): Promise<false> => false) });
+    const response = await run(sess);
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty('padlet');
+  });
+
+  it('C22d: a viewer gets no placement and no Library object', async () => {
+    const sess = session({ canWriteBoard: vi.fn(async () => false) });
+    expect((await run(sess)).status).toBe(403);
+    expect(sess.insertPadlet).not.toHaveBeenCalled();
+    expect(sess.uploadAreaImage).not.toHaveBeenCalled();
   });
 
   it('C23: the crop is uploaded to the derived private path, keyed by the new card', async () => {
@@ -345,7 +377,7 @@ describe('C30-C33: failure leaves nothing behind', () => {
   it('C32: a failed insert removes the orphaned crop rather than leaving it stored', async () => {
     // Without the card the object is unreachable, but it is still a crop of a
     // private PDF sitting in the bucket. It goes.
-    const sess = session({ insertPadlet: vi.fn(async () => false) });
+    const sess = session({ insertPadlet: vi.fn(async (): Promise<false> => false) });
     expect((await run(sess)).status).toBe(503);
     expect(sess.removeAreaImage)
       .toHaveBeenCalledWith(`board-derived/${BOARD_ID}/pdf-areas/${NEW_PADLET_ID}.webp`);
