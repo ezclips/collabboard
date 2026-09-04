@@ -71,6 +71,29 @@ describe('IMAGE-LIBRARY-1 migration', () => {
     expect(statements).not.toMatch(/md5|sha256|digest|content_hash/i);
   });
 
+  it('5b. C1: authorization is established BEFORE any retry can be answered', () => {
+    // The first version answered a retry by id alone, so a board viewer could
+    // replay a card and receive the creator's private library id. Behaviour is
+    // proved in imagePostLibraryAuthorization.test.ts; this pins the ORDER, so
+    // the early-return can never drift back above the authorization checks.
+    const hardening = fs.readFileSync(path.join(process.cwd(),
+      'supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql'), 'utf8')
+      .replace(/\r\n/g, '\n').replace(/--.*$/gm, '');
+    const actorCheck = hardening.indexOf('auth.uid() <> p_user_id');
+    const boardCheck = hardening.indexOf('FROM public.board_collaborators c');
+    const retryLookup = hardening.indexOf('LEFT JOIN public.library_items l');
+    expect(actorCheck).toBeGreaterThan(-1);
+    expect(boardCheck).toBeGreaterThan(actorCheck);
+    expect(retryLookup).toBeGreaterThan(boardCheck);
+    // A retry is only honoured for the same board AND the same creator.
+    expect(hardening).toMatch(/v_existing_board = p_board_id/);
+    expect(hardening).toMatch(/v_library_owner = p_user_id/);
+    // The posture the independent review passed is restated, never widened.
+    expect(hardening).toMatch(/SECURITY INVOKER/);
+    expect(hardening).not.toMatch(/SECURITY DEFINER/);
+    expect(hardening).toMatch(/FROM PUBLIC, anon/);
+  });
+
   it('6. is a new migration and edits no historical one', () => {
     expect(fs.existsSync(path.join(process.cwd(), MIGRATION))).toBe(true);
     expect(statements).not.toMatch(/DROP TABLE|DROP COLUMN|TRUNCATE/);
