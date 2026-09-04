@@ -44,17 +44,35 @@ import {
   KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
 import {
+  useKnowledgeHighlightDelete,
   useKnowledgeSourceBacklinksForDocument,
-  useKnowledgeSourceNoteColors,
   useKnowledgeSourceReferencesForDocument,
+  useKnowledgeStandaloneHighlights,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import KnowledgeDocumentPageRegionSelector from '@/components/collabboard/KnowledgeDocumentPageRegionSelector';
 import { normalizeStorableRegion } from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 import type { KnowledgePageRotation, NormalizedPageRegion }
   from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
-import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
-import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
-import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
+import {
+  KNOWLEDGE_HIGHLIGHT_IDS_ATTRIBUTE,
+  knowledgeHighlightIdsAttribute,
+  knowledgeStandaloneHighlightColor,
+  knowledgeStandaloneHighlightSegments,
+} from '@/lib/domain/knowledge/knowledgeStandaloneHighlights';
+import {
+  knowledgeCitationFocusFor,
+  knowledgeReaderSegments,
+} from '@/lib/domain/knowledge/knowledgeStandaloneHighlights';
+import type { KnowledgeReaderSegment }
+  from '@/lib/domain/knowledge/knowledgeStandaloneHighlights';
+import type { KnowledgeSourceHighlight }
+  from '@/lib/domain/knowledge/knowledgeSourceHighlight';
+import {
+  knowledgeHighlightNoteTarget,
+  knowledgeHighlightNoteTargets,
+} from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
+import KnowledgeHighlightActions from '@/components/collabboard/KnowledgeHighlightActions';
+import type { KnowledgeHighlightAction } from '@/components/collabboard/KnowledgeHighlightActions';
 import type { KnowledgeSourceHighlightSegment } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
 import {
   knowledgeSourceBacklinkDocumentRows,
@@ -158,10 +176,17 @@ interface PageSourceInteraction {
   /** Absent outside a canvas, which keeps every piece non-interactive. */
   readonly onActivate: ((targets: readonly string[]) => void) | null;
   /**
-   * P6J-F8-B3 -- the board's Note colours. Empty means every highlight keeps
-   * its neutral sky styling, which is also what a non-canvas surface gets.
+   * PDF-R6K-H2B-C1 -- what a click on a painted run opens.
+   *
+   * The old gesture opened the citing Note directly. It cannot any more: a
+   * highlight may have no Note at all, and it now has an action of its own, so
+   * the click opens a compact control instead of guessing between them.
    */
-  readonly noteColors: KnowledgeSourceNoteColors;
+  readonly onOpenHighlightActions: ((actions: readonly KnowledgeHighlightAction[]) => void) | null;
+  /** Highlight id -> its row, for deriving that highlight's own Note target. */
+  readonly highlightsById: ReadonlyMap<string, KnowledgeSourceHighlight>;
+  /** Citation id -> the Note it belongs to. Derived, never stored on a highlight. */
+  readonly noteTargets: ReadonlyMap<string, string>;
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
@@ -208,37 +233,48 @@ function findMatches(pages: readonly KnowledgeDocumentDetailPage[], query: strin
   });
 }
 
-/** Distinct citations overlapping a run, by real reference id. */
+/** Distinct standalone highlights overlapping a run, by durable id. */
 function sourceCountOver(
-  segments: readonly KnowledgeSourceHighlightSegment[],
+  segments: readonly KnowledgeReaderSegment[],
   start: number,
   end: number,
 ): number {
   const ids = new Set<string>();
   for (const segment of segments) {
     if (segment.end <= start || segment.start >= end) continue;
-    for (const span of segment.spans) ids.add(span.referenceId);
+    for (const span of segment.spans) ids.add(span.highlightId);
   }
   return ids.size;
 }
 
 /**
- * The distinct Notes a run cites, in the spans' own deterministic order, kept
- * only where the Note is currently listed as citing this document. A span whose
- * target is not in that set still paints -- it just offers no action, because
- * there is nothing on the board to open.
+ * PDF-R6K-H2B-C1 -- one contextual row per highlight covering a run.
+ *
+ * Each row carries its OWN Note target, derived from that highlight's origin
+ * citation rather than stored on the highlight. Three cases collapse to "no
+ * Note": a plain highlight, one orphaned when its citing Note was deleted, and
+ * one whose Note the board no longer holds. All three must offer no Open Note,
+ * and none of them stops the highlight painting or being deleted.
  */
-function eligibleTargetsOf(
-  segment: KnowledgeSourceHighlightSegment,
+function highlightActionsOf(
+  segment: KnowledgeReaderSegment,
+  highlightsById: ReadonlyMap<string, KnowledgeSourceHighlight>,
+  noteTargets: ReadonlyMap<string, string>,
   eligible: ReadonlySet<string>,
-): readonly string[] {
-  const targets: string[] = [];
+): readonly KnowledgeHighlightAction[] {
+  const actions: KnowledgeHighlightAction[] = [];
   for (const span of segment.spans) {
-    if (!eligible.has(span.targetPadletId)) continue;
-    // Two citations of one Note are one destination, not two.
-    if (!targets.includes(span.targetPadletId)) targets.push(span.targetPadletId);
+    const row = highlightsById.get(span.highlightId);
+    const target = row === undefined
+      ? null
+      : knowledgeHighlightNoteTarget(row, noteTargets);
+    actions.push({
+      highlightId: span.highlightId,
+      color: span.color,
+      targetPadletId: target !== null && eligible.has(target) ? target : null,
+    });
   }
-  return targets;
+  return actions;
 }
 
 import {
@@ -333,7 +369,7 @@ function highlightedText(
   pageMatches: readonly TextMatch[],
   activeMatch: TextMatch | undefined,
   activeRef: React.MutableRefObject<HTMLElement | null>,
-  sourceSegments: readonly KnowledgeSourceHighlightSegment[],
+  sourceSegments: readonly KnowledgeReaderSegment[],
   interaction: PageSourceInteraction,
   preview: { readonly start: number; readonly end: number; readonly color: string } | null,
 ) {
@@ -354,43 +390,68 @@ function highlightedText(
       const to = Math.min(segment.end, end);
       if (from >= to) continue;
       const piece = text.slice(from, to);
-      if (segment.spans.length === 0) {
+      /*
+        PDF-R6K-H2B-C1. A run with no highlight is plain text -- UNLESS it is
+        the citation being navigated to, which still needs its transient ring.
+        That is the whole of "jump to source works with no mark": the span is
+        rendered for the focus alone and carries no background, so once the
+        navigation focus clears nothing is left behind.
+      */
+      if (segment.spans.length === 0 && !segment.focused) {
         nodes.push(...withPreview(text, from, to, `text-${from}`, preview));
         continue;
       }
-      const isArrival = interaction.navigationReferenceId !== null
-        && segment.spans.some((span) => span.referenceId === interaction.navigationReferenceId);
+      /*
+        PDF-R6K-H2B-C1. Arrival is now a CITATION fact, not a painted one.
+
+        `focused` comes from the citation's own resolved span, so a jump to
+        source rings the passage whether or not any highlight covers it -- and
+        the ring is transient navigation feedback that leaves no persistent
+        background behind when it clears. That is what keeps this from being a
+        disguised citation-derived highlight.
+      */
+      const isArrival = segment.focused;
       const anchorHere = isArrival && !navigationAnchored;
       if (anchorHere) navigationAnchored = true;
 
-      const targets = interaction.onActivate === null
-        ? []
-        : eligibleTargetsOf(segment, interaction.eligibleTargets);
-      const activate = targets.length === 0 || interaction.onActivate === null
+      /*
+        The persistent background is the STANDALONE highlights' and theirs
+        alone. Disagreeing colours over one run still fail closed, for the
+        original reason: one background cannot honestly represent two marks.
+      */
+      const tint = knowledgeStandaloneHighlightColor(segment.spans);
+      const painted = segment.spans.length > 0;
+
+      // Clicking a painted run opens its contextual control. A click that ends
+      // a drag-selection is the user selecting text, so it is suppressed --
+      // the same rule the old navigation click applied, for the same reason.
+      const activate = !painted || interaction.onOpenHighlightActions === null
         ? null
         : () => {
-          // A click that ends a drag-selection is the user selecting text, not
-          // asking to navigate. Read ONLY to suppress: no offset and no
-          // identity is ever derived from the live selection here -- B4-B2B
-          // remains the single path from a selection to coordinates.
           const selection = typeof window === 'undefined' ? null : window.getSelection();
           if (selection && !selection.isCollapsed) return;
-          interaction.onActivate!(targets);
+          interaction.onOpenHighlightActions!(highlightActionsOf(
+            segment, interaction.highlightsById, interaction.noteTargets,
+            interaction.eligibleTargets,
+          ));
         };
-
-      // P6J-F8-B3. The domain resolver owns every rule -- validity, default
-      // white, and disagreement between the Notes covering this run. A null
-      // simply leaves the neutral class below untouched.
-      const tint = knowledgeSourceHighlightColor(segment.spans, interaction.noteColors);
 
       nodes.push(
         <span
           key={`source-${from}`}
           ref={anchorHere ? interaction.navigationRef : undefined}
-          style={tint ? { backgroundColor: tint.backgroundColor } : undefined}
-          data-knowledge-source-highlight="true"
-          data-knowledge-source-highlight-count={segment.spans.length}
+          style={tint ? { backgroundColor: tint } : undefined}
+          data-knowledge-source-highlight={painted ? 'true' : undefined}
+          data-knowledge-source-highlight-count={painted ? segment.spans.length : undefined}
+          // The durable delete targets, so a click resolves to real rows rather
+          // than to a quote string or an offset guess.
+          {...(painted
+            ? { [KNOWLEDGE_HIGHLIGHT_IDS_ATTRIBUTE]: knowledgeHighlightIdsAttribute(segment.spans) }
+            : {})}
           data-knowledge-source-navigation-target={isArrival ? 'true' : undefined}
+          data-knowledge-source-focus-reference-id={
+            isArrival ? interaction.navigationReferenceId ?? undefined : undefined
+          }
           role={activate ? 'button' : undefined}
           tabIndex={activate ? 0 : undefined}
           onClick={activate ?? undefined}
@@ -404,10 +465,11 @@ function highlightedText(
             : undefined}
           className={[
             'rounded-sm',
-            // The tint replaces the neutral background and nothing else: the
-            // arrival ring is navigation feedback, not decoration, so a
-            // coloured Note must never cost the reader its "you are here".
-            tint ? '' : (isArrival ? 'bg-sky-200' : 'bg-sky-100'),
+            // A highlight's own colour replaces the neutral background. An
+            // unpainted run gets NO background at all -- only the transient
+            // arrival ring, which is why a citation with no highlight leaves
+            // nothing behind once navigation focus clears.
+            tint ? '' : (painted ? 'bg-sky-100' : ''),
             isArrival ? 'ring-1 ring-sky-400' : '',
             activate ? 'cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400' : '',
           ].filter(Boolean).join(' ')}
@@ -519,6 +581,13 @@ export default function KnowledgeDocumentDetails({
   // P6J-F6-B4-B4. The Notes offered for one ambiguous run, or null. Transient
   // UI only -- never stored, never persisted, replaced by the next activation.
   const [targetChoice, setTargetChoice] = useState<readonly string[] | null>(null);
+  /**
+   * PDF-R6K-H2B-C1. The contextual rows for the highlight run last clicked, or
+   * null. Transient UI only -- never stored, never persisted, replaced by the
+   * next click and cleared by a delete.
+   */
+  const [highlightActions, setHighlightActions] =
+    useState<readonly KnowledgeHighlightAction[] | null>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
   const sourceNavigationRef = useRef<HTMLElement | null>(null);
   const scrolledSourceRequestRef = useRef<number | null>(null);
@@ -541,19 +610,64 @@ export default function KnowledgeDocumentDetails({
   // the other direction. No request of its own, and nothing stored: the spans
   // are derived at render time and thrown away.
   const documentSourceReferences = useKnowledgeSourceReferencesForDocument(documentId);
-  // P6J-F8-B3 -- read-only Note colours, already derived by the board's owner.
-  const noteColors = useKnowledgeSourceNoteColors();
+
+  /*
+    PDF-R6K-H2B-C1. THE authority switch.
+
+    Citations are still loaded above -- Used in Notes, backlinks, Open Note and
+    jump-to-source all still need them -- but they no longer paint anything.
+    The persistent background comes from standalone highlight rows and nothing
+    else, so there is exactly one visual authority and a deleted highlight is
+    actually gone.
+  */
+  const documentHighlights = useKnowledgeStandaloneHighlights(documentId);
+  const deleteHighlight = useKnowledgeHighlightDelete();
+  const highlightsById = useMemo(
+    () => new Map(documentHighlights.map(
+      (row): [string, KnowledgeSourceHighlight] => [String(row.id), row],
+    )),
+    [documentHighlights],
+  );
+  /** Citation id -> its Note, derived from rows the board already holds. */
+  const noteTargets = useMemo(
+    () => knowledgeHighlightNoteTargets(documentSourceReferences),
+    [documentSourceReferences],
+  );
+
+  /**
+   * Where a citation navigation should land, resolved from the CITATION's own
+   * span through the shared resolver. Independent of what is painted, which is
+   * what makes jump-to-source survive a deleted -- or never-created -- mark.
+   */
+  const citationFocus = useMemo(
+    // Delegated, never resolved here: the reader has never been allowed to be
+    // a second opinion on what a stored span addresses.
+    () => knowledgeCitationFocusFor(
+      initialSourceReferenceId === undefined
+        ? null
+        : documentSourceReferences.find((row) => String(row.id) === initialSourceReferenceId),
+      pages,
+    ),
+    [initialSourceReferenceId, documentSourceReferences, pages],
+  );
+
   // Keyed by page number rather than index so it survives reordering, and
   // deliberately independent of `query` -- typing in the search box must not
-  // re-resolve every citation on every keystroke.
+  // re-resolve every highlight on every keystroke.
   const sourceSegmentsByPage = useMemo(() => {
-    const byPage = new Map<number, readonly KnowledgeSourceHighlightSegment[]>();
-    if (documentSourceReferences.length === 0) return byPage;
+    const byPage = new Map<number, readonly KnowledgeReaderSegment[]>();
     for (const page of pages) {
-      byPage.set(page.pageNumber, knowledgeSourceHighlightSegments(documentSourceReferences, page.pageNumber, page.text));
+      const focus = citationFocus !== null && citationFocus.pageNumber === page.pageNumber
+        ? { start: citationFocus.start, end: citationFocus.end }
+        : null;
+      if (documentHighlights.length === 0 && focus === null) continue;
+      byPage.set(
+        page.pageNumber,
+        knowledgeReaderSegments(documentHighlights, page.pageNumber, page.text, focus),
+      );
     }
     return byPage;
-  }, [documentSourceReferences, pages]);
+  }, [documentHighlights, citationFocus, pages]);
 
   /**
    * P6J-F6-B4-B4. The Notes the reader is already telling the user cite this
@@ -576,15 +690,12 @@ export default function KnowledgeDocumentDetails({
    * comes from the ref the renderer attaches, so this never carries a
    * coordinate of its own.
    */
-  const requestedSourceResolved = useMemo(() => {
-    if (initialSourceReferenceId === undefined) return false;
-    for (const segments of sourceSegmentsByPage.values()) {
-      for (const segment of segments) {
-        if (segment.spans.some((span) => span.referenceId === initialSourceReferenceId)) return true;
-      }
-    }
-    return false;
-  }, [initialSourceReferenceId, sourceSegmentsByPage]);
+  const requestedSourceResolved = useMemo(
+    // PDF-R6K-H2B-C1: resolved from the citation, so an arrival still happens
+    // when no highlight paints the passage.
+    () => citationFocus !== null,
+    [citationFocus],
+  );
 
   /**
    * P6J-F9-D. The one explicitly navigated PAGE_REGION reference, or null for
@@ -878,7 +989,11 @@ export default function KnowledgeDocumentDetails({
     navigationRef: sourceNavigationRef,
     eligibleTargets,
     onActivate: onOpenBacklinkTarget ? activateSourceTargets : null,
-    noteColors,
+    // PDF-R6K-H2B-C1. A painted run opens its own control; the control decides
+    // per highlight whether an Open Note exists behind it.
+    onOpenHighlightActions: setHighlightActions,
+    highlightsById,
+    noteTargets,
   };
 
   const moveMatch = (delta: number) => {
@@ -1341,6 +1456,28 @@ export default function KnowledgeDocumentDetails({
         no affordance may add a character to it. Identity is the padlet id on
         each control -- the label is presentation and opens nothing.
       */}
+      {/*
+        PDF-R6K-H2B-C1. The highlight's own control, and deliberately in the
+        same place as the choice list above: OUTSIDE the pages container, so
+        B4-B2B's selection offsets -- measured against the page text root --
+        cannot be shifted by a character of affordance.
+
+        One row per covering highlight, each carrying its own durable id. Open
+        Note appears only where that highlight still has a live citation; Trash
+        only where the board wired a delete authority, which it withholds from
+        a viewer. RLS remains the actual boundary either way.
+      */}
+      {highlightActions && highlightActions.length > 0 ? (
+        <div className="mt-3">
+          <KnowledgeHighlightActions
+            actions={highlightActions}
+            onOpenNote={onOpenBacklinkTarget ?? null}
+            onDelete={deleteHighlight}
+            onDismiss={() => setHighlightActions(null)}
+          />
+        </div>
+      ) : null}
+
       {targetChoice && onOpenBacklinkTarget ? (
         <div
           data-knowledge-source-choice="true"

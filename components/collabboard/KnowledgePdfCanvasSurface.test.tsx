@@ -242,10 +242,29 @@ describe('11 + 12. one surface, both hosts', () => {
 
 describe('13. deleting a placement never deletes the document', () => {
   it('introduces no Knowledge delete request', () => {
-    for (const source of [SURFACE, CLIENT.slice(CLIENT.indexOf('handleKnowledgePdfUploaded'), CLIENT.indexOf('persistKnowledgeSourceReference'))]) {
-      expect(source).not.toMatch(/method:\s*'DELETE'/);
-      expect(source).not.toMatch(/knowledge\/[^'"`]*['"`],\s*\{\s*method:\s*'DELETE'/);
+    // The surface itself still issues no delete of any kind.
+    expect(SURFACE).not.toMatch(/method:\s*'DELETE'/);
+
+    /*
+      PDF-R6K-H2B-C1 narrowed this from "no DELETE anywhere in the block" to the
+      rule it was always protecting: the DOCUMENT is never deleted. The board now
+      legitimately deletes a standalone HIGHLIGHT -- a different resource on its
+      own route -- and forbidding every DELETE would have blocked that while
+      protecting nothing extra.
+    */
+    expect(CLIENT).not.toContain('knowledge/${encodeURIComponent(documentId)}`, { method');
+    expect(CLIENT).not.toContain("knowledge/${documentId}`, { method: 'DELETE'");
+
+    // And every DELETE the board DOES make names the highlights route.
+    let cursor = CLIENT.indexOf("method: 'DELETE'");
+    let seen = 0;
+    while (cursor !== -1) {
+      const preceding = CLIENT.slice(Math.max(0, cursor - 260), cursor);
+      expect(preceding, 'an unexpected DELETE target').toContain('knowledge/highlights');
+      seen += 1;
+      cursor = CLIENT.indexOf("method: 'DELETE'", cursor + 1);
     }
+    expect(seen, 'exactly the highlight delete').toBe(1);
   });
 });
 

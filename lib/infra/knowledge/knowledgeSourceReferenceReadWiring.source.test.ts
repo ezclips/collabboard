@@ -615,7 +615,11 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     // The reader projects the existing context and derives spans through the
     // pure module. Both are in-memory: nothing here can load or store.
     expect(documentDetails).toContain('useKnowledgeSourceReferencesForDocument(documentId)');
-    expect(documentDetails).toContain('knowledgeSourceHighlightSegments(documentSourceReferences, page.pageNumber, page.text)');
+    // PDF-R6K-H2B-C1: the persistent visual authority is the standalone
+    // highlight table now. Citations are still loaded and still drive Used in
+    // Notes, backlinks, Open Note and jump-to-source -- they simply paint
+    // nothing.
+    expect(documentDetails).toContain('knowledgeReaderSegments(documentHighlights, page.pageNumber, page.text, focus)');
     expect(documentDetails).toContain('data-knowledge-source-highlight');
     for (const forbidden of ['fetch(', 'supabase', 'createClient', '/api/', '.insert(', '.update(', '.delete(', '.upsert(', '.rpc(']) {
       expect(documentDetails, forbidden).not.toContain(forbidden);
@@ -627,7 +631,10 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     // summary transport, bringing the total to four and no further.
     expect(referenceContext).toContain('export function useKnowledgeSourceReferencesForDocument');
     expect(referenceContext).toContain('useContext(KnowledgeSourceReferenceContext)');
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(5);
+    // PDF-R6K-H2B-C1 added two more, both inert transport on the SAME
+    // provider: the standalone highlight index and the delete authority.
+    // Still no second data architecture, and still no state here.
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(7);
     for (const forbidden of ['fetch(', 'supabase', 'useState', 'useEffect', '.insert(', '.update(']) {
       expect(referenceContext, forbidden).not.toContain(forbidden);
     }
@@ -921,7 +928,11 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
   it('the reader still delegates span resolution and adds no data access', () => {
     // Unchanged layering: segments come from the pure module, which is the sole
     // consumer of B4-B1. Interaction rides on what it already returned.
-    expect(documentDetails).toContain('knowledgeSourceHighlightSegments(documentSourceReferences, page.pageNumber, page.text)');
+    // PDF-R6K-H2B-C1: the persistent visual authority is the standalone
+    // highlight table now. Citations are still loaded and still drive Used in
+    // Notes, backlinks, Open Note and jump-to-source -- they simply paint
+    // nothing.
+    expect(documentDetails).toContain('knowledgeReaderSegments(documentHighlights, page.pageNumber, page.text, focus)');
     for (const forbidden of [
       'knowledgeSourceSpanResolver', 'resolveKnowledgeSourceSpan',
       'fetch(', 'supabase', 'createClient', '.insert(', '.update(', '.upsert(', '.rpc(',
@@ -931,13 +942,16 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
     // Interaction introduced no context of its own. The third is F8-B3's Note
     // colour transport and the fourth is the Source Notes Panel phase's Note
     // summary transport, and neither carries state either.
-    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(5);
+    // PDF-R6K-H2B-C1 added two more, both inert transport on the SAME
+    // provider: the standalone highlight index and the delete authority.
+    // Still no second data architecture, and still no state here.
+    expect((referenceContext.match(/createContext</g) ?? []).length).toBe(7);
   });
 
   it('target identity comes from the resolved spans, never from the DOM count attribute', () => {
     // The attribute survives for display and tests, and is emitted exactly
     // where B4-B3 put it -- but nothing READS it back to decide a destination.
-    expect(documentDetails).toContain('data-knowledge-source-highlight-count={segment.spans.length}');
+    expect(documentDetails).toContain('data-knowledge-source-highlight-count={painted ? segment.spans.length : undefined}');
     for (const forbidden of [
       'dataset.knowledgeSourceHighlightCount',
       "getAttribute('data-knowledge-source-highlight-count')",
@@ -946,7 +960,11 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
       expect(documentDetails, `routing must not read ${forbidden}`).not.toContain(forbidden);
     }
     // Targets are derived from the segment's own spans.
-    expect(documentDetails).toContain('eligibleTargetsOf(segment, interaction.eligibleTargets)');
+    // PDF-R6K-H2B-C1: a run's actions are derived per HIGHLIGHT, each with its
+    // own Note target -- so a plain or orphaned mark offers no Open Note while
+    // still painting and still being deletable.
+    expect(documentDetails).toContain('highlightActionsOf(');
+    expect(documentDetails).toContain('knowledgeHighlightNoteTarget(row, noteTargets)');
     expect(documentDetails).toContain('for (const span of segment.spans) {');
   });
 
@@ -1076,7 +1094,11 @@ describe('P6J-F8-B2 source excerpt boundaries', () => {
       expect(documentDetails, `the reader must not contain ${forbidden}`).not.toContain(forbidden);
     }
     // The gate lives in the domain module, not inline in the reader's JSX.
-    expect(documentDetails).toContain('knowledgeSourceHighlightColor(segment.spans, interaction.noteColors)');
+    // PDF-R6K-H2B-C1: the persistent visual authority is the standalone
+    // highlight table now. Citations are still loaded and still drive Used in
+    // Notes, backlinks, Open Note and jump-to-source -- they simply paint
+    // nothing.
+    expect(documentDetails).toContain('knowledgeStandaloneHighlightColor(segment.spans)');
     expect(documentDetails).not.toContain('cardColor');
   });
 

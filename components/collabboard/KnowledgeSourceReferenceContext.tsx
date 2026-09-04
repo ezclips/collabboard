@@ -16,6 +16,14 @@ import type {
   KnowledgeSourceBacklinkIndex,
 } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
+import {
+  EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX,
+  knowledgeStandaloneHighlightsFor,
+} from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
+import type { KnowledgeStandaloneHighlightIndex }
+  from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
+import type { KnowledgeSourceHighlight }
+  from '@/lib/domain/knowledge/knowledgeSourceHighlight';
 import type { KnowledgeSourceNoteColors } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
 import {
   EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
@@ -82,6 +90,26 @@ const KnowledgeSourceNoteSummaryContext = createContext<KnowledgeSourceNoteSumma
  */
 const KnowledgeSourceOpenContext = createContext<((reference: SourceReference) => void) | null>(null);
 
+/**
+ * PDF-R6K-H2B-C1 -- the board's STANDALONE highlights, and the authority to
+ * delete one.
+ *
+ * Carried on the SAME provider, for the same reason as every index above: the
+ * board's owner loads them once and the reader reads a projection. This is what
+ * keeps the switch of visual authority from becoming a second data
+ * architecture, and what keeps a click on a highlight from costing a request.
+ *
+ * `onDeleteHighlight` is null for a surface with no shared-edit authority,
+ * which is how a viewer's contextual control ends up with no Trash. The real
+ * boundary remains H2A's RLS -- this only decides what is offered.
+ */
+const KnowledgeStandaloneHighlightContext = createContext<KnowledgeStandaloneHighlightIndex>(
+  EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX,
+);
+
+const KnowledgeHighlightDeleteContext =
+  createContext<((highlightId: string) => void | Promise<void>) | null>(null);
+
 /** Stable empty result so a padlet with no references never re-renders on identity. */
 const NO_REFERENCES: readonly SourceReference[] = [];
 const NO_BACKLINKS: readonly KnowledgeSourceBacklink[] = [];
@@ -94,6 +122,8 @@ export function KnowledgeSourceReferenceProvider({
   noteColors = NO_NOTE_COLORS,
   noteSummaries = EMPTY_KNOWLEDGE_SOURCE_NOTE_SUMMARY_INDEX,
   onOpenSourceReference = null,
+  highlights = EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX,
+  onDeleteHighlight = null,
   children,
 }: {
   index: KnowledgeSourceReferenceIndex;
@@ -105,6 +135,10 @@ export function KnowledgeSourceReferenceProvider({
   noteSummaries?: KnowledgeSourceNoteSummaryIndex;
   /** Optional: omitting it leaves card source markers as plain labels. */
   onOpenSourceReference?: ((reference: SourceReference) => void) | null;
+  /** PDF-R6K-H2B-C1: omitting it leaves every page unhighlighted. */
+  highlights?: KnowledgeStandaloneHighlightIndex;
+  /** Omitting it withholds every Trash action, offering read-only context. */
+  onDeleteHighlight?: ((highlightId: string) => void | Promise<void>) | null;
   children: React.ReactNode;
 }) {
   // All four are already new Maps only when they actually changed, so this
@@ -115,7 +149,11 @@ export function KnowledgeSourceReferenceProvider({
         <KnowledgeSourceNoteColorContext.Provider value={noteColors}>
           <KnowledgeSourceNoteSummaryContext.Provider value={noteSummaries}>
             <KnowledgeSourceOpenContext.Provider value={onOpenSourceReference}>
-              {children}
+              <KnowledgeStandaloneHighlightContext.Provider value={highlights}>
+                <KnowledgeHighlightDeleteContext.Provider value={onDeleteHighlight}>
+                  {children}
+                </KnowledgeHighlightDeleteContext.Provider>
+              </KnowledgeStandaloneHighlightContext.Provider>
             </KnowledgeSourceOpenContext.Provider>
           </KnowledgeSourceNoteSummaryContext.Provider>
         </KnowledgeSourceNoteColorContext.Provider>
@@ -218,4 +256,26 @@ export function useKnowledgeSourceNoteSummariesForDocument(
     const found = knowledgeSourceNoteSummariesForDocument(index, documentId);
     return found.length > 0 ? found : NO_NOTE_SUMMARIES;
   }, [index, documentId]);
+}
+
+/**
+ * PDF-R6K-H2B-C1 -- every standalone highlight ON one document.
+ *
+ * This is the reader's ONE persistent visual authority. Citations are still
+ * read, but only for provenance and navigation; nothing here paints from them.
+ */
+export function useKnowledgeStandaloneHighlights(
+  documentId: string | null | undefined,
+): readonly KnowledgeSourceHighlight[] {
+  const index = useContext(KnowledgeStandaloneHighlightContext);
+  return useMemo(
+    () => knowledgeStandaloneHighlightsFor(index, documentId),
+    [index, documentId],
+  );
+}
+
+/** The board's delete authority, or null where the viewer has none. */
+export function useKnowledgeHighlightDelete():
+((highlightId: string) => void | Promise<void>) | null {
+  return useContext(KnowledgeHighlightDeleteContext);
 }

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 // @vitest-environment jsdom
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,6 +9,49 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeDocumentDetails from './KnowledgeDocumentDetails';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
+import { knowledgeSourceNoteAccentColor }
+  from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
+import { knowledgeStandaloneHighlightIndexOf }
+  from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
+import type { KnowledgeSourceHighlight }
+  from '@/lib/domain/knowledge/knowledgeSourceHighlight';
+
+/**
+ * PDF-R6K-H2B-C1. The reader's persistent visual authority is now the
+ * standalone highlight table, so a fixture that used to be "a citation that
+ * paints" becomes "a citation PLUS the highlight created with it" -- which is
+ * exactly what the atomic create flow now writes.
+ *
+ * Each test's offsets, quote and intent are unchanged; only the row that
+ * carries them to the renderer is. A test that wants a citation WITHOUT a mark
+ * simply omits the highlight, which is the decisive separation case.
+ */
+const highlightFor = (
+  reference: SourceReference,
+  over: Partial<KnowledgeSourceHighlight> = {},
+): KnowledgeSourceHighlight => ({
+  id: `hl-${String(reference.id)}` as KnowledgeSourceHighlight['id'],
+  sourceDocumentId: reference.sourceDocumentId,
+  pageNumber: reference.pageStart,
+  charStart: reference.charStart ?? 0,
+  charEnd: reference.charEnd ?? 0,
+  quoteText: reference.quoteText ?? '',
+  quoteHash: null,
+  color: '#e0f2fe',
+  createdBy: null,
+  createdAt: '2026-09-04T00:00:00.000Z',
+  updatedAt: '2026-09-04T00:00:00.000Z',
+  sourceReferenceId: reference.id,
+  ...over,
+});
+
+/** Every citation that resolves to a span gets the mark it would have been created with. */
+const highlightsForAll = (references: readonly SourceReference[]) =>
+  knowledgeStandaloneHighlightIndexOf(
+    references
+      .filter((reference) => reference.charStart !== null && reference.charEnd !== null)
+      .map((reference) => highlightFor(reference)),
+  );
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
@@ -726,7 +771,11 @@ function mountWithReferences(
     root!.render(
       // The REAL provider and the REAL index CanvasClient builds -- nothing
       // between the stored rows and the DOM is stubbed.
-      <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(references)}>
+      <KnowledgeSourceReferenceProvider
+        index={buildKnowledgeSourceReferenceIndex(references)}
+        highlights={highlightsForAll(references)}
+        onDeleteHighlight={() => {}}
+      >
         <KnowledgeDocumentDetails
           documentId={DOC_ID}
           originalFilename="EMG_checklist.pdf"
@@ -993,6 +1042,65 @@ const ids = (id: string, targetPadletId: string) =>
  * The reader as it exists on a canvas: forward references AND the backlink
  * index, both built by the real domain builders from the same rows.
  */
+/**
+ * PDF-R6K-H2B-C1. Like `mountInteractive`, but the standalone highlights are
+ * stated explicitly rather than derived from the citations -- which is the only
+ * way to express the cases that matter now: a citation with NO mark, a mark
+ * with NO citation, and a board with no delete authority.
+ */
+function mountInteractiveWithHighlights(
+  references: readonly SourceReference[],
+  posts: readonly { id: string; type: string; title: string; content: string }[],
+  highlights?: readonly KnowledgeSourceHighlight[],
+  options: {
+    onDeleteHighlight?: ((id: string) => void) | null;
+  } = {},
+) {
+  const onOpenBacklinkTarget = vi.fn();
+  const onDeleteHighlight = options.onDeleteHighlight === undefined
+    ? () => {}
+    : options.onDeleteHighlight;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+
+  const paint = (rows: readonly KnowledgeSourceHighlight[]) => {
+    act(() => {
+      root!.render(
+        <KnowledgeSourceReferenceProvider
+          index={buildKnowledgeSourceReferenceIndex(references)}
+          backlinks={buildKnowledgeSourceBacklinkIndex(references, posts)}
+          highlights={knowledgeStandaloneHighlightIndexOf(rows)}
+          onDeleteHighlight={onDeleteHighlight}
+        >
+          <KnowledgeDocumentDetails
+            documentId={DOC_ID}
+            originalFilename="EMG_checklist.pdf"
+            pageCount={2}
+            pages={pages}
+            loading={false}
+            error={false}
+            onBack={vi.fn()}
+            onCreateNoteFromPage={vi.fn()}
+            onOpenBacklinkTarget={onOpenBacklinkTarget}
+          />
+        </KnowledgeSourceReferenceProvider>,
+      );
+    });
+  };
+
+  paint(highlights ?? references
+    .filter((reference) => reference.charStart !== null && reference.charEnd !== null)
+    .map((reference) => highlightFor(reference)));
+
+  return {
+    container: host!,
+    onOpenBacklinkTarget,
+    /** Re-renders with a new set, as the board would after a delete. */
+    rerenderHighlights: paint,
+  };
+}
+
 function mountInteractive(
   references: readonly SourceReference[],
   posts: readonly { id: string; type: string; title: string; content: string }[],
@@ -1009,6 +1117,8 @@ function mountInteractive(
         <KnowledgeSourceReferenceProvider
           index={buildKnowledgeSourceReferenceIndex(references)}
           backlinks={buildKnowledgeSourceBacklinkIndex(references, posts)}
+          highlights={highlightsForAll(references)}
+          onDeleteHighlight={() => {}}
         >
           <KnowledgeDocumentDetails
             documentId={DOC_ID}
@@ -1054,7 +1164,11 @@ describe('P6J-F6-B4-B4 Note -> exact source span', () => {
     expect(marked[0].textContent).toBe('safety');
     // The exact piece, not merely the page section, is what was scrolled to.
     expect(scrolledElements()).toContain(marked[0]);
-    expect(marked[0].className).toContain('bg-sky-200');
+    // PDF-R6K-H2B-C1: arrival is a transient RING now. The old bg-sky-200 was
+    // a citation-derived background, which is exactly what must no longer
+    // exist -- a citation paints nothing that outlives the navigation focus.
+    expect(marked[0].className).toContain('ring-sky-400');
+    expect(marked[0].className).not.toContain('bg-sky-200');
   });
 
   it('N: a drifted citation lands on the passage its quote recovered', () => {
@@ -1137,106 +1251,162 @@ describe('P6J-F6-B4-B4 Note -> exact source span', () => {
   });
 });
 
-describe('P6J-F6-B4-B4 exact source -> Note', () => {
-  it('V: one citing Note opens directly, once', () => {
+/**
+ * PDF-R6K-H2B-C1 -- clicking a persisted highlight.
+ *
+ * The old gesture opened the citing Note directly. It cannot survive the
+ * separation: a highlight may have no Note at all, and it now has an action of
+ * its own, so the click opens a compact control instead of guessing between
+ * them. Open Note is offered per highlight, only where that highlight still has
+ * a live citation; Trash only where the board wired a delete authority.
+ */
+describe('PDF-R6K-H2B-C1 highlight contextual actions', () => {
+  const actionsIn = (container: HTMLElement) =>
+    container.querySelector('[data-knowledge-highlight-actions="true"]');
+  const rowsIn = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-knowledge-highlight-action-row]'));
+  const openNoteIn = (scope: HTMLElement | Document) =>
+    Array.from(scope.querySelectorAll('[data-knowledge-highlight-action="open-note"]'));
+  const trashIn = (scope: HTMLElement | Document) =>
+    Array.from(scope.querySelectorAll('[data-knowledge-highlight-action="delete"]'));
+
+  it('CLICK-1/CLICK-2: an editor clicking a linked highlight gets Open Note and Trash', () => {
     const { container, onOpenBacklinkTarget } = mountInteractive(
       [exactRef(4, 10, ids('ref-a', 'note-a'))],
       [notePost('note-a', 'Citing Note')],
     );
 
+    // Nothing is open until the highlight is deliberately clicked.
+    expect(actionsIn(container)).toBeNull();
     clickOn(highlightsIn(container)[0]);
 
-    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
-    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
-    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
-  });
-
-  it('W: two citations pointing at ONE Note are one destination', () => {
-    const { container, onOpenBacklinkTarget } = mountInteractive(
-      [
-        exactRef(0, 10, ids('ref-a', 'note-a')),
-        exactRef(4, 14, ids('ref-b', 'note-a')),
-      ],
-      [notePost('note-a', 'Citing Note')],
-    );
-
-    // The overlap run carries both citations...
-    const overlap = highlightsIn(container).find((node) => node.textContent === 'safety')!;
-    expect(overlap.getAttribute('data-knowledge-source-highlight-count')).toBe('2');
-    clickOn(overlap);
-
-    // ...but only one Note, so no chooser and exactly one call.
-    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
-    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
-    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
-  });
-
-  it('X/Y/Z: an overlap of two Notes asks, and routes by id even when labels match', () => {
-    const { container, onOpenBacklinkTarget } = mountInteractive(
-      [
-        exactRef(0, 10, ids('ref-a', 'note-a')),
-        exactRef(4, 14, ids('ref-b', 'note-b')),
-      ],
-      // Deliberately identical titles: a source-created Note inherits the PDF's
-      // filename, so two citing Notes legitimately read the same.
-      [notePost('note-a', 'EMG_checklist.pdf'), notePost('note-b', 'EMG_checklist.pdf')],
-    );
-
-    clickOn(highlightsIn(container).find((node) => node.textContent === 'safety')!);
-
-    // Nothing was chosen for the user.
+    expect(actionsIn(container)).not.toBeNull();
+    expect(rowsIn(container)).toHaveLength(1);
+    expect(openNoteIn(container)).toHaveLength(1);
+    expect(trashIn(container)).toHaveLength(1);
+    // The old gesture no longer fires on the click itself.
     expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
-    const options = chooserOptions(container);
-    expect(options).toHaveLength(2);
-    expect(options.map((option) => option.getAttribute('data-knowledge-source-choice-target')))
-      .toEqual(['note-a', 'note-b']);
-
-    clickOn(options[1]);
-
-    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
-    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-b');
-    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
   });
 
-  it('AA/AB: a span with no listed Note, or no callback, stays visible but inert', () => {
-    // The citation resolves and paints, but its target is not a Note the board
-    // currently lists as citing this document.
-    const orphan = mountInteractive([exactRef(4, 10, ids('ref-a', 'note-gone'))], []);
-    const orphanSpan = highlightsIn(orphan.container)[0];
-    expect(orphanSpan.textContent).toBe('safety');
-    expect(orphanSpan.getAttribute('role')).toBeNull();
-    expect(orphanSpan.getAttribute('tabindex')).toBeNull();
-    clickOn(orphanSpan);
-    expect(orphan.onOpenBacklinkTarget).not.toHaveBeenCalled();
-    remount();
-
-    // Outside a canvas there is nothing to navigate to at all.
-    const { container } = mountWithReferences([exactRef(4, 10, ids('ref-a', 'note-a'))]);
-    const span = highlightsIn(container)[0];
-    expect(span.getAttribute('role')).toBeNull();
-    expect(span.getAttribute('tabindex')).toBeNull();
-  });
-
-  it('AG/AH/AI: Enter and Space activate, and Space does not scroll the page', () => {
+  it('CLICK-7: Open Note targets the exact citation-linked padlet', () => {
     const { container, onOpenBacklinkTarget } = mountInteractive(
       [exactRef(4, 10, ids('ref-a', 'note-a'))],
       [notePost('note-a', 'Citing Note')],
     );
-    const span = highlightsIn(container)[0];
-    expect(span.getAttribute('role')).toBe('button');
-    expect(span.getAttribute('tabindex')).toBe('0');
+    clickOn(highlightsIn(container)[0]);
+    clickOn(openNoteIn(container)[0] as HTMLElement);
 
-    expect(pressOn(span, 'Enter').defaultPrevented).toBe(true);
     expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
+    // Acting dismisses the control.
+    expect(actionsIn(container)).toBeNull();
+  });
 
-    const space = pressOn(span, ' ');
-    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(2);
-    // Space would otherwise scroll the reader out from under the reader.
-    expect(space.defaultPrevented).toBe(true);
+  it('CLICK-4/CLICK-6: a highlight with no live citation offers Trash and no Open Note', () => {
+    // `sourceReferenceId: null` is what a plain highlight looks like, and also
+    // what an orphan looks like after its citing Note was deleted (H2A-C1's
+    // ON DELETE SET NULL). The two are indistinguishable here on purpose.
+    const { container } = mountInteractiveWithHighlights(
+      [],
+      [],
+      [highlightFor(exactRef(4, 10, ids('ref-a', 'note-a')), { sourceReferenceId: null })],
+    );
+    clickOn(highlightsIn(container)[0]);
 
-    // An unrelated key does nothing at all.
-    expect(pressOn(span, 'a').defaultPrevented).toBe(false);
-    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(2);
+    expect(rowsIn(container)).toHaveLength(1);
+    expect(openNoteIn(container), 'no Note exists to open').toHaveLength(0);
+    expect(trashIn(container)).toHaveLength(1);
+  });
+
+  it('CLICK-3/CLICK-5: a viewer gets Open Note but never Trash', () => {
+    const { container } = mountInteractiveWithHighlights(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+      undefined,
+      // No delete authority wired: this is what a viewer or commenter gets.
+      { onDeleteHighlight: null },
+    );
+    clickOn(highlightsIn(container)[0]);
+
+    expect(openNoteIn(container)).toHaveLength(1);
+    expect(trashIn(container), 'a viewer is offered no shared mutation').toHaveLength(0);
+  });
+
+  it('CLICK-8: no target padlet is denormalised onto the highlight', () => {
+    // The Note is derived from the citation the board already holds. A copy on
+    // the highlight row would go stale the moment that Note is deleted.
+    const domain = readFileSync(
+      join(process.cwd(), 'lib/domain/knowledge/knowledgeSourceHighlight.ts'), 'utf8',
+    );
+    expect(domain).not.toContain('targetPadletId');
+    const migration = readFileSync(
+      join(process.cwd(), 'supabase/migrations/20260904_create_knowledge_source_highlights.sql'),
+      'utf8',
+    );
+    expect(migration.replace(/--.*$/gm, '')).not.toContain('target_padlet_id');
+  });
+
+  it('OVERLAP-1/OVERLAP-2: an A+B run lists both ids, each with its own Note', () => {
+    const refA = exactRef(0, 10, ids('ref-a', 'note-a'));
+    const refB = exactRef(4, 14, ids('ref-b', 'note-b'));
+    const { container, onOpenBacklinkTarget } = mountInteractiveWithHighlights(
+      [refA, refB],
+      [notePost('note-a', 'Note A'), notePost('note-b', 'Note B')],
+    );
+
+    const overlap = highlightsIn(container).find((node) => node.textContent === 'safety')!;
+    expect(overlap.getAttribute('data-knowledge-source-highlight-count')).toBe('2');
+    // Both durable ids reach the DOM, so neither has to be guessed.
+    expect(overlap.getAttribute('data-knowledge-highlight-ids'))
+      .toBe('hl-ref-a,hl-ref-b');
+
+    clickOn(overlap);
+    expect(rowsIn(container), 'one row per covering highlight').toHaveLength(2);
+    // Each row resolves its OWN Note, never the first one arbitrarily.
+    const notes = openNoteIn(container);
+    expect(notes).toHaveLength(2);
+    clickOn(notes[1] as HTMLElement);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-b');
+  });
+
+  it('OVERLAP-3: deleting A leaves B painted and B\'s Note action intact', () => {
+    const refA = exactRef(0, 10, ids('ref-a', 'note-a'));
+    const refB = exactRef(4, 14, ids('ref-b', 'note-b'));
+    const deleted: string[] = [];
+    const { container, rerenderHighlights } = mountInteractiveWithHighlights(
+      [refA, refB],
+      [notePost('note-a', 'Note A'), notePost('note-b', 'Note B')],
+      undefined,
+      { onDeleteHighlight: (id: string) => { deleted.push(id); } },
+    );
+
+    const overlap = highlightsIn(container).find((node) => node.textContent === 'safety')!;
+    clickOn(overlap);
+    // Delete the FIRST row deliberately -- by its id, not by position luck.
+    clickOn(trashIn(container)[0] as HTMLElement);
+    expect(deleted).toEqual(['hl-ref-a']);
+
+    // The board removes the row and re-renders; B must survive untouched.
+    rerenderHighlights([highlightFor(refB)]);
+    const remaining = highlightsIn(container);
+    expect(remaining.length).toBeGreaterThan(0);
+    for (const node of remaining) {
+      expect(node.getAttribute('data-knowledge-highlight-ids')).toBe('hl-ref-b');
+    }
+    clickOn(remaining[0]);
+    expect(openNoteIn(container)).toHaveLength(1);
+  });
+
+  it('a citation with NO standalone highlight paints nothing at all', () => {
+    // The decisive separation test: the citation is present and navigable, but
+    // there is no persistent background anywhere on the page.
+    const { container } = mountInteractiveWithHighlights(
+      [exactRef(4, 10, ids('ref-a', 'note-a'))],
+      [notePost('note-a', 'Citing Note')],
+      [],
+    );
+    expect(highlightsIn(container)).toHaveLength(0);
+    expect(container.querySelector('[data-knowledge-highlight-ids]')).toBeNull();
   });
 });
 
@@ -1285,7 +1455,7 @@ describe('P6J-F6-B4-B4 selection still wins over navigation', () => {
       .toEqual({ charStart: 0, charEnd: 14, selectedText: 'PDF safety PDF' });
   });
 
-  it('AF: an ordinary collapsed click still navigates', () => {
+  it('AF: an ordinary collapsed click still acts -- now by opening the control', () => {
     const { container, onOpenBacklinkTarget } = mountInteractive(
       [exactRef(4, 10, ids('ref-a', 'note-a'))],
       [notePost('note-a', 'Citing Note')],
@@ -1294,6 +1464,11 @@ describe('P6J-F6-B4-B4 selection still wins over navigation', () => {
     // Nothing selected -- the browser's selection is collapsed.
     clickOn(highlightsIn(container)[0]);
 
+    // PDF-R6K-H2B-C1: the gesture reaches the highlight's own actions, and Open
+    // Note is one of them rather than the whole of it.
+    const actions = container.querySelector('[data-knowledge-highlight-actions="true"]');
+    expect(actions).not.toBeNull();
+    clickOn(actions!.querySelector('[data-knowledge-highlight-action="open-note"]') as HTMLElement);
     expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
   });
 });
@@ -1336,7 +1511,8 @@ describe('P6J-F6-B4-B4 search keeps its match, and the canonical root is untouch
     const overlap = highlightsIn(container).find((node) => node.textContent === 'safety')!;
     expect(overlap.getAttribute('role')).toBe('button');
     clickOn(overlap);
-    expect(chooserOptions(container)).toHaveLength(2);
+    // PDF-R6K-H2B-C1: one row per covering HIGHLIGHT, each with its own id.
+    expect(container.querySelectorAll('[data-knowledge-highlight-action-row]')).toHaveLength(2);
     expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
   });
 
@@ -1347,17 +1523,17 @@ describe('P6J-F6-B4-B4 search keeps its match, and the canonical root is untouch
 
     clickOn(highlightsIn(container).find((node) => node.textContent === 'safety')!);
 
-    const chooser = container.querySelector('[data-knowledge-source-choice="true"]')!;
-    expect(chooser).not.toBeNull();
+    const actions = container.querySelector('[data-knowledge-highlight-actions="true"]')!;
+    expect(actions).not.toBeNull();
     // Outside every page text root -- otherwise its labels would land in the
-    // coordinate space B4-B2B measures against.
-    expect(root.contains(chooser)).toBe(false);
+    // coordinate space B4-B2B measures against. The control moved; the rule
+    // it has to obey did not.
+    expect(root.contains(actions)).toBe(false);
     expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
 
-    // Dismissing restores nothing, because nothing in the root ever changed.
-    clickOn(Array.from(container.querySelectorAll('button'))
-      .find((button) => button.getAttribute('aria-label') === 'Dismiss citing Notes')!);
-    expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
+    // Acting dismisses it, and restores nothing -- the root never changed.
+    clickOn(actions.querySelector('[data-knowledge-highlight-action="open-note"]') as HTMLElement);
+    expect(container.querySelector('[data-knowledge-highlight-actions="true"]')).toBeNull();
     expect(pageRoot(container, 1).textContent).toBe(PAGE_ONE);
     // Each substring is emitted once: the overlap is not painted per citation.
     expect((root.textContent!.match(/safety/g) ?? []).length).toBe(1);
@@ -1777,9 +1953,21 @@ function mountWithNoteColors(
       // is supplied, exactly as CanvasClient derives it from its own posts.
       <KnowledgeSourceReferenceProvider
         index={buildKnowledgeSourceReferenceIndex(references)}
-        // Callers still pass a flat id -> color map; wrapped here as topStrip,
-        // the primary field the resolver now reads (knowledgeSourceHighlightColor.ts).
-        noteColors={new Map([...noteColors].map(([id, color]) => [id, { topStrip: color }]))}
+        // PDF-R6K-H2B-C1: colour is now the HIGHLIGHT's, seeded from the Note
+        // at creation and owned by the highlight afterwards. The map these
+        // tests supply is therefore applied to the highlight rows, which is
+        // exactly what the atomic create flow writes.
+        highlights={knowledgeStandaloneHighlightIndexOf(references
+          .filter((reference) => reference.charStart !== null && reference.charEnd !== null)
+          .map((reference) => highlightFor(reference, {
+            // Seeded exactly as the atomic create flow does: the Note's accent
+            // through the shared authority, which rejects white and unusable
+            // values, falling back to the reader's own neutral.
+            color: knowledgeSourceNoteAccentColor({
+              topStrip: noteColors.get(String(reference.targetPadletId)),
+            }) ?? '#e0f2fe',
+          })))}
+        onDeleteHighlight={() => {}}
       >
         <KnowledgeDocumentDetails
           documentId={DOC_ID}
@@ -1830,15 +2018,18 @@ describe('P6J-F8-B3 source highlight colour', () => {
     expect(highlight.className).not.toContain('bg-sky-100');
   });
 
-  it('an uncoloured Note keeps the existing neutral styling and no inline colour', () => {
+  it('an uncoloured Note seeds the neutral, which the highlight then OWNS', () => {
+    // PDF-R6K-H2B-C1: a highlight always has a colour of its own. Where the
+    // Note offered no usable accent, the reader's existing neutral is what was
+    // stored at creation -- so it paints inline rather than by class, and a
+    // later Note recolour cannot reach it.
     const container = mountWithNoteColors(
       [b3Exact(0, 3, 'note-a')],
       new Map(),
     );
     const [highlight] = highlightsIn(container);
 
-    expect(highlight.style.backgroundColor).toBe('');
-    expect(highlight.className).toContain('bg-sky-100');
+    expect(highlight.style.backgroundColor).toBe('rgb(224, 242, 254)');
   });
 
   it('a default-white Note stays neutral rather than painting the highlight white', () => {
@@ -1848,8 +2039,10 @@ describe('P6J-F8-B3 source highlight colour', () => {
     );
     const [highlight] = highlightsIn(container);
 
-    expect(highlight.style.backgroundColor).toBe('');
-    expect(highlight.className).toContain('bg-sky-100');
+    // PDF-R6K-H2B-C1: white is still refused as an accent -- a white highlight
+    // is an invisible one -- so the neutral was seeded at creation and is what
+    // the highlight now owns and paints.
+    expect(highlight.style.backgroundColor).toBe('rgb(224, 242, 254)');
   });
 
   it('an overlap between Notes wanting DIFFERENT colours falls back to neutral', () => {
@@ -1955,12 +2148,13 @@ describe('P6J-F8-B3 source highlight colour', () => {
     expect(b3PageRoot(container, 2).textContent).toBe(pages[1].text);
   });
 
-  it('a reader mounted without noteColors behaves exactly as before', () => {
+  it('a reader mounted without noteColors still paints the highlight own colour', () => {
+    // PDF-R6K-H2B-C1: Note colours are no longer an input to painting at all.
+    // The highlight carries its own, so the reader needs nothing from the board.
     const { container } = mountWithReferences([b3Exact(0, 3, 'note-a')]);
     const [highlight] = highlightsIn(container);
 
-    expect(highlight.style.backgroundColor).toBe('');
-    expect(highlight.className).toContain('bg-sky-100');
+    expect(highlight.style.backgroundColor).toBe('rgb(224, 242, 254)');
   });
 });
 
@@ -2226,7 +2420,11 @@ describe('P6J-F9-D region arrival', () => {
     const render = (extra: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {}) => {
       act(() => {
         root!.render(
-          <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(references)}>
+          <KnowledgeSourceReferenceProvider
+            index={buildKnowledgeSourceReferenceIndex(references)}
+            highlights={highlightsForAll(references)}
+            onDeleteHighlight={() => {}}
+          >
             <KnowledgeDocumentDetails
               documentId={REGION_DOC} boardId="board-region-1" originalFilename="synthetic.pdf"
               pageCount={2} pages={regionPages} loading={false} error={false} onBack={vi.fn()}

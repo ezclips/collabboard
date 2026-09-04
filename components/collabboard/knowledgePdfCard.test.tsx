@@ -570,12 +570,18 @@ describe('43-45. converted text carries the side-panel highlights', () => {
     // One resolver, one colour rule -- the card decides neither.
     // Same resolver, now handed the page the card is actually displaying --
     // that substitution IS the switcher's provenance contract.
+    // PDF-R6K-H2B-C1: the SAME authority as the reader, now the standalone
+    // highlight table. Citations still load on this card for provenance and
+    // for creating new ones; they paint nothing.
     expect(code).toMatch(
-      /knowledgeSourceHighlightSegments\(\s*references,\s*currentPageData\.pageNumber,\s*currentPageData\.text,?\s*\)/,
+      /knowledgeStandaloneHighlightSegments\(\s*documentHighlights,\s*currentPageData\.pageNumber,\s*currentPageData\.text,?\s*\)/,
     );
-    expect(code).toContain('knowledgeSourceHighlightColor(segment.spans, noteColors)');
+    expect(code).toContain('knowledgeStandaloneHighlightColor(segment.spans)');
+    expect(code).toContain('useKnowledgeStandaloneHighlights(documentId)');
     expect(code).toContain('useKnowledgeSourceReferencesForDocument(documentId)');
-    expect(code).toContain('useKnowledgeSourceNoteColors()');
+    // No citation-derived paint survives anywhere on this surface.
+    expect(code).not.toContain('knowledgeSourceHighlightSegments');
+    expect(code).not.toContain('knowledgeSourceHighlightColor');
     // No second notion of a highlight, and no colour invented here.
     expect(code).not.toMatch(/charStart|quoteText|indexOf\(reference/);
   });
@@ -1009,9 +1015,9 @@ describe('PDF-C1 page switcher', () => {
     // against p.3 paints on page 3 and nowhere else. A literal 1, or the loop
     // variable of a superseded multi-page render, would silently mis-attribute.
     expect(code).toMatch(
-      /knowledgeSourceHighlightSegments\(\s*references,\s*currentPageData\.pageNumber,\s*currentPageData\.text,?\s*\)/,
+      /knowledgeStandaloneHighlightSegments\(\s*documentHighlights,\s*currentPageData\.pageNumber,\s*currentPageData\.text,?\s*\)/,
     );
-    expect(code).not.toMatch(/knowledgeSourceHighlightSegments\(\s*references,\s*1\s*,/);
+    expect(code).not.toMatch(/knowledgeStandaloneHighlightSegments\(\s*documentHighlights,\s*1\s*,/);
     // The page image is addressed by the same displayed page number.
     expect(code).toContain('pageNumber={currentPageData.pageNumber}');
     // Identity throughout is the document id, never the placement or filename.
@@ -1053,9 +1059,10 @@ describe('PDF-C1 page switcher', () => {
     expect(code).toContain('useKnowledgePdfCreateNote()');
     expect(code).toMatch(/createNoteFromPage\(buildSelectionSourceRequest\(/);
 
-    // 5. The highlight side is untouched -- still exactly one resolver call.
-    expect((code.match(/knowledgeSourceHighlightSegments\(/g) || []).length).toBe(1);
-    expect((code.match(/knowledgeSourceHighlightColor\(/g) || []).length).toBe(1);
+    // 5. The highlight side stays a single resolver call -- now against the
+    //    standalone authority (PDF-R6K-H2B-C1), still exactly once.
+    expect((code.match(/knowledgeStandaloneHighlightSegments\(/g) || []).length).toBe(1);
+    expect((code.match(/knowledgeStandaloneHighlightColor\(/g) || []).length).toBe(1);
   });
 
   it('25. the pager is isolated from card drag and canvas panning', async () => {

@@ -16,6 +16,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgeSourceReaderDrawer from './KnowledgeSourceReaderDrawer';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
+import { knowledgeStandaloneHighlightIndexOf }
+  from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import { buildKnowledgeSourceNoteSummaryIndex } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
@@ -95,6 +97,27 @@ async function renderInto(props: DrawerProps, references: readonly SourceReferen
         index={buildKnowledgeSourceReferenceIndex(references)}
         backlinks={buildKnowledgeSourceBacklinkIndex(references, posts)}
         noteSummaries={buildKnowledgeSourceNoteSummaryIndex(references, posts)}
+        /*
+          PDF-R6K-H2B-C1: the reader paints from standalone highlights now, so
+          a fixture that means "this citation is marked" supplies the mark the
+          atomic create flow would have written alongside it.
+        */
+        highlights={knowledgeStandaloneHighlightIndexOf(references
+          .filter((reference) => reference.charStart !== null && reference.charEnd !== null)
+          .map((reference) => ({
+            id: `hl-${String(reference.id)}`,
+            sourceDocumentId: reference.sourceDocumentId,
+            pageNumber: reference.pageStart,
+            charStart: reference.charStart!,
+            charEnd: reference.charEnd!,
+            quoteText: reference.quoteText ?? '',
+            quoteHash: null,
+            color: '#e0f2fe',
+            createdBy: null,
+            createdAt: '2026-09-04T00:00:00.000Z',
+            updatedAt: '2026-09-04T00:00:00.000Z',
+            sourceReferenceId: reference.id,
+          } as never)))}
       >
         <KnowledgeSourceReaderDrawer {...props} />
       </KnowledgeSourceReferenceProvider>,
@@ -612,6 +635,13 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(highlight).not.toBeNull();
     await act(async () => { highlight.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
+    // PDF-R6K-H2B-C1: the click opens the highlight's own control; Open Note is
+    // one of its actions rather than the whole gesture.
+    const openNote = drawerEl()!
+      .querySelector('[data-knowledge-highlight-action="open-note"]') as HTMLElement;
+    expect(openNote).not.toBeNull();
+    await act(async () => { openNote.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
     expect(onOpen).toHaveBeenCalledWith('padlet-1');
     // The whole point of F7: the source stays beside the Note it supports.
     expect(drawerEl()).not.toBeNull();
@@ -785,8 +815,11 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
 
     const highlight = drawerEl()!.querySelector('[data-knowledge-source-highlight="true"]') as HTMLElement;
     expect(highlight).not.toBeNull();
-    expect(highlight.getAttribute('role'), 'no board target, so no action').toBeNull();
     await act(async () => { highlight.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // PDF-R6K-H2B-C1: the mark still opens its own control -- it is a real
+    // annotation regardless of any Note -- but with no Note on the board there
+    // is no Open Note action, so nothing can be navigated to.
+    expect(drawerEl()!.querySelector('[data-knowledge-highlight-action="open-note"]')).toBeNull();
     expect(onOpen).not.toHaveBeenCalled();
 
     for (const forbidden of ['supabase', 'createClient', '.insert(', '.update(', '.delete(', '.upsert(', '.rpc(',

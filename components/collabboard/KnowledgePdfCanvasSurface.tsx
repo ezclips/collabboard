@@ -10,11 +10,15 @@ import {
 } from '@/components/collabboard/KnowledgePageCache';
 import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
-  useKnowledgeSourceNoteColors,
+  useKnowledgeStandaloneHighlights,
   useKnowledgeSourceReferencesForDocument,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
-import { knowledgeSourceHighlightSegments } from '@/lib/domain/knowledge/knowledgeSourceHighlights';
-import { knowledgeSourceHighlightColor } from '@/lib/domain/knowledge/knowledgeSourceHighlightColor';
+import {
+  KNOWLEDGE_HIGHLIGHT_IDS_ATTRIBUTE,
+  knowledgeHighlightIdsAttribute,
+  knowledgeStandaloneHighlightColor,
+  knowledgeStandaloneHighlightSegments,
+} from '@/lib/domain/knowledge/knowledgeStandaloneHighlights';
 import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
@@ -651,7 +655,14 @@ export default function KnowledgePdfCanvasSurface({
    * side panel. A card outside the provider simply gets no highlights.
    */
   const references = useKnowledgeSourceReferencesForDocument(documentId);
-  const noteColors = useKnowledgeSourceNoteColors();
+  /*
+    PDF-R6K-H2B-C1. The card paints from STANDALONE highlights, exactly as the
+    reader does -- one visual authority for both surfaces, so a highlight
+    deleted on one is gone on the other at the next render. Citations are still
+    read on this card for provenance and for creating new ones; they no longer
+    paint anything.
+  */
+  const documentHighlights = useKnowledgeStandaloneHighlights(documentId);
 
   /**
    * PDF-C1 Text -- selecting source text on the page that is actually visible.
@@ -957,24 +968,29 @@ export default function KnowledgePdfCanvasSurface({
                       reference recorded against p.3 paints on page 3 and nowhere
                       else. Nothing here decides what a highlight is.
                     */}
-                    {knowledgeSourceHighlightSegments(
-                      references,
+                    {knowledgeStandaloneHighlightSegments(
+                      documentHighlights,
                       currentPageData.pageNumber,
                       currentPageData.text,
                     )
                       .map((segment) => {
-                        const highlight = segment.spans.length > 0
-                          ? knowledgeSourceHighlightColor(segment.spans, noteColors)
-                          : null;
-                        if (!highlight) {
+                        const color = knowledgeStandaloneHighlightColor(segment.spans);
+                        if (color === null) {
                           return <React.Fragment key={segment.start}>{segment.text}</React.Fragment>;
                         }
                         return (
                           <mark
                             key={segment.start}
                             data-knowledge-pdf-highlight="true"
+                            // The durable ids travel with the painted run here
+                            // too, so the card and the reader name the same
+                            // rows and a later delete surface has real targets.
+                            {...{
+                              [KNOWLEDGE_HIGHLIGHT_IDS_ATTRIBUTE]:
+                                knowledgeHighlightIdsAttribute(segment.spans),
+                            }}
                             className="rounded-[2px] bg-transparent px-0 text-inherit"
-                            style={{ backgroundColor: highlight.backgroundColor }}
+                            style={{ backgroundColor: color }}
                           >
                             {segment.text}
                           </mark>

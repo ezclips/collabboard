@@ -155,23 +155,27 @@ describe('H2A changes no rendering and no citation authority', () => {
   const READER = read('components/collabboard/KnowledgeDocumentDetails.tsx');
   const CARD = read('components/collabboard/KnowledgePdfCanvasSurface.tsx');
 
-  it('7. both renderers still paint citation-derived highlights, unchanged', () => {
-    // H2A is data and server authority only. The renderer switch is H2B.
+  it('7. PDF-R6K-H2B-C1: both renderers now paint from the STANDALONE table', () => {
+    // Superseded by design. H2A deliberately left the renderers on citations;
+    // H2B-C1 is the slice that switched them, and the invariant that matters
+    // now is that no citation-derived paint survives on either surface.
     for (const source of [READER, CARD]) {
-      expect(source).toContain('knowledgeSourceHighlightSegments');
-      // The NEW entity, by its own names. The pre-existing
-      // KnowledgeSourceHighlightSpan/Color types are the citation renderer's
-      // own and are deliberately not what is being excluded here.
+      expect(source).toContain('knowledgeStandaloneHighlight');
+      expect(source).not.toContain('knowledgeSourceHighlightSegments');
+      expect(source).not.toContain('knowledgeSourceHighlightColor');
+      // Neither surface reaches the database itself; both read the board's
+      // index through the inert provider.
       expect(source).not.toContain('knowledge_source_highlights');
-      expect(source).not.toContain('knowledgeSourceHighlightWrite');
-      expect(source).not.toContain("knowledge/knowledgeSourceHighlight'");
-      expect(source).not.toContain('/highlights');
+      expect(source).toContain('useKnowledgeStandaloneHighlights');
     }
   });
 
-  it('8. no Trash, no highlight click handler was added', () => {
-    expect(CARD).not.toContain('data-knowledge-pdf-highlight-delete');
-    expect(READER).not.toContain('data-knowledge-highlight-delete');
+  it('8. only the reader hosts the contextual control, and only via the provider', () => {
+    // The card paints the same marks but hosts no delete surface yet -- that is
+    // the reader's, and it is wired through the provider's delete authority.
+    expect(CARD).not.toContain('KnowledgeHighlightActions');
+    expect(READER).toContain('KnowledgeHighlightActions');
+    expect(READER).toContain('useKnowledgeHighlightDelete()');
   });
 
   it('9. the citation client is still INSERT-ONLY', () => {
@@ -194,13 +198,19 @@ describe('H2A changes no rendering and no citation authority', () => {
   it('11. the routes use the caller authority, never an admin client', () => {
     const collection = read('app/api/boards/[id]/knowledge/highlights/route.ts');
     const item = read('app/api/boards/[id]/knowledge/highlights/[highlightId]/route.ts');
-    expect(collection).toContain('createRouteHandlerClient');
-    for (const source of [collection, item]) {
+    const session = read('lib/server/knowledge/knowledgeHighlightSession.ts');
+    // The caller's own authority, built once in the shared session factory --
+    // a Next route module may export only handlers, so it cannot live there.
+    expect(session).toContain('createRouteHandlerClient');
+    for (const source of [collection, item, session]) {
       expect(source).not.toContain('SERVICE_ROLE');
       expect(source).not.toContain('createAdminClient');
       expect(source).not.toContain('service_role');
     }
-    // Both paths bind the same session factory, so authority cannot diverge.
-    expect(item).toContain("from '../route'");
+    // Both paths bind the SAME session factory, so authority cannot diverge.
+    for (const source of [collection, item]) {
+      expect(source).toContain('knowledgeHighlightSession');
+      expect(source).toContain('getKnowledgeHighlightSession');
+    }
   });
 });

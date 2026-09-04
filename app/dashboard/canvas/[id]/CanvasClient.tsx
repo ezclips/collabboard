@@ -116,6 +116,14 @@ import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/kn
 import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
 import { asPostId } from '@/lib/domain/core/ids';
 import { KnowledgeSourceReferenceProvider } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import {
+  EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX,
+  knowledgeStandaloneHighlightIndexOf,
+} from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
+import type { KnowledgeStandaloneHighlightIndex }
+  from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
+import type { KnowledgeSourceHighlight }
+  from '@/lib/domain/knowledge/knowledgeSourceHighlight';
 import { KnowledgePdfOpenProvider } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import type {
   KnowledgePdfProcessingStatus,
@@ -1724,6 +1732,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return () => { cancelled = true; };
   }, [sourceReferenceScopeKey, sourceReferenceTargetKey, supabase]);
 
+
   // P6J-F6-B3 -- reverse provenance (document -> citing Notes), DISPLAY ONLY.
   // A pure inversion of rows B1 already loaded and RLS already authorized: no
   // request, no route, no second stored copy. Derived here because this is the
@@ -2032,6 +2041,91 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets((prev) => prev.map((p) => (p.id === target.id ? { ...p, metadata: nextMetadata } : p)));
     void updatePostFieldsSwallowResolved(target.id, { metadata: nextMetadata } as any);
   }, [padlets, updatePostFieldsSwallowResolved]);
+
+  /*
+    PDF-R6K-H2B-C1 -- the board's STANDALONE highlights.
+
+    This is the reader's and the card's one persistent visual authority, loaded
+    here for the same reason the citations are: the board owns the state, the
+    surfaces read a projection, and nothing fetches per rendered run or per
+    click. One request per PLACED document -- bounded by how many PDFs are on
+    the board, never by how many highlights or Notes exist.
+
+    Read through the H2A typed route under the caller's own session, so RLS
+    stays the boundary and no component touches Supabase directly.
+  */
+  const [knowledgeHighlightIndex, setKnowledgeHighlightIndex] =
+    useState<KnowledgeStandaloneHighlightIndex>(EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX);
+
+  const placedKnowledgeDocumentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const padlet of padlets) {
+      const placement = readKnowledgePdfPlacement(padlet);
+      if (placement) ids.add(placement.documentId);
+    }
+    return [...ids].sort();
+  }, [padlets]);
+  const placedKnowledgeDocumentKey = placedKnowledgeDocumentIds.join(',');
+
+  const loadKnowledgeHighlights = useCallback(async () => {
+    if (!canvasId || placedKnowledgeDocumentIds.length === 0) {
+      setKnowledgeHighlightIndex(EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX);
+      return;
+    }
+    const rows: KnowledgeSourceHighlight[] = [];
+    for (const documentId of placedKnowledgeDocumentIds) {
+      try {
+        const response = await fetch(
+          `/api/boards/${encodeURIComponent(canvasId)}/knowledge/highlights`
+          + `?documentId=${encodeURIComponent(documentId)}`,
+        );
+        if (!response.ok) continue;
+        const payload = await response.json() as { highlights?: KnowledgeSourceHighlight[] };
+        for (const row of payload.highlights ?? []) rows.push(row);
+      } catch {
+        // Annotations are supplementary: a failed read costs marks, not the
+        // board. Deliberately silent, exactly like the citation read above.
+      }
+    }
+    setKnowledgeHighlightIndex(knowledgeStandaloneHighlightIndexOf(rows));
+  }, [canvasId, placedKnowledgeDocumentIds]);
+
+  useEffect(() => {
+    void loadKnowledgeHighlights();
+    // Keyed on the placed documents, so adding a PDF loads its marks and
+    // nothing else re-fetches.
+  }, [placedKnowledgeDocumentKey, loadKnowledgeHighlights]);
+
+  /**
+   * Deleting one standalone highlight, by its durable id.
+   *
+   * The row goes; the citation, its post and every other
+   * highlight are untouched -- the route has no way to reach them. Local state
+   * is updated optimistically and then reconciled from the server, so the mark
+   * disappears on both surfaces at once.
+   */
+  const deleteKnowledgeHighlight = useCallback(async (highlightId: string) => {
+    if (!canvasId) return;
+    setKnowledgeHighlightIndex((current) => {
+      const remaining: KnowledgeSourceHighlight[] = [];
+      for (const rows of current.values()) {
+        for (const row of rows) if (String(row.id) !== highlightId) remaining.push(row);
+      }
+      return knowledgeStandaloneHighlightIndexOf(remaining);
+    });
+    try {
+      const response = await fetch(
+        `/api/boards/${encodeURIComponent(canvasId)}/knowledge/highlights/`
+        + encodeURIComponent(highlightId),
+        { method: 'DELETE' },
+      );
+      if (!response.ok) toast.error('Highlight could not be deleted');
+    } catch {
+      toast.error('Highlight could not be deleted');
+    }
+    // Whether it succeeded or not, the server is the truth.
+    await loadKnowledgeHighlights();
+  }, [canvasId, loadKnowledgeHighlights]);
 
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
@@ -7453,6 +7547,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       noteColors={knowledgeSourceNoteColors}
       noteSummaries={knowledgeSourceNoteSummaries}
       onOpenSourceReference={requestKnowledgeSourceOpen}
+      highlights={knowledgeHighlightIndex}
+      /*
+        PDF-R6K-H2B-C1. Withheld from a viewer, so no Trash is offered at all.
+        An affordance, not the boundary: H2A's RLS refuses a viewer's delete
+        whatever this renders.
+      */
+      onDeleteHighlight={canUseCanvasToolbar ? deleteKnowledgeHighlight : null}
     >
     <KnowledgePdfOpenProvider
       onOpenDocument={requestKnowledgeDocumentOpen}
