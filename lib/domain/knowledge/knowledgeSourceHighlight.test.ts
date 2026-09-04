@@ -157,13 +157,16 @@ describe('create authority', () => {
     });
     const result = await create(validCreate);
     expect(result.ok).toBe(true);
-    // createdBy is the SESSION user and quoteHash is produced here -- neither
-    // is reachable from a request body.
+    // quoteHash is produced here, never accepted from a body.
     expect(repo.insert).toHaveBeenCalledWith(expect.objectContaining({
-      createdBy: USER,
       quoteHash: 'sha:10',
       sourceDocumentId: DOC,
     }));
+    // PDF-R6K-H2A-C1: no author is sent at all. `created_by` defaults to
+    // auth.uid() in the database and authenticated callers cannot name the
+    // column, so authorship is unforgeable rather than merely derived here.
+    expect((repo.insert as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0])
+      .not.toHaveProperty('createdBy');
   });
 
   it('10. a document on another board is not found, never merely forbidden', async () => {

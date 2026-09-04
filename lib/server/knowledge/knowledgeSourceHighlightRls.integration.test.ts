@@ -158,9 +158,14 @@ const highlightRow = (over: Record<string, unknown> = {}) => ({
 describe.skipIf(!reachable)('PDF-R6K-H2A RLS against local Postgres', () => {
   it('J. an editor may insert, recolour and delete', async () => {
     const client = asUser(world.editor.token);
+    // PDF-R6K-H2A-C1: created_by is NOT supplied. An authenticated caller has
+    // no INSERT privilege on that column any more -- naming it at all is a
+    // permission error -- and the column default fills in their own identity.
     const inserted = await client.from('knowledge_source_highlights')
-      .insert(highlightRow({ created_by: world.editor.id })).select('id, color').single();
+      .insert(highlightRow()).select('id, color, created_by').single();
     expect(inserted.error).toBeNull();
+    expect(inserted.data!.created_by, 'authorship comes from the session')
+      .toBe(world.editor.id);
 
     const updated = await client.from('knowledge_source_highlights')
       .update({ color: '#bbf7d0' }).eq('id', inserted.data!.id).select('color').single();

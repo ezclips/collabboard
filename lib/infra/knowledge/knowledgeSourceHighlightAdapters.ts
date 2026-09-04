@@ -104,6 +104,11 @@ interface HighlightTable {
   delete(): DeleteQuery;
 }
 
+/**
+ * PDF-R6K-H2A-C1. `created_by` is absent on purpose. An authenticated caller
+ * has no INSERT privilege on it, so naming the column at all fails with 42501
+ * -- the column default (auth.uid()) is the only way authorship is written.
+ */
 interface HighlightInsertRow {
   readonly source_document_id: string;
   readonly page_number: number;
@@ -112,7 +117,6 @@ interface HighlightInsertRow {
   readonly quote_text: string;
   readonly quote_hash: string;
   readonly color: string;
-  readonly created_by: string;
   readonly source_reference_id: string | null;
 }
 
@@ -315,7 +319,6 @@ implements KnowledgeSourceHighlightRepository {
           quote_text: row.quoteText,
           quote_hash: row.quoteHash,
           color: row.color,
-          created_by: row.createdBy,
           source_reference_id: row.sourceReferenceId,
         })
         .select(SELECT_COLUMNS)

@@ -22,8 +22,14 @@ describe('PDF-R6K-H2A migration', () => {
   it('1. adds exactly one new migration and rewrites no historical one', () => {
     const listed = fs.readdirSync(MIGRATIONS).filter((name) => name.endsWith('.sql'));
     expect(listed).toContain(FILE);
-    // One 20260904 file, so the slice cannot have smuggled a second.
-    expect(listed.filter((name) => name.startsWith('20260904'))).toEqual([FILE]);
+    // PDF-R6K-H2A-C1 deliberately adds a second, later same-day migration that
+    // hardens this table's column grants. It is additive and never edits this
+    // file, so the invariant that still matters is that no OTHER 20260904
+    // migration appeared.
+    expect(listed.filter((name) => name.startsWith('20260904')).sort()).toEqual([
+      '20260904120000_harden_knowledge_source_highlight_authority.sql',
+      FILE,
+    ].sort());
   });
 
   it('2. creates the table with the agreed identity and span columns', () => {

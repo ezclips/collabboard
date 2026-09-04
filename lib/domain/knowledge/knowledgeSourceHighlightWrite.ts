@@ -72,6 +72,16 @@ export interface KnowledgeSourceHighlightRepository {
   remove(highlightId: KnowledgeSourceHighlightId): Promise<Result<true, DomainError>>;
 }
 
+/**
+ * PDF-R6K-H2A-C1. There is deliberately NO `createdBy` here.
+ *
+ * Authorship is a database fact now: `created_by` defaults to `auth.uid()` and
+ * an authenticated caller holds no INSERT privilege on the column, so naming it
+ * -- with any value, including NULL -- is a permission error. Stating it here
+ * would therefore break the write, and would also be a claim the application is
+ * no longer the authority for. The session user is still used, for the
+ * authorization check above.
+ */
 export interface KnowledgeSourceHighlightInsert {
   readonly sourceDocumentId: KnowledgeDocumentId;
   readonly pageNumber: number;
@@ -80,7 +90,6 @@ export interface KnowledgeSourceHighlightInsert {
   readonly quoteText: string;
   readonly quoteHash: string;
   readonly color: string;
-  readonly createdBy: UserId;
   readonly sourceReferenceId: SourceReferenceId | null;
 }
 
@@ -194,9 +203,10 @@ export function createCreateKnowledgeSourceHighlightCommand(
       // citation writer treats it.
       quoteHash: deps.hasher.hashQuoteText(input.quoteText),
       color: input.color,
-      // Identity comes from the session. A body naming someone else as author
-      // cannot reach this field.
-      createdBy: input.userId,
+      // No author is sent: the column defaults to auth.uid(), which is the same
+      // identity this command just authorized, and the database refuses any
+      // attempt to state it. That is what makes authorship unforgeable rather
+      // than merely correct here.
       sourceReferenceId: input.sourceReferenceId,
     });
   };
