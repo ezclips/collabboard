@@ -69,6 +69,31 @@ function usableNoteColor(fields: KnowledgeSourceNoteColorFields | undefined): st
 }
 
 /**
+ * PDF-R6K-H2A. The one place that decides whether a string IS a highlight
+ * colour, exported so a stored standalone highlight is validated by the SAME
+ * rule the renderer has always applied to a Note's colour. Additive: nothing
+ * about the derivation above changes, and no second colour format exists.
+ *
+ * White is NOT rejected here, unlike `usableNoteColor`. That rule -- "a white
+ * tint would erase the highlight, so fall back to neutral" -- is a question
+ * about deriving a colour from a Note, not about whether a colour a person
+ * deliberately chose is well formed.
+ */
+export function isKnowledgeHighlightColor(value: unknown): value is string {
+  return typeof value === 'string' && canonicalHex(value) !== null;
+}
+
+/**
+ * The neutral highlight, as a storable colour.
+ *
+ * Read off the reader's existing neutral class rather than invented: the
+ * citation highlight has always painted Tailwind `bg-sky-100` when no Note
+ * accent applied. A backfilled highlight whose Note has no usable accent keeps
+ * exactly that appearance instead of acquiring a new yellow or blue.
+ */
+export const KNOWLEDGE_HIGHLIGHT_NEUTRAL_COLOR = '#e0f2fe';
+
+/**
  * The Note's own accent colour (topStrip, with the same legacy cardColor
  * fallback), for a caller that needs ONE Note's colour rather than a run's
  * agreement across several. Same authority as `usableNoteColor`, exported.
