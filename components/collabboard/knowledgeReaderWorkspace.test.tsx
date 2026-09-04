@@ -134,7 +134,7 @@ describe('19-25. the bottom viewer toolbar exposes only real functions', () => {
     expect(at, 'the bottom toolbar must exist').toBeGreaterThan(-1);
     // PDF-R6J moved the area actions into this bar, so the window has to reach
     // past them to the controls that follow.
-    return code.slice(at - 200, at + 5200);
+    return code.slice(at - 200, at + 12000);
   };
 
   it('19. a compact toolbar sits at the foot of the workspace', () => {
@@ -295,112 +295,145 @@ describe('30-37. everything outside the reader is untouched', () => {
 });
 
 
-describe('PDF-R6J: page actions are compact icons, and the area actions moved down', () => {
-  /** Executable markup only: prose must not satisfy or fail these. */
+describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
   const code = () => executable(DETAILS);
   const toolbar = () => {
     const c = code();
     const at = c.indexOf('data-knowledge-viewer-toolbar="true"');
     expect(at, 'the bottom toolbar must exist').toBeGreaterThan(-1);
-    return c.slice(at - 200, at + 5200);
+    return c.slice(at - 200, at + 12000);
   };
-  /** The per-page header cluster, above the page visual. */
-  const pageCluster = () => {
+  /** The per-page header, which must now carry no actions at all. */
+  const pageHeader = () => {
     const c = code();
-    const at = c.indexOf('aria-label={`Create Note from page ${page.pageNumber}`}');
-    expect(at, 'the page action cluster must exist').toBeGreaterThan(-1);
-    return c.slice(at - 400, at + 2000);
+    const at = c.indexOf('<section key={page.pageNumber} data-page-number={page.pageNumber}>');
+    expect(at, 'the page section must exist').toBeGreaterThan(-1);
+    // Ends at the page visual, which is the first thing after the header --
+    // a comment marker would not survive executable()'s stripping.
+    const end = c.indexOf('<KnowledgeDocumentPageRegionSelector', at);
+    expect(end, 'the page visual must follow the header').toBeGreaterThan(at);
+    return c.slice(at, end);
   };
 
-  it('1-4: the old large text buttons are gone from above the page', () => {
-    // They crowded the page they sat above; that horizontal space goes back to
-    // the page. The ACTIONS survive -- only their presentation and, for the
-    // area pair, their location changed.
-    const c = code();
-    for (const label of ['>Create Note<', '>Add page to Board AI<', '>Create Note from area<', '>Clear<']) {
-      expect(c, label).not.toContain(label);
+  it('1-4: no page-header action controls, and no permanent search field', () => {
+    const header = pageHeader();
+    for (const gone of ['<StickyNote', '<Sparkles', '<SquareDashedMousePointer', '<Crop', '<X ', 'onAddBoardAiContext', 'onCreateNoteFromPage']) {
+      expect(header, gone).not.toContain(gone);
     }
-  });
-
-  it('5,6: the page actions are icon buttons, still in the page header', () => {
-    // They stay per-page on purpose: the reader has no notion of a "current"
-    // page (no scroll tracking, no observer), so a single document-level
-    // button would have to guess which page it meant.
-    const cluster = pageCluster();
-    expect(cluster).toContain('<StickyNote className="h-3.5 w-3.5"');
-    expect(cluster).toContain('<Sparkles className="h-3.5 w-3.5"');
-    expect(cluster).toContain('title="Create Note"');
-    expect(cluster).toContain('title="Add page to Board AI"');
-    expect(cluster).toContain('aria-label={`Create Note from page ${page.pageNumber}`}');
-    expect(cluster).toContain('aria-label={`Add page ${page.pageNumber} to Board AI`}');
-  });
-
-  it('7,8: the AREA actions now live in the bottom toolbar', () => {
-    // An armed rectangle is document-wide state and names its own page, so it
-    // needs no per-page home and nothing here guesses at a current page.
-    const bar = toolbar();
-    expect(bar).toContain('data-knowledge-viewer-action="note-from-area"');
-    expect(bar).toContain('data-knowledge-viewer-action="clear-area"');
-    expect(bar).toContain('title="Create Note from area"');
-    expect(bar).toContain('title="Clear selection"');
-    expect(bar).toContain('<SquareDashedMousePointer className="h-3.5 w-3.5"');
-    expect(bar).toContain('activeRegion.pageNumber');
-  });
-
-  it('9,10: each icon invokes the SAME handler, and only once', () => {
+    // The header keeps only what identifies the page.
+    expect(header).toContain('Page {page.pageNumber}');
+    expect(header).toContain('<UsedInNotes');
+    // The permanent field is gone: the input only exists inside the popover.
     const c = code();
-    // One authority per action -- nothing was duplicated into two places.
-    expect((c.match(/aria-label=\{`Create Note from page/g) || [])).toHaveLength(1);
-    expect((c.match(/aria-label=\{`Add page \$\{page\.pageNumber\} to Board AI/g) || [])).toHaveLength(1);
-    expect((c.match(/data-knowledge-viewer-action="note-from-area"/g) || [])).toHaveLength(1);
-    expect((c.match(/data-knowledge-viewer-action="clear-area"/g) || [])).toHaveLength(1);
-    // The area action still sends the region and clears the mode, as before.
-    const bar = toolbar();
-    expect(bar).toContain('appliedRotation: activeRegion.appliedRotation');
-    expect(bar).toContain('setArmedRegion(null)');
-    expect(bar).toContain('setRegionMode(false)');
-    expect(bar).toContain("pageText: ''");
+    expect(c).not.toContain('className="relative min-w-0 flex-1"');
+    expect(c.indexOf('aria-label="Search in this PDF"'))
+      .toBeGreaterThan(c.indexOf('data-knowledge-search-popover="true"'));
   });
 
-  it('11,12: every icon carries a tooltip and a label', () => {
-    for (const [title, label] of [
-      ['title="Create Note"', 'Create Note from page'],
-      ['title="Add page to Board AI"', 'to Board AI'],
-      ['title="Create Note from area"', 'Create Note from selected area'],
-      ['title="Clear selection"', 'Clear selected area'],
-    ] as const) {
-      expect(code(), title).toContain(title);
-      expect(code(), label).toContain(label);
+  it('5-10: every action is in the bottom bar, in reading order', () => {
+    const bar = toolbar();
+    const order = ['search', 'create-note', 'add-to-chat', 'select-area', 'note-from-area', 'clear-area'];
+    let previous = -1;
+    for (const action of order) {
+      const at = bar.indexOf(`data-knowledge-viewer-action="${action}"`);
+      expect(at, action).toBeGreaterThan(previous);
+      previous = at;
     }
+    // ...and the page count closes the row.
+    expect(bar.indexOf('data-knowledge-viewer-page-indicator="true"')).toBeGreaterThan(previous);
   });
 
-  it('13,14,15: search, Select area and the page count are untouched', () => {
+  it('11,12: the actions are icon-only, and all the same size', () => {
     const bar = toolbar();
-    expect(bar).toContain('aria-label="Search in this PDF"');
-    expect(bar).toContain('data-knowledge-viewer-action="select-area"');
-    expect(bar).toContain('Select area');
-    expect(bar).toContain('data-knowledge-viewer-page-indicator="true"');
-  });
-
-  it('16,17,18: the icon buttons share one fixed size, so the row stays on one line', () => {
-    expect(code()).toContain("const KNOWLEDGE_ICON_BUTTON_CLASS =");
+    for (const icon of ['<Search className="h-3.5 w-3.5"', '<StickyNote className="h-3.5 w-3.5"',
+      '<Sparkles className="h-3.5 w-3.5"', '<Crop className="h-3.5 w-3.5"',
+      '<SquareDashedMousePointer className="h-3.5 w-3.5"', '<X className="h-3.5 w-3.5"']) {
+      expect(bar, icon).toContain(icon);
+    }
+    // No visible text label survives on an action button.
+    for (const label of ['>Select area<', '>Create Note<', '>Clear<', '>Add page to Board AI<']) {
+      expect(bar, label).not.toContain(label);
+    }
+    expect(code()).toContain('const KNOWLEDGE_ICON_BUTTON_CLASS =');
     expect(code()).toContain('inline-flex h-6 w-6 flex-none shrink-0 items-center justify-center');
-    // Search is the flexible control; every action is shrink-0 beside it.
-    const bar = toolbar();
-    expect(bar).toContain('className="relative min-w-0 flex-1"');
-    expect(bar).toContain('items-center');
-    // Keyboard focus stays visible on an icon-only control.
-    expect(code()).toContain('focus-visible:outline');
+    expect((bar.match(/KNOWLEDGE_ICON_BUTTON_CLASS/g) || []).length).toBeGreaterThanOrEqual(6);
   });
 
-  it('19,20: the capability gates are exactly the ones that were there before', () => {
+  it('13,14: one row, and the page count is pushed to the end', () => {
+    const bar = toolbar();
+    // flex-wrap would let the row become two; it is gone.
+    expect(bar).toContain('flex flex-none items-center gap-1 border-t border-gray-100 pt-2');
+    expect(bar).not.toContain('flex-wrap');
+    expect(bar).toContain('ml-auto flex-none text-[11px] tabular-nums');
+  });
+
+  it('15-17: the search icon opens a popover holding the existing search UI', () => {
+    const bar = toolbar();
+    expect(bar).toContain('data-knowledge-viewer-action="search"');
+    expect(bar).toContain('aria-label="Search this PDF"');
+    expect(bar).toContain('setSearchOpen((open) => !open)');
+    expect(bar).toContain('data-knowledge-search-popover="true"');
+    // The SAME query state, matching and navigation as the permanent field.
+    expect(bar).toContain('setQuery(event.currentTarget.value)');
+    expect(bar).toContain('moveMatch(-1)');
+    expect(bar).toContain('moveMatch(1)');
+    expect(bar).toContain("matches.length === 0 ? 'No matches'");
+  });
+
+  it('16: it opens UPWARD, because the bar sits at the foot of the reader', () => {
+    expect(toolbar()).toContain('absolute bottom-full left-0 z-20 mb-2 w-[280px]');
+  });
+
+  it('19,20: Escape and a click outside close it, and only while it is open', () => {
     const c = code();
-    // Page actions: unchanged conditions.
-    expect(c).toContain('onCreateNoteFromPage && documentId && !pageSelection');
-    expect(c).toContain('onAddBoardAiContext && documentId && !pageSelection');
-    // Area actions: same capability, same "only while armed" rule.
-    expect(toolbar()).toContain('onCreateNoteFromPage && documentId && activeRegion');
+    expect(c).toContain("if (event.key === 'Escape') setSearchOpen(false);");
+    expect(c).toContain('if (popover && !popover.contains(event.target as Node)) setSearchOpen(false);');
+    // Bound only while open -- the reader adds no listeners at rest.
+    expect(c).toMatch(/if \(!searchOpen\) return;[\s\S]{0,600}addEventListener/);
+    expect(c).toContain("window.removeEventListener('keydown', onKeyDown)");
+    expect(c).toContain("document.removeEventListener('mousedown', onPointerDown)");
+    // Focus lands in the field when it opens.
+    expect(c).toContain('if (searchOpen) searchInputRef.current?.focus();');
+  });
+
+  it('21-24: the page actions act on the page in view, tracked invisibly', () => {
+    const bar = toolbar();
+    expect(bar).toContain('pageNumber: activePageNumber');
+    expect(bar).toContain('boardAiDraftFromPage(documentId, originalFilename, activePageNumber)');
+    expect(bar).toContain('aria-label={`Create Note from page ${activePageNumber}`}');
+    expect(bar).toContain('aria-label={`Add page ${activePageNumber} to Board AI`}');
+    // The tracking itself: one hook, no new UI, no scroll handler in the view.
+    expect(code()).toContain('const activePageNumber = useKnowledgeReaderActivePage(pagesContainerRef, pages.length, initialPageNumber)');
+    const hook = read('components/collabboard/useKnowledgeReaderActivePage.ts');
+    expect(hook).toContain('new IntersectionObserver(');
+    // Opening the reader AT a page means that page from the first press,
+    // rather than page 1 until the observer catches up.
+    expect(hook).toContain('useState(initialPage)');
+    expect(hook).toContain('initialPage = 1');
+    expect(hook).toContain("typeof IntersectionObserver === 'undefined'");
+  });
+
+  it('26,27: a region keeps its OWN page -- the tracker never overrides it', () => {
+    const bar = toolbar();
+    expect(bar).toContain('pageNumber: activeRegion.pageNumber');
+    expect(bar).toContain('appliedRotation: activeRegion.appliedRotation');
+    // The area actions must not read the tracked page at all.
+    const areaAt = bar.indexOf('data-knowledge-viewer-action="note-from-area"');
+    const clearEnd = bar.indexOf('data-knowledge-viewer-action="select-area"');
+    const areaBlock = clearEnd > areaAt ? bar.slice(areaAt, clearEnd) : bar.slice(areaAt, areaAt + 2000);
+    expect(areaBlock).not.toContain('activePageNumber');
+  });
+
+  it('29,30: the capability gates are exactly the ones that were there before', () => {
+    const bar = toolbar();
     // Absent, not disabled -- a viewer never sees them.
-    expect(toolbar()).not.toContain('disabled={!onCreateNoteFromPage}');
+    // A page action with no rendered page is not an action.
+    expect(bar).toContain('onCreateNoteFromPage && documentId && pages.length > 0 && !activeSelection');
+    expect(bar).toContain('onAddBoardAiContext && documentId && pages.length > 0 && !activeSelection');
+    expect(bar).toContain('onCreateNoteFromPage && documentId && activeRegion');
+    expect(bar).toContain('onCreateNoteFromPage && documentId ?');
+    // Search is outside every gate: reading is never a privilege.
+    expect(bar.indexOf('data-knowledge-viewer-action="search"'))
+      .toBeLessThan(bar.indexOf('onCreateNoteFromPage && documentId'));
   });
 });

@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { GripVertical, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
+import { Crop, GripVertical, Search, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
 import type {
   KnowledgeSourcePageRequest,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
+import { useKnowledgeReaderActivePage } from './useKnowledgeReaderActivePage';
 
 /**
  * PDF-R6J. One compact icon button, used by every page/document action in the
@@ -510,6 +511,10 @@ export default function KnowledgeDocumentDetails({
   // One mode and one armed rectangle: two armed pages would offer two confirm
   // buttons for one intent.
   const [regionMode, setRegionMode] = useState(false);
+  /** PDF-R6J-C2. The bottom bar's search popover. */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchPopoverRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [armedRegion, setArmedRegion] = useState<ArmedPageRegion | null>(null);
   // P6J-F6-B4-B4. The Notes offered for one ambiguous run, or null. Transient
   // UI only -- never stored, never persisted, replaced by the next activation.
@@ -637,6 +642,43 @@ export default function KnowledgeDocumentDetails({
   }, [documentId]);
 
   // Re-proved against the rendered pages, as activeSelection is.
+  /**
+   * PDF-R6J-C2. Escape and a click outside close the search popover.
+   *
+   * Bound only while it is open, so the reader adds no listeners in its
+   * ordinary state. The query itself is deliberately NOT cleared: reopening
+   * search should show what you last looked for, which is what the permanent
+   * field used to give you for free.
+   */
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSearchOpen(false);
+    };
+    const onPointerDown = (event: MouseEvent) => {
+      const popover = searchPopoverRef.current;
+      if (popover && !popover.contains(event.target as Node)) setSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  /**
+   * PDF-R6J-C2. Which page the bottom bar's page actions act on.
+   *
+   * Region actions do NOT use this: an armed rectangle carries its own page,
+   * and that stays authoritative.
+   */
+  const activePageNumber = useKnowledgeReaderActivePage(pagesContainerRef, pages.length, initialPageNumber);
+
   const activeRegion = useMemo(() => {
     if (armedRegion === null) return null;
     return pages.some((page) => page.pageNumber === armedRegion.pageNumber) ? armedRegion : null;
@@ -886,56 +928,9 @@ export default function KnowledgeDocumentDetails({
                     onOpen={onOpenBacklinkTarget}
                   />
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                {/*
-                  Text Phase 1 -- an exact selection's affordances moved to the
-                  ONE floating toolbar (below, outside every page and outside
-                  the paragraph B4-B2B measures). The plain page-level action
-                  stays here, and ONLY here, for when there is no selection.
-                */}
-                {onCreateNoteFromPage && documentId && !pageSelection ? (
-                  <button
-                    type="button"
-                    aria-label={`Create Note from page ${page.pageNumber}`}
-                    title="Create Note"
-                    className={KNOWLEDGE_ICON_BUTTON_CLASS}
-                    onClick={() => onCreateNoteFromPage({
-                      // The document's real identity, never its filename.
-                      sourceDocumentId: documentId,
-                      originalFilename,
-                      pageNumber: page.pageNumber,
-                      pageText: page.text,
-                      selection: null,
-                    })}
-                  >
-                    <StickyNote className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {/*
-                  The page the user actually names, rather than a guess at
-                  which one is "current": no scroll tracking, no observer, and
-                  no change to how pages render. Sits in the existing page
-                  action cluster for the same reason Create Note does.
-                */}
-                {onAddBoardAiContext && documentId && !pageSelection ? (
-                  <button
-                    type="button"
-                    data-knowledge-page-add-to-chat={page.pageNumber}
-                    aria-label={`Add page ${page.pageNumber} to Board AI`}
-                    title="Add page to Board AI"
-                    className={KNOWLEDGE_ICON_BUTTON_CLASS}
-                    onClick={() => onAddBoardAiContext(
-                      boardAiDraftFromPage(documentId, originalFilename, page.pageNumber),
-                    )}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {/* PDF-R6J. The AREA actions moved to the document toolbar at
-                    the foot of the reader: an armed rectangle is document-wide
-                    state (there is only ever one, and it names its own page),
-                    so it does not need a per-page home. */}
-                </div>
+                {/* PDF-R6J-C2. No page-level action controls at all: every
+                    action now lives in the one bottom toolbar, so the page
+                    header carries only what identifies the page. */}
               </div>
               {/*
                 P6J-F9-A2b -- the page visual, a SIBLING of the canonical text
@@ -991,29 +986,133 @@ export default function KnowledgeDocumentDetails({
       */}
       <div
         data-knowledge-viewer-toolbar="true"
-        className="mt-2 flex flex-none flex-wrap items-center gap-2 border-t border-gray-100 pt-2"
+        className="mt-2 flex flex-none items-center gap-1 border-t border-gray-100 pt-2"
       >
-        <div className="relative min-w-0 flex-1">
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            placeholder="Search in this PDF…"
-            aria-label="Search in this PDF"
-            className="w-full rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
-          />
+        {/*
+          PDF-R6J-C2. Search is an icon with a popover instead of a permanent
+          field. The field was the widest thing in the reader and was present
+          whether or not anyone was searching; the popover opens UPWARD because
+          this bar sits at the foot of the reader and there is nothing below it.
+
+          The search itself is untouched -- same query state, same matching,
+          same navigation -- and the query survives closing, so reopening shows
+          what you last looked for, exactly as the permanent field did.
+        */}
+        <div className="relative flex-none" ref={searchPopoverRef}>
+          <button
+            type="button"
+            data-knowledge-viewer-action="search"
+            aria-label="Search this PDF"
+            aria-expanded={searchOpen}
+            title="Search this PDF"
+            className={`${KNOWLEDGE_ICON_BUTTON_CLASS}${query ? ' border-blue-300 bg-blue-50 text-blue-700' : ''}`}
+            onClick={() => setSearchOpen((open) => !open)}
+          >
+            <Search className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+
+          {searchOpen ? (
+            <div
+              data-knowledge-search-popover="true"
+              className="absolute bottom-full left-0 z-20 mb-2 w-[280px] rounded-md border border-gray-200 bg-white p-2 shadow-lg"
+            >
+              <input
+                ref={searchInputRef}
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="Search in this PDF…"
+                aria-label="Search in this PDF"
+                className="w-full rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+              />
+              {query ? (
+                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                  <span>{matches.length === 0 ? 'No matches' : `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}</span>
+                  {matches.length > 1 ? (
+                    <>
+                      <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(-1)}>Previous</button>
+                      <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(1)}>Next</button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
-        {query ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-            <span>{matches.length === 0 ? 'No matches' : `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}</span>
-            {matches.length > 1 ? (
-              <>
-                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(-1)}>Previous</button>
-                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(1)}>Next</button>
-              </>
-            ) : null}
-          </div>
+        {/*
+          PDF-R6J-C2. The page actions, moved down from the page headers.
+          They act on the page the reader is actually showing -- see
+          useKnowledgeReaderActivePage, which exists only because
+          consolidating these buttons removed the old answer (which button you
+          pressed named the page).
+        */}
+        {onCreateNoteFromPage && documentId && pages.length > 0 && !activeSelection ? (
+          <button
+            type="button"
+            data-knowledge-viewer-action="create-note"
+            aria-label={`Create Note from page ${activePageNumber}`}
+            title="Create Note"
+            className={KNOWLEDGE_ICON_BUTTON_CLASS}
+            onClick={() => onCreateNoteFromPage({
+              // The document's real identity, never its filename.
+              sourceDocumentId: documentId,
+              originalFilename,
+              pageNumber: activePageNumber,
+              pageText: pages.find((page) => page.pageNumber === activePageNumber)?.text ?? '',
+              selection: null,
+            })}
+          >
+            <StickyNote className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+
+        {onAddBoardAiContext && documentId && pages.length > 0 && !activeSelection ? (
+          <button
+            type="button"
+            data-knowledge-viewer-action="add-to-chat"
+            data-knowledge-page-add-to-chat={activePageNumber}
+            aria-label={`Add page ${activePageNumber} to Board AI`}
+            title="Add page to Board AI"
+            className={KNOWLEDGE_ICON_BUTTON_CLASS}
+            onClick={() => onAddBoardAiContext(
+              boardAiDraftFromPage(documentId, originalFilename, activePageNumber),
+            )}
+          >
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+
+        {/* P6J-F9-B2. ONE mode, off by default: always-on image dragging would
+            fight the reader's own vertical scrolling. Editor-only, exactly as
+            before -- a viewer never sees it. */}
+        {onCreateNoteFromPage && documentId ? (
+          <button
+            type="button"
+            aria-pressed={regionMode}
+            data-knowledge-viewer-action="select-area"
+            title="Select area"
+            aria-label="Select area"
+            className={`${KNOWLEDGE_ICON_BUTTON_CLASS}${regionMode ? ' border-blue-300 bg-blue-50 text-blue-700' : ''}`}
+            // Leaving the mode abandons whatever was drawn in it. Entering it
+            // drops any captured text-selection toolbar state so the text
+            // toolbar (and its AI activation) can never coexist with an armed
+            // region -- the same exclusivity the AI toolbar gate asserts.
+            onClick={() => {
+              setRegionMode((current) => {
+                const next = !current;
+                if (next) {
+                  setCapturedSelection(null);
+                  setSelectionColor(null);
+                  setSelectionRect(null);
+                }
+                return next;
+              });
+              setArmedRegion(null);
+            }}
+          >
+            <Crop className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         ) : null}
 
         {/* PDF-R6J. The armed rectangle's own actions, moved down from above
@@ -1063,43 +1162,11 @@ export default function KnowledgeDocumentDetails({
           </>
         ) : null}
 
-        {/* P6J-F9-B2. ONE mode, off by default: always-on image dragging would
-            fight the reader's own vertical scrolling. Editor-only, exactly as
-            before -- a viewer never sees it. */}
-        {onCreateNoteFromPage && documentId ? (
-          <button
-            type="button"
-            aria-pressed={regionMode}
-            data-knowledge-viewer-action="select-area"
-            className={`flex-none rounded border px-1.5 py-0.5 text-[11px] ${regionMode
-              ? 'border-blue-300 bg-blue-50 text-blue-700'
-              : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            // Leaving the mode abandons whatever was drawn in it. Entering it
-            // drops any captured text-selection toolbar state so the text
-            // toolbar (and its AI activation) can never coexist with an armed
-            // region -- the same exclusivity the AI toolbar gate asserts.
-            onClick={() => {
-              setRegionMode((current) => {
-                const next = !current;
-                if (next) {
-                  setCapturedSelection(null);
-                  setSelectionColor(null);
-                  setSelectionRect(null);
-                }
-                return next;
-              });
-              setArmedRegion(null);
-            }}
-          >
-            Select area
-          </button>
-        ) : null}
-
         {/* Counted from the pages actually rendered, never a stored guess. */}
         {pages.length > 0 ? (
           <span
             data-knowledge-viewer-page-indicator="true"
-            className="flex-none text-[11px] tabular-nums text-gray-500"
+            className="ml-auto flex-none text-[11px] tabular-nums text-gray-500"
           >
             {pages.length} {pages.length === 1 ? 'page' : 'pages'}
           </span>

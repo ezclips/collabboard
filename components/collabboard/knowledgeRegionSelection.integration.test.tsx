@@ -300,7 +300,9 @@ describe('P6J-F9-B2 F8 isolation', () => {
     // No hit layer exists to intercept a text selection, and the page header
     // controls F8 owns are still the ones present.
     expect(layers(container)).toHaveLength(0);
-    expect(buttons(container, 'Create Note')).toHaveLength(2);
+    // PDF-R6J-C2: one Create Note control for the whole reader, not one per
+    // page -- it acts on the page in view.
+    expect(buttons(container, 'Create Note')).toHaveLength(1);
     expect(container.querySelector('[data-knowledge-clip-chip]')).toBeNull();
     textRoots(container).forEach((root_, index) => {
       expect(root_.textContent).toBe(PAGES[index].text);

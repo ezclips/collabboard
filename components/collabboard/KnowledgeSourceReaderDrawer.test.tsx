@@ -280,16 +280,19 @@ describe('P6J-F5 create Note from a source page (relocated)', () => {
     await mount({ documentOpenRequest: docRequest(1, 'doc-real'), onCreateNoteFromPage: onCreate });
 
     const buttons = createNoteButtons();
-    expect(buttons).toHaveLength(2);
-    await act(async () => { buttons[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // PDF-R6J-C2: ONE reader-level action, aimed at the page in view. With no
+    // scrolling that is page 1, so this proves the FIRST page's bytes -- the
+    // byte-exactness contract is the point here, not which page it came from.
+    expect(buttons).toHaveLength(1);
+    await act(async () => { buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(onCreate.mock.calls[0][0]).toEqual({
       sourceDocumentId: 'doc-real',
       originalFilename: 'sources.pdf',
-      pageNumber: 2,
+      pageNumber: 1,
       // Byte-exact: whitespace and CRLF are evidence, not formatting.
-      pageText: '  spaced\r\nlines  ',
+      pageText: 'Page one extracted text',
       // B4-B2B: no text was selected, so this stays the page-only request.
       selection: null,
     });
@@ -340,13 +343,15 @@ describe('P6J-F5 create Note from a source page (relocated)', () => {
     const onCreate = vi.fn();
 
     await mount({ documentOpenRequest: docRequest(1), onCreateNoteFromPage: onCreate });
-    expect(createNoteButtons()).toHaveLength(2);
+    // PDF-R6J-C2: ONE reader-level action, aimed at the page in view.
+    expect(createNoteButtons()).toHaveLength(1);
 
     await act(async () => { createNoteButtons()[0].dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // F7: creating a Note no longer tears the source down behind it.
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(drawerEl()).not.toBeNull();
-    expect(createNoteButtons()).toHaveLength(2);
+    // PDF-R6J-C2: ONE reader-level action, aimed at the page in view.
+    expect(createNoteButtons()).toHaveLength(1);
 
     const back = Array.from(drawerEl()!.querySelectorAll('button'))
       .find((button) => button.textContent?.includes('Back to PDFs'))!;

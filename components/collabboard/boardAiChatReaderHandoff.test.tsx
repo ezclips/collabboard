@@ -65,15 +65,19 @@ afterEach(async () => {
 });
 
 describe('24. a page handoff names the page the user chose', () => {
-  it('every page offers its own action, carrying that exact page', async () => {
+  it('one action carries the page the reader is showing', async () => {
+    // PDF-R6J-C2 consolidated the per-page buttons into one bottom control that
+    // follows the page in view. Which page it names is still exact -- it is now
+    // stated by the control's own attribute rather than by which one you press.
     await mount();
     const buttons = all('[data-knowledge-page-add-to-chat]');
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].getAttribute('data-knowledge-page-add-to-chat')).toBe('1');
 
-    await click('[data-knowledge-page-add-to-chat="2"]');
+    await click('[data-knowledge-page-add-to-chat="1"]');
     expect(added).toHaveLength(1);
     expect(added[0].request).toEqual({
-      type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 2,
+      type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1,
     });
     // 32. The page's text is not carried: the server reloads it by id.
     expect(JSON.stringify(added[0].request)).not.toContain('Page two body');

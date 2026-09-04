@@ -540,8 +540,12 @@ describe('P6J-F5 source note wiring', () => {
     expect(action).toContain('sourceDocumentId: documentId');
     // Never the filename or an index as identity.
     expect(action).not.toContain('sourceDocumentId: originalFilename');
-    expect(action).toContain('pageNumber: page.pageNumber');
-    expect(action).toContain('pageText: page.text');
+    // PDF-R6J-C2: one bottom action for the reader, so the page comes from the
+    // page in view rather than from the button's own page. The identity
+    // contract above -- the document id, never the filename -- is unchanged.
+    expect(action).toContain('pageNumber: activePageNumber');
+    // PDF-R6J-C2: resolved from the page in view rather than the button's own.
+    expect(action).toContain('pages.find((page) => page.pageNumber === activePageNumber)?.text');
     // The reader surface never writes anything itself.
     expect(details).not.toContain('knowledge/references');
     expect(details).not.toContain('supabase');

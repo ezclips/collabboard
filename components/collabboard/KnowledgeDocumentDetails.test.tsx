@@ -74,8 +74,47 @@ function scrolledPageNumbers(): string[] {
     .filter((value): value is string => typeof value === 'string');
 }
 
+/**
+ * PDF-R6J-C2. The reader's page actions now act on the page in view, which is
+ * tracked with an IntersectionObserver. jsdom has none, so tests drive it:
+ * without this every page-scoped assertion below would silently be about
+ * page 1 forever.
+ */
+type IoEntry = { target: Element; intersectionRatio: number };
+let ioCallbacks: Array<(entries: IoEntry[]) => void> = [];
+
+class TestIntersectionObserver {
+  private readonly targets: Element[] = [];
+  constructor(private readonly callback: (entries: IoEntry[]) => void) {
+    ioCallbacks.push(callback);
+  }
+  observe(target: Element) { this.targets.push(target); }
+  unobserve() { /* not needed */ }
+  disconnect() { ioCallbacks = ioCallbacks.filter((cb) => cb !== this.callback); }
+}
+
+/** Reports `pageNumber` as the page filling the reader viewport. */
+function showPage(container: HTMLElement, pageNumber: number) {
+  const sections = Array.from(container.querySelectorAll('[data-page-number]'));
+  const entries = sections.map((target) => ({
+    target,
+    intersectionRatio: Number(target.getAttribute('data-page-number')) === pageNumber ? 1 : 0,
+  }));
+  act(() => { for (const cb of [...ioCallbacks]) cb(entries); });
+}
+
+/** The search field lives in a popover now; open it before typing. */
+function openSearch(container: HTMLElement): HTMLInputElement {
+  const existing = container.querySelector('input[type="search"]') as HTMLInputElement | null;
+  if (existing) return existing;
+  const trigger = container.querySelector('[data-knowledge-viewer-action="search"]') as HTMLButtonElement;
+  expect(trigger, 'the search trigger must exist').toBeTruthy();
+  act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  return container.querySelector('input[type="search"]') as HTMLInputElement;
+}
+
 function setSearch(container: HTMLElement, value: string) {
-  const input = container.querySelector('input[type="search"]') as HTMLInputElement;
+  const input = openSearch(container);
   act(() => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
     setter.call(input, value);
@@ -84,6 +123,9 @@ function setSearch(container: HTMLElement, value: string) {
 }
 
 beforeEach(() => {
+  ioCallbacks = [];
+  (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver =
+    TestIntersectionObserver as unknown as typeof IntersectionObserver;
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   HTMLElement.prototype.scrollIntoView = vi.fn();
   globalThis.fetch = vi.fn() as unknown as typeof globalThis.fetch;
@@ -289,11 +331,12 @@ function pageRoot(container: HTMLElement, pageNumber: number): HTMLElement {
  * "the button that reaches onCreateNoteFromPage" get either, transparently.
  */
 function createNoteButton(container: HTMLElement, pageNumber: number): HTMLButtonElement {
-  const section = container.querySelector(`[data-page-number="${pageNumber}"]`)!;
-  // PDF-R6J made this an icon button, so it is found by the label it exposes
-  // rather than by its text. The aria-label is unchanged, and it is what the
-  // page-scoped/selection-scoped contract below is actually written against.
-  const pageButton = section.querySelector(
+  // PDF-R6J-C2. There is no longer a button per page: ONE bottom control acts
+  // on whichever page the reader is showing, so "the button for page N" means
+  // "show page N, then the button". Callers that just want the control get it
+  // either way.
+  showPage(container, pageNumber);
+  const pageButton = container.querySelector(
     `button[aria-label="Create Note from page ${pageNumber}"]`,
   ) as HTMLButtonElement | null;
   if (pageButton) return pageButton;
@@ -335,7 +378,10 @@ function mountReader(props: Partial<React.ComponentProps<typeof KnowledgeDocumen
 }
 
 function clickCreateNote(container: HTMLElement, pageNumber: number) {
-  act(() => createNoteButton(container, pageNumber).click());
+  // Resolved OUTSIDE act: createNoteButton shows the page first, which is its
+  // own act(), and nesting them leaves the query reading the pre-update DOM.
+  const button = createNoteButton(container, pageNumber);
+  act(() => button.click());
 }
 
 describe('KnowledgeDocumentDetails exact selection capture', () => {
@@ -371,9 +417,10 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
 
     expect(createNoteButton(container, 1).textContent).toBe('Note Post');
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from selection on page 1');
-    // Page 2 is untouched by a selection that does not live there.
-    expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
-    expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
+    // PDF-R6J-C2: there is one page action, and an active selection replaces
+    // it entirely -- the same "selection wins" rule the per-page buttons had,
+    // now expressed once instead of per page.
+    expect(container.querySelector('[data-knowledge-viewer-action="create-note"]')).toBeNull();
   });
 
   it('C: clicking the armed action emits the exact captured span', () => {
@@ -395,12 +442,19 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     expect(pages[0].text.slice(4, 10)).toBe('safety');
   });
 
-  it('C: the other page still emits a page-only request while page 1 is armed', () => {
+  it('C: the page-only request returns, for the page in view, once the selection goes', () => {
+    // PDF-R6J-C2 replaced the per-page buttons with one that follows the page
+    // in view, so "the other page" is now "scroll to it": the page-only shape
+    // of the request is what this has always been about.
     const { container, onCreateNoteFromPage } = mountReader();
     const root = pageRoot(container, 1);
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
+    expect(container.querySelector('[data-knowledge-viewer-action="create-note"]')).toBeNull();
 
+    // Drop the selection, show page 2, and the plain action is back for it.
+    selectRange(root.firstChild!, 4, root.firstChild!, 4);
+    finishSelectionOn(root);
     clickCreateNote(container, 2);
 
     expect(onCreateNoteFromPage.mock.calls[0][0]).toMatchObject({ pageNumber: 2, selection: null });
@@ -499,7 +553,8 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(pageRoot(container, 1).firstChild!, 4, pageRoot(container, 2).firstChild!, 3);
     finishSelectionOn(pageRoot(container, 2));
 
-    // Neither page is armed, and neither invented a one-page span.
+    // Nothing is armed, and no one-page span was invented: the plain action
+    // is what remains, aimed at whichever page is in view.
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
     expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
     clickCreateNote(container, 1);
@@ -1985,7 +2040,7 @@ describe('P6J-F9-A2b: page image integration', () => {
     expect(textRoot.textContent).toBe(a2bPages[0].text);
     expect(textRoot.className).toContain('select-text');
     // Search still finds and marks text on the page whose image failed.
-    const search = container.querySelector('input')!;
+    const search = openSearch(container);
     act(() => {
       (Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
         .set as (v: string) => void).call(search, 'Alpha');
@@ -2341,7 +2396,8 @@ describe('KnowledgeDocumentDetails PDF Source AI Phase 1 toolbar', () => {
     finishSelectionOn(root);
     expect(aiButton(container)).not.toBeNull();
 
-    const selectArea = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Select area')!;
+    const selectArea = container
+      .querySelector('[data-knowledge-viewer-action="select-area"]') as HTMLButtonElement;
     act(() => selectArea.click());
 
     expect(aiButton(container)).toBeNull();
