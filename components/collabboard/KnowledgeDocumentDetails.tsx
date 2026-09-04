@@ -1,11 +1,26 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { GripVertical, Sparkles } from 'lucide-react';
+import { GripVertical, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
 import type {
   KnowledgeSourcePageRequest,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
+
+/**
+ * PDF-R6J. One compact icon button, used by every page/document action in the
+ * reader.
+ *
+ * The page actions used to be text buttons wide enough to crowd the page they
+ * sat above. Fixed square dimensions keep the whole row on one line and keep
+ * the buttons the same size as each other, which is what makes them read as a
+ * group rather than as four unrelated controls.
+ */
+const KNOWLEDGE_ICON_BUTTON_CLASS =
+  'inline-flex h-6 w-6 flex-none shrink-0 items-center justify-center rounded border border-gray-200 '
+  + 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 '
+  + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 '
+  + 'disabled:cursor-not-allowed disabled:opacity-40';
 /**
  * PDF-C1 Text -- the exact-span selection contract moved OUT of this file so
  * the canvas card obeys the same one instead of re-deriving it. Nothing about
@@ -882,7 +897,8 @@ export default function KnowledgeDocumentDetails({
                   <button
                     type="button"
                     aria-label={`Create Note from page ${page.pageNumber}`}
-                    className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    title="Create Note"
+                    className={KNOWLEDGE_ICON_BUTTON_CLASS}
                     onClick={() => onCreateNoteFromPage({
                       // The document's real identity, never its filename.
                       sourceDocumentId: documentId,
@@ -892,7 +908,7 @@ export default function KnowledgeDocumentDetails({
                       selection: null,
                     })}
                   >
-                    Create Note
+                    <StickyNote className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 ) : null}
                 {/*
@@ -906,54 +922,19 @@ export default function KnowledgeDocumentDetails({
                     type="button"
                     data-knowledge-page-add-to-chat={page.pageNumber}
                     aria-label={`Add page ${page.pageNumber} to Board AI`}
-                    className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    title="Add page to Board AI"
+                    className={KNOWLEDGE_ICON_BUTTON_CLASS}
                     onClick={() => onAddBoardAiContext(
                       boardAiDraftFromPage(documentId, originalFilename, page.pageNumber),
                     )}
                   >
-                    Add page to Board AI
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 ) : null}
-                {/* Only for the page owning the armed rectangle, the F8 clip
-                    chip's rule, in the same cluster: no new toolbar. */}
-                {onCreateNoteFromPage && documentId && pageRegion ? (
-                  <>
-                    <button
-                      type="button"
-                      aria-label={`Create Note from selected area on page ${page.pageNumber}`}
-                      className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100 hover:text-blue-900"
-                      onClick={() => {
-                        onCreateNoteFromPage({
-                          sourceDocumentId: documentId,
-                          originalFilename,
-                          pageNumber: page.pageNumber,
-                          // Empty by design, as the F8 clip path does: a region
-                          // quotes nothing, and passing the text would leave a
-                          // page snapshot one branch away from a rectangle
-                          // nobody read it from.
-                          pageText: '',
-                          selection: null,
-                          region: {
-                            region: pageRegion.region,
-                            appliedRotation: pageRegion.appliedRotation,
-                          },
-                        });
-                        setArmedRegion(null);
-                        setRegionMode(false);
-                      }}
-                    >
-                      Create Note from area
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Clear selected area on page ${page.pageNumber}`}
-                      className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                      onClick={() => setArmedRegion(null)}
-                    >
-                      Clear
-                    </button>
-                  </>
-                ) : null}
+                {/* PDF-R6J. The AREA actions moved to the document toolbar at
+                    the foot of the reader: an armed rectangle is document-wide
+                    state (there is only ever one, and it names its own page),
+                    so it does not need a per-page home. */}
                 </div>
               </div>
               {/*
@@ -1033,6 +1014,53 @@ export default function KnowledgeDocumentDetails({
               </>
             ) : null}
           </div>
+        ) : null}
+
+        {/* PDF-R6J. The armed rectangle's own actions, moved down from above
+            the page. They are gated exactly as they were -- the same
+            onCreateNoteFromPage capability and the same "only while a region
+            is armed" rule -- and act on the page the region itself names, so
+            nothing here guesses at a current page. */}
+        {onCreateNoteFromPage && documentId && activeRegion ? (
+          <>
+            <button
+              type="button"
+              data-knowledge-viewer-action="note-from-area"
+              aria-label={`Create Note from selected area on page ${activeRegion.pageNumber}`}
+              title="Create Note from area"
+              className={`${KNOWLEDGE_ICON_BUTTON_CLASS} border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-900`}
+              onClick={() => {
+                onCreateNoteFromPage({
+                  sourceDocumentId: documentId,
+                  originalFilename,
+                  pageNumber: activeRegion.pageNumber,
+                  // Empty by design, as the F8 clip path does: a region quotes
+                  // nothing, and passing the text would leave a page snapshot
+                  // one branch away from a rectangle nobody read it from.
+                  pageText: '',
+                  selection: null,
+                  region: {
+                    region: activeRegion.region,
+                    appliedRotation: activeRegion.appliedRotation,
+                  },
+                });
+                setArmedRegion(null);
+                setRegionMode(false);
+              }}
+            >
+              <SquareDashedMousePointer className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              data-knowledge-viewer-action="clear-area"
+              aria-label={`Clear selected area on page ${activeRegion.pageNumber}`}
+              title="Clear selection"
+              className={KNOWLEDGE_ICON_BUTTON_CLASS}
+              onClick={() => setArmedRegion(null)}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </>
         ) : null}
 
         {/* P6J-F9-B2. ONE mode, off by default: always-on image dragging would

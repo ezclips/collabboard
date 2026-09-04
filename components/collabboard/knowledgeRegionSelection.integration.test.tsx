@@ -80,8 +80,15 @@ function mount(swapRasters = false) {
   return { container: host, onCreateNoteFromPage };
 }
 
+/**
+ * PDF-R6J turned these into icon buttons, so the visible label moved from the
+ * button's text to its tooltip. Matching either keeps every assertion below
+ * about the same control -- and matching them EXACTLY keeps "Create Note" from
+ * also selecting "Create Note from area".
+ */
 const buttons = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll('button'))
-  .filter((candidate) => candidate.textContent?.trim() === label);
+  .filter((candidate) => candidate.textContent?.trim() === label
+    || candidate.getAttribute('title') === label);
 const button = (container: HTMLElement, label: string) => buttons(container, label)[0] ?? null;
 
 const click = (el: Element | null) => act(() => { el?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -151,7 +158,11 @@ describe('P6J-F9-B2 one armed rectangle', () => {
     const confirm = button(container, 'Create Note from area')!;
     expect(confirm).not.toBeNull();
     expect(buttons(container, 'Create Note from area')).toHaveLength(1);
-    expect(confirm.closest('[data-page-number]')!.getAttribute('data-page-number')).toBe('1');
+    // PDF-R6J moved this control out of the page and into the document
+    // toolbar. Which page it belongs to is now stated by its label rather than
+    // by where it sits -- the one-rectangle rule above is unchanged.
+    expect(confirm.closest('[data-page-number]')).toBeNull();
+    expect(confirm.getAttribute('aria-label')).toContain('on page 1');
     expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(1);
   });
 
@@ -162,7 +173,7 @@ describe('P6J-F9-B2 one armed rectangle', () => {
     dragPage(container, 2);
     expect(buttons(container, 'Create Note from area')).toHaveLength(1);
     expect(button(container, 'Create Note from area')!
-      .closest('[data-page-number]')!.getAttribute('data-page-number')).toBe('2');
+      .getAttribute('aria-label')).toContain('on page 2');
     expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(1);
   });
 
@@ -170,7 +181,7 @@ describe('P6J-F9-B2 one armed rectangle', () => {
     const { container } = mount();
     enableMode(container);
     dragPage(container, 1);
-    click(button(container, 'Clear'));
+    click(button(container, 'Clear selection'));
     expect(button(container, 'Create Note from area')).toBeNull();
     expect(container.querySelectorAll('[data-knowledge-region-rectangle]')).toHaveLength(0);
     expect(button(container, 'Select area')!.getAttribute('aria-pressed')).toBe('true');

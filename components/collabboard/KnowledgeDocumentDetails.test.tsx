@@ -290,8 +290,12 @@ function pageRoot(container: HTMLElement, pageNumber: number): HTMLElement {
  */
 function createNoteButton(container: HTMLElement, pageNumber: number): HTMLButtonElement {
   const section = container.querySelector(`[data-page-number="${pageNumber}"]`)!;
-  const pageButton = Array.from(section.querySelectorAll('button'))
-    .find((button) => button.textContent?.startsWith('Create Note')) as HTMLButtonElement | undefined;
+  // PDF-R6J made this an icon button, so it is found by the label it exposes
+  // rather than by its text. The aria-label is unchanged, and it is what the
+  // page-scoped/selection-scoped contract below is actually written against.
+  const pageButton = section.querySelector(
+    `button[aria-label="Create Note from page ${pageNumber}"]`,
+  ) as HTMLButtonElement | null;
   if (pageButton) return pageButton;
   const toolbar = container.querySelector('[data-knowledge-selection-toolbar]');
   return toolbar?.querySelector(
@@ -342,7 +346,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
   it('A: with no selection the action stays page-only', () => {
     const { container, onCreateNoteFromPage } = mountReader();
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
 
     clickCreateNote(container, 1);
@@ -368,7 +372,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     expect(createNoteButton(container, 1).textContent).toBe('Note Post');
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from selection on page 1');
     // Page 2 is untouched by a selection that does not live there.
-    expect(createNoteButton(container, 2).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
     expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
   });
 
@@ -496,8 +500,8 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     finishSelectionOn(pageRoot(container, 2));
 
     // Neither page is armed, and neither invented a one-page span.
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
-    expect(createNoteButton(container, 2).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
+    expect(createNoteButton(container, 2).getAttribute('aria-label')).toBe('Create Note from page 2');
     clickCreateNote(container, 1);
     expect(onCreateNoteFromPage.mock.calls[0][0].selection).toBeNull();
   });
@@ -510,7 +514,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(heading.firstChild!, 0, pageRoot(container, 1).firstChild!, 6);
     finishSelectionOn(container.querySelector('[data-page-number="1"]')!);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('J: a collapsed selection captures nothing and clears a prior capture', () => {
@@ -523,7 +527,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(root.firstChild!, 4, root.firstChild!, 4);
     finishSelectionOn(root);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('K: replacing the document or its page text drops the stale capture', () => {
@@ -549,7 +553,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
       );
     });
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('K: a different document id clears the capture even at identical coordinates', () => {
@@ -574,7 +578,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
       );
     });
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('L: text injected into the paragraph fails the capture closed', () => {
@@ -587,7 +591,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('M: selecting text makes no network request at all', () => {
@@ -823,7 +827,7 @@ describe('KnowledgeDocumentDetails persisted source highlights', () => {
 
     // Persisted provenance and a live browser selection are different things.
     expect(highlightsIn(container)).toHaveLength(1);
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
@@ -1386,7 +1390,7 @@ describe('Text Phase 1 floating selection toolbar', () => {
 
     expect(selectionToolbar(container)).toBeNull();
     // The page-level fallback is still offered.
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('3/C: the toolbar and grip live OUTSIDE the canonical text root, which stays exact', () => {
@@ -1608,7 +1612,7 @@ describe('Text Phase 1 floating selection toolbar', () => {
     });
 
     expect(selectionToolbar(container)).toBeNull();
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
   });
 
   it('a viewer who cannot create posts is offered no toolbar', () => {
@@ -2302,7 +2306,7 @@ describe('KnowledgeDocumentDetails PDF Source AI Phase 1 toolbar', () => {
 
   it('does not appear with no selection', () => {
     const { container } = mountReaderWithAi();
-    expect(createNoteButton(container, 1).textContent).toBe('Create Note');
+    expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from page 1');
     expect(aiButton(container)).toBeNull();
   });
 

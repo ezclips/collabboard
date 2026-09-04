@@ -268,7 +268,9 @@ describe('P6J-F5 create Note from a source page (relocated)', () => {
 
   function createNoteButtons(): HTMLButtonElement[] {
     return Array.from(drawerEl()?.querySelectorAll('button') ?? [])
-      .filter((button) => button.textContent?.trim() === 'Create Note') as HTMLButtonElement[];
+      // PDF-R6J: an icon button now, so the label lives on the tooltip.
+      .filter((button) => button.textContent?.trim() === 'Create Note'
+        || button.getAttribute('title') === 'Create Note') as HTMLButtonElement[];
   }
 
   it('emits the real document id, filename, page number and exact page text', async () => {
