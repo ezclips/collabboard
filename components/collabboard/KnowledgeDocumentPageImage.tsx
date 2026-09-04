@@ -35,6 +35,17 @@ export interface KnowledgeDocumentPageImageProps {
    * keeps today's behaviour by omitting it.
    */
   readonly onUnavailable?: () => void;
+  /**
+   * Optional sizing override. The default below is the READER's sizing -- one
+   * page per row of a continuous scroll, so it takes the full width and lets
+   * its height follow the aspect ratio.
+   *
+   * PDF-R6M. The canvas card is the opposite shape: a bounded preview box with
+   * a pager pinned beneath it, so there the page must be contained by the space
+   * it is given rather than define it. That host passes its own classes; every
+   * existing caller omits this and keeps the reader sizing exactly.
+   */
+  readonly className?: string;
 }
 
 /** Reserves pre-load space only. Never page-coordinate authority. */
@@ -79,6 +90,14 @@ export function knowledgePageImageUrl(
     + `/pages/${pageNumber}/image`;
 }
 
+/**
+ * The reader's sizing, and the default for every caller that does not say
+ * otherwise: full width, height from the aspect ratio, one page per scrolled
+ * row. Named so the canvas card's own sizing can be read against it.
+ */
+export const DEFAULT_PAGE_IMAGE_CLASS =
+  'mb-2 block h-auto w-full rounded border border-gray-200 bg-gray-50';
+
 export default function KnowledgeDocumentPageImage({
   boardId,
   documentId,
@@ -87,6 +106,7 @@ export default function KnowledgeDocumentPageImage({
   heightPoints,
   rotation,
   onUnavailable,
+  className = DEFAULT_PAGE_IMAGE_CLASS,
 }: KnowledgeDocumentPageImageProps) {
   const src = knowledgePageImageUrl(boardId, documentId, pageNumber);
   const reserved = knowledgePageDisplayDimensions(widthPoints, heightPoints, rotation);
@@ -142,7 +162,7 @@ export default function KnowledgeDocumentPageImage({
         setFailedSrc(src);
         onUnavailable?.();
       }}
-      className="mb-2 block h-auto w-full rounded border border-gray-200 bg-gray-50"
+      className={className}
     />
   );
 }

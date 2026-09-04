@@ -703,7 +703,16 @@ export default function KnowledgePdfCanvasSurface({
       /* One frame only: the Freeform host already draws the card's border and
          background, so this surface contributes neither. Square corners are
          deliberate -- a radius here would read as a second nested card. */
-      className="flex h-full flex-col overflow-hidden rounded-none bg-white"
+      /*
+        PDF-R6M. `min-h-0 flex-1` alongside `h-full`, because this surface has
+        two kinds of host. A host that gives it a definite height as a flex
+        column (the Freeform card) sizes it by the flex rules, and it takes the
+        room left over beside its siblings rather than claiming 100% and
+        overflowing past them. A host that is not a flex container at all (the
+        common card) leaves `flex-1` inert and falls back to `h-full`, which is
+        precisely today's behaviour there.
+      */
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none bg-white"
       data-knowledge-pdf-surface="true"
       data-knowledge-document-id={documentId}
       data-knowledge-pdf-collapsed={collapsed ? 'true' : 'false'}
@@ -755,7 +764,16 @@ export default function KnowledgePdfCanvasSurface({
         <div
           ref={pageTextContainerRef}
           data-knowledge-pdf-body="true"
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-1.5 py-1.5"
+          className={`flex min-h-0 flex-auto flex-col overscroll-contain bg-white px-1.5 py-1.5 ${
+            /*
+              PDF-R6M. Page mode CONTAINS: exactly one page, sized to the
+              region, so there is nothing to scroll and a scrollbar here would
+              only mean the preview had escaped its bounds. Text mode still
+              scrolls -- parsed page text is arbitrarily long and is the one
+              thing this card is allowed to scroll.
+            */
+            view === 'page' ? 'overflow-hidden' : 'overflow-y-auto'
+          }`}
           onWheel={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
@@ -787,25 +805,61 @@ export default function KnowledgePdfCanvasSurface({
             <section
               key={currentPageData.pageNumber}
               data-knowledge-pdf-page={currentPageData.pageNumber}
+              /*
+                PDF-R6M. Only page mode is a bounded column. Text mode keeps its
+                content-driven height so the paragraph can overflow the body and
+                scroll, which is exactly what the body above allows it to do.
+              */
+              className={view === 'page' ? 'flex min-h-0 flex-auto flex-col' : undefined}
             >
-              <div className="mb-0.5 select-none text-[8px] uppercase tracking-wider text-gray-400">
+              <div className="mb-0.5 shrink-0 select-none text-[8px] uppercase tracking-wider text-gray-400">
                 Page {currentPageData.pageNumber}
               </div>
               {view === 'page' && !imagelessPages.has(currentPageData.pageNumber) ? (
-                <KnowledgeDocumentPageImage
-                  boardId={boardId}
-                  documentId={documentId}
-                  pageNumber={currentPageData.pageNumber}
-                  originalFilename={originalFilename}
-                  widthPoints={currentPageData.widthPoints}
-                  heightPoints={currentPageData.heightPoints}
-                  rotation={currentPageData.rotation}
-                  onUnavailable={() => {
-                    markImageless(currentPageData.pageNumber);
-                    // Discovering the gap is what asks for it to be filled.
-                    repair.request();
-                  }}
-                />
+                /*
+                  PDF-R6M. THE PREVIEW REGION -- the fix's whole point.
+
+                  `flex-auto` is deliberate where `flex-1` would be wrong. It is
+                  `flex: 1 1 auto`, so the region's base size is the page's own
+                  height and it may then BOTH grow into spare room and shrink
+                  out of a card too short for it. `flex-1` (`flex: 1 1 0%`)
+                  would collapse to nothing in a host that gives this surface no
+                  definite height -- which is exactly what the common card host
+                  does -- and the page would disappear there.
+
+                  Shrinking is what stops the page pushing the pager off the
+                  card: the region gives way, the pager never does.
+                */
+                <div
+                  data-knowledge-pdf-preview="true"
+                  className="flex min-h-0 flex-auto items-center justify-center overflow-hidden"
+                >
+                  <KnowledgeDocumentPageImage
+                    boardId={boardId}
+                    documentId={documentId}
+                    pageNumber={currentPageData.pageNumber}
+                    originalFilename={originalFilename}
+                    widthPoints={currentPageData.widthPoints}
+                    heightPoints={currentPageData.heightPoints}
+                    rotation={currentPageData.rotation}
+                    onUnavailable={() => {
+                      markImageless(currentPageData.pageNumber);
+                      // Discovering the gap is what asks for it to be filled.
+                      repair.request();
+                    }}
+                    /*
+                      Full width with the height following the aspect ratio --
+                      the reader's own sizing -- plus one cap: never taller than
+                      the preview it sits in. A page too tall for the card is
+                      scaled down by that cap, not cropped, and `object-contain`
+                      centres what is drawn, so portrait and landscape are both
+                      whole and neither is stretched. Where the preview has no
+                      definite height the cap resolves to none and this is the
+                      reader's sizing exactly, leaving that host unchanged.
+                    */
+                    className="mx-auto h-auto max-h-full w-full rounded border border-gray-200 bg-gray-50 object-contain"
+                  />
+                </div>
               ) : null}
               {/*
                 PDF/page means the VISUAL page. When the derivative is missing

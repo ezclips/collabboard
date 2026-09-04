@@ -229,8 +229,10 @@ describe('8-12. page content and fallback', () => {
     // A hidden sibling would still fetch its image and still be findable here.
     expect(pageSections(host)).toHaveLength(1);
     expect(pageSections(host)[0].getAttribute('data-knowledge-pdf-page')).toBe('1');
-    // The body still scrolls, but now only ever over a single page.
-    expect(body(host)!.className).toContain('overflow-y-auto');
+    // PDF-R6M. And that one page is CONTAINED, not scrolled: the body is a
+    // bounded column in page mode, so a scrollbar here would only ever mean the
+    // preview had escaped the region it is supposed to fit inside.
+    expect(body(host)!.className).toContain('overflow-hidden');
   });
 
   it('11. a page with no rendered image says so instead of showing text', async () => {
@@ -442,7 +444,10 @@ describe('19-21. canvas interaction is preserved', () => {
     // Height comes from the padlet, not a hardcoded size.
     expect(surface.className).toContain('h-full');
     expect(surface.className).toContain('flex-col');
-    expect(body(host)!.className).toContain('flex-1');
+    // PDF-R6M. `flex-auto` where this once said `flex-1`: the body must still
+    // take the room the card gives it, but its base size is now its content, so
+    // it also renders in a host that hands the surface no height at all.
+    expect(body(host)!.className).toContain('flex-auto');
     expect(executable(SURFACE)).not.toMatch(/height:\s*['"]?\d+px/);
   });
 });
@@ -669,17 +674,20 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     expect(FREEFORM).toContain("|| padlet.type === 'file') ? (() => {");
   });
 
-  it('35z. a resized PDF hugs its content: manual height is a CAP, not a pin', () => {
-    // Widening the card reflows the same page text into fewer lines. With a
-    // pinned height that left a block of empty white below the text down to
-    // the old bottom edge; as a max-height the card shrinks to fit and still
-    // clips-and-scrolls when the content is taller.
+  it('35z. a PDF sizes itself from its own cap, and hugs its content collapsed', () => {
+    // The cap is still derived exactly as it was -- the card's resized height,
+    // or its creation height before a first resize, so a long converted
+    // document never draws one enormous card.
     expect(FREEFORM).toContain('const isPdfPlacementCard = !!readKnowledgePdfPlacement(padlet);');
     expect(FREEFORM).toContain('const pdfMaxHeight = isPdfPlacementCard');
-    // Even before a first resize the card is capped, so a long converted
-    // document scrolls instead of drawing one enormous card.
     expect(FREEFORM).toContain('boxManualHeight ?? `${Math.max(Number(padlet.height) || 0, 160)}px`');
-    expect(FREEFORM).toContain('height: isPdfPlacementCard ? undefined : boxManualHeight,');
+    // PDF-R6M supersedes the "cap, never a pin" rule for an EXPANDED card, and
+    // only for it. A pager can only be pinned beneath a preview inside a box
+    // that knows how tall it is: against a cap alone every child is content-
+    // sized, the page image drives the column past the cap, and the pager is
+    // clipped off below the card's edge. Collapsed, the card still hugs its
+    // strip rather than holding a tall box of white.
+    expect(FREEFORM).toContain('height: isPdfPlacementCard ? (pdfCardExpanded ? pdfMaxHeight : undefined) : boxManualHeight,');
     expect(FREEFORM).toContain('maxHeight: pdfMaxHeight,');
     // It must also escape the generic 80px floor, or a short document would
     // still be padded out with white space.
@@ -688,10 +696,14 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     expect(FREEFORM).toContain("const boxManualHeight = resizeMode === 'box' && padlet.type !== 'ai-component' && manualGeometry");
   });
 
-  it('35y. the card body still scrolls when the document exceeds the cap', async () => {
+  it('35y. parsed text still scrolls in place when it exceeds the card', async () => {
     const host = await card();
-    // The cap clips; this is what makes the remaining pages reachable.
+    // PDF-R6M. Scrolling belongs to TEXT mode, which is the one thing on this
+    // card that is arbitrarily long. Page mode has exactly one page, sized to
+    // fit, so there is nothing there to scroll.
+    await act(async () => { action(host, 'parsed-content')!.click(); });
     expect(body(host)!.className).toContain('overflow-y-auto');
+    // Every non-PDF card keeps the wrapper's original overflow behaviour.
     expect(FREEFORM).toContain("needsContentScroll ? 'overflow-y-auto'");
   });
 
@@ -1443,5 +1455,225 @@ describe('PDF-C1 header overlay', () => {
     const cell = FREEFORM_HEADER.slice(at, FREEFORM_HEADER.indexOf('})()}', at));
     expect(cell.indexOf('if (!canUseFreeformEditButton) return null;'))
       .toBeLessThan(cell.indexOf('data-knowledge-pdf-controls="true"'));
+  });
+});
+
+// ============================================================================
+// PDF-R6M: the page preview is CONTAINED and the pager is never pushed off
+// ============================================================================
+/**
+ * The regression these cover, stated once.
+ *
+ * Nothing about the pager's markup was ever wrong -- it renders outside the
+ * scrolling body, carries shrink-0, and is gated only on there being pages. It
+ * was invisible because NOTHING IN THE CHAIN HAD A DEFINITE HEIGHT. The Freeform
+ * host gave a PDF card `maxHeight` and no `height`, so `h-full` on the surface
+ * resolved to auto, `flex-1` on the body had no free space to divide, and the
+ * page image -- full card width, height from the aspect ratio -- set the
+ * column's height by itself. A 260px card is ~236px of content width, so a
+ * portrait page drew ~334px tall inside a 320px card: the image alone overran
+ * the card, and the pager below it was clipped off by the card's overflow.
+ *
+ * That is why it appeared the moment derivatives came back. With no image the
+ * body was a few lines of text, the card fitted, and the pager showed.
+ *
+ * The fix gives an expanded PDF card a real height, passes it through the card's
+ * content wrapper, and makes the preview a region that SHRINKS. jsdom does no
+ * layout, so containment is asserted where it is actually decided -- the sizing
+ * classes and the box tree -- exactly as the rest of this file asserts layout.
+ */
+describe('PDF-R6M contained preview and pinned pager', () => {
+  const FREEFORM = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+  const PAGE_IMAGE = read('components/collabboard/KnowledgeDocumentPageImage.tsx');
+  const READER = read('components/collabboard/KnowledgeDocumentDetails.tsx');
+
+  const pager = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-pager="true"]') as HTMLElement | null;
+  const indicator = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-page-indicator="true"]')?.textContent?.trim() ?? null;
+  const preview = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-preview="true"]') as HTMLElement | null;
+  const pageImage = (host: HTMLElement) => host.querySelector('img');
+
+  /** Pages of a chosen shape, so portrait and landscape are real inputs. */
+  const stubShapedPages = (count: number, widthPoints: number, heightPoints: number) => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url) !== PAGES_URL) return new Response('{}', { status: 200 });
+      return new Response(JSON.stringify({
+        document: { id: DOC_ID, originalFilename: 'lesson.pdf', pageCount: count },
+        pages: Array.from({ length: count }, (_, index) => ({
+          pageNumber: index + 1,
+          text: `Text of page ${index + 1}. Neutral synthetic content.`,
+          widthPoints, heightPoints, rotation: 0,
+        })),
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  };
+
+  it('1-2. a ready one-page PDF shows its visual, with the pager under it', async () => {
+    stubPages(1);
+    const host = await card();
+    expect(pageImage(host), 'the visual page is drawn').not.toBeNull();
+    expect(pager(host), 'and the pager is on the card with it').not.toBeNull();
+    expect(indicator(host)).toBe('1 / 1');
+  });
+
+  it('3. a six-page PDF gets the same pager', async () => {
+    stubPages(6);
+    const host = await card();
+    expect(pager(host)).not.toBeNull();
+    expect(indicator(host)).toBe('1 / 6');
+  });
+
+  it('4. the page image lives inside the bounded preview region, inside the body', async () => {
+    const host = await card();
+    const region = preview(host);
+    expect(region, 'the page is not loose in the body any more').not.toBeNull();
+    expect(region!.contains(pageImage(host)!)).toBe(true);
+    expect(body(host)!.contains(region!)).toBe(true);
+    // The region is what gives way when the card is short: min-h-0 lets it go
+    // below its content height at all, overflow-hidden keeps the page inside it.
+    expect(region!.className).toContain('min-h-0');
+    expect(region!.className).toContain('overflow-hidden');
+  });
+
+  it('5. the image can never push the pager off the card', async () => {
+    const host = await card();
+    // Structure: the pager is a SIBLING that follows the body, so no amount of
+    // content inside the body is laid out before it.
+    expect(body(host)!.contains(pager(host)!), 'the pager is not in the scrolled body').toBe(false);
+    expect(body(host)!.compareDocumentPosition(pager(host)!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pager(host)!.className, 'and it never shrinks').toContain('shrink-0');
+    // Sizing: `flex-auto` (flex: 1 1 auto), not `flex-1` (flex: 1 1 0%). Both
+    // grow; only this one also has a base size to shrink FROM, which is what
+    // keeps the page inside a card too short for it -- and what keeps the page
+    // visible at all in a host that gives this surface no definite height.
+    for (const el of [preview(host)!, body(host)!]) {
+      expect(el.className).toContain('flex-auto');
+      expect(el.className.split(/\s+/)).not.toContain('flex-1');
+    }
+  });
+
+  it('6-7. portrait and landscape pages are contained the same way', async () => {
+    for (const [w, h] of [[595, 842], [842, 595]] as const) {
+      stubShapedPages(1, w, h);
+      const host = await card();
+      const image = pageImage(host)!;
+      // The box fills the region; object-contain decides what is drawn in it.
+      // That is one rule for both shapes -- neither is cropped or stretched.
+      expect(image.className).toContain('object-contain');
+      expect(image.className).toContain('w-full');
+      // The cap is the whole difference from the reader's sizing: same full
+      // width and aspect-driven height, but never taller than the preview it
+      // sits in. Without it the page overran the card and took the pager with
+      // it; with it a page too tall for the card is scaled down, not cropped.
+      expect(image.className).toContain('max-h-full');
+      // The intrinsic ratio still reaches the browser, so the aspect is real.
+      expect(Number(image.getAttribute('width'))).toBe(w);
+      expect(Number(image.getAttribute('height'))).toBe(h);
+    }
+  });
+
+  it('12-13. the card has a definite height at any size, so the pager stays put', () => {
+    const code = executable(FREEFORM);
+    // The whole root cause in one line: an expanded PDF card is sized, not
+    // merely capped. The cap it adopts is the card's own resized height, so
+    // resizing smaller or larger changes the preview and never the pager.
+    expect(code).toContain('height: isPdfPlacementCard ? (pdfCardExpanded ? pdfMaxHeight : undefined) : boxManualHeight,');
+    expect(code).toContain('const pdfCardExpanded = isPdfPlacementCard && !(pdfCardCollapsed[padlet.id] ?? false);');
+    // And that height reaches the surface: the content wrapper becomes a column
+    // that fills the card and clips, rather than a box sized by its content.
+    expect(code).toContain("pdfCardExpanded ? 'flex min-h-0 flex-1 flex-col overflow-hidden'");
+    // The surface then takes the room left beside its siblings.
+    expect(executable(SURFACE)).toContain('flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none bg-white');
+  });
+
+  it('14. nothing distorts or crops the page to make room', async () => {
+    const host = await card();
+    const image = pageImage(host)!;
+    for (const forbidden of ['object-cover', 'object-fill', 'object-none', 'object-scale-down']) {
+      expect(image.className, forbidden + ' would change the page, not fit it').not.toContain(forbidden);
+    }
+    // No inline geometry either: sizing is the region's, in one place.
+    expect(image.getAttribute('style')).toBeNull();
+  });
+
+  it('15. PDF -> T -> PDF returns to the page that was open', async () => {
+    stubPages(6);
+    const host = await card();
+    await act(async () => { action(host, 'page-next')!.click(); });
+    await act(async () => { action(host, 'page-next')!.click(); });
+    await act(async () => { action(host, 'page-next')!.click(); });
+    expect(indicator(host)).toBe('4 / 6');
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    expect(host.querySelector('[data-knowledge-pdf-page-text]'), 'now reading text').not.toBeNull();
+    expect(indicator(host), 'the pager still speaks for the same page').toBe('4 / 6');
+    await act(async () => { action(host, 'page-view')!.click(); });
+    expect(indicator(host)).toBe('4 / 6');
+    expect(pageImage(host)).not.toBeNull();
+  });
+
+  it('T mode keeps its own scrolling; page mode has nothing to scroll', async () => {
+    const host = await card();
+    // Page mode: exactly one page, sized to the region. A scrollbar here would
+    // only mean the preview had escaped its bounds.
+    expect(body(host)!.className).toContain('overflow-hidden');
+    expect(body(host)!.className).not.toContain('overflow-y-auto');
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    // Text mode: parsed page text is arbitrarily long, and is the one thing
+    // this card has ever been allowed to scroll.
+    expect(body(host)!.className).toContain('overflow-y-auto');
+  });
+
+  it('16-17. collapsing hides preview and pager; the card stops being a tall box', async () => {
+    stubPages(6);
+    const host = await card();
+    await act(async () => { action(host, 'page-next')!.click(); });
+    await act(async () => { action(host, 'collapse')!.click(); });
+    expect(preview(host), 'no preview while collapsed').toBeNull();
+    expect(pager(host), 'and nothing to page through').toBeNull();
+    await act(async () => { action(host, 'collapse')!.click(); });
+    expect(indicator(host), 'the same page comes back').toBe('2 / 6');
+    expect(preview(host)).not.toBeNull();
+    // A collapsed card hugs its strip instead of holding the expanded height.
+    expect(executable(FREEFORM)).toContain('pdfCardExpanded ? pdfMaxHeight : undefined');
+  });
+
+  it('18. the reader keeps its own page sizing, untouched', () => {
+    // The card passes its sizing; every other caller -- the reader above all --
+    // omits the prop and gets the default, which is the class the reader always
+    // had. Nothing about the reader's layout is expressed here.
+    expect(PAGE_IMAGE).toContain(
+      "'mb-2 block h-auto w-full rounded border border-gray-200 bg-gray-50'",
+    );
+    expect(PAGE_IMAGE).toContain('className = DEFAULT_PAGE_IMAGE_CLASS,');
+    const readerUse = READER.slice(READER.indexOf('<KnowledgeDocumentPageImage'));
+    expect(readerUse.slice(0, readerUse.indexOf('/>'))).not.toContain('className');
+  });
+
+  it('19. the page image route is untouched', () => {
+    // Same authenticated same-origin path, built the same way. A layout fix has
+    // no business anywhere near how the bytes are fetched.
+    expect(PAGE_IMAGE).toContain(
+      '`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}`',
+    );
+    expect(PAGE_IMAGE).toContain('+ `/pages/${pageNumber}/image`');
+    const code = executable(PAGE_IMAGE);
+    for (const forbidden of ['getPublicUrl', 'createSignedUrl', 'supabase']) {
+      expect(code).not.toContain(forbidden);
+    }
+  });
+
+  it('20. R6I stays as it was, and no reader tracking leaks into this card', () => {
+    // The card navigates by explicit pager state. The reader's visibility
+    // tracking has no place here and must not have been borrowed for it.
+    const code = executable(SURFACE);
+    expect(code).not.toContain('IntersectionObserver');
+    expect(code).not.toContain('useKnowledgeReaderActivePage');
+    // R6I's draft flow is untouched by this fix.
+    const draft = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+    expect(draft).toContain('ImagePostEditorShell');
+    expect(draft).toContain('ImagePostEditorCard');
   });
 });

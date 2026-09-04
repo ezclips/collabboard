@@ -3225,6 +3225,22 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const pdfMaxHeight = isPdfPlacementCard
           ? (boxManualHeight ?? `${Math.max(Number(padlet.height) || 0, 160)}px`)
           : undefined;
+        /**
+         * PDF-R6M. An EXPANDED PDF card is the one case that needs a definite
+         * height rather than a cap.
+         *
+         * Its accepted layout is a bounded page preview with a pager pinned
+         * underneath, and a pager can only be pinned inside a box that knows how
+         * tall it is: against a max-height alone every child is content-sized,
+         * so the page image drives the column past the cap and the pager is
+         * clipped away below the card's own overflow-hidden edge. Making the cap
+         * the height is what gives the preview a definite region to be contained
+         * by -- the pager then sits at the bottom edge by construction.
+         *
+         * COLLAPSED it goes back to hugging its content, so a collapsed card is
+         * a strip and not a tall box of white; every non-PDF card is untouched.
+         */
+        const pdfCardExpanded = isPdfPlacementCard && !(pdfCardCollapsed[padlet.id] ?? false);
         const needsContentScroll = resizeMode === 'box' && padlet.type !== 'ai-component' && !!manualGeometry;
         // Interaction chrome belongs to the immediate relative wrapper used
         // by each generic root branch, not to this overflow-hidden semantic
@@ -3311,7 +3327,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   : padlet.type === 'ai-component'
                     ? `${Math.max(Number(padlet.width) || 500, 200)}px`
                     : (manualGeometry ? `${manualGeometry.width}px` : '180px'),
-              height: isPdfPlacementCard ? undefined : boxManualHeight,
+              height: isPdfPlacementCard ? (pdfCardExpanded ? pdfMaxHeight : undefined) : boxManualHeight,
               maxHeight: pdfMaxHeight,
               // A PDF hugs its content, so it must not be padded up to the
               // generic 80px floor when its own content is shorter.
@@ -3673,7 +3689,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 when the card is smaller than its content. Legacy unresized
                 posts keep their historical overflow behavior. */}
             <div
-              className={`p-3 ${needsContentScroll ? 'overflow-y-auto' : (padlet.type === 'link' || (padlet.type === 'ai-component' && (expandedAIPosts[padlet.id] ?? false))) ? '' : 'overflow-hidden'}`}
+              /* PDF-R6M. An expanded PDF card passes its height straight through
+                 to the surface, which owns its own preview/pager column and its
+                 own scrolling; this wrapper must therefore be a flex item that
+                 fills the card and clips, never a second scroller. Every other
+                 card type keeps its existing overflow behaviour exactly. */
+              className={`p-3 ${pdfCardExpanded ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : needsContentScroll ? 'overflow-y-auto' : (padlet.type === 'link' || (padlet.type === 'ai-component' && (expandedAIPosts[padlet.id] ?? false))) ? '' : 'overflow-hidden'}`}
               style={{ maxWidth: '100%' }}
               // AI-generated content (and link thumbnails) can contain plain
               // <img> tags, which browsers make natively drag-and-droppable.
