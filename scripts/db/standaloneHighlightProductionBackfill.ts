@@ -75,10 +75,8 @@ export interface BackfillTarget {
 export function resolveBackfillTarget(env: NodeJS.ProcessEnv): BackfillTarget {
   const raw = (env[BACKFILL_URL_ENV] ?? '').trim();
   if (raw === '') {
-    throw new Error(
-      `Refusing to run: ${BACKFILL_URL_ENV} is required. This tool never falls back to `
-      + 'DATABASE_URL, SUPABASE_URL, SUPABASE_DB_URL, NEXT_PUBLIC_* or .env.local.',
-    );
+    throw new Error(`Refusing to run: ${BACKFILL_URL_ENV} is required. This tool never falls `
+      + 'back to DATABASE_URL, SUPABASE_URL, SUPABASE_DB_URL, NEXT_PUBLIC_* or .env.local.');
   }
 
   let url: URL;
@@ -94,44 +92,74 @@ export function resolveBackfillTarget(env: NodeJS.ProcessEnv): BackfillTarget {
 
   const host = url.hostname.toLowerCase();
   if (LOCAL_HOSTS.has(host) || host.endsWith('.local') || host.endsWith('.localhost')) {
-    throw new Error(
-      `Refusing to run: ${host} is a local or test target. The production CLI has no `
-      + 'override; local integration runs through the internal executor seam instead.',
-    );
+    throw new Error(`Refusing to run: ${host} is a local or test target. The production CLI has `
+      + 'no override; local integration runs through the internal executor seam instead.');
   }
 
   // Transaction-mode pooling hands each statement a different backend, so the
   // lock, the snapshot and the inserts could land on three sessions.
   if (url.port === TRANSACTION_POOLER_PORT) {
-    throw new Error(
-      `Refusing to run: port ${TRANSACTION_POOLER_PORT} is Supavisor TRANSACTION mode, which `
-      + `cannot hold one backend session. Use direct PostgreSQL or SESSION mode on ${SESSION_PORT}.`,
-    );
+    throw new Error(`Refusing to run: port ${TRANSACTION_POOLER_PORT} is Supavisor TRANSACTION `
+      + `mode, which cannot hold one backend session. Use direct PostgreSQL or SESSION `
+      + `mode on ${SESSION_PORT}.`);
   }
   if (host.endsWith('.pooler.supabase.com') && url.port !== SESSION_PORT) {
     throw new Error(
-      `Refusing to run: a Supabase pooler host requires the SESSION-mode port ${SESSION_PORT}.`,
-    );
+      `Refusing to run: a Supabase pooler host requires the SESSION-mode port ${SESSION_PORT}.`);
   }
 
-  const sslmode = (url.searchParams.get('sslmode') ?? '').toLowerCase();
-  if (['disable', 'allow', 'prefer'].includes(sslmode)) {
-    throw new Error(
-      `Refusing to run: sslmode=${sslmode} does not guarantee an encrypted connection. `
-      + 'Use sslmode=require (or stricter) for a production backfill.',
-    );
-  }
-
+  assertVerifiedTlsUrl(url);
   return { connectionString: raw, host };
 }
 
-/** One pinned backend session. Never a Pool: its operations can hop connections. */
+/**
+ * TLS by ALLOWLIST, because a blacklist cannot anticipate the next unsafe value.
+ * Two shapes only: no `sslmode`, leaving the explicit `ssl` object below
+ * authoritative; or exactly `sslmode=verify-full`. Everything else is refused --
+ * `require`, which node-postgres warns will stop verifying, and `no-verify`,
+ * which yields `rejectUnauthorized: false`, included. Names are operator input,
+ * so they are lower-cased and ENUMERATED rather than read with `get()`, which
+ * would take the first of a repeated pair and ignore an unsafe second value.
+ */
+function assertVerifiedTlsUrl(url: URL): void {
+  const refuse = (why: string) => { // the URL is never echoed; it carries a password
+    throw new Error(`Refusing to run: ${why}. A production backfill requires a verified TLS `
+      + 'connection: either omit sslmode entirely, or use exactly sslmode=verify-full.');
+  };
+  const sslmodes: string[] = [];
+  for (const name of [...url.searchParams.keys()]) {
+    const key = name.trim().toLowerCase();
+    if (key.includes('uselibpqcompat')) refuse('the URL sets uselibpqcompat, which changes TLS semantics');
+    if (key === 'sslmode') sslmodes.push(...url.searchParams.getAll(name));
+    else if (key.startsWith('ssl')) refuse(`the URL sets an unsupported TLS option "${key}"`);
+  }
+  if (sslmodes.length > 1) refuse('the URL sets sslmode more than once, which is ambiguous');
+  if (sslmodes.length === 1 && sslmodes[0].trim().toLowerCase() !== 'verify-full') {
+    refuse('the URL sets an sslmode other than verify-full');
+  }
+}
+
+/**
+ * One pinned backend session. Never a Pool: its operations can hop connections.
+ * The `ssl` object is NOT self-enforcing -- when the connection string carries
+ * an `sslmode`, node-postgres parses it and REPLACES this object -- so the
+ * resolved configuration is asserted here, before anyone can connect.
+ */
 export function createBackfillClient(target: BackfillTarget): Client {
-  return new Client({
+  const client = new Client({
     connectionString: target.connectionString,
     application_name: APPLICATION_NAME,
     ssl: { rejectUnauthorized: true },
   });
+  const ssl = (client as unknown as { connectionParameters?: { ssl?: unknown } })
+    .connectionParameters?.ssl as { rejectUnauthorized?: unknown } | null | undefined;
+  // No object at all means TLS is off; an explicit `false` is the downgrade
+  // node-postgres derives from the URL. `undefined` is Node's secure default.
+  if (typeof ssl !== 'object' || ssl === null || ssl.rejectUnauthorized === false) {
+    throw new Error('Refusing to connect: the resolved connection does not verify the server '
+      + 'certificate. Remove the TLS options from the URL, or use sslmode=verify-full.');
+  }
+  return client;
 }
 
 /** The surface the executor needs, so tests can drive a local scratch client. */

@@ -59,7 +59,8 @@ count. This is a human/runtime judgement; the tool cannot see it.
 Set the dedicated variable, and nothing else:
 
 ```
-COLLABBOARD_HIGHLIGHT_BACKFILL_DATABASE_URL=postgres://…?sslmode=require
+COLLABBOARD_HIGHLIGHT_BACKFILL_DATABASE_URL=postgres://…            # no sslmode
+COLLABBOARD_HIGHLIGHT_BACKFILL_DATABASE_URL=postgres://…?sslmode=verify-full
 ```
 
 Required:
@@ -68,6 +69,9 @@ Required:
 - one backend session for the whole run
 - the approved administrative/session connection supplied for this release —
   **never an application role**
+- **certificate verification, which is mandatory.** The URL must take exactly
+  one of the two shapes above: omit `sslmode` entirely, or set it to
+  `verify-full` and nothing else.
 
 Forbidden, and refused by the tool:
 
@@ -76,9 +80,23 @@ Forbidden, and refused by the tool:
   three different backends
 - PostgREST, `supabase-js`, a `psql` framing workaround, `pg.Pool`
 - `localhost`, `127.0.0.1`, `::1`, or any local/Docker alias
-- `sslmode=disable`, `allow` or `prefer`
+- **every `sslmode` except `verify-full`** — `disable`, `allow`, `prefer`,
+  `require`, `verify-ca` and `no-verify` are all refused, as is `sslmode` given
+  more than once, or any other `ssl…` parameter
+- **`uselibpqcompat`, in any spelling and with any value**
 - any fallback variable: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_DB_URL`,
   `NEXT_PUBLIC_*`, `.env.local`, `supabase link`, a project ref
+
+**Why `require` is not good enough.** node-postgres builds its TLS settings from
+the connection string, and when the URL carries an `sslmode` that parsed value
+*replaces* the runner's explicit `ssl: { rejectUnauthorized: true }` — the code
+setting is not authoritative, which an earlier version of this runbook implied
+it was. `sslmode=no-verify` and `uselibpqcompat=true` both resolve to
+`rejectUnauthorized: false`: encrypted, but with no check that the server is
+actually your database. `require` verifies today only as a legacy quirk that
+node-postgres has warned it will drop. So the tool allowlists the two shapes
+above and, after building the client, refuses to connect at all unless the
+*resolved* configuration still verifies the certificate.
 
 There is no override flag. The tool reports `ADMIN_ROLE_READY=YES` only when the
 connection can read the migration inputs and insert a highlight naming
@@ -194,6 +212,8 @@ highlight leaves the Note, the citation and "Used in Notes" intact.
 - use `supabase link`, a project ref, or a migration push
 - hand-write `INSERT … SELECT` from `source_references`, copy stored offsets, or
   reimplement quote fallback or Note-colour derivation in SQL
+- use any TLS setting other than the two shapes in Gate 6 — `sslmode=require`,
+  `no-verify`, `verify-ca` and `uselibpqcompat` all skip certificate verification
 - run any mode without the denylist
 - reuse a stale `PLAN_HASH` after the data has moved
 - auto-repair a `MISMATCH`

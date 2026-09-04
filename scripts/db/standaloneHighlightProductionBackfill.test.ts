@@ -163,34 +163,76 @@ describe('H3B connection guards (pure, no database)', () => {
     expect(() => resolveBackfillTarget({} as NodeJS.ProcessEnv)).toThrow(/is required/);
     for (const fallback of ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_DB_URL', 'POSTGRES_URL']) {
       expect(() => resolveBackfillTarget(
-        { [fallback]: 'postgres://u:p@prod.example.com:5432/db?sslmode=require' } as NodeJS.ProcessEnv,
+        { [fallback]: 'postgres://u:p@prod.example.com:5432/db?sslmode=verify-full' } as NodeJS.ProcessEnv,
       ), fallback).toThrow(/is required/);
     }
   });
   it('3-5. refuses local targets', () => {
     for (const host of ['localhost', '127.0.0.1', '[::1]', '0.0.0.0', 'host.docker.internal',
       'supabase_db_collabboard', 'db.local']) {
-      expect(() => resolveBackfillTarget(target(`postgres://u:p@${host}:5432/db?sslmode=require`)),
+      expect(() => resolveBackfillTarget(target(`postgres://u:p@${host}:5432/db?sslmode=verify-full`)),
         host).toThrow(/local or test target/);
     }
   });
   it('6. refuses Supavisor transaction mode, which cannot hold one backend session', () => {
     expect(() => resolveBackfillTarget(
-      target('postgres://u:p@x.pooler.supabase.com:6543/db?sslmode=require'),
+      target('postgres://u:p@x.pooler.supabase.com:6543/db?sslmode=verify-full'),
     )).toThrow(/TRANSACTION mode/);
     expect(() => resolveBackfillTarget(
-      target('postgres://u:p@x.pooler.supabase.com:7000/db?sslmode=require'),
+      target('postgres://u:p@x.pooler.supabase.com:7000/db?sslmode=verify-full'),
     )).toThrow(/SESSION-mode port/);
     expect(resolveBackfillTarget(
-      target('postgres://u:p@x.pooler.supabase.com:5432/db?sslmode=require'),
+      target('postgres://u:p@x.pooler.supabase.com:5432/db?sslmode=verify-full'),
     ).host).toBe('x.pooler.supabase.com');
   });
-  it('7. refuses connections that are not demonstrably encrypted', () => {
-    for (const mode of ['disable', 'allow', 'prefer']) {
-      expect(() => resolveBackfillTarget(
-        target(`postgres://u:p@prod.example.com:5432/db?sslmode=${mode}`)), mode).toThrow(/sslmode/);
+  it('7. TLS is an ALLOWLIST: only no sslmode, or exactly verify-full', () => {
+    // A blacklist cannot anticipate the next unsafe value. These four each make
+    // node-postgres skip certificate verification, or will once pg adopts libpq
+    // semantics -- an encrypted-but-unauthenticated link to a production write.
+    const blocked = [
+      '?sslmode=disable', '?sslmode=allow', '?sslmode=prefer', '?sslmode=require',
+      '?sslmode=verify-ca', '?sslmode=no-verify',
+      '?sslmode=require&uselibpqcompat=true', '?sslmode=verify-full&uselibpqcompat=true',
+      '?uselibpqcompat=false',
+      // Repeated keys: `get()` would read the first and ignore the second.
+      '?sslmode=verify-full&sslmode=no-verify', '?sslmode=verify-full&sslmode=verify-full',
+      // Parameter names are operator input; casing must not walk past the guard.
+      '?SSLMODE=no-verify', '?SslMode=require', '?USELIBPQCOMPAT=true',
+      // Any other TLS-controlling option is unknown to this tool, so refused.
+      '?ssl=false', '?sslrootcert=/tmp/x', '?sslcert=/tmp/c',
+    ];
+    for (const q of blocked) {
+      expect(() => resolveBackfillTarget(target(`postgres://u:p@prod.example.com:5432/db${q}`)), q)
+        .toThrow(/verified TLS connection/);
     }
     expect(() => resolveBackfillTarget(target('https://prod.example.com/db'))).toThrow(/postgres:/);
+
+    // The two accepted shapes, and -- load-bearing -- what pg RESOLVES them to.
+    // The explicit ssl object is not self-enforcing: a connection-string sslmode
+    // replaces it, so the assertion has to read the final client configuration.
+    for (const q of ['', '?sslmode=verify-full', '?application_name=x']) {
+      const resolved = resolveBackfillTarget(target(`postgres://u:p@prod.example.com:5432/db${q}`));
+      const ssl = (createBackfillClient(resolved) as unknown as
+        { connectionParameters: { ssl?: { rejectUnauthorized?: unknown } } }).connectionParameters.ssl;
+      expect(typeof ssl, q).toBe('object');
+      expect(ssl?.rejectUnauthorized, q).not.toBe(false);
+    }
+    // Absent sslmode leaves the explicit object authoritative; verify-full is
+    // pg's own verifying mode, which reports no explicit rejectUnauthorized.
+    const plain = createBackfillClient(resolveBackfillTarget(
+      target('postgres://u:p@prod.example.com:5432/db'))) as unknown as
+      { connectionParameters: { ssl: { rejectUnauthorized?: unknown } } };
+    expect(plain.connectionParameters.ssl.rejectUnauthorized).toBe(true);
+
+    // The client assertion is a SECOND, independent layer. The URL allowlist
+    // makes it unreachable in normal use, so prove it on its own by handing
+    // createBackfillClient a target the allowlist would never have produced.
+    for (const unsafe of ['?sslmode=no-verify', '?sslmode=require&uselibpqcompat=true']) {
+      expect(() => createBackfillClient({
+        connectionString: `postgres://u:p@prod.example.com:5432/db${unsafe}`,
+        host: 'prod.example.com',
+      }), unsafe).toThrow(/does not verify the server certificate/);
+    }
   });
   it('8. has no override flag, and never returns or logs the connection string', () => {
     const source = fs.readFileSync(
@@ -203,7 +245,7 @@ describe('H3B connection guards (pure, no database)', () => {
     expect(source).not.toMatch(/\bnew Pool\(|from 'pg-pool'|Pool[,}]/);
     expect(source).toMatch(/import \{ Client \} from 'pg'/);
     const resolved = resolveBackfillTarget(
-      target('postgres://user:secret@db.abc.supabase.co:5432/postgres?sslmode=require'));
+      target('postgres://user:secret@db.abc.supabase.co:5432/postgres?sslmode=verify-full'));
     expect(resolved.host).toBe('db.abc.supabase.co');
     const summary = formatSummary({
       mode: 'plan', schemaReady: true, adminRoleReady: true, totalReferences: 0, paintable: 0,
@@ -221,7 +263,7 @@ describe('H3B connection guards (pure, no database)', () => {
     expect(parseDenyList({ [DENY_NAMES_ENV]: 'a.pdf, b.pdf\nc.pdf' } as unknown as
       NodeJS.ProcessEnv)).toEqual(['a.pdf', 'b.pdf', 'c.pdf']);
     expect(createBackfillClient(resolveBackfillTarget(
-      target('postgres://u:p@prod.example.com:5432/db?sslmode=require')))).toBeInstanceOf(Client);
+      target('postgres://u:p@prod.example.com:5432/db?sslmode=verify-full')))).toBeInstanceOf(Client);
   });
 });
 
