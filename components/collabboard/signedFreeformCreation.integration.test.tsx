@@ -43,7 +43,26 @@ interface InsertedRow {
 function installFakeSupabase() {
   const inserted: InsertedRow[] = [];
   let nextId = 1;
+  // IMAGE-LIBRARY: an Image is a durable asset, so its creation travels through
+  // the atomic Library+placement RPC instead of a bare padlets insert. The row
+  // it persists is the same row, carried as p_-prefixed arguments -- so it is
+  // recorded here alongside the ordinary inserts and asserted identically.
+  const rows = new Map<string, any>();
   const client = {
+    auth: { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null }) },
+    async rpc(_fn: string, args: any) {
+      const row = {
+        id: args.p_padlet_id, board_id: args.p_board_id, title: args.p_title,
+        content: args.p_content, type: 'image',
+        position_x: args.p_position_x, position_y: args.p_position_y,
+        width: args.p_width, height: args.p_height,
+        file_url: args.p_file_url, metadata: args.p_metadata,
+        library_item_id: `library-${nextId++}`,
+      };
+      rows.set(args.p_padlet_id, row);
+      inserted.push(row);
+      return { data: [{ padlet_id: args.p_padlet_id, library_item_id: row.library_item_id }], error: null };
+    },
     from(_table: string) {
       return {
         insert(row: any) {
@@ -57,11 +76,11 @@ function installFakeSupabase() {
         update(_fields: any) {
           return { eq: async () => ({ data: null, error: null }) };
         },
-        select(_cols: string) {
+        select(_cols?: string) {
           return {
-            eq: () => ({
-              single: async () => ({ data: null, error: null }),
-              maybeSingle: async () => ({ data: null, error: null }),
+            eq: (_col: string, value: string) => ({
+              single: async () => ({ data: rows.get(value) ?? null, error: null }),
+              maybeSingle: async () => ({ data: rows.get(value) ?? null, error: null }),
             }),
           };
         },

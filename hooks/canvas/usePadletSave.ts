@@ -26,7 +26,7 @@ export type SaveAIComponentData = {
 };
 
 
-import { useCallback, useMemo, Dispatch, SetStateAction } from 'react';
+import { useCallback, useMemo, useRef, Dispatch, SetStateAction } from 'react';
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
@@ -256,6 +256,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
   const supabase = useMemo(() => supabaseBrowser(), []);
+  // IMAGE-LIBRARY: the identity of the new-Image draft currently being saved.
+  // Held so a repeated Done reuses it and the atomic RPC treats the second call
+  // as a retry of the same request rather than a new durable Image.
+  const newImagePadletIdRef = useRef<string | null>(null);
   const {
     canvasId,
     padletToEdit,
@@ -1223,19 +1227,43 @@ export function usePadletSave(params: UsePadletSaveParams) {
         // if at all, via the image editing modal's own Title field), not
         // derived from it.
         const { x: position_x, y: position_y } = getNewPostPosition(300, 200);
-        const { data: newImage, error } = await supabase.from('padlets').insert({
-          board_id: canvasId,
-          title: 'Image',
-          content: '',
-          type: 'image',
-          file_url: data.imageUrl,
-          position_x,
-          position_y,
-          width: 300,
-          height: 200,
-          metadata,
-        }).select().single();
+        // IMAGE-LIBRARY: an Image is a durable asset, so saving one creates the
+        // Library object AND this placement together, through the same atomic
+        // RPC the PDF-area flow already uses. Two separate client inserts could
+        // leave a card with no Library identity, which is the state the product
+        // rule forbids. The RPC is SECURITY INVOKER and binds p_user_id to
+        // auth.uid(), so board RLS stays the authority and no elevated key is
+        // involved -- this is the ordinary authenticated browser client.
+        // One id per draft, so a double Done is a RETRY the RPC recognises
+        // rather than a second Image with a second Library object. Claimed
+        // SYNCHRONOUSLY, before the first await: two clicks that land in the
+        // same tick must share it, and anything after an await would already
+        // have let the second call through with an id of its own.
+        const padletId = newImagePadletIdRef.current ?? crypto.randomUUID();
+        newImagePadletIdRef.current = padletId;
+        const { data: auth } = await supabase.auth.getUser();
+        const userId = auth?.user?.id;
+        if (!userId) throw new Error('Not signed in');
+        const { error: pairError } = await supabase.rpc('create_image_post_with_library_item', {
+          p_padlet_id: padletId,
+          p_board_id: canvasId,
+          p_user_id: userId,
+          p_title: 'Image',
+          p_content: '',
+          p_position_x: position_x,
+          p_position_y: position_y,
+          p_width: 300,
+          p_height: 200,
+          p_file_url: data.imageUrl,
+          p_metadata: metadata,
+        });
+        if (pairError) throw pairError;
+        // Read the row back so every downstream consumer still receives exactly
+        // what the database stored, defaults included.
+        const { data: newImage, error } = await supabase
+          .from('padlets').select().eq('id', padletId).single();
         if (error) throw error;
+        newImagePadletIdRef.current = null;
         createdPadlet = newImage;
       } else {
         // Update Image -- title is left untouched here; it's only ever
