@@ -450,7 +450,13 @@ describe('P6J-F9-C1 the real session factory (wiring, not orchestration)', () =>
     const admin = fakeAdminClient({ padlets: [{ id: TARGET_PADLET_ID, board_id: BOARD_ID }] });
     const real = createRealKnowledgeSourceRegionCropSession(admin, admin, USER_ID);
     const found = await real.validation.findTargetPadlet(TARGET_PADLET_ID as never, BOARD_ID as never);
-    expect(found).toEqual(ok({ boardId: BOARD_ID }));
+    // PDF-R6K-H2B: the same lookup now also returns the Note's colour fields,
+    // so a paired highlight can be seeded once. The board scoping it is
+    // asserted for is unchanged.
+    expect(found).toEqual(ok({
+      boardId: BOARD_ID,
+      noteColors: { topStrip: undefined, cardColor: undefined },
+    }));
     const wrongBoard = await real.validation.findTargetPadlet(TARGET_PADLET_ID as never, OTHER_BOARD_ID as never);
     expect(wrongBoard).toEqual(ok(null));
   });

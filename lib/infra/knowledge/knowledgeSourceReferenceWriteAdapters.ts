@@ -42,7 +42,10 @@ interface SourceDocumentRow {
   readonly page_count: number | null;
   readonly processing_status: string;
 }
-interface TargetPadletRow { readonly board_id: string }
+interface TargetPadletRow {
+  readonly board_id: string;
+  readonly metadata: Record<string, unknown> | null;
+}
 interface KnowledgePageRow {
   readonly text: string;
   readonly width_points: number | null;
@@ -93,8 +96,15 @@ interface InsertedRowQuery {
   select(columns: string): { single(): Promise<SingleResult<SourceReferenceRow>> };
 }
 
+/**
+ * PDF-R6K-H2B. `insert` remains -- it is what the citation write used to be and
+ * what the shape of the row still is -- and `select` is added so the writer can
+ * read back the row the atomic function created. Still no update, delete or
+ * upsert: the only mutation this client can express is the one INSERT.
+ */
 interface SourceReferenceWriteTable {
   insert(row: SourceReferenceInsertRow): InsertedRowQuery;
+  select(columns: string): SingleRowQuery<SourceReferenceRow>;
 }
 
 /**
@@ -103,7 +113,38 @@ interface SourceReferenceWriteTable {
  * storage or auth surface to reach for, and no client is constructed here, so
  * the caller decides the authority the query runs under.
  */
+/**
+ * PDF-R6K-H2B. The ONE remote procedure this client may call, typed by name and
+ * by argument shape. Naming it explicitly keeps the surface as narrow as the
+ * table list below: there is no general `rpc(name, args)` here, so no other
+ * function can be reached through this client.
+ */
+export interface KnowledgeSourceCitationRpcArgs {
+  readonly p_target_padlet_id: string;
+  readonly p_source_document_id: string;
+  readonly p_page_start: number;
+  readonly p_page_end: number;
+  readonly p_quote_text: string | null;
+  readonly p_quote_hash: string | null;
+  readonly p_char_start: number | null;
+  readonly p_char_end: number | null;
+  readonly p_region_x: number | null;
+  readonly p_region_y: number | null;
+  readonly p_region_width: number | null;
+  readonly p_region_height: number | null;
+  readonly p_highlight_color: string | null;
+}
+
+interface CitationRpcRow {
+  readonly reference_id: string;
+  readonly highlight_id: string | null;
+}
+
 export interface KnowledgeSourceReferenceWriteSupabaseClient {
+  rpc(
+    fn: 'create_knowledge_source_citation',
+    args: KnowledgeSourceCitationRpcArgs,
+  ): PromiseLike<{ data: CitationRpcRow[] | null; error: { message: string } | null }>;
   from(table: 'boards'): ReadTable<BoardOwnerRow>;
   from(table: 'board_collaborators'): ReadTable<CollaboratorRow>;
   from(table: 'knowledge_documents'): ReadTable<SourceDocumentRow>;
@@ -192,13 +233,22 @@ implements KnowledgeSourceReferenceValidationRepository {
     try {
       const { data, error } = await this.client
         .from('padlets')
-        .select('board_id')
+        // PDF-R6K-H2B also reads the Note's own colour fields, so a highlight
+        // born with this citation can be seeded with the Note's accent once.
+        .select('board_id, metadata')
         .eq('id', id)
         .eq('board_id', boardId)
         .maybeSingle();
       if (error) return err(unavailable(error));
       if (data === null) return ok(null);
-      return ok({ boardId: asBoardId(data.board_id) });
+      const metadata = (data.metadata ?? {}) as Record<string, unknown>;
+      return ok({
+        boardId: asBoardId(data.board_id),
+        noteColors: {
+          topStrip: typeof metadata.topStrip === 'string' ? metadata.topStrip : undefined,
+          cardColor: typeof metadata.cardColor === 'string' ? metadata.cardColor : undefined,
+        },
+      });
     } catch (cause) {
       return err(unavailable(cause));
     }
@@ -284,29 +334,48 @@ export class SupabaseKnowledgeSourceReferenceWriter implements KnowledgeSourceRe
     row: KnowledgeSourceReferenceInsert,
   ): Promise<Result<SourceReference, DomainError>> {
     try {
-      const { data, error } = await this.client
-        .from('source_references')
-        .insert({
-          target_padlet_id: row.targetPadletId,
-          source_document_id: row.sourceDocumentId,
-          page_start: row.pageStart,
-          page_end: row.pageEnd,
-          quote_text: row.quoteText,
-          quote_hash: row.quoteHash,
-          char_start: row.charStart,
-          char_end: row.charEnd,
-          region_x: row.regionX,
-          region_y: row.regionY,
-          region_width: row.regionWidth,
-          region_height: row.regionHeight,
-          // F9 regions are typed columns; this jsonb stays parser bbox territory.
-          locator: null,
-        })
-        .select(SOURCE_REFERENCE_COLUMNS)
-        .single();
+      /*
+        PDF-R6K-H2B. One transaction, not two writes.
+
+        The citation and -- for a paintable text span -- its standalone
+        highlight are created together inside a SECURITY INVOKER function, so a
+        failure on either leaves neither. Two sequential PostgREST calls could
+        not promise that, and a Note whose passage is cited but unmarked would
+        be a state nothing later repairs.
+
+        The function runs as the caller, so source_references RLS, the highlight
+        RLS, the H2A-C1 column grants and the origin trigger all still apply.
+        `created_by` is not passed: the column default writes authorship.
+      */
+      const { data, error } = await this.client.rpc('create_knowledge_source_citation', {
+        p_target_padlet_id: row.targetPadletId,
+        p_source_document_id: row.sourceDocumentId,
+        p_page_start: row.pageStart,
+        p_page_end: row.pageEnd,
+        p_quote_text: row.quoteText,
+        p_quote_hash: row.quoteHash,
+        p_char_start: row.charStart,
+        p_char_end: row.charEnd,
+        p_region_x: row.regionX,
+        p_region_y: row.regionY,
+        p_region_width: row.regionWidth,
+        p_region_height: row.regionHeight,
+        p_highlight_color: row.highlightColor,
+      });
       if (error) return err(unavailable(error));
-      if (data === null) return err(unavailable(null));
-      return ok(toSourceReference(data));
+      const created = data?.[0] ?? null;
+      if (created === null) return err(unavailable(null));
+
+      // Read the durable row back through the ordinary read path, so the
+      // returned entity is the stored one rather than a payload echo.
+      const { data: stored, error: readError } = await this.client
+        .from('source_references')
+        .select(SOURCE_REFERENCE_COLUMNS)
+        .eq('id', created.reference_id)
+        .maybeSingle();
+      if (readError) return err(unavailable(readError));
+      if (stored === null) return err(unavailable(null));
+      return ok(toSourceReference(stored));
     } catch (cause) {
       return err(unavailable(cause));
     }

@@ -36,6 +36,18 @@ export interface KnowledgeSourceHighlightSegment {
   readonly spans: readonly KnowledgeSourceHighlightSpan[];
 }
 
+/**
+ * PDF-R6K-H2B. The segmentation below never inspected anything but `start` and
+ * `end`, so it is stated generically and the standalone-highlight spans reuse
+ * it EXACTLY -- same boundaries, same overlap partition, same reconstruction
+ * guarantee. A second overlap implementation is the thing most likely to drift
+ * from this one, so there isn't one.
+ */
+export interface KnowledgeTextSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
 const NO_SPANS: readonly KnowledgeSourceHighlightSpan[] = [];
 
 /**
@@ -110,18 +122,41 @@ export function knowledgeSourceHighlightSegmentsFromSpans(
   pageText: string,
   spans: readonly KnowledgeSourceHighlightSpan[],
 ): readonly KnowledgeSourceHighlightSegment[] {
+  return knowledgeTextSpanSegments(pageText, spans);
+}
+
+/** One run of page text, with every span of `S` that covers the whole run. */
+export interface KnowledgeTextSpanSegment<S extends KnowledgeTextSpan> {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  readonly spans: readonly S[];
+}
+
+/**
+ * Partitions the page at every span boundary, for any span shape.
+ *
+ * This is the original algorithm, unchanged: emit every character exactly once,
+ * in order, tagged with the full set of spans covering it. The guarantee
+ * `segments.map(s => s.text).join('') === pageText` still holds for every input.
+ */
+export function knowledgeTextSpanSegments<S extends KnowledgeTextSpan>(
+  pageText: string,
+  spans: readonly S[],
+): readonly KnowledgeTextSpanSegment<S>[] {
   const cuts = knowledgeSourceHighlightBoundaries(pageText, spans);
-  const segments: KnowledgeSourceHighlightSegment[] = [];
+  const segments: KnowledgeTextSpanSegment<S>[] = [];
+  const none: readonly S[] = [];
   for (let index = 0; index + 1 < cuts.length; index += 1) {
     const start = cuts[index];
     const end = cuts[index + 1];
-    // Every citation containing this whole run, in the sorted order above.
+    // Every span containing this whole run, in the caller's sorted order.
     const covering = spans.filter((span) => span.start <= start && end <= span.end);
     segments.push({
       start,
       end,
       text: pageText.slice(start, end),
-      spans: covering.length > 0 ? covering : NO_SPANS,
+      spans: covering.length > 0 ? covering : none,
     });
   }
   return segments;
@@ -134,7 +169,7 @@ export function knowledgeSourceHighlightSegmentsFromSpans(
  */
 export function knowledgeSourceHighlightBoundaries(
   pageText: string,
-  spans: readonly KnowledgeSourceHighlightSpan[],
+  spans: readonly KnowledgeTextSpan[],
 ): readonly number[] {
   const cuts = new Set<number>([0, pageText.length]);
   for (const span of spans) {

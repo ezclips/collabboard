@@ -1,3 +1,8 @@
+import {
+  KNOWLEDGE_HIGHLIGHT_NEUTRAL_COLOR,
+  knowledgeSourceNoteAccentColor,
+} from './knowledgeSourceHighlightColor';
+import type { KnowledgeSourceNoteColorFields } from './knowledgeSourceHighlightColor';
 import { domainError } from '../core/errors';
 import type { DomainError } from '../core/errors';
 import type { Result } from '../core/result';
@@ -57,6 +62,13 @@ export interface KnowledgeSourceReferenceSourceDocument {
 
 export interface KnowledgeSourceReferenceTargetPadlet {
   readonly boardId: BoardId;
+  /**
+   * PDF-R6K-H2B. The Note's own colour fields, read here so a highlight born
+   * with this citation can be SEEDED with the Note's accent. Read-only and
+   * read-once: after creation the highlight owns its colour, and a later Note
+   * recolour must never reach back into it.
+   */
+  readonly noteColors?: KnowledgeSourceNoteColorFields;
 }
 
 /** The stored page geometry, the only authority on a page's real shape. */
@@ -85,6 +97,14 @@ export interface KnowledgeSourceReferenceInsert {
   readonly regionY: number | null;
   readonly regionWidth: number | null;
   readonly regionHeight: number | null;
+  /**
+   * PDF-R6K-H2B. Non-null ONLY for a citation that the reader can actually
+   * paint: a resolved single-page text span. The writer creates the paired
+   * standalone highlight when this is set, in the same transaction, and creates
+   * nothing extra when it is null -- which is what keeps page-only and region
+   * citations from acquiring a text mark they never had.
+   */
+  readonly highlightColor: string | null;
 }
 
 export interface KnowledgeSourceReferenceBoardWriteAuthorizer {
@@ -327,6 +347,8 @@ export function createCreateKnowledgeSourceReferenceCommand(
         regionY: null,
         regionWidth: null,
         regionHeight: null,
+        // A page-only citation marks no text, so it acquires no highlight.
+        highlightColor: null,
       });
     }
 
@@ -373,6 +395,9 @@ export function createCreateKnowledgeSourceReferenceCommand(
         regionY: mode.region.y,
         regionWidth: mode.region.width,
         regionHeight: mode.region.height,
+        // A rectangle is not a text span. Region citations keep their existing
+        // behaviour exactly and never gain a text highlight.
+        highlightColor: null,
       });
     }
 
@@ -417,6 +442,20 @@ export function createCreateKnowledgeSourceReferenceCommand(
       regionY: null,
       regionWidth: null,
       regionHeight: null,
+      /*
+        PDF-R6K-H2B. THE paintable case, and the only one.
+
+        The span is already proven here -- the stored page slice equals what the
+        caller selected -- so the highlight is created from the same offsets in
+        the same transaction, with no second resolution step to disagree with.
+
+        The colour is SEEDED from the Note's accent through the shared authority
+        and then belongs to the highlight. Where the Note offers no usable
+        accent the reader's own neutral is stored, so a highlight always has a
+        colour of its own and never a live dependency on the Note again.
+      */
+      highlightColor: knowledgeSourceNoteAccentColor(padlet.value.noteColors)
+        ?? KNOWLEDGE_HIGHLIGHT_NEUTRAL_COLOR,
     });
   };
 }

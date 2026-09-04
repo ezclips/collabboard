@@ -26,10 +26,13 @@ describe('PDF-R6K-H2A migration', () => {
     // hardens this table's column grants. It is additive and never edits this
     // file, so the invariant that still matters is that no OTHER 20260904
     // migration appeared.
-    expect(listed.filter((name) => name.startsWith('20260904')).sort()).toEqual([
-      '20260904120000_harden_knowledge_source_highlight_authority.sql',
+    expect(new Set(listed.filter((name) => name.startsWith('20260904')))).toEqual(new Set([
       FILE,
-    ].sort());
+      // PDF-R6K-H2A-C1 hardens this table's grants.
+      '20260904120000_harden_knowledge_source_highlight_authority.sql',
+      // PDF-R6K-H2B adds the atomic citation+highlight function.
+      '20260904140000_create_knowledge_source_citation_with_highlight.sql',
+    ]));
   });
 
   it('2. creates the table with the agreed identity and span columns', () => {

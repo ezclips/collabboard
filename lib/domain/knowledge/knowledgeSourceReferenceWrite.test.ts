@@ -215,7 +215,8 @@ describe('P6J-F4-A create knowledge source reference', () => {
     // columns, but still has no field for a locator: parser bbox geometry
     // remains unwritable, and a region is typed columns rather than jsonb.
     expect(Object.keys(row).sort()).toEqual([
-      'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteHash', 'quoteText',
+      'charEnd', 'charStart', 'highlightColor', 'pageEnd', 'pageStart',
+      'quoteHash', 'quoteText',
       'regionHeight', 'regionWidth', 'regionX', 'regionY',
       'sourceDocumentId', 'targetPadletId',
     ]);
@@ -382,6 +383,10 @@ describe('P6J-F6-B4-B2A exact source spans', () => {
       regionY: null,
       regionWidth: null,
       regionHeight: null,
+      // PDF-R6K-H2B: a paintable span seeds its highlight's colour. This Note
+      // exposes no accent, so the reader's own neutral is what gets stored --
+      // and from then on the highlight owns it.
+      highlightColor: '#e0f2fe',
     });
     // The canonical slice is what was hashed -- never the client's string.
     expect(state.hasher.hashQuoteText).toHaveBeenCalledTimes(1);
@@ -511,7 +516,8 @@ describe('P6J-F6-B4-B2A exact source spans', () => {
 
     const row = insertedRow(state) as unknown as Record<string, unknown>;
     expect(Object.keys(row).sort()).toEqual([
-      'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteHash', 'quoteText',
+      'charEnd', 'charStart', 'highlightColor', 'pageEnd', 'pageStart',
+      'quoteHash', 'quoteText',
       'regionHeight', 'regionWidth', 'regionX', 'regionY',
       'sourceDocumentId', 'targetPadletId',
     ]);
@@ -721,7 +727,8 @@ describe('P6J-F9-B1 page region references', () => {
     } as never);
 
     expect(Object.keys(insertedRow(state)).sort()).toEqual([
-      'charEnd', 'charStart', 'pageEnd', 'pageStart', 'quoteHash', 'quoteText',
+      'charEnd', 'charStart', 'highlightColor', 'pageEnd', 'pageStart',
+      'quoteHash', 'quoteText',
       'regionHeight', 'regionWidth', 'regionX', 'regionY', 'sourceDocumentId', 'targetPadletId',
     ]);
   });

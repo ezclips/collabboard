@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   SupabaseKnowledgeSourceReferenceValidationRepository,
@@ -23,7 +25,19 @@ type TableResult = { data: unknown; error: unknown } | Error;
  */
 function setup(results: Record<string, TableResult>) {
   const calls: Array<{ table: string; select?: string; eq: Array<[string, string]>; insert?: unknown }> = [];
+  // PDF-R6K-H2B: the citation write is now one atomic RPC, so the harness
+  // records that call the way it records table queries.
+  const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const client = {
+    rpc: vi.fn((fn: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ fn, args });
+      const result = results.rpc;
+      if (result instanceof Error) return Promise.reject(result);
+      return Promise.resolve(result ?? {
+        data: [{ reference_id: 'reference-1', highlight_id: null }],
+        error: null,
+      });
+    }),
     from: vi.fn((table: string) => {
       const entry: { table: string; select?: string; eq: Array<[string, string]>; insert?: unknown } = { table, eq: [] };
       calls.push(entry);
@@ -46,7 +60,12 @@ function setup(results: Record<string, TableResult>) {
       };
     }),
   } as unknown as KnowledgeSourceReferenceWriteSupabaseClient;
-  return { client, calls, table: (name: string) => calls.filter((entry) => entry.table === name) };
+  return {
+    client,
+    calls,
+    rpcCalls,
+    table: (name: string) => calls.filter((entry) => entry.table === name),
+  };
 }
 
 describe('P6J-F4-A source reference write adapters', () => {
@@ -138,14 +157,21 @@ describe('P6J-F4-A source reference write adapters', () => {
     });
 
     it('scopes the target padlet lookup by both id and board', async () => {
-      const state = setup({ padlets: { data: { board_id: BOARD_A }, error: null } });
+      const state = setup({
+        padlets: { data: { board_id: BOARD_A, metadata: { topStrip: '#fde68a' } }, error: null },
+      });
 
       const result = await new SupabaseKnowledgeSourceReferenceValidationRepository(state.client)
         .findTargetPadlet(PADLET, BOARD_A);
 
       expect(state.table('padlets')[0].eq).toEqual([['id', PADLET], ['board_id', BOARD_A]]);
-      expect(state.table('padlets')[0].select).toBe('board_id');
-      expect(result).toEqual({ ok: true, value: { boardId: BOARD_A } });
+      // PDF-R6K-H2B also reads the Note's colour, to seed a paired highlight
+      // once. Nothing else about the lookup changed.
+      expect(state.table('padlets')[0].select).toBe('board_id, metadata');
+      expect(result).toEqual({
+        ok: true,
+        value: { boardId: BOARD_A, noteColors: { topStrip: '#fde68a', cardColor: undefined } },
+      });
     });
 
     it('maps lookup failures to unavailable without provider text', async () => {
@@ -181,7 +207,7 @@ describe('P6J-F4-A source reference write adapters', () => {
       created_at: '2026-08-24T00:00:00.000Z',
     };
 
-    it('inserts exactly the approved V1 columns into source_references', async () => {
+    it('creates the citation through ONE atomic call, with the approved fields', async () => {
       const state = setup({ source_references: { data: insertedRow, error: null } });
 
       await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
@@ -194,43 +220,33 @@ describe('P6J-F4-A source reference write adapters', () => {
         charStart: null,
         charEnd: null,
         regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
       });
 
-      const entry = state.table('source_references')[0];
-      const row = entry.insert as Record<string, unknown>;
-      expect(state.calls.map((call) => call.table)).toEqual(['source_references']);
-      expect(Object.keys(row).sort()).toEqual([
-        'char_end', 'char_start', 'locator', 'page_end', 'page_start',
-        'quote_hash', 'quote_text', 'region_height', 'region_width', 'region_x', 'region_y',
-        'source_document_id', 'target_padlet_id',
-      ]);
-      expect(row).toMatchObject({
-        target_padlet_id: PADLET,
-        source_document_id: DOCUMENT,
-        page_start: 2,
-        page_end: 3,
-        quote_text: 'a quoted passage',
-        quote_hash: 'server-hash',
-        char_start: null,
-        char_end: null,
-        locator: null,
+      // PDF-R6K-H2B: one transaction, so a citation can never outlive a failed
+      // highlight write. Two sequential PostgREST calls could not promise that.
+      expect(state.rpcCalls).toHaveLength(1);
+      expect(state.rpcCalls[0].fn).toBe('create_knowledge_source_citation');
+      expect(state.rpcCalls[0].args).toEqual({
+        p_target_padlet_id: PADLET,
+        p_source_document_id: DOCUMENT,
+        p_page_start: 2,
+        p_page_end: 3,
+        p_quote_text: 'a quoted passage',
+        p_quote_hash: 'server-hash',
+        p_char_start: null,
+        p_char_end: null,
+        p_region_x: null, p_region_y: null, p_region_width: null, p_region_height: null,
+        p_highlight_color: null,
       });
-      // The database owns identity and timestamp.
-      expect(row).not.toHaveProperty('id');
-      expect(row).not.toHaveProperty('created_at');
+      // Authorship is never sent: the column default writes it (H2A-C1).
+      expect(Object.keys(state.rpcCalls[0].args)).not.toContain('p_created_by');
     });
 
-    it('maps the returned row onto the existing domain shape', async () => {
+    it('returns the STORED row, read back rather than echoed', async () => {
       const state = setup({ source_references: { data: insertedRow, error: null } });
 
       const result = await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 3,
-        quoteText: 'a quoted passage', quoteHash: 'server-hash', charStart: null, charEnd: null,
-        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
-      });
-
-      expect(result).toEqual({ ok: true, value: {
-        id: 'reference-1',
         targetPadletId: PADLET,
         sourceDocumentId: DOCUMENT,
         pageStart: 2,
@@ -239,54 +255,86 @@ describe('P6J-F4-A source reference write adapters', () => {
         quoteHash: 'server-hash',
         charStart: null,
         charEnd: null,
-        region: null,
-        locator: null,
-        createdAt: '2026-08-24T00:00:00.000Z',
-      } });
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
+      });
+
+      expect(result.ok === true && result.value.id).toBe('reference-1');
+      // Read by the id the function returned, through the ordinary read path.
+      expect(state.table('source_references')[0].eq).toEqual([['id', 'reference-1']]);
     });
 
-    it('maps insert failures to unavailable without provider text', async () => {
-      const queryError = setup({ source_references: { data: null, error: { message: 'violates row-level security policy' } } });
-      const first = await new SupabaseKnowledgeSourceReferenceWriter(queryError.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
-        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
-      });
-      expect(first.ok === false && first.error.code).toBe('unavailable');
-      expect(first.ok === false && first.error.message).toBe('Could not write the source reference');
-      expect(first.ok === false && first.error.message).not.toContain('row-level security');
-
-      const thrown = setup({ source_references: new Error('network down') });
-      const second = await new SupabaseKnowledgeSourceReferenceWriter(thrown.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
-        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
-      });
-      expect(second.ok === false && second.error.code).toBe('unavailable');
-      expect(second.ok === false && second.error.message).not.toContain('network down');
-    });
-
-    it('declares no update, delete, upsert, rpc, storage or auth capability', async () => {
+    it('passes a highlight colour through for a paintable text span', async () => {
       const state = setup({ source_references: { data: insertedRow, error: null } });
-      const client = state.client as unknown as Record<string, unknown>;
 
       await new SupabaseKnowledgeSourceReferenceWriter(state.client).insertSourceReference({
-        targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 1, pageEnd: 1, quoteText: null, quoteHash: null, charStart: null, charEnd: null,
+        targetPadletId: PADLET,
+        sourceDocumentId: DOCUMENT,
+        pageStart: 2,
+        pageEnd: 2,
+        quoteText: 'beta',
+        quoteHash: 'server-hash',
+        charStart: 6,
+        charEnd: 10,
         regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: '#fde68a',
       });
 
-      for (const method of ['rpc', 'storage', 'auth', 'channel']) {
-        expect(client[method]).toBeUndefined();
+      expect(state.rpcCalls[0].args).toMatchObject({
+        p_char_start: 6, p_char_end: 10, p_highlight_color: '#fde68a',
+      });
+    });
+
+    it('maps failures to unavailable without provider text', async () => {
+      const queryError = setup({ rpc: { data: null, error: { message: 'permission denied for relation' } } });
+      const first = await new SupabaseKnowledgeSourceReferenceWriter(queryError.client).insertSourceReference({
+        targetPadletId: PADLET,
+        sourceDocumentId: DOCUMENT,
+        pageStart: 1,
+        pageEnd: 1,
+        quoteText: null,
+        quoteHash: null,
+        charStart: null,
+        charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
+      });
+      expect(first.ok === false && first.error.code).toBe('unavailable');
+      expect(first.ok === false && first.error.message).not.toContain('permission denied');
+
+      const thrown = setup({ rpc: new Error('socket hang up') });
+      const second = await new SupabaseKnowledgeSourceReferenceWriter(thrown.client).insertSourceReference({
+        targetPadletId: PADLET,
+        sourceDocumentId: DOCUMENT,
+        pageStart: 1,
+        pageEnd: 1,
+        quoteText: null,
+        quoteHash: null,
+        charStart: null,
+        charEnd: null,
+        regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
+      });
+      expect(second.ok === false && second.error.code).toBe('unavailable');
+      expect(second.ok === false && second.error.message).not.toContain('socket hang up');
+    });
+
+    it('declares no update, delete, upsert, storage or auth capability, and ONE named rpc', () => {
+      const source = readFileSync(
+        join(process.cwd(), 'lib/infra/knowledge/knowledgeSourceReferenceWriteAdapters.ts'), 'utf8',
+      ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+      // Precise needles: `.update(` also occurs in the SHA-256 hash builder,
+      // which is not a table mutation.
+      for (const forbidden of ['.update({', '.delete()', '.upsert(', 'storage', '.auth']) {
+        expect(source, forbidden).not.toContain(forbidden);
       }
-      const table = (state.client.from as unknown as ReturnType<typeof vi.fn>).mock.results[0].value as Record<string, unknown>;
-      expect(Object.keys(table).sort()).toEqual(['insert', 'select']);
-      for (const method of ['update', 'delete', 'upsert']) {
-        expect(table[method]).toBeUndefined();
-      }
+      // PDF-R6K-H2B adds exactly one remote procedure, typed by literal name so
+      // no other function is reachable through this client.
+      expect(source).toContain("fn: 'create_knowledge_source_citation'");
+      expect(source).toContain("this.client.rpc('create_knowledge_source_citation'");
     });
   });
 
-  // ==========================================================================
-  // P6J-F6-B4-B2A -- canonical page read and validated offset persistence
-  // ==========================================================================
   describe('canonical page text', () => {
     const PAGE = 'prefix 😀 alpha\nbeta suffix';
 
@@ -347,7 +395,10 @@ describe('P6J-F4-A source reference write adapters', () => {
         expect(table[method]).toBeUndefined();
       }
       const client = state.client as unknown as Record<string, unknown>;
-      for (const method of ['rpc', 'storage', 'auth']) {
+      // PDF-R6K-H2B: `rpc` is now a legitimate, single-purpose capability and is
+      // asserted by name in the writer block above. Storage and auth remain
+      // absent, and no table gains a mutation it did not have.
+      for (const method of ['storage', 'auth']) {
         expect(client[method]).toBeUndefined();
       }
     });
@@ -375,12 +426,15 @@ describe('P6J-F4-A source reference write adapters', () => {
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 2,
         quoteText: 'alpha', quoteHash: 'server-hash', charStart: 10, charEnd: 15,
         regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
       });
 
-      const row = state.table('source_references')[0].insert as Record<string, unknown>;
-      expect(row).toMatchObject({ char_start: 10, char_end: 15, quote_text: 'alpha', locator: null });
-      expect(row).not.toHaveProperty('selectedText');
-      expect(row).not.toHaveProperty('selected_text');
+      const args = state.rpcCalls[0].args;
+      expect(args).toMatchObject({ p_char_start: 10, p_char_end: 15, p_quote_text: 'alpha' });
+      // The locator stays unwritable: the function has no parameter for it.
+      expect(args).not.toHaveProperty('p_locator');
+      expect(args).not.toHaveProperty('selectedText');
+      expect(args).not.toHaveProperty('p_selected_text');
     });
 
     it('V: maps the returned exact-span row onto the domain shape', async () => {
@@ -390,6 +444,7 @@ describe('P6J-F4-A source reference write adapters', () => {
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 2,
         quoteText: 'alpha', quoteHash: 'server-hash', charStart: 10, charEnd: 15,
         regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
       });
 
       expect(result.ok && result.value.charStart).toBe(10);
@@ -405,10 +460,13 @@ describe('P6J-F4-A source reference write adapters', () => {
         targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 2, pageEnd: 3,
         quoteText: 'a quoted passage', quoteHash: 'server-hash', charStart: null, charEnd: null,
         regionX: null, regionY: null, regionWidth: null, regionHeight: null,
+        highlightColor: null,
       });
 
-      const row = state.table('source_references')[0].insert as Record<string, unknown>;
-      expect(row).toMatchObject({ char_start: null, char_end: null, locator: null });
+      const args = state.rpcCalls[0].args;
+      expect(args).toMatchObject({ p_char_start: null, p_char_end: null });
+      // A page-only citation paints nothing, so no highlight is requested.
+      expect(args.p_highlight_color).toBeNull();
     });
   });
 });
@@ -453,14 +511,15 @@ describe('P6J-F9-B1 region write adapters', () => {
       regionY: 0.1,
       regionWidth: 0.5,
       regionHeight: 0.4,
+      // A rectangle is not text: a region citation paints no highlight.
+      highlightColor: null,
     });
 
-    const row = state.table('source_references')[0].insert as Record<string, unknown>;
-    expect(row).toMatchObject({
-      region_x: 0.25, region_y: 0.1, region_width: 0.5, region_height: 0.4,
+    const args = state.rpcCalls[0].args;
+    expect(args).toMatchObject({
+      p_region_x: 0.25, p_region_y: 0.1, p_region_width: 0.5, p_region_height: 0.4,
     });
-    // The jsonb column stays parser-bbox territory in its own coordinate system.
-    expect(row.locator).toBeNull();
+    expect(args.p_highlight_color).toBeNull();
     expect(result.ok === true && result.value.region).toEqual({
       x: 0.25, y: 0.1, width: 0.5, height: 0.4,
     });
@@ -524,6 +583,7 @@ describe('P6J-F9-B1 region write adapters', () => {
       targetPadletId: PADLET, sourceDocumentId: DOCUMENT, pageStart: 4, pageEnd: 4,
       quoteText: null, quoteHash: null, charStart: null, charEnd: null,
       regionX: 0.25, regionY: 0.1, regionWidth: 0.5, regionHeight: 0.4,
+        highlightColor: null,
     });
     expect(result.ok === true && result.value.region).toBeNull();
   });

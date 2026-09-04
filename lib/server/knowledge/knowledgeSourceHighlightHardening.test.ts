@@ -25,8 +25,12 @@ describe('PDF-R6K-H2A-C1 hardening migration', () => {
   it('1. is one new migration that orders after the original, which is untouched', () => {
     const listed = fs.readdirSync(MIGRATIONS).filter((name) => name.endsWith('.sql'));
     expect(listed).toContain(HARDENING);
-    expect(new Set(listed.filter((name) => name.startsWith('20260904'))))
-      .toEqual(new Set([ORIGINAL, HARDENING]));
+    expect(new Set(listed.filter((name) => name.startsWith('20260904')))).toEqual(new Set([
+      ORIGINAL,
+      HARDENING,
+      // PDF-R6K-H2B's atomic citation function is additive and later still.
+      '20260904140000_create_knowledge_source_citation_with_highlight.sql',
+    ]));
 
     // Ordering is decided by the migration VERSION -- the digits before the
     // first underscore -- which is what the Supabase CLI parses and sorts by.
