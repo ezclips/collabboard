@@ -12,6 +12,7 @@
     "build:e2e": "set E2E_BRIDGE_BUILD=1&& next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest run",
     "test:unit": "vitest run",
     "knowledge:pdf-worker": "vite-node workers/knowledge-pdf/cli.ts",
     "knowledge:pdf-dispatcher": "vite-node workers/knowledge-pdf/runDispatcher.ts",
