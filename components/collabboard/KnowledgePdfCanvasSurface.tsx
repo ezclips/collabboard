@@ -206,6 +206,19 @@ const STATUS_LABEL: Record<KnowledgePdfProcessingStatus, string> = {
 };
 
 /**
+ * PDF_CANVAS_MULTI_CARD_REQUEST_OPTIMIZATION -- recorded debt, NOT implemented.
+ *
+ * Page previews are already durable private derivatives behind the
+ * authenticated route, so nothing here re-renders or re-stores them. What is
+ * not yet done is deferring the REQUEST: a board holding many PDF cards asks
+ * for every visible card's current page as soon as it mounts. If that becomes a
+ * cost, the fix is to fetch a card's page image only once the card is at or near
+ * the viewport, keeping the same authenticated route and its ETag behaviour and
+ * adding no second preview store. Deliberately out of scope for PDF-R6M-C1,
+ * which is layout only.
+ */
+
+/**
  * A document can report `ready` a moment before its pages are queryable, so
  * `/pages` answers 409 for a short window. That is a normal lifecycle state,
  * not a failure, and it must not latch: the card polls it out rather than
@@ -757,290 +770,308 @@ export default function KnowledgePdfCanvasSurface({
         </div>
       ) : (
         /*
-          The document itself, and the only scrolling region. Wheel and pointer
-          events stop here so a long PDF scrolls in place instead of panning the
-          canvas or dragging the card -- the header above stays the drag handle.
+          PDF-R6M-C1. ONE width authority for everything below the header.
+
+          The page and the pager used to take their width from different
+          boxes: the body carried the horizontal inset, so the preview sat
+          6px in from each edge, while the pager was the body's SIBLING and
+          spanned the card edge to edge -- a strip 12px wider than the page
+          above it, its rule and its fill visibly running past both sides.
+
+          Holding the inset here instead means neither child expresses a
+          width at all: both fill this one content box, so their left and
+          right edges are the same edges by construction and cannot drift
+          apart at any card size.
         */
         <div
-          ref={pageTextContainerRef}
-          data-knowledge-pdf-body="true"
-          className={`flex min-h-0 flex-auto flex-col overscroll-contain bg-white px-1.5 py-1.5 ${
-            /*
-              PDF-R6M. Page mode CONTAINS: exactly one page, sized to the
-              region, so there is nothing to scroll and a scrollbar here would
-              only mean the preview had escaped its bounds. Text mode still
-              scrolls -- parsed page text is arbitrarily long and is the one
-              thing this card is allowed to scroll.
-            */
-            view === 'page' ? 'overflow-hidden' : 'overflow-y-auto'
-          }`}
-          onWheel={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-          /* The reader's own settle points, for the same reason: a selection is
-             only real once the gesture has ended. */
-          onMouseUp={handleSelectionSettled}
-          onKeyUp={handleSelectionSettled}
+          data-knowledge-pdf-content="true"
+          className="flex min-h-0 flex-auto flex-col px-1.5"
         >
-          {!isReady ? (
-            <div className="px-1 py-2 text-[10px] text-gray-500">{STATUS_LABEL[status]}</div>
-          ) : documentLoading ? (
-            /* The one loading indicator, in the body where it is visible
-               without hovering -- the strip's controls are hover-revealed, so
-               an indicator there could never be seen while it mattered. */
-            <div data-knowledge-pdf-loading="true" className="px-1 py-2 text-[10px] italic text-gray-400">
-              {/* Still a non-numeric state, and now it distinguishes the two
-                  reasons for waiting: fetching pages that exist, versus pages
-                  the backend has not finished extracting. No estimate is
-                  shown -- the duration is not something this client knows. */}
-              {pagesPreparing ? 'Preparing document…' : 'Loading document…'}
-            </div>
-          ) : currentPageData ? (
-            /*
-              EXACTLY ONE page is mounted -- not one visible among many. A
-              hidden sibling would still request its image and still be found by
-              a search of the card, which is precisely the multi-page reader
-              this object is not.
-            */
-            <section
-              key={currentPageData.pageNumber}
-              data-knowledge-pdf-page={currentPageData.pageNumber}
+          {/*
+            The document itself, and the only scrolling region. Wheel and pointer
+            events stop here so a long PDF scrolls in place instead of panning the
+            canvas or dragging the card -- the header above stays the drag handle.
+          */}
+          <div
+            ref={pageTextContainerRef}
+            data-knowledge-pdf-body="true"
+            className={`flex min-h-0 flex-auto flex-col overscroll-contain bg-white py-1.5 ${
               /*
-                PDF-R6M. Only page mode is a bounded column. Text mode keeps its
-                content-driven height so the paragraph can overflow the body and
-                scroll, which is exactly what the body above allows it to do.
+                PDF-R6M. Page mode CONTAINS: exactly one page, sized to the
+                region, so there is nothing to scroll and a scrollbar here would
+                only mean the preview had escaped its bounds. Text mode still
+                scrolls -- parsed page text is arbitrarily long and is the one
+                thing this card is allowed to scroll.
               */
-              className={view === 'page' ? 'flex min-h-0 flex-auto flex-col' : undefined}
-            >
-              <div className="mb-0.5 shrink-0 select-none text-[8px] uppercase tracking-wider text-gray-400">
-                Page {currentPageData.pageNumber}
+              view === 'page' ? 'overflow-hidden' : 'overflow-y-auto'
+            }`}
+            onWheel={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            /* The reader's own settle points, for the same reason: a selection is
+               only real once the gesture has ended. */
+            onMouseUp={handleSelectionSettled}
+            onKeyUp={handleSelectionSettled}
+          >
+            {!isReady ? (
+              <div className="px-1 py-2 text-[10px] text-gray-500">{STATUS_LABEL[status]}</div>
+            ) : documentLoading ? (
+              /* The one loading indicator, in the body where it is visible
+                 without hovering -- the strip's controls are hover-revealed, so
+                 an indicator there could never be seen while it mattered. */
+              <div data-knowledge-pdf-loading="true" className="px-1 py-2 text-[10px] italic text-gray-400">
+                {/* Still a non-numeric state, and now it distinguishes the two
+                    reasons for waiting: fetching pages that exist, versus pages
+                    the backend has not finished extracting. No estimate is
+                    shown -- the duration is not something this client knows. */}
+                {pagesPreparing ? 'Preparing document…' : 'Loading document…'}
               </div>
-              {view === 'page' && !imagelessPages.has(currentPageData.pageNumber) ? (
+            ) : currentPageData ? (
+              /*
+                EXACTLY ONE page is mounted -- not one visible among many. A
+                hidden sibling would still request its image and still be found by
+                a search of the card, which is precisely the multi-page reader
+                this object is not.
+              */
+              <section
+                key={currentPageData.pageNumber}
+                data-knowledge-pdf-page={currentPageData.pageNumber}
                 /*
-                  PDF-R6M. THE PREVIEW REGION -- the fix's whole point.
-
-                  `flex-auto` is deliberate where `flex-1` would be wrong. It is
-                  `flex: 1 1 auto`, so the region's base size is the page's own
-                  height and it may then BOTH grow into spare room and shrink
-                  out of a card too short for it. `flex-1` (`flex: 1 1 0%`)
-                  would collapse to nothing in a host that gives this surface no
-                  definite height -- which is exactly what the common card host
-                  does -- and the page would disappear there.
-
-                  Shrinking is what stops the page pushing the pager off the
-                  card: the region gives way, the pager never does.
+                  PDF-R6M. Only page mode is a bounded column. Text mode keeps its
+                  content-driven height so the paragraph can overflow the body and
+                  scroll, which is exactly what the body above allows it to do.
                 */
-                <div
-                  data-knowledge-pdf-preview="true"
-                  className="flex min-h-0 flex-auto items-center justify-center overflow-hidden"
-                >
-                  <KnowledgeDocumentPageImage
-                    boardId={boardId}
-                    documentId={documentId}
-                    pageNumber={currentPageData.pageNumber}
-                    originalFilename={originalFilename}
-                    widthPoints={currentPageData.widthPoints}
-                    heightPoints={currentPageData.heightPoints}
-                    rotation={currentPageData.rotation}
-                    onUnavailable={() => {
-                      markImageless(currentPageData.pageNumber);
-                      // Discovering the gap is what asks for it to be filled.
-                      repair.request();
-                    }}
-                    /*
-                      Full width with the height following the aspect ratio --
-                      the reader's own sizing -- plus one cap: never taller than
-                      the preview it sits in. A page too tall for the card is
-                      scaled down by that cap, not cropped, and `object-contain`
-                      centres what is drawn, so portrait and landscape are both
-                      whole and neither is stretched. Where the preview has no
-                      definite height the cap resolves to none and this is the
-                      reader's sizing exactly, leaving that host unchanged.
-                    */
-                    className="mx-auto h-auto max-h-full w-full rounded border border-gray-200 bg-gray-50 object-contain"
-                  />
+                className={view === 'page' ? 'flex min-h-0 flex-auto flex-col' : undefined}
+              >
+                <div className="mb-0.5 shrink-0 select-none text-[8px] uppercase tracking-wider text-gray-400">
+                  Page {currentPageData.pageNumber}
                 </div>
-              ) : null}
-              {/*
-                PDF/page means the VISUAL page. When the derivative is missing
-                this says so and offers to build it, rather than quietly
-                rendering parsed text under a control that claims to be showing
-                the document -- which is what it used to do.
-              */}
-              {view === 'page' && imagelessPages.has(currentPageData.pageNumber) ? (
-                <div
-                  data-knowledge-pdf-page-visual-state={
-                    repair.state === 'unavailable' ? 'unavailable' : 'preparing'
-                  }
-                  className="mb-2 flex flex-col items-center justify-center gap-1 rounded border border-dashed border-gray-300 bg-gray-50 px-2 py-6 text-center"
-                >
-                  {repair.state === 'unavailable' ? (
-                    <>
-                      <span className="text-[10px] text-gray-500">Page preview unavailable</span>
-                      <button
-                        type="button"
-                        data-knowledge-pdf-action="retry-page-visual"
-                        className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
-                        onClick={(event) => { event.stopPropagation(); repair.retry(); }}
-                      >
-                        Retry
-                      </button>
-                    </>
-                  ) : (
-                    <span className="text-[10px] text-gray-500">Preparing page preview…</span>
-                  )}
-                </div>
-              ) : null}
-              {view === 'text' ? (
-                <p
-                  data-knowledge-pdf-page-text="true"
+                {view === 'page' && !imagelessPages.has(currentPageData.pageNumber) ? (
                   /*
-                    PDF-C1 Text. Two attributes, both load-bearing.
+                    PDF-R6M. THE PREVIEW REGION -- the fix's whole point.
 
-                    PAGE_TEXT_ROOT is the reader's coordinate-space marker: the
-                    capture measures offsets from this paragraph's start and
-                    reads its page number straight off this attribute, so the
-                    displayed page is the only page a selection here can
-                    produce.
+                    `flex-auto` is deliberate where `flex-1` would be wrong. It is
+                    `flex: 1 1 auto`, so the region's base size is the page's own
+                    height and it may then BOTH grow into spare room and shrink
+                    out of a card too short for it. `flex-1` (`flex: 1 1 0%`)
+                    would collapse to nothing in a host that gives this surface no
+                    definite height -- which is exactly what the common card host
+                    does -- and the page would disappear there.
 
-                    data-no-drag is the canvas's OWN existing exemption.
-                    `handlePadletMouseDown` runs in capture phase on every card
-                    and calls `lockBodySelection()` -- document.body
-                    user-select: none for the duration of the gesture -- unless
-                    the target is inside `[data-no-drag="true"]`, in which case
-                    it returns before both the lock AND the drag arming. That
-                    single early return is what makes real text selection
-                    possible here and what stops a selection gesture from
-                    dragging the card. The pager already relies on it; nothing
-                    outside this paragraph changes, so a drag begun anywhere
-                    else on the card still moves it exactly as before.
+                    Shrinking is what stops the page pushing the pager off the
+                    card: the region gives way, the pager never does.
                   */
-                  data-no-drag="true"
-                  {...{ [PAGE_TEXT_ROOT]: currentPageData.pageNumber }}
-                  className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
-                >
-                  {/*
-                    The SAME resolver, given the page actually on screen. This is
-                    the whole provenance contract of the switcher: the displayed
-                    page number is what reaches the citation authority, so a
-                    reference recorded against p.3 paints on page 3 and nowhere
-                    else. Nothing here decides what a highlight is.
-                  */}
-                  {knowledgeSourceHighlightSegments(
-                    references,
-                    currentPageData.pageNumber,
-                    currentPageData.text,
-                  )
-                    .map((segment) => {
-                      const highlight = segment.spans.length > 0
-                        ? knowledgeSourceHighlightColor(segment.spans, noteColors)
-                        : null;
-                      if (!highlight) {
-                        return <React.Fragment key={segment.start}>{segment.text}</React.Fragment>;
-                      }
-                      return (
-                        <mark
-                          key={segment.start}
-                          data-knowledge-pdf-highlight="true"
-                          className="rounded-[2px] bg-transparent px-0 text-inherit"
-                          style={{ backgroundColor: highlight.backgroundColor }}
-                        >
-                          {segment.text}
-                        </mark>
-                      );
-                    })}
-                </p>
-              ) : null}
-              {/*
-                The reader's action, on the card. Rendered only when there is
-                a proved selection AND the board wired its creation authority
-                -- the same two conditions the reader's own floating Note Post
-                is gated on (`onCreateNoteFromPage && documentId && selection`).
-                A viewer is given no callback, so no mutation action exists to
-                click rather than a disabled one to explain.
-              */}
-              {createNoteFromPage && capturedSelection
-                && capturedSelection.pageNumber === currentPageData.pageNumber ? (
-                <div className="mt-1 flex justify-end">
-                  <button
-                    type="button"
-                    data-no-drag="true"
-                    data-knowledge-pdf-action="create-note"
-                    aria-label={`Create Note from selection on page ${capturedSelection.pageNumber}`}
-                    className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-700 hover:bg-blue-100 hover:text-blue-900"
-                    /* The card is dragged by its chrome and the canvas pans
-                       under it, so a press that begins on this action belongs
-                       to the action alone -- the pager's own rule. */
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onClick={(event) => { event.stopPropagation(); createNoteFromSelection(); }}
+                  <div
+                    data-knowledge-pdf-preview="true"
+                    className="flex min-h-0 flex-auto items-center justify-center overflow-hidden"
                   >
-                    Create Note
-                  </button>
-                </div>
-              ) : null}
-            </section>
-          ) : (
-            <div className="px-1 py-2 text-[10px] text-gray-500">
-              Page content is not available for this document.
-            </div>
-          )}
+                    <KnowledgeDocumentPageImage
+                      boardId={boardId}
+                      documentId={documentId}
+                      pageNumber={currentPageData.pageNumber}
+                      originalFilename={originalFilename}
+                      widthPoints={currentPageData.widthPoints}
+                      heightPoints={currentPageData.heightPoints}
+                      rotation={currentPageData.rotation}
+                      onUnavailable={() => {
+                        markImageless(currentPageData.pageNumber);
+                        // Discovering the gap is what asks for it to be filled.
+                        repair.request();
+                      }}
+                      /*
+                        Full width with the height following the aspect ratio --
+                        the reader's own sizing -- plus one cap: never taller than
+                        the preview it sits in. A page too tall for the card is
+                        scaled down by that cap, not cropped, and `object-contain`
+                        centres what is drawn, so portrait and landscape are both
+                        whole and neither is stretched. Where the preview has no
+                        definite height the cap resolves to none and this is the
+                        reader's sizing exactly, leaving that host unchanged.
+                      */
+                      className="mx-auto h-auto max-h-full w-full rounded border border-gray-200 bg-gray-50 object-contain"
+                    />
+                  </div>
+                ) : null}
+                {/*
+                  PDF/page means the VISUAL page. When the derivative is missing
+                  this says so and offers to build it, rather than quietly
+                  rendering parsed text under a control that claims to be showing
+                  the document -- which is what it used to do.
+                */}
+                {view === 'page' && imagelessPages.has(currentPageData.pageNumber) ? (
+                  <div
+                    data-knowledge-pdf-page-visual-state={
+                      repair.state === 'unavailable' ? 'unavailable' : 'preparing'
+                    }
+                    className="mb-2 flex flex-col items-center justify-center gap-1 rounded border border-dashed border-gray-300 bg-gray-50 px-2 py-6 text-center"
+                  >
+                    {repair.state === 'unavailable' ? (
+                      <>
+                        <span className="text-[10px] text-gray-500">Page preview unavailable</span>
+                        <button
+                          type="button"
+                          data-knowledge-pdf-action="retry-page-visual"
+                          className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
+                          onClick={(event) => { event.stopPropagation(); repair.retry(); }}
+                        >
+                          Retry
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-[10px] text-gray-500">Preparing page preview…</span>
+                    )}
+                  </div>
+                ) : null}
+                {view === 'text' ? (
+                  <p
+                    data-knowledge-pdf-page-text="true"
+                    /*
+                      PDF-C1 Text. Two attributes, both load-bearing.
+
+                      PAGE_TEXT_ROOT is the reader's coordinate-space marker: the
+                      capture measures offsets from this paragraph's start and
+                      reads its page number straight off this attribute, so the
+                      displayed page is the only page a selection here can
+                      produce.
+
+                      data-no-drag is the canvas's OWN existing exemption.
+                      `handlePadletMouseDown` runs in capture phase on every card
+                      and calls `lockBodySelection()` -- document.body
+                      user-select: none for the duration of the gesture -- unless
+                      the target is inside `[data-no-drag="true"]`, in which case
+                      it returns before both the lock AND the drag arming. That
+                      single early return is what makes real text selection
+                      possible here and what stops a selection gesture from
+                      dragging the card. The pager already relies on it; nothing
+                      outside this paragraph changes, so a drag begun anywhere
+                      else on the card still moves it exactly as before.
+                    */
+                    data-no-drag="true"
+                    {...{ [PAGE_TEXT_ROOT]: currentPageData.pageNumber }}
+                    className="whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
+                  >
+                    {/*
+                      The SAME resolver, given the page actually on screen. This is
+                      the whole provenance contract of the switcher: the displayed
+                      page number is what reaches the citation authority, so a
+                      reference recorded against p.3 paints on page 3 and nowhere
+                      else. Nothing here decides what a highlight is.
+                    */}
+                    {knowledgeSourceHighlightSegments(
+                      references,
+                      currentPageData.pageNumber,
+                      currentPageData.text,
+                    )
+                      .map((segment) => {
+                        const highlight = segment.spans.length > 0
+                          ? knowledgeSourceHighlightColor(segment.spans, noteColors)
+                          : null;
+                        if (!highlight) {
+                          return <React.Fragment key={segment.start}>{segment.text}</React.Fragment>;
+                        }
+                        return (
+                          <mark
+                            key={segment.start}
+                            data-knowledge-pdf-highlight="true"
+                            className="rounded-[2px] bg-transparent px-0 text-inherit"
+                            style={{ backgroundColor: highlight.backgroundColor }}
+                          >
+                            {segment.text}
+                          </mark>
+                        );
+                      })}
+                  </p>
+                ) : null}
+                {/*
+                  The reader's action, on the card. Rendered only when there is
+                  a proved selection AND the board wired its creation authority
+                  -- the same two conditions the reader's own floating Note Post
+                  is gated on (`onCreateNoteFromPage && documentId && selection`).
+                  A viewer is given no callback, so no mutation action exists to
+                  click rather than a disabled one to explain.
+                */}
+                {createNoteFromPage && capturedSelection
+                  && capturedSelection.pageNumber === currentPageData.pageNumber ? (
+                  <div className="mt-1 flex justify-end">
+                    <button
+                      type="button"
+                      data-no-drag="true"
+                      data-knowledge-pdf-action="create-note"
+                      aria-label={`Create Note from selection on page ${capturedSelection.pageNumber}`}
+                      className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+                      /* The card is dragged by its chrome and the canvas pans
+                         under it, so a press that begins on this action belongs
+                         to the action alone -- the pager's own rule. */
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => { event.stopPropagation(); createNoteFromSelection(); }}
+                    >
+                      Create Note
+                    </button>
+                  </div>
+                ) : null}
+              </section>
+            ) : (
+              <div className="px-1 py-2 text-[10px] text-gray-500">
+                Page content is not available for this document.
+              </div>
+            )}
+          </div>
+        {/*
+          The page navigator. Permanent while expanded -- it is how this object is
+          read, so hiding it behind hover would hide the only way to move. It sits
+          outside the body so the page can never scroll it out of reach, and it is
+          absent entirely when there is nothing to page through (collapsed, still
+          processing, or a document with no usable pages).
+        */}
+        {currentPageData && pageTotal > 0 ? (
+          <div
+            data-knowledge-pdf-pager="true"
+            data-no-drag="true"
+            className="flex shrink-0 select-none items-center justify-center gap-2 border-t border-gray-200 bg-gray-50 py-1"
+            /* The card is dragged by its header and the canvas pans under it, so
+               a press that begins on the pager belongs to the pager alone. */
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              data-no-drag="true"
+              data-knowledge-pdf-action="page-previous"
+              title="Previous page"
+              aria-label="Previous page"
+              disabled={!canPagePrevious}
+              className={pagerButton(canPagePrevious)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); goToPage(pageNumber - 1); }}
+            >
+              <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+            </button>
+            <span
+              data-knowledge-pdf-page-indicator="true"
+              className="min-w-0 text-[9px] tabular-nums text-gray-600"
+            >
+              {pageNumber} / {pageTotal}
+            </span>
+            <button
+              type="button"
+              data-no-drag="true"
+              data-knowledge-pdf-action="page-next"
+              title="Next page"
+              aria-label="Next page"
+              disabled={!canPageNext}
+              className={pagerButton(canPageNext)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); goToPage(pageNumber + 1); }}
+            >
+              <ChevronRight className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
         </div>
       )}
-
-      {/*
-        The page navigator. Permanent while expanded -- it is how this object is
-        read, so hiding it behind hover would hide the only way to move. It sits
-        outside the body so the page can never scroll it out of reach, and it is
-        absent entirely when there is nothing to page through (collapsed, still
-        processing, or a document with no usable pages).
-      */}
-      {!collapsed && currentPageData && pageTotal > 0 ? (
-        <div
-          data-knowledge-pdf-pager="true"
-          data-no-drag="true"
-          className="flex shrink-0 select-none items-center justify-center gap-2 border-t border-gray-200 bg-gray-50 px-1.5 py-1"
-          /* The card is dragged by its header and the canvas pans under it, so
-             a press that begins on the pager belongs to the pager alone. */
-          onPointerDown={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            data-no-drag="true"
-            data-knowledge-pdf-action="page-previous"
-            title="Previous page"
-            aria-label="Previous page"
-            disabled={!canPagePrevious}
-            className={pagerButton(canPagePrevious)}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => { event.stopPropagation(); goToPage(pageNumber - 1); }}
-          >
-            <ChevronLeft className="h-3 w-3" aria-hidden="true" />
-          </button>
-          <span
-            data-knowledge-pdf-page-indicator="true"
-            className="min-w-0 text-[9px] tabular-nums text-gray-600"
-          >
-            {pageNumber} / {pageTotal}
-          </span>
-          <button
-            type="button"
-            data-no-drag="true"
-            data-knowledge-pdf-action="page-next"
-            title="Next page"
-            aria-label="Next page"
-            disabled={!canPageNext}
-            className={pagerButton(canPageNext)}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => { event.stopPropagation(); goToPage(pageNumber + 1); }}
-          >
-            <ChevronRight className="h-3 w-3" aria-hidden="true" />
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

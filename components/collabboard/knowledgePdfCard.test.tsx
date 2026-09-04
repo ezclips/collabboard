@@ -1677,3 +1677,144 @@ describe('PDF-R6M contained preview and pinned pager', () => {
     expect(draft).toContain('ImagePostEditorCard');
   });
 });
+
+// ============================================================================
+// PDF-R6M-C1: the page and the controls under it share one set of edges
+// ============================================================================
+/**
+ * The defect, and why it was a width and not a position.
+ *
+ * The body carried the card's horizontal inset (`px-1.5`), so everything it
+ * held -- the page section, the preview frame, the page -- began 6px in from
+ * each side. The pager was the body's SIBLING, so its box spanned the surface
+ * edge to edge, and its top rule and grey fill ran 6px past the page on BOTH
+ * sides. Measured in Chrome on a 260x320 card: preview 222px, pager 234px,
+ * left -6px, right +6px. That 12px overhang is the "wider lower strip".
+ *
+ * The fix is not to re-pad the pager to match -- that would be two boxes each
+ * computing the same width and free to drift. One wrapper now holds the inset
+ * and both children fill it, so the edges are the same edges by construction.
+ * Re-measured after: 222px/222px, 0px/0px, and identically aligned at 190px and
+ * 460px card widths and on a landscape page.
+ *
+ * jsdom does no layout, so what is asserted here is the box tree and the width
+ * authority -- the things that decide those measurements.
+ */
+describe('PDF-R6M-C1 preview and controls share one width', () => {
+  const content = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-content="true"]') as HTMLElement | null;
+  const preview = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-preview="true"]') as HTMLElement | null;
+  const pager = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-pager="true"]') as HTMLElement | null;
+  const indicator = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-pdf-page-indicator="true"]')?.textContent?.trim() ?? null;
+
+  /** Every class that would let a box decide its own horizontal extent. */
+  const widthClasses = (el: Element) => el.className.split(/\s+/).filter((c) =>
+    /^-?(px|pl|pr|mx|ml|mr|w|min-w|max-w)-/.test(c));
+
+  it('1-3. one wrapper owns the width; preview and pager both sit inside it', async () => {
+    const host = await card();
+    const box = content(host);
+    expect(box, 'the shared content box exists').not.toBeNull();
+    expect(box!.contains(preview(host)!), 'the preview takes its width from it').toBe(true);
+    expect(box!.contains(pager(host)!), 'and so does the pager').toBe(true);
+    // The inset lives here and nowhere else below it.
+    expect(box!.className).toContain('px-1.5');
+  });
+
+  it('4-5. neither child states a width of its own, so their edges cannot differ', async () => {
+    const host = await card();
+    // The body is what used to carry the inset; that is the whole regression.
+    expect(widthClasses(body(host)!), 'the body must not inset its contents').toEqual([]);
+    expect(widthClasses(pager(host)!), 'and the pager must not span past them').toEqual([]);
+    // The preview fills the body, which fills the wrapper.
+    expect(widthClasses(preview(host)!)).toEqual([]);
+  });
+
+  it('6. the pager is no longer a full-bleed sibling of the body', async () => {
+    const host = await card();
+    // Before the fix the pager's parent was the surface root, which is why it
+    // reached the card's edges. Now both share the one content box.
+    expect(pager(host)!.parentElement).toBe(content(host));
+    expect(body(host)!.parentElement).toBe(content(host));
+    // It is still OUTSIDE the scrolling body, and still after it -- PDF-R6M.
+    expect(body(host)!.contains(pager(host)!)).toBe(false);
+    expect(body(host)!.compareDocumentPosition(pager(host)!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pager(host)!.className).toContain('shrink-0');
+  });
+
+  it('7-8. the width authority does not vary with card size', async () => {
+    const host = await card();
+    // A constant class string: no branch, no measurement, no size-dependent
+    // inset, so a narrower or wider card moves both edges together or neither.
+    expect(content(host)!.className).toBe('flex min-h-0 flex-auto flex-col px-1.5');
+    const code = executable(SURFACE);
+    expect(code).toContain('className="flex min-h-0 flex-auto flex-col px-1.5"');
+    // Nothing in this surface measures a width to lay these out.
+    expect(code).not.toContain('offsetWidth');
+    expect(code).not.toContain('ResizeObserver');
+  });
+
+  it('9. the page is still contained, not stretched to reach the new edges', async () => {
+    const host = await card();
+    const image = host.querySelector('img')!;
+    // Frames align; the page inside one may keep its whitespace.
+    expect(image.className).toContain('object-contain');
+    expect(image.className).toContain('max-h-full');
+    for (const forbidden of ['object-cover', 'object-fill']) {
+      expect(image.className).not.toContain(forbidden);
+    }
+  });
+
+  it('10-11. the pager still works, and PDF/T still keeps the page', async () => {
+    stubPages(6);
+    const host = await card();
+    await act(async () => { action(host, 'page-next')!.click(); });
+    await act(async () => { action(host, 'page-next')!.click(); });
+    expect(indicator(host)).toBe('3 / 6');
+    await act(async () => { action(host, 'parsed-content')!.click(); });
+    // T mode is inside the same shared box, so the pager stays aligned there too.
+    expect(content(host)!.contains(pager(host)!)).toBe(true);
+    expect(indicator(host)).toBe('3 / 6');
+    await act(async () => { action(host, 'page-view')!.click(); });
+    expect(indicator(host)).toBe('3 / 6');
+  });
+
+  it('collapsing still removes the whole shared box', async () => {
+    const host = await card();
+    await act(async () => { action(host, 'collapse')!.click(); });
+    expect(content(host), 'no content box while collapsed').toBeNull();
+    expect(pager(host)).toBeNull();
+    await act(async () => { action(host, 'collapse')!.click(); });
+    expect(content(host)).not.toBeNull();
+    expect(pager(host)).not.toBeNull();
+  });
+
+  it('there is no horizontal scroller here to align -- the strip WAS the pager', () => {
+    // Reported rather than assumed: this surface has never had an overflow-x
+    // region. The page is object-contain inside its frame, so it cannot exceed
+    // it horizontally, and what read as a "wider scroller" was the pager's own
+    // full-bleed rule and fill. Nothing was removed for this.
+    const code = executable(SURFACE);
+    expect(code).not.toContain('overflow-x');
+    expect(code).not.toContain('overflow-auto');
+  });
+
+  it('12-13. the reader and the page image route are untouched', () => {
+    const reader = read('components/collabboard/KnowledgeDocumentDetails.tsx');
+    const image = read('components/collabboard/KnowledgeDocumentPageImage.tsx');
+    // No shared width box was introduced into the reader; this is card-only.
+    expect(reader).not.toContain('data-knowledge-pdf-content');
+    expect(image).toContain(
+      '`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}`',
+    );
+    expect(image).toContain('+ `/pages/${pageNumber}/image`');
+    // The recorded debt is a note, not an implementation.
+    const code = executable(SURFACE);
+    expect(SURFACE).toContain('PDF_CANVAS_MULTI_CARD_REQUEST_OPTIMIZATION');
+    expect(code).not.toContain('PDF_CANVAS_MULTI_CARD_REQUEST_OPTIMIZATION');
+    expect(code).not.toContain('IntersectionObserver');
+  });
+});
