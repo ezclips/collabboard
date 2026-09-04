@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Crop, GripVertical, Search, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Crop, GripVertical, Search, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
 import type {
   KnowledgeSourcePageRequest,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
@@ -679,6 +679,22 @@ export default function KnowledgeDocumentDetails({
    */
   const activePageNumber = useKnowledgeReaderActivePage(pagesContainerRef, pages.length, initialPageNumber);
 
+  /**
+   * PDF-R6K. The pager.
+   *
+   * It moves the SCROLL, it does not page a viewport: the reader stays the
+   * continuous multi-page surface it has always been, and the active-page
+   * observer then reports the arrival on its own. That is why there is no
+   * "current page" state to keep in step here -- there is only one, and this
+   * is not it.
+   */
+  const scrollToPage = useCallback((pageNumber: number) => {
+    if (!Number.isInteger(pageNumber)) return;
+    if (pageNumber < 1 || pageNumber > pages.length) return;
+    const target = pagesContainerRef.current?.querySelector(`[data-page-number="${pageNumber}"]`);
+    if (target instanceof HTMLElement) target.scrollIntoView?.({ block: 'start' });
+  }, [pages.length]);
+
   const activeRegion = useMemo(() => {
     if (armedRegion === null) return null;
     return pages.some((page) => page.pageNumber === armedRegion.pageNumber) ? armedRegion : null;
@@ -918,20 +934,17 @@ export default function KnowledgeDocumentDetails({
             const pageRegion = activeRegion?.pageNumber === page.pageNumber ? activeRegion : null;
             return (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
-              <div className="mb-1 flex items-baseline justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
-                  {/* Citations covering THIS page (pageStart <= n <= pageEnd). */}
-                  <UsedInNotes
-                    scope="page"
-                    rows={knowledgeSourceBacklinkPageRows(documentBacklinks, page.pageNumber)}
-                    onOpen={onOpenBacklinkTarget}
-                  />
-                </div>
-                {/* PDF-R6J-C2. No page-level action controls at all: every
-                    action now lives in the one bottom toolbar, so the page
-                    header carries only what identifies the page. */}
-              </div>
+              {/*
+                PDF-R6K. No page chrome at all.
+                --
+                The heading and the per-page "Used in Notes" rows both restated
+                what the Library panel already owns, directly above the thing
+                the reader is for. The data is untouched -- documentBacklinks
+                still feeds the Library's own document-scoped list, and the
+                page number still rides on the section for tracking, scrolling
+                and citation arrival. Only the duplicate presentation is gone,
+                so the page itself starts at the top of the reader.
+              */}
               {/*
                 P6J-F9-A2b -- the page visual, a SIBLING of the canonical text
                 root and never inside it: B4-B2B measures selection offsets
@@ -1162,14 +1175,45 @@ export default function KnowledgeDocumentDetails({
           </>
         ) : null}
 
-        {/* Counted from the pages actually rendered, never a stored guess. */}
+        {/*
+          PDF-R6K. Where you are, and how to move.
+          --
+          Counted from the pages actually rendered, never a stored guess. The
+          arrows move the scroll and let the observer report the arrival, so
+          the reader stays a continuous scrolling surface rather than becoming
+          a one-page-at-a-time viewer.
+        */}
         {pages.length > 0 ? (
-          <span
-            data-knowledge-viewer-page-indicator="true"
-            className="ml-auto flex-none text-[11px] tabular-nums text-gray-500"
-          >
-            {pages.length} {pages.length === 1 ? 'page' : 'pages'}
-          </span>
+          <div className="ml-auto flex flex-none items-center gap-0.5">
+            <button
+              type="button"
+              data-knowledge-viewer-action="previous-page"
+              aria-label="Previous page"
+              title="Previous page"
+              disabled={activePageNumber <= 1}
+              className={KNOWLEDGE_ICON_BUTTON_CLASS}
+              onClick={() => scrollToPage(activePageNumber - 1)}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <span
+              data-knowledge-viewer-page-indicator="true"
+              className="px-1 text-[11px] tabular-nums text-gray-500"
+            >
+              {activePageNumber} / {pages.length}
+            </span>
+            <button
+              type="button"
+              data-knowledge-viewer-action="next-page"
+              aria-label="Next page"
+              title="Next page"
+              disabled={activePageNumber >= pages.length}
+              className={KNOWLEDGE_ICON_BUTTON_CLASS}
+              onClick={() => scrollToPage(activePageNumber + 1)}
+            >
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
         ) : null}
       </div>
 

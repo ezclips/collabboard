@@ -148,8 +148,10 @@ describe('KnowledgeDocumentDetails local text search', () => {
     expect(container.textContent).toContain('3 matches');
     expect(container.querySelectorAll('mark')).toHaveLength(3);
     expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
-    expect(container.textContent).toContain('Page 1');
-    expect(container.textContent).toContain('Page 2');
+    // PDF-R6K removed the per-page headings; the pager states the position and
+    // both pages are still rendered, which is what this was checking.
+    expect(container.textContent).toContain('1 / 2');
+    expect(container.querySelectorAll('[data-page-number]')).toHaveLength(2);
     expect((globalThis.fetch as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
@@ -242,7 +244,8 @@ describe('KnowledgeDocumentDetails source page targeting', () => {
     await settle();
 
     // The reader still opened; it simply stayed where it was.
-    expect(host!.textContent).toContain('Page 1');
+    // PDF-R6K removed the per-page heading; the pager states the position.
+    expect(host!.textContent).toContain('1 / 2');
     expect(scrolledPageNumbers()).toEqual([]);
   });
 
@@ -563,7 +566,9 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
 
   it('I: a selection reaching outside the page paragraph captures nothing', () => {
     const { container } = mountReader();
-    const heading = container.querySelector('[data-page-number="1"] h3')!;
+    // PDF-R6K removed the page heading, so the document header is now the
+    // out-of-root node this needs.
+    const heading = container.querySelector('h2')!;
 
     // Starts in the "Page 1" heading and ends in the canonical text.
     selectRange(heading.firstChild!, 0, pageRoot(container, 1).firstChild!, 6);
@@ -1637,7 +1642,8 @@ describe('Text Phase 1 floating selection toolbar', () => {
 
   it('2: a selection reaching outside any page root does NOT show the toolbar', () => {
     const { container } = mountReader();
-    const heading = container.querySelector('h3')!;
+    // PDF-R6K removed the page heading; the document header stands in.
+    const heading = container.querySelector('h2')!;
     selectRange(heading.firstChild!, 0, pageRoot(container, 1).firstChild!, 6);
     finishSelectionOn(pageRoot(container, 1));
 

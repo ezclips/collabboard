@@ -293,6 +293,23 @@ export default function KnowledgeDocumentPageRegionSelector({
               draggable={draggableRegion}
               onPointerDown={draggableRegion ? (event) => event.stopPropagation() : undefined}
               onDragStart={draggableRegion ? startAreaClipDrag : undefined}
+              /**
+               * PDF-R6K. The rectangle is transient interaction state, not a
+               * durable annotation, so a successful hand-off ends it.
+               *
+               * `dropEffect` is the browser's own answer to "did anything take
+               * this?": 'copy' when the canvas accepted the drag, 'none' when
+               * the user let go over nothing. Reading it here means the reader
+               * needs no channel back from the canvas -- and a drag that was
+               * abandoned correctly leaves the rectangle alone to be retried.
+               *
+               * The pending Image draft already owns the document, page, rect
+               * and preview, so nothing is lost by clearing; and cancelling
+               * that draft deliberately does NOT bring this back.
+               */
+              onDragEnd={draggableRegion
+                ? (event) => { if (event.dataTransfer.dropEffect !== 'none') onClear(); }
+                : undefined}
               className={`absolute border-2 border-blue-500 bg-blue-500/20 ${
                 draggableRegion ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
               style={{

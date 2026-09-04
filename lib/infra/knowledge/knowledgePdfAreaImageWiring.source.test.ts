@@ -37,7 +37,7 @@ function after(source: string, anchor: string, count = 900): string {
 
 describe('F1-F5: the selected area is itself the drag source', () => {
   it('F1: the armed rectangle is draggable and grabbable, not an inert overlay', () => {
-    const rectangle = after(selector, 'data-knowledge-region-rectangle={pageNumber}', 1800);
+    const rectangle = after(selector, 'data-knowledge-region-rectangle={pageNumber}', 3600);
     expect(rectangle).toContain('draggable={draggableRegion}');
     expect(rectangle).toContain('onDragStart={draggableRegion ? startAreaClipDrag : undefined}');
     expect(rectangle).toContain('cursor-grab');
@@ -46,7 +46,7 @@ describe('F1-F5: the selected area is itself the drag source', () => {
   it('F2: pressing it does not restart a selection underneath it', () => {
     // The crosshair layer treats any press as a NEW rectangle and clears the
     // armed one, which would destroy the thing being dragged.
-    const rectangle = after(selector, 'data-knowledge-region-rectangle={pageNumber}', 1800);
+    const rectangle = after(selector, 'data-knowledge-region-rectangle={pageNumber}', 3600);
     expect(rectangle).toContain('onPointerDown={draggableRegion ? (event) => event.stopPropagation() : undefined}');
     expect(selector).toContain('if (armedRegion !== null) onClear();');
   });
@@ -54,7 +54,7 @@ describe('F1-F5: the selected area is itself the drag source', () => {
   it('F3: only a settled rectangle drags -- mid-drag there is no answer yet', () => {
     expect(selector).toContain('const draggableRegion = enabled && armedRegion !== null && live === null;');
     // An unarmed rectangle keeps its old inert behaviour exactly.
-    const rectangle = after(selector, 'data-knowledge-region-rectangle={pageNumber}', 1800);
+    const rectangle = after(selector, 'data-knowledge-region-rectangle={pageNumber}', 3600);
     expect(rectangle).toContain("draggableRegion ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'");
   });
 

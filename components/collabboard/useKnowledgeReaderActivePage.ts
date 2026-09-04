@@ -69,8 +69,17 @@ export function useKnowledgeReaderActivePage(
   const [activePage, setActivePage] = useState(initialPage);
 
   useEffect(() => {
-    if (Number.isInteger(initialPage) && initialPage > 0) setActivePage(initialPage);
-  }, [initialPage]);
+    if (!Number.isInteger(initialPage) || initialPage < 1) return;
+    // The seed arrives before the pages do, so this runs again once the count
+    // is known. A page the document does not have leaves the reader at the
+    // start -- NOT at the last page, which is what a plain clamp would do and
+    // would look like a deliberate jump to the end.
+    if (pageCount > 0 && initialPage > pageCount) {
+      setActivePage(1);
+      return;
+    }
+    setActivePage(initialPage);
+  }, [initialPage, pageCount]);
 
   useEffect(() => {
     const root = scrollRoot.current;
@@ -99,5 +108,14 @@ export function useKnowledgeReaderActivePage(
     return () => observer.disconnect();
   }, [scrollRoot, pageCount]);
 
-  return activePage;
+  /**
+   * Clamped on the way out, not on the way in.
+   *
+   * The seed arrives before the pages do, so a citation pointing past the end
+   * -- a stale link, a shortened document -- would otherwise be stored and then
+   * be too late to reject. Bounding the ANSWER means the reader can never
+   * report, or page to, something it does not have.
+   */
+  if (pageCount > 0) return Math.min(Math.max(activePage, 1), pageCount);
+  return Math.max(activePage, 1);
 }

@@ -320,9 +320,14 @@ describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
     for (const gone of ['<StickyNote', '<Sparkles', '<SquareDashedMousePointer', '<Crop', '<X ', 'onAddBoardAiContext', 'onCreateNoteFromPage']) {
       expect(header, gone).not.toContain(gone);
     }
-    // The header keeps only what identifies the page.
-    expect(header).toContain('Page {page.pageNumber}');
-    expect(header).toContain('<UsedInNotes');
+    // PDF-R6K went further: the header carries nothing at all. The heading
+    // and the per-page provenance rows both restated what the Library panel
+    // owns, directly above the thing the reader is for.
+    expect(header).not.toContain('Page {page.pageNumber}');
+    expect(header).not.toContain('<UsedInNotes');
+    // The page number still rides on the section -- tracking, scrolling and
+    // citation arrival all address it.
+    expect(header).toContain('data-page-number={page.pageNumber}');
     // The permanent field is gone: the input only exists inside the popover.
     const c = code();
     expect(c).not.toContain('className="relative min-w-0 flex-1"');
@@ -364,7 +369,7 @@ describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
     // flex-wrap would let the row become two; it is gone.
     expect(bar).toContain('flex flex-none items-center gap-1 border-t border-gray-100 pt-2');
     expect(bar).not.toContain('flex-wrap');
-    expect(bar).toContain('ml-auto flex-none text-[11px] tabular-nums');
+    expect(bar).toContain('ml-auto flex flex-none items-center gap-0.5');
   });
 
   it('15-17: the search icon opens a popover holding the existing search UI', () => {
@@ -418,10 +423,12 @@ describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
     expect(bar).toContain('pageNumber: activeRegion.pageNumber');
     expect(bar).toContain('appliedRotation: activeRegion.appliedRotation');
     // The area actions must not read the tracked page at all.
+    // Bounded to the area pair itself: the pager after it legitimately reads
+    // the tracked page, and would otherwise make this pass for the wrong reason.
     const areaAt = bar.indexOf('data-knowledge-viewer-action="note-from-area"');
-    const clearEnd = bar.indexOf('data-knowledge-viewer-action="select-area"');
-    const areaBlock = clearEnd > areaAt ? bar.slice(areaAt, clearEnd) : bar.slice(areaAt, areaAt + 2000);
-    expect(areaBlock).not.toContain('activePageNumber');
+    const areaEnd = bar.indexOf('data-knowledge-viewer-action="clear-area"');
+    expect(areaEnd).toBeGreaterThan(areaAt);
+    expect(bar.slice(areaAt, areaEnd)).not.toContain('activePageNumber');
   });
 
   it('29,30: the capability gates are exactly the ones that were there before', () => {
@@ -435,5 +442,83 @@ describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
     // Search is outside every gate: reading is never a privilege.
     expect(bar.indexOf('data-knowledge-viewer-action="search"'))
       .toBeLessThan(bar.indexOf('onCreateNoteFromPage && documentId'));
+  });
+});
+
+
+describe('PDF-R6K: clean page chrome, a pager, and a transient area rectangle', () => {
+  const code = () => executable(DETAILS);
+  const selector = read('components/collabboard/KnowledgeDocumentPageRegionSelector.tsx');
+  const bar = () => {
+    const c = code();
+    const at = c.indexOf('data-knowledge-viewer-toolbar="true"');
+    return c.slice(at - 200, at + 12000);
+  };
+
+  it('1-4: the reader shows no page metadata, and the Library keeps the data', () => {
+    const c = code();
+    const at = c.indexOf('<section key={page.pageNumber} data-page-number={page.pageNumber}>');
+    const header = c.slice(at, c.indexOf('<KnowledgeDocumentPageRegionSelector', at));
+    expect(header).not.toContain('<UsedInNotes');
+    expect(header).not.toContain('knowledgeSourceBacklinkPageRows');
+    // Document-scoped provenance is untouched: the Library still renders it.
+    expect(c).toContain('<UsedInNotes scope="document"');
+    expect(c).toContain('documentRows');
+  });
+
+  it('5,6: the pager reports current / total from real state', () => {
+    const b = bar();
+    expect(b).toContain('data-knowledge-viewer-action="previous-page"');
+    expect(b).toContain('data-knowledge-viewer-action="next-page"');
+    expect(b).toContain('{activePageNumber} / {pages.length}');
+    expect(b).toContain('data-knowledge-viewer-page-indicator="true"');
+  });
+
+  it('7,8,12: the arrows move the SCROLL -- the reader stays continuous', () => {
+    const b = bar();
+    expect(b).toContain('onClick={() => scrollToPage(activePageNumber - 1)}');
+    expect(b).toContain('onClick={() => scrollToPage(activePageNumber + 1)}');
+    expect(code()).toContain("target.scrollIntoView?.({ block: 'start' })");
+    // No page-at-a-time rendering was introduced.
+    expect(code()).not.toContain('visiblePage');
+    expect(code()).toContain('{pages.map((page, pageIndex) =>');
+  });
+
+  it('9,10: the ends are disabled, and nothing wraps', () => {
+    const b = bar();
+    expect(b).toContain('disabled={activePageNumber <= 1}');
+    expect(b).toContain('disabled={activePageNumber >= pages.length}');
+    // The helper refuses out-of-range targets even if a caller asks.
+    expect(code()).toContain('if (pageNumber < 1 || pageNumber > pages.length) return;');
+    expect(code()).not.toContain('% pages.length');
+  });
+
+  it('13,14: still one row, and Search is still an icon with a popover', () => {
+    const b = bar();
+    expect(b).toContain('flex flex-none items-center gap-1 border-t border-gray-100 pt-2');
+    expect(b).not.toContain('flex-wrap');
+    expect(b).toContain('data-knowledge-viewer-action="search"');
+    expect(b).toContain('data-knowledge-search-popover="true"');
+    expect(b).toContain('absolute bottom-full left-0 z-20 mb-2 w-[280px]');
+  });
+
+  it('31-35: the area rectangle is transient -- a taken drag ends it', () => {
+    // dropEffect is the browser's own answer to "did anything accept this?",
+    // so the reader needs no channel back from the canvas.
+    expect(selector).toContain("if (event.dataTransfer.dropEffect !== 'none') onClear();");
+    expect(selector).toContain('onDragEnd={draggableRegion');
+    // An abandoned drag leaves it alone, to be retried.
+    expect(selector).toContain("!== 'none'");
+    // Nothing restores it later: there is no resurrect path at all.
+    expect(code()).not.toContain('restoreArmedRegion');
+    expect(read('app/dashboard/canvas/[id]/CanvasClient.tsx')).not.toContain('setArmedRegion');
+  });
+
+  it('the Clear control and the area-note action both still end the selection', () => {
+    const b = bar();
+    expect(b).toContain('data-knowledge-viewer-action="clear-area"');
+    expect(b).toContain('onClick={() => setArmedRegion(null)}');
+    // Creating a Note from the area clears it too, as it always did.
+    expect(b).toMatch(/note-from-area[\s\S]{0,1600}setArmedRegion\(null\)/);
   });
 });

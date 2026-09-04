@@ -147,9 +147,10 @@ describe('P6J-F6-B3 Used in Notes', () => {
     expect(documentBlock(container)!.textContent).toContain('Used in Notes · 1');
     expect(targetIdsIn(documentBlock(container))).toEqual([N1]);
 
-    expect(pageBlock(container, 2)!.textContent).toContain('Used in Notes · 1');
-    expect(pageBlock(container, 2)!.textContent).toContain('Runtime fixture note');
-    expect(targetIdsIn(pageBlock(container, 2))).toEqual([N1]);
+    // PDF-R6K removed the per-page presentation: the Library panel is the one
+    // owner of provenance now. The DATA is unchanged -- the same reference
+    // still produces the document-level row asserted above.
+    expect(pageBlock(container, 2)).toBeNull();
 
     // Every other page stays clean.
     for (const page of [1, 3, 4, 5]) expect(pageBlock(container, page), `page ${page}`).toBeNull();
@@ -163,8 +164,8 @@ describe('P6J-F6-B3 Used in Notes', () => {
 
     expect(documentBlock(container)!.textContent).toContain('Used in Notes · 2');
     expect(targetIdsIn(documentBlock(container)).sort()).toEqual([N1, N2].sort());
-    expect(targetIdsIn(pageBlock(container, 1))).toEqual([N1]);
-    expect(targetIdsIn(pageBlock(container, 4))).toEqual([N2]);
+    expect(pageBlock(container, 1)).toBeNull();
+    expect(pageBlock(container, 4), 'page 4 carries no reader-side provenance').toBeNull();
   });
 
   it('D: duplicate reference rows for one Note render it exactly once, count 1', () => {
@@ -175,8 +176,8 @@ describe('P6J-F6-B3 Used in Notes', () => {
 
     expect(documentBlock(container)!.textContent).toContain('Used in Notes · 1');
     expect(targetIdsIn(documentBlock(container))).toEqual([N1]);
-    expect(pageBlock(container, 2)!.textContent).toContain('Used in Notes · 1');
-    expect(targetIdsIn(pageBlock(container, 2))).toEqual([N1]);
+    expect(pageBlock(container, 2)).toBeNull();
+    expect(pageBlock(container, 2), 'page 2 carries no reader-side provenance').toBeNull();
   });
 
   it('E: a pp.2-4 citation appears on pages 2, 3 and 4 but not 1 or 5', () => {
@@ -185,10 +186,12 @@ describe('P6J-F6-B3 Used in Notes', () => {
       posts: [note(N1, 'Ranged note')],
     });
 
-    for (const page of [2, 3, 4]) {
-      expect(targetIdsIn(pageBlock(container, page)), `page ${page}`).toEqual([N1]);
+    // PDF-R6K: the reader shows provenance on no page at all -- the Library
+    // panel owns it. What the RANGE means is unchanged, and is still proved by
+    // the single document-level row below.
+    for (const page of [1, 2, 3, 4, 5]) {
+      expect(pageBlock(container, page), `page ${page}`).toBeNull();
     }
-    for (const page of [1, 5]) expect(pageBlock(container, page), `page ${page}`).toBeNull();
     // Still one Note document-wide, not one per covered page.
     expect(documentBlock(container)!.textContent).toContain('Used in Notes · 1');
   });
@@ -271,7 +274,8 @@ describe('P6J-F6-B3 Used in Notes', () => {
       posts: [note(N1, 'Display only')],
     });
 
-    for (const scope of [documentBlock(container)!, pageBlock(container, 2)!]) {
+    expect(pageBlock(container, 2)).toBeNull();
+    for (const scope of [documentBlock(container)!]) {
       expect(scope.querySelector('button, a, [role="button"], [tabindex], [href]')).toBeNull();
       expect(scope.className).not.toContain('cursor-pointer');
       expect(scope.innerHTML).not.toContain('cursor-pointer');
@@ -356,7 +360,7 @@ describe('P6J-F6-B3 Used in Notes', () => {
       // selection stays null at B4-B2B: no text was selected before the click.
       { sourceDocumentId: DOC_A, originalFilename: SHARED_FILENAME, pageNumber: 2, pageText: 'Page two body.', selection: null },
     ]);
-    expect(targetIdsIn(pageBlock(host, 2))).toEqual([N1]);
+    expect(pageBlock(host, 2)).toBeNull();
   });
 });
 
@@ -397,10 +401,12 @@ describe('P6J-F6-B3N backlink navigation', () => {
       onOpenBacklinkTarget: (id) => opened.push(id),
     });
 
-    clickRow(pageBlock(container, 2), N1);
+    // PDF-R6K removed the page-level rows; the document row still emits the
+    // same stable id, which is what this has always been about.
+    expect(pageBlock(container, 2)).toBeNull();
     clickRow(documentBlock(container), N1);
 
-    expect(opened).toEqual([N1, N1]);
+    expect(opened).toEqual([N1]);
   });
 
   it('C: look-alike Notes each open themselves, never the other', () => {
@@ -451,16 +457,19 @@ describe('P6J-F6-B3N backlink navigation', () => {
     expect(targetIdsIn(documentBlock(container))).toEqual([N1, N2]);
   });
 
-  it('G: page-level rows keep the plain label -- the Page heading carries the page', () => {
+  it('G: with no page-level rows left, the document row is what names the page', () => {
     const container = render({
       references: [reference(N1, DOC_A, 1), reference(N2, DOC_A, 2)],
       posts: [note(N1, SHARED_FILENAME), note(N2, SHARED_FILENAME)],
       onOpenBacklinkTarget: () => undefined,
     });
 
-    expect(rowFor(pageBlock(container, 2), N2)!.textContent).toBe(SHARED_FILENAME);
-    expect(rowFor(pageBlock(container, 2), N2)!.textContent).not.toContain('p. 2');
-    expect(targetIdsIn(pageBlock(container, 2))).toEqual([N2]);
+    // PDF-R6K: the page-level rows omitted the page because the Page heading
+    // carried it. Both are gone, so the document row -- which always named the
+    // page -- is now the only thing that does.
+    expect(pageBlock(container, 2)).toBeNull();
+    expect(rowFor(documentBlock(container), N2)!.textContent).toContain(SHARED_FILENAME);
+    expect(rowFor(documentBlock(container), N2)!.textContent).toContain('p. 2');
   });
 
   it('N: a row is a real, keyboard-reachable button once navigation exists', () => {
