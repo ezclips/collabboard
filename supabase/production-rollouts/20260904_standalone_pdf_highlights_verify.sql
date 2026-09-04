@@ -111,12 +111,18 @@ SELECT
                         AND grantee = 'anon'))                      AS pass;
 
 SELECT '== 7. authorship is a database fact: created_by DEFAULT auth.uid() ==' AS section;
+-- Scalar subqueries rather than a FROM, and COALESCE rather than a bare LIKE:
+-- a column with no default, and a table with no such column, must both read as
+-- an explicit `f` on a row that is always returned. A release-critical check
+-- may not ask an operator to tell a blank cell from a false one.
 SELECT
-    column_default,
-    column_default LIKE '%auth.uid()%'                              AS pass
-FROM information_schema.columns
-WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
-  AND column_name = 'created_by';
+    COALESCE((SELECT column_default FROM information_schema.columns
+               WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
+                 AND column_name = 'created_by'), '<no default>')   AS column_default,
+    COALESCE((SELECT column_default FROM information_schema.columns
+               WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
+                 AND column_name = 'created_by') LIKE '%auth.uid()%',
+             false)                                                 AS pass;
 
 SELECT '== 8. RLS policies: read is owner-or-member, write is owner-or-EDITOR ==' AS section;
 SELECT
@@ -220,13 +226,18 @@ SELECT
     AND NOT EXISTS (SELECT 1 FROM information_schema.column_privileges
                      WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
                        AND grantee = 'anon')
-    AND (SELECT array_agg(column_name::text ORDER BY column_name::text)
-           FROM information_schema.column_privileges
-          WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
-            AND grantee = 'authenticated' AND privilege_type = 'UPDATE') = ARRAY['color']
-    AND (SELECT column_default FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
-            AND column_name = 'created_by') LIKE '%auth.uid()%'
+    -- Both of the next two conjuncts are NULL-able at their source: array_agg
+    -- over no grants is NULL, and a column with no default is NULL. An
+    -- unguarded NULL would turn the whole AND-chain into NULL, and readiness
+    -- would print as a blank cell instead of the `f` the state deserves.
+    AND COALESCE((SELECT array_agg(column_name::text ORDER BY column_name::text)
+                    FROM information_schema.column_privileges
+                   WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
+                     AND grantee = 'authenticated' AND privilege_type = 'UPDATE')
+                 = ARRAY['color'], false)
+    AND COALESCE((SELECT column_default FROM information_schema.columns
+                   WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
+                     AND column_name = 'created_by') LIKE '%auth.uid()%', false)
     AND NOT COALESCE((SELECT prosecdef FROM pg_proc
         WHERE oid = to_regprocedure('public.create_knowledge_source_citation(uuid, uuid, integer, integer, text, text, integer, integer, double precision, double precision, double precision, double precision, text)')), true)
                                                                     AS pass;

@@ -24,6 +24,7 @@ const rollout = read(ROLLOUT_PATH);
 const verifier = read(VERIFY_PATH);
 /** Statements only: a guarantee must never be satisfied by a comment about it. */
 const statements = rollout.replace(/--.*$/gm, '');
+const verifierStatements = verifier.replace(/--.*$/gm, '');
 
 const SOURCES = [
   '20260904_create_knowledge_source_highlights.sql',
@@ -214,5 +215,46 @@ describe('PDF-R6K-H3A rollout artifact', () => {
     // Plain SQL, so it runs unchanged in psql and in the dashboard editor.
     expect(rollout).not.toMatch(/^\\[a-z]/m);
     expect(verifier).not.toMatch(/^\\[a-z]/m);
+  });
+  it('14. tests the created_by default NULL-safely, in every place it is tested', () => {
+    // A column carrying NO default reads as NULL out of information_schema, and
+    // in SQL `NULL NOT LIKE ...` is NULL, not true. `IF NULL THEN` does not fire
+    // and a bare `... LIKE ...` yields a blank cell rather than false -- so the
+    // unguarded form waves through, or fails to report, precisely the state
+    // these checks exist to catch. Nothing downstream can repair it either:
+    // `created_by` is not a column any client is permitted to name, so every
+    // highlight written after such a rollout would carry NULL authorship.
+    //
+    // Asserting that 'auth.uid()' merely APPEARS would pass on the broken form
+    // too. What follows pins the predicate's shape instead, and by count, so a
+    // future edit cannot reintroduce an unguarded one anywhere.
+    const NULL_SAFE = String.raw`COALESCE\(\s*\(SELECT column_default[^)]*\)\s*LIKE\s*'%auth\.uid\(\)%'\s*,\s*false\s*\)`;
+    const nullSafe = new RegExp(NULL_SAFE, 'g');
+    const anyDefaultTest = /'%auth\.uid\(\)%'/g;
+
+    for (const [label, sql] of [['rollout', statements], ['verifier', verifierStatements]] as const) {
+      const tested = (sql.match(anyDefaultTest) ?? []).length;
+      expect(tested, `${label} still tests the created_by default`).toBeGreaterThan(0);
+      expect((sql.match(nullSafe) ?? []).length, `${label}: every default test is NULL-guarded`)
+        .toBe(tested);
+      // The exact broken shape, and the bare boolean that reports NULL as blank.
+      expect(sql, label).not.toMatch(/column_default[^;]*NOT LIKE/);
+    }
+
+    // The postflight must RAISE on the guarded predicate, not merely contain it.
+    const postflight = statements.slice(
+      statements.indexOf('DO $postflight$'), statements.indexOf('$postflight$;'),
+    );
+    expect(postflight).toMatch(
+      /IF NOT COALESCE\(\s*\(SELECT column_default[^)]*\)\s*LIKE\s*'%auth\.uid\(\)%'\s*,\s*false\s*\)\s*THEN/,
+    );
+
+    // The verifier's roll-up decides readiness with one AND-chain: a NULL-able
+    // conjunct anywhere in it turns the whole answer blank instead of false.
+    const rollUp = verifierStatements.slice(verifierStatements.indexOf('== 12. roll-up =='));
+    expect(rollUp).toMatch(new RegExp(NULL_SAFE));
+    expect(rollUp, 'array_agg over no grants is NULL too').toMatch(
+      /COALESCE\(\(SELECT array_agg[\s\S]*?=\s*ARRAY\['color'\]\s*,\s*false\)/,
+    );
   });
 });

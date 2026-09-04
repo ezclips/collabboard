@@ -500,9 +500,15 @@ BEGIN
         RAISE EXCEPTION 'PDF-R6K postflight failed: anon retains a column privilege';
     END IF;
 
-    IF (SELECT column_default FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
-           AND column_name = 'created_by') NOT LIKE '%auth.uid()%' THEN
+    -- NULL-safe deliberately. A column carrying NO default yields NULL here, and
+    -- `NULL NOT LIKE ...` is NULL, which IF silently skips -- so the bare form
+    -- would wave through the very state this check exists to catch. Absence must
+    -- fail exactly as a wrong default does: nothing can repair it afterwards,
+    -- because `created_by` is not a column any client is allowed to name.
+    IF NOT COALESCE(
+        (SELECT column_default FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'knowledge_source_highlights'
+            AND column_name = 'created_by') LIKE '%auth.uid()%', false) THEN
         RAISE EXCEPTION 'PDF-R6K postflight failed: created_by does not default to auth.uid()';
     END IF;
 
