@@ -150,8 +150,8 @@ describe('C1: canonical function integrity', () => {
     expect(preflight).toContain('refusing to overwrite an unreviewed function');
     for (const drift of [
       'existing function body digest is',
-      'function arguments are',
-      'function result is',
+      'function argument types are',
+      'function result columns are',
       'existing function is SECURITY DEFINER',
       'function configuration is',
       'function owner is',
@@ -183,18 +183,24 @@ describe('C1: posture, privilege and column contracts', () => {
     expect(verifier).toContain('owner is the expected deployment role');
   });
 
-  it('10. checks the COMPLETE privilege set, not four spot checks', () => {
+  it('10. compares the COMPLETE privilege set INCLUDING grantability', () => {
     // aclexplode enumerates every grantee; has_function_privilege can only
-    // answer about roles someone thought to name.
+    // answer about roles someone thought to name. And WITH GRANT OPTION is a
+    // delegation right, so is_grantable is part of the identity of a grant:
+    // without it, `authenticated` could hand EXECUTE to anyone.
     expect(statements).toContain('aclexplode');
     expect(verifier).toContain('aclexplode');
-    expect(verifier).toContain('no unexpected EXECUTE holder');
+    expect(verifier).toContain('exact ACL set, none grantable');
     for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
-                        block(rollout, 'DO $postflight$', '$postflight$;')]) {
-      expect(gate).toContain('aclexplode');
-      expect(gate).toContain("'authenticated:EXECUTE'");
-      expect(gate).toContain("'service_role:EXECUTE'");
+                        block(rollout, 'DO $postflight$', '$postflight$;'), verifier]) {
+      expect(gate).toContain('a.is_grantable');
+      expect(gate).toContain("'authenticated:EXECUTE:false'");
+      expect(gate).toContain("'service_role:EXECUTE:false'");
+      expect(gate).toContain("'postgres:EXECUTE:false'");
     }
+    // A grantable variant can never satisfy the expected set.
+    expect(rollout).not.toContain("'authenticated:EXECUTE:true'");
+    expect(verifier).not.toContain("'authenticated:EXECUTE:true'");
   });
 
   it('11. requires the link column to carry NO default', () => {
@@ -216,6 +222,29 @@ describe('C1: posture, privilege and column contracts', () => {
     expect(statements).toContain('foreign keys, expected exactly 1');
     expect(verifier).toContain('exactly one foreign key on the link');
     expect(verifier).toContain('delete action is SET NULL, and only that');
+  });
+
+  it('12b. detects UNIQUE by catalog DEPENDENCY, so expression indexes cannot hide', () => {
+    // UNIQUE ((library_item_id::text)) stores 0 in indkey, so an attnum
+    // comparison misses it while it still outlaws the second placement.
+    // pg_depend records the column an index key or predicate actually reads.
+    for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
+                        block(rollout, 'DO $postflight$', '$postflight$;'), verifier]) {
+      expect(gate).toContain('pg_depend');
+      expect(gate).toContain('refobjsubid');
+      expect(gate).toContain('indisunique');
+    }
+    // Unique/exclusion CONSTRAINTS reach the same outcome by another route.
+    for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
+                        block(rollout, 'DO $postflight$', '$postflight$;'), verifier]) {
+      expect(gate).toContain('pg_constraint');
+      expect(gate).toMatch(/contype IN \('u', ?'x', ?'p'\)/);
+    }
+    expect(verifier).toContain('no UNIQUE index depends on the link column');
+    expect(verifier).toContain('no unique/exclusion constraint covers the link');
+    // A NON-unique expression index is a performance index, not a cardinality
+    // restriction: the guard is scoped to unique ones only.
+    expect(verifier).not.toMatch(/indexprs IS NOT NULL[\s\S]{0,40}RAISE/);
   });
 
   it('13. carries the reviewed security posture across intact', () => {
@@ -262,46 +291,141 @@ describe('C1: prerequisite manifest tracks the function', () => {
     return found;
   }
 
-  it('14. every column the function touches is in both prerequisite manifests', () => {
+  const preflight = () => block(rollout, 'DO $preflight$', '$preflight$;');
+  const postflight = () => block(rollout, 'DO $postflight$', '$postflight$;');
+  /** The three places the same contract has to hold. */
+  const allThreeGates = () => [preflight(), postflight(), verifier];
+
+  it('14. every column the function touches is in ALL THREE typed manifests', () => {
     const referenced = referencedColumns(hardenedBody);
     expect(referenced.size).toBeGreaterThan(15);
-    const preflight = block(rollout, 'DO $preflight$', '$preflight$;');
     for (const ref of referenced) {
       const [table, column] = ref.split('.');
       // The rollout creates this one, so rows 1-4 assert its shape instead.
       if (ref === 'padlets.library_item_id') continue;
-      const entry = `('${table}', '${column}')`;
-      const verifierEntry = `('${table}','${column}')`;
-      expect(preflight, `preflight manifest is missing ${ref}`).toContain(entry);
-      expect(verifier, `verifier manifest is missing ${ref}`).toContain(verifierEntry);
+      // Typed entries: ('table','column','type-class').
+      const entry = new RegExp(`\\('${table}','${column}','(uuid|jsonb|bool|text|numeric)'\\)`);
+      for (const [i, gate] of allThreeGates().entries()) {
+        expect(gate, `gate ${i} manifest is missing ${ref}`).toMatch(entry);
+      }
     }
   });
 
-  it('15. the authority tables and key types are preflighted', () => {
-    const preflight = block(rollout, 'DO $preflight$', '$preflight$;');
-    for (const table of ['public.padlets', 'public.library_items', 'public.boards',
-                         'public.board_collaborators']) {
-      expect(preflight, `preflight must require ${table}`).toContain(table);
+  it('15. the manifest is TYPED, and the authority keys must be uuid', () => {
+    // Existence is not enough: boards.user_id as text passes an existence
+    // check and then fails at runtime with "operator does not exist: text =
+    // uuid" -- after the rollout has already reported success.
+    for (const gate of allThreeGates()) {
+      for (const uuidKey of [
+        "('boards','id','uuid')", "('boards','user_id','uuid')",
+        "('board_collaborators','board_id','uuid')",
+        "('board_collaborators','user_id','uuid')",
+        "('padlets','id','uuid')", "('padlets','board_id','uuid')",
+        "('library_items','id','uuid')", "('library_items','user_id','uuid')",
+      ]) {
+        expect(gate, `missing typed authority key ${uuidKey}`).toContain(uuidKey);
+      }
+      // JSONB payloads and the boolean flag are exact too.
+      expect(gate).toContain("('padlets','metadata','jsonb')");
+      expect(gate).toContain("('library_items','content','jsonb')");
+      expect(gate).toContain("('library_items','is_public','bool')");
+      // Type CLASSES where the function genuinely does not care, which is what
+      // production carries: padlets.type is varchar(50), position_x integer,
+      // width numeric.
+      expect(gate).toContain("col.udt_name = 'uuid'");
+      expect(gate).toMatch(/col\.udt_name IN \('text', ?'varchar', ?'bpchar'\)/);
+      expect(gate).toMatch(/col\.udt_name IN \('int2', ?'int4', ?'int8',\s*'numeric', ?'float4', ?'float8'\)/);
     }
-    expect(preflight).toContain("to_regprocedure('auth.uid()')");
-    // boards.id is the join key Astro removed while both gates still passed.
-    expect(preflight).toContain("'padlets.id', 'library_items.id', 'boards.id'");
-    expect(verifier).toContain("('boards','id')");
+  });
+
+  it('16. auth.uid() is checked as a callable dependency, in all three gates', () => {
+    for (const gate of allThreeGates()) {
+      expect(gate).toContain("to_regprocedure('auth.uid()')");
+      // Not a body-text search: the actual catalog entry, and its return type,
+      // because the actor comparison is against a uuid.
+      expect(gate).toContain('uuid');
+    }
+    for (const gate of [preflight(), postflight()]) {
+      expect(gate).toContain("<> 'uuid'::regtype");
+    }
+    expect(verifier).toContain('auth.uid() exists, takes no arguments, returns uuid');
+    expect(verifier).toContain('pronargs = 0');
+  });
+
+  it('17. postflight RE-QUERIES the catalog rather than trusting preflight', () => {
+    // A prerequisite can be dropped between the two phases; the C1 artifact
+    // committed anyway because postflight never looked again.
+    const post = postflight();
+    expect(post).toContain('unusable prerequisite column(s)');
+    expect(post).toContain('information_schema.columns');
+    expect(post).toContain("to_regclass(actual) IS NULL");
+    // No cached boolean carried across from preflight.
+    expect(post).not.toContain('preflight_ok');
+    // The two gates run the same manifest, so they cannot drift apart.
+    const manifestOf = (s: string) =>
+      (s.match(/\('(?:boards|board_collaborators|padlets|library_items)','\w+','\w+'\)/g) ?? []).sort();
+    expect(manifestOf(preflight())).toEqual(manifestOf(post));
+    expect(manifestOf(preflight())).toEqual(manifestOf(verifier));
+    expect(manifestOf(preflight()).length).toBe(23);
+  });
+});
+
+describe('C2: version independence', () => {
+  it('18. no load-bearing comparison reads a catalog-RENDERED statement', () => {
+    // pg_get_function_identity_arguments renders "double precision"; typname
+    // stores "float8". pg_get_indexdef renders a whole statement. Neither is
+    // used to decide anything here -- checked against STATEMENTS, since the
+    // headers name these functions precisely to explain why they are avoided.
+    for (const gate of [statements, verifierStatements]) {
+      expect(gate).not.toContain('pg_get_function_identity_arguments');
+      expect(gate).not.toContain('pg_get_function_result');
+      expect(gate).not.toContain('pg_get_functiondef');
+      expect(gate).not.toContain('pg_get_indexdef');
+    }
+    // Structural replacements.
+    for (const gate of [rollout, verifier]) {
+      expect(gate).toContain('proargtypes');
+      expect(gate).toContain('proallargtypes');
+      expect(gate).toContain('proargmodes');
+      expect(gate).toContain('t.typname');
+      expect(gate).toContain('indisunique');
+      expect(gate).toContain('am.amname');
+    }
+    expect(rollout).toContain("'float8'");
+    expect(verifier).toContain("'float8'");
+  });
+
+  it('19. the one rendered expression is normalised before comparison', () => {
+    // The partial index predicate is the only rendered text compared, and it
+    // is lowercased with whitespace and parentheses stripped first, so
+    // "(library_item_id IS NOT NULL)" and any equivalent spacing agree.
+    for (const gate of [rollout, verifier]) {
+      expect(gate).toContain('pg_get_expr(i.indpred, i.indrelid)');
+      expect(gate).toMatch(/lower\(regexp_replace\(/);
+      expect(gate).toContain("'[\\s()]', '', 'g'");
+      expect(gate).toContain('pred=library_item_idisnotnull');
+    }
+    // The server version is reported, but never gates readiness: its row is
+    // labelled 'diagnostic' and its pass column is a literal true.
+    const versionRow = verifierStatements.split('\n')
+      .find((line) => line.includes('server version')) ?? '';
+    expect(versionRow).toContain("'diagnostic'");
+    expect(verifierStatements).toContain("current_setting('server_version_num'), true");
   });
 });
 
 describe('C1: verifier contract', () => {
   it('16. is genuinely read only', () => {
+    // Checked against STATEMENTS: the header explains why WITH GRANT OPTION is
+    // rejected, and prose about a verb is not the verb.
     for (const forbidden of ['CREATE TABLE', 'ALTER TABLE', 'CREATE OR REPLACE', 'CREATE FUNCTION',
-      'INSERT INTO', 'UPDATE ', 'DELETE FROM', 'TRUNCATE', 'GRANT ', 'REVOKE ', 'DROP ',
-      'SET ROLE', 'ALTER FUNCTION']) {
-      expect(verifier, forbidden).not.toContain(forbidden);
+      'CREATE INDEX', 'INSERT INTO', 'UPDATE ', 'DELETE FROM', 'TRUNCATE', 'GRANT ', 'REVOKE ',
+      'DROP ', 'SET ROLE', 'ALTER FUNCTION']) {
+      expect(verifierStatements, forbidden).not.toContain(forbidden);
     }
-    // CREATE INDEX is absent from that list on purpose: the verifier carries
-    // the expected index definition as a comparison VALUE, not as a statement
-    // it runs. Pin that it appears exactly once, and only as a literal.
-    expect(verifierStatements.match(/CREATE INDEX/g)).toHaveLength(1);
-    expect(verifierStatements).toContain("('CREATE INDEX padlets_library_item_id_idx");
+    // And nothing that would write even if it parsed as a read.
+    expect(verifierStatements).not.toMatch(/\bINTO\s+\w/);
+    expect(verifierStatements).not.toContain('nextval');
   });
 
   it('17. readiness is the conjunction of the same rows it prints', () => {
@@ -310,19 +434,23 @@ describe('C1: verifier contract', () => {
     expect(verifier).toContain('bool_and(pass) OVER () AS rollout_readiness');
     expect(verifierStatements.match(/rollout_readiness/g)).toHaveLength(1);
     expect(verifier).toContain('FROM invariants');
-    // Every invariant is a row of that one list.
+    // Every load-bearing invariant is a row of that one list.
     const invariants = verifier.slice(verifier.indexOf('invariants(ord, section'));
     for (const check of [
       'padlets.library_item_id exists', 'type is uuid', 'is nullable', 'has NO default',
       'exactly one foreign key on the link', 'targets public.library_items(id)',
-      'delete action is SET NULL, and only that', 'no UNIQUE index covers the link',
-      'supporting index matches exactly', 'exists with the reviewed signature',
+      'delete action is SET NULL, and only that',
+      'no UNIQUE index depends on the link column',
+      'no unique/exclusion constraint covers the link',
+      'supporting index matches structurally', 'exists with the reviewed signature',
       'no other overload of the same name', 'canonical body digest matches the reviewed migration',
-      'identity arguments match', 'result type matches', 'SECURITY INVOKER, never DEFINER',
-      'configuration is exactly search_path=public', 'owner is the expected deployment role',
-      'PUBLIC cannot execute', 'anon cannot execute', 'authenticated can execute',
-      'service_role can execute', 'no unexpected EXECUTE holder',
-      'every table/column the function uses exists',
+      'argument types match (structural)', 'result columns match (structural)',
+      'SECURITY INVOKER, never DEFINER', 'configuration is exactly search_path=public',
+      'owner is the expected deployment role', 'PUBLIC cannot execute', 'anon cannot execute',
+      'authenticated can execute', 'service_role can execute',
+      'exact ACL set, none grantable', 'required relations exist',
+      'every column the function uses exists with a usable type',
+      'auth.uid() exists, takes no arguments, returns uuid',
     ]) {
       expect(invariants, `missing invariant row: ${check}`).toContain(check);
     }
