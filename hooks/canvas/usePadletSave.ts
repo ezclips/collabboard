@@ -26,7 +26,7 @@ export type SaveAIComponentData = {
 };
 
 
-import { useCallback, useMemo, useRef, Dispatch, SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, Dispatch, SetStateAction } from 'react';
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
@@ -226,6 +226,12 @@ export type UsePadletSaveParams = {
   setIsCommentEditorOpen: (v: boolean) => void;
   setIsCardEditorOpen: (v: boolean) => void;
   setIsImageEditorOpen: (v: boolean) => void;
+  /**
+   * ORDINARY-IMAGE-LIBRARY-C1: observed, never set here. Opening the Image
+   * editor begins a new draft SESSION, and the durable creation identity below
+   * belongs to that session -- see the effect in the hook body.
+   */
+  isImageEditorOpen?: boolean;
   setIsDrawingEditorOpen: (v: boolean) => void;
   setIsAIComponentEditorOpen: (v: boolean) => void;
   // Placement prompt setters
@@ -256,10 +262,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
   const supabase = useMemo(() => supabaseBrowser(), []);
-  // IMAGE-LIBRARY: the identity of the new-Image draft currently being saved.
-  // Held so a repeated Done reuses it and the atomic RPC treats the second call
-  // as a retry of the same request rather than a new durable Image.
+  // IMAGE-LIBRARY: the durable creation identity of the new-Image draft
+  // currently open. Held so a repeated Done within ONE draft reuses it and the
+  // atomic RPC treats the second call as a retry of the same request.
   const newImagePadletIdRef = useRef<string | null>(null);
+  const imageEditorWasOpenRef = useRef(false);
   const {
     canvasId,
     padletToEdit,
@@ -281,6 +288,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setIsCommentEditorOpen,
     setIsCardEditorOpen,
     setIsImageEditorOpen,
+    isImageEditorOpen,
     setIsDrawingEditorOpen,
     setIsAIComponentEditorOpen,
     setPendingPostDraft,
@@ -296,6 +304,21 @@ export function usePadletSave(params: UsePadletSaveParams) {
     sourceNoteReference,
     onSourceNoteCreated,
   } = params;
+  // The durable creation identity belongs to ONE draft session, not to "the
+  // last save that did not finish". Opening the Image editor starts a new
+  // draft, so any identity left over from a previous one is dropped here.
+  //
+  // Clearing on FAILURE instead would be wrong in the one case that matters:
+  // an RPC that committed but whose read-back failed. That draft's retry must
+  // still resolve to the row it already created, or the retry would mint a
+  // second durable Image. The session boundary -- not success or failure --
+  // is what decides when the identity changes.
+  useEffect(() => {
+    if (isImageEditorOpen && !imageEditorWasOpenRef.current) {
+      newImagePadletIdRef.current = null;
+    }
+    imageEditorWasOpenRef.current = !!isImageEditorOpen;
+  }, [isImageEditorOpen]);
 
   const checkGridPlacementRequired = useGridPadletSave({
     isWallLayout,

@@ -20,10 +20,12 @@ import { supabaseBrowser } from '@/lib/supabase/browser';
 vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
 
 const IMAGE_URL = 'https://example.test/ordinary.png';
+const FIRST = 'https://example.test/first.png';
+const SECOND = 'https://example.test/SECOND.png';
 
 interface Call { fn: string; args: Record<string, unknown> }
 
-function installFakeSupabase(options: { rpcFails?: boolean } = {}) {
+function installFakeSupabase(options: { rpcFails?: boolean; readBackFails?: boolean } = {}) {
   const calls: Call[] = [];
   const inserts: Record<string, unknown>[] = [];
   const rows = new Map<string, Record<string, unknown>>();
@@ -62,7 +64,9 @@ function installFakeSupabase(options: { rpcFails?: boolean } = {}) {
         update: () => ({ eq: async () => ({ data: null, error: null }) }),
         select: () => ({
           eq: (_c: string, value: string) => ({
-            single: async () => ({ data: rows.get(value) ?? null, error: null }),
+            single: async () => (options.readBackFails
+              ? { data: null, error: { message: 'read-back failed' } }
+              : { data: rows.get(value) ?? null, error: null }),
             maybeSingle: async () => ({ data: rows.get(value) ?? null, error: null }),
           }),
         }),
@@ -77,12 +81,14 @@ type SaveApi = ReturnType<typeof usePadletSave>;
 let api: SaveApi | null = null;
 let placed: Padlet[] = [];
 
-function Harness() {
+function Harness({ editorOpen }: { editorOpen: boolean }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>([]);
   const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(null);
   placed = padlets;
   api = usePadletSave({
     canvasId: 'canvas-1', padletToEdit,
+    // C1: the real draft-session boundary.
+    isImageEditorOpen: editorOpen,
     isWallLayout: false, isColumnsLayout: false, isGridLayout: false,
     isDrawingLayout: false, isTimelineLayout: false, isSchedulerLayout: false,
     isFreeformLayout: true, isMapLayout: false,
@@ -101,16 +107,21 @@ function Harness() {
 }
 
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
+let rerender: ((open: boolean) => void) | null = null;
 function mount() {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  act(() => { root.render(<Harness />); });
+  const render = (open: boolean) => act(() => { root.render(<Harness editorOpen={open} />); });
+  render(true);
+  rerender = render;
   mounted.push({ root, container });
 }
+/** Close the Image editor and open it again: a NEW draft session. */
+const startNewDraft = () => { rerender!(false); rerender!(true); };
 afterEach(() => {
   for (const m of mounted) { act(() => { m.root.unmount(); }); m.container.remove(); }
-  mounted = []; api = null; placed = []; vi.clearAllMocks();
+  mounted = []; api = null; placed = []; rerender = null; vi.clearAllMocks();
 });
 
 const save = async () => {
@@ -216,5 +227,71 @@ describe('ordinary Image Post ownership', () => {
     // pair was never created, so there is nothing partial to undo.
     expect(fake.rows.size).toBe(0);
     expect(placed).toHaveLength(0);
+  });
+
+  it('C1-blocker: a committed save whose read-back failed must not capture the NEXT image',
+    async () => {
+      // The exact scenario the independent review proved. Draft A commits, its
+      // read-back fails, the user abandons it and saves a DIFFERENT image.
+      const options = { rpcFails: false, readBackFails: true };
+      const fake = installFakeSupabase(options);
+      mount();
+      await act(async () => {
+        try { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); } catch { /* read-back */ }
+      });
+      expect(fake.rows.size).toBe(1);
+      options.readBackFails = false;
+
+      startNewDraft();
+      await act(async () => { await api!.saveImage({ imageUrl: SECOND, source: 'upload' }); });
+
+      const idA = fake.calls[0].args.p_padlet_id;
+      const idB = fake.calls[1].args.p_padlet_id;
+      // A new draft is a new request: it may never inherit A's identity, or the
+      // RPC's genuine-retry path would hand back A and discard this image.
+      expect(idB).not.toBe(idA);
+      const stored = [...fake.rows.values()].map((r) => r.file_url);
+      expect(stored).toContain(SECOND);
+      expect(fake.rows.size).toBe(2);
+    });
+
+  it('C1: a refused draft, then a new draft, get different identities', async () => {
+    const options = { rpcFails: true, readBackFails: false };
+    const fake = installFakeSupabase(options);
+    mount();
+    await save();
+    const refusedId = fake.calls[0].args.p_padlet_id;
+    // Same draft, retried: the identity is kept.
+    await save();
+    expect(fake.calls[1].args.p_padlet_id).toBe(refusedId);
+    // A different draft: a fresh identity, even though the old one was unused.
+    options.rpcFails = false;
+    startNewDraft();
+    await save();
+    expect(fake.calls[2].args.p_padlet_id).not.toBe(refusedId);
+  });
+
+  it('C1: two ordinary successful drafts are two distinct durable Images', async () => {
+    const fake = installFakeSupabase();
+    mount();
+    await act(async () => { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); });
+    startNewDraft();
+    await act(async () => { await api!.saveImage({ imageUrl: SECOND, source: 'upload' }); });
+    expect(fake.calls[1].args.p_padlet_id).not.toBe(fake.calls[0].args.p_padlet_id);
+    const stored = [...fake.rows.values()].map((r) => r.file_url);
+    expect(stored).toEqual([FIRST, SECOND]);
+    // Two drafts, two durable Library objects -- never deduplicated by content.
+    expect(new Set([...fake.rows.values()].map((r) => r.library_item_id)).size).toBe(2);
+  });
+
+  it('C1: the same image saved twice as two drafts stays two Images', async () => {
+    const fake = installFakeSupabase();
+    mount();
+    await act(async () => { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); });
+    startNewDraft();
+    await act(async () => { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); });
+    // Identical bytes, two deliberate creations: identity is the draft, never
+    // the file url, the name or the pixels.
+    expect(fake.rows.size).toBe(2);
   });
 });

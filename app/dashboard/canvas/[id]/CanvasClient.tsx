@@ -2266,6 +2266,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsCommentEditorOpen,
     setIsCardEditorOpen,
     setIsImageEditorOpen,
+    // C1: the draft-session boundary the image save identity is scoped to.
+    isImageEditorOpen,
     setIsDrawingEditorOpen,
     setIsAIComponentEditorOpen,
     setPendingPostDraft,
