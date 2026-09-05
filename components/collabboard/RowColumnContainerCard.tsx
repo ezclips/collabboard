@@ -395,6 +395,10 @@ export default function RowColumnContainerCard({
                   width: libData.width || 300,
                   height: libData.height || 200,
                   file_url: fileUrl,
+                  // Reuse, not creation: this container placement references the
+                  // Library object the dragged item already is. No library_items
+                  // row is written here.
+                  library_item_id: libData.libraryItemId ?? null,
                 };
                 onDropDraftIntoContainer?.(padlet.id, draftPayload);
                 return;

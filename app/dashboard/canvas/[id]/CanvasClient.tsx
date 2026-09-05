@@ -5795,6 +5795,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         file_url: fileUrl || null,
         created_at: now,
         updated_at: now,
+        // Reuse, not creation: the timeline placement references the Library
+        // object the drag already carried. No library_items row is written.
+        library_item_id: draftPayload.library_item_id ?? null,
         metadata: {
           ...draftPayload.metadata,
           parentId: containerId,
@@ -6041,6 +6044,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         file_size: (payload.file_size as number) || undefined,
         created_at: now,
         updated_at: now,
+        // Reuse, not creation: the scheduled placement references the Library
+        // object the drag already carried. Slot metadata stays local below.
+        library_item_id: (payload.libraryItemId as string | undefined) ?? null,
         metadata: {
           ...sanitizedMetadata,
           parentId: containerId,
@@ -6764,6 +6770,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       height: (drawingPendingDraft as any).height || 200,
       created_at: nowIso,
       updated_at: nowIso,
+      // The drawing prompt is a placement branch, not a creation one: forward
+      // whatever durable Library link the staged draft arrived with. A draft
+      // that was never Library-backed stays NULL.
+      library_item_id: (drawingPendingDraft as any).library_item_id ?? null,
       metadata: { ...childMetadata, parentId: containerId } as any,
     };
 
@@ -8255,6 +8265,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     width: itemContent.width || 300,
                     height: itemContent.height || 200,
                     file_url: fileUrl || null,
+                    // Reuse, not creation: this layout-aware placement points at
+                    // the Library object the drag already carried, on both the
+                    // drawing-container branch and the direct insert below.
+                    library_item_id: itemContent.libraryItemId ?? null,
                     metadata: {
                       ...cleanMetadata,
                       imageUrl: itemContent.metadata?.imageUrl || fileUrl,

@@ -111,6 +111,14 @@ export interface Padlet {
   updated_at: string;
   is_pinned?: boolean;
   likes_count?: number;
+  /**
+   * Durable reference to the library_items row this placement reuses.
+   * Provenance only: rendering stays on the placement's own snapshot
+   * (file_url/content/metadata), so a collaborator never needs SELECT on
+   * another user's private Library row. Nullable -- a placement that was
+   * never Library-backed, or whose Library item was deleted, keeps working.
+   */
+  library_item_id?: string | null;
   metadata?: {
     // Scheduler-specific metadata
     start_date?: string;

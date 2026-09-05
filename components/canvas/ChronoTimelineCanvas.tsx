@@ -300,6 +300,9 @@ export default function ChronoTimelineCanvas({
           width: libData.width || 300,
           height: libData.height || 200,
           file_url: fileUrl,
+          // Reuse, not creation: the placement points at the Library object the
+          // dragged item already is. No library_items row is written here.
+          library_item_id: libData.libraryItemId ?? null,
         };
       } catch (err) {
         console.error('Failed to parse library payload:', err);
@@ -468,6 +471,8 @@ export default function ChronoTimelineCanvas({
                   width: libData.width || 300,
                   height: libData.height || 200,
                   file_url: fileUrl,
+                  // Reuse, not creation -- same durable Library object.
+                  library_item_id: libData.libraryItemId ?? null,
                 };
                 onDropDraftIntoContainer?.(container.id, draftPayload);
                 return;

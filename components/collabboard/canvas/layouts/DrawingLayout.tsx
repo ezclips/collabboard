@@ -1175,6 +1175,11 @@ export function DrawingEmbeddableCard({
           metadata: { parentId: padlet.id } as any,
           width: libData.width || 300,
           height: libData.height || 200,
+          // Reuse, not creation. Two payload shapes reach this drop: a direct
+          // Library drag (`libraryItemId`) and a ghost draft re-serialised from
+          // a placement draft (already the `library_item_id` column name). A
+          // ghost that was never Library-backed carries neither and stays NULL.
+          library_item_id: libData.libraryItemId ?? libData.library_item_id ?? null,
           // Transient, and only when THIS payload carries it.
           ...(libData.sourceReference ? { sourceReference: libData.sourceReference } : {}),
         });
@@ -4629,6 +4634,9 @@ export default function DrawingLayout({
               width: item.width || 320,
               height: item.height || 280,
               metadata: { ...cleanMeta, forceContainerPrompt: true },
+              // Reuse, not creation: rides the draft through the container
+              // prompt into whichever placement branch the user picks.
+              library_item_id: item.libraryItemId ?? null,
               // Transient, and only when THIS payload carries it.
               ...(item.sourceReference ? { sourceReference: item.sourceReference } : {}),
             });
