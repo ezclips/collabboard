@@ -6215,6 +6215,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         file_name: content.file_name,
         file_type: content.file_type,
         file_size: content.file_size,
+        // Reuse, not creation: this placement points at the Library object the
+        // item already is. No library_items row is written here.
+        library_item_id: content.libraryItemId ?? null,
       });
     } catch (err) {
       console.error('Failed to create padlet from library item:', err);

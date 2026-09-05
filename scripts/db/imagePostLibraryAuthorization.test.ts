@@ -197,3 +197,71 @@ describe('IMAGE-LIBRARY-1-C1 RPC authorization', () => {
     expect(await counts()).toEqual({ padlets: 1, library: 1 });
   });
 });
+
+describe('IMAGE-LIBRARY-REUSE-LINK-1 placing an existing Library Image', () => {
+  const REUSE = 'c2000000-0000-0000-0000-0000000000e1';
+  const REUSE2 = 'c2000000-0000-0000-0000-0000000000e2';
+
+  /** What the reuse drop does: a placement row, and NO library_items write. */
+  const place = (padletId: string, libraryItemId: string | null) => db.query(
+    `INSERT INTO public.padlets (id, board_id, title, type, file_url, metadata, library_item_id)
+     VALUES ($1::uuid, $2::uuid, 'reused', 'image', $3, '{}'::jsonb, $4::uuid)`,
+    [padletId, BOARD, IMAGE, libraryItemId]);
+
+  it('1-4. reuse links the SAME durable object and never creates a second one', async () => {
+    const created = await call(OWNER, P1, BOARD, OWNER);
+    expect(created.ok).toBe(true);
+    const libraryId = created.ok ? created.libraryItemId : '';
+    const before = await counts();
+    expect(before.library).toBe(1);
+
+    await place(REUSE, libraryId);
+    await place(REUSE2, libraryId);
+
+    const after = await counts();
+    // One Library object, three placements (the original plus two reuses).
+    expect(after.library).toBe(before.library);
+    expect(after.padlets).toBe(before.padlets + 2);
+    const { rows } = await db.query(
+      'SELECT id, library_item_id, file_url FROM public.padlets WHERE id = ANY($1::uuid[]) ORDER BY id',
+      [[REUSE, REUSE2]]);
+    expect(rows.map((r) => r.library_item_id)).toEqual([libraryId, libraryId]);
+    // Same durable asset on every placement -- nothing was re-uploaded.
+    expect(rows.map((r) => r.file_url)).toEqual([IMAGE, IMAGE]);
+    // Each placement keeps its own board-local identity.
+    expect(new Set(rows.map((r) => r.id)).size).toBe(2);
+  });
+
+  it('6-7. delete semantics survive reuse in both directions', async () => {
+    const created = await call(OWNER, P1, BOARD, OWNER);
+    const libraryId = created.ok ? created.libraryItemId : '';
+    await place(REUSE, libraryId);
+    await place(REUSE2, libraryId);
+
+    // Removing one placement leaves the Library object and the others.
+    await db.query('DELETE FROM public.padlets WHERE id = $1::uuid', [REUSE]);
+    expect((await counts()).library).toBe(1);
+    const still = await db.query(
+      'SELECT library_item_id FROM public.padlets WHERE id = $1::uuid', [REUSE2]);
+    expect(still.rows[0].library_item_id).toBe(libraryId);
+
+    // Removing the Library object leaves every placement standing, link nulled,
+    // and their own snapshot still renderable.
+    await db.query('DELETE FROM public.library_items WHERE id = $1::uuid', [libraryId]);
+    const after = await db.query(
+      'SELECT library_item_id, file_url FROM public.padlets WHERE id = $1::uuid', [REUSE2]);
+    expect(after.rows).toHaveLength(1);
+    expect(after.rows[0].library_item_id).toBeNull();
+    expect(after.rows[0].file_url).toBe(IMAGE);
+  });
+
+  it('a placement with no durable link is still valid', async () => {
+    // An older drag, or a snapshot with no row behind it: the column is
+    // nullable precisely so this keeps working.
+    await place(REUSE, null);
+    const { rows } = await db.query(
+      'SELECT library_item_id, file_url FROM public.padlets WHERE id = $1::uuid', [REUSE]);
+    expect(rows[0].library_item_id).toBeNull();
+    expect(rows[0].file_url).toBe(IMAGE);
+  });
+});

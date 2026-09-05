@@ -1,6 +1,18 @@
 import { supabase } from '@/lib/supabase';
 
 export interface LibraryItemContent {
+    /**
+     * IMAGE-LIBRARY-REUSE-LINK-1: the durable library_items.id this snapshot
+     * came from, carried through the drag so a placement created by reuse can
+     * reference the SAME durable object instead of losing the relationship.
+     *
+     * Optional: a snapshot may legitimately have no durable row behind it (a
+     * hand-built payload, or an older drag), and it is a REFERENCE only --
+     * rendering still comes from the snapshot below, which is what keeps a
+     * shared board card readable by collaborators who cannot see the
+     * creator's private Library row.
+     */
+    libraryItemId?: string;
     title: string;
     content: string;
     type?: string;

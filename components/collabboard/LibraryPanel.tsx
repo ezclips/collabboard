@@ -648,9 +648,13 @@ export default function LibraryPanel({
                                                                                 return;
                                                                             }
 
+                                                                            // Carry the durable Library identity alongside the
+                                                                            // snapshot: placing this item is REUSE, so the new
+                                                                            // placement must reference the same library_items row
+                                                                            // rather than becoming an unrelated copy.
                                                                             e.dataTransfer.setData(
                                                                                 'application/collabboard-library',
-                                                                                JSON.stringify(item.content),
+                                                                                JSON.stringify({ ...item.content, libraryItemId: item.id }),
                                                                             );
                                                                             e.dataTransfer.effectAllowed = 'copyMove';
                                                                         }}
