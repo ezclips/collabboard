@@ -294,4 +294,80 @@ describe('ordinary Image Post ownership', () => {
     // the file url, the name or the pixels.
     expect(fake.rows.size).toBe(2);
   });
+
+  it('C2-blocker: changing the image after a committed-but-unread save is a NEW request',
+    async () => {
+      // The editor never closes here -- this is the SAME draft session. What
+      // changes is what the user is saving, and that makes it a different
+      // request: reusing the id would hand back the first Image and discard
+      // this one.
+      const options = { rpcFails: false, readBackFails: true };
+      const fake = installFakeSupabase(options);
+      mount();
+      await act(async () => {
+        try { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); } catch { /* read-back */ }
+      });
+      expect(fake.rows.size).toBe(1);
+      options.readBackFails = false;
+
+      // The user picks a different image, still inside the open editor.
+      await act(async () => { await api!.saveImage({ imageUrl: SECOND, source: 'upload' }); });
+
+      expect(fake.calls[1].args.p_padlet_id).not.toBe(fake.calls[0].args.p_padlet_id);
+      const stored = [...fake.rows.values()].map((r) => r.file_url);
+      expect(stored).toEqual([FIRST, SECOND]);
+      expect(fake.rows.size).toBe(2);
+    });
+
+  it('C2: an unchanged retry after a committed-but-unread save keeps ONE Image', async () => {
+    // The complement, and the reason the id may not simply be cleared on error:
+    // this retry must resolve to the row that already exists.
+    const options = { rpcFails: false, readBackFails: true };
+    const fake = installFakeSupabase(options);
+    mount();
+    await act(async () => {
+      try { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); } catch { /* read-back */ }
+    });
+    options.readBackFails = false;
+    await act(async () => { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); });
+    expect(fake.calls[1].args.p_padlet_id).toBe(fake.calls[0].args.p_padlet_id);
+    expect(fake.rows.size).toBe(1);
+  });
+
+  it('C2: a material metadata change after a REFUSED save is a new request', async () => {
+    const options = { rpcFails: true, readBackFails: false };
+    const fake = installFakeSupabase(options);
+    mount();
+    await save();                                   // refused, nothing persisted
+    const refusedId = fake.calls[0].args.p_padlet_id;
+    options.rpcFails = false;
+    // Same image, but a material metadata field the user chose has changed.
+    await act(async () => {
+      await api!.saveImage({ imageUrl: IMAGE_URL, source: 'upload', caption: 'a caption', cardColor: '#ff0000' });
+    });
+    expect(fake.calls[1].args.p_padlet_id).not.toBe(refusedId);
+  });
+
+  it('C2: an unchanged retry after a refusal keeps the same request id', async () => {
+    const options = { rpcFails: true, readBackFails: false };
+    const fake = installFakeSupabase(options);
+    mount();
+    await save();
+    await save();
+    expect(fake.calls[1].args.p_padlet_id).toBe(fake.calls[0].args.p_padlet_id);
+  });
+
+  it('C2: the request identity does not change from a rerender alone', async () => {
+    const options = { rpcFails: false, readBackFails: true };
+    const fake = installFakeSupabase(options);
+    mount();
+    await act(async () => {
+      try { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); } catch { /* read-back */ }
+    });
+    for (let i = 0; i < 4; i += 1) rerender!(true);   // true -> true
+    options.readBackFails = false;
+    await act(async () => { await api!.saveImage({ imageUrl: FIRST, source: 'upload' }); });
+    expect(fake.calls[1].args.p_padlet_id).toBe(fake.calls[0].args.p_padlet_id);
+    expect(fake.rows.size).toBe(1);
+  });
 });

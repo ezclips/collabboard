@@ -138,6 +138,8 @@ function Harness({ worldCenter }: { worldCenter: { x: number; y: number } }) {
     setIsCommentEditorOpen: () => {},
     setIsCardEditorOpen: () => {},
     setIsImageEditorOpen: () => {},
+    // C2: the draft-session signal the image save identity is scoped to.
+    isImageEditorOpen: true,
     setIsDrawingEditorOpen: () => {},
     setIsAIComponentEditorOpen: () => {},
     setPendingPostDraft: () => {},

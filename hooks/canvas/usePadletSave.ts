@@ -227,11 +227,16 @@ export type UsePadletSaveParams = {
   setIsCardEditorOpen: (v: boolean) => void;
   setIsImageEditorOpen: (v: boolean) => void;
   /**
-   * ORDINARY-IMAGE-LIBRARY-C1: observed, never set here. Opening the Image
+   * ORDINARY-IMAGE-LIBRARY-C1/C2: observed, never set here. Opening the Image
    * editor begins a new draft SESSION, and the durable creation identity below
-   * belongs to that session -- see the effect in the hook body.
+   * is scoped to that session -- see the effect in the hook body.
+   *
+   * REQUIRED, deliberately: an omitted signal would silently un-scope the
+   * identity and resurrect the "next Image inherits the previous id" defect,
+   * which is exactly the kind of bug a new call site should not be able to
+   * reintroduce by forgetting a field.
    */
-  isImageEditorOpen?: boolean;
+  isImageEditorOpen: boolean;
   setIsDrawingEditorOpen: (v: boolean) => void;
   setIsAIComponentEditorOpen: (v: boolean) => void;
   // Placement prompt setters
@@ -262,10 +267,17 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
   const supabase = useMemo(() => supabaseBrowser(), []);
-  // IMAGE-LIBRARY: the durable creation identity of the new-Image draft
-  // currently open. Held so a repeated Done within ONE draft reuses it and the
-  // atomic RPC treats the second call as a retry of the same request.
-  const newImagePadletIdRef = useRef<string | null>(null);
+  // IMAGE-LIBRARY: the durable creation identity of the new-Image request
+  // currently outstanding, and the request it belongs to.
+  //
+  // An id may be reused only when BOTH still hold: the same draft session (the
+  // effect below), and the same material payload. A retry of the SAME request
+  // must reuse it -- otherwise a save that committed but whose read-back failed
+  // would create a second durable Image. But once the user changes what they
+  // are saving it is a DIFFERENT request, and reusing the id would make the
+  // RPC's genuine-retry path hand back the old Image and silently discard the
+  // new one.
+  const newImageRequestRef = useRef<{ fingerprint: string; padletId: string } | null>(null);
   const imageEditorWasOpenRef = useRef(false);
   const {
     canvasId,
@@ -315,7 +327,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // is what decides when the identity changes.
   useEffect(() => {
     if (isImageEditorOpen && !imageEditorWasOpenRef.current) {
-      newImagePadletIdRef.current = null;
+      newImageRequestRef.current = null;
     }
     imageEditorWasOpenRef.current = !!isImageEditorOpen;
   }, [isImageEditorOpen]);
@@ -1257,13 +1269,23 @@ export function usePadletSave(params: UsePadletSaveParams) {
         // rule forbids. The RPC is SECURITY INVOKER and binds p_user_id to
         // auth.uid(), so board RLS stays the authority and no elevated key is
         // involved -- this is the ordinary authenticated browser client.
-        // One id per draft, so a double Done is a RETRY the RPC recognises
-        // rather than a second Image with a second Library object. Claimed
-        // SYNCHRONOUSLY, before the first await: two clicks that land in the
-        // same tick must share it, and anything after an await would already
-        // have let the second call through with an id of its own.
-        const padletId = newImagePadletIdRef.current ?? crypto.randomUUID();
-        newImagePadletIdRef.current = padletId;
+        // The identity of THIS request. Claimed SYNCHRONOUSLY, before the
+        // first await: two Done clicks landing in the same tick must share it,
+        // and anything after an await would already have let the second call
+        // through with an id of its own.
+        //
+        // The fingerprint covers what the user chose -- the image and its
+        // metadata -- and deliberately NOT the derived position, which is
+        // recomputed from the camera on every save and would make an ordinary
+        // retry look like a new request. It is a WITHIN-REQUEST comparison
+        // only: two separate drafts of the same file still get separate ids and
+        // separate Library objects.
+        const requestFingerprint = JSON.stringify({ file_url: data.imageUrl, metadata });
+        const held = newImageRequestRef.current;
+        const padletId = held !== null && held.fingerprint === requestFingerprint
+          ? held.padletId
+          : crypto.randomUUID();
+        newImageRequestRef.current = { fingerprint: requestFingerprint, padletId };
         const { data: auth } = await supabase.auth.getUser();
         const userId = auth?.user?.id;
         if (!userId) throw new Error('Not signed in');
@@ -1286,7 +1308,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         const { data: newImage, error } = await supabase
           .from('padlets').select().eq('id', padletId).single();
         if (error) throw error;
-        newImagePadletIdRef.current = null;
+        newImageRequestRef.current = null;
         createdPadlet = newImage;
       } else {
         // Update Image -- title is left untouched here; it's only ever
