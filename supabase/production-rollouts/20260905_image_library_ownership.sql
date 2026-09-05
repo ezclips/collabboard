@@ -29,11 +29,31 @@
 -- two distinct objects -- so inventing relationships would manufacture
 -- provenance nobody asserted. A backfill would be a SEPARATE reviewed gate.
 --
+-- ENTRY STATES. Exactly two are accepted, and NOTHING is ever repaired:
+--
+--   ABSENT   link column and function both missing        -> install
+--   EXACT    every object already in the reviewed form,   -> re-apply
+--            including the function's canonical body
+--            digest, owner, configuration and full ACL
+--
+-- Anything else ABORTS before the first mutation and the operator decides. The
+-- initial pre-hardening function body is deliberately NOT an accepted entry
+-- state: this batch is transactional, so a failed run leaves nothing behind and
+-- that body can never be a legitimate resting state in production.
+--
+-- CANONICAL FUNCTION IDENTITY. Keyword checks cannot tell a hardened body from
+-- a weakened one that still mentions the same identifiers, so the authority
+-- here is md5(pg_proc.prosrc) -- the stored body, byte for byte as the reviewed
+-- migration wrote it -- pinned below and re-derived from that migration file by
+-- scripts/db/imageLibraryRollout.source.test.ts. Signature, result type,
+-- security posture, configuration, owner and the complete ACL are asserted
+-- alongside it, because a body digest alone says nothing about who may call it.
+--
 -- RELEASE ORDER -- DB FIRST, APPLICATION SECOND. Do not reverse it:
 --   1. Confirm the reviewed application code is still UNDEPLOYED.
 --   2. Apply this rollout.
 --   3. Run 20260905_image_library_ownership_verify.sql.
---   4. Require every section's `pass` to be true and rollout_readiness true.
+--   4. Require rollout_readiness true; it is the conjunction of every check.
 --   5. Only then deploy the reviewed application code (PDF-area Image
 --      ownership, ordinary NEW Image ownership, Freeform Library reuse, and
 --      the non-Freeform layout reuse links).
@@ -43,126 +63,108 @@
 -- column production does not yet have.
 --
 -- Backward compatible with the CURRENTLY deployed application: the column is
--- nullable with no default, so existing INSERTs that never name it keep
--- working, existing readers never see it, and a function nothing calls yet is
--- inert.
+-- nullable AND carries NO DEFAULT, so existing INSERTs that never name it keep
+-- writing NULL. A default would generate an id with no library_items row behind
+-- it and every such INSERT would fail the foreign key -- which is why a
+-- pre-existing default is refused rather than accepted.
 
 BEGIN;
 
--- Fail before any schema or privilege mutation unless production is in a state
--- this rollout recognises.
---
---   PRE-IMAGE-LIBRARY   column, FK, index and function absent  -> apply
---   POST-IMAGE-LIBRARY  all present in the EXACT reviewed form -> re-apply
---   anything else                                              -> ABORT
---
--- Re-application is deliberately safe: every statement below is idempotent.
--- What is NOT safe is converging a state this rollout did not author, so drift
--- aborts and the operator decides. A column present WITHOUT its foreign key can
--- never come from this file -- the two land in one transaction -- so that state
--- is foreign drift, not a partial run.
 DO $preflight$
 DECLARE
-    prerequisites constant text[] := ARRAY[
-        'public.padlets',
-        'public.library_items',
-        'public.boards',
-        'public.board_collaborators'
-    ];
-    prerequisite text;
-    expected_signature constant text :=
+    -- The canonical body of the FINAL hardened function. Derived from
+    -- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql
+    -- and re-derived from that same file by the source test, so it can never
+    -- drift into an unexplained constant.
+    expected_body_md5 constant text := 'e5b8ce9de5a443313593af4ee71c28b8';
+    expected_identity constant text :=
+        'p_padlet_id uuid, p_board_id uuid, p_user_id uuid, p_title text,'
+        ' p_content text, p_position_x double precision,'
+        ' p_position_y double precision, p_width double precision,'
+        ' p_height double precision, p_file_url text, p_metadata jsonb';
+    expected_result constant text := 'TABLE(padlet_id uuid, library_item_id uuid)';
+    expected_owner constant text := 'postgres';
+    expected_config constant text[] := ARRAY['search_path=public'];
+    expected_index constant text :=
+        'CREATE INDEX padlets_library_item_id_idx ON public.padlets'
+        ' USING btree (library_item_id) WHERE (library_item_id IS NOT NULL)';
+    signature constant text :=
         'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
         ' double precision, double precision, double precision, double precision,'
         ' text, jsonb)';
+    fn oid;
     missing text;
     link_type text;
     link_nullable text;
+    link_default text;
+    fk_count integer;
     fk_rule text;
     fk_target text;
     index_definition text;
     overloads integer;
+    actual_acl text[];
+    expected_acl text[];
+    actual text;
 BEGIN
-    -- The live tables this feature hangs off. Every one is a foreign key
-    -- target, an authorization join target, or an insert target.
-    FOREACH prerequisite IN ARRAY prerequisites LOOP
-        IF to_regclass(prerequisite) IS NULL THEN
+    -- 1. PREREQUISITES. Every table, and every column, the FINAL hardened
+    -- function reads or writes. Traced from that function, not assumed: a
+    -- missing one would otherwise surface as a runtime failure on the first
+    -- real save, long after this rollout reported success.
+    FOREACH actual IN ARRAY ARRAY[
+        'public.padlets', 'public.library_items',
+        'public.boards', 'public.board_collaborators'
+    ] LOOP
+        IF to_regclass(actual) IS NULL THEN
             RAISE EXCEPTION
-                'IMAGE-LIBRARY rollout preflight failed: % is missing', prerequisite;
+                'IMAGE-LIBRARY rollout preflight failed: % is missing', actual;
         END IF;
     END LOOP;
 
-    -- The hardened body binds the logical actor to the JWT subject.
     IF to_regprocedure('auth.uid()') IS NULL THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY rollout preflight failed: auth.uid() is missing';
     END IF;
 
-    -- Key types must match or the foreign key cannot be created.
-    IF (SELECT data_type FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'padlets'
-           AND column_name = 'id') IS DISTINCT FROM 'uuid' THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: public.padlets.id is not uuid';
-    END IF;
-    IF (SELECT data_type FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'library_items'
-           AND column_name = 'id') IS DISTINCT FROM 'uuid' THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: public.library_items.id is not uuid';
-    END IF;
-
-    -- Every column the function names: a missing one would otherwise surface as
-    -- a runtime failure on the first real save.
-    SELECT string_agg(required, ', ' ORDER BY required) INTO missing
-      FROM unnest(ARRAY[
-            'id', 'board_id', 'title', 'content', 'type', 'position_x',
-            'position_y', 'width', 'height', 'file_url', 'metadata'
-           ]) AS required
+    -- The manifest is mirrored in the source test, so a future change to the
+    -- function's dependencies has to be reviewed here rather than shipped.
+    SELECT string_agg(t || '.' || c, ', ' ORDER BY t, c) INTO missing
+      FROM (
+        VALUES
+            ('boards', 'id'), ('boards', 'user_id'),
+            ('board_collaborators', 'board_id'), ('board_collaborators', 'user_id'),
+            ('board_collaborators', 'role'),
+            ('padlets', 'id'), ('padlets', 'board_id'), ('padlets', 'title'),
+            ('padlets', 'content'), ('padlets', 'type'), ('padlets', 'position_x'),
+            ('padlets', 'position_y'), ('padlets', 'width'), ('padlets', 'height'),
+            ('padlets', 'file_url'), ('padlets', 'metadata'),
+            ('library_items', 'id'), ('library_items', 'user_id'),
+            ('library_items', 'title'), ('library_items', 'type'),
+            ('library_items', 'content'), ('library_items', 'thumbnail_url'),
+            ('library_items', 'is_public')
+      ) AS required(t, c)
      WHERE NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'padlets'
-           AND column_name = required);
+         WHERE table_schema = 'public' AND table_name = required.t
+           AND column_name = required.c);
     IF missing IS NOT NULL THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: public.padlets is missing %', missing;
+            'IMAGE-LIBRARY rollout preflight failed: missing required column(s): %', missing;
     END IF;
 
-    SELECT string_agg(required, ', ' ORDER BY required) INTO missing
-      FROM unnest(ARRAY[
-            'id', 'user_id', 'title', 'type', 'content', 'thumbnail_url', 'is_public'
-           ]) AS required
-     WHERE NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'library_items'
-           AND column_name = required);
-    IF missing IS NOT NULL THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: public.library_items is missing %', missing;
-    END IF;
+    -- Key types the foreign key and the authority joins depend on.
+    FOREACH actual IN ARRAY ARRAY['padlets.id', 'library_items.id', 'boards.id'] LOOP
+        IF (SELECT data_type FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = split_part(actual, '.', 1)
+               AND column_name = split_part(actual, '.', 2)) IS DISTINCT FROM 'uuid' THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: public.% is not uuid', actual;
+        END IF;
+    END LOOP;
 
-    -- The board-authority branch the hardened body reproduces.
-    SELECT string_agg(required, ', ' ORDER BY required) INTO missing
-      FROM unnest(ARRAY['board_id', 'user_id', 'role']) AS required
-     WHERE NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'board_collaborators'
-           AND column_name = required);
-    IF missing IS NOT NULL THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: public.board_collaborators is missing %', missing;
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'boards'
-           AND column_name = 'user_id') THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: public.boards.user_id is missing';
-    END IF;
-
-    -- An already-present link column must be EXACTLY the reviewed one. A
-    -- different type or a NOT NULL would break every existing INSERT that
-    -- omits it, which is the backward-compatibility promise of this gate.
-    SELECT data_type, is_nullable INTO link_type, link_nullable
+    -- 2. THE LINK COLUMN. Present means it must ALREADY be exactly right.
+    SELECT data_type, is_nullable, column_default
+      INTO link_type, link_nullable, link_default
       FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = 'padlets'
        AND column_name = 'library_item_id';
@@ -177,10 +179,31 @@ BEGIN
             RAISE EXCEPTION
                 'IMAGE-LIBRARY rollout preflight failed: padlets.library_item_id is NOT NULL';
         END IF;
+        -- A default would hand every legacy INSERT a library id with no row
+        -- behind it, and the foreign key would reject the write. The reviewed
+        -- migration creates none, so any default is drift.
+        IF link_default IS NOT NULL THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: padlets.library_item_id has DEFAULT %, expected none',
+                link_default;
+        END IF;
 
-        -- ADD COLUMN IF NOT EXISTS carries its REFERENCES clause only when it
-        -- actually adds the column, so an existing column with no foreign key
-        -- would silently stay unlinked. Both land together here or not at all.
+        -- Exactly ONE foreign key, and the right one. Counting matters: an
+        -- extra CASCADE key alongside the correct SET NULL key would delete
+        -- board placements when a personal Library item is removed.
+        SELECT count(*) INTO fk_count
+          FROM information_schema.key_column_usage AS k
+          JOIN information_schema.referential_constraints AS rc
+            ON rc.constraint_name = k.constraint_name
+           AND rc.constraint_schema = k.constraint_schema
+         WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
+           AND k.column_name = 'library_item_id';
+        IF fk_count <> 1 THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: padlets.library_item_id has % foreign keys, expected exactly 1',
+                fk_count;
+        END IF;
+
         SELECT rc.delete_rule,
                ccu.table_schema || '.' || ccu.table_name || '(' || ccu.column_name || ')'
           INTO fk_rule, fk_target
@@ -193,11 +216,6 @@ BEGIN
            AND ccu.constraint_schema = k.constraint_schema
          WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
            AND k.column_name = 'library_item_id';
-
-        IF fk_rule IS NULL THEN
-            RAISE EXCEPTION
-                'IMAGE-LIBRARY rollout preflight failed: padlets.library_item_id exists with no foreign key';
-        END IF;
         IF fk_target IS DISTINCT FROM 'public.library_items(id)' THEN
             RAISE EXCEPTION
                 'IMAGE-LIBRARY rollout preflight failed: padlets.library_item_id references %, expected public.library_items(id)',
@@ -214,7 +232,6 @@ BEGIN
     -- outlaw reuse, so it aborts whether or not this rollout ran.
     IF EXISTS (
         SELECT 1 FROM pg_index AS i
-          JOIN pg_class AS c ON c.oid = i.indexrelid
          WHERE i.indrelid = to_regclass('public.padlets')
            AND i.indisunique
            AND EXISTS (
@@ -229,37 +246,94 @@ BEGIN
     END IF;
 
     -- CREATE INDEX IF NOT EXISTS matches on NAME alone, so an index holding
-    -- this name with a different shape would be silently kept.
+    -- this name with any other shape would be silently kept. Exact text, not a
+    -- pattern: a different column, predicate or method is all drift.
     SELECT indexdef INTO index_definition
       FROM pg_indexes
      WHERE schemaname = 'public' AND indexname = 'padlets_library_item_id_idx';
-    IF index_definition IS NOT NULL
-       AND index_definition NOT LIKE '%(library_item_id)%WHERE (library_item_id IS NOT NULL)' THEN
+    -- Absent is acceptable ONLY on a fresh install, where section A creates it.
+    -- Once the link column exists this batch has already run, so a missing or
+    -- reshaped index is drift: CREATE INDEX IF NOT EXISTS matches on NAME
+    -- alone, and silently re-creating one nobody dropped on purpose would be
+    -- exactly the unattended repair this preflight refuses to perform.
+    IF index_definition IS DISTINCT FROM expected_index
+       AND NOT (index_definition IS NULL AND link_type IS NULL) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: padlets_library_item_id_idx has an unexpected definition: %',
-            index_definition;
+            'IMAGE-LIBRARY rollout preflight failed: padlets_library_item_id_idx is %, expected %',
+            COALESCE(index_definition, '(absent)'), expected_index;
     END IF;
 
-    -- Replacement is BY SIGNATURE: a same-named function with other argument
-    -- types would stand beside the reviewed one as a reachable overload.
+    -- 3. THE FUNCTION. Absent, or byte-for-byte the reviewed final contract.
     SELECT count(*) INTO overloads
-      FROM pg_proc AS p
-      JOIN pg_namespace AS n ON n.oid = p.pronamespace
+      FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public'
        AND p.proname = 'create_image_post_with_library_item'
-       AND p.oid <> COALESCE(to_regprocedure(expected_signature), 0);
+       AND p.oid <> COALESCE(to_regprocedure(signature), 0);
     IF overloads > 0 THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY rollout preflight failed: % unexpected overload(s) of create_image_post_with_library_item',
             overloads;
     END IF;
 
-    -- Replacing a SECURITY DEFINER copy would tighten rather than widen, but it
-    -- is still a body nobody here authored: fail closed.
-    IF to_regprocedure(expected_signature) IS NOT NULL
-       AND (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure(expected_signature)) THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY rollout preflight failed: existing create_image_post_with_library_item is SECURITY DEFINER';
+    fn := to_regprocedure(signature);
+    IF fn IS NOT NULL THEN
+        -- The body. This is what a keyword check cannot do: a viewer-allowing,
+        -- retry-bypassing or reordered body still mentions every identifier the
+        -- hardened one does, and still differs here on the first byte changed.
+        SELECT md5(prosrc) INTO actual FROM pg_proc WHERE oid = fn;
+        IF actual <> expected_body_md5 THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: existing function body digest is %, expected % -- refusing to overwrite an unreviewed function',
+                actual, expected_body_md5;
+        END IF;
+
+        SELECT pg_get_function_identity_arguments(fn) INTO actual;
+        IF actual <> expected_identity THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: function arguments are %', actual;
+        END IF;
+        SELECT pg_get_function_result(fn) INTO actual;
+        IF actual <> expected_result THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: function result is %', actual;
+        END IF;
+        IF (SELECT prosecdef FROM pg_proc WHERE oid = fn) THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: existing function is SECURITY DEFINER';
+        END IF;
+        IF (SELECT COALESCE(proconfig, ARRAY[]::text[]) FROM pg_proc WHERE oid = fn)
+             IS DISTINCT FROM expected_config THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: function configuration is %, expected %',
+                (SELECT proconfig FROM pg_proc WHERE oid = fn), expected_config;
+        END IF;
+
+        -- Owner. The repo's schema is owned by postgres throughout, and the
+        -- owner can replace the body at will, so an unexpected owner is an
+        -- authority change even when today's body still matches.
+        SELECT pg_get_userbyid(proowner) INTO actual FROM pg_proc WHERE oid = fn;
+        IF actual <> expected_owner THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: function owner is %, expected %',
+                actual, expected_owner;
+        END IF;
+
+        -- The COMPLETE explicit ACL, not four spot checks: an extra EXECUTE
+        -- grant to any other role is a caller nobody reviewed.
+        SELECT array_agg(entry ORDER BY entry) INTO actual_acl FROM (
+            SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(a.grantee) END
+                   || ':' || a.privilege_type AS entry
+              FROM pg_proc AS p, aclexplode(p.proacl) AS a
+             WHERE p.oid = fn) AS acl;
+        expected_acl := ARRAY[
+            expected_owner || ':EXECUTE', 'authenticated:EXECUTE', 'service_role:EXECUTE'];
+        SELECT array_agg(e ORDER BY e) INTO expected_acl FROM unnest(expected_acl) AS e;
+        IF COALESCE(actual_acl, ARRAY[]::text[]) IS DISTINCT FROM expected_acl THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY rollout preflight failed: function ACL is %, expected %',
+                COALESCE(actual_acl, ARRAY[]::text[]), expected_acl;
+        END IF;
     END IF;
 END;
 $preflight$;
@@ -496,31 +570,45 @@ GRANT EXECUTE ON FUNCTION public.create_image_post_with_library_item(
 ) TO authenticated, service_role;
 
 -- Nothing leaves this transaction unless the committed state is the reviewed
--- one. Every check below reads the catalog it just wrote.
+-- one. Every check reads the catalog this batch just wrote; a failure here
+-- rolls the whole thing back, including section A's column.
 DO $postflight$
 DECLARE
-    expected_signature constant text :=
+    expected_body_md5 constant text := 'e5b8ce9de5a443313593af4ee71c28b8';
+    expected_identity constant text :=
+        'p_padlet_id uuid, p_board_id uuid, p_user_id uuid, p_title text,'
+        ' p_content text, p_position_x double precision,'
+        ' p_position_y double precision, p_width double precision,'
+        ' p_height double precision, p_file_url text, p_metadata jsonb';
+    expected_result constant text := 'TABLE(padlet_id uuid, library_item_id uuid)';
+    expected_owner constant text := 'postgres';
+    expected_config constant text[] := ARRAY['search_path=public'];
+    expected_index constant text :=
+        'CREATE INDEX padlets_library_item_id_idx ON public.padlets'
+        ' USING btree (library_item_id) WHERE (library_item_id IS NOT NULL)';
+    signature constant text :=
         'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
         ' double precision, double precision, double precision, double precision,'
         ' text, jsonb)';
-    body text;
-    authority_at integer;
-    retry_at integer;
+    fn oid;
+    actual text;
+    actual_acl text[];
+    expected_acl text[];
 BEGIN
-    -- Column: present, uuid, and still nullable for the deployed application.
+    -- Column: uuid, nullable, and no default, so a legacy INSERT still writes
+    -- NULL rather than a fabricated id the foreign key would reject.
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
          WHERE table_schema = 'public' AND table_name = 'padlets'
            AND column_name = 'library_item_id'
-           AND data_type = 'uuid' AND is_nullable = 'YES') THEN
+           AND data_type = 'uuid' AND is_nullable = 'YES'
+           AND column_default IS NULL) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: padlets.library_item_id is not a nullable uuid';
+            'IMAGE-LIBRARY postflight failed: padlets.library_item_id is not a nullable uuid with no default';
     END IF;
 
-    -- A Library deletion must NULL the link, never delete the placement.
-    IF NOT EXISTS (
-        SELECT 1
-          FROM information_schema.key_column_usage AS k
+    -- Exactly one foreign key, targeting library_items(id), SET NULL.
+    IF (SELECT count(*) FROM information_schema.key_column_usage AS k
           JOIN information_schema.referential_constraints AS rc
             ON rc.constraint_name = k.constraint_name
            AND rc.constraint_schema = k.constraint_schema
@@ -530,81 +618,95 @@ BEGIN
          WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
            AND k.column_name = 'library_item_id'
            AND ccu.table_schema = 'public' AND ccu.table_name = 'library_items'
-           AND ccu.column_name = 'id'
-           AND rc.delete_rule = 'SET NULL') THEN
+           AND ccu.column_name = 'id' AND rc.delete_rule = 'SET NULL') <> 1
+       OR (SELECT count(*) FROM information_schema.key_column_usage AS k
+             JOIN information_schema.referential_constraints AS rc
+               ON rc.constraint_name = k.constraint_name
+              AND rc.constraint_schema = k.constraint_schema
+            WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
+              AND k.column_name = 'library_item_id') <> 1 THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: the library_items foreign key is missing or is not ON DELETE SET NULL';
+            'IMAGE-LIBRARY postflight failed: padlets.library_item_id does not carry exactly one ON DELETE SET NULL key to library_items(id)';
     END IF;
 
-    -- Reuse must stay possible: one durable object, many placements.
     IF EXISTS (
         SELECT 1 FROM pg_index AS i
-         WHERE i.indrelid = to_regclass('public.padlets')
-           AND i.indisunique
+         WHERE i.indrelid = to_regclass('public.padlets') AND i.indisunique
            AND EXISTS (
                 SELECT 1 FROM unnest(i.indkey) AS k(attnum)
                  WHERE k.attnum = (
                     SELECT a.attnum FROM pg_attribute AS a
                      WHERE a.attrelid = to_regclass('public.padlets')
-                       AND a.attname = 'library_item_id'))
-    ) THEN
+                       AND a.attname = 'library_item_id'))) THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY postflight failed: a UNIQUE index covers padlets.library_item_id';
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes
-         WHERE schemaname = 'public' AND tablename = 'padlets'
-           AND indexname = 'padlets_library_item_id_idx') THEN
+    SELECT indexdef INTO actual FROM pg_indexes
+     WHERE schemaname = 'public' AND indexname = 'padlets_library_item_id_idx';
+    IF actual IS DISTINCT FROM expected_index THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: padlets_library_item_id_idx is missing';
+            'IMAGE-LIBRARY postflight failed: padlets_library_item_id_idx is %, expected %',
+            COALESCE(actual, '(missing)'), expected_index;
     END IF;
 
-    -- Function: present, and SECURITY INVOKER so it reaches but never elevates.
-    IF to_regprocedure(expected_signature) IS NULL THEN
+    fn := to_regprocedure(signature);
+    IF fn IS NULL THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY postflight failed: create_image_post_with_library_item is missing';
     END IF;
-    IF (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure(expected_signature)) THEN
+    IF (SELECT count(*) FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.proname = 'create_image_post_with_library_item') <> 1 THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: create_image_post_with_library_item is SECURITY DEFINER';
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_proc
-         WHERE oid = to_regprocedure(expected_signature)
-           AND proconfig @> ARRAY['search_path=public']) THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: create_image_post_with_library_item has no pinned search_path';
+            'IMAGE-LIBRARY postflight failed: unexpected overloads of create_image_post_with_library_item';
     END IF;
 
-    -- The committed body must be the HARDENED one, not section B's.
-    body := pg_get_functiondef(to_regprocedure(expected_signature));
-    IF position('auth.uid() <> p_user_id' IN body) = 0 THEN
+    -- The committed body is the HARDENED one, proved by digest rather than by
+    -- the presence of words that a weakened body would also contain.
+    SELECT md5(prosrc) INTO actual FROM pg_proc WHERE oid = fn;
+    IF actual <> expected_body_md5 THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: the committed body does not bind the logical actor';
+            'IMAGE-LIBRARY postflight failed: committed function body digest is %, expected %',
+            actual, expected_body_md5;
     END IF;
 
-    authority_at := position('public.board_collaborators' IN body);
-    retry_at := position('LEFT JOIN public.library_items' IN body);
-    IF authority_at = 0 OR retry_at = 0 OR authority_at > retry_at THEN
+    IF pg_get_function_identity_arguments(fn) <> expected_identity
+       OR pg_get_function_result(fn) <> expected_result THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: board authorization does not precede the retry lookup';
+            'IMAGE-LIBRARY postflight failed: unexpected function signature or result type';
+    END IF;
+    IF (SELECT prosecdef FROM pg_proc WHERE oid = fn) THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY postflight failed: function is SECURITY DEFINER';
+    END IF;
+    IF (SELECT COALESCE(proconfig, ARRAY[]::text[]) FROM pg_proc WHERE oid = fn)
+         IS DISTINCT FROM expected_config THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY postflight failed: function configuration is not exactly %', expected_config;
+    END IF;
+    SELECT pg_get_userbyid(proowner) INTO actual FROM pg_proc WHERE oid = fn;
+    IF actual <> expected_owner THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY postflight failed: function owner is %, expected %', actual, expected_owner;
     END IF;
 
-    -- Signed-in callers only.
-    IF has_function_privilege('public', expected_signature, 'EXECUTE')
-       OR has_function_privilege('anon', expected_signature, 'EXECUTE') THEN
+    SELECT array_agg(entry ORDER BY entry) INTO actual_acl FROM (
+        SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC'
+                    ELSE pg_get_userbyid(a.grantee) END
+               || ':' || a.privilege_type AS entry
+          FROM pg_proc AS p, aclexplode(p.proacl) AS a
+         WHERE p.oid = fn) AS acl;
+    expected_acl := ARRAY[
+        expected_owner || ':EXECUTE', 'authenticated:EXECUTE', 'service_role:EXECUTE'];
+    SELECT array_agg(e ORDER BY e) INTO expected_acl FROM unnest(expected_acl) AS e;
+    IF COALESCE(actual_acl, ARRAY[]::text[]) IS DISTINCT FROM expected_acl THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: PUBLIC or anon can execute the function';
-    END IF;
-    IF NOT has_function_privilege('authenticated', expected_signature, 'EXECUTE')
-       OR NOT has_function_privilege('service_role', expected_signature, 'EXECUTE') THEN
-        RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: authenticated or service_role cannot execute the function';
+            'IMAGE-LIBRARY postflight failed: function ACL is %, expected exactly %',
+            COALESCE(actual_acl, ARRAY[]::text[]), expected_acl;
     END IF;
 
-    -- Nothing was backfilled here. A first application leaves this at zero.
-    RAISE NOTICE 'IMAGE-LIBRARY rollout applied. Linked placements present: %. No backfill was performed -- deploy the application code only after the verifier is green.',
+    RAISE NOTICE 'IMAGE-LIBRARY rollout applied. Linked placements present: %. No backfill was performed -- deploy the application code only after the verifier reports rollout_readiness true.',
         (SELECT count(*) FROM public.padlets WHERE library_item_id IS NOT NULL);
 END;
 $postflight$;

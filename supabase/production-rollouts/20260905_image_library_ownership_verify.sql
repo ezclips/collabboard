@@ -1,283 +1,217 @@
 -- Read-only verification for 20260905_image_library_ownership.sql.
--- This file creates no objects and changes no rows. It is safe to run before a
--- rollout, after one, or against a partial state.
 --
--- Plain SQL only: the section headers are SELECTs rather than psql
--- metacommands, so this runs unchanged in the Supabase dashboard SQL Editor as
--- well as in psql. Each header returns a single labelled row.
+-- This file creates nothing and changes nothing. It reads pg_catalog and
+-- information_schema only, and runs unchanged inside `BEGIN READ ONLY`. It is
+-- safe before a rollout, after one, or against a partial state.
 --
--- Every check yields a `pass` boolean so the whole output can be scanned for a
--- single `false`. The last query is a roll-up.
+-- Plain SQL, one statement: the section labels are ordinary columns rather than
+-- psql metacommands, so it runs in the Supabase dashboard SQL Editor as well as
+-- in psql.
 --
--- Check 20 of the gate -- that supabase/migrations/ still matches what this
--- rollout copied -- is a static repository property, not a database one, and is
--- proved in scripts/db/imageLibraryRollout.source.test.ts.
+-- READINESS IS THE CONJUNCTION, BY CONSTRUCTION. Every invariant is one row of
+-- the `invariants` list below, and `rollout_readiness` is `bool_and(pass)` over
+-- that same list as a window, repeated on every row. There is no separately
+-- maintained roll-up expression that could drift from the rows above it, so it
+-- is not possible for a row to report pass = false while readiness reads true.
+-- Scan for any `pass = f`, or read `rollout_readiness` from any row.
+--
+-- SEMANTIC AUTHORITY IS THE BODY DIGEST, NOT KEYWORDS. A function that lets a
+-- viewer through, that skips the retry's Library-ownership test, or that moves
+-- the actor binding after the retry, still mentions every identifier the
+-- hardened body mentions -- keyword checks pass all of them. md5(prosrc) does
+-- not. The pinned digest comes from
+-- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql
+-- and is re-derived from that file by scripts/db/imageLibraryRollout.source.test.ts.
+-- The diagnostic rows near the end help locate a mismatch; they are
+-- deliberately NOT the authority.
 
-SELECT '== 1. padlets.library_item_id exists, is uuid, and is nullable ==' AS section;
-SELECT
-    (SELECT data_type FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'padlets'
-        AND column_name = 'library_item_id')                        AS actual_type,
-    (SELECT is_nullable FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'padlets'
-        AND column_name = 'library_item_id')                        AS actual_nullable,
-    -- Nullable is the backward-compatibility promise: writes that never name
-    -- this column keep working, so the database may lead the application.
-    COALESCE((SELECT data_type = 'uuid' AND is_nullable = 'YES'
-                FROM information_schema.columns
-               WHERE table_schema = 'public' AND table_name = 'padlets'
-                 AND column_name = 'library_item_id'), false)       AS pass;
-
-SELECT '== 2. foreign key targets library_items(id) with ON DELETE SET NULL ==' AS section;
-SELECT
-    ccu.table_schema || '.' || ccu.table_name || '(' || ccu.column_name || ')' AS references_target,
-    rc.delete_rule                                                  AS actual_delete_rule,
-    -- Removing a Library item leaves its placements standing with a NULL link;
-    -- it must never reach onto a board and delete the card.
-    (ccu.table_schema = 'public' AND ccu.table_name = 'library_items'
-     AND ccu.column_name = 'id' AND rc.delete_rule = 'SET NULL')    AS pass
-FROM information_schema.key_column_usage AS k
-JOIN information_schema.referential_constraints AS rc
-  ON rc.constraint_name = k.constraint_name
- AND rc.constraint_schema = k.constraint_schema
-JOIN information_schema.constraint_column_usage AS ccu
-  ON ccu.constraint_name = k.constraint_name
- AND ccu.constraint_schema = k.constraint_schema
-WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
-  AND k.column_name = 'library_item_id';
-
-SELECT '== 3. NO unique restriction: one Library object may be placed many times ==' AS section;
-SELECT
-    NOT EXISTS (
-        SELECT 1 FROM pg_index AS i
-         WHERE i.indrelid = to_regclass('public.padlets')
-           AND i.indisunique
-           AND EXISTS (
-                SELECT 1 FROM unnest(i.indkey) AS k(attnum)
-                 WHERE k.attnum = (SELECT a.attnum FROM pg_attribute AS a
-                                    WHERE a.attrelid = to_regclass('public.padlets')
-                                      AND a.attname = 'library_item_id'))
-    )                                                               AS no_unique_on_link,
-    NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints AS tc
-          JOIN information_schema.key_column_usage AS k
-            ON k.constraint_name = tc.constraint_name
-           AND k.constraint_schema = tc.constraint_schema
-         WHERE tc.table_schema = 'public' AND tc.table_name = 'padlets'
-           AND tc.constraint_type = 'UNIQUE'
-           AND k.column_name = 'library_item_id'
-    )                                                               AS no_unique_constraint,
-    (NOT EXISTS (
-        SELECT 1 FROM pg_index AS i
-         WHERE i.indrelid = to_regclass('public.padlets')
-           AND i.indisunique
-           AND EXISTS (
-                SELECT 1 FROM unnest(i.indkey) AS k(attnum)
-                 WHERE k.attnum = (SELECT a.attnum FROM pg_attribute AS a
-                                    WHERE a.attrelid = to_regclass('public.padlets')
-                                      AND a.attname = 'library_item_id'))))  AS pass;
-
-SELECT '== 4. the supporting partial index exists in its reviewed shape ==' AS section;
-SELECT
-    indexdef                                                        AS actual_definition,
-    (indexdef NOT LIKE '%UNIQUE%'
-     AND indexdef LIKE '%(library_item_id)%'
-     AND indexdef LIKE '%WHERE (library_item_id IS NOT NULL)')      AS pass
-FROM pg_indexes
-WHERE schemaname = 'public' AND tablename = 'padlets'
-  AND indexname = 'padlets_library_item_id_idx';
-
-SELECT '== 5. the function exists with the reviewed signature, and alone ==' AS section;
-SELECT
-    to_regprocedure(
-        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-        ' double precision, double precision, double precision, double precision,'
-        ' text, jsonb)') IS NOT NULL                                AS function_exists,
-    (SELECT count(*) FROM pg_proc AS p
-       JOIN pg_namespace AS n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'public'
-        AND p.proname = 'create_image_post_with_library_item')       AS overload_count,
-    (to_regprocedure(
-        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-        ' double precision, double precision, double precision, double precision,'
-        ' text, jsonb)') IS NOT NULL
-     AND (SELECT count(*) FROM pg_proc AS p
-            JOIN pg_namespace AS n ON n.oid = p.pronamespace
-           WHERE n.nspname = 'public'
-             AND p.proname = 'create_image_post_with_library_item') = 1)  AS pass;
-
-SELECT '== 6. SECURITY INVOKER, never DEFINER, with a pinned search_path ==' AS section;
-SELECT
-    p.prosecdef                                                     AS is_security_definer,
-    p.proconfig                                                     AS settings,
-    -- INVOKER is what keeps this a reach rather than an elevation: every row it
-    -- writes still faces the same policies a direct write would.
-    (NOT p.prosecdef AND p.proconfig @> ARRAY['search_path=public']) AS pass
-FROM pg_proc AS p
-WHERE p.oid = to_regprocedure(
-    'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-    ' double precision, double precision, double precision, double precision,'
-    ' text, jsonb)');
-
-SELECT '== 7. execute privileges: signed-in callers only ==' AS section;
--- The oid form throughout: has_function_privilege(role, TEXT signature, ...)
--- RAISES when the function is absent, which would make this file unusable
--- before a rollout. to_regprocedure yields NULL there, and the oid form yields
--- NULL in turn, so a missing function reports rather than errors.
-WITH target(fn) AS (
-    SELECT to_regprocedure(
-        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-        ' double precision, double precision, double precision, double precision,'
-        ' text, jsonb)')::oid
-)
-SELECT
-    has_function_privilege('public', fn, 'EXECUTE')                 AS public_execute,
-    has_function_privilege('anon', fn, 'EXECUTE')                   AS anon_execute,
-    has_function_privilege('authenticated', fn, 'EXECUTE')          AS authenticated_execute,
-    has_function_privilege('service_role', fn, 'EXECUTE')           AS service_role_execute,
-    COALESCE(NOT has_function_privilege('public', fn, 'EXECUTE')
-     AND NOT has_function_privilege('anon', fn, 'EXECUTE')
-     AND has_function_privilege('authenticated', fn, 'EXECUTE')
-     AND has_function_privilege('service_role', fn, 'EXECUTE'), false) AS pass
-FROM target;
-
-SELECT '== 8. the committed body is the HARDENED one ==' AS section;
-WITH body(definition) AS (
-    SELECT pg_get_functiondef(to_regprocedure(
-        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-        ' double precision, double precision, double precision, double precision,'
-        ' text, jsonb)'))
-)
-SELECT
-    -- The logical actor: a direct caller may not nominate anyone else.
-    position('auth.uid() <> p_user_id' IN definition) > 0            AS binds_logical_actor,
-    position('p_user_id IS NULL' IN definition) > 0                  AS refuses_null_actor,
-    -- Board-write authority: owner, or a collaborator whose role is editor.
-    -- Viewer and commenter are absent by construction, not by filtering.
-    position('c.role = ''editor''' IN definition) > 0                AS editor_only,
-    position('b.user_id = p_user_id' IN definition) > 0              AS owner_branch,
-    (position('auth.uid() <> p_user_id' IN definition) > 0
-     AND position('p_user_id IS NULL' IN definition) > 0
-     AND position('c.role = ''editor''' IN definition) > 0
-     AND position('b.user_id = p_user_id' IN definition) > 0)        AS pass
-FROM body;
-
-SELECT '== 9. authorization precedes the retry lookup ==' AS section;
-WITH body(definition) AS (
-    SELECT pg_get_functiondef(to_regprocedure(
-        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-        ' double precision, double precision, double precision, double precision,'
-        ' text, jsonb)'))
-)
-SELECT
-    position('public.board_collaborators' IN definition)             AS authority_at,
-    position('LEFT JOIN public.library_items' IN definition)         AS retry_lookup_at,
-    -- Ordering is the whole point of the hardening: the pre-hardening body
-    -- answered a retry before it knew anything about the caller, so a board
-    -- viewer could replay a card id and receive the creator's private id.
-    -- Catalog metadata cannot express statement order, so this is the one
-    -- narrowly targeted body inspection in this file.
-    (position('public.board_collaborators' IN definition) > 0
-     AND position('LEFT JOIN public.library_items' IN definition) > 0
-     AND position('public.board_collaborators' IN definition)
-         < position('LEFT JOIN public.library_items' IN definition)) AS pass
-FROM body;
-
-SELECT '== 10. a genuine retry must match board, link and library owner ==' AS section;
-WITH body(definition) AS (
-    SELECT pg_get_functiondef(to_regprocedure(
-        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
-        ' double precision, double precision, double precision, double precision,'
-        ' text, jsonb)'))
-)
-SELECT
-    position('v_existing_board = p_board_id' IN definition) > 0      AS same_board,
-    position('v_existing_library IS NOT NULL' IN definition) > 0     AS link_present,
-    position('v_library_owner = p_user_id' IN definition) > 0        AS library_owned_by_actor,
-    (position('v_existing_board = p_board_id' IN definition) > 0
-     AND position('v_existing_library IS NOT NULL' IN definition) > 0
-     AND position('v_library_owner = p_user_id' IN definition) > 0)  AS pass
-FROM body;
-
-SELECT '== 11. capability only -- no backfill was performed ==' AS section;
--- Addressed through to_jsonb rather than by naming the column: a plain
--- `WHERE library_item_id IS NOT NULL` fails to PARSE on a database where the
--- rollout has not run, and this file has to stay runnable before, after and
--- against a partial state. It costs one scan of padlets, which is the price of
--- that guarantee; the rollout's own postflight reports the same number from the
--- indexed column at the moment it commits.
-WITH linked(n) AS (
-    SELECT count(*) FROM public.padlets AS p
-     WHERE (to_jsonb(p) ->> 'library_item_id') IS NOT NULL
-)
-SELECT
-    linked.n                                                        AS linked_placements,
-    (SELECT count(*) FROM public.library_items)                     AS library_rows,
-    CASE
-        WHEN linked.n = 0 THEN 'no links yet -- expected before the application is deployed'
-        ELSE 'links present -- expected only after the application is deployed'
-    END                                                             AS release_gate,
-    true                                                            AS pass
-FROM linked;
-
-SELECT '== 12. roll-up ==' AS section;
-WITH signature(sig) AS (
-    VALUES ('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
+WITH expected AS (
+    SELECT
+        to_regprocedure(
+            'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
             ' double precision, double precision, double precision, double precision,'
-            ' text, jsonb)')
-), body(definition) AS (
-    SELECT CASE WHEN to_regprocedure((SELECT sig FROM signature)) IS NULL THEN ''
-                ELSE pg_get_functiondef(to_regprocedure((SELECT sig FROM signature))) END
+            ' text, jsonb)')::oid                                    AS fn,
+        'e5b8ce9de5a443313593af4ee71c28b8'::text                     AS body_md5,
+        ('p_padlet_id uuid, p_board_id uuid, p_user_id uuid, p_title text,'
+         ' p_content text, p_position_x double precision,'
+         ' p_position_y double precision, p_width double precision,'
+         ' p_height double precision, p_file_url text, p_metadata jsonb')::text AS identity_args,
+        'TABLE(padlet_id uuid, library_item_id uuid)'::text          AS result_type,
+        'postgres'::text                                             AS owner,
+        ARRAY['search_path=public']::text[]                          AS config,
+        ('CREATE INDEX padlets_library_item_id_idx ON public.padlets'
+         ' USING btree (library_item_id) WHERE (library_item_id IS NOT NULL)')::text AS indexdef
+),
+link AS (
+    SELECT data_type, is_nullable, column_default
+      FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'padlets'
+       AND column_name = 'library_item_id'
+),
+fks AS (
+    SELECT rc.delete_rule,
+           ccu.table_schema || '.' || ccu.table_name || '(' || ccu.column_name || ')' AS target
+      FROM information_schema.key_column_usage AS k
+      JOIN information_schema.referential_constraints AS rc
+        ON rc.constraint_name = k.constraint_name AND rc.constraint_schema = k.constraint_schema
+      JOIN information_schema.constraint_column_usage AS ccu
+        ON ccu.constraint_name = k.constraint_name AND ccu.constraint_schema = k.constraint_schema
+     WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
+       AND k.column_name = 'library_item_id'
+),
+acl AS (
+    SELECT array_agg(entry ORDER BY entry) AS entries FROM (
+        SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END
+               || ':' || a.privilege_type AS entry
+          FROM pg_proc AS p, aclexplode(p.proacl) AS a
+         WHERE p.oid = (SELECT fn FROM expected)) AS x
+),
+expected_acl AS (
+    SELECT array_agg(e ORDER BY e) AS entries
+      FROM unnest(ARRAY[(SELECT owner FROM expected) || ':EXECUTE',
+                        'authenticated:EXECUTE', 'service_role:EXECUTE']) AS e
+),
+-- Every table and column the FINAL hardened function reads or writes, traced
+-- from that function. padlets.library_item_id is excluded on purpose: the
+-- rollout creates it, and rows 1-4 assert its exact shape instead.
+prereq AS (
+    SELECT string_agg(t || '.' || c, ', ' ORDER BY t, c) AS missing
+      FROM (VALUES
+            ('boards','id'),('boards','user_id'),
+            ('board_collaborators','board_id'),('board_collaborators','user_id'),
+            ('board_collaborators','role'),
+            ('padlets','id'),('padlets','board_id'),('padlets','title'),
+            ('padlets','content'),('padlets','type'),('padlets','position_x'),
+            ('padlets','position_y'),('padlets','width'),('padlets','height'),
+            ('padlets','file_url'),('padlets','metadata'),
+            ('library_items','id'),('library_items','user_id'),
+            ('library_items','title'),('library_items','type'),
+            ('library_items','content'),('library_items','thumbnail_url'),
+            ('library_items','is_public')
+           ) AS required(t, c)
+     WHERE NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = required.t
+           AND column_name = required.c)
+),
+body AS (
+    SELECT p.prosrc AS src, md5(p.prosrc) AS digest,
+           pg_get_userbyid(p.proowner) AS owner, p.prosecdef,
+           COALESCE(p.proconfig, ARRAY[]::text[]) AS config
+      FROM pg_proc AS p WHERE p.oid = (SELECT fn FROM expected)
+),
+invariants(ord, section, check_name, actual, pass) AS (
+              SELECT  1, 'column', 'padlets.library_item_id exists',
+           COALESCE((SELECT data_type FROM link), '(absent)'),
+           EXISTS (SELECT 1 FROM link)
+    UNION ALL SELECT  2, 'column', 'type is uuid',
+           COALESCE((SELECT data_type FROM link), '(absent)'),
+           COALESCE((SELECT data_type = 'uuid' FROM link), false)
+    UNION ALL SELECT  3, 'column', 'is nullable',
+           COALESCE((SELECT is_nullable FROM link), '(absent)'),
+           COALESCE((SELECT is_nullable = 'YES' FROM link), false)
+    UNION ALL SELECT  4, 'column', 'has NO default',
+           COALESCE((SELECT column_default FROM link), '(none)'),
+           COALESCE((SELECT column_default IS NULL FROM link), false)
+    UNION ALL SELECT  5, 'foreign key', 'exactly one foreign key on the link',
+           (SELECT count(*)::text FROM fks),
+           (SELECT count(*) FROM fks) = 1
+    UNION ALL SELECT  6, 'foreign key', 'targets public.library_items(id)',
+           COALESCE((SELECT string_agg(target, ', ') FROM fks), '(none)'),
+           (SELECT count(*) FROM fks WHERE target = 'public.library_items(id)') = 1
+    UNION ALL SELECT  7, 'foreign key', 'delete action is SET NULL, and only that',
+           COALESCE((SELECT string_agg(delete_rule, ', ') FROM fks), '(none)'),
+           (SELECT count(*) FROM fks WHERE delete_rule = 'SET NULL') = 1
+             AND (SELECT count(*) FROM fks WHERE delete_rule <> 'SET NULL') = 0
+    UNION ALL SELECT  8, 'cardinality', 'no UNIQUE index covers the link',
+           'checked',
+           NOT EXISTS (
+                SELECT 1 FROM pg_index AS i
+                 WHERE i.indrelid = to_regclass('public.padlets') AND i.indisunique
+                   AND EXISTS (SELECT 1 FROM unnest(i.indkey) AS k(attnum)
+                                WHERE k.attnum = (SELECT a.attnum FROM pg_attribute AS a
+                                                   WHERE a.attrelid = to_regclass('public.padlets')
+                                                     AND a.attname = 'library_item_id')))
+    UNION ALL SELECT  9, 'index', 'supporting index matches exactly',
+           COALESCE((SELECT indexdef FROM pg_indexes
+                      WHERE schemaname = 'public'
+                        AND indexname = 'padlets_library_item_id_idx'), '(absent)'),
+           COALESCE((SELECT indexdef FROM pg_indexes
+                      WHERE schemaname = 'public'
+                        AND indexname = 'padlets_library_item_id_idx'), '(absent)')
+           = (SELECT indexdef FROM expected)
+    UNION ALL SELECT 10, 'function', 'exists with the reviewed signature',
+           COALESCE((SELECT fn FROM expected)::text, '(absent)'),
+           (SELECT fn FROM expected) IS NOT NULL
+    UNION ALL SELECT 11, 'function', 'no other overload of the same name',
+           (SELECT count(*)::text FROM pg_proc AS p
+              JOIN pg_namespace AS n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'public'
+               AND p.proname = 'create_image_post_with_library_item'),
+           (SELECT count(*) FROM pg_proc AS p
+              JOIN pg_namespace AS n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'public'
+               AND p.proname = 'create_image_post_with_library_item') = 1
+    UNION ALL SELECT 12, 'function', 'canonical body digest matches the reviewed migration',
+           COALESCE((SELECT digest FROM body), '(absent)'),
+           COALESCE((SELECT digest FROM body) = (SELECT body_md5 FROM expected), false)
+    UNION ALL SELECT 13, 'function', 'identity arguments match',
+           COALESCE(pg_get_function_identity_arguments((SELECT fn FROM expected)), '(absent)'),
+           COALESCE(pg_get_function_identity_arguments((SELECT fn FROM expected))
+                    = (SELECT identity_args FROM expected), false)
+    UNION ALL SELECT 14, 'function', 'result type matches',
+           COALESCE(pg_get_function_result((SELECT fn FROM expected)), '(absent)'),
+           COALESCE(pg_get_function_result((SELECT fn FROM expected))
+                    = (SELECT result_type FROM expected), false)
+    UNION ALL SELECT 15, 'function', 'SECURITY INVOKER, never DEFINER',
+           COALESCE((SELECT CASE WHEN prosecdef THEN 'DEFINER' ELSE 'INVOKER' END FROM body), '(absent)'),
+           COALESCE((SELECT NOT prosecdef FROM body), false)
+    UNION ALL SELECT 16, 'function', 'configuration is exactly search_path=public',
+           COALESCE((SELECT array_to_string(config, ',') FROM body), '(absent)'),
+           COALESCE((SELECT config FROM body) = (SELECT config FROM expected), false)
+    UNION ALL SELECT 17, 'function', 'owner is the expected deployment role',
+           COALESCE((SELECT owner FROM body), '(absent)'),
+           COALESCE((SELECT owner FROM body) = (SELECT owner FROM expected), false)
+    UNION ALL SELECT 18, 'privileges', 'PUBLIC cannot execute',
+           COALESCE(has_function_privilege('public', (SELECT fn FROM expected), 'EXECUTE')::text, '(absent)'),
+           COALESCE(NOT has_function_privilege('public', (SELECT fn FROM expected), 'EXECUTE'), false)
+    UNION ALL SELECT 19, 'privileges', 'anon cannot execute',
+           COALESCE(has_function_privilege('anon', (SELECT fn FROM expected), 'EXECUTE')::text, '(absent)'),
+           COALESCE(NOT has_function_privilege('anon', (SELECT fn FROM expected), 'EXECUTE'), false)
+    UNION ALL SELECT 20, 'privileges', 'authenticated can execute',
+           COALESCE(has_function_privilege('authenticated', (SELECT fn FROM expected), 'EXECUTE')::text, '(absent)'),
+           COALESCE(has_function_privilege('authenticated', (SELECT fn FROM expected), 'EXECUTE'), false)
+    UNION ALL SELECT 21, 'privileges', 'service_role can execute',
+           COALESCE(has_function_privilege('service_role', (SELECT fn FROM expected), 'EXECUTE')::text, '(absent)'),
+           COALESCE(has_function_privilege('service_role', (SELECT fn FROM expected), 'EXECUTE'), false)
+    UNION ALL SELECT 22, 'privileges', 'no unexpected EXECUTE holder',
+           COALESCE(array_to_string((SELECT entries FROM acl), ', '), '(default ACL)'),
+           COALESCE((SELECT entries FROM acl) = (SELECT entries FROM expected_acl), false)
+    UNION ALL SELECT 23, 'prerequisites', 'every table/column the function uses exists',
+           COALESCE((SELECT missing FROM prereq), '(none missing)'),
+           (SELECT missing FROM prereq) IS NULL
+    UNION ALL SELECT 24, 'diagnostic', 'body binds the logical actor',
+           COALESCE((SELECT position('auth.uid() <> p_user_id' IN src)::text FROM body), '(absent)'),
+           COALESCE((SELECT position('auth.uid() <> p_user_id' IN src) > 0 FROM body), false)
+    UNION ALL SELECT 25, 'diagnostic', 'board authority precedes the retry lookup',
+           COALESCE((SELECT position('public.board_collaborators' IN src)::text FROM body), '(absent)'),
+           COALESCE((SELECT position('public.board_collaborators' IN src) > 0
+                     AND position('public.board_collaborators' IN src)
+                         < position('LEFT JOIN public.library_items' IN src) FROM body), false)
+    UNION ALL SELECT 26, 'diagnostic', 'retry requires board, link and library owner',
+           COALESCE((SELECT position('v_library_owner = p_user_id' IN src)::text FROM body), '(absent)'),
+           COALESCE((SELECT position('v_existing_board = p_board_id' IN src) > 0
+                     AND position('v_existing_library IS NOT NULL' IN src) > 0
+                     AND position('v_library_owner = p_user_id' IN src) > 0 FROM body), false)
 )
 SELECT
-    -- Every conjunct is COALESCEd at its source: a missing column, index or
-    -- function yields NULL, and one unguarded NULL would print readiness as a
-    -- blank cell instead of the `f` the state deserves.
-    COALESCE((SELECT data_type = 'uuid' AND is_nullable = 'YES'
-                FROM information_schema.columns
-               WHERE table_schema = 'public' AND table_name = 'padlets'
-                 AND column_name = 'library_item_id'), false)
-    AND COALESCE((SELECT bool_or(ccu.table_name = 'library_items'
-                                 AND ccu.column_name = 'id'
-                                 AND rc.delete_rule = 'SET NULL')
-                    FROM information_schema.key_column_usage AS k
-                    JOIN information_schema.referential_constraints AS rc
-                      ON rc.constraint_name = k.constraint_name
-                     AND rc.constraint_schema = k.constraint_schema
-                    JOIN information_schema.constraint_column_usage AS ccu
-                      ON ccu.constraint_name = k.constraint_name
-                     AND ccu.constraint_schema = k.constraint_schema
-                   WHERE k.table_schema = 'public' AND k.table_name = 'padlets'
-                     AND k.column_name = 'library_item_id'), false)
-    AND NOT EXISTS (
-        SELECT 1 FROM pg_index AS i
-         WHERE i.indrelid = to_regclass('public.padlets') AND i.indisunique
-           AND EXISTS (SELECT 1 FROM unnest(i.indkey) AS k(attnum)
-                        WHERE k.attnum = (SELECT a.attnum FROM pg_attribute AS a
-                                           WHERE a.attrelid = to_regclass('public.padlets')
-                                             AND a.attname = 'library_item_id')))
-    AND COALESCE((SELECT indexdef NOT LIKE '%UNIQUE%'
-                         AND indexdef LIKE '%WHERE (library_item_id IS NOT NULL)'
-                    FROM pg_indexes
-                   WHERE schemaname = 'public' AND tablename = 'padlets'
-                     AND indexname = 'padlets_library_item_id_idx'), false)
-    AND to_regprocedure((SELECT sig FROM signature)) IS NOT NULL
-    AND (SELECT count(*) FROM pg_proc AS p
-           JOIN pg_namespace AS n ON n.oid = p.pronamespace
-          WHERE n.nspname = 'public'
-            AND p.proname = 'create_image_post_with_library_item') = 1
-    AND NOT COALESCE((SELECT prosecdef FROM pg_proc
-                       WHERE oid = to_regprocedure((SELECT sig FROM signature))), true)
-    AND COALESCE((SELECT proconfig @> ARRAY['search_path=public'] FROM pg_proc
-                   WHERE oid = to_regprocedure((SELECT sig FROM signature))), false)
-    AND NOT COALESCE(has_function_privilege('public', to_regprocedure((SELECT sig FROM signature))::oid, 'EXECUTE'), true)
-    AND NOT COALESCE(has_function_privilege('anon', to_regprocedure((SELECT sig FROM signature))::oid, 'EXECUTE'), true)
-    AND COALESCE(has_function_privilege('authenticated', to_regprocedure((SELECT sig FROM signature))::oid, 'EXECUTE'), false)
-    AND COALESCE(has_function_privilege('service_role', to_regprocedure((SELECT sig FROM signature))::oid, 'EXECUTE'), false)
-    AND (SELECT position('auth.uid() <> p_user_id' IN definition) > 0 FROM body)
-    AND (SELECT position('c.role = ''editor''' IN definition) > 0 FROM body)
-    AND (SELECT position('v_library_owner = p_user_id' IN definition) > 0 FROM body)
-    AND (SELECT position('public.board_collaborators' IN definition) > 0
-                AND position('public.board_collaborators' IN definition)
-                    < position('LEFT JOIN public.library_items' IN definition) FROM body)
-                                                                    AS rollout_readiness;
+    ord,
+    section,
+    check_name,
+    actual,
+    pass,
+    -- The conjunction of every row above, repeated on every row. Nothing else
+    -- computes readiness, so no invariant can fail while this reads true.
+    bool_and(pass) OVER () AS rollout_readiness
+FROM invariants
+ORDER BY ord;

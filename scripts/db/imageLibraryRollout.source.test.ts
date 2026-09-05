@@ -1,25 +1,27 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
  * IMAGE-LIBRARY-1 -- the production rollout artifact for durable Image
- * ownership.
+ * ownership, and its C1 fail-closed hardening.
  *
  * This repository does not push migrations: `[db.migrations] enabled = false`
  * and supabase/BASELINE.md records that supabase/migrations/ does not rebuild
  * the live database. Production changes go through a guarded, self-contained
  * batch under supabase/production-rollouts/ plus a read-only verifier.
  *
- * These assertions pin the properties that make THIS artifact safe to run
- * against production: fail-closed guards, one transaction, the reviewed
- * security and cardinality invariants carried across BYTE FOR BYTE, and --
- * load-bearing -- no backfill.
+ * These assertions pin the properties that make the artifact safe to run
+ * against production: fail-closed entry gates, one transaction, the reviewed
+ * statements carried across BYTE FOR BYTE, a canonical function fingerprint
+ * whose provenance is re-derived here rather than trusted, a complete privilege
+ * and prerequisite contract, and -- load-bearing -- no backfill.
  *
- * The behavioural half (apply, verify, the authorization matrix, drift
- * refusal and re-run safety) is rehearsed against a disposable local
- * PostgreSQL; scripts/db/imagePostLibraryAuthorization.test.ts owns the
- * function's authorization proof against the same source migrations.
+ * The behavioural half (apply, verify, the authorization matrix, every drift
+ * refusal, atomic rollback and re-run safety) is rehearsed against disposable
+ * local PostgreSQL databases; scripts/db/imagePostLibraryAuthorization.test.ts
+ * owns the function's authorization proof against the same source migrations.
  */
 
 const ROOT = process.cwd();
@@ -40,12 +42,11 @@ const migration = (name: string) => read(`supabase/migrations/${name}`);
 const statements = rollout.replace(/--.*$/gm, '');
 /** Statements with both function bodies removed, to reason about the batch itself. */
 const outsideFunctionBodies = statements.replace(/AS \$\$[\s\S]*?\n\$\$;/g, 'AS $$<body>$$;');
-/**
- * Statements with single-quoted literals blanked. The guards RAISE messages
- * that NAME the postures they reject ("is SECURITY DEFINER"), so a bare
- * substring search would read a refusal as the thing being refused.
- */
-const code = statements.replace(/'(?:[^']|'')*'/g, "''");
+/** Verifier statements only, for counts that must not be met by prose. */
+const verifierStatements = verifier.replace(/--.*$/gm, '');
+
+const FN_END = '\nEND;\n$$;';
+const ACL_END = ') TO authenticated, service_role;';
 
 /** The exact block a marker pair delimits, so "faithful copy" is testable. */
 function block(source: string, start: string, end: string): string {
@@ -56,20 +57,23 @@ function block(source: string, start: string, end: string): string {
   return source.slice(i, j + end.length);
 }
 
-const ACL_END = ') TO authenticated, service_role;';
-const FN_END = '\nEND;\n$$;';
+/**
+ * PostgreSQL stores a dollar-quoted body verbatim, so pg_proc.prosrc is exactly
+ * the text between the delimiters in the migration. That is what makes the
+ * pinned digest reproducible offline instead of a constant nobody can check.
+ */
+const hardenedSource = migration(SOURCES[1]);
+const hardenedBody = hardenedSource.slice(
+  hardenedSource.indexOf('AS $$') + 'AS $$'.length,
+  hardenedSource.lastIndexOf('$$;'),
+);
+const expectedBodyMd5 = crypto.createHash('md5').update(hardenedBody, 'utf8').digest('hex');
 
 describe('IMAGE-LIBRARY-1 rollout artifact', () => {
   it('1. follows the rollout/verify pair convention this repo uses', () => {
     const listed = fs.readdirSync(path.join(ROOT, 'supabase/production-rollouts'));
     expect(listed).toContain('20260905_image_library_ownership.sql');
     expect(listed).toContain('20260905_image_library_ownership_verify.sql');
-    // The verifier creates nothing and changes nothing, so it is safe before,
-    // after, or against a partial state.
-    for (const forbidden of ['CREATE TABLE', 'ALTER TABLE', 'CREATE OR REPLACE',
-      'INSERT INTO', 'UPDATE ', 'DELETE FROM', 'TRUNCATE', 'GRANT ', 'REVOKE ', 'DROP ']) {
-      expect(verifier, forbidden).not.toContain(forbidden);
-    }
   });
 
   it('2. names the two reviewed migrations as its source, in dependency order', () => {
@@ -83,8 +87,6 @@ describe('IMAGE-LIBRARY-1 rollout artifact', () => {
 
   it('3. copies every reviewed statement BYTE FOR BYTE', () => {
     const first = migration(SOURCES[0]);
-    const second = migration(SOURCES[1]);
-    // Schema, in the reviewed wording -- including the "not unique" rationale.
     for (const [start, end] of [
       ['ALTER TABLE public.padlets', 'ON DELETE SET NULL;'],
       ['CREATE INDEX IF NOT EXISTS', 'WHERE library_item_id IS NOT NULL;'],
@@ -95,20 +97,17 @@ describe('IMAGE-LIBRARY-1 rollout artifact', () => {
       expect(rollout, `${start} must be copied verbatim from ${SOURCES[0]}`)
         .toContain(block(first, start, end));
     }
-    // The hardened body and its restated posture.
     expect(rollout, 'the hardened function must be copied verbatim')
-      .toContain(block(second, 'CREATE OR REPLACE FUNCTION', FN_END));
+      .toContain(block(hardenedSource, 'CREATE OR REPLACE FUNCTION', FN_END));
     expect(rollout, 'the hardened grants must be copied verbatim')
-      .toContain(block(second, 'REVOKE ALL ON FUNCTION', ACL_END));
+      .toContain(block(hardenedSource, 'REVOKE ALL ON FUNCTION', ACL_END));
   });
 
   it('4. applies the initial function FIRST and the hardened one LAST', () => {
     const initial = rollout.indexOf(block(migration(SOURCES[0]), 'CREATE OR REPLACE FUNCTION', FN_END));
-    const hardened = rollout.indexOf(block(migration(SOURCES[1]), 'CREATE OR REPLACE FUNCTION', FN_END));
+    const hardened = rollout.indexOf(block(hardenedSource, 'CREATE OR REPLACE FUNCTION', FN_END));
     expect(initial).toBeGreaterThan(-1);
     expect(hardened).toBeGreaterThan(initial);
-    // The committed contract is the hardened body: nothing follows it that
-    // could replace the function again.
     expect(rollout.indexOf('CREATE OR REPLACE FUNCTION', hardened + 1)).toBe(-1);
   });
 
@@ -116,115 +115,253 @@ describe('IMAGE-LIBRARY-1 rollout artifact', () => {
     expect(statements).toMatch(/^\s*BEGIN;/m);
     expect(statements.trimEnd()).toMatch(/COMMIT;$/);
     expect(statements).not.toContain('ROLLBACK');
-    // Exactly one transaction: no intermediate COMMIT could publish section B.
     expect(statements.match(/^\s*COMMIT;/gm)).toHaveLength(1);
   });
+});
 
-  it('6. refuses to run before it has proved every assumption', () => {
-    expect(statements).toContain('DO $preflight$');
+describe('C1: canonical function integrity', () => {
+  it('6. the pinned digest is re-derived from the reviewed migration, not invented', () => {
+    // Provenance, computed here rather than trusted: change the hardened
+    // migration and this recomputation moves, forcing the constants to be
+    // re-pinned deliberately instead of drifting.
+    expect(hardenedBody).toContain('auth.uid() <> p_user_id');
+    expect(hardenedBody.length).toBeGreaterThan(1000);
+    expect(rollout, 'rollout must pin the migration-derived body digest')
+      .toContain(expectedBodyMd5);
+    expect(verifier, 'verifier must pin the SAME digest')
+      .toContain(expectedBodyMd5);
+    // One digest, used by both gates -- they cannot disagree about identity.
+    expect(rollout.match(new RegExp(expectedBodyMd5, 'g'))).toHaveLength(2); // preflight + postflight
+    expect(verifier.match(new RegExp(expectedBodyMd5, 'g'))).toHaveLength(1);
+  });
+
+  it('7. both gates compare the stored body, not keywords', () => {
+    expect(statements).toContain('md5(prosrc)');
+    expect(verifier).toContain('md5(p.prosrc)');
+    // Keyword checks survive only as labelled diagnostics.
+    expect(verifier).toContain("'diagnostic'");
+    const diagnosticsStart = verifier.indexOf("'diagnostic'");
+    expect(verifier.indexOf("position('auth.uid() <> p_user_id'"))
+      .toBeGreaterThan(diagnosticsStart);
+  });
+
+  it('8. entry states are ABSENT or EXACT -- the initial body is not accepted', () => {
     const preflight = block(rollout, 'DO $preflight$', '$preflight$;');
-    for (const guard of [
-      'public.padlets', 'public.library_items', 'public.boards',
-      'public.board_collaborators', "to_regprocedure('auth.uid()')",
-    ]) {
-      expect(preflight, `preflight must require ${guard}`).toContain(guard);
-    }
-    // Drift is never converged silently: each of these aborts.
+    expect(preflight).toContain('refusing to overwrite an unreviewed function');
     for (const drift of [
-      'is not uuid',
-      'is NOT NULL',
-      'exists with no foreign key',
-      'expected public.library_items(id)',
-      'expected SET NULL',
-      'would outlaw reuse',
-      'has an unexpected definition',
+      'existing function body digest is',
+      'function arguments are',
+      'function result is',
+      'existing function is SECURITY DEFINER',
+      'function configuration is',
+      'function owner is',
+      'function ACL is',
       'unexpected overload',
-      'is SECURITY DEFINER',
     ]) {
       expect(preflight, `preflight must abort on: ${drift}`).toContain(drift);
     }
-    // Fail-closed, not repair-in-place.
+    // The pre-hardening body is deliberately not whitelisted as an entry state.
+    const initialBodyMd5 = crypto.createHash('md5').update(
+      (() => {
+        const s = migration(SOURCES[0]);
+        return s.slice(s.indexOf('AS $$') + 'AS $$'.length, s.lastIndexOf('$$;'));
+      })(), 'utf8').digest('hex');
+    expect(initialBodyMd5).not.toBe(expectedBodyMd5);
+    expect(rollout).not.toContain(initialBodyMd5);
+    expect(verifier).not.toContain(initialBodyMd5);
+    // Fail closed, never repair.
     expect(preflight).not.toContain('ALTER TABLE');
     expect(preflight).not.toContain('DROP ');
   });
+});
 
-  it('7. refuses to commit unless the resulting state is the reviewed one', () => {
-    const postflight = block(rollout, 'DO $postflight$', '$postflight$;');
-    for (const check of [
-      'is not a nullable uuid',
-      'is not ON DELETE SET NULL',
-      'UNIQUE index covers padlets.library_item_id',
-      'padlets_library_item_id_idx is missing',
-      'is SECURITY DEFINER',
-      'no pinned search_path',
-      'does not bind the logical actor',
-      'board authorization does not precede the retry lookup',
-      'PUBLIC or anon can execute',
-      'authenticated or service_role cannot execute',
-    ]) {
-      expect(postflight, `postflight must verify: ${check}`).toContain(check);
+describe('C1: posture, privilege and column contracts', () => {
+  it('9. pins one exact function owner in both gates', () => {
+    expect(block(rollout, 'DO $preflight$', '$preflight$;')).toContain("expected_owner constant text := 'postgres'");
+    expect(block(rollout, 'DO $postflight$', '$postflight$;')).toContain("expected_owner constant text := 'postgres'");
+    expect(verifier).toContain("'postgres'::text                                             AS owner");
+    expect(verifier).toContain('owner is the expected deployment role');
+  });
+
+  it('10. checks the COMPLETE privilege set, not four spot checks', () => {
+    // aclexplode enumerates every grantee; has_function_privilege can only
+    // answer about roles someone thought to name.
+    expect(statements).toContain('aclexplode');
+    expect(verifier).toContain('aclexplode');
+    expect(verifier).toContain('no unexpected EXECUTE holder');
+    for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
+                        block(rollout, 'DO $postflight$', '$postflight$;')]) {
+      expect(gate).toContain('aclexplode');
+      expect(gate).toContain("'authenticated:EXECUTE'");
+      expect(gate).toContain("'service_role:EXECUTE'");
     }
   });
 
-  it('8. keeps the cardinality that makes a Library object reusable', () => {
-    // One durable object, many placements. A unique index would silently
-    // outlaw the reuse this whole feature exists for.
+  it('11. requires the link column to carry NO default', () => {
+    expect(block(rollout, 'DO $preflight$', '$preflight$;')).toContain('has DEFAULT');
+    expect(block(rollout, 'DO $postflight$', '$postflight$;')).toContain('column_default IS NULL');
+    expect(verifier).toContain('has NO default');
+    expect(verifier).toContain('column_default IS NULL');
+    // The reviewed migration creates none, so none may be accepted.
+    expect(migration(SOURCES[0])).not.toMatch(/library_item_id uuid[\s\S]{0,80}DEFAULT/);
+  });
+
+  it('12. keeps the cardinality that makes a Library object reusable', () => {
     expect(statements).not.toMatch(/CREATE\s+UNIQUE\s+INDEX/i);
     expect(statements).not.toMatch(/UNIQUE\s*\(\s*library_item_id\s*\)/i);
     expect(statements).toContain('ON DELETE SET NULL');
-    expect(statements).not.toMatch(/library_item_id[\s\S]{0,80}ON DELETE CASCADE/);
-    // Nullable, with no default: the currently deployed application keeps
-    // working against this database, which is what lets the DB go first.
     expect(statements).toContain('ADD COLUMN IF NOT EXISTS library_item_id uuid');
     expect(statements).not.toMatch(/library_item_id uuid[\s\S]{0,60}NOT NULL/);
-    expect(statements).not.toMatch(/library_item_id uuid[\s\S]{0,60}DEFAULT/);
+    // Exactly one key: an extra CASCADE key would delete placements.
+    expect(statements).toContain('foreign keys, expected exactly 1');
+    expect(verifier).toContain('exactly one foreign key on the link');
+    expect(verifier).toContain('delete action is SET NULL, and only that');
   });
 
-  it('9. carries the reviewed security posture across intact', () => {
-    expect(code).toContain('SECURITY INVOKER');
-    // Declared posture only -- the guards quote the wording they reject.
-    expect(code).not.toContain('SECURITY DEFINER');
-    expect(code).toContain('SET search_path = public');
-    expect(code).toContain('FROM PUBLIC, anon;');
-    expect(code).toContain('TO authenticated, service_role;');
-    // Nothing widens authority beyond the two source migrations.
-    expect(code).not.toMatch(/GRANT[\s\S]{0,80}\bTO\s+(anon|PUBLIC)\b/);
-    expect(code).not.toContain('SET ROLE');
-    expect(code).not.toContain('ALTER ROLE');
-    expect(code).not.toMatch(/DISABLE ROW LEVEL SECURITY/i);
-    expect(code).not.toMatch(/(CREATE|ALTER|DROP)\s+POLICY/i);
+  it('13. carries the reviewed security posture across intact', () => {
+    expect(statements).toContain('SECURITY INVOKER');
+    // Matched as a DECLARATION line. The guards quote the wording they reject
+    // ("existing function is SECURITY DEFINER"), so a bare substring search
+    // would read a refusal as the thing being refused.
+    expect(statements).not.toMatch(/^\s*SECURITY DEFINER\s*$/m);
+    expect(statements).toContain('SET search_path = public');
+    expect(statements).toContain('FROM PUBLIC, anon;');
+    expect(statements).toContain('TO authenticated, service_role;');
+    expect(statements).not.toMatch(/GRANT[\s\S]{0,80}\bTO\s+(anon|PUBLIC)\b/);
+    expect(statements).not.toMatch(/^\s*SET ROLE\b/m);
+    expect(statements).not.toMatch(/^\s*ALTER ROLE\b/m);
+    expect(statements).not.toMatch(/DISABLE ROW LEVEL SECURITY/i);
+    expect(statements).not.toMatch(/(CREATE|ALTER|DROP)\s+POLICY/i);
+  });
+});
+
+describe('C1: prerequisite manifest tracks the function', () => {
+  /**
+   * Every relation.column the FINAL hardened function actually touches, derived
+   * from its body: aliases from FROM/JOIN, the columns used through them, and
+   * both INSERT column lists. If the function grows a dependency, this set
+   * grows and the manifest below must be updated deliberately.
+   */
+  function referencedColumns(body: string): Set<string> {
+    const aliases = new Map<string, string>();
+    for (const m of body.matchAll(/(?:FROM|JOIN)\s+public\.(\w+)\s+(?:AS\s+)?(\w+)/g)) {
+      if (!['ON', 'WHERE', 'SET'].includes(m[2].toUpperCase())) aliases.set(m[2], m[1]);
+    }
+    const found = new Set<string>();
+    for (const [alias, table] of aliases) {
+      for (const m of body.matchAll(new RegExp(`\\b${alias}\\.(\\w+)`, 'g'))) {
+        found.add(`${table}.${m[1]}`);
+      }
+    }
+    for (const m of body.matchAll(/INSERT INTO public\.(\w+)\s*\(([^)]*)\)/g)) {
+      for (const raw of m[2].split(',')) {
+        const col = raw.trim();
+        if (col) found.add(`${m[1]}.${col}`);
+      }
+    }
+    return found;
+  }
+
+  it('14. every column the function touches is in both prerequisite manifests', () => {
+    const referenced = referencedColumns(hardenedBody);
+    expect(referenced.size).toBeGreaterThan(15);
+    const preflight = block(rollout, 'DO $preflight$', '$preflight$;');
+    for (const ref of referenced) {
+      const [table, column] = ref.split('.');
+      // The rollout creates this one, so rows 1-4 assert its shape instead.
+      if (ref === 'padlets.library_item_id') continue;
+      const entry = `('${table}', '${column}')`;
+      const verifierEntry = `('${table}','${column}')`;
+      expect(preflight, `preflight manifest is missing ${ref}`).toContain(entry);
+      expect(verifier, `verifier manifest is missing ${ref}`).toContain(verifierEntry);
+    }
   });
 
-  it('10. performs NO backfill and touches no existing row', () => {
-    // Both INSERTs live inside the function bodies, where they run per call.
-    // The batch itself writes no data at all.
+  it('15. the authority tables and key types are preflighted', () => {
+    const preflight = block(rollout, 'DO $preflight$', '$preflight$;');
+    for (const table of ['public.padlets', 'public.library_items', 'public.boards',
+                         'public.board_collaborators']) {
+      expect(preflight, `preflight must require ${table}`).toContain(table);
+    }
+    expect(preflight).toContain("to_regprocedure('auth.uid()')");
+    // boards.id is the join key Astro removed while both gates still passed.
+    expect(preflight).toContain("'padlets.id', 'library_items.id', 'boards.id'");
+    expect(verifier).toContain("('boards','id')");
+  });
+});
+
+describe('C1: verifier contract', () => {
+  it('16. is genuinely read only', () => {
+    for (const forbidden of ['CREATE TABLE', 'ALTER TABLE', 'CREATE OR REPLACE', 'CREATE FUNCTION',
+      'INSERT INTO', 'UPDATE ', 'DELETE FROM', 'TRUNCATE', 'GRANT ', 'REVOKE ', 'DROP ',
+      'SET ROLE', 'ALTER FUNCTION']) {
+      expect(verifier, forbidden).not.toContain(forbidden);
+    }
+    // CREATE INDEX is absent from that list on purpose: the verifier carries
+    // the expected index definition as a comparison VALUE, not as a statement
+    // it runs. Pin that it appears exactly once, and only as a literal.
+    expect(verifierStatements.match(/CREATE INDEX/g)).toHaveLength(1);
+    expect(verifierStatements).toContain("('CREATE INDEX padlets_library_item_id_idx");
+  });
+
+  it('17. readiness is the conjunction of the same rows it prints', () => {
+    // One list, one aggregate: there is no second roll-up expression that could
+    // report true while a row above it reports false.
+    expect(verifier).toContain('bool_and(pass) OVER () AS rollout_readiness');
+    expect(verifierStatements.match(/rollout_readiness/g)).toHaveLength(1);
+    expect(verifier).toContain('FROM invariants');
+    // Every invariant is a row of that one list.
+    const invariants = verifier.slice(verifier.indexOf('invariants(ord, section'));
+    for (const check of [
+      'padlets.library_item_id exists', 'type is uuid', 'is nullable', 'has NO default',
+      'exactly one foreign key on the link', 'targets public.library_items(id)',
+      'delete action is SET NULL, and only that', 'no UNIQUE index covers the link',
+      'supporting index matches exactly', 'exists with the reviewed signature',
+      'no other overload of the same name', 'canonical body digest matches the reviewed migration',
+      'identity arguments match', 'result type matches', 'SECURITY INVOKER, never DEFINER',
+      'configuration is exactly search_path=public', 'owner is the expected deployment role',
+      'PUBLIC cannot execute', 'anon cannot execute', 'authenticated can execute',
+      'service_role can execute', 'no unexpected EXECUTE holder',
+      'every table/column the function uses exists',
+    ]) {
+      expect(invariants, `missing invariant row: ${check}`).toContain(check);
+    }
+  });
+
+  it('18. stays runnable against a database where the rollout has not run', () => {
+    // has_function_privilege(role, TEXT signature, ...) RAISES on a missing
+    // function, and naming the column directly fails to parse before the
+    // column exists. Both were real failures caught in local rehearsal.
+    expect(verifier).not.toMatch(/has_function_privilege\(\s*'[a-z_]+'\s*,\s*sig\b/);
+    expect(verifier).toContain('to_regprocedure');
+    expect(verifier).toContain('COALESCE');
+  });
+});
+
+describe('C1: release safety', () => {
+  it('19. performs NO backfill and touches no existing row', () => {
     expect(outsideFunctionBodies).not.toContain('INSERT INTO');
     expect(outsideFunctionBodies).not.toMatch(/\bUPDATE\s+public\./);
     expect(outsideFunctionBodies).not.toMatch(/\bDELETE\s+FROM\b/);
     expect(outsideFunctionBodies).not.toMatch(/\bTRUNCATE\b/);
     expect(outsideFunctionBodies).not.toMatch(/\bDROP\s+(TABLE|COLUMN|INDEX|FUNCTION)\b/);
-    // And it says so, so an operator cannot mistake this for the data gate.
     expect(rollout).toContain('NO BACKFILL IS PERFORMED OR ATTEMPTED HERE');
   });
 
-  it('11. documents the DB-first release order the application depends on', () => {
+  it('20. documents the DB-first release order, never application-first', () => {
     expect(rollout).toContain('DB FIRST, APPLICATION SECOND');
-    const order = [
-      'UNDEPLOYED',
-      'Apply this rollout',
-      '20260905_image_library_ownership_verify.sql',
-      'Only then deploy',
-    ];
+    const order = ['UNDEPLOYED', 'Apply this rollout',
+                   '20260905_image_library_ownership_verify.sql', 'Only then deploy'];
     let previous = -1;
     for (const step of order) {
       const at = rollout.indexOf(step);
       expect(at, `runbook step out of order: ${step}`).toBeGreaterThan(previous);
       previous = at;
     }
+    expect(rollout).toContain('rollout_readiness');
   });
 
-  it('12. the two source migrations are not modified by this gate', () => {
-    // The rollout copies them; it must never become the place they are edited.
+  it('21. the two source migrations are not modified by this gate', () => {
     expect(migration(SOURCES[0])).toContain('ADD COLUMN IF NOT EXISTS library_item_id uuid');
     expect(migration(SOURCES[0])).toContain('ON DELETE SET NULL');
     expect(migration(SOURCES[1])).toContain('auth.uid() <> p_user_id');
@@ -233,48 +370,5 @@ describe('IMAGE-LIBRARY-1 rollout artifact', () => {
       expect(migration(name)).toContain('SECURITY INVOKER');
       expect(migration(name)).not.toContain('SECURITY DEFINER');
     }
-  });
-});
-
-describe('IMAGE-LIBRARY-1 verifier', () => {
-  it('13. reports every property the gate requires, and rolls them up', () => {
-    for (const check of [
-      'library_item_id',
-      'is_nullable',
-      'delete_rule',
-      'no_unique_on_link',
-      'padlets_library_item_id_idx',
-      'overload_count',
-      'is_security_definer',
-      'search_path=public',
-      'public_execute',
-      'anon_execute',
-      'authenticated_execute',
-      'service_role_execute',
-      'binds_logical_actor',
-      'authority_at',
-      'retry_lookup_at',
-      'library_owned_by_actor',
-      'rollout_readiness',
-    ]) {
-      expect(verifier, `verifier must report ${check}`).toContain(check);
-    }
-  });
-
-  it('14. proves the ordering the catalog cannot express', () => {
-    // Statement order is the whole point of the hardening, and no catalog view
-    // exposes it -- this is the one narrowly targeted body inspection.
-    expect(verifier).toContain('pg_get_functiondef');
-    expect(verifier).toContain("position('public.board_collaborators' IN definition)");
-    expect(verifier).toContain("position('LEFT JOIN public.library_items' IN definition)");
-  });
-
-  it('15. stays runnable against a database where the rollout has not run', () => {
-    // has_function_privilege(role, TEXT signature, ...) RAISES on a missing
-    // function, and naming the column directly fails to parse before the
-    // column exists. Both were real failures caught in local rehearsal.
-    expect(verifier).not.toMatch(/has_function_privilege\(\s*'[a-z_]+'\s*,\s*sig\b/);
-    expect(verifier).toContain('to_regprocedure');
-    expect(verifier).toContain("to_jsonb(p) ->> 'library_item_id'");
   });
 });
