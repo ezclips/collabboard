@@ -224,6 +224,22 @@ describe('C1: posture, privilege and column contracts', () => {
     expect(verifier).toContain('delete action is SET NULL, and only that');
   });
 
+  it('12c. exclusion constraints are found through their BACKING INDEX', () => {
+    // EXCLUDE USING btree ((library_item_id::text) WITH =) stores 0 in conkey
+    // AND its backing index is not indisunique, so neither the conkey scan nor
+    // the uniqueness scan sees it -- while it still outlaws the second
+    // placement. The backing index is what actually reads the column.
+    for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
+                        block(rollout, 'DO $postflight$', '$postflight$;'), verifier]) {
+      expect(gate).toContain('con.conindid');
+      expect(gate).toMatch(/contype = 'x'/);
+      // ...and the direct-conkey path is kept as well, for a plain column key.
+      expect(gate).toMatch(/contype IN \('u', ?'x', ?'p'\)/);
+      expect(gate).toContain('ANY (con.conkey)');
+    }
+    expect(verifier).toContain('no unique/exclusion constraint constrains the link');
+  });
+
   it('12b. detects UNIQUE by catalog DEPENDENCY, so expression indexes cannot hide', () => {
     // UNIQUE ((library_item_id::text)) stores 0 in indkey, so an attnum
     // comparison misses it while it still outlaws the second placement.
@@ -238,10 +254,8 @@ describe('C1: posture, privilege and column contracts', () => {
     for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
                         block(rollout, 'DO $postflight$', '$postflight$;'), verifier]) {
       expect(gate).toContain('pg_constraint');
-      expect(gate).toMatch(/contype IN \('u', ?'x', ?'p'\)/);
     }
     expect(verifier).toContain('no UNIQUE index depends on the link column');
-    expect(verifier).toContain('no unique/exclusion constraint covers the link');
     // A NON-unique expression index is a performance index, not a cardinality
     // restriction: the guard is scoped to unique ones only.
     expect(verifier).not.toMatch(/indexprs IS NOT NULL[\s\S]{0,40}RAISE/);
@@ -303,38 +317,43 @@ describe('C1: prerequisite manifest tracks the function', () => {
       const [table, column] = ref.split('.');
       // The rollout creates this one, so rows 1-4 assert its shape instead.
       if (ref === 'padlets.library_item_id') continue;
-      // Typed entries: ('table','column','type-class').
-      const entry = new RegExp(`\\('${table}','${column}','(uuid|jsonb|bool|text|numeric)'\\)`);
+      // Typed entries carry the exact typname AND the exact atttypmod.
+      const entry = new RegExp(`\\('${table}','${column}','\\w+',-?\\d+\\)`);
       for (const [i, gate] of allThreeGates().entries()) {
         expect(gate, `gate ${i} manifest is missing ${ref}`).toMatch(entry);
       }
     }
   });
 
-  it('15. the manifest is TYPED, and the authority keys must be uuid', () => {
+  it('15. the manifest is TYPED and TYPMOD-EXACT, and authority keys are uuid', () => {
     // Existence is not enough: boards.user_id as text passes an existence
     // check and then fails at runtime with "operator does not exist: text =
     // uuid" -- after the rollout has already reported success.
     for (const gate of allThreeGates()) {
       for (const uuidKey of [
-        "('boards','id','uuid')", "('boards','user_id','uuid')",
-        "('board_collaborators','board_id','uuid')",
-        "('board_collaborators','user_id','uuid')",
-        "('padlets','id','uuid')", "('padlets','board_id','uuid')",
-        "('library_items','id','uuid')", "('library_items','user_id','uuid')",
+        "('boards','id','uuid',-1)", "('boards','user_id','uuid',-1)",
+        "('board_collaborators','board_id','uuid',-1)",
+        "('board_collaborators','user_id','uuid',-1)",
+        "('padlets','id','uuid',-1)", "('padlets','board_id','uuid',-1)",
+        "('library_items','id','uuid',-1)", "('library_items','user_id','uuid',-1)",
       ]) {
         expect(gate, `missing typed authority key ${uuidKey}`).toContain(uuidKey);
       }
-      // JSONB payloads and the boolean flag are exact too.
-      expect(gate).toContain("('padlets','metadata','jsonb')");
-      expect(gate).toContain("('library_items','content','jsonb')");
-      expect(gate).toContain("('library_items','is_public','bool')");
-      // Type CLASSES where the function genuinely does not care, which is what
-      // production carries: padlets.type is varchar(50), position_x integer,
-      // width numeric.
-      expect(gate).toContain("col.udt_name = 'uuid'");
-      expect(gate).toMatch(/col\.udt_name IN \('text', ?'varchar', ?'bpchar'\)/);
-      expect(gate).toMatch(/col\.udt_name IN \('int2', ?'int4', ?'int8',\s*'numeric', ?'float4', ?'float8'\)/);
+      expect(gate).toContain("('padlets','metadata','jsonb',-1)");
+      expect(gate).toContain("('library_items','content','jsonb',-1)");
+      expect(gate).toContain("('library_items','is_public','bool',-1)");
+      // C3-B: the BOUNDED column is pinned to its canonical typmod. The RPC
+      // inserts the literal 'image', and a re-bound to varchar(1) both breaks
+      // that and passes any type-family check.
+      expect(gate).toContain("('padlets','type','varchar',54)");
+      expect(gate).toContain("('library_items','type','text',-1)");
+      expect(gate).toContain("('padlets','position_x','int4',-1)");
+      expect(gate).toContain("('padlets','width','numeric',-1)");
+      // Structural comparison of both the type and its modifier.
+      expect(gate).toContain('a.atttypmod');
+      expect(gate).toContain('cur.ty <> req.ty OR cur.tm <> req.tm');
+      // No loose family matching survives.
+      expect(gate).not.toContain("udt_name IN ('text'");
     }
   });
 
@@ -363,15 +382,50 @@ describe('C1: prerequisite manifest tracks the function', () => {
     expect(post).not.toContain('preflight_ok');
     // The two gates run the same manifest, so they cannot drift apart.
     const manifestOf = (s: string) =>
-      (s.match(/\('(?:boards|board_collaborators|padlets|library_items)','\w+','\w+'\)/g) ?? []).sort();
+      (s.match(/\('(?:boards|board_collaborators|padlets|library_items)','\w+','\w+',-?\d+\)/g) ?? []).sort();
     expect(manifestOf(preflight())).toEqual(manifestOf(post));
     expect(manifestOf(preflight())).toEqual(manifestOf(verifier));
     expect(manifestOf(preflight()).length).toBe(23);
   });
+
+  it('17b. the pinned bound admits every fixed literal the RPC inserts', () => {
+    // atttypmod for varchar(N) is N + 4. padlets.type is the only bounded
+    // column the function writes, and it writes the literal 'image'.
+    const literals = [...hardenedBody.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(literals).toContain('image');
+    const bound = /\('padlets','type','varchar',(\d+)\)/.exec(rollout);
+    expect(bound, 'padlets.type must be pinned with a typmod').not.toBeNull();
+    const maxLength = Number(bound![1]) - 4;
+    expect(maxLength).toBe(50);
+    for (const literal of ['image']) {
+      expect(literal.length, `${literal} must fit varchar(${maxLength})`)
+        .toBeLessThanOrEqual(maxLength);
+    }
+  });
 });
 
-describe('C2: version independence', () => {
-  it('18. no load-bearing comparison reads a catalog-RENDERED statement', () => {
+describe('C3: predicate identity and version disposition', () => {
+  it('17c. the supporting-index predicate is compared EXACTLY, never normalised', () => {
+    // Stripping parentheses and whitespace made `library_item_id IS NOT NULL`
+    // and a call to a function literally named `library_item_idisnotnull()`
+    // collapse onto the same token, so a predicate returning FALSE verified as
+    // the reviewed one. Exact comparison is what keeps parse trees apart.
+    for (const gate of [rollout, verifier]) {
+      expect(gate).not.toContain("regexp_replace");
+      expect(gate).not.toContain("'[\\s()]'");
+      expect(gate).toContain('pg_get_expr(i.indpred, i.indrelid, false)');
+      expect(gate).toContain('pred=(library_item_id IS NOT NULL)');
+    }
+    // The malicious spelling must not be what the artifact expects.
+    for (const gate of [rollout, verifier]) {
+      expect(gate).not.toContain('pred=library_item_idisnotnull');
+    }
+    // Provenance: the expected predicate is the one the reviewed migration's
+    // own CREATE INDEX produces.
+    expect(migration(SOURCES[0])).toContain('WHERE library_item_id IS NOT NULL');
+  });
+
+  it('18. no load-bearing comparison reads a catalog-RENDERED STATEMENT', () => {
     // pg_get_function_identity_arguments renders "double precision"; typname
     // stores "float8". pg_get_indexdef renders a whole statement. Neither is
     // used to decide anything here -- checked against STATEMENTS, since the
@@ -395,22 +449,24 @@ describe('C2: version independence', () => {
     expect(verifier).toContain("'float8'");
   });
 
-  it('19. the one rendered expression is normalised before comparison', () => {
-    // The partial index predicate is the only rendered text compared, and it
-    // is lowercased with whitespace and parentheses stripped first, so
-    // "(library_item_id IS NOT NULL)" and any equivalent spacing agree.
-    for (const gate of [rollout, verifier]) {
-      expect(gate).toContain('pg_get_expr(i.indpred, i.indrelid)');
-      expect(gate).toMatch(/lower\(regexp_replace\(/);
-      expect(gate).toContain("'[\\s()]', '', 'g'");
-      expect(gate).toContain('pred=library_item_idisnotnull');
+  it('19. the deparsed predicate is covered by an explicit PostgreSQL 17 guard', () => {
+    // The predicate comparison is exact rather than normalised, which is what
+    // fixes the collision -- but deparser output is still a major-version
+    // detail, so all three gates fail closed anywhere but major 17. The guard
+    // does not mask the collision; it makes the representation safe to trust.
+    for (const gate of [block(rollout, 'DO $preflight$', '$preflight$;'),
+                        block(rollout, 'DO $postflight$', '$postflight$;'), verifier]) {
+      expect(gate).toContain("current_setting('server_version_num')");
+      expect(gate).toContain('170000 AND 179999');
     }
-    // The server version is reported, but never gates readiness: its row is
-    // labelled 'diagnostic' and its pass column is a literal true.
+    // In the verifier it is a LOAD-BEARING invariant row, not a diagnostic.
     const versionRow = verifierStatements.split('\n')
-      .find((line) => line.includes('server version')) ?? '';
-    expect(versionRow).toContain("'diagnostic'");
-    expect(verifierStatements).toContain("current_setting('server_version_num'), true");
+      .find((line) => line.includes("'compatibility'")) ?? '';
+    expect(versionRow).toContain('PostgreSQL major 17');
+    expect(verifierStatements).not.toContain("current_setting('server_version_num'), true");
+    // And both artifacts say so plainly, so nobody re-pins it during an apply.
+    expect(rollout).toContain('certified for PostgreSQL major 17 only');
+    expect(verifier).toContain('POSTGRESQL MAJOR 17 ONLY');
   });
 });
 
@@ -440,16 +496,18 @@ describe('C1: verifier contract', () => {
       'padlets.library_item_id exists', 'type is uuid', 'is nullable', 'has NO default',
       'exactly one foreign key on the link', 'targets public.library_items(id)',
       'delete action is SET NULL, and only that',
+      'PostgreSQL major 17 (this artifact is certified for it only)',
       'no UNIQUE index depends on the link column',
-      'no unique/exclusion constraint covers the link',
-      'supporting index matches structurally', 'exists with the reviewed signature',
+      'no unique/exclusion constraint constrains the link',
+      'supporting index matches structurally, predicate exactly',
+      'exists with the reviewed signature',
       'no other overload of the same name', 'canonical body digest matches the reviewed migration',
       'argument types match (structural)', 'result columns match (structural)',
       'SECURITY INVOKER, never DEFINER', 'configuration is exactly search_path=public',
       'owner is the expected deployment role', 'PUBLIC cannot execute', 'anon cannot execute',
       'authenticated can execute', 'service_role can execute',
       'exact ACL set, none grantable', 'required relations exist',
-      'every column the function uses exists with a usable type',
+      'every column the function uses has the canonical type and typmod',
       'auth.uid() exists, takes no arguments, returns uuid',
     ]) {
       expect(invariants, `missing invariant row: ${check}`).toContain(check);

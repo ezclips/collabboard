@@ -119,17 +119,28 @@ DECLARE
     fk_target text;
     overloads integer;
 BEGIN
-    -- 1. PREREQUISITES, WITH TYPES. Every relation, column and callable the
-    -- FINAL hardened function depends on, traced from that function. Existence
-    -- is not enough: a boards.user_id of type text passes an existence check
-    -- and then fails at runtime with "operator does not exist: text = uuid",
-    -- long after this rollout reported success.
+    -- 0. REPRESENTATION COMPATIBILITY. The supporting-index predicate below is
+    -- compared as PostgreSQL DEPARSES it, and deparser output is a major-version
+    -- detail. This artifact was proven on PostgreSQL 17.x, so it refuses to run
+    -- anywhere else rather than compare a string it cannot vouch for. A wrong
+    -- major is a reviewed artifact change, never an in-rollout edit.
+    IF current_setting('server_version_num')::int NOT BETWEEN 170000 AND 179999 THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY rollout preflight failed: server_version_num is %, but this artifact is certified for PostgreSQL major 17 only',
+            current_setting('server_version_num');
+    END IF;
+
+    -- 1. PREREQUISITES, WITH EXACT TYPES AND TYPMODS. Every relation, column and
+    -- callable the FINAL hardened function depends on, traced from that function
+    -- and pinned against supabase/baseline/schema_snapshot_2026-07-05.sql.
     --
-    -- Type classes rather than exact type names where the function genuinely
-    -- does not care: the authority keys must be uuid, the JSONB payloads must
-    -- be jsonb, and the text/numeric columns accept their whole family, which
-    -- is what production actually carries (padlets.type is varchar(50),
-    -- position_x is integer, width is numeric).
+    -- Existence is not enough: boards.user_id as text passes an existence check
+    -- and then fails at runtime with "operator does not exist: text = uuid".
+    -- Neither is the type family: library_items.type narrowed to varchar(1)
+    -- still looks "text-ish" and then rejects the literal 'image' this function
+    -- inserts. So the contract is the exact typname AND the exact atttypmod --
+    -- structural catalog facts, not rendered type names -- and any unexpected
+    -- narrowing or widening fails closed.
     FOREACH actual IN ARRAY ARRAY[
         'public.padlets', 'public.library_items',
         'public.boards', 'public.board_collaborators'
@@ -153,39 +164,41 @@ BEGIN
               WHERE oid = to_regprocedure('auth.uid()'));
     END IF;
 
-    SELECT string_agg(req.t || '.' || req.c || ' (' || req.k || ', found '
-                      || COALESCE(col.udt_name, 'nothing') || ')', ', ' ORDER BY req.t, req.c)
+    -- atttypmod is -1 for an unconstrained type; for varchar(N) it is N + 4.
+    -- padlets.type is the one bounded column the function writes, and it must
+    -- stay wide enough for the literal 'image' AND identical to the canonical
+    -- schema, so a silent re-bound is drift either way.
+    SELECT string_agg(req.t || '.' || req.c || ' (expected ' || req.ty
+                      || CASE WHEN req.tm = -1 THEN '' ELSE '/' || req.tm::text END
+                      || ', found ' || COALESCE(cur.ty, 'nothing')
+                      || CASE WHEN cur.tm IS NULL OR cur.tm = -1 THEN ''
+                              ELSE '/' || cur.tm::text END || ')',
+                      ', ' ORDER BY req.t, req.c)
       INTO missing
       FROM (VALUES
-            ('boards','id','uuid'),('boards','user_id','uuid'),
-            ('board_collaborators','board_id','uuid'),
-            ('board_collaborators','user_id','uuid'),
-            ('board_collaborators','role','text'),
-            ('padlets','id','uuid'),('padlets','board_id','uuid'),
-            ('padlets','title','text'),('padlets','content','text'),
-            ('padlets','type','text'),('padlets','position_x','numeric'),
-            ('padlets','position_y','numeric'),('padlets','width','numeric'),
-            ('padlets','height','numeric'),('padlets','file_url','text'),
-            ('padlets','metadata','jsonb'),
-            ('library_items','id','uuid'),('library_items','user_id','uuid'),
-            ('library_items','title','text'),('library_items','type','text'),
-            ('library_items','content','jsonb'),
-            ('library_items','thumbnail_url','text'),
-            ('library_items','is_public','bool')
-           ) AS req(t, c, k)
-      LEFT JOIN information_schema.columns AS col
-             ON col.table_schema = 'public' AND col.table_name = req.t
-            AND col.column_name = req.c
-     WHERE col.column_name IS NULL
-        OR NOT CASE req.k
-                WHEN 'uuid'    THEN col.udt_name = 'uuid'
-                WHEN 'jsonb'   THEN col.udt_name = 'jsonb'
-                WHEN 'bool'    THEN col.udt_name = 'bool'
-                WHEN 'text'    THEN col.udt_name IN ('text', 'varchar', 'bpchar')
-                WHEN 'numeric' THEN col.udt_name IN ('int2', 'int4', 'int8',
-                                                     'numeric', 'float4', 'float8')
-                ELSE false
-               END;
+            ('boards','id','uuid',-1),('boards','user_id','uuid',-1),
+            ('board_collaborators','board_id','uuid',-1),
+            ('board_collaborators','user_id','uuid',-1),
+            ('board_collaborators','role','text',-1),
+            ('padlets','id','uuid',-1),('padlets','board_id','uuid',-1),
+            ('padlets','title','text',-1),('padlets','content','text',-1),
+            ('padlets','type','varchar',54),
+            ('padlets','position_x','int4',-1),('padlets','position_y','int4',-1),
+            ('padlets','width','numeric',-1),('padlets','height','numeric',-1),
+            ('padlets','file_url','text',-1),('padlets','metadata','jsonb',-1),
+            ('library_items','id','uuid',-1),('library_items','user_id','uuid',-1),
+            ('library_items','title','text',-1),('library_items','type','text',-1),
+            ('library_items','content','jsonb',-1),
+            ('library_items','thumbnail_url','text',-1),
+            ('library_items','is_public','bool',-1)
+           ) AS req(t, c, ty, tm)
+      LEFT JOIN LATERAL (
+            SELECT ty2.typname::text AS ty, a.atttypmod AS tm
+              FROM pg_attribute AS a JOIN pg_type AS ty2 ON ty2.oid = a.atttypid
+             WHERE a.attrelid = to_regclass('public.' || req.t)
+               AND a.attname = req.c AND a.attnum > 0 AND NOT a.attisdropped
+           ) AS cur ON true
+     WHERE cur.ty IS NULL OR cur.ty <> req.ty OR cur.tm <> req.tm;
     IF missing IS NOT NULL THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY rollout preflight failed: unusable prerequisite column(s): %', missing;
@@ -257,46 +270,63 @@ BEGIN
     END IF;
 
     -- Cardinality is load-bearing product behaviour: one durable Library object
-    -- may be placed many times. Detection is by CATALOG DEPENDENCY, not by
-    -- reading index key columns: an expression index such as
-    -- UNIQUE ((library_item_id::text)) stores 0 in indkey and would slip past
-    -- an attnum comparison while still outlawing the second placement.
+    -- may be placed many times. Detection is by CATALOG DEPENDENCY on the
+    -- BACKING INDEX, not by reading key columns: an expression key such as
+    -- ((library_item_id::text)) stores 0 in both indkey and conkey, so an
+    -- attnum comparison misses it entirely -- while it still outlaws the
+    -- second placement. That is true of UNIQUE indexes and of EXCLUSION
+    -- constraints alike, and an exclusion's backing index is not indisunique,
+    -- so uniqueness alone is not the test either.
     SELECT a.attnum INTO link_attnum FROM pg_attribute AS a
      WHERE a.attrelid = to_regclass('public.padlets') AND a.attname = 'library_item_id';
     IF link_attnum IS NOT NULL THEN
-        SELECT string_agg(c.relname, ', ' ORDER BY c.relname) INTO actual
-          FROM pg_index AS i JOIN pg_class AS c ON c.oid = i.indexrelid
-         WHERE i.indrelid = to_regclass('public.padlets')
-           AND i.indisunique
-           AND EXISTS (
-                SELECT 1 FROM pg_depend AS d
-                 WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid
-                   AND d.refclassid = 'pg_class'::regclass AND d.refobjid = i.indrelid
-                   AND d.refobjsubid = link_attnum);
+        SELECT string_agg(name, ', ' ORDER BY name) INTO actual FROM (
+            -- Any UNIQUE index that reads the column, however it reads it.
+            SELECT c.relname AS name
+              FROM pg_index AS i JOIN pg_class AS c ON c.oid = i.indexrelid
+             WHERE i.indrelid = to_regclass('public.padlets')
+               AND i.indisunique
+               AND EXISTS (
+                    SELECT 1 FROM pg_depend AS d
+                     WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid
+                       AND d.refclassid = 'pg_class'::regclass AND d.refobjid = i.indrelid
+                       AND d.refobjsubid = link_attnum)
+            UNION
+            -- Any EXCLUSION constraint whose backing index reads the column.
+            SELECT con.conname
+              FROM pg_constraint AS con
+              JOIN pg_index AS i ON i.indexrelid = con.conindid
+             WHERE con.conrelid = to_regclass('public.padlets')
+               AND con.contype = 'x'
+               AND EXISTS (
+                    SELECT 1 FROM pg_depend AS d
+                     WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid
+                       AND d.refclassid = 'pg_class'::regclass AND d.refobjid = i.indrelid
+                       AND d.refobjsubid = link_attnum)
+            UNION
+            -- And any unique/primary/exclusion constraint naming it directly.
+            SELECT con.conname
+              FROM pg_constraint AS con
+             WHERE con.conrelid = to_regclass('public.padlets')
+               AND con.contype IN ('u', 'x', 'p')
+               AND link_attnum = ANY (con.conkey)
+        ) AS offenders;
         IF actual IS NOT NULL THEN
             RAISE EXCEPTION
-                'IMAGE-LIBRARY rollout preflight failed: UNIQUE index(es) % constrain padlets.library_item_id, which would outlaw reuse',
-                actual;
-        END IF;
-
-        -- Unique and exclusion CONSTRAINTS reach the same outcome by another
-        -- route, so they fail closed too.
-        SELECT string_agg(con.conname, ', ' ORDER BY con.conname) INTO actual
-          FROM pg_constraint AS con
-         WHERE con.conrelid = to_regclass('public.padlets')
-           AND con.contype IN ('u', 'x', 'p')
-           AND link_attnum = ANY (con.conkey);
-        IF actual IS NOT NULL THEN
-            RAISE EXCEPTION
-                'IMAGE-LIBRARY rollout preflight failed: constraint(s) % constrain padlets.library_item_id',
+                'IMAGE-LIBRARY rollout preflight failed: object(s) % impose placement cardinality on padlets.library_item_id, which would outlaw reuse',
                 actual;
         END IF;
     END IF;
 
-    -- The supporting index, checked STRUCTURALLY. pg_get_indexdef renders a
-    -- whole statement whose formatting is a PostgreSQL-major detail; indisunique,
-    -- the access method and the key attnum are stored facts. Only the partial
-    -- predicate is rendered, and it is normalised before comparison.
+    -- The supporting index, checked STRUCTURALLY except for its partial
+    -- predicate, which is compared EXACTLY as PostgreSQL deparses it.
+    --
+    -- No normalisation. Stripping parentheses and whitespace made
+    -- `library_item_id IS NOT NULL` and a call to a function literally named
+    -- `library_item_idisnotnull()` collapse to the same token, and a predicate
+    -- returning FALSE would have verified as the reviewed one. Exact
+    -- comparison is what keeps materially different parse trees apart; the
+    -- major-version guard above is what makes the deparsed form safe to trust.
     SELECT (CASE WHEN i.indisunique THEN 'unique' ELSE 'non-unique' END)
            || ' ' || am.amname
            || ' keys=' || COALESCE((SELECT string_agg(a.attname, ',' ORDER BY k.ord)
@@ -305,8 +335,7 @@ BEGIN
                                              ON a.attrelid = i.indrelid AND a.attnum = k.attnum), '(expression)')
            || ' natts=' || i.indnatts::text
            || ' expr=' || (i.indexprs IS NOT NULL)::text
-           || ' pred=' || lower(regexp_replace(COALESCE(pg_get_expr(i.indpred, i.indrelid), ''),
-                                               '[\s()]', '', 'g'))
+           || ' pred=' || COALESCE(pg_get_expr(i.indpred, i.indrelid, false), '(none)')
       INTO actual
       FROM pg_index AS i
       JOIN pg_class AS c ON c.oid = i.indexrelid
@@ -317,11 +346,11 @@ BEGIN
     -- it. Once the link column exists this batch has already run, so a missing
     -- or reshaped index is drift, and silently re-creating one nobody dropped
     -- on purpose would be exactly the unattended repair this preflight refuses.
-    IF actual IS DISTINCT FROM 'non-unique btree keys=library_item_id natts=1 expr=false pred=library_item_idisnotnull'
+    IF actual IS DISTINCT FROM 'non-unique btree keys=library_item_id natts=1 expr=false pred=(library_item_id IS NOT NULL)'
        AND NOT (actual IS NULL AND link_type IS NULL) THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY rollout preflight failed: padlets_library_item_id_idx is [%], expected [%]',
-            COALESCE(actual, 'absent'), 'non-unique btree keys=library_item_id natts=1 expr=false pred=library_item_idisnotnull';
+            COALESCE(actual, 'absent'), 'non-unique btree keys=library_item_id natts=1 expr=false pred=(library_item_id IS NOT NULL)';
     END IF;
 
     -- 3. THE FUNCTION. Absent, or byte-for-byte the reviewed final contract.
@@ -674,17 +703,28 @@ DECLARE
     actual text;
     actual_list text[];
 BEGIN
-    -- 1. PREREQUISITES, WITH TYPES. Every relation, column and callable the
-    -- FINAL hardened function depends on, traced from that function. Existence
-    -- is not enough: a boards.user_id of type text passes an existence check
-    -- and then fails at runtime with "operator does not exist: text = uuid",
-    -- long after this rollout reported success.
+    -- 0. REPRESENTATION COMPATIBILITY. The supporting-index predicate below is
+    -- compared as PostgreSQL DEPARSES it, and deparser output is a major-version
+    -- detail. This artifact was proven on PostgreSQL 17.x, so it refuses to run
+    -- anywhere else rather than compare a string it cannot vouch for. A wrong
+    -- major is a reviewed artifact change, never an in-rollout edit.
+    IF current_setting('server_version_num')::int NOT BETWEEN 170000 AND 179999 THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY postflight failed: server_version_num is %, but this artifact is certified for PostgreSQL major 17 only',
+            current_setting('server_version_num');
+    END IF;
+
+    -- 1. PREREQUISITES, WITH EXACT TYPES AND TYPMODS. Every relation, column and
+    -- callable the FINAL hardened function depends on, traced from that function
+    -- and pinned against supabase/baseline/schema_snapshot_2026-07-05.sql.
     --
-    -- Type classes rather than exact type names where the function genuinely
-    -- does not care: the authority keys must be uuid, the JSONB payloads must
-    -- be jsonb, and the text/numeric columns accept their whole family, which
-    -- is what production actually carries (padlets.type is varchar(50),
-    -- position_x is integer, width is numeric).
+    -- Existence is not enough: boards.user_id as text passes an existence check
+    -- and then fails at runtime with "operator does not exist: text = uuid".
+    -- Neither is the type family: library_items.type narrowed to varchar(1)
+    -- still looks "text-ish" and then rejects the literal 'image' this function
+    -- inserts. So the contract is the exact typname AND the exact atttypmod --
+    -- structural catalog facts, not rendered type names -- and any unexpected
+    -- narrowing or widening fails closed.
     FOREACH actual IN ARRAY ARRAY[
         'public.padlets', 'public.library_items',
         'public.boards', 'public.board_collaborators'
@@ -708,39 +748,41 @@ BEGIN
               WHERE oid = to_regprocedure('auth.uid()'));
     END IF;
 
-    SELECT string_agg(req.t || '.' || req.c || ' (' || req.k || ', found '
-                      || COALESCE(col.udt_name, 'nothing') || ')', ', ' ORDER BY req.t, req.c)
+    -- atttypmod is -1 for an unconstrained type; for varchar(N) it is N + 4.
+    -- padlets.type is the one bounded column the function writes, and it must
+    -- stay wide enough for the literal 'image' AND identical to the canonical
+    -- schema, so a silent re-bound is drift either way.
+    SELECT string_agg(req.t || '.' || req.c || ' (expected ' || req.ty
+                      || CASE WHEN req.tm = -1 THEN '' ELSE '/' || req.tm::text END
+                      || ', found ' || COALESCE(cur.ty, 'nothing')
+                      || CASE WHEN cur.tm IS NULL OR cur.tm = -1 THEN ''
+                              ELSE '/' || cur.tm::text END || ')',
+                      ', ' ORDER BY req.t, req.c)
       INTO missing
       FROM (VALUES
-            ('boards','id','uuid'),('boards','user_id','uuid'),
-            ('board_collaborators','board_id','uuid'),
-            ('board_collaborators','user_id','uuid'),
-            ('board_collaborators','role','text'),
-            ('padlets','id','uuid'),('padlets','board_id','uuid'),
-            ('padlets','title','text'),('padlets','content','text'),
-            ('padlets','type','text'),('padlets','position_x','numeric'),
-            ('padlets','position_y','numeric'),('padlets','width','numeric'),
-            ('padlets','height','numeric'),('padlets','file_url','text'),
-            ('padlets','metadata','jsonb'),
-            ('library_items','id','uuid'),('library_items','user_id','uuid'),
-            ('library_items','title','text'),('library_items','type','text'),
-            ('library_items','content','jsonb'),
-            ('library_items','thumbnail_url','text'),
-            ('library_items','is_public','bool')
-           ) AS req(t, c, k)
-      LEFT JOIN information_schema.columns AS col
-             ON col.table_schema = 'public' AND col.table_name = req.t
-            AND col.column_name = req.c
-     WHERE col.column_name IS NULL
-        OR NOT CASE req.k
-                WHEN 'uuid'    THEN col.udt_name = 'uuid'
-                WHEN 'jsonb'   THEN col.udt_name = 'jsonb'
-                WHEN 'bool'    THEN col.udt_name = 'bool'
-                WHEN 'text'    THEN col.udt_name IN ('text', 'varchar', 'bpchar')
-                WHEN 'numeric' THEN col.udt_name IN ('int2', 'int4', 'int8',
-                                                     'numeric', 'float4', 'float8')
-                ELSE false
-               END;
+            ('boards','id','uuid',-1),('boards','user_id','uuid',-1),
+            ('board_collaborators','board_id','uuid',-1),
+            ('board_collaborators','user_id','uuid',-1),
+            ('board_collaborators','role','text',-1),
+            ('padlets','id','uuid',-1),('padlets','board_id','uuid',-1),
+            ('padlets','title','text',-1),('padlets','content','text',-1),
+            ('padlets','type','varchar',54),
+            ('padlets','position_x','int4',-1),('padlets','position_y','int4',-1),
+            ('padlets','width','numeric',-1),('padlets','height','numeric',-1),
+            ('padlets','file_url','text',-1),('padlets','metadata','jsonb',-1),
+            ('library_items','id','uuid',-1),('library_items','user_id','uuid',-1),
+            ('library_items','title','text',-1),('library_items','type','text',-1),
+            ('library_items','content','jsonb',-1),
+            ('library_items','thumbnail_url','text',-1),
+            ('library_items','is_public','bool',-1)
+           ) AS req(t, c, ty, tm)
+      LEFT JOIN LATERAL (
+            SELECT ty2.typname::text AS ty, a.atttypmod AS tm
+              FROM pg_attribute AS a JOIN pg_type AS ty2 ON ty2.oid = a.atttypid
+             WHERE a.attrelid = to_regclass('public.' || req.t)
+               AND a.attname = req.c AND a.attnum > 0 AND NOT a.attisdropped
+           ) AS cur ON true
+     WHERE cur.ty IS NULL OR cur.ty <> req.ty OR cur.tm <> req.tm;
     IF missing IS NOT NULL THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY postflight failed: unusable prerequisite column(s): %', missing;
@@ -780,46 +822,63 @@ BEGIN
     END IF;
 
     -- Cardinality is load-bearing product behaviour: one durable Library object
-    -- may be placed many times. Detection is by CATALOG DEPENDENCY, not by
-    -- reading index key columns: an expression index such as
-    -- UNIQUE ((library_item_id::text)) stores 0 in indkey and would slip past
-    -- an attnum comparison while still outlawing the second placement.
+    -- may be placed many times. Detection is by CATALOG DEPENDENCY on the
+    -- BACKING INDEX, not by reading key columns: an expression key such as
+    -- ((library_item_id::text)) stores 0 in both indkey and conkey, so an
+    -- attnum comparison misses it entirely -- while it still outlaws the
+    -- second placement. That is true of UNIQUE indexes and of EXCLUSION
+    -- constraints alike, and an exclusion's backing index is not indisunique,
+    -- so uniqueness alone is not the test either.
     SELECT a.attnum INTO link_attnum FROM pg_attribute AS a
      WHERE a.attrelid = to_regclass('public.padlets') AND a.attname = 'library_item_id';
     IF link_attnum IS NOT NULL THEN
-        SELECT string_agg(c.relname, ', ' ORDER BY c.relname) INTO actual
-          FROM pg_index AS i JOIN pg_class AS c ON c.oid = i.indexrelid
-         WHERE i.indrelid = to_regclass('public.padlets')
-           AND i.indisunique
-           AND EXISTS (
-                SELECT 1 FROM pg_depend AS d
-                 WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid
-                   AND d.refclassid = 'pg_class'::regclass AND d.refobjid = i.indrelid
-                   AND d.refobjsubid = link_attnum);
+        SELECT string_agg(name, ', ' ORDER BY name) INTO actual FROM (
+            -- Any UNIQUE index that reads the column, however it reads it.
+            SELECT c.relname AS name
+              FROM pg_index AS i JOIN pg_class AS c ON c.oid = i.indexrelid
+             WHERE i.indrelid = to_regclass('public.padlets')
+               AND i.indisunique
+               AND EXISTS (
+                    SELECT 1 FROM pg_depend AS d
+                     WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid
+                       AND d.refclassid = 'pg_class'::regclass AND d.refobjid = i.indrelid
+                       AND d.refobjsubid = link_attnum)
+            UNION
+            -- Any EXCLUSION constraint whose backing index reads the column.
+            SELECT con.conname
+              FROM pg_constraint AS con
+              JOIN pg_index AS i ON i.indexrelid = con.conindid
+             WHERE con.conrelid = to_regclass('public.padlets')
+               AND con.contype = 'x'
+               AND EXISTS (
+                    SELECT 1 FROM pg_depend AS d
+                     WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid
+                       AND d.refclassid = 'pg_class'::regclass AND d.refobjid = i.indrelid
+                       AND d.refobjsubid = link_attnum)
+            UNION
+            -- And any unique/primary/exclusion constraint naming it directly.
+            SELECT con.conname
+              FROM pg_constraint AS con
+             WHERE con.conrelid = to_regclass('public.padlets')
+               AND con.contype IN ('u', 'x', 'p')
+               AND link_attnum = ANY (con.conkey)
+        ) AS offenders;
         IF actual IS NOT NULL THEN
             RAISE EXCEPTION
-                'IMAGE-LIBRARY postflight failed: UNIQUE index(es) % constrain padlets.library_item_id, which would outlaw reuse',
-                actual;
-        END IF;
-
-        -- Unique and exclusion CONSTRAINTS reach the same outcome by another
-        -- route, so they fail closed too.
-        SELECT string_agg(con.conname, ', ' ORDER BY con.conname) INTO actual
-          FROM pg_constraint AS con
-         WHERE con.conrelid = to_regclass('public.padlets')
-           AND con.contype IN ('u', 'x', 'p')
-           AND link_attnum = ANY (con.conkey);
-        IF actual IS NOT NULL THEN
-            RAISE EXCEPTION
-                'IMAGE-LIBRARY postflight failed: constraint(s) % constrain padlets.library_item_id',
+                'IMAGE-LIBRARY postflight failed: object(s) % impose placement cardinality on padlets.library_item_id, which would outlaw reuse',
                 actual;
         END IF;
     END IF;
 
-    -- The supporting index, checked STRUCTURALLY. pg_get_indexdef renders a
-    -- whole statement whose formatting is a PostgreSQL-major detail; indisunique,
-    -- the access method and the key attnum are stored facts. Only the partial
-    -- predicate is rendered, and it is normalised before comparison.
+    -- The supporting index, checked STRUCTURALLY except for its partial
+    -- predicate, which is compared EXACTLY as PostgreSQL deparses it.
+    --
+    -- No normalisation. Stripping parentheses and whitespace made
+    -- `library_item_id IS NOT NULL` and a call to a function literally named
+    -- `library_item_idisnotnull()` collapse to the same token, and a predicate
+    -- returning FALSE would have verified as the reviewed one. Exact
+    -- comparison is what keeps materially different parse trees apart; the
+    -- major-version guard above is what makes the deparsed form safe to trust.
     SELECT (CASE WHEN i.indisunique THEN 'unique' ELSE 'non-unique' END)
            || ' ' || am.amname
            || ' keys=' || COALESCE((SELECT string_agg(a.attname, ',' ORDER BY k.ord)
@@ -828,18 +887,17 @@ BEGIN
                                              ON a.attrelid = i.indrelid AND a.attnum = k.attnum), '(expression)')
            || ' natts=' || i.indnatts::text
            || ' expr=' || (i.indexprs IS NOT NULL)::text
-           || ' pred=' || lower(regexp_replace(COALESCE(pg_get_expr(i.indpred, i.indrelid), ''),
-                                               '[\s()]', '', 'g'))
+           || ' pred=' || COALESCE(pg_get_expr(i.indpred, i.indrelid, false), '(none)')
       INTO actual
       FROM pg_index AS i
       JOIN pg_class AS c ON c.oid = i.indexrelid
       JOIN pg_am AS am ON am.oid = c.relam
      WHERE i.indrelid = to_regclass('public.padlets')
        AND c.relname = 'padlets_library_item_id_idx';
-    IF actual IS DISTINCT FROM 'non-unique btree keys=library_item_id natts=1 expr=false pred=library_item_idisnotnull' THEN
+    IF actual IS DISTINCT FROM 'non-unique btree keys=library_item_id natts=1 expr=false pred=(library_item_id IS NOT NULL)' THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY postflight failed: padlets_library_item_id_idx is [%], expected [%]',
-            COALESCE(actual, 'absent'), 'non-unique btree keys=library_item_id natts=1 expr=false pred=library_item_idisnotnull';
+            COALESCE(actual, 'absent'), 'non-unique btree keys=library_item_id natts=1 expr=false pred=(library_item_id IS NOT NULL)';
     END IF;
 
     fn := to_regprocedure(signature);
