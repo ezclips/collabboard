@@ -33,8 +33,8 @@
 --
 --   ABSENT   link column and function both missing        -> install
 --   EXACT    every object already in the reviewed form,   -> re-apply
---            including the function's canonical body
---            digest, owner, configuration and full ACL
+--            including a canonical body digest (LF or
+--            CRLF), owner, configuration and full ACL
 --
 -- Anything else ABORTS before the first mutation and the operator decides. The
 -- initial pre-hardening function body is deliberately NOT an accepted entry
@@ -43,16 +43,30 @@
 --
 -- NO OPERATOR RE-PINNING. A digest, catalog or type mismatch means STOP. The
 -- expected values here are a reviewed code change, never something to edit
--- during a rollout to make it proceed.
+-- during a rollout to make it proceed. That includes the two accepted body
+-- digests: a THIRD digest is a body nobody reviewed, whatever its newlines, and
+-- adding it here to get past a failed apply is exactly the move this line
+-- forbids.
 --
 -- CANONICAL FUNCTION IDENTITY. Keyword checks cannot tell a hardened body from
 -- a weakened one that still mentions the same identifiers, so the authority
 -- here is md5(pg_proc.prosrc) -- the stored body, byte for byte as the reviewed
--- migration wrote it -- pinned below and re-derived from that migration file by
--- scripts/db/imageLibraryRollout.source.test.ts. Signature, result columns,
--- security posture, configuration, owner and the complete ACL (including
--- grantability) are asserted alongside it, because a body digest alone says
--- nothing about who may call it.
+-- migration wrote it.
+--
+-- TWO digests are accepted, and only two: the reviewed body with LF newlines,
+-- and the SAME reviewed body with CRLF newlines. PostgreSQL stores prosrc
+-- verbatim, so pasting the identical reviewed function into the SQL Editor from
+-- a CRLF client yields different bytes and a different digest -- which is what
+-- failed a first production attempt and rolled it back, with nothing semantic
+-- changed. Accepting both encodings of one reviewed source is not
+-- normalisation: nothing is folded, so a weakened, reordered, pre-hardening or
+-- otherwise edited body still fails under either encoding. Both values are
+-- re-derived from the migration file by
+-- scripts/db/imageLibraryRollout.source.test.ts.
+--
+-- Signature, result columns, security posture, configuration, owner and the
+-- complete ACL (including grantability) are asserted alongside the digest,
+-- because a body digest alone says nothing about who may call it.
 --
 -- VERSION INDEPENDENCE. No load-bearing comparison reads a catalog-RENDERED
 -- statement. Argument and result types come from pg_type.typname, the index is
@@ -84,11 +98,22 @@ BEGIN;
 
 DO $preflight$
 DECLARE
-    -- The canonical body of the FINAL hardened function. Derived from
-    -- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql
-    -- and re-derived from that same file by the source test, so it can never
-    -- drift into an unexplained constant.
-    expected_body_md5 constant text := 'e5b8ce9de5a443313593af4ee71c28b8';
+    -- The canonical body of the FINAL hardened function, in the TWO exact byte
+    -- representations one reviewed source has: LF and CRLF. PostgreSQL stores
+    -- prosrc verbatim, so a body pasted into the SQL Editor from a CRLF client
+    -- is byte-different from the same reviewed body with LF newlines -- and a
+    -- first production attempt rolled back on exactly that, having changed
+    -- nothing semantic. Both come from
+    -- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql,
+    -- and the source test re-derives each from that one file: the second is
+    -- the first with every LF newline converted to CRLF, nothing else.
+    --
+    -- EXACTLY TWO. This is not normalisation: no whitespace, comment, case or
+    -- token is folded, so any other body -- weakened authority, reordered
+    -- checks, the pre-hardening version, an edited comment -- still fails.
+    expected_body_md5s constant text[] := ARRAY[
+        'e5b8ce9de5a443313593af4ee71c28b8',   -- LF
+        'face6815bf0be1b1511ab415eb698b09'];  -- CRLF
     -- Structural, never catalog-rendered prose: pg_type.typname is a stored
     -- identifier, while pg_get_function_identity_arguments would render
     -- "double precision" in a format this file would then depend on.
@@ -371,10 +396,10 @@ BEGIN
         -- retry-bypassing or reordered body still mentions every identifier the
         -- hardened one does, and still differs here on the first byte changed.
         SELECT md5(prosrc) INTO actual FROM pg_proc WHERE oid = fn;
-        IF actual <> expected_body_md5 THEN
+        IF NOT (actual = ANY (expected_body_md5s)) THEN
             RAISE EXCEPTION
-                'IMAGE-LIBRARY rollout preflight failed: existing function body digest is %, expected % -- refusing to overwrite an unreviewed function',
-                actual, expected_body_md5;
+                'IMAGE-LIBRARY rollout preflight failed: existing function body digest is %, expected one of % -- refusing to overwrite an unreviewed function',
+                actual, expected_body_md5s;
         END IF;
 
         SELECT array_agg(t.typname::text ORDER BY k.ord) INTO actual_list
@@ -675,11 +700,22 @@ GRANT EXECUTE ON FUNCTION public.create_image_post_with_library_item(
 -- preflight computed, because a prerequisite can be dropped between the two.
 DO $postflight$
 DECLARE
-    -- The canonical body of the FINAL hardened function. Derived from
-    -- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql
-    -- and re-derived from that same file by the source test, so it can never
-    -- drift into an unexplained constant.
-    expected_body_md5 constant text := 'e5b8ce9de5a443313593af4ee71c28b8';
+    -- The canonical body of the FINAL hardened function, in the TWO exact byte
+    -- representations one reviewed source has: LF and CRLF. PostgreSQL stores
+    -- prosrc verbatim, so a body pasted into the SQL Editor from a CRLF client
+    -- is byte-different from the same reviewed body with LF newlines -- and a
+    -- first production attempt rolled back on exactly that, having changed
+    -- nothing semantic. Both come from
+    -- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql,
+    -- and the source test re-derives each from that one file: the second is
+    -- the first with every LF newline converted to CRLF, nothing else.
+    --
+    -- EXACTLY TWO. This is not normalisation: no whitespace, comment, case or
+    -- token is folded, so any other body -- weakened authority, reordered
+    -- checks, the pre-hardening version, an edited comment -- still fails.
+    expected_body_md5s constant text[] := ARRAY[
+        'e5b8ce9de5a443313593af4ee71c28b8',   -- LF
+        'face6815bf0be1b1511ab415eb698b09'];  -- CRLF
     -- Structural, never catalog-rendered prose: pg_type.typname is a stored
     -- identifier, while pg_get_function_identity_arguments would render
     -- "double precision" in a format this file would then depend on.
@@ -913,10 +949,10 @@ BEGIN
     END IF;
 
     SELECT md5(prosrc) INTO actual FROM pg_proc WHERE oid = fn;
-    IF actual <> expected_body_md5 THEN
+    IF NOT (actual = ANY (expected_body_md5s)) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY postflight failed: committed function body digest is %, expected %',
-            actual, expected_body_md5;
+            'IMAGE-LIBRARY postflight failed: committed function body digest is %, expected one of %',
+            actual, expected_body_md5s;
     END IF;
 
     SELECT array_agg(t.typname::text ORDER BY k.ord) INTO actual_list

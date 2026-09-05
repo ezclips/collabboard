@@ -68,6 +68,14 @@ const hardenedBody = hardenedSource.slice(
   hardenedSource.lastIndexOf('$$;'),
 );
 const expectedBodyMd5 = crypto.createHash('md5').update(hardenedBody, 'utf8').digest('hex');
+/**
+ * The SAME reviewed body with CRLF newlines. PostgreSQL stores prosrc verbatim,
+ * so pasting the identical function into the SQL Editor from a CRLF client
+ * yields different bytes -- which is what rolled a first production apply back.
+ * Derived here, never hand-written.
+ */
+const crlfBody = hardenedBody.replace(/\n/g, '\r\n');
+const expectedCrlfMd5 = crypto.createHash('md5').update(crlfBody, 'utf8').digest('hex');
 
 describe('IMAGE-LIBRARY-1 rollout artifact', () => {
   it('1. follows the rollout/verify pair convention this repo uses', () => {
@@ -120,19 +128,76 @@ describe('IMAGE-LIBRARY-1 rollout artifact', () => {
 });
 
 describe('C1: canonical function integrity', () => {
-  it('6. the pinned digest is re-derived from the reviewed migration, not invented', () => {
+  it('6. both pinned digests are re-derived from ONE reviewed body, not invented', () => {
     // Provenance, computed here rather than trusted: change the hardened
-    // migration and this recomputation moves, forcing the constants to be
+    // migration and these recomputations move, forcing the constants to be
     // re-pinned deliberately instead of drifting.
     expect(hardenedBody).toContain('auth.uid() <> p_user_id');
     expect(hardenedBody.length).toBeGreaterThan(1000);
-    expect(rollout, 'rollout must pin the migration-derived body digest')
-      .toContain(expectedBodyMd5);
-    expect(verifier, 'verifier must pin the SAME digest')
-      .toContain(expectedBodyMd5);
-    // One digest, used by both gates -- they cannot disagree about identity.
+    // The second digest is the SAME body with every LF newline converted to
+    // CRLF and nothing else -- which is what a SQL Editor paste from a CRLF
+    // client stores, and what rolled a first production apply back.
+    expect(crlfBody).toBe(hardenedBody.replace(/\n/g, '\r\n'));
+    expect(crlfBody.replace(/\r\n/g, '\n')).toBe(hardenedBody);
+    expect(expectedCrlfMd5).not.toBe(expectedBodyMd5);
+
+    for (const [name, gate] of [['rollout', rollout], ['verifier', verifier]] as const) {
+      expect(gate, `${name} must pin the LF digest`).toContain(expectedBodyMd5);
+      expect(gate, `${name} must pin the CRLF digest`).toContain(expectedCrlfMd5);
+    }
+    // Both gates of the rollout, and the verifier, use the same pair.
     expect(rollout.match(new RegExp(expectedBodyMd5, 'g'))).toHaveLength(2); // preflight + postflight
+    expect(rollout.match(new RegExp(expectedCrlfMd5, 'g'))).toHaveLength(2);
     expect(verifier.match(new RegExp(expectedBodyMd5, 'g'))).toHaveLength(1);
+    expect(verifier.match(new RegExp(expectedCrlfMd5, 'g'))).toHaveLength(1);
+  });
+
+  it('6b. EXACTLY two digests are accepted, by membership not normalisation', () => {
+    // Nothing is folded: no whitespace, comment, case or token normalisation.
+    for (const gate of [statements, verifierStatements]) {
+      expect(gate).not.toMatch(/md5\(\s*replace\(/);
+      expect(gate).not.toMatch(/md5\(\s*regexp_replace\(/);
+      expect(gate).not.toMatch(/md5\(\s*lower\(/);
+      expect(gate).not.toMatch(/md5\(\s*btrim\(/);
+    }
+    // Membership in an exact two-element set.
+    const preflight = block(rollout, 'DO $preflight$', '$preflight$;');
+    const postflight = block(rollout, 'DO $postflight$', '$postflight$;');
+    for (const gate of [preflight, postflight]) {
+      expect(gate).toContain('expected_body_md5s constant text[] := ARRAY[');
+      expect(gate).toContain('= ANY (expected_body_md5s)');
+    }
+    expect(verifier).toContain('AS body_md5s');
+    expect(verifier).toContain('= ANY (SELECT unnest(body_md5s) FROM expected)');
+    // Two, and only two, in every declaration.
+    for (const decl of [...rollout.matchAll(/expected_body_md5s constant text\[\] := ARRAY\[([\s\S]*?)\];/g)]) {
+      expect((decl[1].match(/'[0-9a-f]{32}'/g) ?? [])).toHaveLength(2);
+    }
+    const verifierDecl = /ARRAY\['([0-9a-f]{32})',\s*'([0-9a-f]{32})'\]::text\[\]\s+AS body_md5s/.exec(verifier);
+    expect(verifierDecl, 'verifier must declare exactly the two').not.toBeNull();
+    expect([verifierDecl![1], verifierDecl![2]].sort())
+      .toEqual([expectedBodyMd5, expectedCrlfMd5].sort());
+  });
+
+  it('6c. a mutated body misses BOTH accepted digests, under either encoding', () => {
+    // The point of accepting two encodings is that it widens nothing else.
+    const mutations = {
+      'viewer allowed': hardenedBody.replace("c.role = 'editor'", "c.role IN ('editor','viewer')"),
+      'retry bypass': hardenedBody.replace('AND v_library_owner = p_user_id', 'AND true'),
+      'comment only': hardenedBody.replace('-- 1. THE LOGICAL ACTOR.', '-- 1. the logical actor.'),
+      'one space': hardenedBody.replace('BEGIN\n', 'BEGIN \n'),
+    };
+    for (const [label, body] of Object.entries(mutations)) {
+      expect(body, `${label} must actually differ`).not.toBe(hardenedBody);
+      for (const [enc, text] of [['LF', body], ['CRLF', body.replace(/\n/g, '\r\n')]] as const) {
+        const d = crypto.createHash('md5').update(text, 'utf8').digest('hex');
+        expect(d, `${label} (${enc}) must not be an accepted digest`)
+          .not.toBe(expectedBodyMd5);
+        expect(d).not.toBe(expectedCrlfMd5);
+        expect(rollout, `${label} (${enc}) must not appear in the rollout`).not.toContain(d);
+        expect(verifier).not.toContain(d);
+      }
+    }
   });
 
   it('7. both gates compare the stored body, not keywords', () => {
@@ -166,9 +231,18 @@ describe('C1: canonical function integrity', () => {
         const s = migration(SOURCES[0]);
         return s.slice(s.indexOf('AS $$') + 'AS $$'.length, s.lastIndexOf('$$;'));
       })(), 'utf8').digest('hex');
-    expect(initialBodyMd5).not.toBe(expectedBodyMd5);
-    expect(rollout).not.toContain(initialBodyMd5);
-    expect(verifier).not.toContain(initialBodyMd5);
+    const initialBody = (() => {
+      const src = migration(SOURCES[0]);
+      return src.slice(src.indexOf('AS $$') + 'AS $$'.length, src.lastIndexOf('$$;'));
+    })();
+    const initialCrlfMd5 = crypto.createHash('md5')
+      .update(initialBody.replace(/\n/g, '\r\n'), 'utf8').digest('hex');
+    for (const d of [initialBodyMd5, initialCrlfMd5]) {
+      expect(d).not.toBe(expectedBodyMd5);
+      expect(d).not.toBe(expectedCrlfMd5);
+      expect(rollout).not.toContain(d);
+      expect(verifier).not.toContain(d);
+    }
     // Fail closed, never repair.
     expect(preflight).not.toContain('ALTER TABLE');
     expect(preflight).not.toContain('DROP ');
@@ -501,7 +575,8 @@ describe('C1: verifier contract', () => {
       'no unique/exclusion constraint constrains the link',
       'supporting index matches structurally, predicate exactly',
       'exists with the reviewed signature',
-      'no other overload of the same name', 'canonical body digest matches the reviewed migration',
+      'no other overload of the same name',
+      'canonical body digest matches the reviewed migration (LF or CRLF)',
       'argument types match (structural)', 'result columns match (structural)',
       'SECURITY INVOKER, never DEFINER', 'configuration is exactly search_path=public',
       'owner is the expected deployment role', 'PUBLIC cannot execute', 'anon cannot execute',

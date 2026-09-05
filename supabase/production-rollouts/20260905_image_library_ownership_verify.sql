@@ -20,9 +20,16 @@
 -- viewer through, that skips the retry's Library-ownership test, or that moves
 -- the actor binding after the retry, still mentions every identifier the
 -- hardened body mentions -- keyword checks pass all of them. md5(prosrc) does
--- not. The pinned digest comes from
+-- not. TWO digests are accepted and only two: the reviewed body with LF
+-- newlines, and the SAME reviewed body with CRLF newlines. PostgreSQL stores
+-- prosrc verbatim, so the identical reviewed function pasted from a CRLF
+-- client hashes differently -- which failed a first production apply with
+-- nothing semantic changed. Nothing is folded, so a weakened, reordered or
+-- pre-hardening body still fails under either encoding, and a THIRD digest is
+-- a body nobody reviewed: STOP, never add it here to get past an apply.
+-- Both values come from
 -- supabase/migrations/20260905100000_harden_image_post_library_idempotency.sql
--- and is re-derived from that file by scripts/db/imageLibraryRollout.source.test.ts.
+-- and are re-derived from that file by scripts/db/imageLibraryRollout.source.test.ts.
 -- The rows labelled 'diagnostic' help locate a mismatch and are NOT the
 -- authority.
 --
@@ -41,7 +48,11 @@ WITH expected AS (
             'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text,'
             ' double precision, double precision, double precision, double precision,'
             ' text, jsonb)')::oid                                    AS fn,
-        'e5b8ce9de5a443313593af4ee71c28b8'::text                     AS body_md5,
+        -- TWO exact byte representations of ONE reviewed body: LF, then the
+        -- same body with CRLF newlines. Not normalisation -- nothing is
+        -- folded, so any third digest is a body nobody reviewed.
+        ARRAY['e5b8ce9de5a443313593af4ee71c28b8',
+              'face6815bf0be1b1511ab415eb698b09']::text[]             AS body_md5s,
         ARRAY['uuid','uuid','uuid','text','text','float8','float8','float8',
               'float8','text','jsonb']::text[]                       AS argtypes,
         ARRAY['padlet_id:uuid','library_item_id:uuid']::text[]        AS out_columns,
@@ -244,9 +255,12 @@ invariants(ord, section, check_name, actual, pass) AS (
               JOIN pg_namespace AS n ON n.oid = p.pronamespace
              WHERE n.nspname = 'public'
                AND p.proname = 'create_image_post_with_library_item') = 1
-    UNION ALL SELECT 14, 'function', 'canonical body digest matches the reviewed migration',
+    UNION ALL SELECT 14, 'function', 'canonical body digest matches the reviewed migration (LF or CRLF)',
            COALESCE((SELECT digest FROM body), '(absent)'),
-           COALESCE((SELECT digest FROM body) = (SELECT body_md5 FROM expected), false)
+           -- ANY over a subquery of scalar rows: `= ANY (<subquery returning
+           -- the array>)` would compare text to text[] and fail to type.
+           COALESCE((SELECT digest FROM body)
+                    = ANY (SELECT unnest(body_md5s) FROM expected), false)
     UNION ALL SELECT 15, 'function', 'argument types match (structural)',
            COALESCE(array_to_string((SELECT argtypes FROM body), ','), '(absent)'),
            COALESCE((SELECT argtypes FROM body) = (SELECT argtypes FROM expected), false)
