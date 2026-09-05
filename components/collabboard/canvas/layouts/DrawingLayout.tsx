@@ -24,6 +24,7 @@ import {
   type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
+import { buildLibraryClickPlacementDraft, resolveReusedLibraryItemId } from '@/lib/infra/collabboard/libraryReuseLink';
 import { sortSlidesByPresentationOrder } from '@/lib/infra/presentation/slideOrder';
 import { syncInvalidIndicesImmutable, validateFractionalIndices, getSceneVersion } from '@excalidraw/element';
 import { createSettledScenePropagation } from '@/lib/infra/drawing/settledScenePropagation';
@@ -1175,11 +1176,10 @@ export function DrawingEmbeddableCard({
           metadata: { parentId: padlet.id } as any,
           width: libData.width || 300,
           height: libData.height || 200,
-          // Reuse, not creation. Two payload shapes reach this drop: a direct
-          // Library drag (`libraryItemId`) and a ghost draft re-serialised from
-          // a placement draft (already the `library_item_id` column name). A
-          // ghost that was never Library-backed carries neither and stays NULL.
-          library_item_id: libData.libraryItemId ?? libData.library_item_id ?? null,
+          // Reuse, not creation. One shared resolver with the RowColumnContainerCard
+          // body zone, so the two handlers that can receive the same drop cannot
+          // drift apart on which payload shapes count as a durable link.
+          library_item_id: resolveReusedLibraryItemId(libData),
           // Transient, and only when THIS payload carries it.
           ...(libData.sourceReference ? { sourceReference: libData.sourceReference } : {}),
         });
@@ -4567,21 +4567,15 @@ export default function DrawingLayout({
           const canvasX = (centerClientX / zoom) - scrollX;
           const canvasY = (centerClientY / zoom) - scrollY;
 
-          // item is LibraryItem; the actual padlet fields live in item.content (LibraryItemContent)
-          const c = (item.content || {}) as any;
-          const { parentId: _p2, childPadletIds: _c2, ...cleanMeta2 } = c.metadata || {};
-          await onAddPadlet({
-            board_id: canvasId,
-            type: (c.type || item.type || 'note') as Padlet['type'],
-            title: c.title || item.title || 'Library Item',
-            content: typeof c.content === 'string' ? c.content : (c.content != null ? JSON.stringify(c.content) : ''),
-            file_url: c.file_url || c.metadata?.imageUrl || undefined,
-            position_x: canvasX,
-            position_y: canvasY,
-            width: c.width || 320,
-            height: c.height || 280,
-            metadata: { ...cleanMeta2, forceContainerPrompt: true },
-          });
+          // Click-to-place is the twin of the drag drop below, on the SAME
+          // durable object: the shared builder reads the Library id straight off
+          // the clicked item, so clicking and dragging one image can never
+          // disagree about whether the placement is Library-backed.
+          await onAddPadlet(buildLibraryClickPlacementDraft(item, {
+            boardId: canvasId,
+            positionX: canvasX,
+            positionY: canvasY,
+          }) as DrawingPostDraft);
           setActiveTool('select');
         }}
       />

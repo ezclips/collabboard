@@ -13,6 +13,7 @@ import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/li
 import { resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
 import { useScrollbarLane } from "./useScrollbarLane";
 import { resolveContainerChildren, type ContainerOrientation } from "@/lib/domain/canvas/containerModel";
+import { resolveReusedLibraryItemId } from "@/lib/infra/collabboard/libraryReuseLink";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -398,7 +399,15 @@ export default function RowColumnContainerCard({
                   // Reuse, not creation: this container placement references the
                   // Library object the dragged item already is. No library_items
                   // row is written here.
-                  library_item_id: libData.libraryItemId ?? null,
+                  //
+                  // This zone claims the drop (preventDefault + stopPropagation)
+                  // before Drawing's outer container handler can see it, so it
+                  // must accept BOTH shapes: a direct Library drag carries the
+                  // transport name, while a Drawing "Add to Existing" ghost was
+                  // spread from a staged placement draft and already carries the
+                  // column name. A ghost that was never Library-backed has
+                  // neither and stays NULL.
+                  library_item_id: resolveReusedLibraryItemId(libData),
                 };
                 onDropDraftIntoContainer?.(padlet.id, draftPayload);
                 return;

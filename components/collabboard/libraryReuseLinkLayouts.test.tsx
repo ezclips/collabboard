@@ -19,6 +19,9 @@
 // from the site it stands for.
 import { describe, expect, it } from 'vitest';
 import type { LibraryItem, LibraryItemContent } from '@/lib/collabboard/library';
+// C1: the dual-key rule is production code now, so this suite calls it rather
+// than restating it.
+import { resolveReusedLibraryItemId } from '@/lib/infra/collabboard/libraryReuseLink';
 
 const LIBRARY_MIME = 'application/collabboard-library';
 const IMAGE = 'https://example.test/library-image.png';
@@ -165,7 +168,7 @@ const drawingContainerChildRow = (libData: Record<string, any>, containerId: str
   file_url: libData.file_url || undefined,
   width: libData.width || 300,
   height: libData.height || 200,
-  library_item_id: libData.libraryItemId ?? libData.library_item_id ?? null,
+  library_item_id: resolveReusedLibraryItemId(libData),
   metadata: { parentId: containerId },
 });
 
@@ -363,12 +366,15 @@ describe('the real placement writers are the ones modelled above', () => {
     // Both timeline drops: the line (new container) and an existing container.
     expect(timeline.match(/library_item_id: libData\.libraryItemId \?\? null/g)).toHaveLength(2);
 
+    // C1: the two Drawing-reachable container drops now share one resolver that
+    // accepts both payload shapes -- behaviour proved in
+    // drawingLibraryReuseLink.test.tsx against the mounted handler.
     const rowColumn = await read('components/collabboard/RowColumnContainerCard.tsx');
-    expect(rowColumn).toContain('library_item_id: libData.libraryItemId ?? null');
+    expect(rowColumn).toContain('library_item_id: resolveReusedLibraryItemId(libData)');
 
     const drawing = await read('components/collabboard/canvas/layouts/DrawingLayout.tsx');
     expect(drawing).toContain('library_item_id: item.libraryItemId ?? null');
-    expect(drawing).toContain('library_item_id: libData.libraryItemId ?? libData.library_item_id ?? null');
+    expect(drawing).toContain('library_item_id: resolveReusedLibraryItemId(libData)');
   });
 
   it('no path mints a Library object, calls the NEW-image RPC, or copies the asset', async () => {
