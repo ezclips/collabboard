@@ -1256,6 +1256,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isSchedulerLayout = canvas?.layout === 'scheduler';
   const enableGantt = process.env.NEXT_PUBLIC_ENABLE_GANTT === 'true';
   const enableScheduler = process.env.NEXT_PUBLIC_ENABLE_SCHEDULER === 'true';
+  /**
+   * Board AI Chat reads and writes `board_ai_threads` / `board_ai_messages`,
+   * and that migration is NOT applied to production. Nothing here contacts the
+   * database until the drawer is opened -- every fetch in BoardAiChatDrawer is
+   * gated on `isOpen`, which starts false -- but its two entry points are one
+   * click away, and one of them lives in the PDF details panel that the Image
+   * validation run uses. Default OFF so the surface cannot be reached by
+   * accident; set NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT=true once the migration has
+   * been applied through a reviewed production rollout. No implementation is
+   * removed by this flag.
+   */
+  const enableBoardAiChat = process.env.NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT === 'true';
   const [isGanttVisible, setIsGanttVisible] = useState(true);
   const [isSchedulerVisible, setIsSchedulerVisible] = useState(false);
   const isGridLayout = canvas?.layout === 'grid';
@@ -9730,28 +9742,30 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
-          onAddBoardAiContext={addBoardAiChatContext}
+          onAddBoardAiContext={enableBoardAiChat ? addBoardAiChatContext : undefined}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader
             is one: mounted under CanvasSidebar's z-[3000] wrapper it would be
             pinned above every editor modal. Here it sits in the docked band and
             yields to a blocking editor on the board's own flag. */}
-        <BoardAiChatDrawer
-          boardId={canvasId}
-          isOpen={isBoardAiChatOpen}
-          onClose={closeBoardAiChat}
-          blockingEditorOpen={isBlockingOverlayOpen}
-          draftContext={boardAiChatDraftContext}
-          onDraftContextChange={setBoardAiChatDraftContext}
-          selectedBoardItem={boardAiChatSelectedItem}
-        />
+        {enableBoardAiChat && (
+          <BoardAiChatDrawer
+            boardId={canvasId}
+            isOpen={isBoardAiChatOpen}
+            onClose={closeBoardAiChat}
+            blockingEditorOpen={isBlockingOverlayOpen}
+            draftContext={boardAiChatDraftContext}
+            onDraftContextChange={setBoardAiChatDraftContext}
+            selectedBoardItem={boardAiChatSelectedItem}
+          />
+        )}
 
         {/* The one board-level Board AI entry point. Available to every reader
             of the board, viewers included -- private reasoning is a read -- so
             it is deliberately NOT behind canUseCanvasToolbar. Hidden while an
             editor owns the screen, like every other floating board control. */}
-        {!isBlockingEditorModalOpen && !isBoardAiChatOpen && (
+        {enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && (
           <button
             type="button"
             data-board-ai-chat-open="true"

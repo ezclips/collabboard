@@ -171,7 +171,12 @@ describe('23,25,26,27,29. the reader drawer hands over identity only', () => {
 
   it('25,26. the shell opens Chat and lets the docked reader yield the dock', () => {
     // One handoff callback, and it is the same one the reader is given.
-    expect(canvas).toContain('onAddBoardAiContext={addBoardAiChatContext}');
+    // runtime/image-library-validation: the hand-off is wired exactly as
+    // before, but behind NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT while
+    // 20260902120000_create_board_ai_chat.sql is unapplied in production, so
+    // the reader's "add to AI context" affordance cannot reach missing tables.
+    expect(canvas).toContain(
+      'onAddBoardAiContext={enableBoardAiChat ? addBoardAiChatContext : undefined}');
     const handler = canvas.slice(
       canvas.indexOf('const addBoardAiChatContext'),
       canvas.indexOf('const boardAiChatSelectedItem'),
