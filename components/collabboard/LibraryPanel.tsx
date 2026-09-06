@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { resolveLibraryImagePreviewSrc } from '@/lib/domain/canvas/libraryImagePreviewSource';
 import {
     X,
     Book,
@@ -129,13 +130,23 @@ function resolvePreview(item: LibraryItem) {
         (t === 'image' ? 'Image' : t === 'link' ? 'Link' : t === 'todo' ? 'To-do' : 'Untitled');
 
     // Thumbnail sources
-    const thumb =
-        c.metadata?.previewUrl ||
-        c.metadata?.imageUrl ||
-        c.file_url ||
-        c.metadata?.file_url ||
-        c.metadata?.linkImage ||
-        c.file_url;
+    //
+    // An Image tile asks the Library's own display authority, because a saved
+    // annotation updates `thumbnail_url` and `content.file_url` while
+    // `content.metadata.imageUrl` keeps holding the BASE crop an editor starts
+    // from. Asking imageUrl first -- as the shared chain below still does for
+    // every other type -- painted the pre-annotation image over a row that had
+    // already been repaired. Display only: nothing here writes.
+    const thumb = t === 'image'
+        ? (resolveLibraryImagePreviewSrc(item) ?? undefined)
+        : (
+            c.metadata?.previewUrl ||
+            c.metadata?.imageUrl ||
+            c.file_url ||
+            c.metadata?.file_url ||
+            c.metadata?.linkImage ||
+            c.file_url
+        );
 
     // Subtitle / snippet
     let subtitle = '';
