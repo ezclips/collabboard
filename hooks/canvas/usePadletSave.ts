@@ -29,6 +29,7 @@ export type SaveAIComponentData = {
 import { useCallback, useEffect, useMemo, useRef, Dispatch, SetStateAction } from 'react';
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
 import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 // ============================================================================
@@ -1313,57 +1314,20 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else {
         // Update Image -- title is left untouched here; it's only ever
         // changed through the image editing modal's own Title field now.
-        await supabase
-          .from('padlets')
-          .update({
-            file_url: data.imageUrl,
-            metadata,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', padletToEdit.id);
-
-        /**
-         * IMAGE-LIBRARY: annotations are DURABLE IMAGE CONTENT, not placement
-         * decoration. The Library object owns the image, its drawing and its
-         * text; the placement owns board id, position, size and layout. So a
-         * saved edit has to reach the SAME linked library_items row -- until
-         * now the snapshot was written once at creation and never again, which
-         * left the durable object showing the original crop while the board
-         * showed the annotated one.
-         *
-         * The same row, never a new one: no second Library id is minted and no
-         * asset is re-uploaded, because `data.imageUrl` is already the
-         * authoritative saved representation the placement itself renders.
-         *
-         * The shape mirrors what create_image_post_with_library_item builds, so
-         * one object cannot end up with two snapshot layouts.
-         *
-         * Authority stays with RLS. `Users can update their own library items`
-         * is `auth.uid() = user_id`, so annotating a placement that REUSES
-         * someone else's Library image matches no row and changes nothing --
-         * their durable object is not ours to rewrite. No service-role client
-         * is involved here, deliberately.
-         */
-        const linkedLibraryItemId =
-          (padletToEdit as { library_item_id?: string | null }).library_item_id ?? null;
-        if (linkedLibraryItemId) {
-          await supabase
-            .from('library_items')
-            .update({
-              content: {
-                title: padletToEdit.title ?? 'Image',
-                content: '',
-                type: 'image',
-                width: padletToEdit.width ?? 300,
-                height: padletToEdit.height ?? 200,
-                file_url: data.imageUrl,
-                metadata,
-              },
-              thumbnail_url: data.imageUrl,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', linkedLibraryItemId);
-        }
+        //
+        // IMAGE-LIBRARY: annotations are DURABLE IMAGE CONTENT, not placement
+        // decoration. The placement and the SAME linked library_items row are
+        // written by one shared authority, so the Freeform "Draw on image" arm
+        // cannot drift from this one again -- see persistDurableImageContent.
+        await persistDurableImageContent(supabase as never, {
+          padletId: padletToEdit.id,
+          libraryItemId: (padletToEdit as { library_item_id?: string | null }).library_item_id ?? null,
+          imageUrl: data.imageUrl,
+          metadata,
+          title: padletToEdit.title,
+          width: padletToEdit.width,
+          height: padletToEdit.height,
+        });
       }
 
       setIsImageEditorOpen(false);

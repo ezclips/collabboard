@@ -98,6 +98,7 @@ import {
   parseKnowledgeSourceTextClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
+import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
   KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
@@ -9398,13 +9399,43 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }}
                   onSave={async (dataUrl, paths, textElements) => {
                     try {
-                      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
-                      const result = await updatePostMetadataBestEffort(
-                        { postId: drawingPadlet.id, metadata: { ...drawingPadlet.metadata, drawing: dataUrl, drawingPaths: paths, drawingText: textElements } },
-                        { userId: null }
-                      );
-
-                      if (!result.ok) throw result.error.cause ?? result.error;
+                      /**
+                       * IMAGE-LIBRARY: a stroke is DURABLE IMAGE CONTENT.
+                       *
+                       * This arm used to write `metadata` alone, which left the
+                       * board rendering the annotated composite while the
+                       * durable Library object still held the original crop --
+                       * the placement had been edited, the owned image had not.
+                       * `dataUrl` from ImageDrawingLayer is already the
+                       * flattened composite (original + strokes + shapes +
+                       * text), so it IS the authoritative saved representation,
+                       * and it goes to the placement and the SAME linked
+                       * library_items row through the one shared authority.
+                       *
+                       * The editable inputs are kept alongside it so reopening
+                       * the editor resumes from the saved strokes. That does not
+                       * double-render: resolveImagePostDisplaySrc CHOOSES one
+                       * src -- `metadata.drawing` -- rather than overlaying it
+                       * on top of file_url, so the composite is painted once.
+                       *
+                       * Metadata is spread, never rebuilt, so unrelated keys and
+                       * `source` (PDF-area provenance) survive untouched.
+                       */
+                      const metadata = {
+                        ...drawingPadlet.metadata,
+                        drawing: dataUrl,
+                        drawingPaths: paths,
+                        drawingText: textElements,
+                      };
+                      await persistDurableImageContent(supabase as never, {
+                        padletId: drawingPadlet.id,
+                        libraryItemId: (drawingPadlet as { library_item_id?: string | null }).library_item_id ?? null,
+                        imageUrl: dataUrl,
+                        metadata,
+                        title: drawingPadlet.title,
+                        width: drawingPadlet.width,
+                        height: drawingPadlet.height,
+                      });
                       setIsDrawingMode(false);
                       setDrawingPadlet(null);
                       fetchData();
