@@ -236,30 +236,78 @@ const JWT_LIKE = /\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b
 const LONG_OPAQUE_TOKEN = /\b[A-Za-z0-9_-]{40,}\b/g;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/g;
 
+/**
+ * FAIL CLOSED. Each rule below removes a whole credential-bearing construct
+ * rather than trying to keep the interesting half of it.
+ *
+ * The earlier rules leaked, provably. `Authorization: Bearer abc.def.ghi`
+ * matched SECRET_ASSIGNMENT only as far as `Bearer` -- its value pattern is
+ * `\S+` -- so the redaction produced `Authorization=[redacted] abc.def.ghi`
+ * and published the credential it existed to remove. A signed URL survived
+ * because `sig` is not a word anyone had enumerated, and a cookie survived
+ * because `session` is not either. Enumerating harder is the same losing bet;
+ * these rules delete the construct.
+ */
+
+/** Any URL, entire. No query value survives what is no longer there. */
+const URL_LIKE = /\b[a-z][a-z0-9+.-]*:\/\/\S*/gi;
+/** A leftover `?k=v` / `&k=v` pair, for a URL fragment with no scheme left. */
+const QUERY_PAIR = /([?&][A-Za-z0-9_.-]+=)[^\s&#]+/g;
+/**
+ * Credential headers, to the end of the value. `Cookie` stops at `;` so a
+ * following sentence is not swallowed; the others take the rest of the line,
+ * because an auth value may legitimately contain spaces.
+ */
+const COOKIE_HEADER = /\b(set-cookie|cookie)\s*[:=]\s*[^;]*/gi;
+const AUTH_HEADER = /\b(proxy-authorization|authorization)\s*[:=]\s*.*/gi;
+/** A scheme plus its credential, wherever it appears. */
+const AUTH_SCHEME = /\b(bearer|basic|digest|token)\s+[^\s,;]+/gi;
+
+/** Reads a message without letting a hostile getter or coercion escape. */
 function rawMessage(error: unknown): string {
-  if (typeof error === 'string') return error;
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object' && 'message' in error) {
+  try {
+    if (typeof error === 'string') return error;
+    if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return '';
     const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
+    return typeof message === 'string' ? message : '';
+  } catch {
+    // A throwing `message` getter is precisely the case an inspecting handler
+    // has to survive: report nothing rather than propagate.
+    return '';
   }
-  return '';
 }
 
+/**
+ * A single-line, credential-free, length-bounded description of a failure.
+ *
+ * TOTAL: any input -- a Proxy, a throwing getter, a hostile `toString` --
+ * yields the generic fallback rather than an exception. Callers run this on
+ * their failure path, where a throw would replace the real failure.
+ */
 export function sanitizeKnowledgeProcessingError(error: unknown): string {
-  // Only the first line survives: a stack trace's frames all live below it.
-  const firstLine = rawMessage(error).split(/[\r\n]/, 1)[0] ?? '';
+  try {
+    // Only the first line survives: a stack trace's frames all live below it.
+    const firstLine = rawMessage(error).split(/[\r\n]/, 1)[0] ?? '';
 
-  const redacted = firstLine
-    .replace(SECRET_ASSIGNMENT, (_match, name: string) => `${name}=[redacted]`)
-    .replace(JWT_LIKE, '[redacted]')
-    .replace(LONG_OPAQUE_TOKEN, '[redacted]')
-    .replace(CONTROL_CHARACTERS, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    const redacted = firstLine
+      // Whole constructs first, so nothing downstream has to be clever.
+      .replace(URL_LIKE, '[redacted-url]')
+      .replace(QUERY_PAIR, '$1[redacted]')
+      .replace(COOKIE_HEADER, '$1: [redacted]')
+      .replace(AUTH_HEADER, '$1: [redacted]')
+      .replace(AUTH_SCHEME, '$1 [redacted]')
+      .replace(SECRET_ASSIGNMENT, (_match, name: string) => `${name}=[redacted]`)
+      .replace(JWT_LIKE, '[redacted]')
+      .replace(LONG_OPAQUE_TOKEN, '[redacted]')
+      .replace(CONTROL_CHARACTERS, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-  if (redacted.length === 0) return 'Extraction failed';
-  return redacted.slice(0, KNOWLEDGE_PROCESSING_ERROR_MAX_LENGTH);
+    if (redacted.length === 0) return 'Extraction failed';
+    return redacted.slice(0, KNOWLEDGE_PROCESSING_ERROR_MAX_LENGTH);
+  } catch {
+    return 'Extraction failed';
+  }
 }
 
 // ---------------------------------------------------------------------------

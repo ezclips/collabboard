@@ -90,7 +90,15 @@ try {
              * invalid_derivative_path | upload_failed | upload_partial); no
              * path, URL or document content passes through here.
              */
-            log: (event) => console.log(JSON.stringify(event)),
+            log: (event) => {
+              // Best effort, exactly as in the dispatcher: a failed write to
+              // stdout must not abort a repair pass or reject the loop.
+              try {
+                console.log(JSON.stringify(event));
+              } catch {
+                // Dropped.
+              }
+            },
           },
           limit,
         );

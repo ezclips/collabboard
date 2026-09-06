@@ -1,6 +1,7 @@
 import type { DomainError } from '../../lib/domain/core/errors';
 import type { KnowledgeDocumentId } from '../../lib/domain/core/ids';
 import type { Result } from '../../lib/domain/core/result';
+import { sanitizeKnowledgeProcessingError } from '../../lib/domain/knowledge/knowledgeExtraction';
 import type { KnowledgePdfWorkerResult } from './processKnowledgePdfDocument';
 
 /**
@@ -158,6 +159,27 @@ function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void>
   });
 }
 
+/**
+ * Logging is BEST EFFORT and must never become the failure.
+ *
+ * A throwing logger used to reject the job promise, which ran the outer catch,
+ * counted the same failure a SECOND time and suppressed the finished event
+ * entirely -- observability silently rewriting the outcome it exists to
+ * report. Every emission goes through here instead, and a logger that throws
+ * is dropped: deliberately not re-reported through the same logger that just
+ * failed, and never rethrown into the dispatcher loop.
+ */
+function safeLog(
+  log: (event: Record<string, unknown>) => void,
+  event: Record<string, unknown>,
+): void {
+  try {
+    log(event);
+  } catch {
+    // Nothing. The job outcome is authoritative; the log is commentary.
+  }
+}
+
 function logJobResult(
   log: (event: Record<string, unknown>) => void,
   documentId: KnowledgeDocumentId,
@@ -172,11 +194,18 @@ function logJobResult(
    * `{stage:"complete", status:"failed"}` and nothing else, on any channel. The
    * reason existed and was thrown away one line before Cloud Logging.
    *
+   * `cleanupWarning` is deliberately absent. It is built with
+   * boundedDiagnostic, which flattens and truncates a secondary failure's text
+   * but does NOT redact it, so logging it published whatever that failure
+   * happened to say -- a signed URL, a lease token, a flattened frame. The
+   * stage and the sanitized reason are what an operator needs; keep it that
+   * way.
+   *
    * Exactly one such event per finished job: this is the single return path,
    * and it neither retries nor re-raises.
    */
   if (result.status === 'failed' || result.status === 'stale' || result.status === 'not_claimed') {
-    log({
+    safeLog(log, {
       event: 'knowledge-pdf-job-error',
       documentId,
       status: result.status,
@@ -186,12 +215,11 @@ function logJobResult(
       // Already single-line, redacted and length-bounded by the pipeline.
       message: result.error ?? 'Extraction failed',
       ...(result.failureRecorded === undefined ? {} : { failureRecorded: result.failureRecorded }),
-      ...(result.cleanupWarning === undefined ? {} : { cleanupWarning: result.cleanupWarning }),
     });
   } else if (result.derivativeWarning !== undefined) {
     // A ready document whose pictures did not all land. Low cardinality, and
     // never a reason to call the document failed.
-    log({
+    safeLog(log, {
       event: 'knowledge-pdf-job-derivative-warning',
       documentId,
       stage: 'page-derivatives',
@@ -199,7 +227,7 @@ function logJobResult(
     });
   }
 
-  log({
+  safeLog(log, {
     event: 'knowledge-pdf-job-finished',
     documentId,
     status: result.status,
@@ -262,10 +290,17 @@ export async function runKnowledgePdfDispatcher(
       })
       .catch((error: unknown) => {
         summary.failed += 1;
-        log({
+        safeLog(log, {
           event: 'knowledge-pdf-job-error',
           documentId,
-          error: error instanceof Error ? error.message.split(/[\r\n]/, 1)[0].slice(0, 500) : 'worker error',
+          status: 'failed',
+          stage: 'unknown',
+          errorClass: 'UnknownError',
+          errorCode: 'UNKNOWN',
+          // The pipeline's own total sanitizer: reading `.message` directly
+          // here would let a hostile getter throw inside the catch handler and
+          // reject the dispatcher loop.
+          message: sanitizeKnowledgeProcessingError(error),
         });
       })
       .finally(() => { active.delete(key); });
@@ -288,7 +323,7 @@ export async function runKnowledgePdfDispatcher(
         );
         if (!discovered.ok) {
           summary.discoveryErrors += 1;
-          log({ event: 'knowledge-pdf-discovery-error', error: discovered.error.message.split(/[\r\n]/, 1)[0].slice(0, 500) });
+          safeLog(log, { event: 'knowledge-pdf-discovery-error', error: discovered.error.message.split(/[\r\n]/, 1)[0].slice(0, 500) });
           if (once) break;
           await sleep(backoffMs, signal);
           backoffMs = Math.min(config.backoffMaxMs, backoffMs * 2);
@@ -316,14 +351,14 @@ export async function runKnowledgePdfDispatcher(
             const repaired = await deps.renderPass(config.discoveryLimit);
             if (repaired > 0) {
               summary.rendered += repaired;
-              log({ event: 'knowledge-pdf-render-pass', repaired });
+              safeLog(log, { event: 'knowledge-pdf-render-pass', repaired });
               if (once) break;
               continue;
             }
           } catch (error: unknown) {
             // A render failure is never allowed to stop extraction dispatch.
             summary.renderErrors += 1;
-            log({
+            safeLog(log, {
               event: 'knowledge-pdf-render-pass-error',
               error: error instanceof Error ? error.message.slice(0, 200) : 'render pass failed',
             });

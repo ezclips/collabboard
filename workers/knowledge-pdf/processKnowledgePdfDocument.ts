@@ -113,14 +113,22 @@ export interface KnowledgePdfWorkerResult {
   readonly error?: string;
   /**
    * Diagnostic classification of the FIRST failure, carried out of the pipeline
-   * so the dispatcher can log it. Both are derived from the thrown value and
-   * pass through the same sanitizer as `error`: they never carry a URL, a
-   * token, an argument list or a stack frame.
+   * so the dispatcher can log it.
+   *
+   * ALLOWLISTED, not sanitized -- see errorClassOf/errorCodeOf. A failure gets
+   * to choose its own `name` and `code`, so redacting them is the wrong tool:
+   * they are matched against a fixed vocabulary and collapse to
+   * `UnknownError` / `UNKNOWN` otherwise. Log-safe by construction.
    */
   readonly errorClass?: string;
   readonly errorCode?: string;
   readonly failureRecorded?: boolean;
   readonly rawArtifactPath?: string;
+  /**
+   * NOT log-safe: assembled from a secondary failure's raw text, which never
+   * passes through sanitizeKnowledgeProcessingError. It stays a return value
+   * for a caller inspecting one job in a test or a script.
+   */
   readonly cleanupWarning?: string;
   readonly derivativeWarning?: KnowledgeDerivativeWarning;
 }
@@ -192,19 +200,46 @@ function startLeaseHeartbeat(
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof KnowledgePdfWorkerError) {
-    return error.diagnostics ? `${error.message}: ${error.diagnostics}` : error.message;
-  }
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message?: unknown }).message;
+  // TOTAL, for the same reason safeProperty is: `instanceof` consults the
+  // prototype chain and `in` consults a `has` trap, so a Proxy can throw from
+  // either. This runs while a failure is already being recorded.
+  try {
+    if (error instanceof KnowledgePdfWorkerError) {
+      return error.diagnostics ? `${error.message}: ${error.diagnostics}` : error.message;
+    }
+    if (error instanceof Error) return error.message;
+    const message = safeProperty(error, 'message');
     if (typeof message === 'string') return message;
+  } catch {
+    // Fall through to the generic reason.
   }
   return 'Extraction failed';
 }
 
 function currentStage(error: unknown, fallback: string): string {
-  return error instanceof KnowledgePdfWorkerError ? error.stage : fallback;
+  try {
+    return error instanceof KnowledgePdfWorkerError ? error.stage : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Total, because it decides a STATE TRANSITION, not a log line.
+ *
+ * A value whose `getPrototypeOf` trap throws makes `instanceof` throw, and
+ * this one sits in the canonical catch: an exception here escapes
+ * processKnowledgePdfDocument entirely, so the document is never marked
+ * failed, the lease runs to expiry and the dispatcher reports a bare worker
+ * error with no stage. Unrecognisable means not-stale, which is the path that
+ * records the failure.
+ */
+function isStaleLease(error: unknown): boolean {
+  try {
+    return error instanceof StaleKnowledgeLeaseError;
+  } catch {
+    return false;
+  }
 }
 
 async function findParserJsonFile(root: string): Promise<string> {
@@ -263,30 +298,89 @@ async function removeRawArtifact(
   }
 }
 
-/** The error's own name, bounded and stripped of anything but an identifier. */
-function errorClassOf(error: unknown): string | undefined {
-  const name = error instanceof Error ? error.name : typeof error;
-  const identifier = String(name ?? '').replace(/[^A-Za-z0-9_$]/g, '');
-  return identifier.length > 0 ? identifier.slice(0, 64) : undefined;
-}
+/**
+ * ALLOWLISTED diagnostics. Neither of these may carry a value the FAILURE
+ * chose for us.
+ *
+ * Filtering an arbitrary `Error.name` down to identifier characters is not a
+ * safety property: `SUPER_SECRET_TOKEN` passes such a filter unchanged, and a
+ * provider `code` is provider-controlled text. So only classes this worker
+ * actually understands are named, only codes it actually acts on are reported,
+ * and everything else collapses to a constant. A diagnostic that cannot be
+ * recognised is worth less than a leak costs.
+ */
+const KNOWN_ERROR_CLASSES: ReadonlySet<string> = new Set([
+  'KnowledgePdfWorkerError',
+  'StaleKnowledgeLeaseError',
+  'OpenDataLoaderProcessError',
+  'Error',
+  'TypeError',
+  'RangeError',
+  'SyntaxError',
+  'AbortError',
+]);
+
+/** Codes this worker raises itself, the DomainError vocabulary, and Node errno. */
+const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
+  'TIMEOUT',
+  'PROCESS_ERROR',
+  'not_found',
+  'unavailable',
+  'unknown',
+  'invalid',
+  'conflict',
+  'forbidden',
+  'ENOENT',
+  'EACCES',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ENOSPC',
+  'EAI_AGAIN',
+]);
 
 /**
- * A short, bounded reason code -- never a message, never a path, never an
- * argument list.
+ * Reads one property without letting a hostile getter escape.
  *
- * OpenDataLoader is the one case worth naming explicitly: a timeout and a
- * non-zero exit are different operational problems with the same error class,
- * and the deployed worker gave us no way to tell them apart.
+ * Inspecting a thrown value happens ON the failure path, where a throw does
+ * not surface a second problem -- it REPLACES the first one. An error whose
+ * `code` getter throws used to become an unhandled rejection that lost the
+ * stage, the reason and the finished event together. Diagnostics must never be
+ * able to do that.
  */
-function errorCodeOf(error: unknown): string | undefined {
-  if (error instanceof Error && error.name === 'OpenDataLoaderProcessError') {
-    return (error as { timedOut?: boolean }).timedOut === true ? 'TIMEOUT' : 'PROCESS_ERROR';
+function safeProperty(error: unknown, key: string): unknown {
+  try {
+    if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return undefined;
+    return (error as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
   }
-  // DomainError, PostgrestError and Node errno objects all expose `code`.
-  const code = (error as { code?: unknown } | null)?.code;
-  if (typeof code !== 'string' && typeof code !== 'number') return undefined;
-  const bounded = String(code).replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64);
-  return bounded.length > 0 ? bounded : undefined;
+}
+
+function errorClassOf(error: unknown): string {
+  const name = safeProperty(error, 'name');
+  if (typeof name === 'string' && KNOWN_ERROR_CLASSES.has(name)) return name;
+  return 'UnknownError';
+}
+
+function errorCodeOf(error: unknown): string {
+  if (errorClassOf(error) === 'OpenDataLoaderProcessError') {
+    // The one case worth naming explicitly: a timeout and a non-zero exit are
+    // different operational problems sharing one class, and the deployed
+    // worker gave us no way to tell them apart.
+    return safeProperty(error, 'timedOut') === true ? 'TIMEOUT' : 'PROCESS_ERROR';
+  }
+  const code = safeProperty(error, 'code');
+  // An HTTP-style status is a bounded number from a fixed range, not provider
+  // text; it is safe, and it is the code that matters for a storage failure.
+  if (typeof code === 'number' && Number.isInteger(code) && code >= 100 && code <= 599) {
+    return String(code);
+  }
+  if (typeof code === 'string') {
+    if (KNOWN_ERROR_CODES.has(code)) return code;
+    if (/^[1-5][0-9]{2}$/.test(code)) return code;
+  }
+  return 'UNKNOWN';
 }
 
 async function recordFailure(
@@ -549,7 +643,7 @@ export async function processKnowledgePdfDocument(
     };
   } catch (error: unknown) {
     const cleanupWarning = await removeRawArtifact(deps.storage, rawUploaded ? rawArtifactPath : undefined);
-    if (error instanceof StaleKnowledgeLeaseError || heartbeat.lost()) {
+    if (isStaleLease(error) || heartbeat.lost()) {
       return {
         status: 'stale',
         documentId,
