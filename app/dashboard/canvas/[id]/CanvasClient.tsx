@@ -2079,13 +2079,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [padlets]);
   const placedKnowledgeDocumentKey = placedKnowledgeDocumentIds.join(',');
 
-  const loadKnowledgeHighlights = useCallback(async () => {
-    if (!canvasId || placedKnowledgeDocumentIds.length === 0) {
+  /**
+   * The documents to read marks for travel as an ARGUMENT, so this callback's
+   * identity depends on the board alone. Previously it closed over
+   * `placedKnowledgeDocumentIds`, whose identity is a fresh array on every
+   * `padlets` change -- which made the effect below re-run on churn that had
+   * nothing to do with which PDFs are placed.
+   */
+  const loadKnowledgeHighlights = useCallback(async (documentIds: readonly string[]) => {
+    if (!canvasId || documentIds.length === 0) {
       setKnowledgeHighlightIndex(EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX);
       return;
     }
     const rows: KnowledgeSourceHighlight[] = [];
-    for (const documentId of placedKnowledgeDocumentIds) {
+    for (const documentId of documentIds) {
       try {
         const response = await fetch(
           `/api/boards/${encodeURIComponent(canvasId)}/knowledge/highlights`
@@ -2099,14 +2106,35 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         // board. Deliberately silent, exactly like the citation read above.
       }
     }
-    setKnowledgeHighlightIndex(knowledgeStandaloneHighlightIndexOf(rows));
-  }, [canvasId, placedKnowledgeDocumentIds]);
+    // A read that produced nothing must not write a NEW empty index: that is a
+    // state change React re-renders for, and on an unavailable route (503 on
+    // every document) it is the beat of a request loop. Keep the identity we
+    // already have and the render stops here.
+    setKnowledgeHighlightIndex((current) => (
+      rows.length === 0 && current.size === 0
+        ? current
+        : knowledgeStandaloneHighlightIndexOf(rows)
+    ));
+  }, [canvasId]);
 
+  /** Lets an explicit reconcile re-read exactly what is placed right now. */
+  const placedKnowledgeDocumentIdsRef = useRef(placedKnowledgeDocumentIds);
+  placedKnowledgeDocumentIdsRef.current = placedKnowledgeDocumentIds;
+
+  /**
+   * One read per distinct (board, placed documents) pair. The guard is the
+   * point: a failed read leaves the same key behind, so the board does not ask
+   * again on the next render -- adding or removing a PDF changes the key and
+   * does.
+   */
+  const loadedKnowledgeHighlightKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    void loadKnowledgeHighlights();
-    // Keyed on the placed documents, so adding a PDF loads its marks and
-    // nothing else re-fetches.
-  }, [placedKnowledgeDocumentKey, loadKnowledgeHighlights]);
+    if (!canvasId) return;
+    const key = `${canvasId}|${placedKnowledgeDocumentKey}`;
+    if (loadedKnowledgeHighlightKeyRef.current === key) return;
+    loadedKnowledgeHighlightKeyRef.current = key;
+    void loadKnowledgeHighlights(placedKnowledgeDocumentIdsRef.current);
+  }, [canvasId, placedKnowledgeDocumentKey, loadKnowledgeHighlights]);
 
   /**
    * Deleting one standalone highlight, by its durable id.
@@ -2135,8 +2163,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     } catch {
       toast.error('Highlight could not be deleted');
     }
-    // Whether it succeeded or not, the server is the truth.
-    await loadKnowledgeHighlights();
+    // Whether it succeeded or not, the server is the truth. An explicit
+    // reconcile deliberately bypasses the effect's once-per-key guard.
+    await loadKnowledgeHighlights(placedKnowledgeDocumentIdsRef.current);
   }, [canvasId, loadKnowledgeHighlights]);
 
   const persistKnowledgeSourceReference = useCallback(async (
@@ -6593,7 +6622,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         : 'Could not create the image from that area');
       return;
     }
-    setPadlets(prev => [...prev, created.padlet as unknown as Padlet]);
+    // The RPC behind this route is idempotent: a repeated Done for the same
+    // draft returns the placement that already exists rather than making a
+    // second one. Appending blindly would then put the SAME id in the list
+    // twice -- one durable object, one database row, two React children on a
+    // duplicated key. Reconcile by id so a retry converges on the server's row.
+    const createdPadlet = created.padlet as unknown as Padlet;
+    setPadlets((prev) => (
+      prev.some((padlet) => String(padlet.id) === String(createdPadlet.id))
+        ? prev.map((padlet) => (
+            String(padlet.id) === String(createdPadlet.id) ? createdPadlet : padlet
+          ))
+        : [...prev, createdPadlet]
+    ));
     setPendingPdfAreaDraft(null);
     setPdfAreaDraftTitle('');
     clearKnowledgeAreaDraftPreview();

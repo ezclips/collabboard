@@ -166,7 +166,11 @@ describe('F6-F10: the canvas asks the server, and claims the drop exactly once',
     // R6I. The refusal now lives with the create, on the Save path.
     const save = areaSavePath();
     const refusal = save.indexOf('if (!created.ok)');
-    const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
+    // The placement write reconciles by id rather than appending blindly, so a
+    // repeated Done for one draft converges on the row the idempotent RPC
+    // returns instead of listing the same id twice. The ordering this test
+    // exists for -- refuse, then place, then close -- is unchanged.
+    const place = save.indexOf('const createdPadlet = created.padlet');
     expect(refusal).toBeGreaterThan(-1);
     expect(place).toBeGreaterThan(refusal);
     expect(save).toContain('toast.error(');
