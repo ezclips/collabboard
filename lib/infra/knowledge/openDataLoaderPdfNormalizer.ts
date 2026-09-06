@@ -40,15 +40,41 @@ function asPositiveInteger(value: unknown): number | undefined {
   return number !== undefined && Number.isInteger(number) && number > 0 ? number : undefined;
 }
 
+/**
+ * PostgreSQL cannot represent U+0000 in `text`, and rejects it at the JSONB
+ * boundary with SQLSTATE 22P05 (untranslatable_character) -- which is exactly
+ * how production document f5efa877 failed at the `complete` stage, after the
+ * parser, the geometry and every structural invariant had passed.
+ *
+ * REPLACED, not deleted, and applied HERE rather than in the adapter. One
+ * UTF-16 code unit becomes one UTF-16 code unit, so the character offsets and
+ * source-locator ranges computed downstream are unaffected -- and because the
+ * substitution happens before page aggregation, chunking and hashing, the text
+ * that is stored is the same text that was hashed and offset. Sanitizing at
+ * the adapter instead would silently desynchronise `text` from `text_hash`,
+ * `char_start`/`char_end` and every locator range.
+ *
+ * Deliberately narrow: only the one code point PostgreSQL cannot store. Tabs,
+ * newlines, other control characters, accents, CJK and astral-plane characters
+ * are all left exactly as the parser produced them.
+ */
+function replaceUntranslatableCharacters(value: string): string {
+  return value.replace(/\u0000/g, '\uFFFD');
+}
+
 function asSourceElementId(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim() !== '') return value.trim();
+  // A parser-controlled id travels into KnowledgeChunkSourceLocator and so
+  // into p_chunks, which is the same JSONB that rejected the document.
+  if (typeof value === 'string' && value.trim() !== '') {
+    return replaceUntranslatableCharacters(value.trim());
+  }
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return undefined;
 }
 
 function normalizeText(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
-  return value.replace(/\r\n?/g, '\n');
+  return replaceUntranslatableCharacters(value.replace(/\r\n?/g, '\n'));
 }
 
 function rawTypeOf(value: JsonRecord): string | undefined {
