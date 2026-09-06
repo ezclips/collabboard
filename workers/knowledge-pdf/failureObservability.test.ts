@@ -42,7 +42,7 @@ import type {
   KnowledgePdfWorkerResult,
   KnowledgeWorkerStorage,
 } from './processKnowledgePdfDocument';
-import { runKnowledgePdfDispatcher } from './dispatcher';
+import { runKnowledgePdfDispatcher, safeLog } from './dispatcher';
 
 const DOC = asKnowledgeDocumentId('bdc0dc74-b8c8-4eae-9a64-6d2bb3eca75c');
 
@@ -656,5 +656,248 @@ describe('_C1 blocker 3 -- observability must not alter worker behaviour', () =>
     expect(hostile.failures).toEqual(quiet.failures);
     expect(hostile.summary.failed).toBe(quiet.summary.failed);
     expect(hostile.failures).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// _C2 -- the two gaps the C1 boundary still left open. Both are cases where a
+// realistic logger differs from a test double: a real credential header holds
+// more than one pair, and a real log transport returns a promise.
+// ---------------------------------------------------------------------------
+
+describe('_C2 blocker 1 -- a cookie header is a container, not a list', () => {
+  it('B1. a multi-cookie header loses every pair, not just the first', () => {
+    // Stopping at the first `;` redacted `theme=light` -- the one value that
+    // was not a secret -- and published both credentials that followed it.
+    const sanitized = sanitizeKnowledgeProcessingError(
+      new Error('rejected Cookie: theme=light; session=COOKIE_SECRET; another=SECOND_SECRET'));
+    expect(sanitized).not.toContain('COOKIE_SECRET');
+    expect(sanitized).not.toContain('SECOND_SECRET');
+    expect(sanitized).not.toContain('theme=light');
+    expect(sanitized).toContain('[redacted]');
+  });
+
+  it('B2. Set-Cookie loses its value and all of its attributes', () => {
+    const sanitized = sanitizeKnowledgeProcessingError(
+      new Error('Set-Cookie: session=COOKIE_SECRET; Path=/; HttpOnly; Secure'));
+    expect(sanitized).not.toContain('COOKIE_SECRET');
+    expect(sanitized).not.toContain('HttpOnly');
+    expect(sanitized).not.toContain('Path=/');
+  });
+
+  it('B3. every case and spacing form of both headers is redacted whole', () => {
+    const headers = [
+      'cookie:', 'Cookie:', 'COOKIE:', 'set-cookie:', 'Set-Cookie:', 'SET-COOKIE:',
+      'Cookie :', 'Cookie:   ', 'CoOkIe:', 'Set-Cookie  :',
+    ];
+    for (const header of headers) {
+      const sanitized = sanitizeKnowledgeProcessingError(
+        new Error(`upload failed ${header} a=b; session=COOKIE_SECRET; x=SECOND_SECRET`));
+      expect(sanitized, header).not.toContain('COOKIE_SECRET');
+      expect(sanitized, header).not.toContain('SECOND_SECRET');
+      expect(sanitized, header).not.toContain('a=b');
+    }
+  });
+
+  it('B4. the redaction ends at the line, and no stack material is resurrected', () => {
+    const error = new Error('Error happened\nCookie: session=COOKIE_SECRET\nSafe diagnostic detail');
+    error.stack = 'Error: boom\n    at /app/dist/runDispatcher.mjs:1:1';
+    const sanitized = sanitizeKnowledgeProcessingError(error);
+    expect(sanitized).not.toContain('COOKIE_SECRET');
+    expect(sanitized).not.toContain('at /app');
+    // Single line and bounded, exactly as before.
+    expect(sanitized).not.toContain('\n');
+    expect(sanitized).toBe('Error happened');
+  });
+
+  it('B4b. a cookie header on the FIRST line still takes nothing from the next', () => {
+    const sanitized = sanitizeKnowledgeProcessingError(
+      new Error('Cookie: session=COOKIE_SECRET\nSafe diagnostic detail'));
+    expect(sanitized).not.toContain('COOKIE_SECRET');
+    expect(sanitized).not.toContain('Safe diagnostic detail');
+    expect(sanitized.length).toBeLessThanOrEqual(1_000);
+  });
+});
+
+describe('_C2 blocker 2 -- a logger that rejects is still just a logger', () => {
+  /**
+   * Fails the assertion if anything rejected without a handler while `run`
+   * executed. The trailing turns matter: an unhandled rejection is reported
+   * only after the microtask queue drains and the host checks.
+   */
+  async function withoutUnhandledRejections<T>(run: () => Promise<T>): Promise<T> {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const value = await run();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled.map(String)).toEqual([]);
+      return value;
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  }
+
+  /** A logger that rejects asynchronously for the events the test names. */
+  const rejectingLogger = (rejectOn: (event: Record<string, unknown>) => boolean) => {
+    const seen: string[] = [];
+    return {
+      seen,
+      log: (event: Record<string, unknown>): unknown => {
+        seen.push(String(event.event));
+        // A real transport returns a promise; only its rejection is the hazard.
+        return rejectOn(event) ? Promise.reject(new Error('log transport down')) : undefined;
+      },
+    };
+  };
+
+  async function dispatchAsyncLog(
+    log: (event: Record<string, unknown>) => unknown,
+    processDocument: () => Promise<KnowledgePdfWorkerResult>,
+    documents: readonly (typeof DOC)[] = [DOC],
+  ) {
+    let listed = false;
+    return runKnowledgePdfDispatcher(
+      {
+        discovery: {
+          listProcessingCandidates: async () => {
+            if (listed) return ok([]);
+            listed = true;
+            return ok([...documents]);
+          },
+        },
+        processDocument,
+        log,
+      },
+      { concurrency: documents.length, pollIntervalMs: 1, once: true },
+    );
+  }
+
+  it('B5. an async rejection on the error event leaves the job counted once', async () => {
+    const logger = rejectingLogger((e) => e.event === 'knowledge-pdf-job-error');
+    const summary = await withoutUnhandledRejections(
+      () => dispatchAsyncLog(logger.log, async () => failedAt('parser')));
+    expect(summary.failed).toBe(1);
+    // The terminal event is still attempted after the failed one.
+    expect(logger.seen).toEqual(['knowledge-pdf-job-error', 'knowledge-pdf-job-finished']);
+    expect(summary.stopped).toBe(false);
+  });
+
+  it('B6. an async rejection on the finished event changes no outcome', async () => {
+    const logger = rejectingLogger((e) => e.event === 'knowledge-pdf-job-finished');
+    const summary = await withoutUnhandledRejections(
+      () => dispatchAsyncLog(logger.log, async () => failedAt('parser')));
+    expect(summary.failed).toBe(1);
+    expect(summary.completed).toBe(0);
+    expect(logger.seen).toContain('knowledge-pdf-job-finished');
+  });
+
+  it('B7. both events rejecting leaves the dispatcher healthy', async () => {
+    const logger = rejectingLogger(() => true);
+    const summary = await withoutUnhandledRejections(
+      () => dispatchAsyncLog(logger.log, async () => failedAt('parser')));
+    expect(summary.failed).toBe(1);
+    expect(summary.stopped).toBe(false);
+    expect(logger.seen).toEqual(['knowledge-pdf-job-error', 'knowledge-pdf-job-finished']);
+  });
+
+  it('B8. a hostile thenable never escapes the logging boundary', async () => {
+    // Every shape a returned value can take that is not a well-behaved
+    // promise. All must be absorbed rather than assimilated.
+    const hostile: ReadonlyArray<readonly [string, () => unknown]> = [
+      ['rejected promise', () => Promise.reject(new Error('down'))],
+      ['thenable whose then() throws', () => ({ then() { throw new Error('then threw'); } })],
+      ['thenable that calls back with a rejection', () => ({
+        then(_resolve: unknown, reject: (reason: unknown) => void) { reject(new Error('rejected')); },
+      })],
+      ['thenable whose then getter throws', () => ({
+        get then(): never { throw new Error('then getter'); },
+      })],
+      ['synchronous throw', () => { throw new Error('sync'); }],
+    ];
+    for (const [label, produce] of hostile) {
+      const summary = await withoutUnhandledRejections(
+        () => dispatchAsyncLog(() => produce(), async () => failedAt('parser')));
+      expect(summary.failed, label).toBe(1);
+      expect(summary.stopped, label).toBe(false);
+    }
+  });
+
+  it('B9. a rejecting derivative-repair logger changes no repair outcome', async () => {
+    // The repair path shares the boundary runDispatcher wires to it, so the
+    // guarantee is asserted on that boundary and on the dispatcher cycle that
+    // drives a repair pass.
+    let repaired = 0;
+    const summary = await withoutUnhandledRejections(() => runKnowledgePdfDispatcher(
+      {
+        discovery: { listProcessingCandidates: async () => ok([]) },
+        processDocument: async () => failedAt('parser'),
+        renderPass: async () => {
+          // What repairKnowledgePageDerivatives emits through its log seam,
+          // sent to a transport that rejects.
+          safeLog(
+            () => Promise.reject(new Error('log transport down')),
+            { documentId: DOC, stage: 'page-derivative-repair', reason: 'upload_partial' },
+          );
+          repaired += 1;
+          return 1;
+        },
+        log: () => Promise.reject(new Error('log transport down')),
+      },
+      { concurrency: 1, pollIntervalMs: 1, once: true },
+    ));
+    expect(repaired).toBe(1);
+    expect(summary.rendered).toBe(1);
+    expect(summary.renderErrors).toBe(0);
+    expect(summary.failed).toBe(0);
+  });
+
+  it('B10. a job after a rejecting logger is processed normally', async () => {
+    const second = asKnowledgeDocumentId('bdc0dc74-b8c8-4eae-9a64-6d2bb3eca75d');
+    const processed: string[] = [];
+    const summary = await withoutUnhandledRejections(() => dispatchAsyncLog(
+      () => Promise.reject(new Error('log transport down')),
+      async () => {
+        processed.push('processed');
+        return failedAt('parser');
+      },
+      [DOC, second],
+    ));
+    expect(processed).toHaveLength(2);
+    expect(summary.started).toBe(2);
+    expect(summary.failed).toBe(2);
+  });
+
+  it('B11. a REAL pipeline failure survives a rejecting logger, and the loop stays usable', async () => {
+    // End to end: real processKnowledgePdfDocument, real dispatcher, a
+    // transport that rejects on every event -- then the same dispatcher run
+    // again, to prove nothing was left poisoned.
+    const run = async (log: (event: Record<string, unknown>) => unknown) => {
+      const repository = new FakeRepository();
+      const deps = workerDeps(exitingParser('boom'), repository);
+      let result: KnowledgePdfWorkerResult | undefined;
+      const summary = await dispatchAsyncLog(log, async () => {
+        result = await processKnowledgePdfDocument(deps, DOC);
+        return result;
+      });
+      return { failures: repository.failures, status: result?.status, stage: result?.stage, summary };
+    };
+
+    const { quiet, hostile, after } = await withoutUnhandledRejections(async () => ({
+      quiet: await run(() => undefined),
+      hostile: await run(() => Promise.reject(new Error('log transport down'))),
+      after: await run(() => undefined),
+    }));
+
+    expect(hostile.status).toBe(quiet.status);
+    expect(hostile.stage).toBe(quiet.stage);
+    expect(hostile.failures).toEqual(quiet.failures);
+    expect(hostile.summary.failed).toBe(1);
+    expect(hostile.summary.started).toBe(1);
+    // Still usable afterwards, with an identical outcome.
+    expect(after.status).toBe(quiet.status);
+    expect(after.failures).toEqual(quiet.failures);
+    expect(after.summary.failed).toBe(1);
   });
 });

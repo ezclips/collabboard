@@ -254,11 +254,21 @@ const URL_LIKE = /\b[a-z][a-z0-9+.-]*:\/\/\S*/gi;
 /** A leftover `?k=v` / `&k=v` pair, for a URL fragment with no scheme left. */
 const QUERY_PAIR = /([?&][A-Za-z0-9_.-]+=)[^\s&#]+/g;
 /**
- * Credential headers, to the end of the value. `Cookie` stops at `;` so a
- * following sentence is not swallowed; the others take the rest of the line,
- * because an auth value may legitimately contain spaces.
+ * Credential headers, to the END OF THE LINE -- never to the first `;`.
+ *
+ * Stopping at the semicolon was itself a leak: `Cookie: theme=light;
+ * session=SECRET; another=SECRET2` redacted only `theme=light` and published
+ * both real credentials after it. A cookie header is a credential CONTAINER,
+ * not a list with one interesting entry, and a worker diagnostic has no need
+ * of any individual cookie name or attribute. So the whole value goes, without
+ * parsing components and without needing to know a single cookie name.
+ *
+ * `[^\r\n]` rather than `.` states the boundary explicitly: the redaction ends
+ * at the line, so unrelated following text is never swallowed. (The sanitizer
+ * has already reduced its input to the first line by this point; the bound is
+ * written out anyway so the rule stays correct wherever it is applied.)
  */
-const COOKIE_HEADER = /\b(set-cookie|cookie)\s*[:=]\s*[^;]*/gi;
+const COOKIE_HEADER = /\b(set-cookie|cookie)\s*[:=]\s*[^\r\n]*/gi;
 const AUTH_HEADER = /\b(proxy-authorization|authorization)\s*[:=]\s*.*/gi;
 /** A scheme plus its credential, wherever it appears. */
 const AUTH_SCHEME = /\b(bearer|basic|digest|token)\s+[^\s,;]+/gi;

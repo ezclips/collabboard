@@ -70,7 +70,13 @@ export interface KnowledgePdfDispatcherDependencies {
    */
   readonly renderPass?: (limit: number) => Promise<number>;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
-  readonly log?: (event: Record<string, unknown>) => void;
+  /**
+   * `unknown` rather than `void`, because a real log transport returns a
+   * promise and the dispatcher must be honest that it accepts one. What it
+   * does NOT do is await it -- see safeLog: the return value is assimilated
+   * and its rejection absorbed, off the processing path.
+   */
+  readonly log?: (event: Record<string, unknown>) => unknown;
 }
 
 export interface KnowledgePdfDispatcherOptions {
@@ -165,18 +171,40 @@ function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void>
  * A throwing logger used to reject the job promise, which ran the outer catch,
  * counted the same failure a SECOND time and suppressed the finished event
  * entirely -- observability silently rewriting the outcome it exists to
- * report. Every emission goes through here instead, and a logger that throws
- * is dropped: deliberately not re-reported through the same logger that just
- * failed, and never rethrown into the dispatcher loop.
+ * report. Every emission goes through here instead, and a logger that fails is
+ * dropped: deliberately not re-reported through the same logger that just
+ * failed, never retried, and never rethrown into the dispatcher loop.
+ *
+ * A logger fails in TWO ways, and catching only the first is not a boundary.
+ * A real transport -- a Cloud Logging client, a batching shipper -- returns a
+ * promise, and `catch` cannot see that promise reject: the rejection surfaces
+ * later as an unhandled rejection, which on a container with the usual
+ * `--unhandled-rejections=throw` kills the worker mid-queue. So the returned
+ * value is assimilated and its rejection absorbed.
+ *
+ * NOT awaited, deliberately. Job completion must not wait on a log write:
+ * awaiting would put the transport's latency, and its stalls, on the
+ * processing path. The absorption is fire-and-forget.
  */
-function safeLog(
-  log: (event: Record<string, unknown>) => void,
+export function safeLog(
+  log: (event: Record<string, unknown>) => unknown,
   event: Record<string, unknown>,
 ): void {
   try {
-    log(event);
+    const result: unknown = log(event);
+    /**
+     * Promise.resolve is the assimilation boundary. An arbitrary thenable
+     * reaches this line, so `then` may be a throwing getter (Promise.resolve
+     * turns that into a rejection, which the catch below absorbs) or a
+     * function that throws or calls back with a rejection (same). Nothing the
+     * logger returns escapes into the dispatcher's promise chain.
+     */
+    void Promise.resolve(result).catch(() => {
+      // Nothing. The job outcome is authoritative; the log is commentary.
+    });
   } catch {
-    // Nothing. The job outcome is authoritative; the log is commentary.
+    // A synchronous logger throw, or a thenable hostile enough to throw out of
+    // assimilation itself.
   }
 }
 

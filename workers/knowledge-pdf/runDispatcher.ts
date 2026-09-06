@@ -9,6 +9,7 @@ import {
   runKnowledgePdfDispatcher,
   resolveKnowledgePdfDispatcherConfig,
   resolveKnowledgePdfDispatchMode,
+  safeLog,
 } from './dispatcher';
 
 function required(name: string): string {
@@ -90,15 +91,14 @@ try {
              * invalid_derivative_path | upload_failed | upload_partial); no
              * path, URL or document content passes through here.
              */
-            log: (event) => {
-              // Best effort, exactly as in the dispatcher: a failed write to
-              // stdout must not abort a repair pass or reject the loop.
-              try {
-                console.log(JSON.stringify(event));
-              } catch {
-                // Dropped.
-              }
-            },
+            /**
+             * The SAME boundary the dispatcher uses, not a lookalike: a
+             * repair-pass log must be as unable to change a repair outcome as
+             * a job log is to change a job outcome. It absorbs a synchronous
+             * throw (a stdout write can fail with EPIPE) and any rejection
+             * from whatever the sink returns, without awaiting it.
+             */
+            log: (event) => safeLog((payload) => console.log(JSON.stringify(payload)), event),
           },
           limit,
         );
