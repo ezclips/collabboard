@@ -99,6 +99,7 @@ import {
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
 import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
+import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
   KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
@@ -9478,20 +9479,57 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             {
               isCropMode && cropPadlet && (
                 <ImageCropLayer
-                  imageUrl={cropPadlet.metadata?.imageUrl || ''}
+                  /**
+                   * The CURRENT visible raster, not the base.
+                   *
+                   * Crop used to read `metadata.imageUrl`, so cropping an
+                   * annotated Image silently reverted to the unannotated
+                   * original and threw the drawing away. Draw still starts from
+                   * the base -- drawing onto a composite would bake every pass
+                   * in permanently -- but crop is a deliberate destructive
+                   * raster transform, so it operates on what the user can
+                   * actually see.
+                   */
+                  imageUrl={resolveImagePostDisplaySrc(cropPadlet) ?? cropPadlet.metadata?.imageUrl ?? ''}
                   onCancel={() => {
                     setIsCropMode(false);
                     setCropPadlet(null);
                   }}
                   onSave={async (croppedDataUrl) => {
                     try {
-                      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
-                      const result = await updatePostMetadataBestEffort(
-                        { postId: cropPadlet.id, metadata: { ...cropPadlet.metadata, imageUrl: croppedDataUrl, drawing: null, drawingPaths: null, drawingText: null } },
-                        { userId: null }
-                      );
-
-                      if (!result.ok) throw result.error.cause ?? result.error;
+                      /**
+                       * IMAGE-LIBRARY: a crop is DURABLE IMAGE CONTENT, exactly
+                       * like a drawing. This arm wrote `metadata` alone, so the
+                       * placement showed the cropped image while the Library
+                       * object it references kept the previous raster -- the
+                       * same split the Draw arm had.
+                       *
+                       * The cropped result becomes the new base AND the new
+                       * current raster, and the already-baked stroke vectors are
+                       * cleared: they are pixels in this image now, so replaying
+                       * them would paint the annotation twice.
+                       *
+                       * Metadata is spread, never rebuilt, so `source` (PDF-area
+                       * provenance) and unrelated keys survive -- cropping the
+                       * derived Image does not change which PDF page it came
+                       * from.
+                       */
+                      const metadata = {
+                        ...cropPadlet.metadata,
+                        imageUrl: croppedDataUrl,
+                        drawing: null,
+                        drawingPaths: null,
+                        drawingText: null,
+                      };
+                      await persistDurableImageContent(supabase as never, {
+                        padletId: cropPadlet.id,
+                        libraryItemId: (cropPadlet as { library_item_id?: string | null }).library_item_id ?? null,
+                        imageUrl: croppedDataUrl,
+                        metadata,
+                        title: cropPadlet.title,
+                        width: cropPadlet.width,
+                        height: cropPadlet.height,
+                      });
                       setIsCropMode(false);
                       setCropPadlet(null);
                       fetchData();

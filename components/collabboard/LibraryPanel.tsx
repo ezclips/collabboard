@@ -680,7 +680,14 @@ export default function LibraryPanel({
                                                                                     <img
                                                                                         src={preview.thumb}
                                                                                         alt={preview.title}
-                                                                                        className="h-20 w-full object-cover"
+                                                                                        // An Image tile shows the CURRENT raster
+                                                                                        // whole: object-cover re-cropped an image the
+                                                                                        // user had already cropped, hiding part of the
+                                                                                        // content the Library is meant to represent.
+                                                                                        // Every other thumbnail type keeps its fill.
+                                                                                        className={preview.type === 'image'
+                                                                                            ? "h-20 w-full object-contain"
+                                                                                            : "h-20 w-full object-cover"}
                                                                                         draggable={false}
                                                                                     />
                                                                                 ) : (
