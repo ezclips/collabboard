@@ -77,7 +77,21 @@ try {
         : {}),
       renderPass: async (limit) => {
         const results = await runKnowledgePageRenderPass(
-          { lifecycle: renderLifecycle, storage: renderStorage },
+          {
+            lifecycle: renderLifecycle,
+            storage: renderStorage,
+            /**
+             * PDF-R1. repairKnowledgePageDerivatives has always emitted
+             * `{documentId, stage:'page-derivative-repair', reason}` through
+             * this seam, but production never supplied it -- so every repair
+             * failure was discarded, and a card stuck on "Page preview
+             * unavailable" left no trace at all. The reason is a bounded enum
+             * (download_failed | ineligible | raster_failed |
+             * invalid_derivative_path | upload_failed | upload_partial); no
+             * path, URL or document content passes through here.
+             */
+            log: (event) => console.log(JSON.stringify(event)),
+          },
           limit,
         );
         return results.filter((result) => result.status === 'completed').length;

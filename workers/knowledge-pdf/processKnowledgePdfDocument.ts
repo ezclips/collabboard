@@ -111,6 +111,14 @@ export interface KnowledgePdfWorkerResult {
   readonly stage: string;
   readonly pageCount?: number;
   readonly error?: string;
+  /**
+   * Diagnostic classification of the FIRST failure, carried out of the pipeline
+   * so the dispatcher can log it. Both are derived from the thrown value and
+   * pass through the same sanitizer as `error`: they never carry a URL, a
+   * token, an argument list or a stack frame.
+   */
+  readonly errorClass?: string;
+  readonly errorCode?: string;
   readonly failureRecorded?: boolean;
   readonly rawArtifactPath?: string;
   readonly cleanupWarning?: string;
@@ -255,6 +263,32 @@ async function removeRawArtifact(
   }
 }
 
+/** The error's own name, bounded and stripped of anything but an identifier. */
+function errorClassOf(error: unknown): string | undefined {
+  const name = error instanceof Error ? error.name : typeof error;
+  const identifier = String(name ?? '').replace(/[^A-Za-z0-9_$]/g, '');
+  return identifier.length > 0 ? identifier.slice(0, 64) : undefined;
+}
+
+/**
+ * A short, bounded reason code -- never a message, never a path, never an
+ * argument list.
+ *
+ * OpenDataLoader is the one case worth naming explicitly: a timeout and a
+ * non-zero exit are different operational problems with the same error class,
+ * and the deployed worker gave us no way to tell them apart.
+ */
+function errorCodeOf(error: unknown): string | undefined {
+  if (error instanceof Error && error.name === 'OpenDataLoaderProcessError') {
+    return (error as { timedOut?: boolean }).timedOut === true ? 'TIMEOUT' : 'PROCESS_ERROR';
+  }
+  // DomainError, PostgrestError and Node errno objects all expose `code`.
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code !== 'string' && typeof code !== 'number') return undefined;
+  const bounded = String(code).replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64);
+  return bounded.length > 0 ? bounded : undefined;
+}
+
 async function recordFailure(
   deps: KnowledgePdfWorkerDependencies,
   documentId: KnowledgeDocumentId,
@@ -272,6 +306,8 @@ async function recordFailure(
       documentId,
       stage,
       error: sanitizeKnowledgeProcessingError(error),
+      errorClass: errorClassOf(error),
+      errorCode: errorCodeOf(error),
       failureRecorded: false,
       cleanupWarning: [cleanupWarning, `failure transition error: ${boundedDiagnostic(errorMessage(failureError))}`]
         .filter(Boolean)
@@ -292,6 +328,8 @@ async function recordFailure(
     documentId,
     stage,
     error: sanitizeKnowledgeProcessingError(error),
+    errorClass: errorClassOf(error),
+    errorCode: errorCodeOf(error),
     failureRecorded: failure.ok,
     cleanupWarning,
   };

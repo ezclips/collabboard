@@ -163,6 +163,42 @@ function logJobResult(
   documentId: KnowledgeDocumentId,
   result: KnowledgePdfWorkerResult,
 ): void {
+  /**
+   * The FIRST failing boundary, with the reason attached.
+   *
+   * The pipeline already computed all of this -- `stage` is the first failing
+   * boundary and `error` came out of sanitizeKnowledgeProcessingError -- but
+   * only `status` and `stage` were ever logged, so the deployed worker reported
+   * `{stage:"complete", status:"failed"}` and nothing else, on any channel. The
+   * reason existed and was thrown away one line before Cloud Logging.
+   *
+   * Exactly one such event per finished job: this is the single return path,
+   * and it neither retries nor re-raises.
+   */
+  if (result.status === 'failed' || result.status === 'stale' || result.status === 'not_claimed') {
+    log({
+      event: 'knowledge-pdf-job-error',
+      documentId,
+      status: result.status,
+      stage: result.stage,
+      ...(result.errorClass === undefined ? {} : { errorClass: result.errorClass }),
+      ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+      // Already single-line, redacted and length-bounded by the pipeline.
+      message: result.error ?? 'Extraction failed',
+      ...(result.failureRecorded === undefined ? {} : { failureRecorded: result.failureRecorded }),
+      ...(result.cleanupWarning === undefined ? {} : { cleanupWarning: result.cleanupWarning }),
+    });
+  } else if (result.derivativeWarning !== undefined) {
+    // A ready document whose pictures did not all land. Low cardinality, and
+    // never a reason to call the document failed.
+    log({
+      event: 'knowledge-pdf-job-derivative-warning',
+      documentId,
+      stage: 'page-derivatives',
+      reason: result.derivativeWarning,
+    });
+  }
+
   log({
     event: 'knowledge-pdf-job-finished',
     documentId,
