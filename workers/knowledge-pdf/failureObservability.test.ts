@@ -309,7 +309,10 @@ function workerDeps(
     repository,
     storage,
     parser,
-    geometry: async () => [{ pageNumber: 1, widthPoints: 612, heightPoints: 792, rotation: 0 }],
+    geometry: async () => [
+      { pageNumber: 1, widthPoints: 612, heightPoints: 792, rotation: 0 },
+      { pageNumber: 2, widthPoints: 612, heightPoints: 792, rotation: 0 },
+    ],
     hasher: { sha256: async (bytes) => createHash('sha256').update(bytes).digest('hex') },
     parserOptionsHash: 'options-hash',
     parserName: 'opendataloader-pdf',
@@ -899,5 +902,176 @@ describe('_C2 blocker 2 -- a logger that rejects is still just a logger', () => 
     expect(after.status).toBe(quiet.status);
     expect(after.failures).toEqual(quiet.failures);
     expect(after.summary.failed).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dbErrorCode -- the one token that separates the completion failures.
+//
+// Production proved the RPC exists with the full 10-argument signature, that
+// service_role may execute it, and that knowledge_chunks.source_locators is
+// present. The payload was proven structurally valid offline. What remains
+// indistinguishable in the log is WHICH database failure occurred: the adapter
+// wraps every PostgREST error as domainError('unavailable', 'Could not commit
+// the extraction result', { cause }), so 42703, PGRST202 and 23514 all arrive
+// as the same constant. The cause survives; only the code is surfaced.
+// ---------------------------------------------------------------------------
+
+/** Drives the REAL pipeline with a completion failure carrying `cause`. */
+async function completionFailure(cause: unknown): Promise<{
+  events: Record<string, unknown>[];
+  result?: KnowledgePdfWorkerResult;
+  repository: FakeRepository;
+}> {
+  const repository = new FakeRepository();
+  repository.completeResult = err(
+    domainError('unavailable', 'Could not commit the extraction result', { cause }),
+  );
+  const deps = workerDeps(succeedingParser(), repository);
+  let result: KnowledgePdfWorkerResult | undefined;
+  const events = await dispatchOnce(async () => {
+    result = await processKnowledgePdfDocument(deps, DOC);
+    return result;
+  });
+  return { events, result, repository };
+}
+
+describe('dbErrorCode -- the provider code, and only the code', () => {
+  it('D1. the real completion failure surfaces 42703 end to end', async () => {
+    // The load-bearing case: repository.complete rejects with a PostgREST
+    // error whose provider text must never be logged.
+    const { events, result } = await completionFailure({
+      code: '42703',
+      message: 'column "source_locators" of relation "knowledge_chunks" does not exist',
+      details: 'PROVIDER_DETAILS_SECRET',
+      hint: 'PROVIDER_HINT_SECRET',
+    });
+
+    expect(result?.status).toBe('failed');
+    const [error] = errorEvents(events);
+    expect(error.stage).toBe('complete');
+    expect(error.errorCode).toBe('unavailable');
+    expect(error.dbErrorCode).toBe('42703');
+    expect(error.message).toBe('Could not commit the extraction result');
+    expect(error.failureRecorded).toBe(true);
+
+    // None of the provider's own prose reaches the log.
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain('PROVIDER_DETAILS_SECRET');
+    expect(serialized).not.toContain('PROVIDER_HINT_SECRET');
+    expect(serialized).not.toContain('source_locators');
+    expect(serialized).not.toContain('does not exist');
+  });
+
+  it('D2. every code in the closed grammar is admitted, unchanged', async () => {
+    for (const code of [
+      'PGRST202', 'PGRST203',
+      '42703', '42501', '42883', '42P01',
+      '23502', '23503', '23505', '23514',
+      '22023', '22P02', 'P0001',
+    ]) {
+      const { events } = await completionFailure({ code });
+      expect(errorEvents(events)[0].dbErrorCode, code).toBe(code);
+    }
+  });
+
+  it('D3. anything outside the grammar is dropped, never coerced into it', async () => {
+    // A provider string is not a code just because it is short, or uppercase,
+    // or ends in five characters. Nothing is trimmed or upcased INTO shape.
+    const rejected: ReadonlyArray<readonly [string, unknown]> = [
+      ['arbitrary identifier', 'SECRET_ACCESS_KEY'],
+      ['long opaque token', 'sk-' + 'a'.repeat(64)],
+      ['url', 'https://abcdefgh.supabase.co/rest/v1/rpc/complete_knowledge_extraction?apikey=SECRETVALUE'],
+      ['jwt-like', 'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.QsmCbQ4tUZjyRHRc3dHrmxOwqThAqAVvHRp7Kk8xYzQ'],
+      ['lowercase sqlstate', '42p01'],
+      ['four characters', '4270'],
+      ['six characters', '427033'],
+      ['padded', ' 42703 '],
+      ['pgrst wrong arity', 'PGRST20'],
+      ['numeric, not a string', 42703],
+      ['null', null],
+      ['object', { code: '42703' }],
+      ['array', ['42703']],
+    ];
+    for (const [label, code] of rejected) {
+      const { events } = await completionFailure({ code });
+      const [error] = errorEvents(events);
+      expect(Object.keys(error), label).not.toContain('dbErrorCode');
+      // The failure is still reported, just without a provider token.
+      expect(error.errorCode, label).toBe('unavailable');
+      expect(JSON.stringify(events), label).not.toContain('SECRETVALUE');
+    }
+  });
+
+  it('D4. a hostile cause never changes what the worker does', async () => {
+    const hostile: ReadonlyArray<readonly [string, () => unknown]> = [
+      ['throwing cause getter', () => ({ get cause(): never { throw new Error('cause getter'); } })],
+      ['throwing code getter', () => ({ cause: { get code(): never { throw new Error('code getter'); } } })],
+      ['proxy cause', () => ({ cause: new Proxy({}, {
+        get() { throw new Error('trap'); },
+        has() { throw new Error('trap'); },
+        getPrototypeOf() { throw new Error('trap'); },
+      }) })],
+      ['cause is null', () => ({ cause: null })],
+      ['no cause at all', () => ({})],
+    ];
+    for (const [label, produce] of hostile) {
+      // The DomainError itself carries the hostile shape, so the reader meets
+      // it exactly where recordFailure does.
+      const repository = new FakeRepository();
+      const hostileError = produce() as Record<string, unknown>;
+      // defineProperties, not spread: a spread would invoke the throwing
+      // getter here instead of where recordFailure meets it.
+      Object.defineProperties(hostileError, {
+        code: { value: 'unavailable', enumerable: true },
+        message: { value: 'Could not commit the extraction result', enumerable: true },
+      });
+      repository.completeResult = err(hostileError as never);
+      const deps = workerDeps(succeedingParser(), repository);
+      let result: KnowledgePdfWorkerResult | undefined;
+      const events = await dispatchOnce(async () => {
+        result = await processKnowledgePdfDocument(deps, DOC);
+        return result;
+      });
+      expect(result?.status, label).toBe('failed');
+      expect(result?.stage, label).toBe('complete');
+      const [error] = errorEvents(events);
+      expect(Object.keys(error), label).not.toContain('dbErrorCode');
+      expect(error.errorCode, label).toBe('unavailable');
+      // Still exactly one failure, still terminal.
+      expect(errorEvents(events), label).toHaveLength(1);
+      expect(finishedEvents(events), label).toHaveLength(1);
+      expect(repository.failures, label).toHaveLength(1);
+    }
+  });
+
+  it('D5. a success and a non-database failure carry no dbErrorCode', async () => {
+    const ready = await dispatchOnce({
+      status: 'ready', documentId: DOC, stage: 'complete', pageCount: 1,
+    });
+    expect(JSON.stringify(ready)).not.toContain('dbErrorCode');
+
+    // A parser failure has no provider cause to report.
+    const { events } = await runRealPipeline(workerDeps(exitingParser('boom')));
+    expect(Object.keys(errorEvents(events)[0])).not.toContain('dbErrorCode');
+  });
+
+  it('D6. dbErrorCode reports the FIRST failure, not the cleanup that follows', async () => {
+    // The completion error is what recordFailure receives; a later failing
+    // artifact removal must not overwrite the code that explains the job.
+    const repository = new FakeRepository();
+    repository.completeResult = err(
+      domainError('unavailable', 'Could not commit the extraction result', { cause: { code: 'PGRST202' } }),
+    );
+    const storage = new FakeStorage();
+    storage.removeError = Object.assign(new Error('cleanup failed'), { code: '23505' });
+    const deps = workerDeps(succeedingParser(), repository, storage);
+    let result: KnowledgePdfWorkerResult | undefined;
+    const events = await dispatchOnce(async () => {
+      result = await processKnowledgePdfDocument(deps, DOC);
+      return result;
+    });
+    expect(result?.cleanupWarning).toBeTruthy();
+    expect(errorEvents(events)[0].dbErrorCode).toBe('PGRST202');
   });
 });

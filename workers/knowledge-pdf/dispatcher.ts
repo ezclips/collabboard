@@ -240,6 +240,10 @@ function logJobResult(
       stage: result.stage,
       ...(result.errorClass === undefined ? {} : { errorClass: result.errorClass }),
       ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+      // Present only when the provider handed us a token from the closed
+      // PostgREST/SQLSTATE grammar; omitted entirely otherwise. `errorCode`
+      // stays what it was -- this says WHICH database failure produced it.
+      ...(result.dbErrorCode === undefined ? {} : { dbErrorCode: result.dbErrorCode }),
       // Already single-line, redacted and length-bounded by the pipeline.
       message: result.error ?? 'Extraction failed',
       ...(result.failureRecorded === undefined ? {} : { failureRecorded: result.failureRecorded }),

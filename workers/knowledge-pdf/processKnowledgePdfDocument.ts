@@ -122,6 +122,13 @@ export interface KnowledgePdfWorkerResult {
    */
   readonly errorClass?: string;
   readonly errorCode?: string;
+  /**
+   * The provider's own failure code behind an `unavailable` DomainError -- a
+   * PostgREST code or a PostgreSQL SQLSTATE, matched against a closed grammar
+   * (see dbErrorCodeOf) and otherwise absent. It does not replace `errorCode`;
+   * it says WHICH database failure produced it.
+   */
+  readonly dbErrorCode?: string;
   readonly failureRecorded?: boolean;
   readonly rawArtifactPath?: string;
   /**
@@ -383,6 +390,39 @@ function errorCodeOf(error: unknown): string {
   return 'UNKNOWN';
 }
 
+/**
+ * PostgREST codes, and PostgreSQL SQLSTATEs, and nothing else.
+ *
+ * `PGRST\d{3}` is PostgREST's own vocabulary; a SQLSTATE is exactly five
+ * uppercase ASCII alphanumerics (`42703`, `23514`, `P0001`, `42P01`). Both are
+ * closed, self-delimiting grammars, which is the whole reason this field can
+ * be logged at all -- a value is either already one of these tokens or it is
+ * dropped. Nothing is trimmed, upcased or otherwise coerced INTO the grammar,
+ * because coercion is how an arbitrary provider string becomes a
+ * "valid-looking" code.
+ */
+const DB_ERROR_CODE = /^(?:PGRST[0-9]{3}|[0-9A-Z]{5})$/;
+
+/**
+ * The provider's own failure code, recovered from the preserved cause.
+ *
+ * The adapter already wraps every PostgREST failure as
+ * `domainError('unavailable', 'Could not commit the extraction result',
+ * { cause })`, so the code that actually distinguishes a missing column
+ * (42703) from a stale schema cache (PGRST202) from a check violation (23514)
+ * survives -- but only `DomainError.code` was ever logged, which is the
+ * constant `unavailable` for all of them. One token closes that gap.
+ *
+ * Deliberately NOT `instanceof`-based and total, like every other reader on
+ * this path: a hostile `cause` getter, a hostile `cause.code` getter or a
+ * Proxy must not be able to change what the worker does.
+ */
+function dbErrorCodeOf(error: unknown): string | undefined {
+  const code = safeProperty(safeProperty(error, 'cause'), 'code');
+  if (typeof code !== 'string') return undefined;
+  return DB_ERROR_CODE.test(code) ? code : undefined;
+}
+
 async function recordFailure(
   deps: KnowledgePdfWorkerDependencies,
   documentId: KnowledgeDocumentId,
@@ -402,6 +442,7 @@ async function recordFailure(
       error: sanitizeKnowledgeProcessingError(error),
       errorClass: errorClassOf(error),
       errorCode: errorCodeOf(error),
+      ...(dbErrorCodeOf(error) === undefined ? {} : { dbErrorCode: dbErrorCodeOf(error) }),
       failureRecorded: false,
       cleanupWarning: [cleanupWarning, `failure transition error: ${boundedDiagnostic(errorMessage(failureError))}`]
         .filter(Boolean)
@@ -424,6 +465,7 @@ async function recordFailure(
     error: sanitizeKnowledgeProcessingError(error),
     errorClass: errorClassOf(error),
     errorCode: errorCodeOf(error),
+    ...(dbErrorCodeOf(error) === undefined ? {} : { dbErrorCode: dbErrorCodeOf(error) }),
     failureRecorded: failure.ok,
     cleanupWarning,
   };
