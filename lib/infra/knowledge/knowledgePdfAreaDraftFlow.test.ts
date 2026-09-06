@@ -155,7 +155,10 @@ describe('R6I-8..17: Save is the only thing that writes', () => {
 
   it('R6I-16: a successful Save closes the modal and shows the created card', () => {
     const save = savePath();
-    const place = save.indexOf('setPadlets(prev => [...prev, created.padlet');
+    // The placement write reconciles by id rather than appending blindly, so a
+    // repeated Done for one draft converges on the row the idempotent RPC
+    // returns instead of listing the same id twice.
+    const place = save.indexOf('const createdPadlet = created.padlet');
     // Clearing the draft IS closing the modal: it renders off that state.
     const close = save.indexOf('setPendingPdfAreaDraft(null)');
     expect(place).toBeGreaterThan(-1);
@@ -257,7 +260,8 @@ describe('R6I-22..25: a failed Save keeps the work on screen', () => {
 
   it('R6I-24: no broken card is placed on the way out', () => {
     const save = savePath();
-    expect(save.indexOf('setPadlets(prev => [...prev, created.padlet')).toBeGreaterThan(save.indexOf('if (!created.ok)'));
+    expect(save.indexOf('const createdPadlet = created.padlet'))
+      .toBeGreaterThan(save.indexOf('if (!created.ok)'));
   });
 
   it('R6I-25: the in-flight guard is released so a retry can proceed', () => {

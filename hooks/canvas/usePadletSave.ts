@@ -1321,6 +1321,49 @@ export function usePadletSave(params: UsePadletSaveParams) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', padletToEdit.id);
+
+        /**
+         * IMAGE-LIBRARY: annotations are DURABLE IMAGE CONTENT, not placement
+         * decoration. The Library object owns the image, its drawing and its
+         * text; the placement owns board id, position, size and layout. So a
+         * saved edit has to reach the SAME linked library_items row -- until
+         * now the snapshot was written once at creation and never again, which
+         * left the durable object showing the original crop while the board
+         * showed the annotated one.
+         *
+         * The same row, never a new one: no second Library id is minted and no
+         * asset is re-uploaded, because `data.imageUrl` is already the
+         * authoritative saved representation the placement itself renders.
+         *
+         * The shape mirrors what create_image_post_with_library_item builds, so
+         * one object cannot end up with two snapshot layouts.
+         *
+         * Authority stays with RLS. `Users can update their own library items`
+         * is `auth.uid() = user_id`, so annotating a placement that REUSES
+         * someone else's Library image matches no row and changes nothing --
+         * their durable object is not ours to rewrite. No service-role client
+         * is involved here, deliberately.
+         */
+        const linkedLibraryItemId =
+          (padletToEdit as { library_item_id?: string | null }).library_item_id ?? null;
+        if (linkedLibraryItemId) {
+          await supabase
+            .from('library_items')
+            .update({
+              content: {
+                title: padletToEdit.title ?? 'Image',
+                content: '',
+                type: 'image',
+                width: padletToEdit.width ?? 300,
+                height: padletToEdit.height ?? 200,
+                file_url: data.imageUrl,
+                metadata,
+              },
+              thumbnail_url: data.imageUrl,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', linkedLibraryItemId);
+        }
       }
 
       setIsImageEditorOpen(false);
