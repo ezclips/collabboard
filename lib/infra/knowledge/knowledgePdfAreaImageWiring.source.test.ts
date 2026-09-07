@@ -325,11 +325,17 @@ describe('F14-F22: durable Library preview SQL contract', () => {
 
   it('F19: every verifier section is an explicit boolean', () => {
     // A NULL `pass` is not a failure to a human skim-reading the output.
-    const sections = verifier.split('\nSELECT ').slice(1);
+    // Dynamic SQL passed to query_to_xml carries its own SELECT, so the
+    // dollar-quoted blocks are removed before the file is split into
+    // statements -- otherwise a fragment of one is mistaken for a section.
+    const staticSql = verifier.replace(/\$q\$[\s\S]*?\$q\$/g, "''");
+    const sections = staticSql.split('\nSELECT ').slice(1);
     expect(sections.length).toBeGreaterThanOrEqual(12);
     for (const section of sections) {
-      const head = section.slice(0, section.indexOf(' AS pass') + ' AS pass'.length);
+      // Dynamic SQL passed to query_to_xml contains its own SELECT, which the
+      // naive split above also yields; those fragments have no `pass` column.
       if (section.indexOf(' AS pass') < 0) continue;
+      const head = section.slice(0, section.indexOf(' AS pass') + ' AS pass'.length);
       expect(head.includes('COALESCE') || head.includes('true AS pass') || head.includes('false AS pass'),
         'section "' + section.slice(0, 50) + '" must fail closed').toBe(true);
     }
@@ -350,9 +356,9 @@ describe('F14-F22: durable Library preview SQL contract', () => {
       "has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE')",
       "privilege_type='INSERT'",
       "privilege_type='UPDATE'",
-      ":'fn'",
-      ":'genericfn'",
-      ":'helperfn'",
+      'create_knowledge_pdf_area_image_post_with_library_item',
+      'create_image_post_with_library_item',
+      'is_knowledge_pdf_area_provenance',
       "has_function_privilege('service_role'",
       "has_function_privilege('authenticated'",
       "has_function_privilege('anon'",
@@ -492,7 +498,7 @@ describe('F23-F30: durable preview parser, policy and state-machine contract', (
     expect(rollup).toContain("has_table_privilege('anon','public.library_items','TRIGGER')");
     // And the exact owner-policy fingerprint is part of the gate itself.
     expect(rollup).toContain("replace(qual,' ','')='(auth.uid()=user_id)'");
-    expect(rollup).toContain(":'helperfn'");
+    expect(rollup).toContain("to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)')");
   });
 
   it('F29: the state machine knows every object this correction owns', () => {
@@ -643,15 +649,34 @@ describe('F31-F36: float64, policy identity and recognised-state contract', () =
     expect(preflight).toContain('to_regprocedure(helper_sig)');
     expect(preflight).toContain('to_regprocedure(trusted_sig)');
     expect(preflight).toContain('to_regprocedure(generic_sig)');
-    expect(verifier).toContain("to_regprocedure(:'helperfn')");
-    expect(verifier).toContain("to_regprocedure(:'fn')");
-    expect(verifier).toContain("to_regprocedure(:'genericfn')");
+    expect(verifier).toContain(
+      "to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)')");
+    expect(verifier).toContain(
+      "to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(");
+    expect(verifier).toContain(
+      "to_regprocedure('public.create_image_post_with_library_item(");
     // A CASE cannot save a statement that NAMES a missing function: Postgres
-    // resolves names at parse time, so the helper's callers are gated by psql
-    // itself rather than by SQL.
-    expect(verifier).toContain('\\gset');
-    expect((verifier.match(/\\if :helper_exists/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    // resolves names at parse time. The checks that must CALL the mirror
+    // therefore pass their query as TEXT to query_to_xml, so the name is
+    // resolved at execution time and the CASE around it decides whether that
+    // execution happens at all.
     expect(verifier).toContain('resolves function names at PARSE time');
+    // Comments stripped: the file's own prose explains the technique by name.
+    const executableSql = verifier.replace(/^\s*--.*$/gm, '');
+    expect((executableSql.match(/query_to_xml\(/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    // Every dynamic call is preceded by its own to_regprocedure guard.
+    for (const at of [...executableSql.matchAll(/query_to_xml\(/g)].map((m) => m.index ?? 0)) {
+      const guard = executableSql.lastIndexOf('to_regprocedure', at);
+      expect(guard, 'query_to_xml at ' + at + ' must be guarded').toBeGreaterThan(-1);
+      expect(executableSql.slice(guard, at)).toContain('IS NULL THEN false');
+    }
+    // The verifier must run through ANY SQL executor, so nothing psql-only.
+    for (const directive of ['\\gset', '\\if ', '\\else', '\\endif', '\\set ']) {
+      expect(executableSql, directive).not.toContain(directive);
+    }
+    // Signatures are written out rather than carried in client-side variables.
+    expect(verifier).not.toContain(":'helperfn'");
+    expect(verifier).toContain("to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)')");
     // The gate proves the security mode of all three functions.
     const rollup = verifier.slice(verifier.indexOf('12 AS section'));
     expect((rollup.match(/prosecdef/g) ?? []).length).toBeGreaterThanOrEqual(3);

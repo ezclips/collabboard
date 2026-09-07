@@ -5,12 +5,24 @@
 -- load-bearing condition rather than trusting an operator to read the rows
 -- above, and every conjunct is COALESCEd so a NULL can never read as success.
 --
--- IT NEVER RAISES. This file is diagnostic: it must be able to describe a
--- broken database, so every function is resolved with to_regprocedure() first
--- and a missing one yields `false`, not an error. `has_function_privilege` on a
--- signature that does not exist would abort the whole report and leave the
--- operator with nothing. SQL errors belong to the rollout's preflight, which is
--- the thing that must refuse to proceed.
+-- PLAIN SQL ONLY. No \set, \gset or \if: this file must run through whatever
+-- executes SQL for the release -- psql, a driver, the Supabase SQL editor --
+-- so it uses nothing psql-specific. Signatures are written out in full rather
+-- than carried in client-side variables.
+--
+-- IT NEVER RAISES. This file is diagnostic: it must be able to DESCRIBE a
+-- broken database, so a missing object is a `false`, never an error. That is
+-- harder than it looks. PostgreSQL resolves function names at PARSE time, so a
+-- statement that merely NAMES an absent function fails before any CASE guard
+-- can run -- which is exactly the state an operator most needs reported. The
+-- three checks that must CALL the provenance mirror therefore pass their query
+-- to query_to_xml() as text: the name inside it is resolved at execution time,
+-- and the surrounding CASE means it is never executed when to_regprocedure()
+-- says the function is absent. Everything else reads catalogs, which is safe
+-- for objects that do not exist.
+--
+-- SQL errors belong to the rollout's preflight, which is the thing that must
+-- refuse to proceed. This file only reports.
 --
 -- WHAT IT DELIBERATELY DOES NOT CHECK: that a durable row still has a live
 -- origin placement. Trust is established ONCE, when the path is written, by the
@@ -21,18 +33,6 @@
 -- It reads catalogs and structural columns only. No filename, page text, quote,
 -- excerpt or any other document content is selected, and no PDF is opened.
 -- Nothing here writes.
-
-\set helperfn 'public.is_knowledge_pdf_area_provenance(jsonb)'
-\set fn 'public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'
-\set genericfn 'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'
-\set pathre '^board-derived/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/pdf-areas/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.webp$'
-
--- The provenance mirror is CALLED by three sections below. A CASE guard is not
--- enough: PostgreSQL resolves function names at PARSE time, so naming a missing
--- function aborts the statement before any guard runs -- and this file must be
--- able to describe a database that is missing it. psql's own conditional keeps
--- the reference out of the parser entirely when it does not exist.
-SELECT to_regprocedure(:'helperfn') IS NOT NULL AS helper_exists \gset
 
 -- 1. The server-owned location column exists, is text and is nullable.
 SELECT 1 AS section, 'knowledge_storage_path exists, text, nullable' AS check,
@@ -113,7 +113,7 @@ SELECT 5 AS section, 'trusted PDF-area RPC: exists, INVOKER, service_role only' 
               has_function_privilege('authenticated', f.oid, 'EXECUTE'),
               has_function_privilege('anon', f.oid, 'EXECUTE'),
               has_function_privilege('public', f.oid, 'EXECUTE')) END AS detail
-  FROM (SELECT to_regprocedure(:'fn') AS oid) f;
+  FROM (SELECT to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') AS oid) f;
 
 -- 6. It derives its own path and takes none.
 SELECT 6 AS section, 'trusted RPC derives its own path and accepts none' AS check,
@@ -121,7 +121,8 @@ SELECT 6 AS section, 'trusted RPC derives its own path and accepts none' AS chec
                 AND p.prosrc NOT LIKE '%p_durable_object_path%'
                 AND p.prosrc LIKE '%board-derived/%'
                 AND p.prosrc LIKE '%is_knowledge_pdf_area_provenance%'
-                FROM pg_proc p WHERE p.oid = to_regprocedure(:'fn')), false) AS pass,
+                FROM pg_proc p
+               WHERE p.oid = to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)')), false) AS pass,
     'path derived internally; provenance judged by the shared mirror' AS detail;
 
 -- 6a. The generic image RPC is a PREREQUISITE this rollout does not own: it must
@@ -141,76 +142,50 @@ SELECT '6a' AS section, 'generic image RPC unchanged: exists, INVOKER, expected 
               has_function_privilege('service_role', g.oid, 'EXECUTE'),
               has_function_privilege('anon', g.oid, 'EXECUTE'),
               has_function_privilege('public', g.oid, 'EXECUTE')) END AS detail
-  FROM (SELECT to_regprocedure(:'genericfn') AS oid) g;
+  FROM (SELECT to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') AS oid) g;
 
-\if :helper_exists
--- 6b. Parser parity, in float64. Every row here is a case the TypeScript parser
+-- 6b. Parser parity, in float64. Every fixture is a case the TypeScript parser
 --     decides one way, asserted to decide the same way in SQL -- and no
 --     malformed input may raise instead of returning false.
+--
+--     The whole matrix is one dynamically executed query so the mirror's name
+--     is resolved only when it exists; the CASE below is what stops it running
+--     otherwise. Dollar-quoting keeps the JSON fixtures readable.
 SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser (float64)' AS check,
-    CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE COALESCE(
-      public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.1,"y":0.1,"width":0.2,"height":0.2}}}'::jsonb)
-      -- Number.isInteger(1.0) is true: a digits-only text regex would strand this row.
-      AND public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      -- finalizeRegion clamps a hair below zero to 0 rather than rejecting.
-      AND public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":2,"region":{"x":-0.0000000001,"y":-0.0000000001,"width":0.5,"height":0.5}}}'::jsonb)
-      AND public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":7,"region":{"x":0.5,"y":0.5,"width":0.5000000001,"height":0.5}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(NULL)
-      AND NOT public.is_knowledge_pdf_area_provenance('{}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance('[]'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance('{"source":[]}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance('{"source":"x"}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"upload"}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area"}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":5,"pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"not-a-uuid","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":"1","region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.5,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      -- float64: 1e400 is Infinity in JavaScript, so Number.isInteger rejects it.
-      -- An arbitrary-precision mirror would call this valid provenance.
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1e400,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      -- float64: a width that underflows to 0 stops being a selection.
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":1e-400,"height":1}}}'::jsonb)
-      -- float64: a non-finite coordinate is not a rectangle.
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1e400,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":[]}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"0","y":0,"width":1,"height":1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"abc","y":"1e","width":"--3","height":"NaN"}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":0,"height":1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":-1}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.9,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":-0.5,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
-      -- a coordinate exactly at the far edge leaves no area after trimming
-      AND NOT public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1,"y":0,"width":0.0000000001,"height":0.5}}}'::jsonb),
-      false) END AS pass,
+    CASE WHEN to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NULL THEN false
+         ELSE COALESCE((xpath('/row/c/text()', query_to_xml($q$
+SELECT
+      public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.1,"y":0.1,"width":0.2,"height":0.2}}}'::jsonb)
+  AND public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":2,"region":{"x":-0.0000000001,"y":-0.0000000001,"width":0.5,"height":0.5}}}'::jsonb)
+  AND public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":7,"region":{"x":0.5,"y":0.5,"width":0.5000000001,"height":0.5}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance(NULL)
+  AND NOT public.is_knowledge_pdf_area_provenance('{}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('[]'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":[]}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":"x"}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"upload"}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area"}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":5,"pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"not-a-uuid","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":"1","region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.5,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1e400,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":1e-400,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1e400,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":[]}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"0","y":0,"width":1,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"abc","y":"1e","width":"--3","height":"NaN"}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":0,"height":1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":-1}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.9,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":-0.5,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
+  AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1,"y":0,"width":0.0000000001,"height":0.5}}}'::jsonb)
+  AS c
+$q$, false, true, '')))[1]::text::boolean, false) END AS pass,
     'accepts what TypeScript accepts, rejects the rest, never raises' AS detail;
-\else
-SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser (float64)' AS check,
-    false AS pass, 'provenance mirror is absent' AS detail;
-\endif
 
 -- 6c. The mirror exists, is SECURITY INVOKER, and is internal machinery only.
 SELECT '6c' AS section, 'provenance mirror: exists, INVOKER, not browser-executable' AS check,
@@ -228,7 +203,7 @@ SELECT '6c' AS section, 'provenance mirror: exists, INVOKER, not browser-executa
               has_function_privilege('anon', h.oid, 'EXECUTE'),
               has_function_privilege('authenticated', h.oid, 'EXECUTE'),
               has_function_privilege('service_role', h.oid, 'EXECUTE')) END AS detail
-  FROM (SELECT to_regprocedure(:'helperfn') AS oid) h;
+  FROM (SELECT to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') AS oid) h;
 
 -- 7. RLS enabled, and the EXACT accepted owner-policy set -- by IDENTITY as well
 --    as semantics. A renamed policy, one narrowed to another role, or a
@@ -280,22 +255,19 @@ SELECT '7c' AS section, 'authenticated table privileges are exactly SELECT+DELET
                 FROM information_schema.table_privileges
                WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items'), '{}') AS detail;
 
-\if :helper_exists
 -- 8. Durable rows satisfy the contract that SURVIVES placement deletion.
---    A live padlet is deliberately NOT required here.
+--    A live padlet is deliberately NOT required here. Dynamically executed for
+--    the same reason as 6b: the mirror may not exist, and that is a `false`.
 SELECT 8 AS section, 'durable rows are canonical, image, valid provenance' AS check,
-    CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE
-      COALESCE((SELECT count(*) FROM public.library_items li
-                 WHERE li.knowledge_storage_path IS NOT NULL
-                   AND NOT (li.knowledge_storage_path ~ :'pathre'
-                            AND li.type = 'image'
-                            AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))) = 0, false)
-    END AS pass,
+    CASE WHEN to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NULL THEN false
+         ELSE COALESCE((xpath('/row/c/text()', query_to_xml($q$
+SELECT count(*) AS c FROM public.library_items li
+ WHERE li.knowledge_storage_path IS NOT NULL
+   AND NOT (li.knowledge_storage_path ~ '^board-derived/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/pdf-areas/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.webp$'
+            AND li.type = 'image'
+            AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))
+$q$, false, true, '')))[1]::text::bigint = 0, false) END AS pass,
     'canonical path, image row, provenance the reader still accepts' AS detail;
-\else
-SELECT 8 AS section, 'durable rows are canonical, image, valid provenance' AS check,
-    false AS pass, 'provenance mirror is absent' AS detail;
-\endif
 
 -- 8b. A durable row never previews through a board-scoped URL.
 SELECT '8b' AS section, 'durable rows preview through their own Library URL' AS check,
@@ -333,9 +305,9 @@ SELECT 10 AS section, 'rollout state complete' AS check,
     COALESCE(
       EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema='public' AND table_name='library_items' AND column_name='knowledge_storage_path')
-      AND to_regprocedure(:'helperfn') IS NOT NULL
-      AND to_regprocedure(:'fn') IS NOT NULL
-      AND to_regprocedure(:'genericfn') IS NOT NULL, false) AS pass,
+      AND to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NOT NULL
+      AND to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') IS NOT NULL
+      AND to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') IS NOT NULL, false) AS pass,
     'column + provenance mirror + trusted RPC + generic RPC' AS detail;
 
 -- 11. Library route prerequisites SQL can prove: the columns it selects exist.
@@ -345,10 +317,11 @@ SELECT 11 AS section, 'Library serve route schema prerequisites' AS check,
                  AND column_name IN ('id','type','knowledge_storage_path','content')) = 4, false) AS pass,
     'id, type, knowledge_storage_path, content all present' AS detail;
 
-\if :helper_exists
 -- 12. RELEASE GATE. Every load-bearing condition, repeated here so the gate can
---     never pass on a section nobody read. Each conjunct fails closed, and every
---     function is resolved by oid so a missing one is `false`, not an error.
+--     never pass on a section nobody read. Each conjunct fails closed, every
+--     function is resolved by oid, and the one conjunct that must CALL the
+--     mirror is executed dynamically so a missing mirror is `false`, not an
+--     aborted report.
 SELECT 12 AS section, 'ROLL-UP' AS check,
   COALESCE((SELECT data_type='text' FROM information_schema.columns
              WHERE table_schema='public' AND table_name='library_items'
@@ -405,37 +378,42 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
   AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','INSERT'), false)
   AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE'), false)
   -- provenance mirror: exists, SECURITY INVOKER, internal only
-  AND COALESCE(to_regprocedure(:'helperfn') IS NOT NULL, false)
-  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(:'helperfn')), false)
-  AND COALESCE(CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE
-        NOT has_function_privilege('public', to_regprocedure(:'helperfn'), 'EXECUTE')
-    AND NOT has_function_privilege('anon', to_regprocedure(:'helperfn'), 'EXECUTE')
-    AND NOT has_function_privilege('authenticated', to_regprocedure(:'helperfn'), 'EXECUTE')
-    AND has_function_privilege('service_role', to_regprocedure(:'helperfn'), 'EXECUTE') END, false)
+  AND COALESCE(to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NOT NULL, false)
+  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p
+                 WHERE p.oid = to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)')), false)
+  AND COALESCE(CASE WHEN to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NULL THEN false ELSE
+        NOT has_function_privilege('public', to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('anon', to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)'), 'EXECUTE')
+    AND has_function_privilege('service_role', to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)'), 'EXECUTE') END, false)
   -- trusted RPC: exists, SECURITY INVOKER, service_role only
-  AND COALESCE(to_regprocedure(:'fn') IS NOT NULL, false)
-  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(:'fn')), false)
-  AND COALESCE(CASE WHEN to_regprocedure(:'fn') IS NULL THEN false ELSE
-        has_function_privilege('service_role', to_regprocedure(:'fn'), 'EXECUTE')
-    AND NOT has_function_privilege('authenticated', to_regprocedure(:'fn'), 'EXECUTE')
-    AND NOT has_function_privilege('anon', to_regprocedure(:'fn'), 'EXECUTE')
-    AND NOT has_function_privilege('public', to_regprocedure(:'fn'), 'EXECUTE') END, false)
+  AND COALESCE(to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') IS NOT NULL, false)
+  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p
+                 WHERE p.oid = to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)')), false)
+  AND COALESCE(CASE WHEN to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') IS NULL THEN false ELSE
+        has_function_privilege('service_role', to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('anon', to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('public', to_regprocedure('public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE') END, false)
   -- generic RPC prerequisite: unchanged in security and execution authority
-  AND COALESCE(to_regprocedure(:'genericfn') IS NOT NULL, false)
-  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(:'genericfn')), false)
-  AND COALESCE(CASE WHEN to_regprocedure(:'genericfn') IS NULL THEN false ELSE
-        has_function_privilege('authenticated', to_regprocedure(:'genericfn'), 'EXECUTE')
-    AND has_function_privilege('service_role', to_regprocedure(:'genericfn'), 'EXECUTE')
-    AND NOT has_function_privilege('anon', to_regprocedure(:'genericfn'), 'EXECUTE')
-    AND NOT has_function_privilege('public', to_regprocedure(:'genericfn'), 'EXECUTE') END, false)
+  AND COALESCE(to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') IS NOT NULL, false)
+  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p
+                 WHERE p.oid = to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)')), false)
+  AND COALESCE(CASE WHEN to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') IS NULL THEN false ELSE
+        has_function_privilege('authenticated', to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE')
+    AND has_function_privilege('service_role', to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('anon', to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE')
+    AND NOT has_function_privilege('public', to_regprocedure('public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'), 'EXECUTE') END, false)
   -- data shape: canonical durable paths (no live-padlet dependency), no stale
   -- board preview, no downgraded composite
-  AND COALESCE(CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE
-        (SELECT count(*) FROM public.library_items li
-          WHERE li.knowledge_storage_path IS NOT NULL
-            AND NOT (li.knowledge_storage_path ~ :'pathre'
-                     AND li.type='image'
-                     AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))) = 0 END, false)
+  AND COALESCE(CASE WHEN to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NULL THEN false
+        ELSE (xpath('/row/c/text()', query_to_xml($q$
+SELECT count(*) AS c FROM public.library_items li
+ WHERE li.knowledge_storage_path IS NOT NULL
+   AND NOT (li.knowledge_storage_path ~ '^board-derived/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/pdf-areas/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.webp$'
+            AND li.type = 'image'
+            AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))
+$q$, false, true, '')))[1]::text::bigint = 0 END, false)
   AND COALESCE((SELECT count(*) FROM public.library_items li
                  WHERE li.knowledge_storage_path IS NOT NULL
                    AND li.thumbnail_url ~ '^/api/boards/'
@@ -446,7 +424,3 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
                         OR li.content -> 'metadata' ->> 'previewUrl' IS NOT NULL)) = 0, false)
   AS pass,
   'schema, RLS, policy identities, exact grants, function security modes, durable-row and composite invariants' AS detail;
-\else
-SELECT 12 AS section, 'ROLL-UP' AS check, false AS pass,
-    'provenance mirror is absent -- release conditions cannot hold' AS detail;
-\endif
