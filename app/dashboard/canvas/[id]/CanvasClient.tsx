@@ -6716,16 +6716,34 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return !!target && canPlaceKnowledgeSourceNote(target, padlets);
   }, [canUseFreeformEditButton, isFreeformLayout, knowledgeReaderPresentation, padlets, canvasId]);
 
-  // Capture only our dedicated MIME, before card/container handlers can claim it.
-  // Library drags retain their existing dispatch path, even with mixed MIME data.
+  /**
+   * DETECT -> PARSE -> VALIDATE -> CLAIM, in that order.
+   *
+   * The first version cancelled the drop the moment it saw the MIME and parsed
+   * the payload afterwards, so a malformed source-note payload swallowed drops
+   * that also carried a valid Knowledge clip, file or text/padlet-id: this arm
+   * consumed the event and then did nothing with it. It also had to name the
+   * Library MIME explicitly to protect that one path, which only hid the shape
+   * of the bug.
+   *
+   * Nothing is consumed unless this arm can actually perform the reposition, so
+   * every "not ours" answer -- absent MIME, malformed payload, blank or unknown
+   * id, wrong target type, locked note, container child, wrong layout or no
+   * permission -- returns false with the event untouched, and whatever else the
+   * drag carried reaches its own handler exactly as before. `canDragSourceNote`
+   * remains the single eligibility authority.
+   */
   const handleKnowledgeSourceNotePlacementDrop = useCallback((event: React.DragEvent): boolean => {
-    if (event.dataTransfer.types.includes('application/collabboard-library')
-      || !event.dataTransfer.types.includes(SOURCE_NOTE_PLACEMENT_MIME)) return false;
+    if (!event.dataTransfer.types.includes(SOURCE_NOTE_PLACEMENT_MIME)) return false;
+    const payload = parseKnowledgeSourceNotePlacementDrag(
+      event.dataTransfer.getData(SOURCE_NOTE_PLACEMENT_MIME),
+    );
+    if (!payload || !canDragSourceNote(payload.targetPadletId)) return false;
+    const target = padlets.find((post) => post.id === payload.targetPadletId);
+    if (!target) return false;
+    // Claimed: only now may the event be consumed.
     event.preventDefault();
     event.stopPropagation();
-    const payload = parseKnowledgeSourceNotePlacementDrag(event.dataTransfer.getData(SOURCE_NOTE_PLACEMENT_MIME));
-    if (!payload || !canDragSourceNote(payload.targetPadletId)) return true;
-    const target = padlets.find((post) => post.id === payload.targetPadletId)!;
     const point = getCanvasPointFromClient(event.clientX, event.clientY);
     const position = clampRectPositionToFreeformBounds({ ...point, width: target.width, height: target.height });
     const positionX = Math.round(position.x);
@@ -7854,13 +7872,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             }
           }}
           onDropCapture={handleKnowledgeSourceNotePlacementDrop}
+          /**
+           * dragover cannot read the payload -- browsers expose only `types`
+           * until the drop -- so this path claims the cursor only when the drag
+           * carries our MIME and nothing another handler already owns. A real
+           * source-note drag sets that one type and nothing else, so this costs
+           * a genuine drag nothing while guaranteeing a malformed one can never
+           * suppress or misrepresent a Library, Knowledge-clip, file or text
+           * drag. Their dragover behaviour is left exactly as it was.
+           */
           onDragOverCapture={(event) => {
-            if (event.dataTransfer.types.includes('application/collabboard-library')
-              || !event.dataTransfer.types.includes(SOURCE_NOTE_PLACEMENT_MIME)) return;
+            const types = event.dataTransfer.types;
+            if (!types.includes(SOURCE_NOTE_PLACEMENT_MIME)) return;
+            if (['application/collabboard-library', KNOWLEDGE_SOURCE_CLIP_MIME, 'Files', 'text/plain']
+              .some((type) => types.includes(type))) return;
+            if (!canUseFreeformEditButton || !isFreeformLayout
+              || knowledgeReaderPresentation !== 'side-panel') return;
             event.preventDefault();
             event.stopPropagation();
-            event.dataTransfer.dropEffect = canUseFreeformEditButton && isFreeformLayout
-              && knowledgeReaderPresentation === 'side-panel' ? 'move' : 'none';
+            event.dataTransfer.dropEffect = 'move';
           }}
           onMouseDown={handleFreeformPanMouseDown}
           onDragOver={(e) => {

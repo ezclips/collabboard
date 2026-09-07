@@ -309,7 +309,12 @@ describe('source Note placement contract and actual Freeform handler', () => {
     '{"targetPadletId":3}', '{"targetPadletId":""}', '{"targetPadletId":"  "}'])('rejects %s', async (raw) => {
     expect(parseKnowledgeSourceNotePlacementDrag(raw)).toBeNull();
     const h = harness();
-    expect(h.drop(h.event(raw))).toBe(true);
+    const event = h.event(raw);
+    // Not claimed, and the event is left completely untouched so whatever else
+    // the drag carried still reaches its own handler.
+    expect(h.drop(event)).toBe(false);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(h.update).not.toHaveBeenCalled();
   });
@@ -337,7 +342,10 @@ describe('source Note placement contract and actual Freeform handler', () => {
   ])('rejects ineligible current board state: %j', async (options) => {
     const h = harness(options);
     expect(h.canDrag('N1')).toBe(false);
-    h.drop(h.event());
+    const event = h.event();
+    expect(h.drop(event)).toBe(false);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(h.update).not.toHaveBeenCalled();
     expect(h.posts()).toEqual(h.original);
@@ -348,7 +356,9 @@ describe('source Note placement contract and actual Freeform handler', () => {
     const posts = [note()];
     const h = harness({ posts });
     posts.pop();
-    h.drop(h.event());
+    const event = h.event();
+    expect(h.drop(event)).toBe(false);
+    expect(event.stopPropagation).not.toHaveBeenCalled();
     expect(h.update).not.toHaveBeenCalled();
   });
 
@@ -370,6 +380,50 @@ describe('source Note placement contract and actual Freeform handler', () => {
     expect(h.update).not.toHaveBeenCalled();
   });
 
+  it('an unusable source-note payload never steals another valid drop', () => {
+    // The reviewed blocker: the arm cancelled on MIME alone, so a malformed
+    // payload swallowed whatever else the drag was really carrying.
+    const competing = ['application/collabboard-knowledge-clip', 'Files', 'text/plain',
+      'application/collabboard-library'];
+    for (const other of competing) {
+      for (const raw of ['{ not json', '{}', '{"targetPadletId":""}',
+        serializeKnowledgeSourceNotePlacementDrag('missing')]) {
+        const h = harness();
+        const event = h.event(raw, [SOURCE_NOTE_PLACEMENT_MIME, other]);
+        expect(h.drop(event), `${other} / ${raw}`).toBe(false);
+        expect(event.preventDefault, `${other} / ${raw}`).not.toHaveBeenCalled();
+        expect(event.stopPropagation, `${other} / ${raw}`).not.toHaveBeenCalled();
+        expect(h.update).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('an ineligible target never steals another valid drop', () => {
+    for (const options of [{ posts: [note('N1', 'image')] },
+      { posts: [note('N1', 'text', { parentId: 'owner' })] }, { editable: false }]) {
+      const h = harness(options);
+      const event = h.event(serializeKnowledgeSourceNotePlacementDrag('N1'),
+        [SOURCE_NOTE_PLACEMENT_MIME, 'application/collabboard-knowledge-clip']);
+      expect(h.drop(event)).toBe(false);
+      expect(event.stopPropagation).not.toHaveBeenCalled();
+      expect(h.update).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a usable source-note payload still takes precedence over a coexisting format', async () => {
+    // Precedence survives -- but only for an operation this arm can perform.
+    for (const other of ['application/collabboard-knowledge-clip', 'Files', 'text/plain']) {
+      const h = harness();
+      const event = h.event(serializeKnowledgeSourceNotePlacementDrag('N1'),
+        [SOURCE_NOTE_PLACEMENT_MIME, other]);
+      expect(h.drop(event), other).toBe(true);
+      expect(event.preventDefault, other).toHaveBeenCalledOnce();
+      expect(event.stopPropagation, other).toHaveBeenCalledOnce();
+      await Promise.resolve();
+      expect(h.update, other).toHaveBeenCalledOnce();
+    }
+  });
+
   it('wires capture ahead of container drops and withholds workspace drag at the reader', () => {
     expect(canvas).toContain('onDropCapture={handleKnowledgeSourceNotePlacementDrop}');
     expect(canvas).toContain('canDragSourceNote={canDragSourceNote}');
@@ -388,7 +442,7 @@ describe('source Note placement contract and actual Freeform handler', () => {
 describe('Source Context drop capture on the real viewport', () => {
   it.each([
     ['valid source', serializeKnowledgeSourceNotePlacementDrag('N1'), [SOURCE_NOTE_PLACEMENT_MIME], false],
-    ['invalid source', '{}', [SOURCE_NOTE_PLACEMENT_MIME], false],
+    ['invalid source', '{}', [SOURCE_NOTE_PLACEMENT_MIME], true],
     ['Library', '{}', ['application/collabboard-library'], true],
   ] as const)('%s keeps the correct drop owner', async (_label, raw, types, reachesChild) => {
     const h = harness();
