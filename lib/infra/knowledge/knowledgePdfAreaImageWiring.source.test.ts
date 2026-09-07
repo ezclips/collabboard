@@ -288,8 +288,10 @@ describe('F14-F22: durable Library preview SQL contract', () => {
     for (const field of ['knowledgeDocumentId', 'pageNumber', 'region', "'x'", "'y'", "'width'", "'height'"]) {
       expect(migration, field).toContain(field);
     }
-    // Never NULL: a NULL conjunct in a security predicate reads as "not false".
-    expect(migration).toContain('SELECT COALESCE(');
+    // Never NULL and never throwing: a NULL conjunct in a security predicate
+    // reads as "not false", and an exception aborts the whole rollout.
+    expect(migration).toContain('RETURNS boolean');
+    expect(migration).toContain('WHEN others THEN');
     // Both sides of the join are validated, not just the Library snapshot.
     expect(REPAIR).toContain("public.is_knowledge_pdf_area_provenance(li.content -> 'metadata')");
     expect(REPAIR).toContain('public.is_knowledge_pdf_area_provenance(p.metadata)');
@@ -382,5 +384,151 @@ describe('F14-F22: durable Library preview SQL contract', () => {
       expect(added.length, name).toBeGreaterThan(0);
       expect(added.every((a) => a.endsWith('knowledge_storage_path')), name).toBe(true);
     }
+  });
+});
+
+/**
+ * F23-F30: the three corrections a second review demanded.
+ *
+ * Parser equivalence, exact policy/privilege proof, and a state machine that
+ * knows every object this correction owns. These are release-critical SQL
+ * properties that vitest cannot execute, so each assertion pins the specific
+ * defect it prevents rather than merely spot-checking a string.
+ */
+describe('F23-F30: durable preview parser, policy and state-machine contract', () => {
+  const migration = sourceOf('supabase/migrations/20260907120000_library_durable_image_preview.sql');
+  const rollout = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image.sql');
+  const verifier = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image_verify.sql');
+  const parser = sourceOf('lib/domain/knowledge/knowledgePdfAreaImagePolicy.ts');
+  const geometry = sourceOf('lib/domain/knowledge/knowledgePageRegionGeometry.ts');
+  const helperOf = (sql: string) => sql.slice(
+    sql.indexOf('CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance'),
+    sql.indexOf('COMMENT ON FUNCTION public.is_knowledge_pdf_area_provenance'));
+
+  it('F23: the mirror types JSON, and never validates a number as text', () => {
+    const helper = helperOf(migration);
+    // Number.isInteger(1.0) is true, so a digits-only regex on the serialized
+    // text would strand every row whose page was stored as 1.0.
+    expect(helper).not.toContain("~ '^[0-9]+$'");
+    expect(helper).not.toMatch(/\^\[0-9\]\+\$/);
+    // jsonb_typeof is the type authority, for every field the parser reads.
+    for (const field of ["'kind'", "'knowledgeDocumentId'", "'pageNumber'", "'region'", "'x'", "'y'", "'width'", "'height'"]) {
+      expect(helper, field).toContain('jsonb_typeof');
+    }
+    // Number.isInteger is mirrored by trunc equality, not by text shape.
+    expect(helper).toContain('trunc(page_number)');
+  });
+
+  it('F24: no cast can run before the type test that guards it', () => {
+    const helper = helperOf(migration);
+    // Postgres does not promise AND-operands evaluate left to right, so a cast
+    // guarded only by a neighbouring predicate can still raise on client JSON.
+    // plpgsql statements are ordered, so each cast follows its own IF.
+    expect(helper).toContain('LANGUAGE plpgsql');
+    for (const cast of ["(src -> 'pageNumber')::numeric", "(reg -> 'x')::numeric"]) {
+      const castAt = helper.indexOf(cast);
+      expect(castAt, cast).toBeGreaterThan(-1);
+      const guard = helper.lastIndexOf('RETURN false;', castAt);
+      expect(guard, cast + ' must be preceded by its own guard').toBeGreaterThan(-1);
+    }
+    // The document id is compared as text; no uuid cast happens in the mirror.
+    expect(helper).not.toContain('::uuid');
+    // And anything unforeseen still cannot abort a rollout.
+    expect(helper).toContain('EXCEPTION');
+  });
+
+  it('F25: epsilon and range semantics track the canonical geometry helper', () => {
+    const helper = helperOf(migration);
+    // The parser CLAMPS a hair-negative coordinate rather than rejecting it, so
+    // `x >= 0` would be stricter than the product and would strand valid rows.
+    expect(geometry).toContain('NORMALIZED_REGION_EPSILON = 1e-9');
+    expect(helper).toContain('1e-9');
+    expect(helper).toContain('rx < 0 AND rx > -eps');
+    expect(helper).toContain('ry < 0 AND ry > -eps');
+    // finalizeRegion's trim-to-remaining-page check, which a naive range test
+    // omits: x = 1 with a positive width leaves no area at all.
+    expect(helper).toContain('least(rw, 1 - r_left)');
+    expect(helper).toContain('least(rh, 1 - r_top)');
+    // The TypeScript side this mirrors is itself pinned, so the pair can't drift.
+    expect(parser).toContain('normalizeStorableRegion(record.region)');
+    expect(parser).toContain('Number.isInteger(pageNumber)');
+  });
+
+  it('F26: the mirror is internal machinery, not a client-callable function', () => {
+    for (const [name, sql] of [['migration', migration], ['rollout', rollout]] as const) {
+      expect(sql, name).toContain('REVOKE ALL ON FUNCTION public.is_knowledge_pdf_area_provenance(jsonb)\n    FROM PUBLIC, anon, authenticated;');
+      expect(sql, name).toContain('GRANT EXECUTE ON FUNCTION public.is_knowledge_pdf_area_provenance(jsonb)\n    TO service_role;');
+    }
+    // service_role needs it because the trusted creation RPC now judges its
+    // input through the same contract the repair and verifier use.
+    expect(migration).toContain('IF NOT public.is_knowledge_pdf_area_provenance(p_metadata) THEN');
+    expect(verifier).toContain('provenance helper is not browser-executable');
+  });
+
+  it('F27: policies are proved exactly, not by substring', () => {
+    // `qual LIKE '%uid()%'` would accept `auth.uid() = user_id OR true`.
+    const fingerprint = "replace(qual,' ','')='(auth.uid()=user_id)'";
+    for (const [name, sql] of [['rollout', rollout], ['verifier', verifier]] as const) {
+      expect(sql, name).toContain(fingerprint);
+      expect(sql, name).toContain("count(*) = 4");
+      // Each command pinned in its own clause, and a NULL (unrestricted)
+      // USING / WITH CHECK fails the FILTER rather than passing it.
+      for (const cmd of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {
+        expect(sql, name + ' ' + cmd).toContain("cmd='" + cmd + "'");
+      }
+      expect(sql, name).toContain("qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)'");
+    }
+    expect(verifier).not.toContain("qual NOT LIKE '%uid()%'");
+  });
+
+  it('F28: the release gate proves exact privilege sets, including anon DDL', () => {
+    const rollup = verifier.slice(verifier.indexOf('12 AS section'));
+    // Absences alone are not a contract: the sets are compared exactly.
+    expect(rollup).toContain("= ARRAY['SELECT']");
+    expect(rollup).toContain("= ARRAY['DELETE','SELECT']");
+    // The two the previous gate checked per-section but omitted from the gate.
+    expect(rollup).toContain("has_table_privilege('anon','public.library_items','REFERENCES')");
+    expect(rollup).toContain("has_table_privilege('anon','public.library_items','TRIGGER')");
+    // And the exact owner-policy fingerprint is part of the gate itself.
+    expect(rollup).toContain("replace(qual,' ','')='(auth.uid()=user_id)'");
+    expect(rollup).toContain('is_knowledge_pdf_area_provenance(jsonb)');
+  });
+
+  it('F29: the state machine knows every object this correction owns', () => {
+    const preflight = rollout.slice(rollout.indexOf('DO $preflight$'), rollout.indexOf('$preflight$;'));
+    // Three owned objects, not two: omitting the helper would let a half
+    // applied database read as clean PRE and be mutated again.
+    for (const owned of ['has_column', 'has_helper', 'has_trusted']) {
+      expect(preflight, owned).toContain(owned);
+    }
+    expect(preflight).toContain('IF owned = 0 THEN');
+    expect(preflight).toContain('IF owned <> 3 THEN');
+    expect(preflight).toContain('partial state (column=%, helper=%, trusted_rpc=%)');
+    // POST is more than "objects exist": grants, policies and function
+    // authority must all hold, or the state is partial and a human decides.
+    expect(preflight).toContain('grants_hardened');
+    expect(preflight).toContain('functions_hardened');
+    expect(preflight).toContain('policies_exact');
+    expect(preflight).toContain('the hardened contract does not hold');
+    // Not merely TRUNCATE, which is what the previous version leaned on.
+    expect(preflight).toContain("has_column_privilege('authenticated', 'public.library_items', 'knowledge_storage_path', 'UPDATE')");
+    // The prerequisite foundation is still required in both states.
+    expect(preflight).toContain('create_image_post_with_library_item');
+    // And POST never demands a live placement.
+    expect(preflight).not.toContain('library_item_id = li.id');
+  });
+
+  it('F30: every aggregate and array comparison fails closed', () => {
+    const preflight = rollout.slice(rollout.indexOf('DO $preflight$'), rollout.indexOf('$preflight$;'));
+    // Empty grant sets aggregate to NULL; compared raw they read as "not false".
+    for (const [name, sql] of [['preflight', preflight], ['verifier', verifier]] as const) {
+      expect(sql, name).toContain('ARRAY[]::text[]');
+      expect(sql, name).toContain('COALESCE(');
+    }
+    expect(preflight).toContain('COALESCE(grants_hardened, false)');
+    expect(preflight).toContain('COALESCE(functions_hardened, false)');
+    // The gate's own result can never be NULL.
+    const rollup = verifier.slice(verifier.indexOf('12 AS section'));
+    expect((rollup.match(/COALESCE\(/g) ?? []).length).toBeGreaterThanOrEqual(30);
   });
 });

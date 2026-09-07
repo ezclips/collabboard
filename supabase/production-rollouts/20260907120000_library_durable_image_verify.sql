@@ -108,33 +108,127 @@ SELECT 6 AS section, 'trusted function derives its own path; generic RPC intact'
     AND COALESCE(has_function_privilege('authenticated', :'genericfn', 'EXECUTE'), false) AS pass,
     'SECURITY INVOKER, derives path internally, generic image RPC still granted' AS detail;
 
--- 6b. The canonical provenance mirror exists and rejects malformed metadata.
-SELECT '6b' AS section, 'provenance validator mirrors the parser and never returns NULL' AS check,
+-- 6b. Parser parity. Every row here is a case the TypeScript parser decides one
+--     way, asserted to decide the same way in SQL -- and no malformed input may
+--     raise instead of returning false.
+SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser' AS check,
     COALESCE(
+      -- ACCEPTED by parseKnowledgePdfAreaProvenance:
       public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.1,"y":0.1,"width":0.2,"height":0.2}}}'::jsonb) = true
-      AND public.is_knowledge_pdf_area_provenance('{}'::jsonb) = false
-      AND public.is_knowledge_pdf_area_provenance(NULL) IS NOT DISTINCT FROM false
-      AND public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area"}}'::jsonb) = false
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.1,"y":0.1,"width":0.2,"height":0.2}}}'::jsonb)
+      -- Number.isInteger(1.0) is true: a digits-only text regex would strand this row.
       AND public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"not-a-uuid","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb) = false
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      -- finalizeRegion clamps a hair below zero to 0 rather than rejecting.
       AND public.is_knowledge_pdf_area_provenance(
-        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.9,"y":0,"width":0.5,"height":0.5}}}'::jsonb) = false,
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":2,"region":{"x":-0.0000000001,"y":-0.0000000001,"width":0.5,"height":0.5}}}'::jsonb)
+      -- Full-page and epsilon overhang are both inside tolerance.
+      AND public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":7,"region":{"x":0.5,"y":0.5,"width":0.5000000001,"height":0.5}}}'::jsonb)
+      -- REJECTED, each returning false rather than raising:
+      AND NOT public.is_knowledge_pdf_area_provenance(NULL)
+      AND NOT public.is_knowledge_pdf_area_provenance('{}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance('[]'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance('{"source":[]}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance('{"source":"x"}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"upload"}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area"}}'::jsonb)
+      -- document id: missing, wrong type, non-canonical
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":5,"pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"not-a-uuid","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      -- page: wrong type, non-integral, below 1
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":"1","region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.5,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      -- region: missing, wrong type, member wrong type, malformed numeric text
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":[]}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"0","y":0,"width":1,"height":1}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"abc","y":"1e","width":"--3","height":"NaN"}}}'::jsonb)
+      -- zero/negative extent, and overhang beyond tolerance
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":0,"height":1}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":-1}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.9,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":-0.5,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
+      -- a coordinate exactly at the far edge leaves no area after trimming
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1,"y":0,"width":0.0000000001,"height":0.5}}}'::jsonb),
       false) AS pass,
-    'accepts canonical, rejects incomplete/invalid, NULL-safe' AS detail;
+    'accepts what TypeScript accepts, rejects the rest, never raises' AS detail;
 
--- 7. RLS still enabled, and every policy remains owner-scoped.
-SELECT 7 AS section, 'RLS enabled and policies owner-scoped' AS check,
+-- 7. RLS enabled, and the EXACT accepted owner-policy set.
+--
+--    `qual LIKE '%uid()%'` is not proof: `auth.uid() = user_id OR true` would
+--    satisfy it. Each of the four commands is pinned to its own normalised
+--    predicate in the correct clause, and a USING/WITH CHECK that has become
+--    NULL -- i.e. unrestricted -- fails the FILTER rather than passing it.
+SELECT 7 AS section, 'RLS enabled and the exact owner-policy set is intact' AS check,
     COALESCE((SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                WHERE n.nspname='public' AND c.relname='library_items'), false)
-    AND COALESCE((SELECT count(*) FILTER (WHERE qual IS NOT NULL AND qual NOT LIKE '%uid()%') = 0
-                    AND count(*) FILTER (WHERE with_check IS NOT NULL AND with_check NOT LIKE '%uid()%') = 0
-                    AND count(*) >= 4
-                    FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false) AS pass,
-    COALESCE((SELECT format('rls=%s policies=%s',
+    AND COALESCE((SELECT count(*) = 4
+           AND count(*) FILTER (WHERE cmd='SELECT'
+                 AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+           AND count(*) FILTER (WHERE cmd='INSERT'
+                 AND qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)') = 1
+           AND count(*) FILTER (WHERE cmd='UPDATE'
+                 AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+           AND count(*) FILTER (WHERE cmd='DELETE'
+                 AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+          FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false) AS pass,
+    COALESCE((SELECT format('rls=%s policies=%s cmds=%s',
                 (SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                  WHERE n.nspname='public' AND c.relname='library_items'), count(*))
+                  WHERE n.nspname='public' AND c.relname='library_items'),
+                count(*), string_agg(DISTINCT cmd, ',' ORDER BY cmd))
                 FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), 'none') AS detail;
+
+-- 7b. anon holds SELECT and nothing else -- proven as an exact set, not as a
+--     list of absences that a future grant could slip past.
+SELECT '7b' AS section, 'anon table privileges are exactly SELECT' AS check,
+    COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+                FROM information_schema.table_privileges
+               WHERE grantee='anon' AND table_schema='public' AND table_name='library_items')
+             = ARRAY['SELECT'], false)
+    AND COALESCE((SELECT count(*) FROM information_schema.column_privileges
+                   WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'
+                     AND privilege_type IN ('INSERT','UPDATE')) = 0, false) AS pass,
+    COALESCE((SELECT array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text)::text
+                FROM information_schema.table_privileges
+               WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'), '{}') AS detail;
+
+-- 7c. authenticated holds exactly SELECT and DELETE at table level.
+SELECT '7c' AS section, 'authenticated table privileges are exactly SELECT+DELETE' AS check,
+    COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+                FROM information_schema.table_privileges
+               WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items')
+             = ARRAY['DELETE','SELECT'], false) AS pass,
+    COALESCE((SELECT array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text)::text
+                FROM information_schema.table_privileges
+               WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items'), '{}') AS detail;
+
+-- 7d. The provenance mirror is internal machinery: no browser role may call it.
+SELECT '7d' AS section, 'provenance helper is not browser-executable' AS check,
+    COALESCE(NOT has_function_privilege('public','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')
+         AND NOT has_function_privilege('anon','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')
+         AND NOT has_function_privilege('authenticated','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')
+         AND has_function_privilege('service_role','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false) AS pass,
+    format('public=%s anon=%s authenticated=%s service_role=%s',
+        has_function_privilege('public','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'),
+        has_function_privilege('anon','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'),
+        has_function_privilege('authenticated','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'),
+        has_function_privilege('service_role','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')) AS detail;
 
 -- 8. Durable rows satisfy the contract that SURVIVES placement deletion.
 --    A live padlet is deliberately NOT required here.
@@ -210,10 +304,6 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
                AND column_name='knowledge_storage_path'), false)
   AND COALESCE((SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                  WHERE n.nspname='public' AND c.relname='library_items'), false)
-  AND COALESCE((SELECT count(*) FILTER (WHERE qual IS NOT NULL AND qual NOT LIKE '%uid()%') = 0
-                  AND count(*) FILTER (WHERE with_check IS NOT NULL AND with_check NOT LIKE '%uid()%') = 0
-                  AND count(*) >= 4
-                  FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','INSERT'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','UPDATE'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','TRUNCATE'), false)
@@ -266,5 +356,38 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
                  WHERE li.thumbnail_url = '/api/library/items/' || li.id::text || '/image'
                    AND (li.content -> 'metadata' ->> 'drawing' IS NOT NULL
                         OR li.content -> 'metadata' ->> 'previewUrl' IS NOT NULL)) = 0, false)
+  -- Exact owner-policy set. `LIKE '%uid()%'` would accept
+  -- `auth.uid() = user_id OR true`, so each command is pinned individually and
+  -- a NULL (unrestricted) USING/WITH CHECK fails its FILTER.
+  AND COALESCE((SELECT count(*) = 4
+         AND count(*) FILTER (WHERE cmd='SELECT'
+               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+         AND count(*) FILTER (WHERE cmd='INSERT'
+               AND qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)') = 1
+         AND count(*) FILTER (WHERE cmd='UPDATE'
+               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+         AND count(*) FILTER (WHERE cmd='DELETE'
+               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+        FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false)
+  -- anon holds exactly SELECT, proven as a set rather than as absences.
+  AND COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+                  FROM information_schema.table_privileges
+                 WHERE grantee='anon' AND table_schema='public' AND table_name='library_items')
+               = ARRAY['SELECT'], false)
+  AND COALESCE(NOT has_table_privilege('anon','public.library_items','REFERENCES'), false)
+  AND COALESCE(NOT has_table_privilege('anon','public.library_items','TRIGGER'), false)
+  AND COALESCE((SELECT count(*) FROM information_schema.column_privileges
+                 WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'
+                   AND privilege_type IN ('INSERT','UPDATE')) = 0, false)
+  -- authenticated holds exactly SELECT + DELETE at table level.
+  AND COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+                  FROM information_schema.table_privileges
+                 WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items')
+               = ARRAY['DELETE','SELECT'], false)
+  -- The provenance mirror is internal machinery, not a client-callable function.
+  AND COALESCE(NOT has_function_privilege('public','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
+  AND COALESCE(NOT has_function_privilege('anon','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
+  AND COALESCE(NOT has_function_privilege('authenticated','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
+  AND COALESCE(has_function_privilege('service_role','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
   AS pass,
-  'schema, RLS, grants, RPC authority, durable-row and composite invariants' AS detail;
+  'schema, RLS, exact policies, exact grants, RPC authority, durable-row and composite invariants' AS detail;
