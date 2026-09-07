@@ -234,3 +234,153 @@ describe('F11-F13: nothing in this slice can publish a crop', () => {
     }
   });
 });
+
+/**
+ * F14-F22: the durable-preview SQL contract.
+ *
+ * The rollout and its verifier are release-critical and cannot be exercised by
+ * vitest, so the properties a reviewer would otherwise have to take on trust --
+ * or rediscover by running a disposable database by hand -- are pinned here.
+ * Each assertion names a defect that would otherwise ship silently.
+ */
+describe('F14-F22: durable Library preview SQL contract', () => {
+  const migration = sourceOf('supabase/migrations/20260907120000_library_durable_image_preview.sql');
+  const rollout = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image.sql');
+  const verifier = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image_verify.sql');
+  const CANONICAL_UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+  const REPAIR = rollout.slice(rollout.indexOf('WITH hint AS ('), rollout.indexOf('-- 5. Postflight'));
+
+  it('F14: durable state never requires a live origin placement', () => {
+    // The feature IS "the object outlives its placements". A postflight or
+    // verifier that joins a durable row back to `padlets` fails exactly when
+    // the correction starts working, so neither may do it.
+    const rolloutDurable = rollout.slice(rollout.indexOf('-- 5. Postflight'));
+    expect(rolloutDurable).toContain('knowledge_storage_path IS NOT NULL');
+    expect(rolloutDurable, 'postflight must not join padlets for a durable row')
+      .not.toContain('p.library_item_id = li.id');
+    expect(verifier, 'verifier must not join padlets for a durable row')
+      .not.toContain('p.library_item_id = li.id');
+    // And the intent is stated where the next reader will look.
+    expect(rollout).toContain('SURVIVE placement deletion');
+    expect(verifier).toContain('DELIBERATELY DOES NOT CHECK');
+  });
+
+  it('F15: the legacy hint is parsed with a canonical UUID shape before any cast', () => {
+    // A loose [0-9a-fA-F-]{36} class admits malformed strings that then abort
+    // the whole transaction on ::uuid -- turning a forged client-owned URL into
+    // a denial of the entire rollout.
+    expect(REPAIR).toContain(CANONICAL_UUID);
+    expect(REPAIR).not.toContain('[0-9a-fA-F-]{36}');
+    // The cast happens in a later CTE, only after the strict match succeeded.
+    // Comments are stripped first: this is a claim about executed SQL, and the
+    // hint CTE's own prose mentions the very cast it must not perform.
+    const executable = REPAIR.replace(/^\s*--.*$/gm, '');
+    const candidateAt = executable.indexOf('candidate AS (');
+    expect(candidateAt).toBeGreaterThan(0);
+    expect(executable.slice(0, candidateAt), 'no cast may run inside the hint CTE')
+      .not.toContain('::uuid');
+    expect(executable.slice(candidateAt)).toContain('h.board_text::uuid');
+  });
+
+  it('F16: provenance is validated through one mirror of the canonical parser', () => {
+    // Checking source.kind alone would accept a row the reader later rejects.
+    expect(migration).toContain('CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance');
+    for (const field of ['knowledgeDocumentId', 'pageNumber', 'region', "'x'", "'y'", "'width'", "'height'"]) {
+      expect(migration, field).toContain(field);
+    }
+    // Never NULL: a NULL conjunct in a security predicate reads as "not false".
+    expect(migration).toContain('SELECT COALESCE(');
+    // Both sides of the join are validated, not just the Library snapshot.
+    expect(REPAIR).toContain("public.is_knowledge_pdf_area_provenance(li.content -> 'metadata')");
+    expect(REPAIR).toContain('public.is_knowledge_pdf_area_provenance(p.metadata)');
+  });
+
+  it('F17: the hint is proved by structural join, never believed', () => {
+    for (const proof of [
+      'p.id = c.padlet_id',
+      'p.board_id = c.board_id',
+      'p.library_item_id = c.id',
+      "p.type = 'image'",
+      "p.metadata -> 'source' ->> 'knowledgeDocumentId' = c.document_id",
+    ]) {
+      expect(REPAIR, proof).toContain(proof);
+    }
+  });
+
+  it('F18: neither creation retry nor legacy repair can downgrade a composite', () => {
+    // resolveLibraryImagePreviewSrc reads thumbnail_url and content.file_url
+    // ABOVE metadata.drawing/previewUrl, so repointing those two fields on a
+    // row that carries either would hide the current picture behind the crop.
+    for (const [name, sql] of [['migration', migration], ['rollout', rollout]] as const) {
+      expect(sql, name).toContain("content -> 'metadata' ->> 'drawing' IS NULL");
+      expect(sql, name).toContain("content -> 'metadata' ->> 'previewUrl' IS NULL");
+    }
+    // The repair guards it in the candidate set AND again at write time.
+    expect((REPAIR.match(/->> 'drawing' IS NULL/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // And the verifier proves after the fact that none was downgraded.
+    expect(verifier).toContain('no composite row was repointed to the original crop');
+  });
+
+  it('F19: every verifier section is an explicit boolean', () => {
+    // A NULL `pass` is not a failure to a human skim-reading the output.
+    const sections = verifier.split('\nSELECT ').slice(1);
+    expect(sections.length).toBeGreaterThanOrEqual(12);
+    for (const section of sections) {
+      const head = section.slice(0, section.indexOf(' AS pass'));
+      if (section.indexOf(' AS pass') < 0) continue;
+      expect(head.includes('COALESCE') || head.includes('true AS pass') || head.includes('true'),
+        'section "' + section.slice(0, 50) + '" must fail closed').toBe(true);
+    }
+    // The empty-grant case aggregates to NULL and must be defended explicitly.
+    expect(verifier).toContain('ARRAY[]::text[]');
+  });
+
+  it('F20: the release gate repeats every load-bearing condition', () => {
+    const rollup = verifier.slice(verifier.indexOf('12 AS section'));
+    for (const conjunct of [
+      'relrowsecurity',
+      "has_table_privilege('authenticated','public.library_items','INSERT')",
+      "has_table_privilege('authenticated','public.library_items','UPDATE')",
+      "has_table_privilege('authenticated','public.library_items','TRUNCATE')",
+      "has_table_privilege('authenticated','public.library_items','REFERENCES')",
+      "has_table_privilege('authenticated','public.library_items','TRIGGER')",
+      "has_table_privilege('anon','public.library_items','UPDATE')",
+      "has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE')",
+      "privilege_type='INSERT'",
+      "privilege_type='UPDATE'",
+      'create_knowledge_pdf_area_image_post_with_library_item',
+      'create_image_post_with_library_item',
+      'is_knowledge_pdf_area_provenance',
+      "has_function_privilege('service_role'",
+      "has_function_privilege('authenticated'",
+      "has_function_privilege('anon'",
+      "has_function_privilege('public'",
+      'prosecdef',
+    ]) {
+      expect(rollup, 'roll-up must assert ' + conjunct).toContain(conjunct);
+    }
+    // Every conjunct in the gate defends itself against NULL.
+    expect((rollup.match(/COALESCE\(/g) ?? []).length).toBeGreaterThanOrEqual(20);
+  });
+
+  it('F21: the trusted RPC is service_role only and takes no path', () => {
+    for (const [name, sql] of [['migration', migration], ['rollout', rollout]] as const) {
+      expect(sql, name).toContain('FROM PUBLIC, anon, authenticated');
+      expect(sql, name).toContain(') TO service_role;');
+      expect(sql, name).not.toContain('p_storage_path');
+      expect(sql, name).not.toContain('p_durable_object_path');
+      // The location is derived inside the function from validated ids.
+      expect(sql, name).toContain("v_storage_path := 'board-derived/'");
+    }
+  });
+
+  it('F22: no second storage object, no new bucket, one new column only', () => {
+    for (const [name, sql] of [['migration', migration], ['rollout', rollout]] as const) {
+      expect(sql, name).not.toContain('storage.objects');
+      expect(sql, name).not.toContain('createBucket');
+      const added = sql.match(/ADD COLUMN IF NOT EXISTS (\w+)/g) ?? [];
+      expect(added.length, name).toBeGreaterThan(0);
+      expect(added.every((a) => a.endsWith('knowledge_storage_path')), name).toBe(true);
+    }
+  });
+});

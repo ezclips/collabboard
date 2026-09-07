@@ -78,6 +78,59 @@ GRANT UPDATE (content, thumbnail_url, updated_at)
 GRANT ALL ON TABLE public.library_items TO service_role;
 
 -- ---------------------------------------------------------------------------
+-- The canonical PDF-area provenance contract, mirrored once.
+-- ---------------------------------------------------------------------------
+--
+-- One SQL statement of the same shape parseKnowledgePdfAreaProvenance() accepts
+-- in lib/domain/knowledge/knowledgePdfAreaImagePolicy.ts, so the repair and the
+-- verifier cannot drift from each other or from the reader that must later
+-- consume these rows. Deliberately no stricter than the parser: it is the
+-- authority, and a row it would accept must not be rejected here.
+--
+--   source.kind          exactly 'knowledge-pdf-area'
+--   knowledgeDocumentId  canonical 8-4-4-4-12 UUID
+--   pageNumber           integer >= 1
+--   region               x/y/width/height numbers, normalizeStorableRegion()
+--
+-- IMMUTABLE and side-effect free: a predicate, never a repair.
+CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance(p_metadata jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+    SELECT COALESCE(
+        p_metadata -> 'source' ->> 'kind' = 'knowledge-pdf-area'
+        AND p_metadata -> 'source' ->> 'knowledgeDocumentId'
+            ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'pageNumber') = 'number'
+        AND (p_metadata -> 'source' ->> 'pageNumber') ~ '^[0-9]+$'
+        AND (p_metadata -> 'source' ->> 'pageNumber')::numeric >= 1
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region') = 'object'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'x') = 'number'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'y') = 'number'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'width') = 'number'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'height') = 'number'
+        -- finalizeRegion(): inside the page, positive extent, and not spilling
+        -- past the far edge. 1e-9 is the parser's own overhang tolerance.
+        AND (p_metadata -> 'source' -> 'region' ->> 'x')::numeric >= 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'y')::numeric >= 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'x')::numeric <= 1
+        AND (p_metadata -> 'source' -> 'region' ->> 'y')::numeric <= 1
+        AND (p_metadata -> 'source' -> 'region' ->> 'width')::numeric > 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'height')::numeric > 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'x')::numeric
+          + (p_metadata -> 'source' -> 'region' ->> 'width')::numeric <= 1 + 1e-9
+        AND (p_metadata -> 'source' -> 'region' ->> 'y')::numeric
+          + (p_metadata -> 'source' -> 'region' ->> 'height')::numeric <= 1 + 1e-9,
+        false)
+$$;
+
+COMMENT ON FUNCTION public.is_knowledge_pdf_area_provenance(jsonb) IS
+    'IMAGE-LIBRARY-DURABLE-PREVIEW: SQL mirror of parseKnowledgePdfAreaProvenance. '
+    'Returns false (never NULL) for any metadata the TypeScript parser rejects.';
+
+-- ---------------------------------------------------------------------------
 -- Trusted creation: one transaction, and no client-supplied location.
 -- ---------------------------------------------------------------------------
 --
@@ -153,7 +206,15 @@ BEGIN
            content = jsonb_set(content, '{file_url}', to_jsonb(v_library_url), true)
      WHERE id = v_library_item_id
        AND knowledge_storage_path IS NULL
-       AND thumbnail_url IS NOT DISTINCT FROM p_board_file_url;
+       AND thumbnail_url IS NOT DISTINCT FROM p_board_file_url
+       AND content ->> 'file_url' IS NOT DISTINCT FROM p_board_file_url
+       -- resolveLibraryImagePreviewSrc reads thumbnail_url and content.file_url
+       -- BEFORE content.metadata.drawing / previewUrl. A row that carries either
+       -- of those has a newer composite that those two fields do not yet show --
+       -- the resolver's own documented legacy case -- so repointing the fields
+       -- above it would hide the current picture behind the original crop.
+       AND content -> 'metadata' ->> 'drawing' IS NULL
+       AND content -> 'metadata' ->> 'previewUrl' IS NULL;
 
     RETURN QUERY SELECT p_padlet_id, v_library_item_id;
 END;

@@ -152,6 +152,59 @@ GRANT UPDATE (content, thumbnail_url, updated_at)
 GRANT ALL ON TABLE public.library_items TO service_role;
 
 -- ---------------------------------------------------------------------------
+-- The canonical PDF-area provenance contract, mirrored once.
+-- ---------------------------------------------------------------------------
+--
+-- One SQL statement of the same shape parseKnowledgePdfAreaProvenance() accepts
+-- in lib/domain/knowledge/knowledgePdfAreaImagePolicy.ts, so the repair and the
+-- verifier cannot drift from each other or from the reader that must later
+-- consume these rows. Deliberately no stricter than the parser: it is the
+-- authority, and a row it would accept must not be rejected here.
+--
+--   source.kind          exactly 'knowledge-pdf-area'
+--   knowledgeDocumentId  canonical 8-4-4-4-12 UUID
+--   pageNumber           integer >= 1
+--   region               x/y/width/height numbers, normalizeStorableRegion()
+--
+-- IMMUTABLE and side-effect free: a predicate, never a repair.
+CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance(p_metadata jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+    SELECT COALESCE(
+        p_metadata -> 'source' ->> 'kind' = 'knowledge-pdf-area'
+        AND p_metadata -> 'source' ->> 'knowledgeDocumentId'
+            ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'pageNumber') = 'number'
+        AND (p_metadata -> 'source' ->> 'pageNumber') ~ '^[0-9]+$'
+        AND (p_metadata -> 'source' ->> 'pageNumber')::numeric >= 1
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region') = 'object'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'x') = 'number'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'y') = 'number'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'width') = 'number'
+        AND jsonb_typeof(p_metadata -> 'source' -> 'region' -> 'height') = 'number'
+        -- finalizeRegion(): inside the page, positive extent, and not spilling
+        -- past the far edge. 1e-9 is the parser's own overhang tolerance.
+        AND (p_metadata -> 'source' -> 'region' ->> 'x')::numeric >= 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'y')::numeric >= 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'x')::numeric <= 1
+        AND (p_metadata -> 'source' -> 'region' ->> 'y')::numeric <= 1
+        AND (p_metadata -> 'source' -> 'region' ->> 'width')::numeric > 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'height')::numeric > 0
+        AND (p_metadata -> 'source' -> 'region' ->> 'x')::numeric
+          + (p_metadata -> 'source' -> 'region' ->> 'width')::numeric <= 1 + 1e-9
+        AND (p_metadata -> 'source' -> 'region' ->> 'y')::numeric
+          + (p_metadata -> 'source' -> 'region' ->> 'height')::numeric <= 1 + 1e-9,
+        false)
+$$;
+
+COMMENT ON FUNCTION public.is_knowledge_pdf_area_provenance(jsonb) IS
+    'IMAGE-LIBRARY-DURABLE-PREVIEW: SQL mirror of parseKnowledgePdfAreaProvenance. '
+    'Returns false (never NULL) for any metadata the TypeScript parser rejects.';
+
+-- ---------------------------------------------------------------------------
 -- 3. Trusted creation. One transaction, and no client-supplied location.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_post_with_library_item(
@@ -203,7 +256,15 @@ BEGIN
            content = jsonb_set(content, '{file_url}', to_jsonb(v_library_url), true)
      WHERE id = v_library_item_id
        AND knowledge_storage_path IS NULL
-       AND thumbnail_url IS NOT DISTINCT FROM p_board_file_url;
+       AND thumbnail_url IS NOT DISTINCT FROM p_board_file_url
+       AND content ->> 'file_url' IS NOT DISTINCT FROM p_board_file_url
+       -- resolveLibraryImagePreviewSrc reads thumbnail_url and content.file_url
+       -- BEFORE content.metadata.drawing / previewUrl. A row that carries either
+       -- of those has a newer composite that those two fields do not yet show --
+       -- the resolver's own documented legacy case -- so repointing the fields
+       -- above it would hide the current picture behind the original crop.
+       AND content -> 'metadata' ->> 'drawing' IS NULL
+       AND content -> 'metadata' ->> 'previewUrl' IS NULL;
 
     RETURN QUERY SELECT p_padlet_id, v_library_item_id;
 END;
@@ -247,24 +308,51 @@ COMMENT ON FUNCTION public.create_knowledge_pdf_area_image_post_with_library_ite
 -- Rows whose origin placement is already deleted match nothing here and keep
 -- NULL. That is the intended outcome: no surviving fact proves entitlement, so
 -- no path is invented. Their preview stays absent and the UI will say so.
-WITH candidate AS (
+WITH hint AS (
+    -- STRICT extraction. The URL is owner-writable, so it is parsed with the
+    -- canonical 8-4-4-4-12 shape rather than a loose 36-character class: a
+    -- forged hint must fall out of the candidate set, never reach a ::uuid cast
+    -- and abort the whole rollout. Nothing is cast in this CTE.
     SELECT li.id,
            li.thumbnail_url,
-           (regexp_match(li.thumbnail_url,
-             '^/api/boards/([0-9a-fA-F-]{36})/padlets/([0-9a-fA-F-]{36})/image$'))[1]::uuid AS board_id,
-           (regexp_match(li.thumbnail_url,
-             '^/api/boards/([0-9a-fA-F-]{36})/padlets/([0-9a-fA-F-]{36})/image$'))[2]::uuid AS padlet_id,
+           (regexp_match(
+              li.thumbnail_url,
+              '^/api/boards/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/padlets/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/image$'
+           ))[1] AS board_text,
+           (regexp_match(
+              li.thumbnail_url,
+              '^/api/boards/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/padlets/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/image$'
+           ))[2] AS padlet_text,
            li.content -> 'metadata' -> 'source' ->> 'knowledgeDocumentId' AS document_id
       FROM public.library_items li
      WHERE li.knowledge_storage_path IS NULL
        AND li.type = 'image'
-       AND li.content -> 'metadata' -> 'source' ->> 'kind' = 'knowledge-pdf-area'
-       -- Only the exact legacy board-scoped PDF-area address. A row already
-       -- carrying a newer durable/composite URL is current and is not touched.
-       AND li.thumbnail_url ~ '^/api/boards/[0-9a-fA-F-]{36}/padlets/[0-9a-fA-F-]{36}/image$'
+       -- The full canonical contract, not just source.kind.
+       AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata')
+       -- Only the exact legacy board-scoped PDF-area address is repairable. A
+       -- row already carrying a newer durable/composite URL is current.
        AND li.content ->> 'file_url' = li.thumbnail_url
+       -- No newer representation may be masked. resolveLibraryImagePreviewSrc
+       -- reads thumbnail_url and content.file_url ABOVE content.metadata.drawing
+       -- and previewUrl, so a row carrying either of those has a composite the
+       -- two fields do not yet show -- the resolver's own documented legacy
+       -- case. Repointing above it would hide the current picture.
+       AND li.content -> 'metadata' ->> 'drawing' IS NULL
+       AND li.content -> 'metadata' ->> 'previewUrl' IS NULL
+),
+candidate AS (
+    -- Only now, once both groups are known-canonical UUIDs, is a cast safe.
+    SELECT h.id, h.thumbnail_url, h.document_id,
+           h.board_text::uuid AS board_id,
+           h.padlet_text::uuid AS padlet_id
+      FROM hint h
+     WHERE h.board_text IS NOT NULL
+       AND h.padlet_text IS NOT NULL
+       AND h.document_id IS NOT NULL
 ),
 verified AS (
+    -- The hint proposed a pair; the join is what PROVES it. Every one of these
+    -- is required, and a failure means "skip", never "abort".
     SELECT c.id, c.board_id, c.padlet_id, c.thumbnail_url
       FROM candidate c
       JOIN public.padlets p
@@ -272,9 +360,8 @@ verified AS (
        AND p.board_id = c.board_id
        AND p.library_item_id = c.id
        AND p.type = 'image'
-       AND p.metadata -> 'source' ->> 'kind' = 'knowledge-pdf-area'
-       AND p.metadata -> 'source' ->> 'knowledgeDocumentId' IS NOT DISTINCT FROM c.document_id
-     WHERE c.document_id IS NOT NULL
+       AND public.is_knowledge_pdf_area_provenance(p.metadata)
+       AND p.metadata -> 'source' ->> 'knowledgeDocumentId' = c.document_id
 )
 UPDATE public.library_items li
    SET knowledge_storage_path =
@@ -288,9 +375,12 @@ UPDATE public.library_items li
        updated_at = timezone('utc'::text, now())
   FROM verified v
  WHERE li.id = v.id
-   -- Re-checked at write time: nothing may have moved on since the CTE read.
+   -- Re-checked at write time: nothing may have moved on since the CTE read,
+   -- including a composite arriving between the read and this statement.
    AND li.thumbnail_url = v.thumbnail_url
-   AND li.content ->> 'file_url' = v.thumbnail_url;
+   AND li.content ->> 'file_url' = v.thumbnail_url
+   AND li.content -> 'metadata' ->> 'drawing' IS NULL
+   AND li.content -> 'metadata' ->> 'previewUrl' IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- 5. Postflight. Refuse to commit anything that is not what was reviewed.
@@ -380,18 +470,36 @@ BEGIN
         RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW postflight failed: a non-owner-scoped policy exists on library_items';
     END IF;
 
-    -- Every repaired row must have a real, structurally proven origin.
+    -- Durable rows are checked on facts that SURVIVE placement deletion.
+    --
+    -- Trust is established once, at repair or creation time, by the structural
+    -- join above -- and the whole point of the feature is that the object stays
+    -- valid after every placement is gone. Requiring a live padlet here would
+    -- make the feature fail exactly when it is doing its job, so this asserts
+    -- only what remains true forever: canonical path shape, an image row, and
+    -- provenance the reader will still accept.
     SELECT count(*) INTO guessed
       FROM public.library_items li
      WHERE li.knowledge_storage_path IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1 FROM public.padlets p
-            WHERE p.library_item_id = li.id
-              AND li.knowledge_storage_path =
-                  'board-derived/' || p.board_id::text || '/pdf-areas/' || p.id::text || '.webp'
+       AND NOT (
+           li.knowledge_storage_path ~
+             '^board-derived/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/pdf-areas/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.webp$'
+           AND li.type = 'image'
+           AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata')
        );
     IF guessed > 0 THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW postflight failed: % row(s) carry a path with no matching placement', guessed;
+        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW postflight failed: % durable row(s) fail the canonical path/provenance contract', guessed;
+    END IF;
+
+    -- No row may have been repaired into a state the reader cannot use: a
+    -- repaired row's preview must be ITS OWN Library address.
+    SELECT count(*) INTO guessed
+      FROM public.library_items li
+     WHERE li.knowledge_storage_path IS NOT NULL
+       AND li.thumbnail_url ~ '^/api/boards/'
+       AND li.thumbnail_url IS DISTINCT FROM '/api/library/items/' || li.id::text || '/image';
+    IF guessed > 0 THEN
+        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW postflight failed: % durable row(s) still preview through a board-scoped URL', guessed;
     END IF;
 
     RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW: applied. Run the verifier next.';
