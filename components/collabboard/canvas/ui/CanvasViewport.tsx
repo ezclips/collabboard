@@ -8,6 +8,8 @@ interface CanvasViewportProps {
   containerRef: React.Ref<HTMLDivElement>;
   onWheel: (e: React.WheelEvent<HTMLDivElement>) => void;
   onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onDropCapture?: React.DragEventHandler<HTMLDivElement>;
+  onDragOverCapture?: React.DragEventHandler<HTMLDivElement>;
   onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void | Promise<void>;
   onContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
@@ -25,6 +27,8 @@ export default function CanvasViewport({
   containerRef,
   onWheel,
   onMouseDown,
+  onDropCapture,
+  onDragOverCapture,
   onDragOver,
   onDrop,
   onContextMenu,
@@ -42,6 +46,8 @@ export default function CanvasViewport({
       ref={containerRef}
       onWheel={onWheel}
       onMouseDown={onMouseDown}
+      onDropCapture={onDropCapture}
+      onDragOverCapture={onDragOverCapture}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onContextMenu={onContextMenu}

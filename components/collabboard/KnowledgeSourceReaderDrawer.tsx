@@ -70,6 +70,7 @@ export interface KnowledgeSourceReaderDrawerProps {
    * which is what makes returning to it lossless.
    */
   presentation?: 'workspace' | 'side-panel';
+  canDragSourceNote?: (targetPadletId: string) => boolean;
   /**
    * The board's OWN blocking-editor authority (`isBlockingEditorModalOpen`),
    * forwarded unchanged. It is already the single generic answer to "does a
@@ -177,6 +178,7 @@ export default function KnowledgeSourceReaderDrawer({
   sourceOpenRequest = null,
   documentOpenRequest = null,
   presentation = 'side-panel',
+  canDragSourceNote,
   blockingEditorOpen = false,
   onCreateNoteFromPage,
   onAddBoardAiContext,
@@ -669,7 +671,7 @@ export default function KnowledgeSourceReaderDrawer({
                   ) : null}
                   <UsedInNotes scope="document" rows={libraryBacklinkRows} onOpen={onOpenBacklinkTarget} />
                 </div>
-                <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} />
+                <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} canDragNote={!isWorkspace ? canDragSourceNote : undefined} />
               </>
             )}
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React from 'react';
+import { SOURCE_NOTE_PLACEMENT_MIME, serializeKnowledgeSourceNotePlacementDrag } from '@/lib/domain/knowledge/knowledgeSourceNotePlacement';
 import { useKnowledgeSourceNoteSummariesForDocument } from './KnowledgeSourceReferenceContext';
 import type {
   KnowledgeSourceNoteReferenceDetail,
@@ -11,14 +12,15 @@ import type {
  * PDF Source Notes Panel -- Phase 1. Lists the board Notes citing the
  * document currently open in the Knowledge reader.
  *
- * READ ONLY: the one action is opening an existing Note through the EXISTING
- * backlink-target authority, forwarded verbatim as `onOpenNote`. No editing,
+ * Opens existing Notes through the backlink-target authority. Eligible rows
+ * also carry an identity-only placement handle for the board. No editing,
  * no creation, no AI, and no dependency on a PDF page raster -- every field
  * rendered here comes from `useKnowledgeSourceNoteSummariesForDocument`,
  * itself derived from data the board already holds in memory.
  */
 export interface KnowledgeSourceNotesPanelProps {
   readonly documentId: string;
+  readonly canDragNote?: (targetPadletId: string) => boolean;
   readonly onOpenNote: (targetPadletId: string) => void;
 }
 
@@ -35,8 +37,10 @@ function referenceDetailText(detail: KnowledgeSourceNoteReferenceDetail): string
 function SourceNoteItem({
   summary,
   onOpenNote,
+  draggable,
 }: {
   summary: KnowledgeSourceNoteSummary;
+  draggable: boolean;
   onOpenNote: (targetPadletId: string) => void;
 }) {
   // Presentation-only: a Note with no real title falls back to the same
@@ -48,6 +52,15 @@ function SourceNoteItem({
       <button
         type="button"
         onClick={() => onOpenNote(summary.targetPadletId)}
+        draggable={draggable}
+        title={draggable ? 'Drag to reposition this Note on the board' : undefined}
+        onDragStart={(event) => {
+          if (!draggable) { event.preventDefault(); return; }
+          event.stopPropagation();
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData(SOURCE_NOTE_PLACEMENT_MIME,
+            serializeKnowledgeSourceNotePlacementDrag(summary.targetPadletId));
+        }}
         className="block w-full rounded border border-gray-100 p-2 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
         style={summary.accentColor ? { borderLeftColor: summary.accentColor, borderLeftWidth: 3 } : undefined}
       >
@@ -70,20 +83,21 @@ function SourceNoteItem({
   );
 }
 
-export default function KnowledgeSourceNotesPanel({ documentId, onOpenNote }: KnowledgeSourceNotesPanelProps) {
+export default function KnowledgeSourceNotesPanel({ documentId, onOpenNote, canDragNote }: KnowledgeSourceNotesPanelProps) {
   const summaries = useKnowledgeSourceNoteSummariesForDocument(documentId);
 
   return (
     <div data-knowledge-source-notes-panel="true">
       <p className="mb-2 select-none text-[9px] font-medium uppercase leading-none tracking-wider text-gray-400">
-        Source Notes
+        From this source
       </p>
+      <p className="mb-2 text-xs font-medium text-gray-600">Notes · {summaries.length}</p>
       {summaries.length === 0 ? (
-        <p className="text-[11px] text-gray-500">No notes linked to this source yet.</p>
+        <p className="text-[11px] text-gray-500">No notes from this source yet.</p>
       ) : (
         <ul className="space-y-1.5">
           {summaries.map((summary) => (
-            <SourceNoteItem key={summary.targetPadletId} summary={summary} onOpenNote={onOpenNote} />
+            <SourceNoteItem key={summary.targetPadletId} summary={summary} onOpenNote={onOpenNote} draggable={canDragNote?.(summary.targetPadletId) ?? false} />
           ))}
         </ul>
       )}

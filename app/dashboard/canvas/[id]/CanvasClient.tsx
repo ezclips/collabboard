@@ -112,6 +112,7 @@ import {
   upsertKnowledgeSourceReference,
 } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import { SOURCE_NOTE_PLACEMENT_MIME, parseKnowledgeSourceNotePlacementDrag, canPlaceKnowledgeSourceNote } from '@/lib/domain/knowledge/knowledgeSourceNotePlacement';
 import { buildKnowledgeSourceBacklinkIndex, isKnowledgeBacklinkNote } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import { buildKnowledgeSourceNoteSummaryIndex } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
 import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
@@ -6709,6 +6710,43 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPendingSourceDropPosition,
   ]);
 
+  const canDragSourceNote = useCallback((targetPadletId: string): boolean => {
+    if (!canUseFreeformEditButton || !isFreeformLayout || knowledgeReaderPresentation !== 'side-panel') return false;
+    const target = padlets.find((post) => post.id === targetPadletId && post.board_id === canvasId);
+    return !!target && canPlaceKnowledgeSourceNote(target, padlets);
+  }, [canUseFreeformEditButton, isFreeformLayout, knowledgeReaderPresentation, padlets, canvasId]);
+
+  // Capture only our dedicated MIME, before card/container handlers can claim it.
+  // Library drags retain their existing dispatch path, even with mixed MIME data.
+  const handleKnowledgeSourceNotePlacementDrop = useCallback((event: React.DragEvent): boolean => {
+    if (event.dataTransfer.types.includes('application/collabboard-library')
+      || !event.dataTransfer.types.includes(SOURCE_NOTE_PLACEMENT_MIME)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const payload = parseKnowledgeSourceNotePlacementDrag(event.dataTransfer.getData(SOURCE_NOTE_PLACEMENT_MIME));
+    if (!payload || !canDragSourceNote(payload.targetPadletId)) return true;
+    const target = padlets.find((post) => post.id === payload.targetPadletId)!;
+    const point = getCanvasPointFromClient(event.clientX, event.clientY);
+    const position = clampRectPositionToFreeformBounds({ ...point, width: target.width, height: target.height });
+    const positionX = Math.round(position.x);
+    const positionY = Math.round(position.y);
+    void (async () => {
+      try {
+        const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());
+        const result = await updatePostPosition(
+          { postId: target.id, positionX, positionY }, { userId: null },
+        );
+        if (!result.ok) throw result.error;
+        setPadlets((prev) => prev.map((post) => post.id === target.id
+          ? { ...post, position_x: positionX, position_y: positionY } : post));
+      } catch (error) {
+        console.error('Failed to reposition source Note:', error);
+        toast.error('Could not move this Note');
+      }
+    })();
+    return true;
+  }, [canDragSourceNote, padlets, getCanvasPointFromClient, clampRectPositionToFreeformBounds, setPadlets]);
+
   /**
    * KNI-R2. A dedicated Knowledge clip dropped on an EXISTING ordinary Note
    * (text/legacy note only) appends the selection instead of creating a
@@ -7814,6 +7852,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               const anchorY = containerRect ? e.clientY - containerRect.top : 0;
               zoomAtViewportPoint((z) => z + zoomDelta, anchorX, anchorY);
             }
+          }}
+          onDropCapture={handleKnowledgeSourceNotePlacementDrop}
+          onDragOverCapture={(event) => {
+            if (event.dataTransfer.types.includes('application/collabboard-library')
+              || !event.dataTransfer.types.includes(SOURCE_NOTE_PLACEMENT_MIME)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = canUseFreeformEditButton && isFreeformLayout
+              && knowledgeReaderPresentation === 'side-panel' ? 'move' : 'none';
           }}
           onMouseDown={handleFreeformPanMouseDown}
           onDragOver={(e) => {
@@ -9848,6 +9895,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           sourceOpenRequest={knowledgeSourceOpenRequest}
           documentOpenRequest={knowledgeDocumentOpenRequest}
           presentation={knowledgeReaderPresentation}
+          canDragSourceNote={canDragSourceNote}
           blockingEditorOpen={isBlockingOverlayOpen}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
