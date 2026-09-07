@@ -160,7 +160,10 @@ describe('6-7. the placement owner defends the same allowlist', () => {
       const at = PDF_HANDLER.indexOf(creation);
       expect(at, creation + ' must come after the release-scope guard').toBeGreaterThan(guardAt);
     }
-    expect(guardBody()).toContain('return;');
+    // The guard exits with the placement authority's failure value. An
+    // unsupported invocation is therefore REPORTED as "not placed" rather than
+    // falling out silently, which a caller cannot tell from a real placement.
+    expect(guardBody()).toContain('return false;');
   });
 
   it('7. Drawing (and every unsupported layout) never reaches requestPlacementIfRequired', () => {
@@ -201,8 +204,19 @@ describe('8-10. the kept architecture is untouched', () => {
     expect(PDF_HANDLER).toContain('knowledgeDocumentId: document.id');
     expect(PDF_HANDLER).toContain("type: 'file'");
     expect(PDF_HANDLER).toContain('insertPostPreservingFailureChannels(placement');
-    // Still exactly one placement per document.
-    expect(PDF_HANDLER).toContain('if (alreadyPlaced) return;');
+    // Still exactly one placement per document, and the duplicate guard now
+    // says so: `false` is "nothing was placed", which is what a chooser needs
+    // to hear when a document acquired a card between its load and the click.
+    expect(PDF_HANDLER).toContain('if (alreadyPlaced) return false;');
+  });
+
+  it('8b. the one placement authority reports its outcome as a boolean', () => {
+    expect(PDF_HANDLER).toContain(
+      'async (document: KnowledgePdfPlacementSource): Promise<boolean> =>');
+    // No exit may be bare. A `return;` resolves to undefined, which a caller
+    // cannot distinguish from a successful placement -- exactly the confusion
+    // that would let a chooser close over a placement that never happened.
+    expect(PDF_HANDLER).not.toMatch(/\breturn;/);
   });
 
   it('9. the generic placement infrastructure is kept, not churned away', () => {
@@ -211,7 +225,9 @@ describe('8-10. the kept architecture is untouched', () => {
     // a layout must not mean rebuilding the file-draft path from scratch.
     expect(PDF_HANDLER).toContain('const placementTaken = requestPlacementIfRequiredRef.current?.({');
     expect(PDF_HANDLER).toContain("kind: 'file'");
-    expect(PDF_HANDLER).toContain('if (placementTaken) return;');
+    // TRUE-means-taken: the layout owns completion from here, so the caller is
+    // told the placement succeeded even though this function inserted nothing.
+    expect(PDF_HANDLER).toContain('if (placementTaken) return true;');
   });
 
   it('10. placement policy is still the shared one, never PDF-specific', () => {

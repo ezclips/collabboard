@@ -129,9 +129,10 @@ import type { KnowledgeSourceHighlight }
   from '@/lib/domain/knowledge/knowledgeSourceHighlight';
 import { KnowledgePdfOpenProvider } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import type {
+  KnowledgePdfPlacementSource,
   KnowledgePdfProcessingStatus,
-  KnowledgePdfUploadResult,
 } from '@/components/collabboard/KnowledgePdfUploader';
+import KnowledgeExistingPdfPicker from '@/components/collabboard/KnowledgeExistingPdfPicker';
 import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
@@ -955,6 +956,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     pendingPostDraftRef.current = pendingPostDraft;
   }, [pendingPostDraft]);
   const [isImportBrowserOpen, setIsImportBrowserOpen] = useState(false);
+  /** Open state of the "Use existing PDF" chooser. See the reentry note below. */
+  const [isExistingPdfPickerOpen, setIsExistingPdfPickerOpen] = useState(false);
   const [isPlacementPromptOpen, setIsPlacementPromptOpen] = useState(false);
   const [mapActiveContainerId, setMapActiveContainerId] = useState<string | null>(null);
   const [isMapStylePanelOpen, setIsMapStylePanelOpen] = useState(false);
@@ -1969,9 +1972,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    *
    * Identity is the server's document id. Filenames are display text and are
    * allowed to repeat, so the duplicate guard below keys on the id alone.
+   *
+   * This is the board's ONE placement authority for PDFs. It takes a neutral
+   * KnowledgePdfPlacementSource so both entry points -- a fresh upload and the
+   * "Use existing PDF" chooser -- land here rather than growing a second write
+   * path that could drift. It reports whether a placement was actually made,
+   * because the chooser must not close on a placement that never happened.
    */
-  const handleKnowledgePdfUploaded = useCallback(async (document: KnowledgePdfUploadResult) => {
-    if (!canvasId) return;
+  const handleKnowledgePdfUploaded = useCallback(async (document: KnowledgePdfPlacementSource): Promise<boolean> => {
+    if (!canvasId) return false;
     // PDF-C1 release scope, defensive layer. The toolbar already withholds Add
     // PDF outside the allowlist, so this only catches a stale or impossible
     // invocation. It returns BEFORE the placement gate is consulted, so an
@@ -1980,12 +1989,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // it is durable board-independent authority, not this board's to delete.
     if (!canPlaceDirectPdf) {
       toast.error('PDFs can be added directly on Freeform canvases only');
-      return;
+      return false;
     }
+    // Still authoritative for the chooser: its list is a snapshot, so a
+    // document can acquire a card between load and click. No second placement
+    // is created, and the caller is told none was.
     const alreadyPlaced = padlets.some(
       (p) => (p.metadata as any)?.knowledgeDocumentId === document.id,
     );
-    if (alreadyPlaced) return;
+    if (alreadyPlaced) return false;
 
     const knowledgeMetadata = {
       knowledgeDocumentId: document.id,
@@ -2003,7 +2015,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       title: document.originalFilename,
       metadata: knowledgeMetadata,
     });
-    if (placementTaken) return;
+    // The layout owns completion from here; that is a taken placement, not a
+    // failed one, so the chooser closes and gets out of its way.
+    if (placementTaken) return true;
 
     const placementId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
@@ -2029,11 +2043,30 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets((prev) => [...prev, placement]);
     const insertResult = await insertPostPreservingFailureChannels(placement as any);
     if (!insertResult.ok) {
+      // The optimistic card is withdrawn, so a failed insert leaves no phantom
+      // object behind. The Knowledge document is untouched either way.
       setPadlets((prev) => prev.filter((p) => p.id !== placementId));
       toast.error('PDF uploaded, but it could not be added to the canvas');
       fetchData();
+      return false;
     }
+    return true;
   }, [canvasId, canPlaceDirectPdf, padlets, getNewPostPosition, insertPostPreservingFailureChannels, fetchData]);
+
+  /*
+    PDF reentry. A Knowledge document is durable and board-independent; its
+    canvas card is one disposable reference. Deleting the card stranded the
+    document -- still ready, still listed by the board's own API, with no user
+    action able to reach it, because Add PDF only uploads. "Use existing PDF"
+    is the return path and nothing more: it reads that same listing and hands
+    one row to the placement authority above, which is why that handler is the
+    only thing here that writes a placement.
+
+    Its already-placed rows reuse the board's existing
+    `placedKnowledgeDocumentIds` projection below rather than a second one --
+    it reads placements through readKnowledgePdfPlacement and keys on document
+    id, never on filename, since filenames repeat and are display text only.
+  */
 
   /**
    * Terminal processing state for an already-placed document. Metadata only --
@@ -6453,6 +6486,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsCanvasShareModalOpen(false);
     setIsCanvasSettingsModalOpen(false);
     setIsImportBrowserOpen(false);
+    setIsExistingPdfPickerOpen(false);
     setIsClipartDraftModalOpen(false);
     setIsLibraryOpen(false);
     setIsMapStylePanelOpen(false);
@@ -7394,6 +7428,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         closeDrawingSelectedShapePanel();
         closeAllToolbarLaunchedUi();
         setIsImportBrowserOpen(true);
+        break;
+      // "Use existing PDF". An ordinary action that opens a chooser -- it must
+      // never reach for the hidden PDF input, which belongs to Add PDF and to
+      // the browser's own label activation.
+      case 'knowledge-pdf-existing':
+        closeDrawingSelectedShapePanel();
+        closeAllToolbarLaunchedUi();
+        setIsExistingPdfPickerOpen(true);
         break;
       case 'draw':
         // Open Excalidraw Editor
@@ -9746,6 +9788,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             />
 
 
+
+            {/* "Use existing PDF" chooser. Gated by the same two authorities
+                the placement handler itself enforces, so a viewer or an
+                unsupported layout never sees it even if a stale toolbar
+                dispatched the action. The picker renders nothing while closed,
+                so this anchor collapses to zero size. */}
+            <div className="fixed left-20 top-28 z-50">
+              <KnowledgeExistingPdfPicker
+                isOpen={isExistingPdfPickerOpen && canUseCanvasToolbar && canPlaceDirectPdf}
+                boardId={canvasId ?? ''}
+                placedDocumentIds={placedKnowledgeDocumentIds}
+                onClose={() => setIsExistingPdfPickerOpen(false)}
+                onPlace={handleKnowledgePdfUploaded}
+              />
+            </div>
 
             {/* Imports Dialog */}
             <ImportsDialog

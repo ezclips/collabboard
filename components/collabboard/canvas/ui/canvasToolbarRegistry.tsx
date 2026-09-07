@@ -6,6 +6,7 @@ import {
   CheckSquare,
   CloudDownload,
   Columns3,
+  FileClock,
   FileText,
   FileUp,
   Heading,
@@ -178,6 +179,17 @@ export function buildCanvasToolbarGroups({
           {
             icon: FileUp, label: "Add PDF", color: "text-rose-700", bg: "hover:bg-rose-50",
             type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_INPUT_ID,
+          },
+          // The re-place sibling. A Knowledge document outlives the card that
+          // referenced it, so deleting the card used to strand a perfectly
+          // ready document with no user action able to reach it again -- Add
+          // PDF only ever uploads. This entry is the return path, and it is an
+          // ORDINARY toolbar action: it opens a chooser, so it deliberately
+          // carries no input to activate. Giving it one would make it a second
+          // file dialog, which is precisely the thing it exists to avoid.
+          {
+            icon: FileClock, label: "Use existing PDF", color: "text-rose-700", bg: "hover:bg-rose-50",
+            type: "knowledge-pdf-existing",
           },
         ] : []),
         { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },

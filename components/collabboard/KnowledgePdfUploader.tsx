@@ -23,10 +23,25 @@ export interface KnowledgePdfSummary {
   updatedAt: string;
 }
 
-export interface KnowledgePdfUploadResult {
+/**
+ * The identity a canvas placement actually consumes -- nothing more. Both ways
+ * of reaching a Knowledge document produce one of these: uploading a new PDF,
+ * and re-placing one the board already has. The placement authority therefore
+ * takes a single input type and never learns which entry point called it.
+ *
+ * Upload-only fields stay off it deliberately. `boardId` is upload bookkeeping;
+ * placement already knows its own board, so admitting the field here would
+ * invite a second, disagreeing source of truth.
+ */
+export interface KnowledgePdfPlacementSource {
   id: string;
-  boardId: string;
   originalFilename: string;
+  processingStatus: KnowledgePdfProcessingStatus;
+}
+
+/** A fresh upload: the same placement identity, plus what only upload knows. */
+export interface KnowledgePdfUploadResult extends KnowledgePdfPlacementSource {
+  boardId: string;
   processingStatus: 'uploaded';
 }
 

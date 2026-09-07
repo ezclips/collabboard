@@ -97,7 +97,8 @@ describe('2. upload places the object before processing finishes', () => {
 describe('3. identity is the document id', () => {
   it('refuses a second placement for the same document id', () => {
     expect(CLIENT).toContain("(p.metadata as any)?.knowledgeDocumentId === document.id");
-    expect(CLIENT).toContain('if (alreadyPlaced) return;');
+    // The guard refuses the duplicate AND reports that nothing was placed.
+    expect(CLIENT).toContain('if (alreadyPlaced) return false;');
   });
 
   it('reads a placement by id and tolerates repeated filenames', () => {
@@ -426,7 +427,9 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
   it('3. the PDF builds a file draft and honours the TRUE-means-taken contract', () => {
     expect(TYPES).toContain("| 'file';");
     expect(handler).toContain("kind: 'file'");
-    expect(handler).toContain('if (placementTaken) return;');
+    // TRUE-means-taken, reported outward as a successful placement: the layout
+    // completes the draft, so the caller must not treat this as a failure.
+    expect(handler).toContain('if (placementTaken) return true;');
     // The gate is consulted BEFORE any row is built or inserted.
     expect(handler.indexOf('placementTaken')).toBeLessThan(handler.indexOf('crypto.randomUUID()'));
   });
@@ -437,7 +440,7 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
   });
 
   it('5. a required placement suppresses the immediate insert', () => {
-    const gateAt = handler.indexOf('if (placementTaken) return;');
+    const gateAt = handler.indexOf('if (placementTaken) return true;');
     const insertAt = handler.indexOf('insertPostPreservingFailureChannels');
     expect(gateAt).toBeGreaterThan(-1);
     expect(gateAt).toBeLessThan(insertAt);
@@ -474,7 +477,7 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
   });
 
   it('15. document-id dedupe still guards before the gate is consulted', () => {
-    expect(handler.indexOf('if (alreadyPlaced) return;'))
+    expect(handler.indexOf('if (alreadyPlaced) return false;'))
       .toBeLessThan(handler.indexOf('placementTaken'));
     expect(handler).not.toContain('originalFilename ===');
   });
