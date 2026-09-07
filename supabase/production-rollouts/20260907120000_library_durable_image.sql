@@ -82,6 +82,11 @@ DECLARE
     legacy_grants boolean;
     grants_hardened boolean;
     functions_hardened boolean;
+    helper_identity boolean;
+    -- md5 of the reviewed helper body, i.e. pg_proc.prosrc for the function
+    -- created below. Pinning existence and flags alone would accept an
+    -- arbitrary replacement parser wearing the right signature.
+    helper_body_md5 CONSTANT text := '2831d591e5ef521428763b1e3a760a12';
     rls_on boolean;
     anon_privileges text[];
     auth_privileges text[];
@@ -172,8 +177,15 @@ BEGIN
         -- PRE is a fingerprint, not an absence. The reviewed starting point is
         -- the inherited GRANT ALL baseline; anything else is a database this
         -- rollout has never been reasoned about against.
+        -- PostgreSQL 17 added MAINTAIN, and information_schema.table_privileges
+        -- does not represent it -- so the array above cannot see it. Production
+        -- carries it for both browser roles as part of the inherited GRANT ALL,
+        -- and a state missing it is not the one this rollout was reviewed
+        -- against.
         legacy_grants := anon_privileges = full_privileges
-                     AND auth_privileges = full_privileges;
+                     AND auth_privileges = full_privileges
+                     AND has_table_privilege('anon', 'public.library_items', 'MAINTAIN')
+                     AND has_table_privilege('authenticated', 'public.library_items', 'MAINTAIN');
         IF NOT COALESCE(legacy_grants, false) THEN
             RAISE EXCEPTION
                 'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: no owned objects, but library_items privileges are not the recognised legacy state (anon=%, authenticated=%). Resolve by hand.',
@@ -203,6 +215,10 @@ BEGIN
     grants_hardened :=
         anon_privileges = ARRAY['SELECT']
     AND auth_privileges = ARRAY['DELETE','SELECT']
+    -- Checked separately for the same reason: REVOKE ALL above removes it, and
+    -- no browser client needs it, but the array cannot show that it is gone.
+    AND NOT has_table_privilege('anon', 'public.library_items', 'MAINTAIN')
+    AND NOT has_table_privilege('authenticated', 'public.library_items', 'MAINTAIN')
     AND NOT has_column_privilege('authenticated', 'public.library_items', 'knowledge_storage_path', 'INSERT')
     AND NOT has_column_privilege('authenticated', 'public.library_items', 'knowledge_storage_path', 'UPDATE')
     AND NOT has_column_privilege('anon', 'public.library_items', 'knowledge_storage_path', 'INSERT')
@@ -224,10 +240,26 @@ BEGIN
     AND NOT has_function_privilege('authenticated', trusted_oid, 'EXECUTE')
     AND has_function_privilege('service_role', trusted_oid, 'EXECUTE');
 
-    IF NOT COALESCE(grants_hardened, false) OR NOT COALESCE(functions_hardened, false) THEN
+    -- The mirror decides what counts as provenance for creation, repair AND
+    -- verification, so "a function with this name exists" is not enough: its
+    -- volatility, language, search_path and BODY are all release-critical. A
+    -- replaced body is reported, never silently re-created over.
+    helper_identity := (
+        SELECT p.provolatile = 'i'
+           AND NOT p.prosecdef
+           AND l.lanname = 'plpgsql'
+           AND p.proconfig @> ARRAY['search_path=pg_catalog']
+           AND md5(p.prosrc) = helper_body_md5
+          FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+         WHERE p.oid = helper_oid);
+
+    IF NOT COALESCE(grants_hardened, false)
+       OR NOT COALESCE(functions_hardened, false)
+       OR NOT COALESCE(helper_identity, false) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: all objects exist but the hardened contract does not hold (grants=%, functions=%). Resolve by hand.',
-            COALESCE(grants_hardened, false), COALESCE(functions_hardened, false);
+            'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: all objects exist but the hardened contract does not hold (grants=%, functions=%, helper_identity=%). Resolve by hand.',
+            COALESCE(grants_hardened, false), COALESCE(functions_hardened, false),
+            COALESCE(helper_identity, false);
     END IF;
 
     RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW preflight: POST state (3 of 3 owned objects, hardened) -- re-applying idempotently';

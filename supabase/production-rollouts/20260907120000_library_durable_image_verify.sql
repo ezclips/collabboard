@@ -188,17 +188,23 @@ $q$, false, true, '')))[1]::text::boolean, false) END AS pass,
     'accepts what TypeScript accepts, rejects the rest, never raises' AS detail;
 
 -- 6c. The mirror exists, is SECURITY INVOKER, and is internal machinery only.
-SELECT '6c' AS section, 'provenance mirror: exists, INVOKER, not browser-executable' AS check,
+SELECT '6c' AS section, 'provenance mirror: reviewed definition, INVOKER, internal only' AS check,
     COALESCE(
       h.oid IS NOT NULL
-      AND (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = h.oid)
+      AND (SELECT p.provolatile = 'i' AND NOT p.prosecdef AND l.lanname = 'plpgsql'
+             AND p.proconfig @> ARRAY['search_path=pg_catalog']
+             AND md5(p.prosrc) = '2831d591e5ef521428763b1e3a760a12'
+             FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = h.oid)
       AND NOT has_function_privilege('public', h.oid, 'EXECUTE')
       AND NOT has_function_privilege('anon', h.oid, 'EXECUTE')
       AND NOT has_function_privilege('authenticated', h.oid, 'EXECUTE')
       AND has_function_privilege('service_role', h.oid, 'EXECUTE'), false) AS pass,
     CASE WHEN h.oid IS NULL THEN 'absent'
-         ELSE format('invoker=%s public=%s anon=%s authenticated=%s service_role=%s',
-              (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = h.oid),
+         ELSE format('identity=[%s] public=%s anon=%s authenticated=%s service_role=%s',
+              (SELECT format('volatile=%s secdef=%s lang=%s cfg=%s body=%s',
+                       p.provolatile, p.prosecdef, l.lanname, p.proconfig::text,
+                       CASE WHEN md5(p.prosrc) = '2831d591e5ef521428763b1e3a760a12' THEN 'reviewed' ELSE 'CHANGED' END)
+                 FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = h.oid),
               has_function_privilege('public', h.oid, 'EXECUTE'),
               has_function_privilege('anon', h.oid, 'EXECUTE'),
               has_function_privilege('authenticated', h.oid, 'EXECUTE'),
@@ -240,20 +246,26 @@ SELECT '7b' AS section, 'anon table privileges are exactly SELECT' AS check,
              = ARRAY['SELECT'], false)
     AND COALESCE((SELECT count(*) FROM information_schema.column_privileges
                    WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'
-                     AND privilege_type IN ('INSERT','UPDATE')) = 0, false) AS pass,
+                     AND privilege_type IN ('INSERT','UPDATE')) = 0, false)
+    -- PostgreSQL 17's MAINTAIN is absent from information_schema.table_privileges,
+    -- so the exact array above cannot rule it in or out. Checked explicitly.
+    AND COALESCE(NOT has_table_privilege('anon','public.library_items','MAINTAIN'), false) AS pass,
     COALESCE((SELECT array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text)::text
                 FROM information_schema.table_privileges
-               WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'), '{}') AS detail;
+               WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'), '{}')
+    || format(' maintain=%s', has_table_privilege('anon','public.library_items','MAINTAIN')) AS detail;
 
 -- 7c. authenticated holds exactly SELECT and DELETE at table level.
 SELECT '7c' AS section, 'authenticated table privileges are exactly SELECT+DELETE' AS check,
     COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
                 FROM information_schema.table_privileges
                WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items')
-             = ARRAY['DELETE','SELECT'], false) AS pass,
+             = ARRAY['DELETE','SELECT'], false)
+    AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','MAINTAIN'), false) AS pass,
     COALESCE((SELECT array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text)::text
                 FROM information_schema.table_privileges
-               WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items'), '{}') AS detail;
+               WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items'), '{}')
+    || format(' maintain=%s', has_table_privilege('authenticated','public.library_items','MAINTAIN')) AS detail;
 
 -- 8. Durable rows satisfy the contract that SURVIVES placement deletion.
 --    A live padlet is deliberately NOT required here. Dynamically executed for
@@ -350,6 +362,9 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
                = ARRAY['SELECT'], false)
   AND COALESCE(NOT has_table_privilege('anon','public.library_items','REFERENCES'), false)
   AND COALESCE(NOT has_table_privilege('anon','public.library_items','TRIGGER'), false)
+  -- MAINTAIN (PostgreSQL 17) is invisible to information_schema, so the exact
+  -- array above cannot rule it out. Both browser roles must have lost it.
+  AND COALESCE(NOT has_table_privilege('anon','public.library_items','MAINTAIN'), false)
   AND COALESCE((SELECT count(*) FROM information_schema.column_privileges
                  WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'
                    AND privilege_type IN ('INSERT','UPDATE')) = 0, false)
@@ -363,6 +378,7 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','TRUNCATE'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','REFERENCES'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','TRIGGER'), false)
+  AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','MAINTAIN'), false)
   AND COALESCE((SELECT COALESCE(array_agg(DISTINCT column_name::text ORDER BY column_name::text), ARRAY[]::text[])
                   FROM information_schema.column_privileges
                  WHERE grantee='authenticated' AND table_schema='public'
@@ -379,7 +395,12 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
   AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE'), false)
   -- provenance mirror: exists, SECURITY INVOKER, internal only
   AND COALESCE(to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NOT NULL, false)
-  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p
+  -- The installed mirror must BE the reviewed one: volatility, language,
+  -- search_path and body, not merely a function of the right name.
+  AND COALESCE((SELECT p.provolatile = 'i' AND NOT p.prosecdef AND l.lanname = 'plpgsql'
+                  AND p.proconfig @> ARRAY['search_path=pg_catalog']
+                  AND md5(p.prosrc) = '2831d591e5ef521428763b1e3a760a12'
+                  FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
                  WHERE p.oid = to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)')), false)
   AND COALESCE(CASE WHEN to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NULL THEN false ELSE
         NOT has_function_privilege('public', to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)'), 'EXECUTE')

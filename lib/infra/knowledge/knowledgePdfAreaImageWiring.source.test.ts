@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -469,7 +470,7 @@ describe('F23-F30: durable preview parser, policy and state-machine contract', (
     // service_role needs it because the trusted creation RPC now judges its
     // input through the same contract the repair and verifier use.
     expect(migration).toContain('IF NOT public.is_knowledge_pdf_area_provenance(p_metadata) THEN');
-    expect(verifier).toContain('provenance mirror: exists, INVOKER, not browser-executable');
+    expect(verifier).toContain('provenance mirror: reviewed definition, INVOKER, internal only');
   });
 
   it('F27: policies are proved exactly, not by substring', () => {
@@ -680,5 +681,112 @@ describe('F31-F36: float64, policy identity and recognised-state contract', () =
     // The gate proves the security mode of all three functions.
     const rollup = verifier.slice(verifier.indexOf('12 AS section'));
     expect((rollup.match(/prosecdef/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+/**
+ * F37-F40: the PostgreSQL 17 MAINTAIN privilege, and the identity of the
+ * provenance mirror actually installed.
+ *
+ * Both are release-gate holes that a passing gate would not have shown:
+ * information_schema cannot see MAINTAIN at all, and "a function of this name
+ * exists and is INVOKER" says nothing about what its body does.
+ */
+describe('F37-F40: MAINTAIN privilege and installed-helper identity', () => {
+  const migration = sourceOf('supabase/migrations/20260907120000_library_durable_image_preview.sql');
+  const rollout = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image.sql');
+  const verifier = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image_verify.sql');
+  const preflight = rollout.slice(rollout.indexOf('DO $preflight$'), rollout.indexOf('$preflight$;'));
+  const rollup = verifier.slice(verifier.indexOf('12 AS section'));
+
+  /** The body PostgreSQL stores as pg_proc.prosrc for the shipped helper. */
+  const helperBody = (sql: string) => {
+    const at = sql.indexOf('CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance');
+    const open = sql.indexOf('AS $$', at) + 'AS $$'.length;
+    return sql.slice(open, sql.indexOf('$$;', open)).replace(/\r\n/g, '\n');
+  };
+
+  it('F37: MAINTAIN is checked directly, never inferred from information_schema', () => {
+    // PostgreSQL 17 added MAINTAIN and information_schema.table_privileges does
+    // not represent it, so an exact array built from that view is blind to it
+    // in both directions -- a legacy state missing it would read as recognised
+    // PRE, and a hardened state retaining it would read as clean POST.
+    // Spacing differs between the two files, so compare with it collapsed.
+    const dense = (s: string) => s.replace(/\s+/g, '');
+    for (const [name, sql] of [['rollout', rollout], ['verifier', verifier]] as const) {
+      expect(sql, name).toContain("'MAINTAIN'");
+      expect(dense(sql), name).toContain(dense("has_table_privilege('anon','public.library_items','MAINTAIN')"));
+      expect(dense(sql), name).toContain(dense("has_table_privilege('authenticated','public.library_items','MAINTAIN')"));
+    }
+    // It must never be smuggled into the information_schema array instead.
+    for (const arr of [
+      "ARRAY['DELETE','INSERT','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']",
+      "ARRAY['SELECT']",
+      "ARRAY['DELETE','SELECT']",
+    ]) {
+      expect(rollout + verifier, arr).not.toContain(arr.replace(']', ",'MAINTAIN']"));
+    }
+  });
+
+  it('F38: PRE requires MAINTAIN present, POST requires it gone', () => {
+    // PRE: the PM-confirmed production state carries it for both browser roles
+    // as part of the inherited GRANT ALL.
+    const zeroBranch = preflight.slice(preflight.indexOf('IF owned = 0 THEN'), preflight.indexOf('IF owned <> 3 THEN'));
+    expect(zeroBranch).toContain("has_table_privilege('anon', 'public.library_items', 'MAINTAIN')");
+    expect(zeroBranch).toContain("has_table_privilege('authenticated', 'public.library_items', 'MAINTAIN')");
+    // POST: no browser client needs it, so it must not survive the hardening.
+    const hardened = preflight.slice(preflight.indexOf('grants_hardened :='));
+    expect(hardened).toContain("NOT has_table_privilege('anon', 'public.library_items', 'MAINTAIN')");
+    expect(hardened).toContain("NOT has_table_privilege('authenticated', 'public.library_items', 'MAINTAIN')");
+    // And the release gate carries both, not just the section output.
+    expect(rollup).toContain("NOT has_table_privilege('anon','public.library_items','MAINTAIN')");
+    expect(rollup).toContain("NOT has_table_privilege('authenticated','public.library_items','MAINTAIN')");
+  });
+
+  it('F39: the installed helper is pinned by definition, not just by name', () => {
+    // Existence + INVOKER would accept an arbitrary replacement parser: the
+    // mirror decides what counts as provenance for creation, repair AND
+    // verification, so its body is release-critical.
+    for (const [name, sql] of [['preflight', preflight], ['rollup', rollup]] as const) {
+      expect(sql, name + ' volatility').toContain("provolatile = 'i'");
+      expect(sql, name + ' language').toContain("lanname = 'plpgsql'");
+      expect(sql, name + ' search_path').toContain("proconfig @> ARRAY['search_path=pg_catalog']");
+      expect(sql, name + ' body').toContain('md5(p.prosrc) =');
+    }
+    // Catalog-derived, no extension dependency, and language read through
+    // pg_language rather than guessed from the source text.
+    expect(preflight).toContain('JOIN pg_language l ON l.oid = p.prolang');
+  });
+
+  it('F40: the pinned digest IS the shipped helper body, in both files', () => {
+    // A hand-copied digest would drift silently. This derives it from the very
+    // text the CREATE FUNCTION installs, so editing the helper without
+    // re-pinning fails here rather than in production.
+    const fromMigration = helperBody(migration);
+    const fromRollout = helperBody(rollout);
+    expect(fromRollout, 'migration and rollout helper bodies must be identical')
+      .toBe(fromMigration);
+    const expected = createHash('md5').update(fromRollout, 'utf8').digest('hex');
+    expect(expected).toMatch(/^[0-9a-f]{32}$/);
+    // The same digest is pinned in the rollout's POST check and the verifier.
+    expect(rollout, 'rollout must pin the shipped body digest').toContain(expected);
+    expect(verifier, 'verifier must pin the shipped body digest').toContain(expected);
+    // And nothing else is pinned in its place.
+    const digests = new Set([...(rollout + verifier).matchAll(/\b[0-9a-f]{32}\b/g)].map((m) => m[0]));
+    expect([...digests], 'exactly one body digest may appear').toEqual([expected]);
+  });
+
+  it('F40b: the helper body stays a pure parser', () => {
+    const body = helperBody(migration);
+    // No table reads, no writes, no dynamic SQL, no reach outside itself.
+    for (const forbidden of [
+      'FROM public.', 'INSERT INTO', 'UPDATE public', 'DELETE FROM',
+      'EXECUTE ', 'dblink', 'COPY ', 'pg_read_file',
+    ]) {
+      expect(body, forbidden).not.toContain(forbidden);
+    }
+    // What it does contain is JSON and numeric validation only.
+    expect(body).toContain('jsonb_typeof');
+    expect(body).toContain('double precision');
   });
 });
