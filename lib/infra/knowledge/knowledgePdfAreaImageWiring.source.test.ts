@@ -219,8 +219,18 @@ describe('F11-F13: nothing in this slice can publish a crop', () => {
     for (const forbidden of ['createBucket', 'updateBucket', 'alter table', 'ALTER TABLE']) {
       expect(server, forbidden).not.toContain(forbidden);
     }
-    // The one RPC it may call, and no other.
+    // The one RPC it may call, and no other. It is the PDF-area wrapper rather
+    // than the generic image function: only that one records where the private
+    // crop lives, which is what lets the Library object keep a picture after
+    // this placement is deleted. The generic function stays reachable by
+    // `authenticated`, so it must never be the one that writes a location.
     expect(server.match(/\.rpc\(/g) ?? []).toHaveLength(1);
-    expect(server).toContain("adminClient.rpc('create_image_post_with_library_item'");
+    expect(server).toContain(
+      "adminClient.rpc('create_knowledge_pdf_area_image_post_with_library_item'");
+    // The route sends structural inputs only: no storage path leaves this file,
+    // in any argument name, so the location can never become client input.
+    for (const forbidden of ['p_durable_object_path', 'p_storage_path', 'board-derived/']) {
+      expect(server, forbidden).not.toContain(forbidden);
+    }
   });
 });

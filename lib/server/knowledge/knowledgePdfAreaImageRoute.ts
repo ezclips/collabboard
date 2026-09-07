@@ -348,7 +348,15 @@ export function createRealKnowledgePdfAreaImageSession(
       // ONE transaction for the durable Library object and its placement. The
       // board edit was already authorised above, and `userId` is the id this
       // route authenticated -- the browser never names the owner.
-      const { data, error } = await adminClient.rpc('create_image_post_with_library_item', {
+      //
+      // The PDF-area wrapper, not the generic function: it additionally records
+      // where the private crop lives, so the Library object keeps a picture
+      // after this placement is deleted. It derives that path itself from the
+      // two ids below -- no location is sent from here, and `authenticated`
+      // cannot execute it at all. `p_board_file_url` is the placement's own
+      // board-scoped address; the Library row is pointed at its durable one
+      // inside the same transaction.
+      const { data, error } = await adminClient.rpc('create_knowledge_pdf_area_image_post_with_library_item', {
         p_padlet_id: row.id,
         p_board_id: row.board_id,
         p_user_id: userId,
@@ -358,7 +366,7 @@ export function createRealKnowledgePdfAreaImageSession(
         p_position_y: row.position_y,
         p_width: row.width,
         p_height: row.height,
-        p_file_url: row.file_url,
+        p_board_file_url: row.file_url,
         p_metadata: row.metadata,
       });
       if (error) return false;

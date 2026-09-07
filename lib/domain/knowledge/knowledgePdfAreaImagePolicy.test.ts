@@ -3,6 +3,7 @@ import {
   KNOWLEDGE_PDF_AREA_IMAGE_CONTENT_TYPE,
   KNOWLEDGE_PDF_AREA_SOURCE_KIND,
   buildKnowledgePdfAreaProvenance,
+  knowledgeLibraryImageUrl,
   knowledgePdfAreaImagePath,
   knowledgePdfAreaImageUrl,
   parseKnowledgePdfAreaProvenance,
@@ -17,6 +18,34 @@ const BOARD = '11111111-1111-4111-8111-111111111111';
 const PADLET = '44444444-4444-4444-8444-444444444444';
 const DOC = '55555555-5555-4555-8555-555555555555';
 const REGION = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
+const LIBRARY_ITEM = '66666666-6666-4666-8666-666666666666';
+
+describe('B0: the durable Library address', () => {
+  it('B0a: is owner-scoped, id-keyed, and carries no board or padlet', () => {
+    // The address that outlives the placement. It deliberately names NEITHER
+    // the board nor the padlet: those are what die with the card.
+    const url = knowledgeLibraryImageUrl(LIBRARY_ITEM);
+    expect(url).toBe(`/api/library/items/${LIBRARY_ITEM}/image`);
+    expect(url).not.toContain(BOARD);
+    expect(url).not.toContain(PADLET);
+    // Same-origin and relative, for the same reason the board URL is.
+    expect(url!.startsWith('/api/')).toBe(true);
+  });
+
+  it('B0b: refuses anything that is not a UUID', () => {
+    for (const hostile of ['..', '../../etc/passwd', '', ' ', `${LIBRARY_ITEM}/..`,
+      'board-derived/x/pdf-areas/y.webp', 'null']) {
+      expect(knowledgeLibraryImageUrl(hostile), hostile).toBeNull();
+    }
+    expect(knowledgeLibraryImageUrl(undefined as never)).toBeNull();
+  });
+
+  it('B0c: is a different address for the same object, never a second path', () => {
+    // No storage path appears in it -- the location stays server-side.
+    expect(knowledgeLibraryImageUrl(LIBRARY_ITEM)).not.toContain('board-derived');
+    expect(knowledgeLibraryImageUrl(LIBRARY_ITEM)).not.toContain('.webp');
+  });
+});
 
 describe('B1-B6: the object path is derived, never supplied', () => {
   it('B1: is board-scoped, padlet-keyed and deterministic', () => {

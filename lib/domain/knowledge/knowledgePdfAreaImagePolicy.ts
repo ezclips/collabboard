@@ -53,6 +53,25 @@ export function knowledgePdfAreaImageUrl(boardId: string, padletId: string): str
 }
 
 /**
+ * The DURABLE object's address, for the surfaces that outlive a placement.
+ *
+ * A Library Image survives deletion of the card it was cut from, but the board
+ * URL above cannot: that route proves its authority from the padlet's own
+ * provenance, so it 404s the moment the card is gone. Every field a Library
+ * preview reads then points at nothing, and an object the product promises is
+ * durable becomes unreachable.
+ *
+ * This is the second address of the SAME private object -- no copy, no second
+ * bucket, no signed URL. It is owner-scoped where the board route is
+ * board-scoped, which is exactly why the two cannot be merged: a collaborator
+ * may read a shared board's image without owning the Library row behind it.
+ */
+export function knowledgeLibraryImageUrl(libraryItemId: string): string | null {
+  if (typeof libraryItemId !== 'string' || !UUID.test(libraryItemId)) return null;
+  return `/api/library/items/${libraryItemId}/image`;
+}
+
+/**
  * Typed provenance, stored on the card so the crop always says what it is a
  * crop OF. This is the record a reviewer, an export and the "open source"
  * affordance all read -- and it is what the image route requires before it
