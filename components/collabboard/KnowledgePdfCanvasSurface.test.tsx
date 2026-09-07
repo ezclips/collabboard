@@ -427,9 +427,10 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
   it('3. the PDF builds a file draft and honours the TRUE-means-taken contract', () => {
     expect(TYPES).toContain("| 'file';");
     expect(handler).toContain("kind: 'file'");
-    // TRUE-means-taken, reported outward as a successful placement: the layout
-    // completes the draft, so the caller must not treat this as a failure.
-    expect(handler).toContain('if (placementTaken) return true;');
+    // TRUE-means-taken is the GATE's contract: true means the layout owns the
+    // draft, so the handler must not insert. It is not a placement result --
+    // nothing is on the board yet -- so the handler reports false outward.
+    expect(handler).toContain('if (placementTaken) return false;');
     // The gate is consulted BEFORE any row is built or inserted.
     expect(handler.indexOf('placementTaken')).toBeLessThan(handler.indexOf('crypto.randomUUID()'));
   });
@@ -440,7 +441,7 @@ describe('R1-A-2. placement policy is delegated, never reimplemented', () => {
   });
 
   it('5. a required placement suppresses the immediate insert', () => {
-    const gateAt = handler.indexOf('if (placementTaken) return true;');
+    const gateAt = handler.indexOf('if (placementTaken) return false;');
     const insertAt = handler.indexOf('insertPostPreservingFailureChannels');
     expect(gateAt).toBeGreaterThan(-1);
     expect(gateAt).toBeLessThan(insertAt);

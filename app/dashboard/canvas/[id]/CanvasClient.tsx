@@ -2015,9 +2015,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       title: document.originalFilename,
       metadata: knowledgeMetadata,
     });
-    // The layout owns completion from here; that is a taken placement, not a
-    // failed one, so the chooser closes and gets out of its way.
-    if (placementTaken) return true;
+    // Ownership is not confirmation. The layout has taken the draft and may
+    // complete it later through draftToInsertPayload -- or the user may
+    // abandon the prompt -- so nothing is on the board yet. Only a confirmed
+    // insert below earns `true`; a chooser must stay open on this branch
+    // rather than claim a placement that has not happened.
+    if (placementTaken) return false;
 
     const placementId = crypto.randomUUID();
     const nowIso = new Date().toISOString();

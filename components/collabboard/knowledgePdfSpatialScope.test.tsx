@@ -225,9 +225,11 @@ describe('8-10. the kept architecture is untouched', () => {
     // a layout must not mean rebuilding the file-draft path from scratch.
     expect(PDF_HANDLER).toContain('const placementTaken = requestPlacementIfRequiredRef.current?.({');
     expect(PDF_HANDLER).toContain("kind: 'file'");
-    // TRUE-means-taken: the layout owns completion from here, so the caller is
-    // told the placement succeeded even though this function inserted nothing.
-    expect(PDF_HANDLER).toContain('if (placementTaken) return true;');
+    // The gate is still consulted and still short-circuits the insert; only
+    // what it REPORTS changed. Ownership is not confirmation -- the layout may
+    // complete the draft later, or the user may abandon the prompt -- so this
+    // branch resolves false. Proven executably in "11. the result contract".
+    expect(PDF_HANDLER).toContain('if (placementTaken) return false;');
   });
 
   it('10. placement policy is still the shared one, never PDF-specific', () => {
@@ -263,3 +265,165 @@ describe('9-10. nothing outside the scope gate moved', () => {
     }
   });
 });
+
+/**
+ * 11. The result contract, executed rather than described.
+ *
+ * The suite above pins WHERE each `return` sits. That is necessary but not
+ * sufficient: it cannot prove what the handler actually resolves to, and this
+ * boolean is load-bearing -- KnowledgeExistingPdfPicker closes on `true`, so a
+ * branch that reports success without inserting anything would close the
+ * chooser over a placement that never happened.
+ *
+ * CanvasClient is the whole board shell and cannot be mounted, so the handler's
+ * OWN source is lifted out and run with stubs for everything it closes over.
+ * These assertions therefore execute the shipped code path.
+ */
+const HANDLER_ARROW = (() => {
+  const at = CLIENT.indexOf('const handleKnowledgePdfUploaded');
+  const start = CLIENT.indexOf('async (document', at);
+  const depsAt = CLIENT.indexOf(', [canvasId, canPlaceDirectPdf, padlets', start);
+  return CLIENT.slice(start, CLIENT.lastIndexOf('}', depsAt) + 1);
+})();
+
+/**
+ * `new Function` parses JavaScript, and the handler is TypeScript. Rather than
+ * pull a transpiler into a jsdom suite, the four annotations this handler
+ * actually carries are removed explicitly -- and every removal must match, so
+ * an edit that changes the handler's shape fails here loudly instead of
+ * quietly running a mangled copy of it.
+ */
+const HANDLER_JS = (() => {
+  const strips: ReadonlyArray<readonly [RegExp | string, string]> = [
+    ['async (document: KnowledgePdfPlacementSource): Promise<boolean> =>', 'async (document) =>'],
+    ['const placement: Padlet = {', 'const placement = {'],
+    [/ as const/g, ''],
+    [/ as any/g, ''],
+  ];
+  let src = HANDLER_ARROW;
+  for (const [pattern, replacement] of strips) {
+    const before = src;
+    src = src.replace(pattern as never, replacement);
+    if (src === before) {
+      throw new Error(`handler no longer contains ${pattern} -- update this suite, do not skip it`);
+    }
+  }
+  // A strip that removed too much would leave a handler that decides nothing.
+  // These are STRUCTURAL markers only -- deliberately not the return values,
+  // so that a wrong contract reaches the assertions below and fails there with
+  // a readable expected/received rather than throwing during collection.
+  for (const kept of ['const alreadyPlaced =', 'const placementTaken =', 'insertPostPreservingFailureChannels(']) {
+    if (!src.includes(kept)) throw new Error(`type strip damaged the handler: lost ${kept}`);
+  }
+  return src;
+})();
+
+type PlacementRun = {
+  result: unknown;
+  inserted: any[];
+  onBoard: any[];
+  errors: string[];
+  gateCalls: any[];
+};
+
+async function runPlacement(over: {
+  canvasId?: string;
+  canPlaceDirectPdf?: boolean;
+  padlets?: any[];
+  placementTaken?: boolean;
+  insertOk?: boolean;
+} = {}): Promise<PlacementRun> {
+  const o = {
+    canvasId: 'board-1', canPlaceDirectPdf: true, padlets: [] as any[],
+    placementTaken: false, insertOk: true, ...over,
+  };
+  const inserted: any[] = [];
+  const errors: string[] = [];
+  const gateCalls: any[] = [];
+  let onBoard: any[] = [];
+
+  const build = new Function(
+    'canvasId', 'canPlaceDirectPdf', 'padlets', 'toast', 'requestPlacementIfRequiredRef',
+    'getNewPostPosition', 'nextZIndex', 'setPadlets', 'insertPostPreservingFailureChannels',
+    'fetchData', 'KNOWLEDGE_PDF_PLACEMENT_WIDTH', 'KNOWLEDGE_PDF_PLACEMENT_HEIGHT', 'crypto',
+    `return ${HANDLER_JS};`,
+  );
+  const handler = build(
+    o.canvasId, o.canPlaceDirectPdf, o.padlets,
+    { error: (m: string) => errors.push(m) },
+    { current: (draft: any) => { gateCalls.push(draft); return o.placementTaken; } },
+    () => ({ x: 10, y: 20 }),
+    () => 7,
+    (updater: any) => { onBoard = updater(onBoard); },
+    async (row: any) => { inserted.push(row); return { ok: o.insertOk }; },
+    () => {},
+    260, 320,
+    { randomUUID: () => 'placement-1' },
+  );
+
+  const result = await handler({
+    id: 'doc-1', originalFilename: 'a.pdf', processingStatus: 'ready',
+  });
+  return { result, inserted, onBoard, errors, gateCalls };
+}
+
+describe('11. the result contract, executed', () => {
+  it('a confirmed insert is the ONLY branch that reports true', async () => {
+    const run = await runPlacement();
+    expect(run.result).toBe(true);
+    expect(run.inserted).toHaveLength(1);
+    expect(run.inserted[0].metadata.knowledgeDocumentId).toBe('doc-1');
+    expect(run.onBoard).toHaveLength(1);
+  });
+
+  it('a taken placement reports FALSE -- ownership is not confirmation', async () => {
+    const run = await runPlacement({ placementTaken: true });
+    // The gate was consulted, and it short-circuited the insert as designed.
+    expect(run.gateCalls).toHaveLength(1);
+    expect(run.gateCalls[0].kind).toBe('file');
+    expect(run.inserted).toHaveLength(0);
+    expect(run.onBoard).toHaveLength(0);
+    // Nothing reached the board, so nothing may be reported as placed. This is
+    // what keeps the chooser open instead of closing over a deferred draft.
+    expect(run.result).toBe(false);
+  });
+
+  it('an already-placed document reports false and inserts nothing', async () => {
+    const run = await runPlacement({
+      padlets: [{ id: 'p1', metadata: { knowledgeDocumentId: 'doc-1' } }],
+    });
+    expect(run.result).toBe(false);
+    expect(run.inserted).toHaveLength(0);
+    expect(run.gateCalls).toHaveLength(0);
+  });
+
+  it('a failed insert reports false and leaves no phantom card behind', async () => {
+    const run = await runPlacement({ insertOk: false });
+    expect(run.result).toBe(false);
+    expect(run.inserted).toHaveLength(1);
+    expect(run.onBoard).toHaveLength(0);
+    expect(errorsFor(run)).toContain('could not be added');
+  });
+
+  it('an unsupported layout reports false before building anything', async () => {
+    const run = await runPlacement({ canPlaceDirectPdf: false });
+    expect(run.result).toBe(false);
+    expect(run.inserted).toHaveLength(0);
+    expect(run.gateCalls).toHaveLength(0);
+    expect(errorsFor(run)).toContain('Freeform');
+  });
+
+  it('no branch resolves undefined, which a caller could not read', async () => {
+    for (const run of [
+      await runPlacement(),
+      await runPlacement({ placementTaken: true }),
+      await runPlacement({ insertOk: false }),
+      await runPlacement({ canPlaceDirectPdf: false }),
+      await runPlacement({ padlets: [{ id: 'p1', metadata: { knowledgeDocumentId: 'doc-1' } }] }),
+    ]) {
+      expect(typeof run.result).toBe('boolean');
+    }
+  });
+});
+
+const errorsFor = (run: PlacementRun) => run.errors.join(' | ');
