@@ -5,6 +5,13 @@
 -- load-bearing condition rather than trusting an operator to read the rows
 -- above, and every conjunct is COALESCEd so a NULL can never read as success.
 --
+-- IT NEVER RAISES. This file is diagnostic: it must be able to describe a
+-- broken database, so every function is resolved with to_regprocedure() first
+-- and a missing one yields `false`, not an error. `has_function_privilege` on a
+-- signature that does not exist would abort the whole report and leave the
+-- operator with nothing. SQL errors belong to the rollout's preflight, which is
+-- the thing that must refuse to proceed.
+--
 -- WHAT IT DELIBERATELY DOES NOT CHECK: that a durable row still has a live
 -- origin placement. Trust is established ONCE, when the path is written, by the
 -- structural join in the rollout. The feature exists precisely so the object
@@ -15,9 +22,17 @@
 -- excerpt or any other document content is selected, and no PDF is opened.
 -- Nothing here writes.
 
+\set helperfn 'public.is_knowledge_pdf_area_provenance(jsonb)'
 \set fn 'public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'
 \set genericfn 'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)'
 \set pathre '^board-derived/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/pdf-areas/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.webp$'
+
+-- The provenance mirror is CALLED by three sections below. A CASE guard is not
+-- enough: PostgreSQL resolves function names at PARSE time, so naming a missing
+-- function aborts the statement before any guard runs -- and this file must be
+-- able to describe a database that is missing it. psql's own conditional keeps
+-- the reference out of the parser entirely when it does not exist.
+SELECT to_regprocedure(:'helperfn') IS NOT NULL AS helper_exists \gset
 
 -- 1. The server-owned location column exists, is text and is nullable.
 SELECT 1 AS section, 'knowledge_storage_path exists, text, nullable' AS check,
@@ -80,40 +95,60 @@ SELECT 4 AS section, 'authenticated INSERT/UPDATE column sets are exact' AS chec
                    AND table_name='library_items' AND privilege_type='UPDATE'), ARRAY[]::text[]) AS upd
   ) g;
 
--- 5. The trusted creation function exists and only service_role may run it.
-SELECT 5 AS section, 'trusted PDF-area creation function is service_role only' AS check,
+-- 5. The trusted creation function exists, is SECURITY INVOKER, and only
+--    service_role may run it. Resolved by oid first, so an absent function is a
+--    `false` rather than an aborted report.
+SELECT 5 AS section, 'trusted PDF-area RPC: exists, INVOKER, service_role only' AS check,
     COALESCE(
-      EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-               WHERE n.nspname='public' AND p.proname='create_knowledge_pdf_area_image_post_with_library_item')
-      AND has_function_privilege('service_role', :'fn', 'EXECUTE')
-      AND NOT has_function_privilege('authenticated', :'fn', 'EXECUTE')
-      AND NOT has_function_privilege('anon', :'fn', 'EXECUTE')
-      AND NOT has_function_privilege('public', :'fn', 'EXECUTE'), false) AS pass,
-    format('service=%s authenticated=%s anon=%s public=%s',
-        has_function_privilege('service_role', :'fn', 'EXECUTE'),
-        has_function_privilege('authenticated', :'fn', 'EXECUTE'),
-        has_function_privilege('anon', :'fn', 'EXECUTE'),
-        has_function_privilege('public', :'fn', 'EXECUTE')) AS detail;
+      f.oid IS NOT NULL
+      AND (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = f.oid)
+      AND has_function_privilege('service_role', f.oid, 'EXECUTE')
+      AND NOT has_function_privilege('authenticated', f.oid, 'EXECUTE')
+      AND NOT has_function_privilege('anon', f.oid, 'EXECUTE')
+      AND NOT has_function_privilege('public', f.oid, 'EXECUTE'), false) AS pass,
+    CASE WHEN f.oid IS NULL THEN 'absent'
+         ELSE format('invoker=%s service=%s authenticated=%s anon=%s public=%s',
+              (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = f.oid),
+              has_function_privilege('service_role', f.oid, 'EXECUTE'),
+              has_function_privilege('authenticated', f.oid, 'EXECUTE'),
+              has_function_privilege('anon', f.oid, 'EXECUTE'),
+              has_function_privilege('public', f.oid, 'EXECUTE')) END AS detail
+  FROM (SELECT to_regprocedure(:'fn') AS oid) f;
 
--- 6. It is SECURITY INVOKER, takes no path, and the generic function is intact.
-SELECT 6 AS section, 'trusted function derives its own path; generic RPC intact' AS check,
-    COALESCE((SELECT NOT p.prosecdef
-                AND p.prosrc NOT LIKE '%p_storage_path%'
+-- 6. It derives its own path and takes none.
+SELECT 6 AS section, 'trusted RPC derives its own path and accepts none' AS check,
+    COALESCE((SELECT p.prosrc NOT LIKE '%p_storage_path%'
                 AND p.prosrc NOT LIKE '%p_durable_object_path%'
                 AND p.prosrc LIKE '%board-derived/%'
-                AND p.prosrc LIKE '%knowledge-pdf-area%'
-                FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-               WHERE n.nspname='public'
-                 AND p.proname='create_knowledge_pdf_area_image_post_with_library_item'), false)
-    AND COALESCE(has_function_privilege('authenticated', :'genericfn', 'EXECUTE'), false) AS pass,
-    'SECURITY INVOKER, derives path internally, generic image RPC still granted' AS detail;
+                AND p.prosrc LIKE '%is_knowledge_pdf_area_provenance%'
+                FROM pg_proc p WHERE p.oid = to_regprocedure(:'fn')), false) AS pass,
+    'path derived internally; provenance judged by the shared mirror' AS detail;
 
--- 6b. Parser parity. Every row here is a case the TypeScript parser decides one
---     way, asserted to decide the same way in SQL -- and no malformed input may
---     raise instead of returning false.
-SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser' AS check,
+-- 6a. The generic image RPC is a PREREQUISITE this rollout does not own: it must
+--     still be present in its expected security and execution state.
+SELECT '6a' AS section, 'generic image RPC unchanged: exists, INVOKER, expected grants' AS check,
     COALESCE(
-      -- ACCEPTED by parseKnowledgePdfAreaProvenance:
+      g.oid IS NOT NULL
+      AND (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = g.oid)
+      AND has_function_privilege('authenticated', g.oid, 'EXECUTE')
+      AND has_function_privilege('service_role', g.oid, 'EXECUTE')
+      AND NOT has_function_privilege('anon', g.oid, 'EXECUTE')
+      AND NOT has_function_privilege('public', g.oid, 'EXECUTE'), false) AS pass,
+    CASE WHEN g.oid IS NULL THEN 'absent'
+         ELSE format('invoker=%s authenticated=%s service=%s anon=%s public=%s',
+              (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = g.oid),
+              has_function_privilege('authenticated', g.oid, 'EXECUTE'),
+              has_function_privilege('service_role', g.oid, 'EXECUTE'),
+              has_function_privilege('anon', g.oid, 'EXECUTE'),
+              has_function_privilege('public', g.oid, 'EXECUTE')) END AS detail
+  FROM (SELECT to_regprocedure(:'genericfn') AS oid) g;
+
+\if :helper_exists
+-- 6b. Parser parity, in float64. Every row here is a case the TypeScript parser
+--     decides one way, asserted to decide the same way in SQL -- and no
+--     malformed input may raise instead of returning false.
+SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser (float64)' AS check,
+    CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE COALESCE(
       public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0.1,"y":0.1,"width":0.2,"height":0.2}}}'::jsonb)
       -- Number.isInteger(1.0) is true: a digits-only text regex would strand this row.
@@ -122,10 +157,8 @@ SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser' AS che
       -- finalizeRegion clamps a hair below zero to 0 rather than rejecting.
       AND public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":2,"region":{"x":-0.0000000001,"y":-0.0000000001,"width":0.5,"height":0.5}}}'::jsonb)
-      -- Full-page and epsilon overhang are both inside tolerance.
       AND public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":7,"region":{"x":0.5,"y":0.5,"width":0.5000000001,"height":0.5}}}'::jsonb)
-      -- REJECTED, each returning false rather than raising:
       AND NOT public.is_knowledge_pdf_area_provenance(NULL)
       AND NOT public.is_knowledge_pdf_area_provenance('{}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance('[]'::jsonb)
@@ -133,19 +166,26 @@ SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser' AS che
       AND NOT public.is_knowledge_pdf_area_provenance('{"source":"x"}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"upload"}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance('{"source":{"kind":"knowledge-pdf-area"}}'::jsonb)
-      -- document id: missing, wrong type, non-canonical
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":5,"pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"not-a-uuid","pageNumber":1,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      -- page: wrong type, non-integral, below 1
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":"1","region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1.5,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":0,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
-      -- region: missing, wrong type, member wrong type, malformed numeric text
+      -- float64: 1e400 is Infinity in JavaScript, so Number.isInteger rejects it.
+      -- An arbitrary-precision mirror would call this valid provenance.
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1e400,"region":{"x":0,"y":0,"width":1,"height":1}}}'::jsonb)
+      -- float64: a width that underflows to 0 stops being a selection.
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":1e-400,"height":1}}}'::jsonb)
+      -- float64: a non-finite coordinate is not a rectangle.
+      AND NOT public.is_knowledge_pdf_area_provenance(
+        '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1e400,"y":0,"width":0.5,"height":0.5}}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
@@ -154,7 +194,6 @@ SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser' AS che
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"0","y":0,"width":1,"height":1}}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":"abc","y":"1e","width":"--3","height":"NaN"}}}'::jsonb)
-      -- zero/negative extent, and overhang beyond tolerance
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":0,"y":0,"width":0,"height":1}}}'::jsonb)
       AND NOT public.is_knowledge_pdf_area_provenance(
@@ -166,32 +205,55 @@ SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser' AS che
       -- a coordinate exactly at the far edge leaves no area after trimming
       AND NOT public.is_knowledge_pdf_area_provenance(
         '{"source":{"kind":"knowledge-pdf-area","knowledgeDocumentId":"11111111-1111-4111-8111-111111111111","pageNumber":1,"region":{"x":1,"y":0,"width":0.0000000001,"height":0.5}}}'::jsonb),
-      false) AS pass,
+      false) END AS pass,
     'accepts what TypeScript accepts, rejects the rest, never raises' AS detail;
+\else
+SELECT '6b' AS section, 'provenance mirror matches the TypeScript parser (float64)' AS check,
+    false AS pass, 'provenance mirror is absent' AS detail;
+\endif
 
--- 7. RLS enabled, and the EXACT accepted owner-policy set.
---
---    `qual LIKE '%uid()%'` is not proof: `auth.uid() = user_id OR true` would
---    satisfy it. Each of the four commands is pinned to its own normalised
---    predicate in the correct clause, and a USING/WITH CHECK that has become
---    NULL -- i.e. unrestricted -- fails the FILTER rather than passing it.
-SELECT 7 AS section, 'RLS enabled and the exact owner-policy set is intact' AS check,
+-- 6c. The mirror exists, is SECURITY INVOKER, and is internal machinery only.
+SELECT '6c' AS section, 'provenance mirror: exists, INVOKER, not browser-executable' AS check,
+    COALESCE(
+      h.oid IS NOT NULL
+      AND (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = h.oid)
+      AND NOT has_function_privilege('public', h.oid, 'EXECUTE')
+      AND NOT has_function_privilege('anon', h.oid, 'EXECUTE')
+      AND NOT has_function_privilege('authenticated', h.oid, 'EXECUTE')
+      AND has_function_privilege('service_role', h.oid, 'EXECUTE'), false) AS pass,
+    CASE WHEN h.oid IS NULL THEN 'absent'
+         ELSE format('invoker=%s public=%s anon=%s authenticated=%s service_role=%s',
+              (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = h.oid),
+              has_function_privilege('public', h.oid, 'EXECUTE'),
+              has_function_privilege('anon', h.oid, 'EXECUTE'),
+              has_function_privilege('authenticated', h.oid, 'EXECUTE'),
+              has_function_privilege('service_role', h.oid, 'EXECUTE')) END AS detail
+  FROM (SELECT to_regprocedure(:'helperfn') AS oid) h;
+
+-- 7. RLS enabled, and the EXACT accepted owner-policy set -- by IDENTITY as well
+--    as semantics. A renamed policy, one narrowed to another role, or a
+--    RESTRICTIVE one, is not the reviewed model even if its predicate matches.
+SELECT 7 AS section, 'RLS enabled and the exact owner-policy identities are intact' AS check,
     COALESCE((SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                WHERE n.nspname='public' AND c.relname='library_items'), false)
     AND COALESCE((SELECT count(*) = 4
-           AND count(*) FILTER (WHERE cmd='SELECT'
+           AND count(*) FILTER (WHERE policyname='Users can view their own library items'
+                 AND cmd='SELECT' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-           AND count(*) FILTER (WHERE cmd='INSERT'
+           AND count(*) FILTER (WHERE policyname='Users can insert their own library items'
+                 AND cmd='INSERT' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)') = 1
-           AND count(*) FILTER (WHERE cmd='UPDATE'
+           AND count(*) FILTER (WHERE policyname='Users can update their own library items'
+                 AND cmd='UPDATE' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-           AND count(*) FILTER (WHERE cmd='DELETE'
+           AND count(*) FILTER (WHERE policyname='Users can delete their own library items'
+                 AND cmd='DELETE' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
           FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false) AS pass,
-    COALESCE((SELECT format('rls=%s policies=%s cmds=%s',
+    COALESCE((SELECT format('rls=%s policies=%s names=%s',
                 (SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                   WHERE n.nspname='public' AND c.relname='library_items'),
-                count(*), string_agg(DISTINCT cmd, ',' ORDER BY cmd))
+                count(*), string_agg(policyname || '/' || cmd || '/' || permissive, '; ' ORDER BY cmd))
                 FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), 'none') AS detail;
 
 -- 7b. anon holds SELECT and nothing else -- proven as an exact set, not as a
@@ -218,32 +280,22 @@ SELECT '7c' AS section, 'authenticated table privileges are exactly SELECT+DELET
                 FROM information_schema.table_privileges
                WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items'), '{}') AS detail;
 
--- 7d. The provenance mirror is internal machinery: no browser role may call it.
-SELECT '7d' AS section, 'provenance helper is not browser-executable' AS check,
-    COALESCE(NOT has_function_privilege('public','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')
-         AND NOT has_function_privilege('anon','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')
-         AND NOT has_function_privilege('authenticated','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')
-         AND has_function_privilege('service_role','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false) AS pass,
-    format('public=%s anon=%s authenticated=%s service_role=%s',
-        has_function_privilege('public','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'),
-        has_function_privilege('anon','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'),
-        has_function_privilege('authenticated','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'),
-        has_function_privilege('service_role','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE')) AS detail;
-
+\if :helper_exists
 -- 8. Durable rows satisfy the contract that SURVIVES placement deletion.
 --    A live padlet is deliberately NOT required here.
 SELECT 8 AS section, 'durable rows are canonical, image, valid provenance' AS check,
-    COALESCE((SELECT count(*) FROM public.library_items li
-               WHERE li.knowledge_storage_path IS NOT NULL
-                 AND NOT (li.knowledge_storage_path ~ :'pathre'
-                          AND li.type = 'image'
-                          AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))) = 0, false) AS pass,
-    format('%s durable row(s) failing the contract',
-        COALESCE((SELECT count(*) FROM public.library_items li
-                   WHERE li.knowledge_storage_path IS NOT NULL
-                     AND NOT (li.knowledge_storage_path ~ :'pathre'
-                              AND li.type = 'image'
-                              AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))), -1)) AS detail;
+    CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE
+      COALESCE((SELECT count(*) FROM public.library_items li
+                 WHERE li.knowledge_storage_path IS NOT NULL
+                   AND NOT (li.knowledge_storage_path ~ :'pathre'
+                            AND li.type = 'image'
+                            AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))) = 0, false)
+    END AS pass,
+    'canonical path, image row, provenance the reader still accepts' AS detail;
+\else
+SELECT 8 AS section, 'durable rows are canonical, image, valid provenance' AS check,
+    false AS pass, 'provenance mirror is absent' AS detail;
+\endif
 
 -- 8b. A durable row never previews through a board-scoped URL.
 SELECT '8b' AS section, 'durable rows preview through their own Library URL' AS check,
@@ -276,18 +328,15 @@ SELECT 9 AS section, 'population' AS check, true AS pass,
  WHERE type = 'image'
    AND content -> 'metadata' -> 'source' ->> 'kind' = 'knowledge-pdf-area';
 
--- 10. Migration state is complete: both functions and the column are present.
+-- 10. Migration state is complete: the column and all three functions.
 SELECT 10 AS section, 'rollout state complete' AS check,
     COALESCE(
       EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema='public' AND table_name='library_items' AND column_name='knowledge_storage_path')
-      AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                   WHERE n.nspname='public' AND p.proname='create_knowledge_pdf_area_image_post_with_library_item')
-      AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                   WHERE n.nspname='public' AND p.proname='is_knowledge_pdf_area_provenance')
-      AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                   WHERE n.nspname='public' AND p.proname='create_image_post_with_library_item'), false) AS pass,
-    'column + trusted RPC + provenance mirror + generic RPC' AS detail;
+      AND to_regprocedure(:'helperfn') IS NOT NULL
+      AND to_regprocedure(:'fn') IS NOT NULL
+      AND to_regprocedure(:'genericfn') IS NOT NULL, false) AS pass,
+    'column + provenance mirror + trusted RPC + generic RPC' AS detail;
 
 -- 11. Library route prerequisites SQL can prove: the columns it selects exist.
 SELECT 11 AS section, 'Library serve route schema prerequisites' AS check,
@@ -296,27 +345,51 @@ SELECT 11 AS section, 'Library serve route schema prerequisites' AS check,
                  AND column_name IN ('id','type','knowledge_storage_path','content')) = 4, false) AS pass,
     'id, type, knowledge_storage_path, content all present' AS detail;
 
+\if :helper_exists
 -- 12. RELEASE GATE. Every load-bearing condition, repeated here so the gate can
---     never pass on a section nobody read. Each conjunct fails closed.
+--     never pass on a section nobody read. Each conjunct fails closed, and every
+--     function is resolved by oid so a missing one is `false`, not an error.
 SELECT 12 AS section, 'ROLL-UP' AS check,
   COALESCE((SELECT data_type='text' FROM information_schema.columns
              WHERE table_schema='public' AND table_name='library_items'
                AND column_name='knowledge_storage_path'), false)
   AND COALESCE((SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                  WHERE n.nspname='public' AND c.relname='library_items'), false)
+  -- exact owner-policy identities: names, commands, roles, modes and predicates
+  AND COALESCE((SELECT count(*) = 4
+         AND count(*) FILTER (WHERE policyname='Users can view their own library items'
+               AND cmd='SELECT' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
+               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+         AND count(*) FILTER (WHERE policyname='Users can insert their own library items'
+               AND cmd='INSERT' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
+               AND qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)') = 1
+         AND count(*) FILTER (WHERE policyname='Users can update their own library items'
+               AND cmd='UPDATE' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
+               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+         AND count(*) FILTER (WHERE policyname='Users can delete their own library items'
+               AND cmd='DELETE' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
+               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
+        FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false)
+  -- anon: exactly SELECT, no column mutation grants, no DDL-style authority
+  AND COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+                  FROM information_schema.table_privileges
+                 WHERE grantee='anon' AND table_schema='public' AND table_name='library_items')
+               = ARRAY['SELECT'], false)
+  AND COALESCE(NOT has_table_privilege('anon','public.library_items','REFERENCES'), false)
+  AND COALESCE(NOT has_table_privilege('anon','public.library_items','TRIGGER'), false)
+  AND COALESCE((SELECT count(*) FROM information_schema.column_privileges
+                 WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'
+                   AND privilege_type IN ('INSERT','UPDATE')) = 0, false)
+  -- authenticated: exactly SELECT+DELETE, exact column sets, path unwritable
+  AND COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+                  FROM information_schema.table_privileges
+                 WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items')
+               = ARRAY['DELETE','SELECT'], false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','INSERT'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','UPDATE'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','TRUNCATE'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','REFERENCES'), false)
   AND COALESCE(NOT has_table_privilege('authenticated','public.library_items','TRIGGER'), false)
-  AND COALESCE(NOT has_table_privilege('anon','public.library_items','INSERT'), false)
-  AND COALESCE(NOT has_table_privilege('anon','public.library_items','UPDATE'), false)
-  AND COALESCE(NOT has_table_privilege('anon','public.library_items','DELETE'), false)
-  AND COALESCE(NOT has_table_privilege('anon','public.library_items','TRUNCATE'), false)
-  AND COALESCE(NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','INSERT'), false)
-  AND COALESCE(NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE'), false)
-  AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','INSERT'), false)
-  AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE'), false)
   AND COALESCE((SELECT COALESCE(array_agg(DISTINCT column_name::text ORDER BY column_name::text), ARRAY[]::text[])
                   FROM information_schema.column_privileges
                  WHERE grantee='authenticated' AND table_schema='public'
@@ -327,27 +400,42 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
                  WHERE grantee='authenticated' AND table_schema='public'
                    AND table_name='library_items' AND privilege_type='UPDATE')
                = ARRAY['content','thumbnail_url','updated_at'], false)
-  AND COALESCE(EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                        WHERE n.nspname='public' AND p.proname='create_knowledge_pdf_area_image_post_with_library_item'), false)
-  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                 WHERE n.nspname='public' AND p.proname='create_knowledge_pdf_area_image_post_with_library_item'), false)
-  AND COALESCE(has_function_privilege('service_role', :'fn', 'EXECUTE'), false)
-  AND COALESCE(NOT has_function_privilege('authenticated', :'fn', 'EXECUTE'), false)
-  AND COALESCE(NOT has_function_privilege('anon', :'fn', 'EXECUTE'), false)
-  AND COALESCE(NOT has_function_privilege('public', :'fn', 'EXECUTE'), false)
-  AND COALESCE(EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                        WHERE n.nspname='public' AND p.proname='create_image_post_with_library_item'), false)
-  AND COALESCE(EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                        WHERE n.nspname='public' AND p.proname='is_knowledge_pdf_area_provenance'), false)
-  AND COALESCE((SELECT count(*) FROM information_schema.columns
-                 WHERE table_schema='public' AND table_name='library_items'
-                   AND column_name IN ('id','type','knowledge_storage_path','content')) = 4, false)
-  -- Durable rows: canonical, image, valid provenance. NO live padlet required.
-  AND COALESCE((SELECT count(*) FROM public.library_items li
-                 WHERE li.knowledge_storage_path IS NOT NULL
-                   AND NOT (li.knowledge_storage_path ~ :'pathre'
-                            AND li.type='image'
-                            AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))) = 0, false)
+  AND COALESCE(NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','INSERT'), false)
+  AND COALESCE(NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE'), false)
+  AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','INSERT'), false)
+  AND COALESCE(NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE'), false)
+  -- provenance mirror: exists, SECURITY INVOKER, internal only
+  AND COALESCE(to_regprocedure(:'helperfn') IS NOT NULL, false)
+  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(:'helperfn')), false)
+  AND COALESCE(CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE
+        NOT has_function_privilege('public', to_regprocedure(:'helperfn'), 'EXECUTE')
+    AND NOT has_function_privilege('anon', to_regprocedure(:'helperfn'), 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', to_regprocedure(:'helperfn'), 'EXECUTE')
+    AND has_function_privilege('service_role', to_regprocedure(:'helperfn'), 'EXECUTE') END, false)
+  -- trusted RPC: exists, SECURITY INVOKER, service_role only
+  AND COALESCE(to_regprocedure(:'fn') IS NOT NULL, false)
+  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(:'fn')), false)
+  AND COALESCE(CASE WHEN to_regprocedure(:'fn') IS NULL THEN false ELSE
+        has_function_privilege('service_role', to_regprocedure(:'fn'), 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', to_regprocedure(:'fn'), 'EXECUTE')
+    AND NOT has_function_privilege('anon', to_regprocedure(:'fn'), 'EXECUTE')
+    AND NOT has_function_privilege('public', to_regprocedure(:'fn'), 'EXECUTE') END, false)
+  -- generic RPC prerequisite: unchanged in security and execution authority
+  AND COALESCE(to_regprocedure(:'genericfn') IS NOT NULL, false)
+  AND COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(:'genericfn')), false)
+  AND COALESCE(CASE WHEN to_regprocedure(:'genericfn') IS NULL THEN false ELSE
+        has_function_privilege('authenticated', to_regprocedure(:'genericfn'), 'EXECUTE')
+    AND has_function_privilege('service_role', to_regprocedure(:'genericfn'), 'EXECUTE')
+    AND NOT has_function_privilege('anon', to_regprocedure(:'genericfn'), 'EXECUTE')
+    AND NOT has_function_privilege('public', to_regprocedure(:'genericfn'), 'EXECUTE') END, false)
+  -- data shape: canonical durable paths (no live-padlet dependency), no stale
+  -- board preview, no downgraded composite
+  AND COALESCE(CASE WHEN to_regprocedure(:'helperfn') IS NULL THEN false ELSE
+        (SELECT count(*) FROM public.library_items li
+          WHERE li.knowledge_storage_path IS NOT NULL
+            AND NOT (li.knowledge_storage_path ~ :'pathre'
+                     AND li.type='image'
+                     AND public.is_knowledge_pdf_area_provenance(li.content -> 'metadata'))) = 0 END, false)
   AND COALESCE((SELECT count(*) FROM public.library_items li
                  WHERE li.knowledge_storage_path IS NOT NULL
                    AND li.thumbnail_url ~ '^/api/boards/'
@@ -356,38 +444,9 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
                  WHERE li.thumbnail_url = '/api/library/items/' || li.id::text || '/image'
                    AND (li.content -> 'metadata' ->> 'drawing' IS NOT NULL
                         OR li.content -> 'metadata' ->> 'previewUrl' IS NOT NULL)) = 0, false)
-  -- Exact owner-policy set. `LIKE '%uid()%'` would accept
-  -- `auth.uid() = user_id OR true`, so each command is pinned individually and
-  -- a NULL (unrestricted) USING/WITH CHECK fails its FILTER.
-  AND COALESCE((SELECT count(*) = 4
-         AND count(*) FILTER (WHERE cmd='SELECT'
-               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-         AND count(*) FILTER (WHERE cmd='INSERT'
-               AND qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)') = 1
-         AND count(*) FILTER (WHERE cmd='UPDATE'
-               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-         AND count(*) FILTER (WHERE cmd='DELETE'
-               AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-        FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false)
-  -- anon holds exactly SELECT, proven as a set rather than as absences.
-  AND COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
-                  FROM information_schema.table_privileges
-                 WHERE grantee='anon' AND table_schema='public' AND table_name='library_items')
-               = ARRAY['SELECT'], false)
-  AND COALESCE(NOT has_table_privilege('anon','public.library_items','REFERENCES'), false)
-  AND COALESCE(NOT has_table_privilege('anon','public.library_items','TRIGGER'), false)
-  AND COALESCE((SELECT count(*) FROM information_schema.column_privileges
-                 WHERE grantee='anon' AND table_schema='public' AND table_name='library_items'
-                   AND privilege_type IN ('INSERT','UPDATE')) = 0, false)
-  -- authenticated holds exactly SELECT + DELETE at table level.
-  AND COALESCE((SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
-                  FROM information_schema.table_privileges
-                 WHERE grantee='authenticated' AND table_schema='public' AND table_name='library_items')
-               = ARRAY['DELETE','SELECT'], false)
-  -- The provenance mirror is internal machinery, not a client-callable function.
-  AND COALESCE(NOT has_function_privilege('public','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
-  AND COALESCE(NOT has_function_privilege('anon','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
-  AND COALESCE(NOT has_function_privilege('authenticated','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
-  AND COALESCE(has_function_privilege('service_role','public.is_knowledge_pdf_area_provenance(jsonb)','EXECUTE'), false)
   AS pass,
-  'schema, RLS, exact policies, exact grants, RPC authority, durable-row and composite invariants' AS detail;
+  'schema, RLS, policy identities, exact grants, function security modes, durable-row and composite invariants' AS detail;
+\else
+SELECT 12 AS section, 'ROLL-UP' AS check, false AS pass,
+    'provenance mirror is absent -- release conditions cannot hold' AS detail;
+\endif

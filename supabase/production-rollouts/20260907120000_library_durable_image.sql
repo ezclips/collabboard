@@ -34,21 +34,24 @@
 BEGIN;
 
 -- Fail before any schema, privilege or row mutation unless production is in one
--- of exactly two recognised states.
+-- of exactly two RECOGNISED states.
 --
---   PRE    NONE of this correction's owned objects exist, and the Image Library
---          foundation is present in its expected shape
---   POST   ALL owned objects exist AND every hardened release condition holds
+--   PRE    none of this correction's owned objects exist, AND the database is
+--          the exact legacy shape this rollout was reviewed against
+--   POST   all owned objects exist, AND every hardened release condition holds
 --   anything else -> ABORT
 --
--- "Owned objects" is the full set this correction creates: the column, the
--- provenance mirror and the trusted creation function. Omitting one would let a
--- half-applied database read as clean PRE and be mutated again.
+-- Zero owned objects is NOT by itself PRE. A database whose grants or policies
+-- have already drifted is not the one this file was designed to harden, and
+-- normalising it silently would be this rollout inventing an authority model
+-- nobody reviewed. The legacy fingerprint below is the baseline's own:
+-- GRANT ALL to anon and authenticated, four owner-scoped policies, and the
+-- generic image RPC as SECURITY INVOKER granted to authenticated+service_role.
 --
--- POST is deliberately more than "the objects exist". A database where all three
--- are present but a browser role can write the trusted path, or execute the
--- helper, or the owner policies have been altered, is PARTIAL -- not POST -- and
--- must be resolved by a human rather than converged by this file.
+-- POST is likewise more than "the objects exist". A database where all three
+-- are present but a browser role can write the trusted path, execute the
+-- helper, or either function has become SECURITY DEFINER is PARTIAL -- and is
+-- reported, never re-created over.
 --
 -- POST does NOT require any origin placement to still exist: durable rows
 -- outliving their placements is the entire point of the feature.
@@ -63,14 +66,25 @@ DECLARE
     helper_sig CONSTANT text := 'public.is_knowledge_pdf_area_provenance(jsonb)';
     trusted_sig CONSTANT text :=
         'public.create_knowledge_pdf_area_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)';
+    generic_sig CONSTANT text :=
+        'public.create_image_post_with_library_item(uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)';
+    full_privileges CONSTANT text[] :=
+        ARRAY['DELETE','INSERT','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE'];
+    helper_oid oid;
+    trusted_oid oid;
+    generic_oid oid;
     owned integer := 0;
     has_column boolean;
     has_helper boolean;
     has_trusted boolean;
     policies_exact boolean;
+    generic_ok boolean;
+    legacy_grants boolean;
     grants_hardened boolean;
     functions_hardened boolean;
     rls_on boolean;
+    anon_privileges text[];
+    auth_privileges text[];
     insert_columns text[];
     update_columns text[];
 BEGIN
@@ -81,7 +95,6 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- The durable-identity foundation this correction extends.
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
          WHERE table_schema = 'public' AND table_name = 'padlets' AND column_name = 'library_item_id'
@@ -89,30 +102,47 @@ BEGIN
         RAISE EXCEPTION
             'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: padlets.library_item_id is missing -- apply the IMAGE-LIBRARY ownership rollout first';
     END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'public' AND p.proname = 'create_image_post_with_library_item'
-    ) THEN
+
+    -- to_regprocedure returns NULL rather than raising for an absent function,
+    -- so a missing prerequisite is a decision here, never an error.
+    helper_oid  := to_regprocedure(helper_sig);
+    trusted_oid := to_regprocedure(trusted_sig);
+    generic_oid := to_regprocedure(generic_sig);
+
+    -- The generic image RPC is a PREREQUISITE this rollout does not own: it must
+    -- be present in its expected security and execution state, and drift in it
+    -- is not something this file may repair.
+    generic_ok := generic_oid IS NOT NULL
+        AND NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = generic_oid)
+        AND has_function_privilege('authenticated', generic_oid, 'EXECUTE')
+        AND has_function_privilege('service_role', generic_oid, 'EXECUTE')
+        AND NOT has_function_privilege('anon', generic_oid, 'EXECUTE')
+        AND NOT has_function_privilege('public', generic_oid, 'EXECUTE');
+    IF NOT COALESCE(generic_ok, false) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: create_image_post_with_library_item is missing -- apply the IMAGE-LIBRARY ownership rollout first';
+            'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: create_image_post_with_library_item is missing or its security/execution state is not the reviewed one -- resolve the IMAGE-LIBRARY ownership rollout first';
     END IF;
 
-    -- Row authority must already be the accepted owner-scoped set, in BOTH
-    -- states: this file never creates or repairs a policy, so a database whose
-    -- policies have drifted is not one it may reason about.
+    -- Row authority must be the accepted owner-scoped set in BOTH states, proved
+    -- by identity as well as predicate: a renamed policy, one narrowed to
+    -- another role, or a RESTRICTIVE one, is not the reviewed model.
     rls_on := COALESCE((SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                          WHERE n.nspname = 'public' AND c.relname = 'library_items'), false);
     policies_exact := COALESCE((
         SELECT count(*) = 4
-           AND count(*) FILTER (WHERE cmd='SELECT'
+           AND count(*) FILTER (WHERE policyname='Users can view their own library items'
+                 AND cmd='SELECT' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-           AND count(*) FILTER (WHERE cmd='INSERT'
+           AND count(*) FILTER (WHERE policyname='Users can insert their own library items'
+                 AND cmd='INSERT' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND qual IS NULL AND replace(with_check,' ','')='(auth.uid()=user_id)') = 1
-           AND count(*) FILTER (WHERE cmd='UPDATE'
+           AND count(*) FILTER (WHERE policyname='Users can update their own library items'
+                 AND cmd='UPDATE' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-           AND count(*) FILTER (WHERE cmd='DELETE'
+           AND count(*) FILTER (WHERE policyname='Users can delete their own library items'
+                 AND cmd='DELETE' AND permissive='PERMISSIVE' AND roles='{public}'::name[]
                  AND replace(qual,' ','')='(auth.uid()=user_id)' AND with_check IS NULL) = 1
-          FROM pg_policies WHERE schemaname = 'public' AND tablename = 'library_items'), false);
+          FROM pg_policies WHERE schemaname='public' AND tablename='library_items'), false);
     IF NOT rls_on OR NOT policies_exact THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: library_items row authority is not the accepted owner-scoped set (rls=%, policies_exact=%)',
@@ -123,18 +153,33 @@ BEGIN
         SELECT 1 FROM information_schema.columns
          WHERE table_schema = 'public' AND table_name = 'library_items'
            AND column_name = 'knowledge_storage_path');
-    has_helper := EXISTS (
-        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'public' AND p.proname = 'is_knowledge_pdf_area_provenance');
-    has_trusted := EXISTS (
-        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'public' AND p.proname = 'create_knowledge_pdf_area_image_post_with_library_item');
+    has_helper := helper_oid IS NOT NULL;
+    has_trusted := trusted_oid IS NOT NULL;
     owned := (CASE WHEN has_column THEN 1 ELSE 0 END)
            + (CASE WHEN has_helper THEN 1 ELSE 0 END)
            + (CASE WHEN has_trusted THEN 1 ELSE 0 END);
 
+    SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+      INTO anon_privileges
+      FROM information_schema.table_privileges
+     WHERE grantee = 'anon' AND table_schema = 'public' AND table_name = 'library_items';
+    SELECT COALESCE(array_agg(DISTINCT privilege_type::text ORDER BY privilege_type::text), ARRAY[]::text[])
+      INTO auth_privileges
+      FROM information_schema.table_privileges
+     WHERE grantee = 'authenticated' AND table_schema = 'public' AND table_name = 'library_items';
+
     IF owned = 0 THEN
-        RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW preflight: PRE state (0 of 3 owned objects) -- applying';
+        -- PRE is a fingerprint, not an absence. The reviewed starting point is
+        -- the inherited GRANT ALL baseline; anything else is a database this
+        -- rollout has never been reasoned about against.
+        legacy_grants := anon_privileges = full_privileges
+                     AND auth_privileges = full_privileges;
+        IF NOT COALESCE(legacy_grants, false) THEN
+            RAISE EXCEPTION
+                'IMAGE-LIBRARY-DURABLE-PREVIEW preflight failed: no owned objects, but library_items privileges are not the recognised legacy state (anon=%, authenticated=%). Resolve by hand.',
+                anon_privileges, auth_privileges;
+        END IF;
+        RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW preflight: PRE state (0 of 3 owned objects, recognised legacy authority) -- applying';
         RETURN;
     END IF;
 
@@ -144,9 +189,6 @@ BEGIN
             has_column, has_helper, has_trusted;
     END IF;
 
-    -- All three exist. POST additionally requires the hardened contract, so a
-    -- database whose grants were widened after the fact cannot be re-applied
-    -- over as though it were healthy.
     SELECT COALESCE(array_agg(DISTINCT column_name::text ORDER BY column_name::text), ARRAY[]::text[])
       INTO insert_columns
       FROM information_schema.column_privileges
@@ -159,20 +201,8 @@ BEGIN
        AND table_name = 'library_items' AND privilege_type = 'UPDATE';
 
     grants_hardened :=
-        NOT has_table_privilege('authenticated', 'public.library_items', 'INSERT')
-    AND NOT has_table_privilege('authenticated', 'public.library_items', 'UPDATE')
-    AND NOT has_table_privilege('authenticated', 'public.library_items', 'TRUNCATE')
-    AND NOT has_table_privilege('authenticated', 'public.library_items', 'REFERENCES')
-    AND NOT has_table_privilege('authenticated', 'public.library_items', 'TRIGGER')
-    AND has_table_privilege('authenticated', 'public.library_items', 'SELECT')
-    AND has_table_privilege('authenticated', 'public.library_items', 'DELETE')
-    AND has_table_privilege('anon', 'public.library_items', 'SELECT')
-    AND NOT has_table_privilege('anon', 'public.library_items', 'INSERT')
-    AND NOT has_table_privilege('anon', 'public.library_items', 'UPDATE')
-    AND NOT has_table_privilege('anon', 'public.library_items', 'DELETE')
-    AND NOT has_table_privilege('anon', 'public.library_items', 'TRUNCATE')
-    AND NOT has_table_privilege('anon', 'public.library_items', 'REFERENCES')
-    AND NOT has_table_privilege('anon', 'public.library_items', 'TRIGGER')
+        anon_privileges = ARRAY['SELECT']
+    AND auth_privileges = ARRAY['DELETE','SELECT']
     AND NOT has_column_privilege('authenticated', 'public.library_items', 'knowledge_storage_path', 'INSERT')
     AND NOT has_column_privilege('authenticated', 'public.library_items', 'knowledge_storage_path', 'UPDATE')
     AND NOT has_column_privilege('anon', 'public.library_items', 'knowledge_storage_path', 'INSERT')
@@ -180,15 +210,19 @@ BEGIN
     AND insert_columns = ARRAY['content','description','is_public','thumbnail_url','title','type','user_id']
     AND update_columns = ARRAY['content','thumbnail_url','updated_at'];
 
+    -- Both owned functions must still be SECURITY INVOKER. A DEFINER rewrite is
+    -- an authority change, so it is reported rather than replaced.
     functions_hardened :=
-        NOT has_function_privilege('public', helper_sig, 'EXECUTE')
-    AND NOT has_function_privilege('anon', helper_sig, 'EXECUTE')
-    AND NOT has_function_privilege('authenticated', helper_sig, 'EXECUTE')
-    AND has_function_privilege('service_role', helper_sig, 'EXECUTE')
-    AND NOT has_function_privilege('public', trusted_sig, 'EXECUTE')
-    AND NOT has_function_privilege('anon', trusted_sig, 'EXECUTE')
-    AND NOT has_function_privilege('authenticated', trusted_sig, 'EXECUTE')
-    AND has_function_privilege('service_role', trusted_sig, 'EXECUTE');
+        NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = helper_oid)
+    AND NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = trusted_oid)
+    AND NOT has_function_privilege('public', helper_oid, 'EXECUTE')
+    AND NOT has_function_privilege('anon', helper_oid, 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', helper_oid, 'EXECUTE')
+    AND has_function_privilege('service_role', helper_oid, 'EXECUTE')
+    AND NOT has_function_privilege('public', trusted_oid, 'EXECUTE')
+    AND NOT has_function_privilege('anon', trusted_oid, 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', trusted_oid, 'EXECUTE')
+    AND has_function_privilege('service_role', trusted_oid, 'EXECUTE');
 
     IF NOT COALESCE(grants_hardened, false) OR NOT COALESCE(functions_hardened, false) THEN
         RAISE EXCEPTION
@@ -251,8 +285,18 @@ GRANT ALL ON TABLE public.library_items TO service_role;
 -- normalizeStorableRegion()/finalizeRegion() pair it delegates to, in
 -- lib/domain/knowledge/knowledgePdfAreaImagePolicy.ts and
 -- lib/domain/knowledge/knowledgePageRegionGeometry.ts. The repair, the
--- postflight and the verifier all call this, so none of them can drift from
--- each other or from the reader that must later accept these rows.
+-- postflight, the trusted creation function and the verifier all call this, so
+-- none of them can drift from each other or from the reader that must later
+-- accept these rows.
+--
+-- IEEE-754 IS THE CONTRACT, NOT ARBITRARY PRECISION. The parser is JavaScript,
+-- where every number is a float64, so the comparisons below are made in
+-- `double precision`. `numeric` would silently disagree at the edges: jsonb
+-- stores 1e400 happily and numeric keeps it finite and integral, while
+-- Number('1e400') is Infinity and Number.isInteger rejects it -- so a numeric
+-- mirror would call that valid provenance and hand a durable path to a row the
+-- reader refuses. The same applies downward, where a tiny positive width
+-- underflows to 0 in float64 and stops being a selection.
 --
 -- DELIBERATELY NO STRICTER THAN THE PARSER. A row TypeScript accepts must be
 -- accepted here, or the repair would refuse rows the product considers valid:
@@ -266,10 +310,11 @@ GRANT ALL ON TABLE public.library_items TO service_role;
 --
 -- WRITTEN IN PLPGSQL FOR EVALUATION ORDER. In a single SQL expression Postgres
 -- may evaluate a cast before the AND-branch that was meant to guard it, so
--- `jsonb_typeof(v) = 'number' AND (v #>> '{}')::numeric > 0` can still raise on
--- client-controlled JSON. Here every cast is a separate statement that runs only
--- after its own type test returned, and the exception block makes "never throws
--- for malformed input" a guarantee rather than an argument.
+-- `jsonb_typeof(v) = 'number' AND (v ->> ...)::float8 > 0` can still raise on
+-- client JSON. Here every conversion is its own statement, and the ONLY
+-- exception handlers wrap those conversions -- deliberately narrow, so a
+-- release defect elsewhere in this function still surfaces instead of being
+-- silently reported as "not provenance".
 CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance(p_metadata jsonb)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -279,13 +324,13 @@ SET search_path = pg_catalog
 AS $$
 DECLARE
     -- finalizeRegion()'s own overhang tolerance (NORMALIZED_REGION_EPSILON).
-    eps CONSTANT numeric := 1e-9;
+    eps CONSTANT double precision := 1e-9;
     src jsonb;
     reg jsonb;
     doc text;
-    page_number numeric;
-    rx numeric; ry numeric; rw numeric; rh numeric;
-    r_left numeric; r_top numeric;
+    page_number double precision;
+    rx double precision; ry double precision; rw double precision; rh double precision;
+    r_left double precision; r_top double precision;
 BEGIN
     -- parseKnowledgePdfAreaProvenance: metadata and source must both be plain
     -- objects. jsonb_typeof reports 'array' for arrays, so this rejects them.
@@ -301,7 +346,8 @@ BEGIN
         RETURN false;
     END IF;
 
-    -- typeof knowledgeDocumentId === 'string' && UUID.test(...)
+    -- typeof knowledgeDocumentId === 'string' && UUID.test(...). Compared as
+    -- text: no ::uuid cast exists here, so a malformed id cannot raise.
     IF jsonb_typeof(src -> 'knowledgeDocumentId') <> 'string' THEN
         RETURN false;
     END IF;
@@ -310,12 +356,24 @@ BEGIN
         RETURN false;
     END IF;
 
-    -- Number.isInteger(pageNumber) && pageNumber >= 1. The cast runs only after
-    -- the type test above returned, so malformed JSON cannot reach it.
+    -- Number(pageNumber) as float64. Out-of-range JSON (1e400) raises here and
+    -- is rejected, matching Number.isInteger(Infinity) === false.
     IF jsonb_typeof(src -> 'pageNumber') <> 'number' THEN
         RETURN false;
     END IF;
-    page_number := (src -> 'pageNumber')::numeric;
+    BEGIN
+        page_number := (src ->> 'pageNumber')::double precision;
+    EXCEPTION
+        WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+            RETURN false;
+    END;
+    -- Number.isFinite, then Number.isInteger, then the canonical range.
+    IF page_number IS NULL
+       OR page_number <> page_number
+       OR page_number = 'Infinity'::double precision
+       OR page_number = '-Infinity'::double precision THEN
+        RETURN false;
+    END IF;
     IF page_number <> trunc(page_number) OR page_number < 1 THEN
         RETURN false;
     END IF;
@@ -331,12 +389,27 @@ BEGIN
        OR jsonb_typeof(reg -> 'height') <> 'number' THEN
         RETURN false;
     END IF;
-    rx := (reg -> 'x')::numeric;
-    ry := (reg -> 'y')::numeric;
-    rw := (reg -> 'width')::numeric;
-    rh := (reg -> 'height')::numeric;
+    BEGIN
+        rx := (reg ->> 'x')::double precision;
+        ry := (reg ->> 'y')::double precision;
+        rw := (reg ->> 'width')::double precision;
+        rh := (reg ->> 'height')::double precision;
+    EXCEPTION
+        WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+            RETURN false;
+    END;
 
-    -- JSON cannot carry NaN or Infinity, so Number.isFinite() needs no mirror.
+    -- Number.isFinite(x) && ... on every coordinate, exactly as finalizeRegion
+    -- does before it clamps anything.
+    IF rx IS NULL OR ry IS NULL OR rw IS NULL OR rh IS NULL
+       OR rx <> rx OR ry <> ry OR rw <> rw OR rh <> rh
+       OR rx IN ('Infinity'::double precision, '-Infinity'::double precision)
+       OR ry IN ('Infinity'::double precision, '-Infinity'::double precision)
+       OR rw IN ('Infinity'::double precision, '-Infinity'::double precision)
+       OR rh IN ('Infinity'::double precision, '-Infinity'::double precision) THEN
+        RETURN false;
+    END IF;
+
     r_left := CASE WHEN rx < 0 AND rx > -eps THEN 0 ELSE rx END;
     r_top  := CASE WHEN ry < 0 AND ry > -eps THEN 0 ELSE ry END;
     IF r_left < 0 OR r_top < 0 OR r_left > 1 OR r_top > 1 THEN
@@ -354,18 +427,14 @@ BEGIN
     END IF;
 
     RETURN true;
-EXCEPTION
-    -- Belt and braces. Client-writable JSON must never be able to abort a
-    -- rollout; anything unforeseen is simply "not PDF-area provenance".
-    WHEN others THEN
-        RETURN false;
 END;
 $$;
 
 COMMENT ON FUNCTION public.is_knowledge_pdf_area_provenance(jsonb) IS
     'IMAGE-LIBRARY-DURABLE-PREVIEW: SQL mirror of parseKnowledgePdfAreaProvenance '
-    '(incl. finalizeRegion epsilon clamping and Number.isInteger page semantics). '
-    'Returns false -- never NULL, never an exception -- for anything it rejects.';
+    '(float64 semantics, finalizeRegion epsilon clamping, Number.isInteger pages). '
+    'Returns false -- never NULL -- for anything it rejects; conversions of '
+    'untrusted JSON scalars are the only guarded operations.';
 
 -- Internal database machinery: the repair, postflight and the trusted creation
 -- function are its only callers. No browser role needs it, and PUBLIC must not

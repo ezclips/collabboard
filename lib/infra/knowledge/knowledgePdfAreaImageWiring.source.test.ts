@@ -291,7 +291,7 @@ describe('F14-F22: durable Library preview SQL contract', () => {
     // Never NULL and never throwing: a NULL conjunct in a security predicate
     // reads as "not false", and an exception aborts the whole rollout.
     expect(migration).toContain('RETURNS boolean');
-    expect(migration).toContain('WHEN others THEN');
+    expect(migration).toContain('WHEN numeric_value_out_of_range OR invalid_text_representation THEN');
     // Both sides of the join are validated, not just the Library snapshot.
     expect(REPAIR).toContain("public.is_knowledge_pdf_area_provenance(li.content -> 'metadata')");
     expect(REPAIR).toContain('public.is_knowledge_pdf_area_provenance(p.metadata)');
@@ -328,9 +328,9 @@ describe('F14-F22: durable Library preview SQL contract', () => {
     const sections = verifier.split('\nSELECT ').slice(1);
     expect(sections.length).toBeGreaterThanOrEqual(12);
     for (const section of sections) {
-      const head = section.slice(0, section.indexOf(' AS pass'));
+      const head = section.slice(0, section.indexOf(' AS pass') + ' AS pass'.length);
       if (section.indexOf(' AS pass') < 0) continue;
-      expect(head.includes('COALESCE') || head.includes('true AS pass') || head.includes('true'),
+      expect(head.includes('COALESCE') || head.includes('true AS pass') || head.includes('false AS pass'),
         'section "' + section.slice(0, 50) + '" must fail closed').toBe(true);
     }
     // The empty-grant case aggregates to NULL and must be defended explicitly.
@@ -346,13 +346,13 @@ describe('F14-F22: durable Library preview SQL contract', () => {
       "has_table_privilege('authenticated','public.library_items','TRUNCATE')",
       "has_table_privilege('authenticated','public.library_items','REFERENCES')",
       "has_table_privilege('authenticated','public.library_items','TRIGGER')",
-      "has_table_privilege('anon','public.library_items','UPDATE')",
+      "WHERE grantee='anon' AND table_schema='public' AND table_name='library_items')",
       "has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE')",
       "privilege_type='INSERT'",
       "privilege_type='UPDATE'",
-      'create_knowledge_pdf_area_image_post_with_library_item',
-      'create_image_post_with_library_item',
-      'is_knowledge_pdf_area_provenance',
+      ":'fn'",
+      ":'genericfn'",
+      ":'helperfn'",
       "has_function_privilege('service_role'",
       "has_function_privilege('authenticated'",
       "has_function_privilege('anon'",
@@ -425,14 +425,15 @@ describe('F23-F30: durable preview parser, policy and state-machine contract', (
     // guarded only by a neighbouring predicate can still raise on client JSON.
     // plpgsql statements are ordered, so each cast follows its own IF.
     expect(helper).toContain('LANGUAGE plpgsql');
-    for (const cast of ["(src -> 'pageNumber')::numeric", "(reg -> 'x')::numeric"]) {
+    for (const cast of ["(src ->> 'pageNumber')::double precision", "(reg ->> 'x')::double precision"]) {
       const castAt = helper.indexOf(cast);
       expect(castAt, cast).toBeGreaterThan(-1);
       const guard = helper.lastIndexOf('RETURN false;', castAt);
       expect(guard, cast + ' must be preceded by its own guard').toBeGreaterThan(-1);
     }
     // The document id is compared as text; no uuid cast happens in the mirror.
-    expect(helper).not.toContain('::uuid');
+    // Comments stripped: the helper's prose names the cast it does not do.
+    expect(helper.replace(/^\s*--.*$/gm, '')).not.toContain('::uuid');
     // And anything unforeseen still cannot abort a rollout.
     expect(helper).toContain('EXCEPTION');
   });
@@ -462,7 +463,7 @@ describe('F23-F30: durable preview parser, policy and state-machine contract', (
     // service_role needs it because the trusted creation RPC now judges its
     // input through the same contract the repair and verifier use.
     expect(migration).toContain('IF NOT public.is_knowledge_pdf_area_provenance(p_metadata) THEN');
-    expect(verifier).toContain('provenance helper is not browser-executable');
+    expect(verifier).toContain('provenance mirror: exists, INVOKER, not browser-executable');
   });
 
   it('F27: policies are proved exactly, not by substring', () => {
@@ -491,7 +492,7 @@ describe('F23-F30: durable preview parser, policy and state-machine contract', (
     expect(rollup).toContain("has_table_privilege('anon','public.library_items','TRIGGER')");
     // And the exact owner-policy fingerprint is part of the gate itself.
     expect(rollup).toContain("replace(qual,' ','')='(auth.uid()=user_id)'");
-    expect(rollup).toContain('is_knowledge_pdf_area_provenance(jsonb)');
+    expect(rollup).toContain(":'helperfn'");
   });
 
   it('F29: the state machine knows every object this correction owns', () => {
@@ -530,5 +531,129 @@ describe('F23-F30: durable preview parser, policy and state-machine contract', (
     // The gate's own result can never be NULL.
     const rollup = verifier.slice(verifier.indexOf('12 AS section'));
     expect((rollup.match(/COALESCE\(/g) ?? []).length).toBeGreaterThanOrEqual(30);
+  });
+});
+
+/**
+ * F31-F36: float64 parser equivalence, policy IDENTITY, and a state machine
+ * that recognises its starting point as well as its finish.
+ *
+ * These pin the third round of review findings. Each names the specific way a
+ * database could pass the previous contract while still being wrong.
+ */
+describe('F31-F36: float64, policy identity and recognised-state contract', () => {
+  const migration = sourceOf('supabase/migrations/20260907120000_library_durable_image_preview.sql');
+  const rollout = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image.sql');
+  const verifier = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image_verify.sql');
+  const helperOf = (sql: string) => sql.slice(
+    sql.indexOf('CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance'),
+    sql.indexOf('COMMENT ON FUNCTION public.is_knowledge_pdf_area_provenance'));
+  const preflight = rollout.slice(rollout.indexOf('DO $preflight$'), rollout.indexOf('$preflight$;'));
+
+  it('F31: the mirror decides in float64, not arbitrary precision', () => {
+    const helper = helperOf(migration);
+    // JavaScript numbers are IEEE-754. `numeric` keeps 1e400 finite and
+    // integral, so a numeric mirror calls Infinity valid provenance and hands a
+    // durable path to a row the reader refuses.
+    expect(helper).toContain('double precision');
+    expect(helper).not.toMatch(/\bnumeric\b/);
+    for (const decl of ['page_number double precision', 'rx double precision']) {
+      expect(helper, decl).toContain(decl);
+    }
+    // Number.isFinite is mirrored explicitly, both directions.
+    expect(helper).toContain("'Infinity'::double precision");
+    expect(helper).toContain("'-Infinity'::double precision");
+    // NaN via self-inequality.
+    expect(helper).toContain('page_number <> page_number');
+  });
+
+  it('F32: conversions are guarded narrowly, never the whole function', () => {
+    const helper = helperOf(migration);
+    // Out-of-range JSON raises on cast; that is the rejection path, and it must
+    // be caught around the CONVERSION only -- a function-wide WHEN OTHERS would
+    // report a release defect as "not provenance".
+    expect(helper).toContain('WHEN numeric_value_out_of_range OR invalid_text_representation THEN');
+    expect(helper).not.toContain('WHEN others THEN');
+    // Two conversion blocks: the page, and the four region scalars together.
+    expect((helper.match(/EXCEPTION/g) ?? []).length).toBe(2);
+    // Each conversion still follows its own jsonb_typeof test.
+    for (const cast of ["(src ->> 'pageNumber')::double precision", "(reg ->> 'x')::double precision"]) {
+      const at = helper.indexOf(cast);
+      expect(at, cast).toBeGreaterThan(-1);
+      expect(helper.lastIndexOf('jsonb_typeof', at), cast).toBeGreaterThan(-1);
+    }
+    // The document id is never cast at all. Comments are stripped first: the
+    // helper's own prose says it performs no ::uuid cast.
+    expect(helper.replace(/^\s*--.*$/gm, '')).not.toContain('::uuid');
+  });
+
+  it('F33: parity fixtures cover the float64 edges in both directions', () => {
+    // The cases that separate float64 from arbitrary precision.
+    for (const fixture of ['"pageNumber":1e400', '"width":1e-400', '"x":1e400', '"pageNumber":1.0']) {
+      expect(verifier, fixture).toContain(fixture);
+    }
+    // And the epsilon clamp that separates the parser from a naive range test.
+    expect(verifier).toContain('"x":-0.0000000001');
+  });
+
+  it('F34: policies are proved by IDENTITY -- name, command, role and mode', () => {
+    // A renamed policy, one narrowed to a role, or a RESTRICTIVE one, all carry
+    // the right predicate and the wrong authority.
+    for (const [name, sql] of [['rollout', rollout], ['verifier', verifier]] as const) {
+      for (const policy of [
+        "policyname='Users can view their own library items'",
+        "policyname='Users can insert their own library items'",
+        "policyname='Users can update their own library items'",
+        "policyname='Users can delete their own library items'",
+      ]) {
+        expect(sql, name + ' ' + policy).toContain(policy);
+      }
+      expect(sql, name).toContain("permissive='PERMISSIVE'");
+      expect(sql, name).toContain("roles='{public}'::name[]");
+    }
+    // The release gate carries the identity fingerprint, not just section 7.
+    const rollup = verifier.slice(verifier.indexOf('12 AS section'));
+    expect(rollup).toContain("policyname='Users can view their own library items'");
+    expect(rollup).toContain("permissive='PERMISSIVE'");
+    expect(rollup).toContain("roles='{public}'::name[]");
+  });
+
+  it('F35: PRE is a recognised fingerprint, not merely zero owned objects', () => {
+    // Normalising an unknown authority model would be this rollout inventing
+    // one nobody reviewed.
+    expect(preflight).toContain('legacy_grants');
+    expect(preflight).toContain("ARRAY['DELETE','INSERT','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']");
+    expect(preflight).toContain('not the recognised legacy state');
+    // The zero-object branch checks it BEFORE declaring PRE.
+    const zeroBranch = preflight.slice(preflight.indexOf('IF owned = 0 THEN'), preflight.indexOf('IF owned <> 3 THEN'));
+    expect(zeroBranch).toContain('legacy_grants');
+    expect(zeroBranch).toContain('RAISE EXCEPTION');
+    // The generic RPC prerequisite is fingerprinted by security mode and grants,
+    // and this rollout never repairs it.
+    expect(preflight).toContain('generic_ok');
+    expect(preflight).toContain('prosecdef');
+  });
+
+  it('F36: POST includes function security modes, and lookups never raise', () => {
+    // A DEFINER rewrite is an authority change: reported, never replaced.
+    expect(preflight).toContain('functions_hardened');
+    expect(preflight).toContain('NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = helper_oid)');
+    expect(preflight).toContain('NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = trusted_oid)');
+    // Every function is resolved by oid first, so a missing one is a decision.
+    expect(preflight).toContain('to_regprocedure(helper_sig)');
+    expect(preflight).toContain('to_regprocedure(trusted_sig)');
+    expect(preflight).toContain('to_regprocedure(generic_sig)');
+    expect(verifier).toContain("to_regprocedure(:'helperfn')");
+    expect(verifier).toContain("to_regprocedure(:'fn')");
+    expect(verifier).toContain("to_regprocedure(:'genericfn')");
+    // A CASE cannot save a statement that NAMES a missing function: Postgres
+    // resolves names at parse time, so the helper's callers are gated by psql
+    // itself rather than by SQL.
+    expect(verifier).toContain('\\gset');
+    expect((verifier.match(/\\if :helper_exists/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(verifier).toContain('resolves function names at PARSE time');
+    // The gate proves the security mode of all three functions.
+    const rollup = verifier.slice(verifier.indexOf('12 AS section'));
+    expect((rollup.match(/prosecdef/g) ?? []).length).toBeGreaterThanOrEqual(3);
   });
 });

@@ -85,8 +85,18 @@ GRANT ALL ON TABLE public.library_items TO service_role;
 -- normalizeStorableRegion()/finalizeRegion() pair it delegates to, in
 -- lib/domain/knowledge/knowledgePdfAreaImagePolicy.ts and
 -- lib/domain/knowledge/knowledgePageRegionGeometry.ts. The repair, the
--- postflight and the verifier all call this, so none of them can drift from
--- each other or from the reader that must later accept these rows.
+-- postflight, the trusted creation function and the verifier all call this, so
+-- none of them can drift from each other or from the reader that must later
+-- accept these rows.
+--
+-- IEEE-754 IS THE CONTRACT, NOT ARBITRARY PRECISION. The parser is JavaScript,
+-- where every number is a float64, so the comparisons below are made in
+-- `double precision`. `numeric` would silently disagree at the edges: jsonb
+-- stores 1e400 happily and numeric keeps it finite and integral, while
+-- Number('1e400') is Infinity and Number.isInteger rejects it -- so a numeric
+-- mirror would call that valid provenance and hand a durable path to a row the
+-- reader refuses. The same applies downward, where a tiny positive width
+-- underflows to 0 in float64 and stops being a selection.
 --
 -- DELIBERATELY NO STRICTER THAN THE PARSER. A row TypeScript accepts must be
 -- accepted here, or the repair would refuse rows the product considers valid:
@@ -100,10 +110,11 @@ GRANT ALL ON TABLE public.library_items TO service_role;
 --
 -- WRITTEN IN PLPGSQL FOR EVALUATION ORDER. In a single SQL expression Postgres
 -- may evaluate a cast before the AND-branch that was meant to guard it, so
--- `jsonb_typeof(v) = 'number' AND (v #>> '{}')::numeric > 0` can still raise on
--- client-controlled JSON. Here every cast is a separate statement that runs only
--- after its own type test returned, and the exception block makes "never throws
--- for malformed input" a guarantee rather than an argument.
+-- `jsonb_typeof(v) = 'number' AND (v ->> ...)::float8 > 0` can still raise on
+-- client JSON. Here every conversion is its own statement, and the ONLY
+-- exception handlers wrap those conversions -- deliberately narrow, so a
+-- release defect elsewhere in this function still surfaces instead of being
+-- silently reported as "not provenance".
 CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance(p_metadata jsonb)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -113,13 +124,13 @@ SET search_path = pg_catalog
 AS $$
 DECLARE
     -- finalizeRegion()'s own overhang tolerance (NORMALIZED_REGION_EPSILON).
-    eps CONSTANT numeric := 1e-9;
+    eps CONSTANT double precision := 1e-9;
     src jsonb;
     reg jsonb;
     doc text;
-    page_number numeric;
-    rx numeric; ry numeric; rw numeric; rh numeric;
-    r_left numeric; r_top numeric;
+    page_number double precision;
+    rx double precision; ry double precision; rw double precision; rh double precision;
+    r_left double precision; r_top double precision;
 BEGIN
     -- parseKnowledgePdfAreaProvenance: metadata and source must both be plain
     -- objects. jsonb_typeof reports 'array' for arrays, so this rejects them.
@@ -135,7 +146,8 @@ BEGIN
         RETURN false;
     END IF;
 
-    -- typeof knowledgeDocumentId === 'string' && UUID.test(...)
+    -- typeof knowledgeDocumentId === 'string' && UUID.test(...). Compared as
+    -- text: no ::uuid cast exists here, so a malformed id cannot raise.
     IF jsonb_typeof(src -> 'knowledgeDocumentId') <> 'string' THEN
         RETURN false;
     END IF;
@@ -144,12 +156,24 @@ BEGIN
         RETURN false;
     END IF;
 
-    -- Number.isInteger(pageNumber) && pageNumber >= 1. The cast runs only after
-    -- the type test above returned, so malformed JSON cannot reach it.
+    -- Number(pageNumber) as float64. Out-of-range JSON (1e400) raises here and
+    -- is rejected, matching Number.isInteger(Infinity) === false.
     IF jsonb_typeof(src -> 'pageNumber') <> 'number' THEN
         RETURN false;
     END IF;
-    page_number := (src -> 'pageNumber')::numeric;
+    BEGIN
+        page_number := (src ->> 'pageNumber')::double precision;
+    EXCEPTION
+        WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+            RETURN false;
+    END;
+    -- Number.isFinite, then Number.isInteger, then the canonical range.
+    IF page_number IS NULL
+       OR page_number <> page_number
+       OR page_number = 'Infinity'::double precision
+       OR page_number = '-Infinity'::double precision THEN
+        RETURN false;
+    END IF;
     IF page_number <> trunc(page_number) OR page_number < 1 THEN
         RETURN false;
     END IF;
@@ -165,12 +189,27 @@ BEGIN
        OR jsonb_typeof(reg -> 'height') <> 'number' THEN
         RETURN false;
     END IF;
-    rx := (reg -> 'x')::numeric;
-    ry := (reg -> 'y')::numeric;
-    rw := (reg -> 'width')::numeric;
-    rh := (reg -> 'height')::numeric;
+    BEGIN
+        rx := (reg ->> 'x')::double precision;
+        ry := (reg ->> 'y')::double precision;
+        rw := (reg ->> 'width')::double precision;
+        rh := (reg ->> 'height')::double precision;
+    EXCEPTION
+        WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+            RETURN false;
+    END;
 
-    -- JSON cannot carry NaN or Infinity, so Number.isFinite() needs no mirror.
+    -- Number.isFinite(x) && ... on every coordinate, exactly as finalizeRegion
+    -- does before it clamps anything.
+    IF rx IS NULL OR ry IS NULL OR rw IS NULL OR rh IS NULL
+       OR rx <> rx OR ry <> ry OR rw <> rw OR rh <> rh
+       OR rx IN ('Infinity'::double precision, '-Infinity'::double precision)
+       OR ry IN ('Infinity'::double precision, '-Infinity'::double precision)
+       OR rw IN ('Infinity'::double precision, '-Infinity'::double precision)
+       OR rh IN ('Infinity'::double precision, '-Infinity'::double precision) THEN
+        RETURN false;
+    END IF;
+
     r_left := CASE WHEN rx < 0 AND rx > -eps THEN 0 ELSE rx END;
     r_top  := CASE WHEN ry < 0 AND ry > -eps THEN 0 ELSE ry END;
     IF r_left < 0 OR r_top < 0 OR r_left > 1 OR r_top > 1 THEN
@@ -188,18 +227,14 @@ BEGIN
     END IF;
 
     RETURN true;
-EXCEPTION
-    -- Belt and braces. Client-writable JSON must never be able to abort a
-    -- rollout; anything unforeseen is simply "not PDF-area provenance".
-    WHEN others THEN
-        RETURN false;
 END;
 $$;
 
 COMMENT ON FUNCTION public.is_knowledge_pdf_area_provenance(jsonb) IS
     'IMAGE-LIBRARY-DURABLE-PREVIEW: SQL mirror of parseKnowledgePdfAreaProvenance '
-    '(incl. finalizeRegion epsilon clamping and Number.isInteger page semantics). '
-    'Returns false -- never NULL, never an exception -- for anything it rejects.';
+    '(float64 semantics, finalizeRegion epsilon clamping, Number.isInteger pages). '
+    'Returns false -- never NULL -- for anything it rejects; conversions of '
+    'untrusted JSON scalars are the only guarded operations.';
 
 -- Internal database machinery: the repair, postflight and the trusted creation
 -- function are its only callers. No browser role needs it, and PUBLIC must not
