@@ -4,10 +4,10 @@
 --   supabase/migrations/20260908090000_add_knowledge_pdf_area_image_placement_mapping.sql
 --
 -- The table, grants and function below are a faithful copy of that reviewed
--- migration. Nothing is improved or redesigned here; this file adds the
--- preflight and postflight that make it safe to run once against production.
--- The migration itself is untouched, and so is the CLOSED durable-preview
--- rollout beside it -- this file neither reads nor rewrites anything it owns.
+-- migration. Nothing is improved or redesigned here; this file adds the exact
+-- state machine that makes it safe to run against production. The migration
+-- itself is untouched, and so is the CLOSED durable-preview rollout beside it --
+-- this file neither reads nor rewrites anything it owns.
 --
 -- Run this file as one PostgreSQL statement batch. It is intentionally not a
 -- Supabase CLI migration: `[db.migrations] enabled = false` in config.toml and
@@ -19,32 +19,144 @@
 -- inherited `metadata.imageUrl` addressing the origin card -- a URL that 404s
 -- once that card is deleted. The correction gives the new placement its own
 -- board address and adds the only thing that can authorise serving the private
--- crop behind it: a server-owned mapping no browser role may write or read.
+-- crop behind it: a server-owned mapping recording the padlet, the durable
+-- Library object AND the board whose edit authority was proven at creation.
 --
 -- WHAT IT DOES NOT TOUCH: library_items rows, padlets rows, knowledge_documents,
 -- knowledge_pages, source_references, storage buckets, storage objects, the
 -- durable-preview column and its grants, or either existing image RPC. No PDF
 -- or page content is read. No crop is copied, regenerated or deleted.
 --
--- ROW WRITES: NONE. This rollout creates a table, an index and a function. It
--- inserts no mapping rows and BACKFILLS NOTHING -- historical PDF-area
+-- ROW WRITES: NONE. This rollout creates a table, two indexes and a function.
+-- It inserts no mapping rows and BACKFILLS NOTHING -- historical PDF-area
 -- placements keep serving their own derived object through the board route's
 -- unchanged direct branch, which is exactly why no backfill is needed.
+--
+-- THE STATE MACHINE IS EXACT, AND MUTATION IS GATED BEHIND IT.
+--
+--   EXACT POST   every condition of the installed contract already holds
+--                -> NOTHING runs. Not a CREATE, not a GRANT, not a REVOKE,
+--                   not an ALTER. The DDL lives inside EXECUTE strings that
+--                   are only reached on the PRE branch, so a released database
+--                   cannot be silently "repaired" into a shape nobody reviewed.
+--   EXACT PRE    neither owned object exists and every prerequisite is present
+--                -> apply, then re-prove the SAME complete fingerprint.
+--   ANYTHING ELSE -> ABORT before any mutation.
+--
+-- The fingerprint is written ONCE, as SQL text evaluated by EXECUTE, so the
+-- POST test and the postflight cannot disagree with each other -- they are
+-- literally the same query. It reads catalogs only and takes OIDs rather than
+-- names for every privilege test, so an absent object yields NULL -> false
+-- instead of raising.
 
 BEGIN;
 
--- Fail before any schema or privilege change unless production is in one of
--- exactly two RECOGNISED states.
---
---   PRE    neither owned object exists, AND every prerequisite this correction
---          builds on is present in its expected shape
---   POST   both owned objects exist, AND every hardened release condition holds
---   anything else -> ABORT
---
--- One of two present is PARTIAL: it is reported, never completed over, because
--- a half-applied authority model is not a state anybody reviewed.
-DO $preflight$
+DO $rollout$
 DECLARE
+    reuse_sig CONSTANT text :=
+        'public.create_knowledge_pdf_area_image_reuse_placement(uuid, uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)';
+    -- THE COMPLETE INSTALLED CONTRACT, as one boolean. Identical to the
+    -- verifier's release gate.
+    fingerprint CONSTANT text := $fp$
+SELECT COALESCE(
+       t.oid IS NOT NULL
+   AND f.oid IS NOT NULL
+   AND (SELECT count(*) = 4 FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements')
+   AND (SELECT array_agg(column_name::text || ':' || data_type || ':' || is_nullable
+                         ORDER BY column_name::text)
+          FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements')
+       = ARRAY['board_id:uuid:NO','created_at:timestamp with time zone:NO',
+               'library_item_id:uuid:NO','padlet_id:uuid:NO']
+   AND (SELECT column_default = 'now()' FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'
+           AND column_name='created_at')
+   AND EXISTS (SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = t.oid AND c.contype = 'p'
+                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                         WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[])
+   AND (SELECT count(*) = 3 FROM pg_constraint c
+         WHERE c.conrelid = t.oid AND c.contype = 'f')
+   AND EXISTS (SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
+                  AND c.confrelid = to_regclass('public.padlets')
+                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                         WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[]
+                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                          WHERE a.attrelid = to_regclass('public.padlets') AND a.attname='id')]::int2[])
+   AND EXISTS (SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
+                  AND c.confrelid = to_regclass('public.library_items')
+                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                         WHERE a.attrelid = t.oid AND a.attname='library_item_id')]::int2[]
+                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                          WHERE a.attrelid = to_regclass('public.library_items') AND a.attname='id')]::int2[])
+   AND EXISTS (SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
+                  AND c.confrelid = to_regclass('public.boards')
+                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                         WHERE a.attrelid = t.oid AND a.attname='board_id')]::int2[]
+                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                          WHERE a.attrelid = to_regclass('public.boards') AND a.attname='id')]::int2[])
+   AND (SELECT c.relrowsecurity FROM pg_class c WHERE c.oid = t.oid)
+   AND (SELECT count(*) = 0 FROM pg_policy p WHERE p.polrelid = t.oid)
+   AND NOT has_table_privilege('anon', t.oid, 'SELECT')
+   AND NOT has_table_privilege('anon', t.oid, 'INSERT')
+   AND NOT has_table_privilege('anon', t.oid, 'UPDATE')
+   AND NOT has_table_privilege('anon', t.oid, 'DELETE')
+   AND NOT has_table_privilege('anon', t.oid, 'TRUNCATE')
+   AND NOT has_table_privilege('anon', t.oid, 'REFERENCES')
+   AND NOT has_table_privilege('anon', t.oid, 'TRIGGER')
+   AND NOT has_table_privilege('anon', t.oid, 'MAINTAIN')
+   AND NOT has_table_privilege('authenticated', t.oid, 'SELECT')
+   AND NOT has_table_privilege('authenticated', t.oid, 'INSERT')
+   AND NOT has_table_privilege('authenticated', t.oid, 'UPDATE')
+   AND NOT has_table_privilege('authenticated', t.oid, 'DELETE')
+   AND NOT has_table_privilege('authenticated', t.oid, 'TRUNCATE')
+   AND NOT has_table_privilege('authenticated', t.oid, 'REFERENCES')
+   AND NOT has_table_privilege('authenticated', t.oid, 'TRIGGER')
+   AND NOT has_table_privilege('authenticated', t.oid, 'MAINTAIN')
+   AND (SELECT COALESCE(count(*) = 0, true) FROM information_schema.table_privileges
+         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'
+           AND grantee IN ('PUBLIC','anon','authenticated'))
+   AND has_table_privilege('service_role', t.oid, 'SELECT')
+   AND has_table_privilege('service_role', t.oid, 'INSERT')
+   AND has_table_privilege('service_role', t.oid, 'DELETE')
+   AND (SELECT NOT p.prosecdef
+                AND l.lanname = 'plpgsql'
+                AND COALESCE(p.proconfig, ARRAY[]::text[]) = ARRAY['search_path=public']::text[]
+                AND pg_get_function_identity_arguments(p.oid)
+                    = 'p_padlet_id uuid, p_board_id uuid, p_user_id uuid, p_library_item_id uuid, p_title text, p_content text, p_position_x double precision, p_position_y double precision, p_width double precision, p_height double precision, p_board_file_url text, p_metadata jsonb'
+                AND pg_get_function_result(p.oid)
+                    = 'TABLE(padlet_id uuid, library_item_id uuid, board_id uuid)'
+                AND md5(p.prosrc) = 'c67271ebcc867aaf7f1d272746c62094'
+                AND p.prosrc LIKE '%board_collaborators%'
+                AND p.prosrc LIKE '%is_knowledge_pdf_area_provenance%'
+                AND p.prosrc LIKE '%INSERT INTO public.padlets%'
+                AND p.prosrc LIKE '%INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id, board_id)%'
+                AND p.prosrc LIKE '%VALUES (p_padlet_id, p_library_item_id, p_board_id)%'
+                AND p.prosrc NOT LIKE '%INSERT INTO public.library_items%'
+                AND p.prosrc NOT LIKE '%p_storage_path%'
+                AND p.prosrc NOT LIKE '%storage.%'
+                AND p.prosrc NOT LIKE '%board-derived/%'
+          FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = f.oid)
+   AND has_function_privilege('service_role', f.oid, 'EXECUTE')
+   AND NOT has_function_privilege('authenticated', f.oid, 'EXECUTE')
+   AND NOT has_function_privilege('anon', f.oid, 'EXECUTE')
+   AND NOT has_function_privilege('public', f.oid, 'EXECUTE')
+   AND (SELECT data_type = 'text' FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='library_items'
+           AND column_name='knowledge_storage_path')
+   AND NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','INSERT')
+   AND NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE')
+   AND NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','INSERT')
+   AND NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE')
+   AND to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NOT NULL
+   , false)
+  FROM (SELECT to_regclass('public.knowledge_pdf_area_image_placements') AS oid) t,
+       (SELECT to_regprocedure('public.create_knowledge_pdf_area_image_reuse_placement(uuid, uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') AS oid) f
+$fp$;
     prerequisites CONSTANT text[] := ARRAY[
         'public.library_items',
         'public.padlets',
@@ -52,186 +164,129 @@ DECLARE
         'public.board_collaborators'
     ];
     prerequisite text;
-    mapping_table CONSTANT text := 'public.knowledge_pdf_area_image_placements';
-    helper_sig CONSTANT text := 'public.is_knowledge_pdf_area_provenance(jsonb)';
-    reuse_sig CONSTANT text :=
-        'public.create_knowledge_pdf_area_image_reuse_placement(uuid, uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)';
-    mapping_oid oid;
-    reuse_oid oid;
+    table_oid oid;
+    fn_oid oid;
     owned integer := 0;
-    rls_on boolean;
-    policy_count integer;
-    pk_ok boolean;
-    fk_ok boolean;
-    grants_ok boolean;
-    function_ok boolean;
+    is_post boolean;
 BEGIN
+    -- PREREQUISITES. Objects this correction builds on and does not own. A
+    -- missing one is not drift in this feature -- it is the wrong database.
     FOREACH prerequisite IN ARRAY prerequisites LOOP
         IF to_regclass(prerequisite) IS NULL THEN
             RAISE EXCEPTION
-                'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight failed: prerequisite table % is missing', prerequisite;
+                'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: prerequisite table % is missing', prerequisite;
         END IF;
     END LOOP;
-
-    -- The durable-preview correction is a PREREQUISITE this rollout does not
-    -- own. Without the server-owned path column there is no durable object for
-    -- a mapping to point at, and without the shared provenance mirror the
-    -- trusted function below cannot judge what it is placing.
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'library_items'
-           AND column_name = 'knowledge_storage_path'
+         WHERE table_schema='public' AND table_name='library_items'
+           AND column_name='knowledge_storage_path' AND data_type='text'
     ) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight failed: library_items.knowledge_storage_path is missing -- apply the durable-preview rollout first';
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: library_items.knowledge_storage_path is missing -- apply the durable-preview rollout first';
     END IF;
-    IF to_regprocedure(helper_sig) IS NULL THEN
+    IF to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NULL THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight failed: % is missing -- apply the durable-preview rollout first', helper_sig;
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: the shared provenance mirror is missing -- apply the durable-preview rollout first';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'padlets' AND column_name = 'library_item_id'
+         WHERE table_schema='public' AND table_name='padlets' AND column_name='library_item_id'
     ) THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight failed: padlets.library_item_id is missing -- apply the IMAGE-LIBRARY ownership rollout first';
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: padlets.library_item_id is missing -- apply the IMAGE-LIBRARY ownership rollout first';
     END IF;
 
-    -- to_regclass/to_regprocedure return NULL rather than raising for absent
-    -- objects, so a missing one is a decision here, never an error.
-    mapping_oid := to_regclass(mapping_table);
-    reuse_oid := to_regprocedure(reuse_sig);
-    IF mapping_oid IS NOT NULL THEN owned := owned + 1; END IF;
-    IF reuse_oid IS NOT NULL THEN owned := owned + 1; END IF;
-
-    IF owned = 0 THEN
-        RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight: PRE state (0 of 2 owned objects) -- applying';
+    -- EXACT POST? Then this batch performs no mutation whatsoever.
+    EXECUTE fingerprint INTO is_post;
+    IF COALESCE(is_post, false) THEN
+        RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: EXACT POST already released -- no mutation performed';
         RETURN;
     END IF;
 
-    IF owned = 1 THEN
+    -- Not POST. Then it must be EXACT PRE: neither owned object may exist, in
+    -- any partial or drifted form.
+    table_oid := to_regclass('public.knowledge_pdf_area_image_placements');
+    fn_oid := to_regprocedure(reuse_sig);
+    IF table_oid IS NOT NULL THEN owned := owned + 1; END IF;
+    IF fn_oid IS NOT NULL THEN owned := owned + 1; END IF;
+
+    IF owned <> 0 THEN
         RAISE EXCEPTION
-            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight failed: PARTIAL state (mapping table present=%, reuse function present=%). Resolve by hand.',
-            mapping_oid IS NOT NULL, reuse_oid IS NOT NULL;
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: refusing to mutate -- the feature objects exist but the released contract does not hold (mapping table present=%, reuse function present=%). Resolve by hand.',
+            table_oid IS NOT NULL, fn_oid IS NOT NULL;
     END IF;
 
-    -- Both present. POST is more than existence: a database where a browser
-    -- role can read or write the mapping, or where the function has become
-    -- SECURITY DEFINER or executable by a browser role, is NOT the released
-    -- state and must not be silently re-created over.
-    SELECT c.relrowsecurity INTO rls_on
-      FROM pg_class c WHERE c.oid = mapping_oid;
-    SELECT count(*) INTO policy_count
-      FROM pg_policy p WHERE p.polrelid = mapping_oid;
-
-    pk_ok := EXISTS (
-        SELECT 1 FROM pg_constraint con
-         WHERE con.conrelid = mapping_oid AND con.contype = 'p'
-           AND con.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                    WHERE a.attrelid = mapping_oid AND a.attname = 'padlet_id')]::int2[]
-    );
-    -- Both foreign keys must cascade: the grant dies with the placement, and
-    -- with the durable object it points at.
-    fk_ok := (
-        SELECT count(*) = 2 FROM pg_constraint con
-         WHERE con.conrelid = mapping_oid AND con.contype = 'f' AND con.confdeltype = 'c'
-    );
-
-    grants_ok :=
-        NOT has_table_privilege('anon', mapping_table, 'SELECT')
-    AND NOT has_table_privilege('anon', mapping_table, 'INSERT')
-    AND NOT has_table_privilege('anon', mapping_table, 'UPDATE')
-    AND NOT has_table_privilege('anon', mapping_table, 'DELETE')
-    AND NOT has_table_privilege('anon', mapping_table, 'MAINTAIN')
-    AND NOT has_table_privilege('authenticated', mapping_table, 'SELECT')
-    AND NOT has_table_privilege('authenticated', mapping_table, 'INSERT')
-    AND NOT has_table_privilege('authenticated', mapping_table, 'UPDATE')
-    AND NOT has_table_privilege('authenticated', mapping_table, 'DELETE')
-    AND NOT has_table_privilege('authenticated', mapping_table, 'MAINTAIN')
-    AND has_table_privilege('service_role', mapping_table, 'SELECT')
-    AND has_table_privilege('service_role', mapping_table, 'INSERT');
-
-    function_ok :=
-        (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = reuse_oid)
-    AND has_function_privilege('service_role', reuse_oid, 'EXECUTE')
-    AND NOT has_function_privilege('authenticated', reuse_oid, 'EXECUTE')
-    AND NOT has_function_privilege('anon', reuse_oid, 'EXECUTE')
-    AND NOT has_function_privilege('public', reuse_oid, 'EXECUTE');
-
-    IF COALESCE(rls_on, false)
-       AND policy_count = 0
-       AND COALESCE(pk_ok, false)
-       AND COALESCE(fk_ok, false)
-       AND COALESCE(grants_ok, false)
-       AND COALESCE(function_ok, false) THEN
-        RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight: POST state already released -- re-running is a no-op';
-        RETURN;
+    -- Also refuse a database carrying an object of ours under a shape we do not
+    -- own: an index or constraint left behind by a partial attempt.
+    IF EXISTS (SELECT 1 FROM pg_class WHERE relname LIKE 'knowledge_pdf_area_image_placements%') THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: refusing to mutate -- residual objects named after the mapping already exist';
     END IF;
 
-    RAISE EXCEPTION
-        'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE preflight failed: both objects exist but the released posture does not hold (rls=%, policies=%, pk=%, cascade=%, grants=%, function=%). Resolve by hand.',
-        rls_on, policy_count, pk_ok, fk_ok, grants_ok, function_ok;
-END;
-$preflight$;
+    RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: EXACT PRE -- applying';
 
--- ---------------------------------------------------------------------------
--- The server-owned mapping. A faithful copy of the reviewed migration.
--- ---------------------------------------------------------------------------
+    -- ---------------------------------------------------------------------
+    -- The feature. Reached ONLY from the PRE branch above.
+    -- ---------------------------------------------------------------------
+    EXECUTE $ddl$
+        CREATE TABLE public.knowledge_pdf_area_image_placements (
+            padlet_id uuid PRIMARY KEY
+                REFERENCES public.padlets(id) ON DELETE CASCADE,
+            library_item_id uuid NOT NULL
+                REFERENCES public.library_items(id) ON DELETE CASCADE,
+            board_id uuid NOT NULL
+                REFERENCES public.boards(id) ON DELETE CASCADE,
+            created_at timestamptz NOT NULL DEFAULT now()
+        )
+    $ddl$;
 
-CREATE TABLE IF NOT EXISTS public.knowledge_pdf_area_image_placements (
-    padlet_id uuid PRIMARY KEY
-        REFERENCES public.padlets(id) ON DELETE CASCADE,
-    library_item_id uuid NOT NULL
-        REFERENCES public.library_items(id) ON DELETE CASCADE,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
+    EXECUTE $ddl$
+        COMMENT ON TABLE public.knowledge_pdf_area_image_placements IS
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: server-owned proof that a board '
+            'placement may be served the durable private crop of a PDF-area Library '
+            'Image, and the board on which that was authorised. Written only by '
+            'create_knowledge_pdf_area_image_reuse_placement. No browser role has any '
+            'privilege on it; padlets.library_item_id is a consistency hint beside it, '
+            'never an authorisation.'
+    $ddl$;
 
-COMMENT ON TABLE public.knowledge_pdf_area_image_placements IS
-    'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: server-owned proof that a board '
-    'placement may be served the durable private crop of a PDF-area Library '
-    'Image. Written only by create_knowledge_pdf_area_image_reuse_placement. '
-    'No browser role has any privilege on it; padlets.library_item_id is a '
-    'consistency hint beside it, never an authorisation.';
+    EXECUTE $ddl$
+        CREATE INDEX knowledge_pdf_area_image_placements_library_item_id_idx
+            ON public.knowledge_pdf_area_image_placements (library_item_id)
+    $ddl$;
 
-COMMENT ON COLUMN public.knowledge_pdf_area_image_placements.padlet_id IS
-    'The placement this authorisation belongs to. Primary key: one placement, '
-    'one durable object. Cascades on padlet delete so the grant dies with it.';
+    EXECUTE $ddl$
+        CREATE INDEX knowledge_pdf_area_image_placements_board_id_idx
+            ON public.knowledge_pdf_area_image_placements (board_id)
+    $ddl$;
 
-COMMENT ON COLUMN public.knowledge_pdf_area_image_placements.library_item_id IS
-    'The durable library_items row whose knowledge_storage_path may be served '
-    'for this placement.';
+    EXECUTE $ddl$ ALTER TABLE public.knowledge_pdf_area_image_placements ENABLE ROW LEVEL SECURITY $ddl$;
+    EXECUTE $ddl$ REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM PUBLIC $ddl$;
+    EXECUTE $ddl$ REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM anon $ddl$;
+    EXECUTE $ddl$ REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM authenticated $ddl$;
+    EXECUTE $ddl$ GRANT ALL ON TABLE public.knowledge_pdf_area_image_placements TO service_role $ddl$;
 
-CREATE INDEX IF NOT EXISTS knowledge_pdf_area_image_placements_library_item_id_idx
-    ON public.knowledge_pdf_area_image_placements (library_item_id);
-
--- Fail closed twice over: RLS with ZERO policies, and no privileges at all.
-ALTER TABLE public.knowledge_pdf_area_image_placements ENABLE ROW LEVEL SECURITY;
-
-REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM PUBLIC;
-REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM anon;
-REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM authenticated;
-
-GRANT ALL ON TABLE public.knowledge_pdf_area_image_placements TO service_role;
-
-CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
-    p_padlet_id uuid,
-    p_board_id uuid,
-    p_user_id uuid,
-    p_library_item_id uuid,
-    p_title text,
-    p_content text,
-    p_position_x double precision,
-    p_position_y double precision,
-    p_width double precision,
-    p_height double precision,
-    p_board_file_url text,
-    p_metadata jsonb
-)
-RETURNS TABLE (padlet_id uuid, library_item_id uuid)
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public
-AS $$
+    EXECUTE $ddl$
+        CREATE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
+            p_padlet_id uuid,
+            p_board_id uuid,
+            p_user_id uuid,
+            p_library_item_id uuid,
+            p_title text,
+            p_content text,
+            p_position_x double precision,
+            p_position_y double precision,
+            p_width double precision,
+            p_height double precision,
+            p_board_file_url text,
+            p_metadata jsonb
+        )
+        RETURNS TABLE (padlet_id uuid, library_item_id uuid, board_id uuid)
+        LANGUAGE plpgsql
+        SECURITY INVOKER
+        SET search_path = public
+        AS $fn$
 DECLARE
     v_owner uuid;
     v_type text;
@@ -253,7 +308,9 @@ BEGIN
     -- 2. BOARD-WRITE AUTHORITY FOR THAT ACTOR -- load-bearing, not decorative.
     -- The `board_id` branch of the padlets INSERT policy, reproduced exactly:
     -- owner of the board, or a collaborator whose role is 'editor'. Nothing is
-    -- broadened -- viewer and commenter are absent by construction.
+    -- broadened -- viewer and commenter are absent by construction. This is the
+    -- board the mapping will record, so the entitlement can never name a board
+    -- whose authority was not proved right here.
     IF NOT EXISTS (
         SELECT 1 FROM public.boards b
          WHERE b.id = p_board_id AND b.user_id = p_user_id
@@ -281,6 +338,8 @@ BEGIN
         RAISE EXCEPTION 'Library item is not a placeable PDF-area image'
             USING ERRCODE = '22023';
     END IF;
+    -- A durable address must already have been PROVEN. No path is derived, and
+    -- none is accepted: without this column there is nothing to serve later.
     IF v_path IS NULL OR length(v_path) = 0 THEN
         RAISE EXCEPTION 'Library item is not a placeable PDF-area image'
             USING ERRCODE = '22023';
@@ -297,14 +356,21 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    -- 5. AND THEY MUST BE THE SAME SOURCE.
+    -- 5. AND THEY MUST BE THE SAME SOURCE. The placement is a rebinding of the
+    -- Library object's own provenance, so anything else is a caller inventing a
+    -- claim about what these bytes are a crop of. jsonb equality compares
+    -- numbers numerically, so 1 and 1.0 are the same page here as they are in
+    -- the TypeScript reader.
     IF (p_metadata -> 'source') IS DISTINCT FROM (v_library_metadata -> 'source') THEN
         RAISE EXCEPTION 'Placement provenance does not match the library image'
             USING ERRCODE = '22023';
     END IF;
 
-    -- 6. The placement and its authorisation, in this one transaction. No
-    -- library_items row is created, and no Storage object is touched.
+    -- 6. The placement and its authorisation, in this one transaction. A
+    -- failure on either side leaves neither: a placement with no mapping would
+    -- render nothing, and a mapping with no placement would be a grant with no
+    -- subject. No library_items row is created, and no Storage object is
+    -- touched -- there is not a single storage call in this function.
     INSERT INTO public.padlets (
         id, board_id, title, content, type, position_x, position_y,
         width, height, file_url, metadata, library_item_id
@@ -313,149 +379,53 @@ BEGIN
         p_width, p_height, p_board_file_url, p_metadata, p_library_item_id
     );
 
-    INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id)
-    VALUES (p_padlet_id, p_library_item_id);
+    INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id, board_id)
+    VALUES (p_padlet_id, p_library_item_id, p_board_id);
 
-    RETURN QUERY SELECT p_padlet_id, p_library_item_id;
+    RETURN QUERY SELECT p_padlet_id, p_library_item_id, p_board_id;
 END;
-$$;
+$fn$
+    $ddl$;
 
-REVOKE ALL ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
-    uuid, uuid, uuid, uuid, text, text, double precision, double precision,
-    double precision, double precision, text, jsonb
-) FROM PUBLIC, anon, authenticated;
+    EXECUTE $ddl$
+        REVOKE ALL ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
+            uuid, uuid, uuid, uuid, text, text, double precision, double precision,
+            double precision, double precision, text, jsonb
+        ) FROM PUBLIC, anon, authenticated
+    $ddl$;
 
-GRANT EXECUTE ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
-    uuid, uuid, uuid, uuid, text, text, double precision, double precision,
-    double precision, double precision, text, jsonb
-) TO service_role;
+    EXECUTE $ddl$
+        GRANT EXECUTE ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
+            uuid, uuid, uuid, uuid, text, text, double precision, double precision,
+            double precision, double precision, text, jsonb
+        ) TO service_role
+    $ddl$;
 
-COMMENT ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
-    uuid, uuid, uuid, uuid, text, text, double precision, double precision,
-    double precision, double precision, text, jsonb
-) IS
-    'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: places an existing durable PDF-area '
-    'Library Image on a board, writing the placement and its server-owned '
-    'mapping in ONE transaction. Re-proves library ownership and board edit '
-    'authority. Creates no library row, copies no storage object, accepts no '
-    'path. service_role only.';
+    EXECUTE $ddl$
+        COMMENT ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
+            uuid, uuid, uuid, uuid, text, text, double precision, double precision,
+            double precision, double precision, text, jsonb
+        ) IS
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: places an existing durable PDF-area '
+            'Library Image on a board, writing the placement and its server-owned '
+            'mapping -- including the authorised board -- in ONE transaction. Re-proves '
+            'library ownership and board edit authority. Creates no library row, copies '
+            'no storage object, accepts no path. service_role only.'
+    $ddl$;
 
--- ---------------------------------------------------------------------------
--- Postflight: the released posture, re-proved inside the same transaction.
--- ---------------------------------------------------------------------------
---
--- Anything short of it aborts the whole batch, so production never keeps a
--- half-hardened authority model.
-DO $postflight$
-DECLARE
-    mapping_table CONSTANT text := 'public.knowledge_pdf_area_image_placements';
-    reuse_sig CONSTANT text :=
-        'public.create_knowledge_pdf_area_image_reuse_placement(uuid, uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)';
-    mapping_oid oid;
-    reuse_oid oid;
-    policy_count integer;
-    fk_count integer;
-    row_count bigint;
-BEGIN
-    mapping_oid := to_regclass(mapping_table);
-    IF mapping_oid IS NULL THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: mapping table missing';
-    END IF;
-    reuse_oid := to_regprocedure(reuse_sig);
-    IF reuse_oid IS NULL THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: reuse function missing';
+    -- ---------------------------------------------------------------------
+    -- POSTFLIGHT: the SAME complete fingerprint, re-evaluated. Not a
+    -- diagnostic print -- anything short of the full contract aborts the whole
+    -- batch, so production never keeps a half-hardened authority model.
+    -- ---------------------------------------------------------------------
+    EXECUTE fingerprint INTO is_post;
+    IF NOT COALESCE(is_post, false) THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: the installed objects do not match the reviewed contract';
     END IF;
 
-    -- Structure.
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'knowledge_pdf_area_image_placements'
-           AND column_name = 'padlet_id' AND data_type = 'uuid' AND is_nullable = 'NO'
-    ) OR NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'knowledge_pdf_area_image_placements'
-           AND column_name = 'library_item_id' AND data_type = 'uuid' AND is_nullable = 'NO'
-    ) THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: mapping columns are not the reviewed shape';
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint con
-         WHERE con.conrelid = mapping_oid AND con.contype = 'p'
-           AND con.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                    WHERE a.attrelid = mapping_oid AND a.attname = 'padlet_id')]::int2[]
-    ) THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: padlet_id is not the primary key';
-    END IF;
-
-    SELECT count(*) INTO fk_count FROM pg_constraint con
-     WHERE con.conrelid = mapping_oid AND con.contype = 'f' AND con.confdeltype = 'c';
-    IF fk_count <> 2 THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: expected 2 cascading foreign keys, found %', fk_count;
-    END IF;
-
-    -- Authority.
-    IF NOT (SELECT c.relrowsecurity FROM pg_class c WHERE c.oid = mapping_oid) THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: RLS is not enabled on the mapping';
-    END IF;
-    SELECT count(*) INTO policy_count FROM pg_policy p WHERE p.polrelid = mapping_oid;
-    IF policy_count <> 0 THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: the mapping must have ZERO policies, found %', policy_count;
-    END IF;
-
-    IF has_table_privilege('anon', mapping_table, 'SELECT')
-       OR has_table_privilege('anon', mapping_table, 'INSERT')
-       OR has_table_privilege('anon', mapping_table, 'UPDATE')
-       OR has_table_privilege('anon', mapping_table, 'DELETE')
-       OR has_table_privilege('anon', mapping_table, 'TRUNCATE')
-       OR has_table_privilege('anon', mapping_table, 'REFERENCES')
-       OR has_table_privilege('anon', mapping_table, 'TRIGGER')
-       OR has_table_privilege('anon', mapping_table, 'MAINTAIN') THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: anon retains privileges on the mapping';
-    END IF;
-    IF has_table_privilege('authenticated', mapping_table, 'SELECT')
-       OR has_table_privilege('authenticated', mapping_table, 'INSERT')
-       OR has_table_privilege('authenticated', mapping_table, 'UPDATE')
-       OR has_table_privilege('authenticated', mapping_table, 'DELETE')
-       OR has_table_privilege('authenticated', mapping_table, 'TRUNCATE')
-       OR has_table_privilege('authenticated', mapping_table, 'REFERENCES')
-       OR has_table_privilege('authenticated', mapping_table, 'TRIGGER')
-       OR has_table_privilege('authenticated', mapping_table, 'MAINTAIN') THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: authenticated retains privileges on the mapping';
-    END IF;
-    IF NOT has_table_privilege('service_role', mapping_table, 'INSERT')
-       OR NOT has_table_privilege('service_role', mapping_table, 'SELECT') THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: service_role cannot maintain the mapping';
-    END IF;
-
-    IF (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = reuse_oid) THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: the reuse function is SECURITY DEFINER';
-    END IF;
-    IF NOT has_function_privilege('service_role', reuse_oid, 'EXECUTE')
-       OR has_function_privilege('authenticated', reuse_oid, 'EXECUTE')
-       OR has_function_privilege('anon', reuse_oid, 'EXECUTE')
-       OR has_function_privilege('public', reuse_oid, 'EXECUTE') THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: the reuse function is not service_role-only';
-    END IF;
-
-    -- The durable-preview column this correction depends on is untouched.
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'library_items'
-           AND column_name = 'knowledge_storage_path' AND data_type = 'text'
-    ) THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: the durable-preview column changed';
-    END IF;
-    IF has_column_privilege('authenticated', 'public.library_items', 'knowledge_storage_path', 'UPDATE')
-       OR has_column_privilege('anon', 'public.library_items', 'knowledge_storage_path', 'UPDATE') THEN
-        RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight failed: the durable-preview column became browser-writable';
-    END IF;
-
-    -- NO BACKFILL. Every mapping row is written by the trusted path, one drop
-    -- at a time; this rollout must never have invented one.
-    SELECT count(*) INTO row_count FROM public.knowledge_pdf_area_image_placements;
-    RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE postflight: released. mapping rows = % (this rollout wrote none)', row_count;
+    RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: released and re-proved (this rollout wrote no mapping rows)';
 END;
-$postflight$;
+$rollout$;
 
 COMMIT;

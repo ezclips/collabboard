@@ -833,52 +833,60 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
     'supabase/production-rollouts/20260908090000_knowledge_pdf_area_image_placement_mapping.sql');
   const reuseVerifier = sourceOf(
     'supabase/production-rollouts/20260908090000_knowledge_pdf_area_image_placement_mapping_verify.sql');
+  const reuseClient = sourceOf('lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient.ts');
+  const canvasData = sourceOf('components/collabboard/canvas/hooks/useCanvasData.ts');
 
-  it('F41 (R7, R8): only a durable PDF-area IMAGE takes the new path', () => {
-    const branch = after(canvasClient, 'const pdfAreaProvenance =', 1400);
-    // All three conditions, so an ordinary Library item and an ordinary image
-    // both fall through to the existing reuse call untouched.
-    expect(branch).toContain("content.type === 'image'");
-    expect(branch).toContain("typeof content.libraryItemId === 'string'");
-    expect(branch).toContain('parseKnowledgePdfAreaProvenance(content.metadata)');
-    expect(branch).toContain('if (canvasId && pdfAreaProvenance !== null && content.libraryItemId)');
-    // And the pre-existing path is still the one everything else reaches.
-    const gate = canvasClient.indexOf('const pdfAreaProvenance =');
+  it('F41 (R7, R8): only a durable PDF-area IMAGE takes the trusted path', () => {
+    // ONE decision helper on this screen, and every Library boundary calls it.
+    const helper = after(canvasClient, 'const placeDurablePdfAreaLibraryImage = useCallback(', 1200);
+    expect(helper).toContain('readKnowledgePdfAreaLibraryPlacement(draft, canvasId)');
+    expect(helper).toContain("if (intent === null) return 'not-applicable';");
+    expect(helper).toContain('requestKnowledgePdfAreaLibraryPlacement(intent)');
+    // Both drop boundaries consult it, and the ordinary path is still reached
+    // by everything it declines.
+    expect((canvasClient.match(/await placeDurablePdfAreaLibraryImage\(/g) ?? []).length)
+      .toBeGreaterThanOrEqual(2);
+    const gate = canvasClient.indexOf('await placeDurablePdfAreaLibraryImage({');
     const ordinary = canvasClient.indexOf('await addPadletFromLibraryItem({', gate);
     expect(ordinary).toBeGreaterThan(gate);
   });
 
   it('F42: the browser sends a POSITION to the board-scoped reuse route, nothing more', () => {
-    const branch = after(canvasClient, 'const pdfAreaProvenance =', 1400);
-    expect(branch).toContain('/library-items/');
-    expect(branch).toContain('/image-placement');
-    expect(branch).toContain("method: 'POST'");
-    expect(branch).toContain('JSON.stringify({ positionX: x, positionY: y })');
-    // Nothing about the private object, the origin, or ownership is sent.
+    // The request is built once, in the shared client, from an intent the
+    // classifier produced -- never spread from the drag payload.
+    expect(reuseClient).toContain('/library-items/');
+    expect(reuseClient).toContain('/image-placement');
+    expect(reuseClient).toContain("method: 'POST'");
+    expect(reuseClient).toContain(
+      'JSON.stringify({ positionX: intent.positionX, positionY: intent.positionY })');
     for (const forbidden of ['knowledge_storage_path', 'storagePath', 'originBoardId',
       'originPadletId', 'board-derived/']) {
-      expect(branch, forbidden).not.toContain(forbidden);
+      expect(reuseClient, forbidden).not.toContain(forbidden);
     }
+    // And the intent itself carries only board, library id and a position.
+    expect(reuseClient).toContain('readonly boardId: string;');
+    expect(reuseClient).toContain('readonly libraryItemId: string;');
+    expect(reuseClient).toContain('readonly positionX: number;');
   });
 
   it('F43: a refused reuse never falls back to the browser INSERT', () => {
-    const branch = after(canvasClient, 'if (!placed || !placed.ok)', 400);
-    expect(branch).toContain('toast.error');
-    expect(branch).toContain('return;');
-    // The failure path returns BEFORE addPadletFromLibraryItem, which is what
-    // would otherwise re-create the broken card.
-    const failure = canvasClient.indexOf('if (!placed || !placed.ok)');
-    const returnAt = canvasClient.indexOf('return;', failure);
-    const insertAt = canvasClient.indexOf('await addPadletFromLibraryItem({', failure);
-    expect(returnAt).toBeGreaterThan(-1);
-    expect(insertAt).toBeGreaterThan(returnAt);
+    const helper = after(canvasClient, 'const placeDurablePdfAreaLibraryImage = useCallback(', 1600);
+    expect(helper).toContain('toast.error');
+    expect(helper).toContain("return 'refused';");
+    // Both boundaries treat anything other than 'not-applicable' as final.
+    expect((canvasClient.match(/if \(durable !== 'not-applicable'\) return;/g) ?? []).length)
+      .toBeGreaterThanOrEqual(2);
+    // And the hook re-raises rather than inserting.
+    expect(canvasData).toContain('if (!durable.ok) throw durablePlacementError(durable.status);');
   });
 
   it('F44: the placement metadata is rebound by ONE canonical helper', () => {
     expect(reuseRoute).toContain('buildKnowledgePdfAreaPlacementMetadata(item.metadata, { boardId, padletId })');
-    // The helper rebinds the base-image aliases and nothing else, and it reuses
-    // the existing sanitation contract rather than restating it.
-    expect(placement).toContain('sanitizeLibraryMetadata');
+    // The helper rebinds the base-image aliases and nothing else. Its
+    // sanitation list is domain-local (lib/domain must stay pure) and is pinned
+    // against the canvas engine's own list by its unit tests.
+    expect(placement).toContain('KNOWLEDGE_PDF_AREA_PLACEMENT_ONLY_METADATA_KEYS');
+    expect(placement).not.toContain('@/components');
     expect(placement).toContain('metadata.imageUrl = imageUrl');
     expect(placement).toContain("KNOWLEDGE_PDF_AREA_PLACEMENT_URL_ALIASES = ['imageUrl', 'fileUrl', 'file_url']");
     // The composite and the provenance are never rewritten.
@@ -907,9 +915,12 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
 
   it('F46 (R16-R21): the serve route keeps the direct branch first and gates the fallback', () => {
     const direct = serveRoute.indexOf('knowledgePdfAreaImagePath(boardId, padletId)');
-    const fallback = serveRoute.indexOf('resolveDurableReuseBytes(session, padletId, padlet, placementProvenance)');
+    const fallback = serveRoute.indexOf('await resolveDurableReuseBytes(');
     expect(direct).toBeGreaterThan(-1);
     expect(fallback).toBeGreaterThan(direct);
+    // The request's own board is passed in, because the fallback has to compare
+    // it with the board the entitlement was granted on.
+    expect(serveRoute).toContain('session, boardId, padletId, padlet, placementProvenance,');
     // Every gate, in the order that makes the mapping -- not the browser
     // writable column -- the thing that authorises the read.
     const resolver = after(serveRoute, 'async function resolveDurableReuseBytes', 2600);
@@ -920,76 +931,149 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
     expect(resolver).toContain("item.type !== 'image'");
     expect(resolver).toContain('knowledgePdfAreaProvenanceMatches(placementProvenance, libraryProvenance)');
     expect(resolver).toContain('item.knowledgeStoragePath');
+    // THE BOARD BINDING: request board, padlet board and mapping board must all
+    // agree, so a padlet moved by a browser carries no entitlement with it.
+    expect(resolver).toContain('mapping.boardId !== boardId');
+    expect(resolver).toContain('padlet.boardId !== boardId');
     // The path is never derived from, or read out of, the placement's metadata.
     expect(resolver).not.toContain('board-derived/');
   });
 
-  it('F47: the mapping is server-owned in SQL, and nothing is backfilled', () => {
+  it('F47: the mapping is server-owned, board-bound, and nothing is backfilled', () => {
     for (const sql of [reuseMigration, reuseRollout]) {
-      expect(sql).toContain('CREATE TABLE IF NOT EXISTS public.knowledge_pdf_area_image_placements');
+      expect(sql).toContain('public.knowledge_pdf_area_image_placements');
       expect(sql).toContain('padlet_id uuid PRIMARY KEY');
       expect(sql).toContain('REFERENCES public.padlets(id) ON DELETE CASCADE');
       expect(sql).toContain('REFERENCES public.library_items(id) ON DELETE CASCADE');
+      // The board the entitlement was granted on: NOT NULL, and a real column
+      // rather than something inferred from the padlet at read time.
+      expect(sql).toContain('board_id uuid NOT NULL');
+      expect(sql).toContain('REFERENCES public.boards(id) ON DELETE CASCADE');
+      expect(sql).toContain('created_at timestamptz NOT NULL DEFAULT now()');
       expect(sql).toContain('ENABLE ROW LEVEL SECURITY');
       expect(sql).toContain('REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM anon');
       expect(sql).toContain('REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM authenticated');
       expect(sql).toContain('GRANT ALL ON TABLE public.knowledge_pdf_area_image_placements TO service_role');
       // Zero policies: none is created anywhere in either file.
       expect(sql).not.toContain('CREATE POLICY');
-      // service_role only, and it grants itself no authority.
-      // Judged on the DEFINITION, not the file: the rollout's postflight names
-      // "SECURITY DEFINER" in the error it raises when it finds one.
+
+      // The trusted function: service_role only, no authority of its own, and
+      // the mapping it writes records the board it just re-proved.
       const definition = sql.slice(
-        sql.indexOf('CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement'));
+        sql.indexOf('CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement') >= 0
+          ? sql.indexOf('CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement')
+          : sql.indexOf('CREATE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement'));
       expect(definition).toContain('SECURITY INVOKER');
       expect(definition.slice(0, definition.indexOf('END;'))).not.toContain('SECURITY DEFINER');
+      expect(definition).toContain('RETURNS TABLE (padlet_id uuid, library_item_id uuid, board_id uuid)');
+      expect(definition).toContain('SET search_path = public');
+      expect(definition).toContain('board_collaborators');
+      expect(definition).toContain('is_knowledge_pdf_area_provenance');
+      expect(definition).toContain(
+        'INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id, board_id)');
+      expect(definition).toContain('VALUES (p_padlet_id, p_library_item_id, p_board_id)');
       expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement');
-      // It re-proves both authorities for itself.
-      expect(sql).toContain('board_collaborators');
-      expect(sql).toContain('is_knowledge_pdf_area_provenance');
-      // And it copies nothing: no storage, no second library row, no path input.
-      expect(sql).not.toContain('INSERT INTO public.library_items');
-      expect(sql).not.toContain('p_storage_path');
-      expect(sql).not.toContain('storage.objects');
-      // No backfill of the new mapping from existing rows.
-      expect(sql).not.toContain('INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id)\nSELECT');
-      expect(sql).not.toContain('FROM public.padlets p\n     WHERE p.library_item_id IS NOT NULL');
+
+      // It copies nothing: no storage, no second library row, no path input.
+      // Judged on the DEFINITION -- the rollout's fingerprint legitimately
+      // NAMES these strings in the NOT LIKE guards that prove their absence.
+      expect(definition).not.toContain('INSERT INTO public.library_items');
+      expect(definition).not.toContain('p_storage_path');
+      expect(definition).not.toContain('storage.objects');
+      // And no backfill of the new mapping from existing rows.
+      expect(sql).not.toMatch(/INSERT INTO public\.knowledge_pdf_area_image_placements[^;]*SELECT[^;]*FROM public\.padlets/);
     }
-    // The closed durable-preview migration and rollout are not touched here.
+    // The closed durable-preview objects are not touched here.
     expect(reuseRollout).not.toContain('ALTER TABLE public.library_items');
+    expect(reuseRollout).not.toContain('CREATE OR REPLACE FUNCTION public.is_knowledge_pdf_area_provenance');
   });
 
-  it('F48: the rollout is state-guarded and the verifier is portable, plain SQL', () => {
-    // Exactly two recognised states, and a PARTIAL one aborts.
-    expect(reuseRollout).toContain('DO $preflight$');
-    expect(reuseRollout).toContain('DO $postflight$');
-    expect(reuseRollout).toContain('PRE state (0 of 2 owned objects)');
-    expect(reuseRollout).toContain('POST state already released');
-    expect(reuseRollout).toContain('PARTIAL state');
+  it('F48: the rollout is an EXACT state machine that cannot silently repair', () => {
+    // Exactly two recognised states, and every mutation lives behind the PRE
+    // branch: the DDL is inside EXECUTE strings reached only after the POST
+    // test returned false and the PRE test passed.
+    expect(reuseRollout).toContain('EXACT POST already released -- no mutation performed');
+    expect(reuseRollout).toContain('EXACT PRE -- applying');
+    expect(reuseRollout).toContain('refusing to mutate');
     expect(reuseRollout).toContain('BEGIN;');
     expect(reuseRollout).toContain('COMMIT;');
 
-    // The verifier must run through any SQL API: no psql metacommands at all.
-    // Comments stripped first: the file's own header NAMES the metacommands it
-    // refuses to use, and a naive scan would fail on that sentence.
+    // No mutating statement may sit at the top level of the batch, where it
+    // would run whatever the state turned out to be.
+    const topLevel = reuseRollout
+      .split('\n')
+      .filter((line) => /^(CREATE|ALTER|GRANT|REVOKE|DROP|COMMENT|INSERT|UPDATE|DELETE)\b/.test(line));
+    expect(topLevel, 'every mutation must be gated inside the state machine').toEqual([]);
+
+    // The POST test and the postflight are the SAME query, evaluated twice --
+    // they cannot disagree about what "released" means.
+    const fingerprint = reuseRollout.slice(
+      reuseRollout.indexOf('$fp$') + '$fp$'.length,
+      reuseRollout.lastIndexOf('$fp$'),
+    ).trim();
+    expect(fingerprint.length).toBeGreaterThan(500);
+    expect((reuseRollout.match(/EXECUTE fingerprint INTO is_post;/g) ?? []).length).toBe(2);
+
+    // And the verifier's release gate is that same text, verbatim.
+    expect(reuseVerifier).toContain(fingerprint);
+
+    // The gate covers the whole contract, not just existence.
+    for (const condition of [
+      "count(*) = 4 FROM information_schema.columns",
+      "'board_id:uuid:NO','created_at:timestamp with time zone:NO'",
+      "column_default = 'now()'",
+      "contype = 'p'",
+      "c.confrelid = to_regclass('public.padlets')",
+      "c.confrelid = to_regclass('public.library_items')",
+      "c.confrelid = to_regclass('public.boards')",
+      'relrowsecurity',
+      'pg_policy',
+      "'MAINTAIN'",
+      "lanname = 'plpgsql'",
+      "ARRAY['search_path=public']::text[]",
+      'pg_get_function_identity_arguments',
+      'pg_get_function_result',
+      'md5(p.prosrc)',
+      'library_item_id, board_id)',
+    ]) {
+      expect(fingerprint, condition).toContain(condition);
+    }
+
+    // Generic SQL only, in the verifier: comments stripped first, because the
+    // file's own header NAMES the metacommands it refuses to use.
     const verifierSql = reuseVerifier.replace(/^\s*--.*$/gm, '');
     for (const meta of ['\\gset', '\\if', '\\else', '\\endif', '\\set', '\\echo']) {
       expect(verifierSql, meta).not.toContain(meta);
     }
-    // A missing object must read as false, never abort the report: privilege
-    // tests take an OID, which is NULL for an absent object.
+    // A missing object must read as false, never abort the report.
     expect(reuseVerifier).toContain("has_table_privilege('anon', t.oid,");
-    expect(reuseVerifier).toContain("has_table_privilege('authenticated', t.oid,");
     expect(reuseVerifier).toContain('to_regclass(');
     expect(reuseVerifier).toContain('to_regprocedure(');
-    // PostgreSQL 17's MAINTAIN is invisible to information_schema, so it is
-    // asked for by name or it is never checked at all.
-    expect(reuseVerifier).toContain("has_table_privilege('anon', t.oid, 'MAINTAIN')");
-    expect(reuseVerifier).toContain("has_table_privilege('authenticated', t.oid, 'MAINTAIN')");
-    // One final boolean gate, COALESCEd so a NULL can never read as success.
-    const rollup = reuseVerifier.slice(reuseVerifier.indexOf('12 AS section'));
-    expect(rollup).toContain('COMPLETE PASS');
-    expect(rollup).toContain('COALESCE(');
-    expect(rollup).toContain(', false) AS pass');
+    expect(reuseVerifier).toContain(', false) AS pass');
+  });
+
+  it('F49: the pinned digest IS the shipped function body, in both SQL files', () => {
+    // Derived from the very text that installs the function, so editing the
+    // body without re-pinning fails here rather than in production.
+    const bodyOf = (sql: string, open: string) => {
+      // The definition, not the REVOKE/GRANT/COMMENT that repeat its name.
+      const at = sql.search(/FUNCTION public\.create_knowledge_pdf_area_image_reuse_placement\(\s*\n\s*p_padlet_id uuid/);
+      expect(at, 'function definition not found').toBeGreaterThan(-1);
+      const from = sql.indexOf(open, at) + open.length;
+      return sql.slice(from, sql.indexOf(open.replace('AS ', ''), from)).replace(/\r\n/g, '\n');
+    };
+    const fromMigration = bodyOf(reuseMigration, 'AS $$');
+    const fromRollout = bodyOf(reuseRollout, 'AS $fn$');
+    expect(fromRollout, 'migration and rollout bodies must be identical').toBe(fromMigration);
+
+    const expected = createHash('md5').update(fromMigration, 'utf8').digest('hex');
+    expect(expected).toMatch(/^[0-9a-f]{32}$/);
+    expect(reuseRollout, 'rollout must pin the shipped body digest').toContain(expected);
+    expect(reuseVerifier, 'verifier must pin the shipped body digest').toContain(expected);
+    // And nothing else is pinned in its place.
+    const digests = new Set(
+      [...(reuseRollout + reuseVerifier).matchAll(/\b[0-9a-f]{32}\b/g)].map((m) => m[0]),
+    );
+    expect([...digests], 'exactly one body digest may appear').toEqual([expected]);
   });
 });

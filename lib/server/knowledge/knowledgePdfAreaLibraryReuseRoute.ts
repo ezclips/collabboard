@@ -322,6 +322,7 @@ export function createRealKnowledgePdfAreaLibraryReuseSession(
 interface PlacementMappingRow {
   readonly padlet_id: string;
   readonly library_item_id: string;
+  readonly board_id: string;
 }
 
 interface MappedLibraryRow {
@@ -357,12 +358,17 @@ export function createKnowledgePdfAreaDurableReuseLookup(adminClient: SupabaseCl
       // write. The board was authorised before this is ever reached.
       const { data, error } = await adminClient
         .from('knowledge_pdf_area_image_placements')
-        .select('padlet_id, library_item_id')
+        .select('padlet_id, library_item_id, board_id')
         .eq('padlet_id', padletId)
         .maybeSingle<PlacementMappingRow>();
       if (error) throw error;
       if (!data) return null;
-      return { padletId: data.padlet_id, libraryItemId: data.library_item_id };
+      return {
+        padletId: data.padlet_id,
+        libraryItemId: data.library_item_id,
+        // The board the entitlement was granted on -- compared, never updated.
+        boardId: data.board_id,
+      };
     },
     async findMappedLibraryItem(libraryItemId) {
       // Deliberately NOT the caller's client: a collaborator reading a shared

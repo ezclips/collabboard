@@ -11,6 +11,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import {
+  readKnowledgePdfAreaLibraryPlacement,
+  requestKnowledgePdfAreaLibraryPlacement,
+} from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
+import {
   createCreateContainerCommand,
   createDropDraftIntoContainerCommand,
 } from '@/lib/domain/canvas/containers';
@@ -506,14 +510,73 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     }
   };
 
+  /**
+   * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE -- the choke point.
+   *
+   * This hook owns EVERY board insert on this screen: the canvas drop branches
+   * call it directly, and so does every layout component (Drawing, Columns,
+   * Timeline, Scheduler, container cards) through the adders below. A durable
+   * PDF-area Library Image must never take any of them, because its bytes live
+   * in the private Knowledge bucket and only a SERVER-owned mapping can
+   * authorise serving them later -- a browser INSERT produces a card that
+   * renders nothing, which is precisely the defect runtime found.
+   *
+   * So the question is asked once, here, with the canonical classifier, at the
+   * last boundary before a row reaches the database. Ordinary Library items,
+   * ordinary Images and every other type answer `handled: false` and continue
+   * along exactly the path they always took.
+   *
+   * A refusal is never softened into an insert: the caller re-raises it in its
+   * own idiom, because placing the card the old way is the bug.
+   */
+  const placeDurablePdfAreaLibraryImage = useCallback(async (row: any): Promise<
+    | { handled: false }
+    | { handled: true; ok: true; padlet: any }
+    | { handled: true; ok: false; status: number | null }
+  > => {
+    const intent = readKnowledgePdfAreaLibraryPlacement(row, canvasId);
+    if (intent === null) return { handled: false };
+
+    const placed = await requestKnowledgePdfAreaLibraryPlacement(intent);
+    if (!placed.ok) return { handled: true, ok: false, status: placed.status };
+
+    const padlet = placed.padlet as any;
+    // Server truth, reconciled by id so a repeat cannot duplicate the row.
+    setPadlets((prev) => (
+      prev.some((p) => String(p.id) === String(padlet.id))
+        ? prev.map((p) => (String(p.id) === String(padlet.id) ? padlet : p))
+        : [...prev, padlet]
+    ));
+    // Some surfaces add an optimistic row of their own before calling in here;
+    // a refetch converges every one of them on what the server actually wrote.
+    fetchData();
+    return { handled: true, ok: true, padlet };
+  }, [canvasId, setPadlets, fetchData]);
+
+  const durablePlacementError = (status: number | null): Error =>
+    Object.assign(
+      new Error('This PDF area image must be placed by the server, and that placement was refused'),
+      { status },
+    );
+
   const addPadletFromLibraryItem = useCallback(async (payload: any) => {
+    const durable = await placeDurablePdfAreaLibraryImage(payload);
+    if (durable.handled) {
+      if (!durable.ok) throw durablePlacementError(durable.status);
+      return;
+    }
     const createPostBestEffort = createCreatePostBestEffortCommand(createPostsRepository());
     const result = await createPostBestEffort({ row: payload }, { userId: null });
     if (!result.ok) throw result.error.cause ?? result.error;
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, placeDurablePdfAreaLibraryImage]);
 
   const addFreeformCardPadlet = useCallback(async (newPadlet: Padlet) => {
+    const durable = await placeDurablePdfAreaLibraryImage(newPadlet);
+    if (durable.handled) {
+      if (!durable.ok) setPadlets((prev) => prev.filter((p) => p.id !== newPadlet.id));
+      return;
+    }
     // AUTHORIZED CONVERGENCE (PATCH-041, the program's fourth behavior
     // micro-change): a THROWN insert failure previously escaped to the drop
     // handler's catch and left the optimistic card stranded (ghost work,
@@ -527,6 +590,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
 
   const addDrawingLayoutPadlet = useCallback(async (newPadlet: any, newId: string) => {
     try {
+      const durable = await placeDurablePdfAreaLibraryImage(newPadlet);
+      if (durable.handled) {
+        if (!durable.ok) throw durablePlacementError(durable.status);
+        return durable.padlet;
+      }
       const createPost = createCreatePostCommand(createPostsRepository());
       const result = await createPost({ row: newPadlet }, { userId: null });
       if (!result.ok) throw result.error.cause ?? result.error;
@@ -572,6 +640,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
    * channel-preserving sibling below.
    */
   const insertPostOrThrow = useCallback(async (row: any) => {
+    const durable = await placeDurablePdfAreaLibraryImage(row);
+    if (durable.handled) {
+      if (!durable.ok) throw durablePlacementError(durable.status);
+      return;
+    }
     const createPost = createCreatePostCommand(createPostsRepository());
     const result = await createPost({ row }, { userId: null });
     if (!result.ok) {
@@ -586,6 +659,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
    * its original cause; every other Result returns to its existing branch.
    */
   const insertPostPreservingFailureChannels = useCallback(async (row: any) => {
+    const durable = await placeDurablePdfAreaLibraryImage(row);
+    if (durable.handled) {
+      if (!durable.ok) throw durablePlacementError(durable.status);
+      return { ok: true as const, value: durable.padlet };
+    }
     const createPost = createCreatePostCommand(createPostsRepository());
     const result = await createPost({ row }, { userId: null });
     if (!result.ok && result.error.code === 'unknown') {
@@ -604,6 +682,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
    * precedent) so the byte-kept downstream casts compile unchanged.
    */
   const insertPostAndSelectOrThrow = useCallback(async (row: any): Promise<any> => {
+    const durable = await placeDurablePdfAreaLibraryImage(row);
+    if (durable.handled) {
+      if (!durable.ok) throw durablePlacementError(durable.status);
+      return durable.padlet;
+    }
     const createPostAndSelect = createCreatePostAndSelectCommand(createPostsRepository());
     const result = await createPostAndSelect({ row }, { userId: null });
     if (!result.ok) {
@@ -625,6 +708,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     containerId: string,
     containerMetadata: Record<string, unknown> | null,
   ): Promise<any> => {
+    const durable = await placeDurablePdfAreaLibraryImage(row);
+    if (durable.handled) {
+      if (!durable.ok) throw durablePlacementError(durable.status);
+      return durable.padlet;
+    }
     const dropDraftIntoContainer = createDropDraftIntoContainerCommand(createPostsRepository());
     const result = await dropDraftIntoContainer(
       { row, containerId, containerMetadata },

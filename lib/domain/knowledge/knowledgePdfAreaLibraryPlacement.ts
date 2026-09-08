@@ -1,4 +1,3 @@
-import { sanitizeLibraryMetadata } from '@/components/collabboard/canvas/engine/utils';
 import {
   knowledgePdfAreaImageUrl,
   parseKnowledgePdfAreaProvenance,
@@ -72,6 +71,44 @@ export interface KnowledgePdfAreaPlacementMetadata {
 export const KNOWLEDGE_PDF_AREA_PLACEMENT_URL_ALIASES = ['imageUrl', 'fileUrl', 'file_url'] as const;
 
 /**
+ * The metadata keys that describe WHERE a card sat, not WHAT it is.
+ *
+ * A Library snapshot may carry them from the card it was saved from, and a new
+ * placement must not inherit them: they would attach the reused card to a
+ * container, section or timeline slot that has nothing to do with this drop.
+ *
+ * This is the domain-local statement of the sanitation contract the canvas
+ * engine's `sanitizeLibraryMetadata` applies at the drag boundary. It is
+ * DUPLICATED HERE ON PURPOSE, and cannot be an import: `lib/domain` must stay
+ * pure (lib/domain/CONVENTIONS.md rule 1), and that helper lives in the
+ * component layer. The list is pinned by this module's own tests, so the two
+ * cannot drift silently.
+ */
+export const KNOWLEDGE_PDF_AREA_PLACEMENT_ONLY_METADATA_KEYS = [
+  'parentId',
+  'childPadletIds',
+  'sectionId',
+  'sectionPosition',
+  'position_in_timeline',
+  'wallPosition',
+] as const;
+
+/**
+ * A fresh object with the placement-only keys removed, and nothing else
+ * touched. Never mutates its input -- the Library row's metadata is durable
+ * content that this feature only ever reads.
+ */
+function sanitizePlacementMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  const excluded = new Set<string>(KNOWLEDGE_PDF_AREA_PLACEMENT_ONLY_METADATA_KEYS);
+  for (const key of Object.keys(metadata)) {
+    if (excluded.has(key)) continue;
+    next[key] = metadata[key];
+  }
+  return next;
+}
+
+/**
  * Canonical SEMANTIC equality for two provenances.
  *
  * Never reference equality, and never JSON string equality: these arrive from
@@ -115,13 +152,9 @@ export function buildKnowledgePdfAreaPlacementMetadata(
   // nothing may be written under it.
   if (imageUrl === null) return null;
 
-  // The EXISTING sanitation contract, imported rather than restated: a second
-  // copy of that field list is exactly how the two would drift apart.
-  // sanitizeLibraryMetadata already returns a fresh shallow object, so the
-  // caller's metadata is never written through.
-  const metadata = sanitizeLibraryMetadata(
-    libraryMetadata as Record<string, unknown>,
-  ) as Record<string, unknown>;
+  // A fresh object every time, so the caller's metadata is never written
+  // through -- the Library row is durable content this feature only reads.
+  const metadata = sanitizePlacementMetadata(libraryMetadata as Record<string, unknown>);
 
   // Always. This is the field the runtime failure was.
   metadata.imageUrl = imageUrl;

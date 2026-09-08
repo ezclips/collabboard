@@ -229,7 +229,7 @@ function reuseSession(overrides: Partial<KnowledgePdfAreaImageServeSession> = {}
         ? { kind: 'ok' as const, bytes: DURABLE_BYTES }
         : { kind: 'missing' as const }
     )),
-    findPlacementMapping: vi.fn(async () => ({ padletId: PADLET_ID, libraryItemId: LIBRARY_ID })),
+    findPlacementMapping: vi.fn(async () => ({ padletId: PADLET_ID, libraryItemId: LIBRARY_ID, boardId: BOARD_ID })),
     findMappedLibraryItem: vi.fn(async () => mappedItem()),
     ...overrides,
   });
@@ -367,5 +367,76 @@ describe('D18-D27: a reused placement reaches its durable object, and only throu
       )),
     });
     expect((await run(unavailableDurable)).status).toBe(503);
+  });
+});
+
+/**
+ * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE, group D28-D31 -- the board binding.
+ *
+ * `padlets.board_id` is browser writable: an editor can move a card they
+ * legitimately created onto another board they can edit. The entitlement must
+ * not travel with it, so the mapping records the board its authority was proved
+ * on and serving requires all three ids -- request, padlet, mapping -- to agree.
+ */
+describe('D28-D31: the entitlement is bound to the board it was granted on', () => {
+  const BOARD_B = OTHER_BOARD_ID;
+
+  it('D28 (C): the legitimate board serves the durable crop before any tampering', () => {
+    // The control for the attack below: on the board the mapping records, the
+    // reuse fallback works exactly as designed.
+    return (async () => {
+      const sess = reuseSession();
+      const response = await run(sess);
+      expect(response.status).toBe(200);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(DURABLE_BYTES);
+    })();
+  });
+
+  it('D29 (C): a padlet MOVED to another board reaches no private bytes there', async () => {
+    // The attack, exactly: the row now claims board B (and a browser may have
+    // rewritten its client-writable URLs and metadata too), and the request is
+    // made through board B, which the caller can legitimately read.
+    const moved = reuseSession({
+      findPadlet: vi.fn(async () => row({
+        boardId: BOARD_B,
+        libraryItemId: LIBRARY_ID,
+        metadata: { source: PROVENANCE, imageUrl: `/api/boards/${BOARD_B}/padlets/${PADLET_ID}/image` },
+      })),
+      // The mapping did NOT move: it still records board A.
+      findPlacementMapping: vi.fn(async () => ({
+        padletId: PADLET_ID, libraryItemId: LIBRARY_ID, boardId: BOARD_ID,
+      })),
+    });
+    const response = await run(moved, context(BOARD_B, PADLET_ID));
+    expect(response.status).toBe(404);
+    // Not one byte, and the Library row is never even looked up.
+    expect(moved.findMappedLibraryItem).not.toHaveBeenCalled();
+    expect(moved.downloadAreaImage).not.toHaveBeenCalledWith(DURABLE_PATH);
+  });
+
+  it('D30: a mapping recorded on a different board fails closed', async () => {
+    const sess = reuseSession({
+      findPlacementMapping: vi.fn(async () => ({
+        padletId: PADLET_ID, libraryItemId: LIBRARY_ID, boardId: BOARD_B,
+      })),
+    });
+    expect((await run(sess)).status).toBe(404);
+    expect(sess.findMappedLibraryItem).not.toHaveBeenCalled();
+  });
+
+  it('D31: nothing here repairs the mapping to match a moved padlet', () => {
+    // Structural: the session exposes no writer at all, so a mismatch can only
+    // ever be refused -- never "migrated" into agreement.
+    const sess = reuseSession();
+    expect(Object.keys(sess).sort()).toEqual([
+      'canReadBoard', 'downloadAreaImage', 'findMappedLibraryItem',
+      'findPadlet', 'findPlacementMapping', 'userId',
+    ]);
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'lib/server/knowledge/knowledgePdfAreaImageServeRoute.ts'), 'utf8',
+    );
+    for (const forbidden of ['.update(', '.insert(', '.upsert(', '.delete(']) {
+      expect(source, forbidden).not.toContain(forbidden);
+    }
   });
 });

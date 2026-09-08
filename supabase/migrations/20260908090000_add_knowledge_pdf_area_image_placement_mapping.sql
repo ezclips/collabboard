@@ -13,14 +13,17 @@
 -- its OWN board address and let the board route resolve the durable object
 -- behind it. But the board route serves bytes out of the PRIVATE Knowledge
 -- bucket, so something must say -- with authority -- which private object this
--- placement is entitled to. `padlets.library_item_id` cannot: it is a browser
--- writable column, so it is an identity HINT and never an authorisation. Any
--- signed-in user could set it to a stranger's library UUID and ask the board
--- route for the bytes.
+-- placement is entitled to, AND on which board that entitlement was granted.
+-- `padlets` cannot say either: it is browser writable, so `library_item_id` is
+-- an identity HINT, and even `board_id` can be changed after the fact by an
+-- editor. Any signed-in user could otherwise point a card at a stranger's
+-- library UUID, or move a legitimately created card onto another board and ask
+-- that board to serve the private crop.
 --
 -- So this adds the missing TRUSTED half: one narrow, server-owned mapping that
--- only the trusted reuse function below ever writes, and that no browser role
--- may insert, update, delete or even read.
+-- records padlet, library object AND the board whose edit authority was proven
+-- at creation time -- written only by the trusted reuse function below, and
+-- readable, writable and even visible to no browser role at all.
 --
 -- WHAT IT IS NOT. No second Storage object -- the same private crop is served.
 -- No second library_items row -- the same durable object is referenced. No
@@ -38,22 +41,33 @@
 -- deleting the card removes its authorisation with it, so a padlet id can never
 -- be re-used to reach an object the new card was not granted.
 --
--- `library_item_id` cascades too. A deleted Library object has no bytes to
--- serve, and a mapping pointing at nothing is an authorisation with no subject.
+-- `board_id` is the load-bearing addition. It is the board this placement was
+-- AUTHORISED on, recorded by the trusted function from the board it had just
+-- re-proved edit authority for. Serving requires exact agreement with it, so
+-- moving the padlet to another board later -- an ordinary browser UPDATE --
+-- cannot carry the entitlement along: the mapping does not move, and the new
+-- board's request fails closed.
+--
+-- Both foreign keys cascade. A deleted Library object has no bytes to serve and
+-- a deleted board has no placements, so in either case the mapping is an
+-- authorisation with no subject.
 CREATE TABLE IF NOT EXISTS public.knowledge_pdf_area_image_placements (
     padlet_id uuid PRIMARY KEY
         REFERENCES public.padlets(id) ON DELETE CASCADE,
     library_item_id uuid NOT NULL
         REFERENCES public.library_items(id) ON DELETE CASCADE,
+    board_id uuid NOT NULL
+        REFERENCES public.boards(id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE public.knowledge_pdf_area_image_placements IS
     'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: server-owned proof that a board '
     'placement may be served the durable private crop of a PDF-area Library '
-    'Image. Written only by create_knowledge_pdf_area_image_reuse_placement. '
-    'No browser role has any privilege on it; padlets.library_item_id is a '
-    'consistency hint beside it, never an authorisation.';
+    'Image, and the board on which that was authorised. Written only by '
+    'create_knowledge_pdf_area_image_reuse_placement. No browser role has any '
+    'privilege on it; padlets.library_item_id is a consistency hint beside it, '
+    'never an authorisation.';
 
 COMMENT ON COLUMN public.knowledge_pdf_area_image_placements.padlet_id IS
     'The placement this authorisation belongs to. Primary key: one placement, '
@@ -63,10 +77,19 @@ COMMENT ON COLUMN public.knowledge_pdf_area_image_placements.library_item_id IS
     'The durable library_items row whose knowledge_storage_path may be served '
     'for this placement.';
 
--- The board route looks up by padlet_id (the primary key). This index serves
--- the other direction: the cascade and any per-object audit.
+COMMENT ON COLUMN public.knowledge_pdf_area_image_placements.board_id IS
+    'The board whose EDIT authority was proven when this placement was created. '
+    'Serving requires the request board, the padlet board and this column to '
+    'agree, so a browser that moves the padlet to another board carries no '
+    'entitlement with it.';
+
+-- The board route looks up by padlet_id (the primary key). These serve the
+-- other directions: the cascades, and any per-object or per-board audit.
 CREATE INDEX IF NOT EXISTS knowledge_pdf_area_image_placements_library_item_id_idx
     ON public.knowledge_pdf_area_image_placements (library_item_id);
+
+CREATE INDEX IF NOT EXISTS knowledge_pdf_area_image_placements_board_id_idx
+    ON public.knowledge_pdf_area_image_placements (board_id);
 
 -- ---------------------------------------------------------------------------
 -- Fail closed, twice over.
@@ -98,7 +121,9 @@ GRANT ALL ON TABLE public.knowledge_pdf_area_image_placements TO service_role;
 --
 -- It takes NO storage path, NO origin board and NO origin padlet. The durable
 -- location is read from the Library row's own server-owned column; the browser
--- contributes a position and nothing else.
+-- contributes a position and nothing else. The board recorded in the mapping is
+-- the SAME board this function just proved edit authority for -- never an
+-- independent argument a caller could point elsewhere.
 CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
     p_padlet_id uuid,
     p_board_id uuid,
@@ -113,7 +138,7 @@ CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placemen
     p_board_file_url text,
     p_metadata jsonb
 )
-RETURNS TABLE (padlet_id uuid, library_item_id uuid)
+RETURNS TABLE (padlet_id uuid, library_item_id uuid, board_id uuid)
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public
@@ -139,7 +164,9 @@ BEGIN
     -- 2. BOARD-WRITE AUTHORITY FOR THAT ACTOR -- load-bearing, not decorative.
     -- The `board_id` branch of the padlets INSERT policy, reproduced exactly:
     -- owner of the board, or a collaborator whose role is 'editor'. Nothing is
-    -- broadened -- viewer and commenter are absent by construction.
+    -- broadened -- viewer and commenter are absent by construction. This is the
+    -- board the mapping will record, so the entitlement can never name a board
+    -- whose authority was not proved right here.
     IF NOT EXISTS (
         SELECT 1 FROM public.boards b
          WHERE b.id = p_board_id AND b.user_id = p_user_id
@@ -208,10 +235,10 @@ BEGIN
         p_width, p_height, p_board_file_url, p_metadata, p_library_item_id
     );
 
-    INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id)
-    VALUES (p_padlet_id, p_library_item_id);
+    INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id, board_id)
+    VALUES (p_padlet_id, p_library_item_id, p_board_id);
 
-    RETURN QUERY SELECT p_padlet_id, p_library_item_id;
+    RETURN QUERY SELECT p_padlet_id, p_library_item_id, p_board_id;
 END;
 $$;
 
@@ -233,6 +260,6 @@ COMMENT ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement(
 ) IS
     'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: places an existing durable PDF-area '
     'Library Image on a board, writing the placement and its server-owned '
-    'mapping in ONE transaction. Re-proves library ownership and board edit '
-    'authority. Creates no library row, copies no storage object, accepts no '
-    'path. service_role only.';
+    'mapping -- including the authorised board -- in ONE transaction. Re-proves '
+    'library ownership and board edit authority. Creates no library row, copies '
+    'no storage object, accepts no path. service_role only.';

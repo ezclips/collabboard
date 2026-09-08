@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  KNOWLEDGE_PDF_AREA_PLACEMENT_ONLY_METADATA_KEYS,
   KNOWLEDGE_PDF_AREA_PLACEMENT_URL_ALIASES,
   buildKnowledgePdfAreaPlacementMetadata,
   knowledgePdfAreaProvenanceMatches,
@@ -138,13 +139,27 @@ describe('P7-P10: it refuses everything that is not a durable PDF-area image', (
     expect(built!.metadata.keptField).toBe('kept');
   });
 
-  it('P10: the sanitation contract is imported, not restated', () => {
+  it('P10: the domain module stays pure, and its key list matches the engine contract', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'lib/domain/knowledge/knowledgePdfAreaLibraryPlacement.ts'), 'utf8',
     );
-    expect(source).toContain('sanitizeLibraryMetadata');
-    // A second copy of the field list is exactly how the two would drift apart.
-    expect(source).not.toContain('delete ');
+    // lib/domain/CONVENTIONS.md rule 1: no UI, framework or infrastructure.
+    expect(source).not.toContain('@/components');
+    expect(source).not.toContain('react');
+    expect(source).not.toContain('fetch(');
+
+    // The list is domain-local BECAUSE of that rule, so it is pinned against
+    // the canvas engine's own sanitiser here rather than left to drift.
+    const engine = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/canvas/engine/utils.ts'), 'utf8',
+    );
+    const body = engine.slice(
+      engine.indexOf('export function sanitizeLibraryMetadata'),
+      engine.indexOf('export function isContainerPadlet'),
+    );
+    const engineKeys = [...body.matchAll(/delete next\.([A-Za-z_]+);/g)].map((m) => m[1]).sort();
+    expect(engineKeys.length).toBeGreaterThan(0);
+    expect([...KNOWLEDGE_PDF_AREA_PLACEMENT_ONLY_METADATA_KEYS].sort()).toEqual(engineKeys);
   });
 });
 

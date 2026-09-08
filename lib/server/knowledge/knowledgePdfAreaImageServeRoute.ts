@@ -47,6 +47,12 @@ export interface KnowledgePdfAreaImageServeRow {
 export interface KnowledgePdfAreaImagePlacementMapping {
   readonly padletId: string;
   readonly libraryItemId: string;
+  /**
+   * The board whose EDIT authority was proven when this placement was created.
+   * It does not move when the padlet does -- which is the point: an editor may
+   * change `padlets.board_id`, and the entitlement must not follow.
+   */
+  readonly boardId: string;
 }
 
 /** The durable Library object a mapping points at, read with server authority. */
@@ -115,6 +121,7 @@ async function attempt<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T } 
  */
 async function resolveDurableReuseBytes(
   session: KnowledgePdfAreaImageServeSession,
+  boardId: string,
   padletId: string,
   padlet: KnowledgePdfAreaImageServeRow,
   placementProvenance: KnowledgePdfAreaProvenance,
@@ -124,6 +131,17 @@ async function resolveDurableReuseBytes(
   const mapping = mappingAttempt.value;
   if (!mapping) return { kind: 'missing' };
   if (mapping.padletId !== padletId) return { kind: 'missing' };
+
+  // THE BOARD BINDING. Three ids must agree: the board this request was
+  // authorised against, the board the padlet currently claims, and the board
+  // the mapping recorded when the entitlement was granted.
+  //
+  // `padlets.board_id` is browser writable, so an editor can move a card they
+  // legitimately created onto another board they can edit. The mapping does not
+  // move with it, and nothing here repairs it to match -- so the moved card's
+  // new board asks for a private object it was never granted, and gets nothing.
+  if (mapping.boardId !== boardId) return { kind: 'missing' };
+  if (padlet.boardId !== boardId) return { kind: 'missing' };
 
   // Consistency only. The mapping already decided; this refuses the case where
   // the two disagree rather than trusting either.
@@ -205,7 +223,9 @@ export function createKnowledgePdfAreaImageServeHandler(
       // thing that may say which private object it is entitled to is the
       // server-owned mapping -- never `padlets.library_item_id`, which a
       // browser can write to any UUID it likes.
-      const durable = await resolveDurableReuseBytes(session, padletId, padlet, placementProvenance);
+      const durable = await resolveDurableReuseBytes(
+        session, boardId, padletId, padlet, placementProvenance,
+      );
       if (durable.kind === 'missing') return notFound();
       if (durable.kind === 'unavailable') return unavailable();
       bytes = durable.bytes;

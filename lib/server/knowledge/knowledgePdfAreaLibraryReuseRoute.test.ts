@@ -283,6 +283,11 @@ describe('U16-U17: the module publishes nothing and copies nothing', () => {
       'p_knowledge_storage_path']) {
       expect(source, forbidden).not.toContain(forbidden);
     }
+    // The board the mapping will record is the ROUTE's board -- the one whose
+    // edit authority was just checked -- never a value from the request body.
+    expect(args).toContain('p_board_id: row.board_id');
+    expect(source).toContain('const { id: boardId, libraryItemId } = await context.params;');
+    expect(source).toContain('board_id: boardId,');
     // The board EDIT check precedes the Library read, which precedes the write.
     const edit = source.indexOf('session.canWriteBoard(boardId)');
     const read = source.indexOf('session.findOwnLibraryItem(libraryItemId)');

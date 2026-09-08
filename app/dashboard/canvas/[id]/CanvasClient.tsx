@@ -98,7 +98,10 @@ import {
   parseKnowledgeSourceTextClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
-import { parseKnowledgePdfAreaProvenance } from '@/lib/domain/knowledge/knowledgePdfAreaImagePolicy';
+import {
+  readKnowledgePdfAreaLibraryPlacement,
+  requestKnowledgePdfAreaLibraryPlacement,
+} from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
 import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
@@ -6271,6 +6274,51 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   // PR11.5 — Hoisted handlers (extracted from inline JSX props)
   // Must stay above early returns so hook count is stable across renders.
+  /**
+   * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE -- the ONE place this screen turns a
+   * durable PDF-area Library Image into a card.
+   *
+   * Every Library drop boundary on this screen calls it FIRST and obeys the
+   * answer, so there is no ordinary browser INSERT left that can place one.
+   * That matters because the bytes live in the private Knowledge bucket: only
+   * a server-owned mapping can later authorise serving them, and only the
+   * server may write that mapping. A browser INSERT would produce a card that
+   * renders nothing -- which is exactly the runtime defect this replaces.
+   *
+   *   'not-applicable'  ordinary Library item: the caller keeps its own path,
+   *                     completely unchanged.
+   *   'placed'          the server created the placement and its mapping.
+   *   'refused'         it WAS a durable PDF-area image and the server said no.
+   *                     The caller must NOT fall back to an insert: that would
+   *                     re-create the broken card the fix exists to prevent.
+   */
+  const placeDurablePdfAreaLibraryImage = useCallback(async (
+    draft: unknown,
+  ): Promise<'placed' | 'refused' | 'not-applicable'> => {
+    // The canonical classifier -- never a second, slightly different rule.
+    const intent = readKnowledgePdfAreaLibraryPlacement(draft, canvasId);
+    if (intent === null) return 'not-applicable';
+
+    const placed = await requestKnowledgePdfAreaLibraryPlacement(intent);
+    if (!placed.ok) {
+      toast.error(placed.status === 403
+        ? 'You do not have permission to add cards to this board'
+        : 'Could not place that image');
+      return 'refused';
+    }
+    // Reconcile by id, exactly as the PDF-area creation path does, so a
+    // repeated drop can never put the same id in the list twice.
+    const createdPadlet = placed.padlet as unknown as Padlet;
+    setPadlets((prev) => (
+      prev.some((padlet) => String(padlet.id) === String(createdPadlet.id))
+        ? prev.map((padlet) => (
+            String(padlet.id) === String(createdPadlet.id) ? createdPadlet : padlet
+          ))
+        : [...prev, createdPadlet]
+    ));
+    return 'placed';
+  }, [canvasId, setPadlets]);
+
   const handleFreeformLibraryDrop = useCallback(async (e: React.DragEvent) => {
     const libraryContentStr = e.dataTransfer.getData('application/collabboard-library');
     if (!libraryContentStr) return;
@@ -6288,59 +6336,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         width: content.width,
         height: content.height,
       });
-      // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. A PDF-area Image is the ONE reuse
-      // that cannot be a browser INSERT. Its bytes are in the private Knowledge
-      // bucket, so the new placement needs a SERVER-owned mapping before
-      // anything may serve them, and the snapshot's `metadata.imageUrl` still
-      // addresses the origin card -- copying it verbatim is exactly the defect
-      // this replaces. Everything else, images included, keeps the path below
-      // untouched: this branch is entered only when the item carries a durable
-      // identity AND genuine knowledge-pdf-area provenance.
-      const pdfAreaProvenance = (content.type === 'image' && typeof content.libraryItemId === 'string')
-        ? parseKnowledgePdfAreaProvenance(content.metadata)
-        : null;
-      if (canvasId && pdfAreaProvenance !== null && content.libraryItemId) {
-        // Position only. The server reads the title, size, provenance and
-        // durable location from rows it already trusts.
-        let placed: Response | null = null;
-        try {
-          placed = await fetch(
-            `/api/boards/${encodeURIComponent(canvasId)}/library-items/${encodeURIComponent(content.libraryItemId)}/image-placement`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ positionX: x, positionY: y }),
-            },
-          );
-        } catch {
-          placed = null;
-        }
-        if (!placed || !placed.ok) {
-          // Deliberately no fall-through to the browser INSERT: that is the
-          // path that produces the broken card, so failing visibly is better
-          // than silently placing one that renders nothing.
-          toast.error(placed?.status === 403
-            ? 'You do not have permission to add cards to this board'
-            : 'Could not place that image');
-          return;
-        }
-        const body = await placed.json().catch(() => null) as { padlet?: Padlet } | null;
-        const createdPadlet = body?.padlet;
-        if (!createdPadlet) {
-          toast.error('Could not place that image');
-          return;
-        }
-        // Reconcile by id, exactly as the PDF-area creation path does, so a
-        // repeated drop can never put the same id in the list twice.
-        setPadlets((prev) => (
-          prev.some((padlet) => String(padlet.id) === String(createdPadlet.id))
-            ? prev.map((padlet) => (
-                String(padlet.id) === String(createdPadlet.id) ? createdPadlet : padlet
-              ))
-            : [...prev, createdPadlet]
-        ));
-        return;
-      }
+      // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. Asked FIRST, and its answer is
+      // final: an ordinary Library item falls through to the unchanged path
+      // below, and a durable PDF-area image never reaches it.
+      const durable = await placeDurablePdfAreaLibraryImage({
+        board_id: canvasId,
+        type: content.type,
+        library_item_id: content.libraryItemId ?? null,
+        metadata: content.metadata,
+        position_x: x,
+        position_y: y,
+      });
+      if (durable !== 'not-applicable') return;
 
       await addPadletFromLibraryItem({
         board_id: canvasId,
@@ -8508,6 +8515,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       ...(isDrawingLayout ? { forceContainerPrompt: true } : {}),
                     },
                   };
+
+                  // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. THE real drop path --
+                  // this branch, reached from the LibraryPanel drag through
+                  // PadletLayer's onDrop, is where a reused card is actually
+                  // born. Asked before either insert below, and its answer is
+                  // final: a durable PDF-area image is placed by the server
+                  // (which alone can write the mapping that later authorises
+                  // the private crop), and every ordinary Library item falls
+                  // through to exactly the path it has always taken.
+                  const durable = await placeDurablePdfAreaLibraryImage({
+                    ...draftPayload,
+                    board_id: canvasId,
+                  });
+                  if (durable !== 'not-applicable') return;
 
                   if (isDrawingLayout) {
                     await handleDrawingLayoutAddPadletWithContainerCheck(draftPayload);
