@@ -145,6 +145,12 @@ export interface KnowledgeDocumentDetailsProps {
    */
   initialPageNumber?: number;
   /**
+   * Session-local host state. The reader remains the page authority; this only
+   * reports the page it already derived so a tabbed workspace can restore it
+   * when the user returns to this document.
+   */
+  onActivePageChange?: (documentId: string, pageNumber: number) => void;
+  /**
    * P6J-F6-B4-B4. Which stored citation the arriving Note asked for. A hint,
    * not a coordinate: the span it scrolls to is whatever the already-derived
    * segments resolved, so a drifted row lands on its recovered text and a row
@@ -559,6 +565,7 @@ export default function KnowledgeDocumentDetails({
   onAiFromSelection,
   onAddBoardAiContext,
   initialPageNumber,
+  onActivePageChange,
   initialSourceReferenceId,
   initialSourceRequestId,
   onOpenBacklinkTarget,
@@ -789,6 +796,11 @@ export default function KnowledgeDocumentDetails({
    * and that stays authoritative.
    */
   const activePageNumber = useKnowledgeReaderActivePage(pagesContainerRef, pages.length, initialPageNumber);
+
+  useEffect(() => {
+    if (!documentId || pages.length === 0) return;
+    onActivePageChange?.(documentId, activePageNumber);
+  }, [documentId, pages.length, activePageNumber, onActivePageChange]);
 
   /**
    * PDF-R6K. The pager.

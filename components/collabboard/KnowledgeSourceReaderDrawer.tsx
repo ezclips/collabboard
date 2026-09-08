@@ -15,6 +15,15 @@ import {
 import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
+import PdfWorkspaceChrome, {
+  type PdfWorkspaceRightPanel,
+  type PdfWorkspaceTab,
+} from '@/components/collabboard/PdfWorkspaceChrome';
+import type {
+  KnowledgePdfPlacementSource,
+  KnowledgePdfProcessingStatus,
+  KnowledgePdfUploadResult,
+} from '@/components/collabboard/KnowledgePdfUploader';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type {
   KnowledgeDocumentOpenRequest,
@@ -127,6 +136,19 @@ export interface KnowledgeSourceReaderDrawerProps {
    * would discard a reading session for a conflict that cannot arise.
    */
   closeSidePanelRequestId?: number;
+  /** Board-owned tab state for the focused PDF workspace. */
+  workspaceTabs?: readonly PdfWorkspaceTab[];
+  activeWorkspacePdfId?: string | null;
+  workspaceRightPanel?: PdfWorkspaceRightPanel;
+  onWorkspaceTabActivate?: (documentId: string) => void;
+  onWorkspaceTabClose?: (documentId: string) => void;
+  onWorkspaceClose?: () => void;
+  onWorkspaceRightPanelChange?: (panel: PdfWorkspaceRightPanel) => void;
+  onWorkspaceDocumentResolved?: (document: PdfWorkspaceTab) => void;
+  onWorkspaceActivePageChange?: (documentId: string, pageNumber: number) => void;
+  onWorkspacePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
+  onWorkspaceExistingPdfOpen?: (document: KnowledgePdfPlacementSource) => Promise<boolean> | boolean;
+  onWorkspacePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
 }
 
 /**
@@ -184,6 +206,18 @@ export default function KnowledgeSourceReaderDrawer({
   onAddBoardAiContext,
   closeSidePanelRequestId,
   onOpenBacklinkTarget,
+  workspaceTabs = [],
+  activeWorkspacePdfId = null,
+  workspaceRightPanel = 'closed',
+  onWorkspaceTabActivate,
+  onWorkspaceTabClose,
+  onWorkspaceClose,
+  onWorkspaceRightPanelChange,
+  onWorkspaceDocumentResolved,
+  onWorkspaceActivePageChange,
+  onWorkspacePdfUploaded,
+  onWorkspaceExistingPdfOpen,
+  onWorkspacePdfSettled,
 }: KnowledgeSourceReaderDrawerProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
@@ -347,10 +381,11 @@ export default function KnowledgeSourceReaderDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, documentOpenRequest]);
 
-  const closeReader = () => {
+  const closeReader = useCallback(() => {
     readGenerationRef.current += 1;
     setReader(null);
-  };
+    if (presentation === 'workspace') onWorkspaceClose?.();
+  }, [presentation, onWorkspaceClose]);
 
   /**
    * BCHAT-C. Yield the dock, once per request id.
@@ -390,6 +425,23 @@ export default function KnowledgeSourceReaderDrawer({
   const closeAiSession = () => {
     setReader((current) => (current ? { ...current, aiSession: null } : current));
   };
+
+  useEffect(() => {
+    if (!isWorkspace || reader === null || reader.loading || reader.error) return;
+    onWorkspaceDocumentResolved?.({
+      documentId: reader.documentId,
+      originalFilename: reader.originalFilename || 'Document',
+      pageCount: reader.pageCount,
+    });
+  }, [
+    isWorkspace,
+    reader?.documentId,
+    reader?.originalFilename,
+    reader?.pageCount,
+    reader?.loading,
+    reader?.error,
+    onWorkspaceDocumentResolved,
+  ]);
 
   /**
    * The AI panel's own Note Post: forwards the ORIGINAL, unmodified snapshot
@@ -482,6 +534,111 @@ export default function KnowledgeSourceReaderDrawer({
   if (!boardId || reader === null) return null;
 
   const libraryPageSummary = pageCountSummary(reader.pageCount, reader.pages.length, reader.loading);
+  if (isWorkspace) {
+    const effectiveTabs = workspaceTabs.length > 0
+      ? workspaceTabs
+      : [{
+        documentId: reader.documentId,
+        originalFilename: reader.originalFilename || 'Document',
+        pageCount: reader.pageCount,
+      }];
+    const activeDocumentId = activeWorkspacePdfId ?? reader.documentId;
+    const readerMatchesActiveDocument = reader.documentId === activeDocumentId;
+    const rightPanelContent = !readerMatchesActiveDocument ? (
+      <p data-pdf-workspace-panel-loading="true" className="text-xs text-gray-500">
+        Opening document context…
+      </p>
+    ) : workspaceRightPanel === 'library' ? (
+      <>
+        {libraryPageSummary !== null ? (
+          <p data-knowledge-library-pagecount="true" className="mb-2 text-[11px] text-gray-500">
+            {libraryPageSummary}
+          </p>
+        ) : null}
+        <UsedInNotes
+          scope="document"
+          rows={libraryBacklinkRows}
+          onOpen={(targetPadletId) => onOpenBacklinkTarget?.(targetPadletId)}
+        />
+        <KnowledgeSourceNotesPanel
+          documentId={reader.documentId}
+          onOpenNote={(targetPadletId) => onOpenBacklinkTarget?.(targetPadletId)}
+        />
+      </>
+    ) : workspaceRightPanel === 'ai' && onAddBoardAiContext ? (
+      <div data-pdf-workspace-ai-panel="true" className="space-y-3">
+        <p className="text-xs text-gray-500">
+          Open Board AI with this PDF attached as context.
+        </p>
+        <button
+          type="button"
+          data-pdf-workspace-ai-open-board-chat="true"
+          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+          onClick={() => handOffToBoardAi(
+            boardAiDraftFromDocument(reader.documentId, reader.originalFilename || 'Document'),
+          )}
+        >
+          Open Board AI
+        </button>
+      </div>
+    ) : null;
+
+    return (
+      <PdfWorkspaceChrome
+        boardId={boardId}
+        tabs={effectiveTabs}
+        activeDocumentId={activeDocumentId}
+        rightPanel={workspaceRightPanel}
+        aiAvailable={!!onAddBoardAiContext}
+        rightPanelContent={rightPanelContent}
+        onActivateTab={onWorkspaceTabActivate ?? (() => {})}
+        onCloseTab={(documentId) => {
+          if (effectiveTabs.length <= 1) {
+            closeReader();
+            return;
+          }
+          onWorkspaceTabClose?.(documentId);
+        }}
+        onCloseWorkspace={closeReader}
+        onRightPanelChange={onWorkspaceRightPanelChange ?? (() => {})}
+        onUploadedDocument={onWorkspacePdfUploaded ?? (() => {})}
+        onOpenExistingDocument={onWorkspaceExistingPdfOpen ?? (() => false)}
+        onDocumentSettled={onWorkspacePdfSettled}
+      >
+        <div
+          data-knowledge-reader-workspace="true"
+          className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-4 py-3"
+        >
+          {readerMatchesActiveDocument ? (
+            <KnowledgeDocumentDetails
+              documentId={reader.documentId}
+              boardId={boardId}
+              originalFilename={reader.originalFilename}
+              pageCount={reader.pageCount}
+              pages={reader.pages}
+              loading={reader.loading}
+              error={reader.error}
+              initialPageNumber={reader.initialPageNumber}
+              initialSourceReferenceId={reader.sourceTarget?.referenceId}
+              initialSourceRequestId={reader.sourceTarget?.requestId}
+              onBack={closeReader}
+              hostRendersDocumentHeader
+              onCreateNoteFromPage={onCreateNoteFromPage}
+              onOpenBacklinkTarget={onOpenBacklinkTarget}
+              onAiFromSelection={onCreateNoteFromPage && onOpenBacklinkTarget ? activateAiFromSelection : undefined}
+              onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}
+              onActivePageChange={onWorkspaceActivePageChange}
+            />
+          ) : (
+            <div data-knowledge-reader-workspace-loading="true" className="flex h-full items-center justify-center text-sm text-gray-500">
+              Opening document…
+            </div>
+          )}
+        </div>
+      </PdfWorkspaceChrome>
+    );
+  }
+
   return (
     <aside
       data-knowledge-reader="true"

@@ -2,11 +2,6 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
-import KnowledgePdfUploader, {
-  type KnowledgePdfProcessingStatus,
-  type KnowledgePdfUploadResult,
-  type KnowledgePdfUploaderHandle,
-} from '@/components/collabboard/KnowledgePdfUploader';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,15 +60,6 @@ interface CanvasSidebarProps {
   onBeforeToolClick?: (type: string) => void;
   handleToolClick: (type: string) => void;
   onBack: () => void;
-  /**
-   * PDF-C1. The sidebar's only remaining Knowledge job is owning the hidden
-   * file input behind Add PDF. It neither loads, lists nor reads documents:
-   * the library launcher is gone because the board now holds the PDFs, and the
-   * reader lives at canvas shell level. These two are pure plumbing for the
-   * upload the shell turns into a canvas placement.
-   */
-  onKnowledgePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
-  onKnowledgePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -101,8 +87,6 @@ export default function CanvasSidebar({
   onBeforeToolClick,
   handleToolClick,
   onBack,
-  onKnowledgePdfUploaded,
-  onKnowledgePdfSettled,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -110,7 +94,6 @@ export default function CanvasSidebar({
   const toggleRef = useRef<HTMLButtonElement>(null);
   const moreMeasureRef = useRef<HTMLButtonElement>(null);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
-  const knowledgePdfUploaderRef = useRef<KnowledgePdfUploaderHandle>(null);
   const groupRefs = useRef(new Map<string, HTMLDivElement>());
   const naturalHeightsRef = useRef(new Map<string, Map<string, number>>());
   const [overflowState, setOverflowState] = useState<OverflowState | null>(null);
@@ -163,10 +146,6 @@ export default function CanvasSidebar({
   const dispatchTool = useCallback((type: string, disabled?: boolean) => {
     if (disabled) return;
     onBeforeToolClick?.(type);
-    if (type === 'knowledge-pdf') {
-      knowledgePdfUploaderRef.current?.openPicker();
-      return;
-    }
     handleToolClick(type);
   }, [handleToolClick, onBeforeToolClick]);
 
@@ -370,11 +349,6 @@ export default function CanvasSidebar({
       data-toolbar-sidebar="true"
       className={`${isCollapsed ? 'w-12' : 'w-14'} h-full bg-white border-r flex flex-col items-center py-6 gap-3 shadow-sm z-20 relative overflow-visible transition-[width] duration-150`}
     >
-      <KnowledgePdfUploader
-        ref={knowledgePdfUploaderRef}
-        onDocumentUploaded={onKnowledgePdfUploaded}
-        onDocumentSettled={onKnowledgePdfSettled}
-      />
       <button
         ref={moreMeasureRef}
         type="button"
@@ -400,10 +374,10 @@ export default function CanvasSidebar({
 
       <div ref={dividerRef} className="w-6 h-px bg-gray-200" />
 
-      {/* PDF-C1 removed the Knowledge library launcher that stood here. PDFs
-          are canvas objects now, so the board itself is the library; Add PDF
-          (tool group) remains the one entry point. KnowledgeDocumentsList and
-          every Knowledge API, reader and provenance feature are untouched. */}
+      {/* PDF-C1 removed the Knowledge library launcher that stood here.
+          A1 moves PDF document entry into the focused workspace tab row.
+          KnowledgeDocumentsList and every Knowledge API, reader and provenance
+          feature are untouched. */}
 
       {/* Tool groups */}
       {visibleGroups.map((group) => (
@@ -489,10 +463,9 @@ export default function CanvasSidebar({
                         // onCloseAutoFocus handler above. Every tool that can
                         // reach this menu opens a React surface or sets board
                         // state, so deferring is safe for all of them. A tool
-                        // that must run inside the browser's user activation --
-                        // today only Add PDF, which ends in a native file-input
-                        // click -- is pinned to an always-visible group in the
-                        // registry instead, and never appears here.
+                        // that must run inside the browser's user activation
+                        // must be pinned to an always-visible group instead
+                        // of being dispatched after a menu-close boundary.
                         onSelect={() => {
                           if (isDisabled) return;
                           pendingToolRef.current = tool.type;

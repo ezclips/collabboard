@@ -135,11 +135,12 @@ import { KnowledgePdfOpenProvider } from '@/components/collabboard/KnowledgePdfC
 import type {
   KnowledgePdfPlacementSource,
   KnowledgePdfProcessingStatus,
+  KnowledgePdfUploadResult,
 } from '@/components/collabboard/KnowledgePdfUploader';
-import KnowledgeExistingPdfPicker from '@/components/collabboard/KnowledgeExistingPdfPicker';
 import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
+import type { PdfWorkspaceRightPanel, PdfWorkspaceTab } from '@/components/collabboard/PdfWorkspaceChrome';
 import BoardAiChatDrawer from '@/components/collabboard/BoardAiChatDrawer';
 import { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import {
@@ -960,8 +961,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     pendingPostDraftRef.current = pendingPostDraft;
   }, [pendingPostDraft]);
   const [isImportBrowserOpen, setIsImportBrowserOpen] = useState(false);
-  /** Open state of the "Use existing PDF" chooser. See the reentry note below. */
-  const [isExistingPdfPickerOpen, setIsExistingPdfPickerOpen] = useState(false);
   const [isPlacementPromptOpen, setIsPlacementPromptOpen] = useState(false);
   const [mapActiveContainerId, setMapActiveContainerId] = useState<string | null>(null);
   const [isMapStylePanelOpen, setIsMapStylePanelOpen] = useState(false);
@@ -1821,6 +1820,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const [knowledgeReaderPresentation, setKnowledgeReaderPresentation] =
     useState<'workspace' | 'side-panel'>('side-panel');
+  const [openPdfIds, setOpenPdfIds] = useState<string[]>([]);
+  const [pdfWorkspaceTabs, setPdfWorkspaceTabs] = useState<PdfWorkspaceTab[]>([]);
+  const [activePdfId, setActivePdfId] = useState<string | null>(null);
+  const [pdfWorkspaceRightPanel, setPdfWorkspaceRightPanel] =
+    useState<PdfWorkspaceRightPanel>('closed');
+  const [pdfWorkspacePageById, setPdfWorkspacePageById] =
+    useState<Record<string, number>>({});
 
   /**
    * BCHAT-C. The board's own private AI conversation, and the ONE rule that
@@ -1920,6 +1926,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   useEffect(() => {
     setKnowledgeDocumentOpenRequest(null);
     setKnowledgeSourceOpenRequest(null);
+    setOpenPdfIds([]);
+    setPdfWorkspaceTabs([]);
+    setActivePdfId(null);
+    setPdfWorkspaceRightPanel('closed');
+    setPdfWorkspacePageById({});
   }, [sourceReferenceScopeKey]);
 
   const requestKnowledgeSourceOpen = useCallback((reference: SourceReference) => {
@@ -1930,6 +1941,129 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
   }, [sourceReferenceScopeKey]);
 
+  const openPdfWorkspaceDocument = useCallback((request: {
+    documentId: string;
+    originalFilename?: string;
+    pageNumber?: number;
+  }) => {
+    if (!sourceReferenceScopeKey) return;
+    setKnowledgeReaderPresentation('workspace');
+    setIsBoardAiChatOpen(false);
+    setOpenPdfIds((current) => (
+      current.includes(request.documentId) ? current : [...current, request.documentId]
+    ));
+    setPdfWorkspaceTabs((current) => {
+      const existing = current.find((tab) => tab.documentId === request.documentId);
+      if (existing) {
+        if (!request.originalFilename) return current;
+        return current.map((tab) => (
+          tab.documentId === request.documentId
+            ? { ...tab, originalFilename: request.originalFilename ?? tab.originalFilename }
+            : tab
+        ));
+      }
+      return [
+        ...current,
+        {
+          documentId: request.documentId,
+          originalFilename: request.originalFilename || 'Document',
+          pageCount: null,
+        },
+      ];
+    });
+    setActivePdfId(request.documentId);
+    const restoredPage = request.pageNumber ?? pdfWorkspacePageById[request.documentId];
+    knowledgeDocumentRequestIdRef.current += 1;
+    setKnowledgeDocumentOpenRequest(
+      buildKnowledgeDocumentOpenRequest(
+        knowledgeDocumentRequestIdRef.current,
+        request.documentId,
+        restoredPage,
+      ),
+    );
+  }, [sourceReferenceScopeKey, pdfWorkspacePageById]);
+
+  const activatePdfWorkspaceTab = useCallback((documentId: string) => {
+    const tab = pdfWorkspaceTabs.find((candidate) => candidate.documentId === documentId);
+    if (!tab) return;
+    openPdfWorkspaceDocument({
+      documentId,
+      originalFilename: tab.originalFilename,
+      pageNumber: pdfWorkspacePageById[documentId],
+    });
+  }, [openPdfWorkspaceDocument, pdfWorkspacePageById, pdfWorkspaceTabs]);
+
+  const closePdfWorkspace = useCallback(() => {
+    setOpenPdfIds([]);
+    setPdfWorkspaceTabs([]);
+    setActivePdfId(null);
+    setPdfWorkspaceRightPanel('closed');
+    setKnowledgeReaderPresentation('side-panel');
+    setKnowledgeDocumentOpenRequest(null);
+  }, []);
+
+  const closePdfWorkspaceTab = useCallback((documentId: string) => {
+    const closingIndex = openPdfIds.indexOf(documentId);
+    if (closingIndex === -1) return;
+    const nextIds = openPdfIds.filter((id) => id !== documentId);
+    setOpenPdfIds(nextIds);
+    setPdfWorkspaceTabs((current) => current.filter((tab) => tab.documentId !== documentId));
+    if (nextIds.length === 0) {
+      closePdfWorkspace();
+      return;
+    }
+    if (activePdfId !== documentId) return;
+    const nextActiveId = nextIds[Math.min(closingIndex, nextIds.length - 1)];
+    const nextTab = pdfWorkspaceTabs.find((tab) => tab.documentId === nextActiveId);
+    openPdfWorkspaceDocument({
+      documentId: nextActiveId,
+      originalFilename: nextTab?.originalFilename,
+      pageNumber: pdfWorkspacePageById[nextActiveId],
+    });
+  }, [
+    activePdfId,
+    closePdfWorkspace,
+    openPdfIds,
+    openPdfWorkspaceDocument,
+    pdfWorkspacePageById,
+    pdfWorkspaceTabs,
+  ]);
+
+  const resolvePdfWorkspaceDocument = useCallback((document: PdfWorkspaceTab) => {
+    setPdfWorkspaceTabs((current) => current.map((tab) => (
+      tab.documentId === document.documentId
+        ? {
+          ...tab,
+          originalFilename: document.originalFilename || tab.originalFilename,
+          pageCount: document.pageCount ?? tab.pageCount ?? null,
+        }
+        : tab
+    )));
+  }, []);
+
+  const rememberPdfWorkspacePage = useCallback((documentId: string, pageNumber: number) => {
+    setPdfWorkspacePageById((current) => (
+      current[documentId] === pageNumber ? current : { ...current, [documentId]: pageNumber }
+    ));
+  }, []);
+
+  const openUploadedPdfInWorkspace = useCallback((document: KnowledgePdfUploadResult) => {
+    openPdfWorkspaceDocument({
+      documentId: document.id,
+      originalFilename: document.originalFilename,
+      pageNumber: 1,
+    });
+  }, [openPdfWorkspaceDocument]);
+
+  const openExistingPdfInWorkspace = useCallback((document: KnowledgePdfPlacementSource) => {
+    openPdfWorkspaceDocument({
+      documentId: document.id,
+      originalFilename: document.originalFilename,
+      pageNumber: 1,
+    });
+    return true;
+  }, [openPdfWorkspaceDocument]);
+
   /**
    * P6J-F7-B1. The library named a document; the shell-level reader opens it.
    * Same scope gate and same mint-a-new-id contract as the citation request, so
@@ -1938,10 +2072,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const requestKnowledgeDocumentOpen = useCallback((request: {
     documentId: string;
+    originalFilename?: string;
     pageNumber?: number;
     presentation?: 'workspace' | 'side-panel';
   }) => {
     if (!sourceReferenceScopeKey) return;
+    if ((request.presentation ?? 'side-panel') === 'workspace') {
+      openPdfWorkspaceDocument(request);
+      return;
+    }
     knowledgeDocumentRequestIdRef.current += 1;
     // Which host draws the reader travels beside the request rather than
     // inside it: the persisted navigation request stays exactly the shape the
@@ -1955,7 +2094,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setKnowledgeDocumentOpenRequest(
       buildKnowledgeDocumentOpenRequest(knowledgeDocumentRequestIdRef.current, request.documentId, request.pageNumber),
     );
-  }, [sourceReferenceScopeKey]);
+  }, [sourceReferenceScopeKey, openPdfWorkspaceDocument]);
 
   // R1-A-2. Placement gate lives on usePadletSave (constructed below); this ref
   // bridges the ordering without duplicating any placement policy.
@@ -6667,7 +6806,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsCanvasShareModalOpen(false);
     setIsCanvasSettingsModalOpen(false);
     setIsImportBrowserOpen(false);
-    setIsExistingPdfPickerOpen(false);
     setIsClipartDraftModalOpen(false);
     setIsLibraryOpen(false);
     setIsMapStylePanelOpen(false);
@@ -7610,14 +7748,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         closeAllToolbarLaunchedUi();
         setIsImportBrowserOpen(true);
         break;
-      // "Use existing PDF". An ordinary action that opens a chooser -- it must
-      // never reach for the hidden PDF input, which belongs to Add PDF and to
-      // the browser's own label activation.
-      case 'knowledge-pdf-existing':
-        closeDrawingSelectedShapePanel();
-        closeAllToolbarLaunchedUi();
-        setIsExistingPdfPickerOpen(true);
-        break;
       case 'draw':
         // Open Excalidraw Editor
         closeDrawingSelectedShapePanel();
@@ -7953,8 +8083,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
-              onKnowledgePdfUploaded={handleKnowledgePdfUploaded}
-              onKnowledgePdfSettled={handleKnowledgePdfSettled}
             />
           </div>
         )}
@@ -9984,21 +10112,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
 
 
-            {/* "Use existing PDF" chooser. Gated by the same two authorities
-                the placement handler itself enforces, so a viewer or an
-                unsupported layout never sees it even if a stale toolbar
-                dispatched the action. The picker renders nothing while closed,
-                so this anchor collapses to zero size. */}
-            <div className="fixed left-20 top-28 z-50">
-              <KnowledgeExistingPdfPicker
-                isOpen={isExistingPdfPickerOpen && canUseCanvasToolbar && canPlaceDirectPdf}
-                boardId={canvasId ?? ''}
-                placedDocumentIds={placedKnowledgeDocumentIds}
-                onClose={() => setIsExistingPdfPickerOpen(false)}
-                onPlace={handleKnowledgePdfUploaded}
-              />
-            </div>
-
             {/* Imports Dialog */}
             <ImportsDialog
               isOpen={isImportBrowserOpen}
@@ -10183,6 +10296,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
           onAddBoardAiContext={enableBoardAiChat ? addBoardAiChatContext : undefined}
+          workspaceTabs={pdfWorkspaceTabs}
+          activeWorkspacePdfId={activePdfId}
+          workspaceRightPanel={pdfWorkspaceRightPanel}
+          onWorkspaceTabActivate={activatePdfWorkspaceTab}
+          onWorkspaceTabClose={closePdfWorkspaceTab}
+          onWorkspaceClose={closePdfWorkspace}
+          onWorkspaceRightPanelChange={setPdfWorkspaceRightPanel}
+          onWorkspaceDocumentResolved={resolvePdfWorkspaceDocument}
+          onWorkspaceActivePageChange={rememberPdfWorkspacePage}
+          onWorkspacePdfUploaded={openUploadedPdfInWorkspace}
+          onWorkspaceExistingPdfOpen={openExistingPdfInWorkspace}
+          onWorkspacePdfSettled={handleKnowledgePdfSettled}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader
