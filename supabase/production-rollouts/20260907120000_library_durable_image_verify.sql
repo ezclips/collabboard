@@ -192,7 +192,8 @@ SELECT '6c' AS section, 'provenance mirror: reviewed definition, INVOKER, intern
     COALESCE(
       h.oid IS NOT NULL
       AND (SELECT p.provolatile = 'i' AND NOT p.prosecdef AND l.lanname = 'plpgsql'
-             AND p.proconfig @> ARRAY['search_path=pg_catalog']
+             AND COALESCE(p.proconfig, ARRAY[]::text[])
+                 = ARRAY['search_path=pg_catalog']::text[]
              AND md5(p.prosrc) = '2831d591e5ef521428763b1e3a760a12'
              FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = h.oid)
       AND NOT has_function_privilege('public', h.oid, 'EXECUTE')
@@ -398,7 +399,8 @@ SELECT 12 AS section, 'ROLL-UP' AS check,
   -- The installed mirror must BE the reviewed one: volatility, language,
   -- search_path and body, not merely a function of the right name.
   AND COALESCE((SELECT p.provolatile = 'i' AND NOT p.prosecdef AND l.lanname = 'plpgsql'
-                  AND p.proconfig @> ARRAY['search_path=pg_catalog']
+                  AND COALESCE(p.proconfig, ARRAY[]::text[])
+                      = ARRAY['search_path=pg_catalog']::text[]
                   AND md5(p.prosrc) = '2831d591e5ef521428763b1e3a760a12'
                   FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
                  WHERE p.oid = to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)')), false)

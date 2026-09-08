@@ -248,7 +248,8 @@ BEGIN
         SELECT p.provolatile = 'i'
            AND NOT p.prosecdef
            AND l.lanname = 'plpgsql'
-           AND p.proconfig @> ARRAY['search_path=pg_catalog']
+           AND COALESCE(p.proconfig, ARRAY[]::text[])
+               = ARRAY['search_path=pg_catalog']::text[]
            AND md5(p.prosrc) = helper_body_md5
           FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
          WHERE p.oid = helper_oid);
@@ -683,13 +684,15 @@ BEGIN
            OR has_table_privilege('authenticated', 'public.library_items', 'UPDATE')
            OR has_table_privilege('authenticated', 'public.library_items', 'TRUNCATE')
            OR has_table_privilege('authenticated', 'public.library_items', 'REFERENCES')
-           OR has_table_privilege('authenticated', 'public.library_items', 'TRIGGER') THEN
+           OR has_table_privilege('authenticated', 'public.library_items', 'TRIGGER')
+           OR has_table_privilege('authenticated', 'public.library_items', 'MAINTAIN') THEN
             RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW postflight failed: authenticated retains table-wide write authority';
         END IF;
         IF has_table_privilege('anon', 'public.library_items', 'INSERT')
            OR has_table_privilege('anon', 'public.library_items', 'UPDATE')
            OR has_table_privilege('anon', 'public.library_items', 'DELETE')
-           OR has_table_privilege('anon', 'public.library_items', 'TRUNCATE') THEN
+           OR has_table_privilege('anon', 'public.library_items', 'TRUNCATE')
+           OR has_table_privilege('anon', 'public.library_items', 'MAINTAIN') THEN
             RAISE EXCEPTION 'IMAGE-LIBRARY-DURABLE-PREVIEW postflight failed: anon retains write authority';
         END IF;
     END LOOP;

@@ -697,6 +697,7 @@ describe('F37-F40: MAINTAIN privilege and installed-helper identity', () => {
   const rollout = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image.sql');
   const verifier = sourceOf('supabase/production-rollouts/20260907120000_library_durable_image_verify.sql');
   const preflight = rollout.slice(rollout.indexOf('DO $preflight$'), rollout.indexOf('$preflight$;'));
+  const postflight = rollout.slice(rollout.indexOf('DO $postflight$'), rollout.indexOf('$postflight$;'));
   const rollup = verifier.slice(verifier.indexOf('12 AS section'));
 
   /** The body PostgreSQL stores as pg_proc.prosrc for the shipped helper. */
@@ -741,6 +742,11 @@ describe('F37-F40: MAINTAIN privilege and installed-helper identity', () => {
     // And the release gate carries both, not just the section output.
     expect(rollup).toContain("NOT has_table_privilege('anon','public.library_items','MAINTAIN')");
     expect(rollup).toContain("NOT has_table_privilege('authenticated','public.library_items','MAINTAIN')");
+    // APPLY's own postflight must independently refuse either retained grant;
+    // finding these strings in PRE/POST classification is not sufficient.
+    expect(postflight).toContain("has_table_privilege('anon', 'public.library_items', 'MAINTAIN')");
+    expect(postflight).toContain("has_table_privilege('authenticated', 'public.library_items', 'MAINTAIN')");
+    expect(postflight).toContain('RAISE EXCEPTION');
   });
 
   it('F39: the installed helper is pinned by definition, not just by name', () => {
@@ -750,9 +756,17 @@ describe('F37-F40: MAINTAIN privilege and installed-helper identity', () => {
     for (const [name, sql] of [['preflight', preflight], ['rollup', rollup]] as const) {
       expect(sql, name + ' volatility').toContain("provolatile = 'i'");
       expect(sql, name + ' language').toContain("lanname = 'plpgsql'");
-      expect(sql, name + ' search_path').toContain("proconfig @> ARRAY['search_path=pg_catalog']");
+      const dense = sql.replace(/\s+/g, '');
+      expect(dense, name + ' exact search_path').toContain(
+        "COALESCE(p.proconfig,ARRAY[]::text[])=ARRAY['search_path=pg_catalog']::text[]",
+      );
+      expect(sql, name + ' extra config rejection').not.toContain('proconfig @>');
       expect(sql, name + ' body').toContain('md5(p.prosrc) =');
     }
+    // The verifier checks identity both in its diagnostic section and in the
+    // final gate; neither may accept an array with extra function-local GUCs.
+    expect((verifier.match(/COALESCE\(p\.proconfig, ARRAY\[\]::text\[\]\)/g) ?? []).length)
+      .toBeGreaterThanOrEqual(2);
     // Catalog-derived, no extension dependency, and language read through
     // pg_language rather than guessed from the source text.
     expect(preflight).toContain('JOIN pg_language l ON l.oid = p.prolang');
