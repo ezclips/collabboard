@@ -104,12 +104,25 @@ export default function PdfWorkspaceChrome({
 
       <header
         data-pdf-workspace-tabs="true"
-        className="flex h-11 flex-none items-center gap-1 border-b border-gray-200 bg-gray-50 px-2"
+        className="flex h-11 flex-none items-center gap-1 border-b border-gray-200 bg-slate-50 px-2"
       >
+        <button
+          type="button"
+          data-pdf-workspace-scroll="left"
+          aria-label="Reveal previous PDF tabs"
+          title="Previous tabs"
+          disabled={!canScrollLeft}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition hover:bg-white hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-30"
+          onClick={() => reveal(-1)}
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+        </button>
         <div
           ref={stripRef}
           data-pdf-workspace-tab-row="true"
-          className="flex min-w-0 flex-1 flex-nowrap items-end gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]"
+          role="tablist"
+          aria-label="Open PDFs"
+          className="flex min-w-0 flex-1 flex-nowrap items-end gap-1 overflow-x-auto whitespace-nowrap scroll-smooth pb-px [scrollbar-width:none]"
           onScroll={updateScrollState}
         >
           {tabs.map((tab) => {
@@ -118,17 +131,20 @@ export default function PdfWorkspaceChrome({
               <div
                 key={tab.documentId}
                 ref={active ? activeTabRef : undefined}
+                role="presentation"
                 data-pdf-workspace-tab={tab.documentId}
                 data-pdf-workspace-tab-active={active ? 'true' : 'false'}
-                className={`group flex max-w-[220px] shrink-0 items-center gap-1 rounded-t-md border px-2 py-1.5 text-xs ${
+                className={`group flex max-w-[220px] shrink-0 items-center gap-1 rounded-t-lg border px-2 py-1.5 text-xs transition-colors ${
                   active
-                    ? 'border-gray-200 border-b-white bg-white text-gray-900'
-                    : 'border-transparent text-gray-500 hover:bg-white hover:text-gray-800'
+                    ? 'border-gray-200 border-b-white bg-white text-gray-950 shadow-sm'
+                    : 'border-transparent text-gray-500 hover:border-gray-200 hover:bg-white hover:text-gray-800'
                 }`}
               >
                 <button
                   type="button"
-                  className="min-w-0 flex-1 truncate text-left"
+                  role="tab"
+                  aria-selected={active}
+                  className="min-w-0 flex-1 truncate rounded-sm text-left font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
                   title={tab.originalFilename || 'Document'}
                   onClick={() => onActivateTab(tab.documentId)}
                 >
@@ -139,7 +155,7 @@ export default function PdfWorkspaceChrome({
                   data-pdf-workspace-tab-close={tab.documentId}
                   aria-label={`Close ${tab.originalFilename || 'PDF tab'}`}
                   title="Close tab"
-                  className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  className="shrink-0 rounded p-0.5 text-gray-400 opacity-70 transition hover:bg-gray-100 hover:text-gray-700 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 group-hover:opacity-100"
                   onClick={(event) => {
                     event.stopPropagation();
                     onCloseTab(tab.documentId);
@@ -154,104 +170,95 @@ export default function PdfWorkspaceChrome({
 
         <button
           type="button"
-          data-pdf-workspace-scroll="left"
-          aria-label="Reveal previous PDF tabs"
-          title="Previous tabs"
-          disabled={!canScrollLeft}
-          className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
-          onClick={() => reveal(-1)}
-        >
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
           data-pdf-workspace-scroll="right"
           aria-label="Reveal next PDF tabs"
           title="Next tabs"
           disabled={!canScrollRight}
-          className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition hover:bg-white hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-30"
           onClick={() => reveal(1)}
         >
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              data-pdf-workspace-all-menu="true"
-              aria-label="All open PDFs"
-              title="All open PDFs"
-              className="shrink-0 rounded p-1 text-gray-600 hover:bg-gray-100"
-            >
-              <Files className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="z-[3200] max-h-72 w-72 overflow-y-auto">
-            {tabs.map((tab) => (
-              <DropdownMenuItem key={tab.documentId} onSelect={() => onActivateTab(tab.documentId)}>
-                <span className="min-w-0 truncate">{tab.originalFilename || 'Document'}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <div className="relative shrink-0">
+        <div data-pdf-workspace-fixed-tab-controls="true" className="flex shrink-0 items-center gap-1">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                data-pdf-workspace-add="true"
-                aria-label="Add PDF"
-                title="Add PDF"
-                className="rounded p-1 text-gray-700 hover:bg-gray-100"
+                data-pdf-workspace-all-menu="true"
+                aria-label="All open PDFs"
+                title="All open PDFs"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-600 transition hover:bg-white hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
               >
-                <Plus className="h-4 w-4" aria-hidden="true" />
+                <Files className="h-4 w-4" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="z-[3200] w-48">
-              <DropdownMenuItem asChild>
-                <label htmlFor={KNOWLEDGE_PDF_INPUT_ID} className="flex cursor-pointer items-center">
-                  <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Upload PDF
-                </label>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setPickerOpen(true)}>
-                <Files className="mr-2 h-4 w-4" aria-hidden="true" />
-                Open existing PDF
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="z-[3200] max-h-72 w-72 overflow-y-auto">
+              {tabs.map((tab) => (
+                <DropdownMenuItem key={tab.documentId} onSelect={() => onActivateTab(tab.documentId)}>
+                  <span className="min-w-0 truncate">{tab.originalFilename || 'Document'}</span>
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="absolute right-0 top-10">
-            <KnowledgeExistingPdfPicker
-              isOpen={pickerOpen}
-              boardId={boardId}
-              placedDocumentIds={[]}
-              onClose={() => setPickerOpen(false)}
-              onPlace={onOpenExistingDocument}
-            />
-          </div>
-        </div>
 
-        <button
-          type="button"
-          data-pdf-workspace-close="true"
-          aria-label="Close PDF workspace"
-          title="Close workspace"
-          className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-          onClick={onCloseWorkspace}
-        >
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
+          <div className="relative shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  data-pdf-workspace-add="true"
+                  aria-label="Add PDF"
+                  title="Add PDF"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-gray-700 transition hover:bg-white hover:text-gray-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
+                >
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-[3200] w-48">
+                <DropdownMenuItem asChild>
+                  <label htmlFor={KNOWLEDGE_PDF_INPUT_ID} className="flex cursor-pointer items-center">
+                    <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+                    Upload PDF
+                  </label>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setPickerOpen(true)}>
+                  <Files className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Open existing PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="absolute right-0 top-10">
+              <KnowledgeExistingPdfPicker
+                isOpen={pickerOpen}
+                boardId={boardId}
+                placedDocumentIds={[]}
+                onClose={() => setPickerOpen(false)}
+                onPlace={onOpenExistingDocument}
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            data-pdf-workspace-close="true"
+            aria-label="Close PDF workspace"
+            title="Close workspace"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition hover:bg-white hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
+            onClick={onCloseWorkspace}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <main data-pdf-workspace-main="true" className="min-w-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 bg-slate-100">
+        <main data-pdf-workspace-main="true" className="min-w-0 flex-1 overflow-hidden bg-white transition-all duration-150">
           {children}
         </main>
         <div
           data-pdf-workspace-dock-controls="true"
-          className="flex w-12 shrink-0 flex-col items-center gap-2 border-l border-gray-100 bg-gray-50 px-1 py-3"
+          className="flex w-12 shrink-0 flex-col items-center gap-2 border-l border-gray-200 bg-slate-50 px-1 py-3"
         >
           <button
             type="button"
@@ -259,7 +266,7 @@ export default function PdfWorkspaceChrome({
             aria-pressed={rightPanel === 'library'}
             aria-label="Library"
             title="Library"
-            className={`rounded p-2 ${rightPanel === 'library' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+            className={`rounded-lg p-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${rightPanel === 'library' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:text-gray-800'}`}
             onClick={() => togglePanel('library')}
           >
             <Library className="h-4 w-4" aria-hidden="true" />
@@ -271,7 +278,7 @@ export default function PdfWorkspaceChrome({
               aria-pressed={rightPanel === 'ai'}
               aria-label="AI"
               title="AI"
-              className={`rounded p-2 ${rightPanel === 'ai' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              className={`rounded-lg p-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${rightPanel === 'ai' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:text-gray-800'}`}
               onClick={() => togglePanel('ai')}
             >
               <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -281,12 +288,12 @@ export default function PdfWorkspaceChrome({
         {rightPanel !== 'closed' ? (
           <aside
             data-pdf-workspace-right-panel-content="true"
-            className="flex min-h-0 w-[340px] shrink-0 flex-col border-l border-gray-200 bg-white"
+            className="flex min-h-0 w-[clamp(360px,28vw,400px)] shrink-0 flex-col border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(15,23,42,0.06)]"
             aria-label={`${rightPanel === 'library' ? 'Library' : 'AI'} for ${activeFilename}`}
           >
             <header className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-3 py-2">
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-gray-700">{rightPanel === 'library' ? 'Library' : 'AI'}</div>
+                <div data-pdf-workspace-panel-title="true" className="text-xs font-semibold text-gray-800">{rightPanel === 'library' ? 'Library' : 'AI'}</div>
                 <div data-pdf-workspace-panel-document="true" className="truncate text-[11px] text-gray-500" title={activeFilename}>
                   {activeFilename}
                 </div>
@@ -296,7 +303,7 @@ export default function PdfWorkspaceChrome({
                 data-pdf-workspace-panel-close="true"
                 aria-label="Close right panel"
                 title="Close"
-                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
                 onClick={() => onRightPanelChange('closed')}
               >
                 <X className="h-4 w-4" aria-hidden="true" />

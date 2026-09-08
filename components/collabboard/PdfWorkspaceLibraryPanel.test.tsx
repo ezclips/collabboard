@@ -317,6 +317,13 @@ describe('PdfWorkspaceLibraryPanel', () => {
 
     expect(noteIds(container)).toEqual(['note-a']);
     expect(imageIds(container)).toEqual([IMG_A1]);
+    const filters = Array.from(container.querySelectorAll<HTMLElement>('[data-pdf-workspace-library-filter]'))
+      .map((node) => node.dataset.pdfWorkspaceLibraryFilter);
+    expect(filters).toEqual(['all', 'notes', 'images']);
+    expect(container.querySelector('[data-pdf-workspace-library-filters="true"]')?.className).toContain('flex-nowrap');
+    expect(container.querySelector('[data-pdf-workspace-library-filters="true"]')?.className).toContain('overflow-x-auto');
+    expect(container.querySelector(`[data-pdf-workspace-library-image-go="${IMG_A1}"]`)?.className).toContain('group');
+    expect(container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`)?.className).toContain('group-hover:text-blue-700');
 
     click(container.querySelector('[data-pdf-workspace-library-filter="notes"]'));
     expect(noteIds(container)).toEqual(['note-a']);

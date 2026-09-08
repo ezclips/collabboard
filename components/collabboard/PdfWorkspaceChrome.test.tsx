@@ -133,6 +133,10 @@ function activeReader(container: HTMLElement): string | null {
   return container.querySelector('[data-testid="active-reader"]')?.textContent ?? null;
 }
 
+function scrollButtons(container: HTMLElement): HTMLButtonElement[] {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('[data-pdf-workspace-scroll]'));
+}
+
 function menuItemByText(text: string): HTMLElement | null {
   return Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
     .find((node) => node.textContent?.includes(text)) ?? null;
@@ -240,6 +244,9 @@ describe('PdfWorkspaceChrome', () => {
     click(container.querySelector('[data-pdf-workspace-tab="doc-b"] button'));
     expect(tabs(container)).toEqual(['doc-a', 'doc-b']);
     expect(activeReader(container)).toBe('doc-b');
+    expect(container.querySelector('[data-pdf-workspace-tab-active="true"]')?.getAttribute('data-pdf-workspace-tab')).toBe('doc-b');
+    expect(container.querySelector('[data-pdf-workspace-tab="doc-b"] [role="tab"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('[data-pdf-workspace-tab="doc-a"] [role="tab"]')?.getAttribute('aria-selected')).toBe('false');
   });
 
   it('closes inactive tabs, selects an adjacent tab when active closes, and closes the workspace on the last tab', () => {
@@ -277,7 +284,11 @@ describe('PdfWorkspaceChrome', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha, beta]} initialActive="doc-a" />);
 
     click(container.querySelector('[data-pdf-workspace-dock="library"]'));
+    expect(container.querySelector('[data-pdf-workspace-main="true"]')?.className).toContain('flex-1');
+    expect(container.querySelector('[data-pdf-workspace-right-panel-content="true"]')?.className).toContain('w-[clamp(360px,28vw,400px)]');
+    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className).toContain('bg-blue-600');
     expect(container.querySelector('[data-pdf-workspace-panel-document="true"]')?.textContent).toBe('Alpha.pdf');
+    expect(container.querySelector('[data-pdf-workspace-panel-title="true"]')?.textContent).toBe('Library');
     expect(container.querySelector('[data-testid="panel-context"]')?.textContent).toBe('doc-a');
 
     click(container.querySelector('[data-pdf-workspace-tab="doc-b"] button'));
@@ -287,6 +298,8 @@ describe('PdfWorkspaceChrome', () => {
     click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
     expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.getAttribute('aria-pressed')).toBe('false');
     expect(container.querySelector('[data-pdf-workspace-dock="ai"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelectorAll('[data-pdf-workspace-right-panel-content="true"]')).toHaveLength(1);
+    expect(container.querySelector('[data-pdf-workspace-panel-title="true"]')?.textContent).toBe('AI');
     expect(container.querySelector('[data-pdf-workspace-panel-document="true"]')?.textContent).toBe('Beta.pdf');
 
     click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
@@ -297,15 +310,57 @@ describe('PdfWorkspaceChrome', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha, beta]} initialActive="doc-a" />);
     const row = container.querySelector<HTMLElement>('[data-pdf-workspace-tab-row="true"]');
 
+    expect(row?.getAttribute('role')).toBe('tablist');
+    expect(row?.getAttribute('aria-label')).toBe('Open PDFs');
     expect(row?.className).toContain('flex-nowrap');
     expect(row?.className).toContain('overflow-x-auto');
     expect(row?.className).toContain('whitespace-nowrap');
-    expect(container.querySelector('[data-pdf-workspace-scroll="left"]')).toBeTruthy();
-    expect(container.querySelector('[data-pdf-workspace-scroll="right"]')).toBeTruthy();
-    expect(container.querySelector('[data-pdf-workspace-all-menu="true"]')).toBeTruthy();
+    const [left, right] = scrollButtons(container);
+    expect(left?.getAttribute('aria-label')).toBe('Reveal previous PDF tabs');
+    expect(right?.getAttribute('aria-label')).toBe('Reveal next PDF tabs');
+    expect(row?.previousElementSibling).toBe(left);
+    expect(row?.nextElementSibling).toBe(right);
+    expect(container.querySelector('[data-pdf-workspace-fixed-tab-controls="true"] [data-pdf-workspace-all-menu="true"]')).toBeTruthy();
+    expect(container.querySelector('[data-pdf-workspace-fixed-tab-controls="true"] [data-pdf-workspace-add="true"]')).toBeTruthy();
+    expect(container.querySelector('[data-pdf-workspace-all-menu="true"]')?.getAttribute('aria-label')).toBe('All open PDFs');
+    expect(container.querySelector('[data-pdf-workspace-add="true"]')?.getAttribute('aria-label')).toBe('Add PDF');
+    expect(container.querySelector('[data-pdf-workspace-tab-close="doc-a"]')?.getAttribute('aria-label')).toBe('Close Alpha.pdf');
     expect(container.textContent).not.toContain('From this PDF');
     expect(container.textContent).not.toContain('AI Summary');
     expect(container.textContent).not.toContain('Page Grid');
+  });
+
+  it('updates tab reveal controls at scroll boundaries and reveals the active tab without reordering', () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const container = mount(<TestWorkspace initialTabs={[alpha, beta]} initialActive="doc-b" />);
+      const row = container.querySelector<HTMLElement>('[data-pdf-workspace-tab-row="true"]');
+      expect(row).toBeTruthy();
+      Object.defineProperty(row, 'clientWidth', { configurable: true, value: 100 });
+      Object.defineProperty(row, 'scrollWidth', { configurable: true, value: 300 });
+      row!.scrollLeft = 0;
+
+      act(() => {
+        row!.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+      let [left, right] = scrollButtons(container);
+      expect(left.disabled).toBe(true);
+      expect(right.disabled).toBe(false);
+
+      row!.scrollLeft = 200;
+      act(() => {
+        row!.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+      [left, right] = scrollButtons(container);
+      expect(left.disabled).toBe(false);
+      expect(right.disabled).toBe(true);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+      expect(tabs(container)).toEqual(['doc-a', 'doc-b']);
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
   });
 });
 

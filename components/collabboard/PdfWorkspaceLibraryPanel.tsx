@@ -49,7 +49,7 @@ function NoteRow({
       <button
         type="button"
         onClick={() => onOpenNote(note.targetPadletId)}
-        className="block w-full rounded-md border border-gray-100 p-2 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+        className="block w-full rounded-lg border border-gray-100 bg-white p-2 text-left transition hover:border-gray-200 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
         style={note.accentColor ? { borderLeftColor: note.accentColor, borderLeftWidth: 3 } : undefined}
       >
         <p className="truncate text-xs font-medium text-gray-800">{note.title}</p>
@@ -94,7 +94,7 @@ function ImageRow({
         aria-label={`Go to page ${image.pageNumber}`}
         disabled={!canNavigate}
         onClick={navigate}
-        className="flex w-full gap-2 rounded-md border border-gray-100 p-2 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300 disabled:cursor-default disabled:opacity-60"
+        className="group flex w-full gap-2 rounded-lg border border-gray-100 bg-white p-2 text-left transition hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-default disabled:opacity-60"
       >
         <div className="h-14 w-16 shrink-0 overflow-hidden rounded bg-gray-100">
           {/* Existing Library previews can be same-origin API routes or data URLs. */}
@@ -102,18 +102,17 @@ function ImageRow({
             src={image.previewSrc}
             alt=""
             data-pdf-workspace-library-image-preview={image.libraryItemId}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover transition group-hover:scale-[1.02]"
           />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-gray-800">{image.title}</p>
           <p
             data-pdf-workspace-library-image-page={image.libraryItemId}
-            className="mt-1 text-[10px] font-medium uppercase tracking-wide text-gray-400"
+            className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 group-hover:text-blue-700"
           >
             p. {image.pageNumber}
           </p>
-          <p className="mt-1 truncate text-[10px] text-gray-400">{image.libraryItemId}</p>
         </div>
       </button>
     </li>
@@ -179,17 +178,17 @@ export default function PdfWorkspaceLibraryPanel({
 
   return (
     <div data-pdf-workspace-library-panel="true" data-pdf-workspace-library-document={documentId}>
-      <div data-pdf-workspace-library-filters="true" className="mb-3 flex items-center gap-1">
+      <div data-pdf-workspace-library-filters="true" className="mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">
         {FILTERS.map((entry) => (
           <button
             key={entry.id}
             type="button"
             data-pdf-workspace-library-filter={entry.id}
             aria-pressed={filter === entry.id}
-            className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
               filter === entry.id
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 text-gray-500 hover:bg-slate-200 hover:text-gray-700'
             }`}
             onClick={() => setFilter(entry.id)}
           >
@@ -202,7 +201,7 @@ export default function PdfWorkspaceLibraryPanel({
             data-pdf-workspace-library-filter-reset="true"
             title="Reset filter"
             aria-label="Reset Library filter"
-            className="ml-auto rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            className="ml-auto rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
             onClick={() => setFilter('all')}
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
@@ -212,7 +211,7 @@ export default function PdfWorkspaceLibraryPanel({
 
       {showNotes ? (
         <section data-pdf-workspace-library-notes="true" className="mb-4">
-          <p className="mb-2 text-xs font-medium text-gray-600">Notes</p>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Notes</p>
           {notes.length === 0 ? (
             <p className="text-[11px] text-gray-500">No notes for this PDF yet.</p>
           ) : (
@@ -227,7 +226,7 @@ export default function PdfWorkspaceLibraryPanel({
 
       {showImages ? (
         <section data-pdf-workspace-library-images="true">
-          <p className="mb-2 text-xs font-medium text-gray-600">Images</p>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Images</p>
           {imagesLoading ? (
             <p data-pdf-workspace-library-images-loading="true" className="text-[11px] text-gray-500">
               Loading images…
