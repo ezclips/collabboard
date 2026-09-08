@@ -75,7 +75,8 @@ function ImageRow({
 }) {
   const canNavigate = image.provenance.knowledgeDocumentId === documentId
     && Number.isInteger(image.pageNumber)
-    && image.pageNumber >= 1;
+    && image.pageNumber >= 1
+    && Boolean(onNavigateToImagePage);
 
   const navigate = () => {
     if (!canNavigate) return;
@@ -88,33 +89,39 @@ function ImageRow({
 
   return (
     <li data-pdf-workspace-library-image={image.libraryItemId}>
-      <button
-        type="button"
+      <div
         data-pdf-workspace-library-image-go={image.libraryItemId}
-        aria-label={`Go to page ${image.pageNumber}`}
-        disabled={!canNavigate}
-        onClick={navigate}
         className="group flex w-full gap-2 rounded-lg border border-gray-100 bg-white p-2 text-left transition hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-default disabled:opacity-60"
       >
-        <div className="h-14 w-16 shrink-0 overflow-hidden rounded bg-gray-100">
+        <button
+          type="button"
+          data-pdf-workspace-library-image-preview={image.libraryItemId}
+          aria-label={`Go to page ${image.pageNumber}`}
+          disabled={!canNavigate}
+          onClick={navigate}
+          className="h-14 w-16 shrink-0 overflow-hidden rounded bg-gray-100 transition hover:ring-2 hover:ring-blue-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-default disabled:opacity-60"
+        >
           {/* Existing Library previews can be same-origin API routes or data URLs. */}
           <img
             src={image.previewSrc}
             alt=""
-            data-pdf-workspace-library-image-preview={image.libraryItemId}
             className="h-full w-full object-cover transition group-hover:scale-[1.02]"
           />
-        </div>
+        </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-gray-800">{image.title}</p>
-          <p
+          <button
+            type="button"
             data-pdf-workspace-library-image-page={image.libraryItemId}
-            className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 group-hover:text-blue-700"
+            aria-label={`Go to page ${image.pageNumber}`}
+            disabled={!canNavigate}
+            onClick={navigate}
+            className="mt-1 rounded text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-default disabled:opacity-60 group-hover:text-blue-700"
           >
             p. {image.pageNumber}
-          </p>
+          </button>
         </div>
-      </button>
+      </div>
     </li>
   );
 }

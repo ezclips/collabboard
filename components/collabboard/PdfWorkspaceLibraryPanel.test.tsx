@@ -236,14 +236,17 @@ describe('PdfWorkspaceLibraryPanel', () => {
     click(container.querySelector(`[data-pdf-workspace-library-image-preview="${IMG_A1}"]`));
     click(container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`));
     const imageButton = container.querySelector(`[data-pdf-workspace-library-image-go="${IMG_A1}"]`);
-    expect(imageButton).toBeInstanceOf(HTMLButtonElement);
-    expect((imageButton as HTMLButtonElement).disabled).toBe(false);
-    click(imageButton);
+    const previewButton = container.querySelector(`[data-pdf-workspace-library-image-preview="${IMG_A1}"]`);
+    const pageButton = container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`);
+    expect(imageButton).not.toBeInstanceOf(HTMLButtonElement);
+    expect(previewButton).toBeInstanceOf(HTMLButtonElement);
+    expect(pageButton).toBeInstanceOf(HTMLButtonElement);
+    expect((previewButton as HTMLButtonElement).disabled).toBe(false);
+    expect((pageButton as HTMLButtonElement).disabled).toBe(false);
 
-    expect(navigate).toHaveBeenCalledTimes(3);
+    expect(navigate).toHaveBeenCalledTimes(2);
     expect(navigate).toHaveBeenNthCalledWith(1, { libraryItemId: IMG_A1, documentId: DOC_A, pageNumber: 6 });
     expect(navigate).toHaveBeenNthCalledWith(2, { libraryItemId: IMG_A1, documentId: DOC_A, pageNumber: 6 });
-    expect(navigate).toHaveBeenNthCalledWith(3, { libraryItemId: IMG_A1, documentId: DOC_A, pageNumber: 6 });
     // The navigation callback is a request seam only; this harness proves the
     // panel itself performs no Note open or other mutation while navigating.
     expect(openNote).not.toHaveBeenCalled();
