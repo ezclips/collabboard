@@ -29,6 +29,11 @@ interface ImageState {
 export interface PdfWorkspaceLibraryPanelProps {
   readonly documentId: string;
   readonly onOpenNote: (targetPadletId: string) => void;
+  readonly onNavigateToImagePage?: (request: {
+    readonly libraryItemId: string;
+    readonly documentId: string;
+    readonly pageNumber: number;
+  }) => void;
   readonly loadLibraryItems?: () => Promise<readonly LibraryItem[]>;
 }
 
@@ -59,10 +64,38 @@ function NoteRow({
   );
 }
 
-function ImageRow({ image }: { image: PdfWorkspaceLibraryImage }) {
+function ImageRow({
+  image,
+  documentId,
+  onNavigateToImagePage,
+}: {
+  image: PdfWorkspaceLibraryImage;
+  documentId: string;
+  onNavigateToImagePage?: PdfWorkspaceLibraryPanelProps['onNavigateToImagePage'];
+}) {
+  const canNavigate = image.provenance.knowledgeDocumentId === documentId
+    && Number.isInteger(image.pageNumber)
+    && image.pageNumber >= 1;
+
+  const navigate = () => {
+    if (!canNavigate) return;
+    onNavigateToImagePage?.({
+      libraryItemId: image.libraryItemId,
+      documentId,
+      pageNumber: image.pageNumber,
+    });
+  };
+
   return (
     <li data-pdf-workspace-library-image={image.libraryItemId}>
-      <div className="flex gap-2 rounded-md border border-gray-100 p-2">
+      <button
+        type="button"
+        data-pdf-workspace-library-image-go={image.libraryItemId}
+        aria-label={`Go to page ${image.pageNumber}`}
+        disabled={!canNavigate}
+        onClick={navigate}
+        className="flex w-full gap-2 rounded-md border border-gray-100 p-2 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300 disabled:cursor-default disabled:opacity-60"
+      >
         <div className="h-14 w-16 shrink-0 overflow-hidden rounded bg-gray-100">
           {/* Existing Library previews can be same-origin API routes or data URLs. */}
           <img
@@ -82,7 +115,7 @@ function ImageRow({ image }: { image: PdfWorkspaceLibraryImage }) {
           </p>
           <p className="mt-1 truncate text-[10px] text-gray-400">{image.libraryItemId}</p>
         </div>
-      </div>
+      </button>
     </li>
   );
 }
@@ -90,6 +123,7 @@ function ImageRow({ image }: { image: PdfWorkspaceLibraryImage }) {
 export default function PdfWorkspaceLibraryPanel({
   documentId,
   onOpenNote,
+  onNavigateToImagePage,
   loadLibraryItems = fetchLibraryItems,
 }: PdfWorkspaceLibraryPanelProps) {
   const notes = useKnowledgeSourceNoteSummariesForDocument(documentId);
@@ -207,7 +241,12 @@ export default function PdfWorkspaceLibraryPanel({
           ) : (
             <ul className="space-y-1.5">
               {images.map((image) => (
-                <ImageRow key={image.libraryItemId} image={image} />
+                <ImageRow
+                  key={image.libraryItemId}
+                  image={image}
+                  documentId={documentId}
+                  onNavigateToImagePage={onNavigateToImagePage}
+                />
               ))}
             </ul>
           )}

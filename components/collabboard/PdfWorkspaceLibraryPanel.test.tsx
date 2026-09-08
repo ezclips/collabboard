@@ -209,6 +209,48 @@ describe('PdfWorkspaceLibraryPanel', () => {
     expect(openNote).toHaveBeenCalledWith('note-a');
   });
 
+  it('navigates active-PDF Images to their provenance page from preview, page hint, and keyboard without closing the panel', async () => {
+    notesByDocument.set(DOC_A, [note('note-a', 'A note')]);
+    const openNote = vi.fn();
+    const navigate = vi.fn();
+    const container = mount(
+      <PdfWorkspaceLibraryPanel
+        documentId={DOC_A}
+        onOpenNote={openNote}
+        onNavigateToImagePage={navigate}
+        loadLibraryItems={async () => [
+          libraryImage(IMG_A1, DOC_A, 6, '2026-09-08T10:00:00.000Z'),
+          libraryImage(IMG_B, DOC_B, 3, '2026-09-08T09:00:00.000Z'),
+          libraryImage('cccccccc-cccc-4ccc-8ccc-cccccccccccc', DOC_A, 4, '2026-09-08T08:00:00.000Z', {
+            content: { ...libraryImage(IMG_A1, DOC_A, 4, '2026-09-08T08:00:00.000Z').content, metadata: {} },
+          }),
+        ]}
+      />,
+    );
+    await flush();
+
+    expect(imageIds(container)).toEqual([IMG_A1]);
+    expect(container.querySelector('[data-pdf-workspace-library-panel="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
+
+    click(container.querySelector(`[data-pdf-workspace-library-image-preview="${IMG_A1}"]`));
+    click(container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`));
+    const imageButton = container.querySelector(`[data-pdf-workspace-library-image-go="${IMG_A1}"]`);
+    expect(imageButton).toBeInstanceOf(HTMLButtonElement);
+    expect((imageButton as HTMLButtonElement).disabled).toBe(false);
+    click(imageButton);
+
+    expect(navigate).toHaveBeenCalledTimes(3);
+    expect(navigate).toHaveBeenNthCalledWith(1, { libraryItemId: IMG_A1, documentId: DOC_A, pageNumber: 6 });
+    expect(navigate).toHaveBeenNthCalledWith(2, { libraryItemId: IMG_A1, documentId: DOC_A, pageNumber: 6 });
+    expect(navigate).toHaveBeenNthCalledWith(3, { libraryItemId: IMG_A1, documentId: DOC_A, pageNumber: 6 });
+    // The navigation callback is a request seam only; this harness proves the
+    // panel itself performs no Note open or other mutation while navigating.
+    expect(openNote).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-pdf-workspace-library-panel="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
+  });
+
   it('clears stale active-document content during switches and rejects stale async Library results', async () => {
     notesByDocument.set(DOC_A, [note('note-a', 'A note')]);
     notesByDocument.set(DOC_B, [note('note-b', 'B note')]);
@@ -305,5 +347,21 @@ describe('PdfWorkspaceLibraryPanel', () => {
     expect(selectorSource).not.toContain('originalFilename');
     expect(selectorSource).toContain('parseKnowledgePdfAreaProvenance');
     expect(selectorSource).toContain('resolveLibraryImagePreviewSrc');
+  });
+
+  it('keeps image navigation defensive and routed through the existing reader page authority', () => {
+    const panelSource = readFileSync(join(process.cwd(), 'components/collabboard/PdfWorkspaceLibraryPanel.tsx'), 'utf8');
+    const readerSource = readFileSync(join(process.cwd(), 'components/collabboard/KnowledgeSourceReaderDrawer.tsx'), 'utf8');
+    const detailsSource = readFileSync(join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8');
+
+    expect(panelSource).toContain('image.provenance.knowledgeDocumentId === documentId');
+    expect(panelSource).toContain('Number.isInteger(image.pageNumber)');
+    expect(readerSource).toContain('current.documentId !== request.documentId');
+    expect(readerSource).toContain('current.pages.some((page) => page.pageNumber === request.pageNumber)');
+    expect(readerSource).toContain('onWorkspaceActivePageChange?.(current.documentId, request.pageNumber)');
+    expect(detailsSource).toContain('pageNavigationRequestId');
+    expect(detailsSource).toContain('scrolledToPageRef.current = null;');
+    expect(panelSource).not.toContain('fetch(');
+    expect(panelSource).not.toContain('supabase');
   });
 });

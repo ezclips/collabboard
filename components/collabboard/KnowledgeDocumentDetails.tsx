@@ -144,6 +144,7 @@ export interface KnowledgeDocumentDetailsProps {
    * geometry, no char offsets.
    */
   initialPageNumber?: number;
+  pageNavigationRequestId?: number;
   /**
    * Session-local host state. The reader remains the page authority; this only
    * reports the page it already derived so a tabbed workspace can restore it
@@ -565,6 +566,7 @@ export default function KnowledgeDocumentDetails({
   onAiFromSelection,
   onAddBoardAiContext,
   initialPageNumber,
+  pageNavigationRequestId,
   onActivePageChange,
   initialSourceReferenceId,
   initialSourceRequestId,
@@ -830,7 +832,7 @@ export default function KnowledgeDocumentDetails({
   // A different request resets the latch so the same page can be targeted again.
   useEffect(() => {
     scrolledToPageRef.current = null;
-  }, [initialPageNumber]);
+  }, [initialPageNumber, pageNavigationRequestId]);
 
   useEffect(() => {
     // Integer-only, which is both a correctness check and what keeps the
@@ -847,7 +849,7 @@ export default function KnowledgeDocumentDetails({
     // opened -- never an error, never a jump to an unrelated page.
     scrolledToPageRef.current = initialPageNumber;
     if (target instanceof HTMLElement) target.scrollIntoView?.({ block: 'start' });
-  }, [initialPageNumber, loading, pages, matches.length]);
+  }, [initialPageNumber, pageNavigationRequestId, loading, pages, matches.length]);
 
   /**
    * P6J-F6-B4-B4 exact arrival, refining the page scroll above once the

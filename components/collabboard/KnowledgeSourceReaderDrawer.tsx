@@ -175,6 +175,8 @@ interface KnowledgeReaderState {
   error: boolean;
   /** Navigation state only -- never written back to source_references. */
   initialPageNumber?: number;
+  /** Request id for same-page workspace jumps from Library image provenance. */
+  pageNavigationRequestId?: number;
   /** Null for every library and semantic-result open, so neither inherits one. */
   sourceTarget: KnowledgeSourceTarget | null;
   /**
@@ -243,6 +245,7 @@ export default function KnowledgeSourceReaderDrawer({
   const openerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
+  const workspaceImageNavigationRequestIdRef = useRef(0);
   const isOpen = reader !== null;
 
   const isWorkspace = presentation === 'workspace';
@@ -433,6 +436,26 @@ export default function KnowledgeSourceReaderDrawer({
     setReader((current) => (current ? { ...current, aiSession: null } : current));
   };
 
+  const navigateWorkspaceImageToPage = useCallback((request: {
+    readonly documentId: string;
+    readonly pageNumber: number;
+  }) => {
+    if (!isWorkspace) return;
+    if (!Number.isInteger(request.pageNumber) || request.pageNumber < 1) return;
+    setReader((current) => {
+      if (!current) return current;
+      if (current.documentId !== request.documentId) return current;
+      if (!current.pages.some((page) => page.pageNumber === request.pageNumber)) return current;
+      const requestId = ++workspaceImageNavigationRequestIdRef.current;
+      onWorkspaceActivePageChange?.(current.documentId, request.pageNumber);
+      return {
+        ...current,
+        initialPageNumber: request.pageNumber,
+        pageNavigationRequestId: requestId,
+      };
+    });
+  }, [isWorkspace, onWorkspaceActivePageChange]);
+
   useEffect(() => {
     if (!isWorkspace || reader === null || reader.loading || reader.error) return;
     onWorkspaceDocumentResolved?.({
@@ -572,6 +595,7 @@ export default function KnowledgeSourceReaderDrawer({
       <PdfWorkspaceLibraryPanel
         documentId={reader.documentId}
         onOpenNote={openBacklinkTarget}
+        onNavigateToImagePage={navigateWorkspaceImageToPage}
       />
     ) : workspaceRightPanel === 'ai' && onWorkspaceBoardAiDraftContextChange ? (
       <BoardAiChatDrawer
@@ -625,6 +649,7 @@ export default function KnowledgeSourceReaderDrawer({
               loading={reader.loading}
               error={reader.error}
               initialPageNumber={reader.initialPageNumber}
+              pageNavigationRequestId={reader.pageNavigationRequestId}
               initialSourceReferenceId={reader.sourceTarget?.referenceId}
               initialSourceRequestId={reader.sourceTarget?.requestId}
               onBack={closeReader}
