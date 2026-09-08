@@ -15,6 +15,7 @@ import {
 import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
+import BoardAiChatDrawer from '@/components/collabboard/BoardAiChatDrawer';
 import PdfWorkspaceLibraryPanel from '@/components/collabboard/PdfWorkspaceLibraryPanel';
 import PdfWorkspaceChrome, {
   type PdfWorkspaceRightPanel,
@@ -60,6 +61,7 @@ const READER_PAGES_RETRY_LIMIT = 12;
 const READER_PAGES_RETRY_DELAY_MS = 2000;
 
 import {
+  addBoardAiDraftContext,
   boardAiDraftFromDocument,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
@@ -150,6 +152,8 @@ export interface KnowledgeSourceReaderDrawerProps {
   onWorkspacePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
   onWorkspaceExistingPdfOpen?: (document: KnowledgePdfPlacementSource) => Promise<boolean> | boolean;
   onWorkspacePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
+  workspaceBoardAiDraftContext?: readonly BoardAiDraftContextItem[];
+  onWorkspaceBoardAiDraftContextChange?: (items: readonly BoardAiDraftContextItem[]) => void;
 }
 
 /**
@@ -219,6 +223,8 @@ export default function KnowledgeSourceReaderDrawer({
   onWorkspacePdfUploaded,
   onWorkspaceExistingPdfOpen,
   onWorkspacePdfSettled,
+  workspaceBoardAiDraftContext = [],
+  onWorkspaceBoardAiDraftContextChange,
 }: KnowledgeSourceReaderDrawerProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
@@ -522,9 +528,21 @@ export default function KnowledgeSourceReaderDrawer({
    * that rule out of its single home.
    */
   const handOffToBoardAi = useCallback((item: BoardAiDraftContextItem) => {
+    if (presentation === 'workspace' && onWorkspaceBoardAiDraftContextChange) {
+      onWorkspaceBoardAiDraftContextChange(addBoardAiDraftContext(workspaceBoardAiDraftContext, item).items);
+      onWorkspaceRightPanelChange?.('ai');
+      return;
+    }
     onAddBoardAiContext?.(item);
     if (presentation === 'workspace') closeReader();
-  }, [onAddBoardAiContext, presentation, closeReader]);
+  }, [
+    onAddBoardAiContext,
+    onWorkspaceBoardAiDraftContextChange,
+    onWorkspaceRightPanelChange,
+    presentation,
+    closeReader,
+    workspaceBoardAiDraftContext,
+  ]);
 
   const libraryBacklinks = useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null);
   const libraryBacklinkRows = useMemo(
@@ -555,22 +573,20 @@ export default function KnowledgeSourceReaderDrawer({
         documentId={reader.documentId}
         onOpenNote={openBacklinkTarget}
       />
-    ) : workspaceRightPanel === 'ai' && onAddBoardAiContext ? (
-      <div data-pdf-workspace-ai-panel="true" className="space-y-3">
-        <p className="text-xs text-gray-500">
-          Open Board AI with this PDF attached as context.
-        </p>
-        <button
-          type="button"
-          data-pdf-workspace-ai-open-board-chat="true"
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-          onClick={() => handOffToBoardAi(
-            boardAiDraftFromDocument(reader.documentId, reader.originalFilename || 'Document'),
-          )}
-        >
-          Open Board AI
-        </button>
-      </div>
+    ) : workspaceRightPanel === 'ai' && onWorkspaceBoardAiDraftContextChange ? (
+      <BoardAiChatDrawer
+        boardId={boardId}
+        isOpen
+        onClose={() => onWorkspaceRightPanelChange?.('closed')}
+        presentation="embedded"
+        documentScope={{
+          knowledgeDocumentId: reader.documentId,
+          originalFilename: reader.originalFilename || 'Document',
+        }}
+        draftContext={workspaceBoardAiDraftContext}
+        onDraftContextChange={onWorkspaceBoardAiDraftContextChange}
+        selectedBoardItem={null}
+      />
     ) : null;
 
     return (
@@ -579,7 +595,7 @@ export default function KnowledgeSourceReaderDrawer({
         tabs={effectiveTabs}
         activeDocumentId={activeDocumentId}
         rightPanel={workspaceRightPanel}
-        aiAvailable={!!onAddBoardAiContext}
+        aiAvailable={!!onWorkspaceBoardAiDraftContextChange}
         rightPanelContent={rightPanelContent}
         onActivateTab={onWorkspaceTabActivate ?? (() => {})}
         onCloseTab={(documentId) => {

@@ -1858,6 +1858,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [boardAiChatDraftContext, setBoardAiChatDraftContext] = useState<
     readonly BoardAiDraftContextItem[]
   >([]);
+  const [pdfWorkspaceAiDraftContextById, setPdfWorkspaceAiDraftContextById] =
+    useState<Record<string, readonly BoardAiDraftContextItem[]>>({});
 
   /**
    * The ONE reachable way Board AI opens, so direction A of the dock rule
@@ -1896,6 +1898,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setCloseSidePanelRequestId((current) => current + 1);
   }, []);
 
+  const activePdfAiDraftContext = activePdfId
+    ? pdfWorkspaceAiDraftContextById[activePdfId] ?? []
+    : [];
+
+  const setActivePdfAiDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
+    if (!activePdfId) return;
+    setPdfWorkspaceAiDraftContextById((current) => ({
+      ...current,
+      [activePdfId]: items,
+    }));
+  }, [activePdfId]);
+
   /**
    * The selected board object, reduced to what Board AI could attach.
    *
@@ -1931,6 +1945,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setActivePdfId(null);
     setPdfWorkspaceRightPanel('closed');
     setPdfWorkspacePageById({});
+    setPdfWorkspaceAiDraftContextById({});
   }, [sourceReferenceScopeKey]);
 
   const requestKnowledgeSourceOpen = useCallback((reference: SourceReference) => {
@@ -1998,6 +2013,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPdfWorkspaceTabs([]);
     setActivePdfId(null);
     setPdfWorkspaceRightPanel('closed');
+    setPdfWorkspaceAiDraftContextById({});
     setKnowledgeReaderPresentation('side-panel');
     setKnowledgeDocumentOpenRequest(null);
   }, []);
@@ -10308,6 +10324,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onWorkspacePdfUploaded={openUploadedPdfInWorkspace}
           onWorkspaceExistingPdfOpen={openExistingPdfInWorkspace}
           onWorkspacePdfSettled={handleKnowledgePdfSettled}
+          workspaceBoardAiDraftContext={enableBoardAiChat ? activePdfAiDraftContext : []}
+          onWorkspaceBoardAiDraftContextChange={enableBoardAiChat ? setActivePdfAiDraftContext : undefined}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader

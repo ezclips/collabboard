@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, MessageSquarePlus, Paperclip, SendHorizontal, X } from 'lucide-react';
+import { FileText, Loader2, MessageSquarePlus, Paperclip, SendHorizontal, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import {
@@ -12,7 +12,9 @@ import { BOARD_AI_CHAT_MESSAGE_MAX } from '@/lib/domain/ai/boardAiChatClient';
 import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
   addBoardAiDraftContext,
+  boardAiDraftFromDocument,
   boardAiDraftContextPayload,
+  boardAiDraftKey,
   removeBoardAiDraftContext,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
@@ -46,6 +48,11 @@ export interface BoardAiChatDrawerProps {
   readonly boardId: string;
   readonly isOpen: boolean;
   readonly onClose: () => void;
+  readonly presentation?: 'drawer' | 'embedded';
+  readonly documentScope?: {
+    readonly knowledgeDocumentId: string;
+    readonly originalFilename: string;
+  } | null;
   /**
    * The board's OWN blocking-editor authority, forwarded unchanged -- the same
    * flag the canvas toolbar and the Knowledge reader already step aside on. A
@@ -77,28 +84,164 @@ type ActiveThread = string | null;
 /** A stable empty default, so an absent prop is not a new array each render. */
 const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
 
+interface DocumentScopedSession {
+  readonly activeThreadId: ActiveThread;
+  readonly messages: readonly BoardAiChatMessageView[];
+  readonly draft: string;
+  readonly loadingMessages: boolean;
+  readonly sending: boolean;
+  readonly error: string | null;
+}
+
+const EMPTY_DOCUMENT_SESSION: DocumentScopedSession = {
+  activeThreadId: null,
+  messages: [],
+  draft: '',
+  loadingMessages: false,
+  sending: false,
+  error: null,
+};
+
+function applyStateAction<T>(current: T, action: React.SetStateAction<T>): T {
+  return typeof action === 'function' ? (action as (previous: T) => T)(current) : action;
+}
+
+function mergeMandatoryDocumentContext(
+  mandatory: BoardAiDraftContextItem | null,
+  optional: readonly BoardAiDraftContextItem[],
+): readonly BoardAiDraftContextItem[] {
+  if (!mandatory) return optional;
+  const mandatoryKey = boardAiDraftKey(mandatory);
+  return [
+    mandatory,
+    ...optional.filter((item) => boardAiDraftKey(item) !== mandatoryKey),
+  ].slice(0, BOARD_AI_DRAFT_CONTEXT_MAX);
+}
+
 export default function BoardAiChatDrawer({
   boardId,
   isOpen,
   onClose,
+  presentation = 'drawer',
+  documentScope = null,
   blockingEditorOpen = false,
   draftContext = EMPTY_DRAFT_CONTEXT,
   onDraftContextChange,
   selectedBoardItem = null,
 }: BoardAiChatDrawerProps) {
   const [threads, setThreads] = useState<readonly BoardAiChatThreadSummary[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState<ActiveThread>(null);
-  const [messages, setMessages] = useState<readonly BoardAiChatMessageView[]>([]);
-  const [draft, setDraft] = useState('');
+  const [boardActiveThreadId, setBoardActiveThreadId] = useState<ActiveThread>(null);
+  const [boardMessages, setBoardMessages] = useState<readonly BoardAiChatMessageView[]>([]);
+  const [boardDraft, setBoardDraft] = useState('');
   const [loadingThreads, setLoadingThreads] = useState(false);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [boardLoadingMessages, setBoardLoadingMessages] = useState(false);
+  const [boardSending, setBoardSending] = useState(false);
+  const [boardError, setBoardError] = useState<string | null>(null);
+  const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const activeDocumentScopeRef = useRef<string | null>(null);
 
   const yieldsToEditor = blockingEditorOpen;
+  const isEmbedded = presentation === 'embedded';
+  const documentScopeId = documentScope?.knowledgeDocumentId ?? null;
+  const documentSession = documentScopeId
+    ? documentSessions[documentScopeId] ?? EMPTY_DOCUMENT_SESSION
+    : EMPTY_DOCUMENT_SESSION;
+  const activeThreadId = documentScopeId ? documentSession.activeThreadId : boardActiveThreadId;
+  const messages = documentScopeId ? documentSession.messages : boardMessages;
+  const draft = documentScopeId ? documentSession.draft : boardDraft;
+  const loadingMessages = documentScopeId ? documentSession.loadingMessages : boardLoadingMessages;
+  const sending = documentScopeId ? documentSession.sending : boardSending;
+  const error = documentScopeId ? documentSession.error : boardError;
+  const mandatoryDocumentContext = useMemo(() => (
+    documentScope
+      ? boardAiDraftFromDocument(documentScope.knowledgeDocumentId, documentScope.originalFilename)
+      : null
+  ), [documentScope]);
+
+  const setDocumentSessionValue = useCallback((
+    documentId: string,
+    updater: (session: DocumentScopedSession) => DocumentScopedSession,
+  ) => {
+    setDocumentSessions((current) => ({
+      ...current,
+      [documentId]: updater(current[documentId] ?? EMPTY_DOCUMENT_SESSION),
+    }));
+  }, []);
+
+  const setActiveThreadId = useCallback((action: React.SetStateAction<ActiveThread>) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        activeThreadId: applyStateAction(session.activeThreadId, action),
+      }));
+      return;
+    }
+    setBoardActiveThreadId(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  const setMessages = useCallback((action: React.SetStateAction<readonly BoardAiChatMessageView[]>) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        messages: applyStateAction(session.messages, action),
+      }));
+      return;
+    }
+    setBoardMessages(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  const setDraft = useCallback((action: React.SetStateAction<string>) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        draft: applyStateAction(session.draft, action),
+      }));
+      return;
+    }
+    setBoardDraft(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  const setLoadingMessages = useCallback((action: React.SetStateAction<boolean>) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        loadingMessages: applyStateAction(session.loadingMessages, action),
+      }));
+      return;
+    }
+    setBoardLoadingMessages(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  const setSending = useCallback((action: React.SetStateAction<boolean>) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        sending: applyStateAction(session.sending, action),
+      }));
+      return;
+    }
+    setBoardSending(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  const setError = useCallback((action: React.SetStateAction<string | null>) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        error: applyStateAction(session.error, action),
+      }));
+      return;
+    }
+    setBoardError(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  useEffect(() => {
+    activeDocumentScopeRef.current = documentScopeId;
+    setContextMenuOpen(false);
+    setContextNotice(null);
+  }, [documentScopeId]);
 
   /**
    * Opening the drawer READS; it never writes. A thread row appears only when
@@ -107,6 +250,12 @@ export default function BoardAiChatDrawer({
    */
   useEffect(() => {
     if (!isOpen) return;
+    if (documentScopeId) {
+      setThreads([]);
+      setLoadingThreads(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoadingThreads(true);
     setError(null);
@@ -128,28 +277,32 @@ export default function BoardAiChatDrawer({
       }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, boardId]);
+  }, [isOpen, boardId, documentScopeId, setError]);
 
   /** One thread's messages, reloaded whenever the active thread changes. */
   useEffect(() => {
     if (!isOpen) return;
-    if (activeThreadId === null) { setMessages([]); return; }
+    if (activeThreadId === null) { setMessages([]); setLoadingMessages(false); return; }
     let cancelled = false;
+    const requestDocumentScopeId = documentScopeId;
     setLoadingMessages(true);
     (async () => {
       try {
         const response = await fetch(`${CHAT_PATH(boardId)}?threadId=${encodeURIComponent(activeThreadId)}`);
         if (!response.ok) throw new Error(String(response.status));
         const payload = await response.json() as { messages?: BoardAiChatMessageView[] };
+        if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
         if (!cancelled) setMessages(payload.messages ?? []);
       } catch {
+        if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
         if (!cancelled) { setMessages([]); setError('Could not load this conversation.'); }
       } finally {
+        if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
         if (!cancelled) setLoadingMessages(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, boardId, activeThreadId]);
+  }, [isOpen, boardId, activeThreadId, documentScopeId, setError, setLoadingMessages, setMessages]);
 
   /**
    * Re-reads one thread from the server.
@@ -161,16 +314,18 @@ export default function BoardAiChatDrawer({
    * authorized.
    */
   const reloadThread = useCallback(async (threadId: string) => {
+    const requestDocumentScopeId = documentScopeId;
     try {
       const response = await fetch(`${CHAT_PATH(boardId)}?threadId=${encodeURIComponent(threadId)}`);
       if (!response.ok) return;
       const payload = await response.json() as { messages?: BoardAiChatMessageView[] };
+      if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
       setMessages(payload.messages ?? []);
     } catch {
       // The turn on screen is already truthful enough; a failed refresh only
       // costs the chips, never correctness of the conversation.
     }
-  }, [boardId]);
+  }, [boardId, documentScopeId, setMessages]);
 
   // Newest turn in view, without stealing focus from the composer.
   useEffect(() => {
@@ -200,8 +355,10 @@ export default function BoardAiChatDrawer({
   const startNewChat = useCallback(() => {
     setActiveThreadId(null);
     setMessages([]);
+    setDraft('');
+    setLoadingMessages(false);
     setError(null);
-  }, []);
+  }, [setActiveThreadId, setDraft, setError, setLoadingMessages, setMessages]);
 
   const canSend = draft.trim().length > 0 && !sending;
 
@@ -210,6 +367,11 @@ export default function BoardAiChatDrawer({
   }, [onDraftContextChange]);
 
   const attach = useCallback((item: BoardAiDraftContextItem) => {
+    if (mandatoryDocumentContext && draftContext.length >= BOARD_AI_DRAFT_CONTEXT_MAX - 1) {
+      setContextMenuOpen(false);
+      setContextNotice(`Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX - 1} optional context items with this PDF.`);
+      return;
+    }
     const result = addBoardAiDraftContext(draftContext, item);
     setContextMenuOpen(false);
     if (result.outcome === 'added') {
@@ -222,17 +384,18 @@ export default function BoardAiChatDrawer({
     setContextNotice(result.outcome === 'duplicate'
       ? 'That is already attached.'
       : `Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
-  }, [draftContext, setDraftContext]);
+  }, [draftContext, mandatoryDocumentContext, setDraftContext]);
 
   const send = useCallback(async () => {
     const content = draft.trim();
     if (content.length === 0 || sending) return;
+    const requestDocumentScopeId = documentScopeId;
     setSending(true);
     setError(null);
     setContextNotice(null);
     // Captured for this ONE message. Attachments are not standing state: the
     // next question starts empty unless the user attaches again.
-    const outgoingContext = draftContext;
+    const outgoingContext = mergeMandatoryDocumentContext(mandatoryDocumentContext, draftContext);
     const contextPayload = boardAiDraftContextPayload(outgoingContext);
     // Shown immediately because the server persists the user turn BEFORE it
     // generates: this is what was really stored, not an optimistic guess.
@@ -268,6 +431,29 @@ export default function BoardAiChatDrawer({
         | { threadId?: string; message?: BoardAiChatMessageView; error?: string }
         | null;
 
+      if (requestDocumentScopeId !== activeDocumentScopeRef.current && requestDocumentScopeId) {
+        setDocumentSessionValue(requestDocumentScopeId, (session) => {
+          const withoutPending = session.messages.filter((entry) => entry.id !== pending.id);
+          if (!response.ok) {
+            return {
+              ...session,
+              activeThreadId: payload?.threadId ?? session.activeThreadId,
+              messages: payload?.threadId ? session.messages : withoutPending,
+              draft: payload?.threadId ? session.draft : content,
+              error: safeError(response.status, payload?.error),
+              sending: false,
+            };
+          }
+          return {
+            ...session,
+            activeThreadId: payload?.threadId ?? session.activeThreadId,
+            messages: payload?.message ? [...session.messages, payload.message] : session.messages,
+            sending: false,
+          };
+        });
+        return;
+      }
+      if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
       // The thread id is adopted even from a failure that carries one: the
       // question IS stored, and losing the id would strand it.
       if (payload?.threadId) setActiveThreadId(payload.threadId);
@@ -301,14 +487,39 @@ export default function BoardAiChatDrawer({
       // Only when something was attached: a plain turn has no chips to fetch,
       // and the optimistic row is already exactly what was stored.
       if (contextPayload && payload?.threadId) await reloadThread(payload.threadId);
-      if (payload?.threadId) await refreshThreads();
+      if (!mandatoryDocumentContext && payload?.threadId) await refreshThreads();
     } catch {
+      if (requestDocumentScopeId !== activeDocumentScopeRef.current && requestDocumentScopeId) {
+        setDocumentSessionValue(requestDocumentScopeId, (session) => ({
+          ...session,
+          error: 'Could not reach Board AI.',
+          sending: false,
+        }));
+        return;
+      }
+      if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
       setError('Could not reach Board AI.');
     } finally {
+      if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
       setSending(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, sending, boardId, activeThreadId, draftContext, setDraftContext, reloadThread]);
+  }, [
+    draft,
+    sending,
+    boardId,
+    activeThreadId,
+    draftContext,
+    mandatoryDocumentContext,
+    documentScopeId,
+    setActiveThreadId,
+    setDraft,
+    setDraftContext,
+    setError,
+    setMessages,
+    setSending,
+    reloadThread,
+  ]);
 
   const refreshThreads = useCallback(async () => {
     try {
@@ -331,19 +542,23 @@ export default function BoardAiChatDrawer({
   return (
     <aside
       data-board-ai-chat="true"
+      data-board-ai-chat-presentation={presentation}
+      data-board-ai-chat-document-scope={documentScopeId ?? ''}
       data-board-ai-chat-yielded={yieldsToEditor ? 'true' : 'false'}
       role="complementary"
-      aria-label="Board AI chat"
+      aria-label={mandatoryDocumentContext ? 'PDF AI chat' : 'Board AI chat'}
       /* The docked reader's band: above the editor tier's z-[1000] only while
          no editor is blocking, and always below the toolbar's z-[3000]. When
          an editor opens this goes transparent and inert rather than moving,
          so no z-index anywhere else has to change. */
-      className={`fixed right-0 top-0 z-[1200] flex h-full w-full max-w-[420px] flex-col border-l border-gray-200 bg-white shadow-xl transition-opacity duration-150 ${
+      className={`${isEmbedded
+        ? 'flex h-full min-h-0 w-full flex-col bg-white'
+        : 'fixed right-0 top-0 z-[1200] flex h-full w-full max-w-[420px] flex-col border-l border-gray-200 bg-white shadow-xl transition-opacity duration-150'} ${
         yieldsToEditor ? 'pointer-events-none opacity-0' : ''
       }`}
     >
       <header className="flex shrink-0 items-center gap-1.5 border-b border-gray-200 px-3 py-2">
-        <span className="text-sm font-semibold text-gray-800">Board AI</span>
+        <span className="text-sm font-semibold text-gray-800">{mandatoryDocumentContext ? 'PDF AI' : 'Board AI'}</span>
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
           <BoardAiChatModelChooser disabled={sending} onError={setError} />
           <button
@@ -369,7 +584,7 @@ export default function BoardAiChatDrawer({
         </div>
       </header>
 
-      {threadOptions.length > 0 ? (
+      {!mandatoryDocumentContext && threadOptions.length > 0 ? (
         <div className="shrink-0 border-b border-gray-100 px-3 py-1.5">
           <label className="flex items-center gap-1.5">
             <span className="sr-only">Conversation</span>
@@ -403,11 +618,17 @@ export default function BoardAiChatDrawer({
 
         {!loadingThreads && !loadingMessages && messages.length === 0 ? (
           <div data-board-ai-chat-empty="true" className="pt-6 text-center">
-            <p className="text-xs font-medium text-gray-700">Your private AI conversation for this board.</p>
+            <p className="text-xs font-medium text-gray-700">
+              {mandatoryDocumentContext
+                ? 'Your private AI conversation for this PDF.'
+                : 'Your private AI conversation for this board.'}
+            </p>
             {/* Says exactly what is true today. It does not claim the board is
                 analysed, because nothing from the board is sent. */}
             <p className="mt-1 text-[11px] text-gray-500">
-              Only you can see it. Only items you attach are shared with Board AI.
+              {mandatoryDocumentContext
+                ? 'Only you can see it. This PDF is always attached; optional context is explicit.'
+                : 'Only you can see it. Only items you attach are shared with Board AI.'}
             </p>
           </div>
         ) : null}
@@ -457,6 +678,16 @@ export default function BoardAiChatDrawer({
       ) : null}
 
       <div className="shrink-0 border-t border-gray-200 p-2">
+        {mandatoryDocumentContext ? (
+          <div
+            data-board-ai-context-mandatory="knowledge-document"
+            className="mb-1.5 flex max-w-full items-center gap-1 rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-[11px] text-purple-900"
+          >
+            <FileText className="h-3 w-3 shrink-0 text-purple-500" aria-hidden="true" />
+            <span className="min-w-0 truncate">{mandatoryDocumentContext.label}</span>
+            <span className="min-w-0 shrink truncate text-purple-500">· Using this PDF</span>
+          </div>
+        ) : null}
         <BoardAiChatDraftChips
           items={draftContext}
           disabled={sending}
@@ -488,7 +719,9 @@ export default function BoardAiChatDrawer({
             <Paperclip className="h-3 w-3" aria-hidden="true" />
             Context
             {draftContext.length > 0 ? (
-              <span className="text-gray-400">{draftContext.length}/{BOARD_AI_DRAFT_CONTEXT_MAX}</span>
+              <span className="text-gray-400">
+                {draftContext.length}/{mandatoryDocumentContext ? BOARD_AI_DRAFT_CONTEXT_MAX - 1 : BOARD_AI_DRAFT_CONTEXT_MAX}
+              </span>
             ) : null}
           </button>
 
@@ -528,10 +761,10 @@ export default function BoardAiChatDrawer({
         <div className="flex items-end gap-1.5">
           <textarea
             data-board-ai-chat-input="true"
-            aria-label="Message Board AI"
+            aria-label={mandatoryDocumentContext ? 'Message PDF AI' : 'Message Board AI'}
             rows={2}
             maxLength={BOARD_AI_CHAT_MESSAGE_MAX}
-            placeholder="Ask about this board…"
+            placeholder={mandatoryDocumentContext ? 'Ask about this PDF…' : 'Ask about this board…'}
             className="min-h-0 w-full resize-none rounded border border-gray-200 px-2 py-1.5 text-xs text-gray-800 outline-none focus:border-blue-400"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

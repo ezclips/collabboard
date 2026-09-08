@@ -14,6 +14,7 @@ vi.mock('@/components/collabboard/BoardAiChatModelChooser', () => ({
 }));
 
 import BoardAiChatDrawer from './BoardAiChatDrawer';
+import type { BoardAiDraftContextItem } from '@/lib/domain/ai/boardAiChatDraftContext';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const THREAD_A = '22222222-2222-4222-8222-222222222222';
@@ -28,6 +29,7 @@ const DRAWER = read('components/collabboard/BoardAiChatDrawer.tsx');
 let root: Root | null = null;
 let host: HTMLElement;
 let fetchMock: ReturnType<typeof vi.fn>;
+let posted: Record<string, unknown>[] = [];
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -53,10 +55,12 @@ function stubChat(options: {
   const threads = [...(options.threads ?? [])];
   const messages: Record<string, unknown[]> = { ...(options.messages ?? {}) };
   let sent = 0;
+  posted = [];
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { threadId?: string; message: string };
+      posted.push(body as Record<string, unknown>);
       const threadId = body.threadId ?? THREAD_A;
       messages[threadId] = [
         ...(messages[threadId] ?? []),
@@ -372,8 +376,8 @@ describe('46-48. no context is sent, and none is offered', () => {
   it('the drawer reads no board, PDF or Note source at all', async () => {
     const code = executable(DRAWER);
     for (const forbidden of [
-      'padlet', 'knowledgeDocumentId', 'KnowledgePageCache', 'useKnowledgeSource',
-      'selectedText', 'pageNumber', 'citation', 'Save as Note', 'sourceReference',
+      'KnowledgePageCache', 'useKnowledgeSource', 'selectedText', 'pageNumber',
+      'citation', 'Save as Note', 'sourceReference', 'reader.pages', 'page.text',
     ]) {
       expect(code, `${forbidden} belongs to a later slice`).not.toContain(forbidden);
     }
@@ -387,5 +391,163 @@ describe('46-48. no context is sent, and none is offered', () => {
     expect(code).not.toContain('getSupabaseAdmin');
     expect(code).not.toContain('service_role');
     expect(code).not.toContain('supabase');
+  });
+});
+
+describe('PDF workspace document-scoped mode', () => {
+  const DOC_A = '44444444-4444-4444-8444-444444444444';
+  const DOC_B = '55555555-5555-4555-8555-555555555555';
+  const NOTE_DRAFT = {
+    request: { type: 'padlet' as const, padletId: '66666666-6666-4666-8666-666666666666' },
+    label: 'Planning note',
+    detail: 'Note',
+  };
+
+  async function mountPdfScope(documentId = DOC_A, filename = 'Alpha.pdf') {
+    const state: { items: readonly BoardAiDraftContextItem[] } = { items: [] };
+
+    function Harness({
+      activeDocumentId,
+      activeFilename,
+    }: {
+      activeDocumentId: string;
+      activeFilename: string;
+    }) {
+      const [items, setItems] = React.useState<readonly BoardAiDraftContextItem[]>([]);
+      state.items = items;
+      return (
+        <BoardAiChatDrawer
+          boardId={BOARD_ID}
+          isOpen
+          onClose={vi.fn()}
+          presentation="embedded"
+          documentScope={{ knowledgeDocumentId: activeDocumentId, originalFilename: activeFilename }}
+          draftContext={items}
+          onDraftContextChange={setItems}
+          selectedBoardItem={NOTE_DRAFT}
+        />
+      );
+    }
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<Harness activeDocumentId={documentId} activeFilename={filename} />);
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    return {
+      state,
+      rerender: async (activeDocumentId: string, activeFilename: string) => {
+        await act(async () => {
+          root!.render(<Harness activeDocumentId={activeDocumentId} activeFilename={activeFilename} />);
+        });
+        await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      },
+    };
+  }
+
+  it('sends the active PDF identity on every turn without client-side PDF text', async () => {
+    await mountPdfScope(DOC_A, 'Alpha.pdf');
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'GET')).toHaveLength(0);
+    expect(q('[data-board-ai-chat-thread=""]')).toBeNull();
+    expect(q('[data-board-ai-context-mandatory="knowledge-document"]')?.textContent).toContain('Alpha.pdf');
+    expect(q('[data-board-ai-context-mandatory="knowledge-document"] button')).toBeNull();
+
+    await type('first');
+    await click('[data-board-ai-chat-action="send"]');
+    await type('second');
+    await click('[data-board-ai-chat-action="send"]');
+
+    expect(posted[0]).toEqual({
+      message: 'first',
+      context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_A }] },
+    });
+    expect(posted[1]).toEqual({
+      threadId: THREAD_A,
+      message: 'second',
+      context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_A }] },
+    });
+    expect(JSON.stringify(posted)).not.toContain('Alpha.pdf');
+    expect(JSON.stringify(posted)).not.toContain('The stored page');
+  });
+
+  it('keeps optional context explicit, removable, and separate from the mandatory PDF scope', async () => {
+    const { state } = await mountPdfScope(DOC_A, 'Alpha.pdf');
+    await click('[data-board-ai-context-add="true"]');
+    await click('[data-board-ai-context-use-selected="true"]');
+    expect(state.items).toEqual([NOTE_DRAFT]);
+    expect(q('[data-board-ai-context-draft="padlet"]')).not.toBeNull();
+
+    await click('[data-board-ai-context-remove]');
+    expect(state.items).toHaveLength(0);
+    expect(q('[data-board-ai-context-mandatory="knowledge-document"]')).not.toBeNull();
+  });
+
+  it('switches visible session immediately and restores each PDF independently', async () => {
+    const { rerender } = await mountPdfScope(DOC_A, 'Alpha.pdf');
+    await type('question for A');
+    await click('[data-board-ai-chat-action="send"]');
+    expect(host.textContent).toContain('question for A');
+
+    await type('draft for A');
+    await rerender(DOC_B, 'Beta.pdf');
+    expect(host.textContent).toContain('Beta.pdf');
+    expect(host.textContent).not.toContain('question for A');
+    expect((q('[data-board-ai-chat-input="true"]') as HTMLTextAreaElement).value).toBe('');
+
+    await type('question for B');
+    await click('[data-board-ai-chat-action="send"]');
+    expect(posted.at(-1)).toMatchObject({
+      context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_B }] },
+    });
+
+    await rerender(DOC_A, 'Alpha.pdf');
+    expect(host.textContent).toContain('question for A');
+    expect((q('[data-board-ai-chat-input="true"]') as HTMLTextAreaElement).value).toBe('draft for A');
+  });
+
+  it('New chat resets only the active PDF session and keeps the mandatory scope', async () => {
+    const { rerender } = await mountPdfScope(DOC_A, 'Alpha.pdf');
+    await type('question for A');
+    await click('[data-board-ai-chat-action="send"]');
+
+    await rerender(DOC_B, 'Beta.pdf');
+    await type('question for B');
+    await click('[data-board-ai-chat-action="send"]');
+    await click('[data-board-ai-chat-action="new"]');
+    expect(host.textContent).not.toContain('question for B');
+    expect(q('[data-board-ai-context-mandatory="knowledge-document"]')?.textContent).toContain('Beta.pdf');
+
+    await rerender(DOC_A, 'Alpha.pdf');
+    expect(host.textContent).toContain('question for A');
+  });
+
+  it('late responses from a previous PDF do not repaint the active PDF', async () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    stubChat();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posted.push(body);
+        await gate;
+        return json({
+          threadId: THREAD_A,
+          message: { id: 'late-a', role: 'assistant', content: 'late A answer', provider: null, model: null, createdAt: 'n' },
+        });
+      }
+      return json({ threads: [] });
+    });
+
+    const { rerender } = await mountPdfScope(DOC_A, 'Alpha.pdf');
+    await type('slow A');
+    await act(async () => { q('[data-board-ai-chat-action="send"]')!.click(); });
+    await rerender(DOC_B, 'Beta.pdf');
+    await act(async () => { release!(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(host.textContent).toContain('Beta.pdf');
+    expect(host.textContent).not.toContain('late A answer');
   });
 });

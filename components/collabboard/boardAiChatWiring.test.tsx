@@ -268,8 +268,8 @@ describe('10-15. one right-side dock, two directions', () => {
       + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'), handoff)
       + CLIENT.slice(CLIENT.indexOf('const boardAiChatSelectedItem'));
     expect(outsideBoth).not.toContain('setCloseSidePanelRequestId((current) => current + 1)');
-    // ...and direction B only by the reader's own opener.
-    expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(3);
+    // ...and direction B only by the reader/workspace openers plus the close action.
+    expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(4);
   });
 
   it('14-15. the workspace is untouched and the reader is never unmounted', () => {

@@ -186,12 +186,14 @@ describe('23,25,26,27,29. the reader drawer hands over identity only', () => {
     expect(handler).toContain('setCloseSidePanelRequestId((current) => current + 1)');
   });
 
-  it('27,29. the reader stays unconditionally mounted, with no AI pane added', () => {
+  it('27,29. the reader stays unconditionally mounted, and PDF workspace AI reuses the Board AI drawer', () => {
     // Still rendered as a plain sibling, with no new open-state gate.
     expect(canvas).toMatch(/<KnowledgeSourceReaderDrawer\b/);
     expect(canvas).not.toMatch(/\{\s*\w*[Rr]eaderOpen\w*\s*&&\s*<KnowledgeSourceReaderDrawer/);
-    // D2 added a handoff, never a pane: no chat surface inside the reader.
-    expect(drawer).not.toContain('BoardAiChatDrawer');
+    // A2B embeds the existing chat surface in the workspace dock; it does not
+    // duplicate the chooser or create a second AI backend.
+    expect(drawer).toContain('BoardAiChatDrawer');
+    expect(drawer).toContain('presentation="embedded"');
     expect(drawer).not.toContain('BoardAiChatModelChooser');
   });
 
@@ -256,18 +258,22 @@ describe('the shell owns draft context, and owns it narrowly', () => {
   });
 });
 
-describe('52-57. PDF-R1: the focused workspace returns to the board on handoff', () => {
+describe('52-57. PDF workspace AI handoff stays inside the focused workspace', () => {
   const drawer = executable(read('components/collabboard/KnowledgeSourceReaderDrawer.tsx'));
 
   it('52,53,54. every explicit handoff goes through one wrapper', () => {
     const wrapper = drawer.slice(
       drawer.indexOf('const handOffToBoardAi'),
-      drawer.indexOf('const handOffToBoardAi') + 400,
+      drawer.indexOf('const handOffToBoardAi') + 900,
     );
-    // Queue first, then leave: the attachment must be safe before the reader
-    // that produced it goes away.
-    expect(wrapper.indexOf('onAddBoardAiContext?.(item)'))
-      .toBeLessThan(wrapper.indexOf('closeReader()'));
+    // In the workspace, the handoff queues optional context into the embedded
+    // PDF AI pane and keeps the reader open.
+    expect(wrapper).toContain('onWorkspaceBoardAiDraftContextChange');
+    expect(wrapper.indexOf('onWorkspaceBoardAiDraftContextChange'))
+      .toBeLessThan(wrapper.indexOf("onWorkspaceRightPanelChange?.('ai')"));
+    expect(wrapper).toContain("onWorkspaceRightPanelChange?.('ai')");
+    // The docked board-level fallback still exists for side-panel handoffs.
+    expect(wrapper).toContain('onAddBoardAiContext?.(item)');
     expect(wrapper).toContain("presentation === 'workspace'");
 
     // 52. The document action, 53/54 the page and selection actions inside
@@ -276,18 +282,14 @@ describe('52-57. PDF-R1: the focused workspace returns to the board on handoff',
     expect(drawer).toContain('onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}');
   });
 
-  it('55. only the explicit handoff closes it -- not Chat opening elsewhere', () => {
-    // The board's Chat-open request still reaches the docked reader only; the
-    // workspace has no other path to closeReader from Board AI.
-    const closes = drawer.split('closeReader()').length - 1;
-    const handoffCloses = drawer.slice(
-      drawer.indexOf('const handOffToBoardAi'),
-      drawer.indexOf('const handOffToBoardAi') + 400,
-    ).split('closeReader()').length - 1;
-    expect(handoffCloses).toBe(1);
-    // Every other close is a pre-existing one (the tab, the × button, the
-    // docked close request), none of which this patch touched.
-    expect(closes).toBeGreaterThan(handoffCloses);
+  it('55. workspace handoff does not open a second/floating board AI drawer', () => {
+    const render = drawer.slice(
+      drawer.indexOf('workspaceRightPanel ==='),
+      drawer.indexOf('return (', drawer.indexOf('workspaceRightPanel ===')),
+    );
+    expect(render).toContain('presentation="embedded"');
+    expect(render).toContain('documentScope');
+    expect(render).not.toContain('setIsBoardAiChatOpen');
   });
 
   it('56. the docked path still defers to the existing mutual exclusion', () => {
@@ -300,5 +302,6 @@ describe('52-57. PDF-R1: the focused workspace returns to the board on handoff',
     const canvas = executable(read('app/dashboard/canvas/[id]/CanvasClient.tsx'));
     expect(canvas).toMatch(/<KnowledgeSourceReaderDrawer\b/);
     expect(canvas).not.toMatch(/&&\s*<KnowledgeSourceReaderDrawer/);
+    expect(canvas).toContain('workspaceBoardAiDraftContext={enableBoardAiChat ? activePdfAiDraftContext : []}');
   });
 });
