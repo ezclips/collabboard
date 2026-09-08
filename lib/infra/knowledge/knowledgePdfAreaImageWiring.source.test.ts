@@ -1023,7 +1023,32 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
       reuseRollout.lastIndexOf('$fp$'),
     ).trim();
     expect(fingerprint.length).toBeGreaterThan(500);
-    expect((reuseRollout.match(/EXECUTE fingerprint INTO is_post;/g) ?? []).length).toBe(2);
+    expect((reuseRollout.match(/EXECUTE diagnostics INTO failed_predicates;/g) ?? []).length).toBe(2);
+    // The release authority is "nothing failed", derived from the SAME named
+    // decomposition -- so a failure can be reported by name without any second,
+    // weaker definition of what released means.
+    expect(reuseRollout).toContain('COALESCE(cardinality(failed_predicates) = 0, false)');
+    expect(reuseRollout).toContain('FAILED_POSTFLIGHT: %');
+    expect(reuseRollout).toContain('FAILED_CONTRACT: %');
+    expect(reuseVerifier).toContain("'FAILED: ' || COALESCE(array_to_string(gate.failed, ', ')");
+    // Diagnostics report; they never repair. One SELECT, no statement
+    // chaining, and no write keyword outside the quoted body patterns it
+    // searches prosrc for (which are literals, stripped before this check).
+    expect(fingerprint.startsWith('SELECT ')).toBe(true);
+    const withoutLiterals = fingerprint.replace(/'[^']*'/g, "''");
+    expect(withoutLiterals).not.toContain(';');
+    for (const forbidden of ['INSERT ', 'UPDATE ', 'DELETE ', 'ALTER ', 'CREATE ', 'GRANT ', 'REVOKE ', 'DROP ']) {
+      expect(withoutLiterals, forbidden).not.toContain(forbidden);
+    }
+    // Every predicate is named, and every name is COALESCEd to a failure.
+    const labels = [...fingerprint.matchAll(/THEN NULL ELSE '([a-z_]+)' END/g)].map((m) => m[1]);
+    expect(labels.length).toBeGreaterThanOrEqual(30);
+    expect(new Set(labels).size, 'predicate names must be unique').toBe(labels.length);
+    for (const required of ['rpc_body_digest', 'rpc_execute_authenticated', 'constraint_names',
+      'rpc_name_cardinality', 'created_at_default', 'rls_enabled', 'unexpected_constraint_type']) {
+      expect(labels, required).toContain(required);
+    }
+    expect((fingerprint.match(/CASE WHEN COALESCE\(/g) ?? []).length).toBe(labels.length);
 
     // And the verifier's release gate is that same text, verbatim.
     expect(reuseVerifier).toContain(fingerprint);

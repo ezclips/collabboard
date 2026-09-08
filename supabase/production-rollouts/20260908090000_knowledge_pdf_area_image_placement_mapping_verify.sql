@@ -230,124 +230,166 @@ SELECT 11 AS section, 'mapping rows (diagnostic, not a gate)' AS check,
                              false, true, '')))[1]::text, 'unknown')
     END AS detail;
 
--- 12. THE RELEASE GATE. Byte-identical to the fingerprint the rollout uses to
---     recognise POST and to postflight itself: every load-bearing condition,
---     re-evaluated here, COALESCEd so a NULL can never read as success. This
---     row is literally TRUE or FALSE and never NULL.
-SELECT 12 AS section, 'COMPLETE PASS' AS check, gate.pass AS pass,
-    'every load-bearing condition, re-evaluated' AS detail
+-- 12. THE RELEASE GATE. Byte-identical to the decomposition the rollout uses to
+--     recognise POST and to postflight itself: released means NOTHING failed.
+--     The detail column NAMES whatever did, so a false gate says which
+--     condition, not merely that one exists. Literally TRUE or FALSE, never
+--     NULL: every predicate inside is COALESCEd, and a NULL answer names its
+--     predicate rather than passing it.
+SELECT 12 AS section, 'COMPLETE PASS' AS check,
+    COALESCE(cardinality(gate.failed) = 0, false) AS pass,
+    CASE WHEN COALESCE(cardinality(gate.failed) = 0, false) THEN 'every load-bearing condition, re-evaluated'
+         ELSE 'FAILED: ' || COALESCE(array_to_string(gate.failed, ', '), 'diagnostics unavailable') END AS detail
   FROM (
-SELECT COALESCE(
-       t.oid IS NOT NULL
-   AND f.oid IS NOT NULL
-   AND (SELECT count(*) = 4 FROM information_schema.columns
-         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements')
-   AND (SELECT array_agg(column_name::text || ':' || data_type || ':' || is_nullable
-                         ORDER BY column_name::text)
-          FROM information_schema.columns
-         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements')
-       = ARRAY['board_id:uuid:NO','created_at:timestamp with time zone:NO',
-               'library_item_id:uuid:NO','padlet_id:uuid:NO']
-   AND (SELECT column_default = 'now()' FROM information_schema.columns
-         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'
-           AND column_name='created_at')
-   AND EXISTS (SELECT 1 FROM pg_constraint c
-                WHERE c.conrelid = t.oid AND c.contype = 'p'
-                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                         WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[])
-   AND (SELECT count(*) = 4 FROM pg_constraint c WHERE c.conrelid = t.oid)
-   AND (SELECT count(*) = 1 FROM pg_constraint c
-         WHERE c.conrelid = t.oid AND c.contype = 'p')
-   AND (SELECT count(*) = 3 FROM pg_constraint c
-         WHERE c.conrelid = t.oid AND c.contype = 'f')
-   AND (SELECT count(*) = 0 FROM pg_constraint c
-         WHERE c.conrelid = t.oid AND c.contype NOT IN ('p','f'))
-   AND (SELECT array_agg(c.conname::text ORDER BY c.conname::text)
-          FROM pg_constraint c WHERE c.conrelid = t.oid)
-       = ARRAY['knowledge_pdf_area_image_placements_board_id_fkey',
-               'knowledge_pdf_area_image_placements_library_item_id_fkey',
-               'knowledge_pdf_area_image_placements_padlet_id_fkey',
-               'knowledge_pdf_area_image_placements_pkey']
-   AND EXISTS (SELECT 1 FROM pg_constraint c
-                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
-                  AND c.confrelid = to_regclass('public.padlets')
-                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                         WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[]
-                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                          WHERE a.attrelid = to_regclass('public.padlets') AND a.attname='id')]::int2[])
-   AND EXISTS (SELECT 1 FROM pg_constraint c
-                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
-                  AND c.confrelid = to_regclass('public.library_items')
-                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                         WHERE a.attrelid = t.oid AND a.attname='library_item_id')]::int2[]
-                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                          WHERE a.attrelid = to_regclass('public.library_items') AND a.attname='id')]::int2[])
-   AND EXISTS (SELECT 1 FROM pg_constraint c
-                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
-                  AND c.confrelid = to_regclass('public.boards')
-                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                         WHERE a.attrelid = t.oid AND a.attname='board_id')]::int2[]
-                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                          WHERE a.attrelid = to_regclass('public.boards') AND a.attname='id')]::int2[])
-   AND (SELECT c.relrowsecurity FROM pg_class c WHERE c.oid = t.oid)
-   AND (SELECT count(*) = 0 FROM pg_policy p WHERE p.polrelid = t.oid)
-   AND NOT has_table_privilege('anon', t.oid, 'SELECT')
-   AND NOT has_table_privilege('anon', t.oid, 'INSERT')
-   AND NOT has_table_privilege('anon', t.oid, 'UPDATE')
-   AND NOT has_table_privilege('anon', t.oid, 'DELETE')
-   AND NOT has_table_privilege('anon', t.oid, 'TRUNCATE')
-   AND NOT has_table_privilege('anon', t.oid, 'REFERENCES')
-   AND NOT has_table_privilege('anon', t.oid, 'TRIGGER')
-   AND NOT has_table_privilege('anon', t.oid, 'MAINTAIN')
-   AND NOT has_table_privilege('authenticated', t.oid, 'SELECT')
-   AND NOT has_table_privilege('authenticated', t.oid, 'INSERT')
-   AND NOT has_table_privilege('authenticated', t.oid, 'UPDATE')
-   AND NOT has_table_privilege('authenticated', t.oid, 'DELETE')
-   AND NOT has_table_privilege('authenticated', t.oid, 'TRUNCATE')
-   AND NOT has_table_privilege('authenticated', t.oid, 'REFERENCES')
-   AND NOT has_table_privilege('authenticated', t.oid, 'TRIGGER')
-   AND NOT has_table_privilege('authenticated', t.oid, 'MAINTAIN')
-   AND (SELECT COALESCE(count(*) = 0, true) FROM information_schema.table_privileges
-         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'
-           AND grantee IN ('PUBLIC','anon','authenticated'))
-   AND has_table_privilege('service_role', t.oid, 'SELECT')
-   AND has_table_privilege('service_role', t.oid, 'INSERT')
-   AND has_table_privilege('service_role', t.oid, 'DELETE')
-   AND (SELECT count(*) = 1 FROM pg_proc p
-          JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'public'
-           AND p.proname = 'create_knowledge_pdf_area_image_reuse_placement')
-   AND (SELECT NOT p.prosecdef
-                AND l.lanname = 'plpgsql'
-                AND COALESCE(p.proconfig, ARRAY[]::text[]) = ARRAY['search_path=public']::text[]
-                AND pg_get_function_identity_arguments(p.oid)
-                    = 'p_padlet_id uuid, p_board_id uuid, p_user_id uuid, p_library_item_id uuid, p_title text, p_content text, p_position_x double precision, p_position_y double precision, p_width double precision, p_height double precision, p_board_file_url text, p_metadata jsonb'
-                AND pg_get_function_result(p.oid)
-                    = 'TABLE(padlet_id uuid, library_item_id uuid, board_id uuid)'
-                AND md5(p.prosrc) = 'c67271ebcc867aaf7f1d272746c62094'
-                AND p.prosrc LIKE '%board_collaborators%'
-                AND p.prosrc LIKE '%is_knowledge_pdf_area_provenance%'
-                AND p.prosrc LIKE '%INSERT INTO public.padlets%'
-                AND p.prosrc LIKE '%INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id, board_id)%'
-                AND p.prosrc LIKE '%VALUES (p_padlet_id, p_library_item_id, p_board_id)%'
-                AND p.prosrc NOT LIKE '%INSERT INTO public.library_items%'
-                AND p.prosrc NOT LIKE '%p_storage_path%'
-                AND p.prosrc NOT LIKE '%storage.%'
-                AND p.prosrc NOT LIKE '%board-derived/%'
-          FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = f.oid)
-   AND has_function_privilege('service_role', f.oid, 'EXECUTE')
-   AND NOT has_function_privilege('authenticated', f.oid, 'EXECUTE')
-   AND NOT has_function_privilege('anon', f.oid, 'EXECUTE')
-   AND NOT has_function_privilege('public', f.oid, 'EXECUTE')
-   AND (SELECT data_type = 'text' FROM information_schema.columns
-         WHERE table_schema='public' AND table_name='library_items'
-           AND column_name='knowledge_storage_path')
-   AND NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','INSERT')
-   AND NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE')
-   AND NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','INSERT')
-   AND NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE')
-   AND to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NOT NULL
-   , false)
+SELECT array_remove(ARRAY[
+    CASE WHEN COALESCE(t.oid IS NOT NULL, false) THEN NULL ELSE 'mapping_table_exists' END,
+    CASE WHEN COALESCE(f.oid IS NOT NULL, false) THEN NULL ELSE 'reuse_rpc_exists' END,
+    CASE WHEN COALESCE((SELECT count(*) = 4 FROM information_schema.columns
+                         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'), false)
+         THEN NULL ELSE 'column_count' END,
+    CASE WHEN COALESCE((SELECT array_agg(column_name::text || ':' || data_type || ':' || is_nullable
+                                         ORDER BY column_name::text)
+                          FROM information_schema.columns
+                         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements')
+                       = ARRAY['board_id:uuid:NO','created_at:timestamp with time zone:NO',
+                               'library_item_id:uuid:NO','padlet_id:uuid:NO'], false)
+         THEN NULL ELSE 'column_names_types_nullability' END,
+    CASE WHEN COALESCE((SELECT column_default = 'now()' FROM information_schema.columns
+                         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'
+                           AND column_name='created_at'), false)
+         THEN NULL ELSE 'created_at_default' END,
+    CASE WHEN COALESCE(EXISTS (SELECT 1 FROM pg_constraint c
+                                WHERE c.conrelid = t.oid AND c.contype = 'p'
+                                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                         WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[]), false)
+         THEN NULL ELSE 'primary_key_is_padlet_id' END,
+    CASE WHEN COALESCE((SELECT count(*) = 4 FROM pg_constraint c WHERE c.conrelid = t.oid), false)
+         THEN NULL ELSE 'constraint_count' END,
+    CASE WHEN COALESCE((SELECT count(*) = 1 FROM pg_constraint c
+                         WHERE c.conrelid = t.oid AND c.contype = 'p'), false)
+         THEN NULL ELSE 'primary_key_count' END,
+    CASE WHEN COALESCE((SELECT count(*) = 3 FROM pg_constraint c
+                         WHERE c.conrelid = t.oid AND c.contype = 'f'), false)
+         THEN NULL ELSE 'foreign_key_count' END,
+    CASE WHEN COALESCE((SELECT count(*) = 0 FROM pg_constraint c
+                         WHERE c.conrelid = t.oid AND c.contype NOT IN ('p','f')), false)
+         THEN NULL ELSE 'unexpected_constraint_type' END,
+    CASE WHEN COALESCE((SELECT array_agg(c.conname::text ORDER BY c.conname::text)
+                          FROM pg_constraint c WHERE c.conrelid = t.oid)
+                       = ARRAY['knowledge_pdf_area_image_placements_board_id_fkey',
+                               'knowledge_pdf_area_image_placements_library_item_id_fkey',
+                               'knowledge_pdf_area_image_placements_padlet_id_fkey',
+                               'knowledge_pdf_area_image_placements_pkey'], false)
+         THEN NULL ELSE 'constraint_names' END,
+    CASE WHEN COALESCE(EXISTS (SELECT 1 FROM pg_constraint c
+                                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
+                                  AND c.confrelid = to_regclass('public.padlets')
+                                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                         WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[]
+                                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                          WHERE a.attrelid = to_regclass('public.padlets') AND a.attname='id')]::int2[]), false)
+         THEN NULL ELSE 'fk_padlet_cascade' END,
+    CASE WHEN COALESCE(EXISTS (SELECT 1 FROM pg_constraint c
+                                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
+                                  AND c.confrelid = to_regclass('public.library_items')
+                                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                         WHERE a.attrelid = t.oid AND a.attname='library_item_id')]::int2[]
+                                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                          WHERE a.attrelid = to_regclass('public.library_items') AND a.attname='id')]::int2[]), false)
+         THEN NULL ELSE 'fk_library_item_cascade' END,
+    CASE WHEN COALESCE(EXISTS (SELECT 1 FROM pg_constraint c
+                                WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
+                                  AND c.confrelid = to_regclass('public.boards')
+                                  AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                         WHERE a.attrelid = t.oid AND a.attname='board_id')]::int2[]
+                                  AND c.confkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
+                                                          WHERE a.attrelid = to_regclass('public.boards') AND a.attname='id')]::int2[]), false)
+         THEN NULL ELSE 'fk_board_cascade' END,
+    CASE WHEN COALESCE((SELECT c.relrowsecurity FROM pg_class c WHERE c.oid = t.oid), false)
+         THEN NULL ELSE 'rls_enabled' END,
+    CASE WHEN COALESCE((SELECT count(*) = 0 FROM pg_policy p WHERE p.polrelid = t.oid), false)
+         THEN NULL ELSE 'zero_policies' END,
+    CASE WHEN COALESCE(NOT (has_table_privilege('anon', t.oid, 'SELECT')
+                         OR has_table_privilege('anon', t.oid, 'INSERT')
+                         OR has_table_privilege('anon', t.oid, 'UPDATE')
+                         OR has_table_privilege('anon', t.oid, 'DELETE')
+                         OR has_table_privilege('anon', t.oid, 'TRUNCATE')
+                         OR has_table_privilege('anon', t.oid, 'REFERENCES')
+                         OR has_table_privilege('anon', t.oid, 'TRIGGER')
+                         OR has_table_privilege('anon', t.oid, 'MAINTAIN')), false)
+         THEN NULL ELSE 'anon_table_privileges' END,
+    CASE WHEN COALESCE(NOT (has_table_privilege('authenticated', t.oid, 'SELECT')
+                         OR has_table_privilege('authenticated', t.oid, 'INSERT')
+                         OR has_table_privilege('authenticated', t.oid, 'UPDATE')
+                         OR has_table_privilege('authenticated', t.oid, 'DELETE')
+                         OR has_table_privilege('authenticated', t.oid, 'TRUNCATE')
+                         OR has_table_privilege('authenticated', t.oid, 'REFERENCES')
+                         OR has_table_privilege('authenticated', t.oid, 'TRIGGER')
+                         OR has_table_privilege('authenticated', t.oid, 'MAINTAIN')), false)
+         THEN NULL ELSE 'authenticated_table_privileges' END,
+    CASE WHEN COALESCE((SELECT COALESCE(count(*) = 0, true) FROM information_schema.table_privileges
+                         WHERE table_schema='public' AND table_name='knowledge_pdf_area_image_placements'
+                           AND grantee IN ('PUBLIC','anon','authenticated')), false)
+         THEN NULL ELSE 'browser_grant_rows' END,
+    CASE WHEN COALESCE(has_table_privilege('service_role', t.oid, 'SELECT')
+                   AND has_table_privilege('service_role', t.oid, 'INSERT')
+                   AND has_table_privilege('service_role', t.oid, 'DELETE'), false)
+         THEN NULL ELSE 'service_role_authority' END,
+    CASE WHEN COALESCE((SELECT count(*) = 1 FROM pg_proc p
+                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public'
+                           AND p.proname = 'create_knowledge_pdf_area_image_reuse_placement'), false)
+         THEN NULL ELSE 'rpc_name_cardinality' END,
+    CASE WHEN COALESCE((SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_security_invoker' END,
+    CASE WHEN COALESCE((SELECT l.lanname = 'plpgsql' FROM pg_proc p
+                          JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_language' END,
+    CASE WHEN COALESCE((SELECT COALESCE(p.proconfig, ARRAY[]::text[]) = ARRAY['search_path=public']::text[]
+                          FROM pg_proc p WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_search_path' END,
+    CASE WHEN COALESCE((SELECT pg_get_function_identity_arguments(p.oid)
+                               = 'p_padlet_id uuid, p_board_id uuid, p_user_id uuid, p_library_item_id uuid, p_title text, p_content text, p_position_x double precision, p_position_y double precision, p_width double precision, p_height double precision, p_board_file_url text, p_metadata jsonb'
+                          FROM pg_proc p WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_identity_arguments' END,
+    CASE WHEN COALESCE((SELECT pg_get_function_result(p.oid)
+                               = 'TABLE(padlet_id uuid, library_item_id uuid, board_id uuid)'
+                          FROM pg_proc p WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_result_type' END,
+    CASE WHEN COALESCE((SELECT md5(p.prosrc) = 'c67271ebcc867aaf7f1d272746c62094'
+                          FROM pg_proc p WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_body_digest' END,
+    CASE WHEN COALESCE((SELECT p.prosrc LIKE '%board_collaborators%'
+                           AND p.prosrc LIKE '%is_knowledge_pdf_area_provenance%'
+                           AND p.prosrc LIKE '%INSERT INTO public.padlets%'
+                           AND p.prosrc LIKE '%INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id, board_id)%'
+                           AND p.prosrc LIKE '%VALUES (p_padlet_id, p_library_item_id, p_board_id)%'
+                           AND p.prosrc NOT LIKE '%INSERT INTO public.library_items%'
+                           AND p.prosrc NOT LIKE '%p_storage_path%'
+                           AND p.prosrc NOT LIKE '%storage.%'
+                           AND p.prosrc NOT LIKE '%board-derived/%'
+                          FROM pg_proc p WHERE p.oid = f.oid), false)
+         THEN NULL ELSE 'rpc_body_operations' END,
+    CASE WHEN COALESCE(has_function_privilege('service_role', f.oid, 'EXECUTE'), false)
+         THEN NULL ELSE 'rpc_execute_service_role' END,
+    CASE WHEN COALESCE(NOT has_function_privilege('authenticated', f.oid, 'EXECUTE'), false)
+         THEN NULL ELSE 'rpc_execute_authenticated' END,
+    CASE WHEN COALESCE(NOT has_function_privilege('anon', f.oid, 'EXECUTE'), false)
+         THEN NULL ELSE 'rpc_execute_anon' END,
+    CASE WHEN COALESCE(NOT has_function_privilege('public', f.oid, 'EXECUTE'), false)
+         THEN NULL ELSE 'rpc_execute_public' END,
+    CASE WHEN COALESCE((SELECT data_type = 'text' FROM information_schema.columns
+                         WHERE table_schema='public' AND table_name='library_items'
+                           AND column_name='knowledge_storage_path'), false)
+         THEN NULL ELSE 'durable_column_type' END,
+    CASE WHEN COALESCE(NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','INSERT')
+                   AND NOT has_column_privilege('authenticated','public.library_items','knowledge_storage_path','UPDATE')
+                   AND NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','INSERT')
+                   AND NOT has_column_privilege('anon','public.library_items','knowledge_storage_path','UPDATE'), false)
+         THEN NULL ELSE 'durable_column_not_browser_writable' END,
+    CASE WHEN COALESCE(to_regprocedure('public.is_knowledge_pdf_area_provenance(jsonb)') IS NOT NULL, false)
+         THEN NULL ELSE 'provenance_mirror_present' END
+  ], NULL)
   FROM (SELECT to_regclass('public.knowledge_pdf_area_image_placements') AS oid) t,
        (SELECT to_regprocedure('public.create_knowledge_pdf_area_image_reuse_placement(uuid, uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') AS oid) f
-  ) AS gate(pass);
+  ) AS gate(failed);
