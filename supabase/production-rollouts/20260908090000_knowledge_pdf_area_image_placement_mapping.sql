@@ -51,16 +51,16 @@
 -- first production attempt failed as a bare boolean and that says nothing an
 -- operator can act on.
 --
--- DELIVER THIS FILE WITH LF LINE ENDINGS. `rpc_body_digest` pins md5(prosrc),
--- and prosrc is the body text EXACTLY as the server received it -- so the same
--- file pasted or uploaded with CRLF installs a function whose body differs by
--- its line endings and fails that one predicate. Rehearsed on PostgreSQL 17:
--- LF reaches POST, the byte-identical CRLF copy aborts with
--- `FAILED_POSTFLIGHT: rpc_body_digest`. This is a DELIVERY property, not a
--- contract to relax: the digest is what makes the installed body the reviewed
--- body. Note that a Windows checkout of this repository has CRLF working-copy
--- line endings (core.autocrlf), so copy the file through something that
--- preserves LF, or convert before pasting.
+-- LINE ENDINGS ARE NOT PART OF THE CONTRACT. `rpc_body_digest` pins the body
+-- this rollout installs, and prosrc is that text EXACTLY as the server received
+-- it -- so the same file pasted through the SQL editor from a Windows checkout
+-- (core.autocrlf gives it CRLF) once installed a body that differed only in its
+-- line endings, and production aborted on that one predicate with everything
+-- else passing. Transport is not the thing being reviewed, so the digest is
+-- taken over the body with CRLF and bare CR normalised to LF: the reviewed body
+-- passes however it was delivered, and changing one character of it still
+-- fails. The digest itself is NOT relaxed -- it is what makes the installed
+-- body the reviewed body.
 
 BEGIN;
 
@@ -197,7 +197,8 @@ SELECT array_remove(ARRAY[
                                = 'TABLE(padlet_id uuid, library_item_id uuid, board_id uuid)'
                           FROM pg_proc p WHERE p.oid = f.oid), false)
          THEN NULL ELSE 'rpc_result_type' END,
-    CASE WHEN COALESCE((SELECT md5(p.prosrc) = 'c67271ebcc867aaf7f1d272746c62094'
+    CASE WHEN COALESCE((SELECT md5(replace(replace(p.prosrc, chr(13) || chr(10), chr(10)), chr(13), chr(10)))
+                               = 'c67271ebcc867aaf7f1d272746c62094'
                           FROM pg_proc p WHERE p.oid = f.oid), false)
          THEN NULL ELSE 'rpc_body_digest' END,
     CASE WHEN COALESCE((SELECT p.prosrc LIKE '%board_collaborators%'

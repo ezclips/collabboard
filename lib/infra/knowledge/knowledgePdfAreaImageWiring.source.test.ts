@@ -1079,10 +1079,20 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
       "ARRAY['search_path=public']::text[]",
       'pg_get_function_identity_arguments',
       'pg_get_function_result',
-      'md5(p.prosrc)',
+      'md5(replace(replace(p.prosrc',
       'library_item_id, board_id)',
     ]) {
       expect(fingerprint, condition).toContain(condition);
+    }
+
+    // The body digest is CANONICAL: the same body delivered with LF, CRLF or
+    // bare CR hashes the same, so transport is not part of the contract -- but
+    // the digest itself is still pinned, so changing the body still fails.
+    const canonical = "md5(replace(replace(p.prosrc, chr(13) || chr(10), chr(10)), chr(13), chr(10)))";
+    for (const [name, sql] of [['rollout', reuseRollout], ['verifier', reuseVerifier]] as const) {
+      expect(sql, name).toContain(canonical);
+      // No raw, transport-sensitive digest may survive anywhere.
+      expect(sql, `${name} raw digest`).not.toContain('md5(p.prosrc)');
     }
 
     // Generic SQL only, in the verifier: comments stripped first, because the

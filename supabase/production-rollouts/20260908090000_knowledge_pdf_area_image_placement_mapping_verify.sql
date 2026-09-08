@@ -186,7 +186,8 @@ SELECT 8 AS section, 'reuse RPC: exactly one of that name, plus signature, resul
 --    AUTHORISED board) in one transaction, creates no Library row, and touches
 --    no Storage.
 SELECT 9 AS section, 'reuse RPC body is the reviewed one, and binds the authorised board' AS check,
-    COALESCE((SELECT md5(p.prosrc) = 'c67271ebcc867aaf7f1d272746c62094'
+    COALESCE((SELECT md5(replace(replace(p.prosrc, chr(13) || chr(10), chr(10)), chr(13), chr(10)))
+                    = 'c67271ebcc867aaf7f1d272746c62094'
                 AND p.prosrc LIKE '%board_collaborators%'
                 AND p.prosrc LIKE '%is_knowledge_pdf_area_provenance%'
                 AND p.prosrc LIKE '%INSERT INTO public.padlets%'
@@ -198,7 +199,8 @@ SELECT 9 AS section, 'reuse RPC body is the reviewed one, and binds the authoris
                 AND p.prosrc NOT LIKE '%board-derived/%'
                 FROM pg_proc p WHERE p.oid = f.oid), false) AS pass,
     CASE WHEN f.oid IS NULL THEN 'absent'
-         ELSE COALESCE((SELECT md5(p.prosrc) FROM pg_proc p WHERE p.oid = f.oid), 'unknown') END AS detail
+         ELSE COALESCE((SELECT md5(replace(replace(p.prosrc, chr(13) || chr(10), chr(10)), chr(13), chr(10)))
+                          FROM pg_proc p WHERE p.oid = f.oid), 'unknown') END AS detail
   FROM (SELECT to_regprocedure('public.create_knowledge_pdf_area_image_reuse_placement(uuid, uuid, uuid, uuid, text, text, double precision, double precision, double precision, double precision, text, jsonb)') AS oid) f;
 
 -- 10. The durable-preview correction this one depends on is UNCHANGED: the
@@ -356,7 +358,8 @@ SELECT array_remove(ARRAY[
                                = 'TABLE(padlet_id uuid, library_item_id uuid, board_id uuid)'
                           FROM pg_proc p WHERE p.oid = f.oid), false)
          THEN NULL ELSE 'rpc_result_type' END,
-    CASE WHEN COALESCE((SELECT md5(p.prosrc) = 'c67271ebcc867aaf7f1d272746c62094'
+    CASE WHEN COALESCE((SELECT md5(replace(replace(p.prosrc, chr(13) || chr(10), chr(10)), chr(13), chr(10)))
+                               = 'c67271ebcc867aaf7f1d272746c62094'
                           FROM pg_proc p WHERE p.oid = f.oid), false)
          THEN NULL ELSE 'rpc_body_digest' END,
     CASE WHEN COALESCE((SELECT p.prosrc LIKE '%board_collaborators%'
