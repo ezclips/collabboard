@@ -537,6 +537,20 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     const intent = readKnowledgePdfAreaLibraryPlacement(row, canvasId);
     if (intent === null) return { handled: false };
 
+    // FAIL CLOSED on context this boundary cannot preserve. The trusted
+    // endpoint takes a POSITION -- it cannot be told about a container -- so a
+    // row that asks to live inside one has to be placed and then attached, and
+    // that is the surface's job because only the surface knows the container's
+    // own semantics. Placing it here anyway would silently produce a loose card
+    // outside the container the user dropped it into, which is a wrong board
+    // rather than a smaller failure. The layout handlers route these
+    // themselves; anything still arriving here is refused.
+    const rowMetadata = (row?.metadata ?? null) as Record<string, unknown> | null;
+    const requestedParent = rowMetadata?.parentId;
+    if (typeof requestedParent === 'string' && requestedParent.length > 0) {
+      return { handled: true, ok: false, status: null };
+    }
+
     const placed = await requestKnowledgePdfAreaLibraryPlacement(intent);
     if (!placed.ok) return { handled: true, ok: false, status: placed.status };
 

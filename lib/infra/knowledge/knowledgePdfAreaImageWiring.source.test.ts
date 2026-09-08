@@ -838,10 +838,17 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
 
   it('F41 (R7, R8): only a durable PDF-area IMAGE takes the trusted path', () => {
     // ONE decision helper on this screen, and every Library boundary calls it.
-    const helper = after(canvasClient, 'const placeDurablePdfAreaLibraryImage = useCallback(', 1200);
-    expect(helper).toContain('readKnowledgePdfAreaLibraryPlacement(draft, canvasId)');
-    expect(helper).toContain("if (intent === null) return 'not-applicable';");
-    expect(helper).toContain('requestKnowledgePdfAreaLibraryPlacement(intent)');
+    const helper = after(canvasClient, 'const placeDurablePdfAreaLibraryImage = useCallback(', 1600);
+    // It delegates to the ONE shared orchestration -- classify, place, and
+    // (when the drop asked for a container) attach -- rather than repeating it.
+    expect(helper).toContain('placeDurablePdfAreaLibraryImage_(draft, {');
+    expect(helper).toContain('boardId: canvasId,');
+    expect(helper).toContain("if (outcome.kind === 'not-applicable') return 'not-applicable';");
+    // The rollback authority is the board's own update/delete authority.
+    expect(helper).toContain('updatePlacementFields: updatePostFieldsOrThrow,');
+    expect(helper).toContain('deletePlacement: deletePostOrThrow,');
+    expect(reuseClient).toContain('readKnowledgePdfAreaLibraryPlacement(draft, deps.boardId ?? null)');
+    expect(reuseClient).toContain('await request(intent)');
     // Both drop boundaries consult it, and the ordinary path is still reached
     // by everything it declines.
     expect((canvasClient.match(/await placeDurablePdfAreaLibraryImage\(/g) ?? []).length)

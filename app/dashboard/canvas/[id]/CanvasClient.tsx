@@ -99,8 +99,8 @@ import {
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
 import {
-  readKnowledgePdfAreaLibraryPlacement,
-  requestKnowledgePdfAreaLibraryPlacement,
+  placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
+  type KnowledgePdfAreaPlacementAttachment,
 } from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
 import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
@@ -5851,6 +5851,44 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   }, [canvasId, padlets, getTimelineContainers, applyTimelineOrder, supabase, setPadlets, fetchData]);
 
+  const placeDurablePdfAreaLibraryImage = useCallback(async (
+    draft: unknown,
+    attachment?: KnowledgePdfAreaPlacementAttachment | null,
+  ): Promise<'placed' | 'refused' | 'not-applicable'> => {
+    // ONE orchestration for every surface: the canonical classifier, the
+    // trusted endpoint, and -- when the drop asked for a container -- the
+    // relationship written straight afterwards with the same update authority
+    // the ordinary path uses. A failure anywhere in that takes the placement
+    // back out rather than leaving a card outside its container.
+    const outcome = await placeDurablePdfAreaLibraryImage_(draft, {
+      boardId: canvasId,
+      attachment: attachment ?? null,
+      updatePlacementFields: updatePostFieldsOrThrow,
+      deletePlacement: deletePostOrThrow,
+    });
+    if (outcome.kind === 'not-applicable') return 'not-applicable';
+    if (outcome.kind === 'refused') {
+      toast.error(outcome.status === 403
+        ? 'You do not have permission to add cards to this board'
+        : 'Could not place that image');
+      // A refusal after the server had already created something has already
+      // been cleaned up inside; refetch so the board shows what really exists.
+      if (attachment) fetchData();
+      return 'refused';
+    }
+    // Reconcile by id, exactly as the PDF-area creation path does, so a
+    // repeated drop can never put the same id in the list twice.
+    const createdPadlet = outcome.padlet as unknown as Padlet;
+    setPadlets((prev) => (
+      prev.some((padlet) => String(padlet.id) === String(createdPadlet.id))
+        ? prev.map((padlet) => (
+            String(padlet.id) === String(createdPadlet.id) ? createdPadlet : padlet
+          ))
+        : [...prev, createdPadlet]
+    ));
+    return 'placed';
+  }, [canvasId, setPadlets, fetchData, updatePostFieldsOrThrow, deletePostOrThrow]);
+
   const handleDropLibraryCreateContainer = useCallback(async (position: number, draftPayload: any) => {
     console.log('DEBUG: [handleDropLibraryCreateContainer] START', { position, draftPayload });
     if (!canvasId) return;
@@ -5862,6 +5900,48 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const now = new Date().toISOString();
       const containerId = crypto.randomUUID();
       const newPadletId = crypto.randomUUID();
+
+      // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. A durable PDF-area Image cannot be
+      // created by the compound container+post command below: only the server
+      // may write the mapping that later authorises its private crop. It is
+      // placed by the trusted endpoint and the timeline event is then built
+      // around the id the SERVER chose, so the drop still ends with exactly one
+      // card, inside exactly the container the user asked for.
+      const durable = await placeDurablePdfAreaLibraryImage(
+        { ...draftPayload, board_id: canvasId },
+        {
+          parentId: containerId,
+          attach: async (placementId) => {
+            const durableContainer: Padlet = {
+              id: containerId,
+              board_id: canvasId,
+              title: draftPayload.title || 'New Event',
+              content: '',
+              type: 'container',
+              position_x: 0,
+              position_y: 0,
+              width: 280,
+              height: 200,
+              created_at: now,
+              updated_at: now,
+              metadata: {
+                childPadletIds: [placementId],
+                cardColor: '#ffffff',
+                topStrip: 'transparent',
+                kind: 'container',
+                isContainer: true,
+                position_in_timeline: insertPosition,
+              },
+            };
+            await createContainerOrThrow(durableContainer);
+            setPadlets((prev) => [...prev, durableContainer]);
+            const durableOrder = [...containers];
+            durableOrder.splice(insertPosition, 0, durableContainer);
+            await applyTimelineOrder(durableOrder);
+          },
+        },
+      );
+      if (durable !== 'not-applicable') return;
 
       // Create the new padlet from the draft payload
       const padletType = (draftPayload.type || 'text') as Padlet['type'];
@@ -5929,7 +6009,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       toast.error('Failed to create container');
       fetchData();
     }
-  }, [canvasId, getTimelineContainers, applyTimelineOrder, supabase, setPadlets, fetchData]);
+  }, [canvasId, getTimelineContainers, applyTimelineOrder, supabase, setPadlets, fetchData,
+      placeDurablePdfAreaLibraryImage, createContainerOrThrow]);
 
   const handleCreateSchedulerPadlet = useCallback(async (
     start: Date,
@@ -6112,6 +6193,66 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const postId = crypto.randomUUID();
       const containerId = existingContainer?.id || crypto.randomUUID();
 
+      // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. Same rule as everywhere else, and
+      // the same two steps: the server places the durable image, then the
+      // scheduler relationship the drop asked for is written around the id it
+      // chose -- the slot dates on the card, and the child on its container,
+      // whether that container already existed or has to be created. A failure
+      // in either takes the placement back out; it never becomes a loose card
+      // sitting outside the slot the user dropped it into.
+      const durable = await placeDurablePdfAreaLibraryImage(
+        { ...payload, board_id: canvasId, metadata: sanitizedMetadata },
+        {
+          parentId: containerId,
+          placementMetadata: { start_date, end_date },
+          attach: async (placementId) => {
+            if (existingContainer) {
+              const childIds = (existingContainer.metadata?.childPadletIds || []) as string[];
+              const nextChildIds = [placementId, ...childIds];
+              await updatePostFieldsOrThrow(existingContainer.id, {
+                metadata: { ...((existingContainer.metadata as any) || {}), childPadletIds: nextChildIds },
+                updated_at: now,
+              });
+              setPadlets((prev) => prev.map((p) => (
+                p.id === existingContainer.id
+                  ? { ...p, metadata: { ...p.metadata, childPadletIds: nextChildIds } }
+                  : p
+              )));
+              return;
+            }
+            const durableContainer: Padlet = {
+              id: containerId,
+              board_id: canvasId,
+              title: '',
+              content: '',
+              type: 'container',
+              position_x: 0,
+              position_y: 0,
+              width: 350,
+              height: 300,
+              created_at: now,
+              updated_at: now,
+              metadata: {
+                start_date,
+                end_date,
+                childPadletIds: [placementId],
+                cardColor: '#ffffff',
+              },
+            };
+            await createContainerOrThrow(durableContainer);
+            setPadlets((prev) => [...prev, durableContainer]);
+          },
+        },
+      );
+      if (durable !== 'not-applicable') {
+        if (durable === 'placed') {
+          setSelectedSchedulerSlot({ start: safeStart, end: safeEnd });
+          setSelectedSchedulerContainerId(containerId);
+          setSchedulerPopoverPadletId(containerId);
+        }
+        return;
+      }
+
       const newPost: Padlet = {
         id: postId,
         board_id: canvasId,
@@ -6202,7 +6343,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       console.error('Failed to drop item into scheduler container:', err);
       fetchData();
     }
-  }, [canvasId, padlets, supabase, setPadlets, fetchData]);
+  }, [canvasId, padlets, supabase, setPadlets, fetchData,
+      placeDurablePdfAreaLibraryImage, createContainerOrThrow, updatePostFieldsOrThrow,
+      setSelectedSchedulerSlot, setSelectedSchedulerContainerId, setSchedulerPopoverPadletId]);
 
   // Ghost-drag: a toolbar-created post dropped on empty scheduler space gets a
   // brand-new default-duration container, created and attached in one shot so
@@ -6292,33 +6435,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    *                     The caller must NOT fall back to an insert: that would
    *                     re-create the broken card the fix exists to prevent.
    */
-  const placeDurablePdfAreaLibraryImage = useCallback(async (
-    draft: unknown,
-  ): Promise<'placed' | 'refused' | 'not-applicable'> => {
-    // The canonical classifier -- never a second, slightly different rule.
-    const intent = readKnowledgePdfAreaLibraryPlacement(draft, canvasId);
-    if (intent === null) return 'not-applicable';
-
-    const placed = await requestKnowledgePdfAreaLibraryPlacement(intent);
-    if (!placed.ok) {
-      toast.error(placed.status === 403
-        ? 'You do not have permission to add cards to this board'
-        : 'Could not place that image');
-      return 'refused';
-    }
-    // Reconcile by id, exactly as the PDF-area creation path does, so a
-    // repeated drop can never put the same id in the list twice.
-    const createdPadlet = placed.padlet as unknown as Padlet;
-    setPadlets((prev) => (
-      prev.some((padlet) => String(padlet.id) === String(createdPadlet.id))
-        ? prev.map((padlet) => (
-            String(padlet.id) === String(createdPadlet.id) ? createdPadlet : padlet
-          ))
-        : [...prev, createdPadlet]
-    ));
-    return 'placed';
-  }, [canvasId, setPadlets]);
-
   const handleFreeformLibraryDrop = useCallback(async (e: React.DragEvent) => {
     const libraryContentStr = e.dataTransfer.getData('application/collabboard-library');
     if (!libraryContentStr) return;

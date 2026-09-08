@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  placeDurablePdfAreaLibraryImage,
   readKnowledgePdfAreaLibraryPlacement,
   requestKnowledgePdfAreaLibraryPlacement,
 } from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
@@ -232,11 +233,255 @@ describe('E10-E11: the choke point -- no board insert escapes the question', () 
   });
 
   it('E11: the hook and the canvas share ONE detection rule, imported not restated', () => {
+    // The canvas calls the shared ORCHESTRATION (classify, place, attach); the
+    // hook's defence-in-depth guard calls the classifier and the request
+    // directly. Neither restates the rule.
+    expect(canvasClient).toContain(
+      "from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient'");
+    expect(canvasClient).toContain('placeDurablePdfAreaLibraryImage_');
+    expect(canvasData).toContain('readKnowledgePdfAreaLibraryPlacement');
+    expect(canvasData).toContain('requestKnowledgePdfAreaLibraryPlacement');
+    // No second, slightly different rule anywhere on the client.
     for (const [name, source] of [['hook', canvasData], ['canvas', canvasClient]] as const) {
-      expect(source, name).toContain('readKnowledgePdfAreaLibraryPlacement');
-      expect(source, name).toContain('requestKnowledgePdfAreaLibraryPlacement');
-      // No second, slightly different rule anywhere on the client.
       expect(source, name).not.toContain('parseKnowledgePdfAreaProvenance(');
     }
+  });
+});
+
+/**
+ * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE -- the layout drops, executed.
+ *
+ * SOL_REVIEW_2 found two reachable bypasses: the Timeline line drop
+ * (handleDropLibraryCreateContainer -> createCreateContainerWithPostCommand)
+ * and the Scheduler drop (handleSchedulerExternalDrop -> the compound
+ * attach/create commands). Both created the Image themselves, so a durable
+ * PDF-area image still reached an ordinary browser INSERT.
+ *
+ * These RUN the shared orchestration those handlers now call, with the same
+ * attachment shapes they build, and prove the two halves cannot come apart:
+ * one placement, the server's id, the requested container -- or nothing.
+ */
+describe('F1-F8: the trusted placement, and the container it was dropped into', () => {
+  const SERVER_ID = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+  const CONTAINER_ID = 'cccccccc-2222-4222-8222-cccccccccccc';
+
+  const serverPlacement = (overrides: Record<string, unknown> = {}) => ({
+    id: SERVER_ID,
+    board_id: BOARD_A,
+    type: 'image',
+    library_item_id: LIBRARY_ID,
+    file_url: `/api/boards/${BOARD_A}/padlets/${SERVER_ID}/image`,
+    metadata: { imageUrl: `/api/boards/${BOARD_A}/padlets/${SERVER_ID}/image`, source: PROVENANCE },
+    ...overrides,
+  });
+
+  /** The real dependency surface, spied. */
+  const deps = (over: Partial<Parameters<typeof placeDurablePdfAreaLibraryImage>[1]> = {}) => {
+    const request = vi.fn(async () => ({ ok: true as const, padlet: serverPlacement() }));
+    const updatePlacementFields = vi.fn(async () => {});
+    const deletePlacement = vi.fn(async () => {});
+    return {
+      boardId: BOARD_A,
+      request: request as unknown as NonNullable<
+        Parameters<typeof placeDurablePdfAreaLibraryImage>[1]['request']>,
+      updatePlacementFields,
+      deletePlacement,
+      ...over,
+    };
+  };
+
+  it('F1 (A/B): the placement is created by the server, then attached by its SERVER id', async () => {
+    const createContainer = vi.fn(async () => {});
+    const d = deps();
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), {
+      ...d,
+      attachment: {
+        parentId: CONTAINER_ID,
+        attach: async (placementId) => { await createContainer(); expect(placementId).toBe(SERVER_ID); },
+      },
+    });
+
+    expect(outcome.kind).toBe('placed');
+    // Exactly one placement, carrying the durable identity and the container.
+    expect(d.request).toHaveBeenCalledTimes(1);
+    expect(createContainer).toHaveBeenCalledTimes(1);
+    const placed = (outcome as { padlet: Record<string, unknown> }).padlet;
+    expect(placed.id).toBe(SERVER_ID);
+    expect(placed.library_item_id).toBe(LIBRARY_ID);
+    expect((placed.metadata as Record<string, unknown>).parentId).toBe(CONTAINER_ID);
+    // The relationship is persisted, not just held in local state.
+    expect(d.updatePlacementFields).toHaveBeenCalledWith(SERVER_ID, {
+      metadata: expect.objectContaining({ parentId: CONTAINER_ID, source: PROVENANCE }),
+    });
+    expect(d.deletePlacement).not.toHaveBeenCalled();
+  });
+
+  it('F2 (A): the Timeline event is built around the server id, not a client one', async () => {
+    // The attachment the timeline handler builds: one container whose only
+    // child is the placement the server created, at the dropped position.
+    let containerRow: Record<string, unknown> | null = null;
+    const d = deps();
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), {
+      ...d,
+      attachment: {
+        parentId: CONTAINER_ID,
+        attach: async (placementId) => {
+          containerRow = {
+            id: CONTAINER_ID,
+            type: 'container',
+            metadata: { childPadletIds: [placementId], position_in_timeline: 2, isContainer: true },
+          };
+        },
+      },
+    });
+    expect(outcome.kind).toBe('placed');
+    expect(containerRow).not.toBeNull();
+    expect((containerRow as unknown as { metadata: { childPadletIds: string[] } }).metadata.childPadletIds)
+      .toEqual([SERVER_ID]);
+    // No client-generated post id anywhere in the result.
+    expect(JSON.stringify(outcome)).not.toContain('newPadletId');
+  });
+
+  it('F3 (B): the Scheduler slot lands on the card and the child on its container', async () => {
+    const existingChildren = ['pre-existing-child'];
+    let childUpdate: string[] | null = null;
+    const d = deps();
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), {
+      ...d,
+      attachment: {
+        parentId: CONTAINER_ID,
+        placementMetadata: { start_date: '2026-09-08T09:00:00.000Z', end_date: '2026-09-08T09:30:00.000Z' },
+        attach: async (placementId) => { childUpdate = [placementId, ...existingChildren]; },
+      },
+    });
+
+    expect(outcome.kind).toBe('placed');
+    const placed = (outcome as { padlet: Record<string, unknown> }).padlet;
+    const metadata = placed.metadata as Record<string, unknown>;
+    // Exact scheduler semantics: the slot the drop asked for, on the card.
+    expect(metadata.start_date).toBe('2026-09-08T09:00:00.000Z');
+    expect(metadata.end_date).toBe('2026-09-08T09:30:00.000Z');
+    expect(metadata.parentId).toBe(CONTAINER_ID);
+    expect(childUpdate).toEqual([SERVER_ID, 'pre-existing-child']);
+    // And the durable identity is still the same one Library object.
+    expect(placed.library_item_id).toBe(LIBRARY_ID);
+  });
+
+  it('F4 (D): a failed attachment removes the placement rather than leaving a loose card', async () => {
+    const d = deps();
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), {
+      ...d,
+      attachment: {
+        parentId: CONTAINER_ID,
+        attach: async () => { throw new Error('container insert failed'); },
+      },
+    });
+    expect(outcome).toEqual({ kind: 'refused', status: null });
+    // Fail closed: the orphan is taken back out, which also cascades its
+    // trusted mapping away.
+    expect(d.deletePlacement).toHaveBeenCalledWith(SERVER_ID);
+  });
+
+  it('F5 (D): a failed metadata write is equally fail-closed, and never attaches', async () => {
+    const attach = vi.fn(async () => {});
+    const d = deps({ updatePlacementFields: vi.fn(async () => { throw new Error('rls'); }) });
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), {
+      ...d,
+      attachment: { parentId: CONTAINER_ID, attach },
+    });
+    expect(outcome).toEqual({ kind: 'refused', status: null });
+    expect(attach).not.toHaveBeenCalled();
+    expect(d.deletePlacement).toHaveBeenCalledWith(SERVER_ID);
+  });
+
+  it('F6: a refused server placement attaches nothing and deletes nothing', async () => {
+    const attach = vi.fn(async () => {});
+    const d = deps({ request: vi.fn(async () => ({ ok: false as const, status: 403 })) as never });
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), {
+      ...d,
+      attachment: { parentId: CONTAINER_ID, attach },
+    });
+    expect(outcome).toEqual({ kind: 'refused', status: 403 });
+    expect(attach).not.toHaveBeenCalled();
+    expect(d.deletePlacement).not.toHaveBeenCalled();
+    expect(d.updatePlacementFields).not.toHaveBeenCalled();
+  });
+
+  it('F7 (C): ordinary items never reach the trusted path from these surfaces either', async () => {
+    for (const row of [
+      droppedRow(libraryDragPayload({ metadata: { imageUrl: 'https://cdn.test/plain.png' } })),
+      droppedRow(libraryDragPayload({ type: 'note' })),
+      droppedRow(libraryDragPayload({ type: 'text' })),
+      droppedRow(libraryDragPayload({ libraryItemId: undefined })),
+    ]) {
+      const attach = vi.fn(async () => {});
+      const d = deps();
+      const outcome = await placeDurablePdfAreaLibraryImage(row, {
+        ...d, attachment: { parentId: CONTAINER_ID, attach },
+      });
+      // 'not-applicable' is what lets the Timeline/Scheduler compound commands
+      // run exactly as they always have.
+      expect(outcome, JSON.stringify(row).slice(0, 80)).toEqual({ kind: 'not-applicable' });
+      expect(d.request).not.toHaveBeenCalled();
+      expect(attach).not.toHaveBeenCalled();
+    }
+  });
+
+  it('F8: a standalone drop still needs no attachment, and writes no relationship', async () => {
+    const d = deps();
+    const outcome = await placeDurablePdfAreaLibraryImage(droppedRow(libraryDragPayload()), d);
+    expect(outcome.kind).toBe('placed');
+    expect(d.updatePlacementFields).not.toHaveBeenCalled();
+    expect(d.deletePlacement).not.toHaveBeenCalled();
+  });
+});
+
+describe('F9-F11: the two layout handlers route before their compound commands', () => {
+  it('F9 (A): the Timeline handler places durably, then builds the event around it', () => {
+    const handler = canvasClient.slice(
+      canvasClient.indexOf('const handleDropLibraryCreateContainer = useCallback('),
+      canvasClient.indexOf('const handleCreateSchedulerPadlet = useCallback('),
+    );
+    const decide = handler.indexOf('await placeDurablePdfAreaLibraryImage(');
+    const compound = handler.indexOf('createCreateContainerWithPostCommand(');
+    expect(decide).toBeGreaterThan(-1);
+    expect(compound).toBeGreaterThan(decide);
+    expect(handler).toContain("if (durable !== 'not-applicable') return;");
+    // The container it attaches is created with the SERVER's placement id.
+    expect(handler).toContain('attach: async (placementId) => {');
+    expect(handler).toContain('childPadletIds: [placementId],');
+    expect(handler).toContain('position_in_timeline: insertPosition,');
+    expect(handler).toContain('await createContainerOrThrow(durableContainer);');
+    expect(handler).toContain('await applyTimelineOrder(durableOrder);');
+  });
+
+  it('F10 (B): the Scheduler handler places durably, then preserves the slot', () => {
+    const handler = canvasClient.slice(
+      canvasClient.indexOf('const handleSchedulerExternalDrop = useCallback('),
+      canvasClient.indexOf('const placeDraftInNewSchedulerContainer = useCallback('),
+    );
+    const decide = handler.indexOf('await placeDurablePdfAreaLibraryImage(');
+    for (const compound of ['createAttachPostToSchedulerContainerCommand(',
+      'createCreateSchedulerContainerWithPostCommand(']) {
+      const at = handler.indexOf(compound);
+      expect(at, compound).toBeGreaterThan(decide);
+    }
+    expect(handler).toContain('placementMetadata: { start_date, end_date },');
+    expect(handler).toContain('const nextChildIds = [placementId, ...childIds];');
+    expect(handler).toContain('await createContainerOrThrow(durableContainer);');
+    // The popover/slot selection the ordinary path performs still happens.
+    expect(handler).toContain('setSelectedSchedulerContainerId(containerId);');
+  });
+
+  it('F11 (D): the low-level guard refuses container context it cannot preserve', () => {
+    const guard = canvasData.slice(
+      canvasData.indexOf('const placeDurablePdfAreaLibraryImage = useCallback('),
+      canvasData.indexOf('const durablePlacementError ='),
+    );
+    expect(guard).toContain('rowMetadata?.parentId');
+    expect(guard).toContain('return { handled: true, ok: false, status: null };');
+    // The refusal comes BEFORE the request, so no orphan is ever created.
+    expect(guard.indexOf('rowMetadata?.parentId'))
+      .toBeLessThan(guard.indexOf('await requestKnowledgePdfAreaLibraryPlacement(intent)'));
   });
 });

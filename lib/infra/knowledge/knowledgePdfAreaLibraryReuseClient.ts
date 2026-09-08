@@ -105,6 +105,107 @@ export function readKnowledgePdfAreaLibraryPlacement(
   };
 }
 
+/**
+ * What a surface must re-apply after the server has created the placement.
+ *
+ * The trusted endpoint takes a POSITION and nothing else -- it cannot be told
+ * about containers, timeline events or scheduler slots, and it must not be:
+ * every extra field would be another thing a browser could assert about a
+ * private object. So a drop that asked for a container is completed in two
+ * steps, and this is the second one.
+ */
+export interface KnowledgePdfAreaPlacementAttachment {
+  /** The container the drop asked this card to live in. */
+  readonly parentId: string;
+  /** Placement-level metadata the surface requires (a scheduler slot). */
+  readonly placementMetadata?: Record<string, unknown>;
+  /**
+   * Persists the container side of the relationship, given the id the SERVER
+   * chose. Creating the container, or adding the child to an existing one --
+   * whichever the surface's own drop semantics require.
+   */
+  attach(placementId: string): Promise<void>;
+}
+
+export type KnowledgePdfAreaPlacementOutcome =
+  /** Not a durable PDF-area image: the caller keeps its own path, unchanged. */
+  | { readonly kind: 'not-applicable' }
+  | { readonly kind: 'placed'; readonly padlet: Record<string, unknown> }
+  /** It WAS one, and it could not be placed as asked. Never insert instead. */
+  | { readonly kind: 'refused'; readonly status: number | null };
+
+export interface KnowledgePdfAreaPlacementDependencies {
+  readonly boardId?: string | null;
+  readonly attachment?: KnowledgePdfAreaPlacementAttachment | null;
+  /** Injected so the whole sequence is executable under test. */
+  readonly request?: typeof requestKnowledgePdfAreaLibraryPlacement;
+  updatePlacementFields(placementId: string, fields: Record<string, unknown>): Promise<void>;
+  deletePlacement(placementId: string): Promise<void>;
+}
+
+const UUID_OR_ID = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;
+
+/**
+ * Place a durable PDF-area Library Image, and put it where the drop asked.
+ *
+ * THE WHOLE POINT IS THAT THE TWO HALVES CANNOT COME APART. The server creates
+ * a standalone placement, because that is all a position can express. If the
+ * drop wanted it inside a timeline event or a scheduler slot, the relationship
+ * is written immediately afterwards with the SAME update authority the ordinary
+ * path uses -- and if any part of that fails, the placement is REMOVED again.
+ *
+ * A card sitting outside the container the user dropped it into is not a
+ * smaller failure than no card at all: it is a silently wrong board. So this
+ * fails closed rather than leaving one behind, and the caller must not fall
+ * back to an ordinary browser INSERT, which is the defect the trusted path
+ * exists to prevent.
+ */
+export async function placeDurablePdfAreaLibraryImage(
+  draft: unknown,
+  deps: KnowledgePdfAreaPlacementDependencies,
+): Promise<KnowledgePdfAreaPlacementOutcome> {
+  const intent = readKnowledgePdfAreaLibraryPlacement(draft, deps.boardId ?? null);
+  if (intent === null) return { kind: 'not-applicable' };
+
+  const request = deps.request ?? requestKnowledgePdfAreaLibraryPlacement;
+  const placed = await request(intent);
+  if (!placed.ok) return { kind: 'refused', status: placed.status };
+
+  const attachment = deps.attachment ?? null;
+  if (attachment === null) return { kind: 'placed', padlet: placed.padlet };
+
+  const placementId = UUID_OR_ID(placed.padlet.id);
+  if (placementId === null) {
+    // No id means nothing can be attached and nothing can be cleaned up. Refuse
+    // rather than report a placement whose relationship was never written.
+    return { kind: 'refused', status: null };
+  }
+
+  const metadata = {
+    ...(placed.padlet.metadata as Record<string, unknown> | null ?? {}),
+    ...(attachment.placementMetadata ?? {}),
+    parentId: attachment.parentId,
+  };
+
+  try {
+    await deps.updatePlacementFields(placementId, { metadata });
+    await attachment.attach(placementId);
+  } catch {
+    // Fail closed: take the orphan back out rather than leave a card outside
+    // the container it was dropped into. Deleting the padlet also cascades the
+    // trusted mapping away, so no entitlement is left behind either.
+    try {
+      await deps.deletePlacement(placementId);
+    } catch {
+      // Nothing more can be done here; the caller refetches and reports.
+    }
+    return { kind: 'refused', status: null };
+  }
+
+  return { kind: 'placed', padlet: { ...placed.padlet, metadata } };
+}
+
 export function knowledgePdfAreaLibraryPlacementEndpoint(
   boardId: string,
   libraryItemId: string,
