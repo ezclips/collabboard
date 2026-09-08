@@ -15,6 +15,7 @@ import {
 import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
+import PdfWorkspaceLibraryPanel from '@/components/collabboard/PdfWorkspaceLibraryPanel';
 import PdfWorkspaceChrome, {
   type PdfWorkspaceRightPanel,
   type PdfWorkspaceTab,
@@ -544,27 +545,16 @@ export default function KnowledgeSourceReaderDrawer({
       }];
     const activeDocumentId = activeWorkspacePdfId ?? reader.documentId;
     const readerMatchesActiveDocument = reader.documentId === activeDocumentId;
+    const openBacklinkTarget = (targetPadletId: string) => onOpenBacklinkTarget?.(targetPadletId);
     const rightPanelContent = !readerMatchesActiveDocument ? (
       <p data-pdf-workspace-panel-loading="true" className="text-xs text-gray-500">
         Opening document context…
       </p>
     ) : workspaceRightPanel === 'library' ? (
-      <>
-        {libraryPageSummary !== null ? (
-          <p data-knowledge-library-pagecount="true" className="mb-2 text-[11px] text-gray-500">
-            {libraryPageSummary}
-          </p>
-        ) : null}
-        <UsedInNotes
-          scope="document"
-          rows={libraryBacklinkRows}
-          onOpen={(targetPadletId) => onOpenBacklinkTarget?.(targetPadletId)}
-        />
-        <KnowledgeSourceNotesPanel
-          documentId={reader.documentId}
-          onOpenNote={(targetPadletId) => onOpenBacklinkTarget?.(targetPadletId)}
-        />
-      </>
+      <PdfWorkspaceLibraryPanel
+        documentId={reader.documentId}
+        onOpenNote={openBacklinkTarget}
+      />
     ) : workspaceRightPanel === 'ai' && onAddBoardAiContext ? (
       <div data-pdf-workspace-ai-panel="true" className="space-y-3">
         <p className="text-xs text-gray-500">
