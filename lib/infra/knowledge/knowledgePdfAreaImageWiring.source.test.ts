@@ -1002,6 +1002,10 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
     expect(reuseRollout).toContain('EXACT POST already released -- no mutation performed');
     expect(reuseRollout).toContain('EXACT PRE -- applying');
     expect(reuseRollout).toContain('refusing to mutate');
+    // PRE refuses the NAME, not just the signature: an overload left behind by
+    // an earlier attempt would otherwise survive installation beside this one.
+    expect(reuseRollout).toContain('carry the reuse RPC name with an unexpected signature');
+    expect(reuseRollout).toContain("p.proname = 'create_knowledge_pdf_area_image_reuse_placement';");
     expect(reuseRollout).toContain('BEGIN;');
     expect(reuseRollout).toContain('COMMIT;');
 
@@ -1030,6 +1034,16 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
       "'board_id:uuid:NO','created_at:timestamp with time zone:NO'",
       "column_default = 'now()'",
       "contype = 'p'",
+      // The constraint set is EXACT: an extra UNIQUE(library_item_id) would
+      // outlaw the cross-board reuse this feature exists for, so extras are
+      // rejected rather than merely un-enumerated.
+      'count(*) = 4 FROM pg_constraint c WHERE c.conrelid = t.oid',
+      "contype NOT IN ('p','f')",
+      "'knowledge_pdf_area_image_placements_pkey'",
+      // Exactly ONE function may carry the trusted name: absence of the exact
+      // signature is not absence of the name, and an unreviewed overload beside
+      // it is something a caller could resolve to.
+      "p.proname = 'create_knowledge_pdf_area_image_reuse_placement')",
       "c.confrelid = to_regclass('public.padlets')",
       "c.confrelid = to_regclass('public.library_items')",
       "c.confrelid = to_regclass('public.boards')",

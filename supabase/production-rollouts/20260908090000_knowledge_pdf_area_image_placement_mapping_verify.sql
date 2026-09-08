@@ -69,8 +69,17 @@ SELECT 3 AS section, 'padlet_id is the primary key' AS check,
 -- 4. Exactly three foreign keys, each from the expected column to the expected
 --    target, each ON DELETE CASCADE. The padlet cascade is what makes the
 --    entitlement die with the card it was granted for.
-SELECT 4 AS section, 'three exact cascading foreign keys' AS check,
-    COALESCE((SELECT count(*) = 3 FROM pg_constraint c
+SELECT 4 AS section, 'the EXACT constraint set: one PK, three cascading FKs, nothing else' AS check,
+    COALESCE((SELECT count(*) = 4 FROM pg_constraint c WHERE c.conrelid = t.oid)
+      AND (SELECT count(*) = 0 FROM pg_constraint c
+            WHERE c.conrelid = t.oid AND c.contype NOT IN ('p','f'))
+      AND (SELECT array_agg(c.conname::text ORDER BY c.conname::text)
+             FROM pg_constraint c WHERE c.conrelid = t.oid)
+          = ARRAY['knowledge_pdf_area_image_placements_board_id_fkey',
+                  'knowledge_pdf_area_image_placements_library_item_id_fkey',
+                  'knowledge_pdf_area_image_placements_padlet_id_fkey',
+                  'knowledge_pdf_area_image_placements_pkey']
+      AND (SELECT count(*) = 3 FROM pg_constraint c
                WHERE c.conrelid = t.oid AND c.contype = 'f' AND c.confdeltype = 'c')
       AND EXISTS (SELECT 1 FROM pg_constraint c
                    WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
@@ -87,9 +96,10 @@ SELECT 4 AS section, 'three exact cascading foreign keys' AS check,
                      AND c.confrelid = to_regclass('public.boards')
                      AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
                                             WHERE a.attrelid = t.oid AND a.attname='board_id')]::int2[]), false) AS pass,
-    COALESCE((SELECT string_agg(c.conname || '->' || c.confdeltype::text, ', ')
+    COALESCE((SELECT string_agg(c.conname || ':' || c.contype::text || '->' || c.confdeltype::text, ', '
+                                ORDER BY c.conname)
                 FROM pg_constraint c
-               WHERE c.conrelid = t.oid AND c.contype = 'f'), 'absent') AS detail
+               WHERE c.conrelid = t.oid), 'absent') AS detail
   FROM (SELECT to_regclass('public.knowledge_pdf_area_image_placements') AS oid) t;
 
 -- 5. RLS is on and there is not one policy: nothing without BYPASSRLS may read
@@ -138,9 +148,13 @@ SELECT 7 AS section, 'service_role may write the mapping' AS check,
 
 -- 8. The trusted reuse RPC: exact identity, exact authority. Resolved by oid
 --    first, so an absent function is a `false` rather than an aborted report.
-SELECT 8 AS section, 'reuse RPC: signature, result, language, INVOKER, search_path, ACL' AS check,
+SELECT 8 AS section, 'reuse RPC: exactly one of that name, plus signature, result, language, INVOKER, search_path, ACL' AS check,
     COALESCE(
       f.oid IS NOT NULL
+      AND (SELECT count(*) = 1 FROM pg_proc p
+             JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.proname = 'create_knowledge_pdf_area_image_reuse_placement')
       AND (SELECT NOT p.prosecdef
                   AND l.lanname = 'plpgsql'
                   AND COALESCE(p.proconfig, ARRAY[]::text[]) = ARRAY['search_path=public']::text[]
@@ -154,7 +168,9 @@ SELECT 8 AS section, 'reuse RPC: signature, result, language, INVOKER, search_pa
       AND NOT has_function_privilege('anon', f.oid, 'EXECUTE')
       AND NOT has_function_privilege('public', f.oid, 'EXECUTE'), false) AS pass,
     CASE WHEN f.oid IS NULL THEN 'absent'
-         ELSE format('invoker=%s config=%s service=%s authenticated=%s anon=%s public=%s',
+         ELSE format('overloads=%s invoker=%s config=%s service=%s authenticated=%s anon=%s public=%s',
+              (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname='public' AND p.proname='create_knowledge_pdf_area_image_reuse_placement'),
               (SELECT NOT p.prosecdef FROM pg_proc p WHERE p.oid = f.oid),
               (SELECT COALESCE(p.proconfig, ARRAY[]::text[]) FROM pg_proc p WHERE p.oid = f.oid),
               has_function_privilege('service_role', f.oid, 'EXECUTE'),
@@ -239,8 +255,19 @@ SELECT COALESCE(
                 WHERE c.conrelid = t.oid AND c.contype = 'p'
                   AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
                                          WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[])
+   AND (SELECT count(*) = 4 FROM pg_constraint c WHERE c.conrelid = t.oid)
+   AND (SELECT count(*) = 1 FROM pg_constraint c
+         WHERE c.conrelid = t.oid AND c.contype = 'p')
    AND (SELECT count(*) = 3 FROM pg_constraint c
          WHERE c.conrelid = t.oid AND c.contype = 'f')
+   AND (SELECT count(*) = 0 FROM pg_constraint c
+         WHERE c.conrelid = t.oid AND c.contype NOT IN ('p','f'))
+   AND (SELECT array_agg(c.conname::text ORDER BY c.conname::text)
+          FROM pg_constraint c WHERE c.conrelid = t.oid)
+       = ARRAY['knowledge_pdf_area_image_placements_board_id_fkey',
+               'knowledge_pdf_area_image_placements_library_item_id_fkey',
+               'knowledge_pdf_area_image_placements_padlet_id_fkey',
+               'knowledge_pdf_area_image_placements_pkey']
    AND EXISTS (SELECT 1 FROM pg_constraint c
                 WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
                   AND c.confrelid = to_regclass('public.padlets')
@@ -286,6 +313,10 @@ SELECT COALESCE(
    AND has_table_privilege('service_role', t.oid, 'SELECT')
    AND has_table_privilege('service_role', t.oid, 'INSERT')
    AND has_table_privilege('service_role', t.oid, 'DELETE')
+   AND (SELECT count(*) = 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.proname = 'create_knowledge_pdf_area_image_reuse_placement')
    AND (SELECT NOT p.prosecdef
                 AND l.lanname = 'plpgsql'
                 AND COALESCE(p.proconfig, ARRAY[]::text[]) = ARRAY['search_path=public']::text[]

@@ -76,8 +76,19 @@ SELECT COALESCE(
                 WHERE c.conrelid = t.oid AND c.contype = 'p'
                   AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
                                          WHERE a.attrelid = t.oid AND a.attname='padlet_id')]::int2[])
+   AND (SELECT count(*) = 4 FROM pg_constraint c WHERE c.conrelid = t.oid)
+   AND (SELECT count(*) = 1 FROM pg_constraint c
+         WHERE c.conrelid = t.oid AND c.contype = 'p')
    AND (SELECT count(*) = 3 FROM pg_constraint c
          WHERE c.conrelid = t.oid AND c.contype = 'f')
+   AND (SELECT count(*) = 0 FROM pg_constraint c
+         WHERE c.conrelid = t.oid AND c.contype NOT IN ('p','f'))
+   AND (SELECT array_agg(c.conname::text ORDER BY c.conname::text)
+          FROM pg_constraint c WHERE c.conrelid = t.oid)
+       = ARRAY['knowledge_pdf_area_image_placements_board_id_fkey',
+               'knowledge_pdf_area_image_placements_library_item_id_fkey',
+               'knowledge_pdf_area_image_placements_padlet_id_fkey',
+               'knowledge_pdf_area_image_placements_pkey']
    AND EXISTS (SELECT 1 FROM pg_constraint c
                 WHERE c.conrelid = t.oid AND c.contype='f' AND c.confdeltype='c'
                   AND c.confrelid = to_regclass('public.padlets')
@@ -123,6 +134,10 @@ SELECT COALESCE(
    AND has_table_privilege('service_role', t.oid, 'SELECT')
    AND has_table_privilege('service_role', t.oid, 'INSERT')
    AND has_table_privilege('service_role', t.oid, 'DELETE')
+   AND (SELECT count(*) = 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.proname = 'create_knowledge_pdf_area_image_reuse_placement')
    AND (SELECT NOT p.prosecdef
                 AND l.lanname = 'plpgsql'
                 AND COALESCE(p.proconfig, ARRAY[]::text[]) = ARRAY['search_path=public']::text[]
@@ -167,6 +182,7 @@ $fp$;
     table_oid oid;
     fn_oid oid;
     owned integer := 0;
+    overloads integer := 0;
     is_post boolean;
 BEGIN
     -- PREREQUISITES. Objects this correction builds on and does not own. A
@@ -222,6 +238,22 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_class WHERE relname LIKE 'knowledge_pdf_area_image_placements%') THEN
         RAISE EXCEPTION
             'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: refusing to mutate -- residual objects named after the mapping already exist';
+    END IF;
+
+    -- ABSENCE OF THE EXACT SIGNATURE IS NOT ABSENCE OF THE NAME. A function
+    -- called create_knowledge_pdf_area_image_reuse_placement with a DIFFERENT
+    -- argument list would survive this rollout as a second overload, and every
+    -- caller would then be resolving between two functions -- one of which
+    -- nobody reviewed, and either of which PostgREST might pick. Refuse the
+    -- name entirely rather than install beside it.
+    SELECT count(*) INTO overloads
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname = 'create_knowledge_pdf_area_image_reuse_placement';
+    IF overloads <> 0 THEN
+        RAISE EXCEPTION
+            'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: refusing to mutate -- % function(s) already carry the reuse RPC name with an unexpected signature. Resolve by hand.',
+            overloads;
     END IF;
 
     RAISE NOTICE 'IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE: EXACT PRE -- applying';
