@@ -98,6 +98,7 @@ import {
   parseKnowledgeSourceTextClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
+import { parseKnowledgePdfAreaProvenance } from '@/lib/domain/knowledge/knowledgePdfAreaImagePolicy';
 import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
@@ -6287,6 +6288,60 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         width: content.width,
         height: content.height,
       });
+      // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. A PDF-area Image is the ONE reuse
+      // that cannot be a browser INSERT. Its bytes are in the private Knowledge
+      // bucket, so the new placement needs a SERVER-owned mapping before
+      // anything may serve them, and the snapshot's `metadata.imageUrl` still
+      // addresses the origin card -- copying it verbatim is exactly the defect
+      // this replaces. Everything else, images included, keeps the path below
+      // untouched: this branch is entered only when the item carries a durable
+      // identity AND genuine knowledge-pdf-area provenance.
+      const pdfAreaProvenance = (content.type === 'image' && typeof content.libraryItemId === 'string')
+        ? parseKnowledgePdfAreaProvenance(content.metadata)
+        : null;
+      if (canvasId && pdfAreaProvenance !== null && content.libraryItemId) {
+        // Position only. The server reads the title, size, provenance and
+        // durable location from rows it already trusts.
+        let placed: Response | null = null;
+        try {
+          placed = await fetch(
+            `/api/boards/${encodeURIComponent(canvasId)}/library-items/${encodeURIComponent(content.libraryItemId)}/image-placement`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ positionX: x, positionY: y }),
+            },
+          );
+        } catch {
+          placed = null;
+        }
+        if (!placed || !placed.ok) {
+          // Deliberately no fall-through to the browser INSERT: that is the
+          // path that produces the broken card, so failing visibly is better
+          // than silently placing one that renders nothing.
+          toast.error(placed?.status === 403
+            ? 'You do not have permission to add cards to this board'
+            : 'Could not place that image');
+          return;
+        }
+        const body = await placed.json().catch(() => null) as { padlet?: Padlet } | null;
+        const createdPadlet = body?.padlet;
+        if (!createdPadlet) {
+          toast.error('Could not place that image');
+          return;
+        }
+        // Reconcile by id, exactly as the PDF-area creation path does, so a
+        // repeated drop can never put the same id in the list twice.
+        setPadlets((prev) => (
+          prev.some((padlet) => String(padlet.id) === String(createdPadlet.id))
+            ? prev.map((padlet) => (
+                String(padlet.id) === String(createdPadlet.id) ? createdPadlet : padlet
+              ))
+            : [...prev, createdPadlet]
+        ));
+        return;
+      }
+
       await addPadletFromLibraryItem({
         board_id: canvasId,
         title: content.title,
@@ -6308,7 +6363,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     } catch (err) {
       console.error('Failed to create padlet from library item:', err);
     }
-  }, [canvasId, getCanvasPointFromClient, addPadletFromLibraryItem]);
+  }, [canvasId, getCanvasPointFromClient, addPadletFromLibraryItem, setPadlets]);
 
   const handleFreeformCardDrop = useCallback(async (svgDataStr: string, dropX: number, dropY: number) => {
     const { svgUrl, title } = JSON.parse(svgDataStr);

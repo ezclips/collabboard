@@ -28,6 +28,11 @@ const R6B_FILES = [
   'app/api/boards/[id]/knowledge/area-image/route.ts',
   'app/api/boards/[id]/padlets/[padletId]/image/route.ts',
   'components/collabboard/KnowledgeDocumentPageRegionSelector.tsx',
+  // IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE. The reuse path handles the SAME
+  // private crop, so it is held to the same "nothing is ever published" sweep.
+  'lib/domain/knowledge/knowledgePdfAreaLibraryPlacement.ts',
+  'lib/server/knowledge/knowledgePdfAreaLibraryReuseRoute.ts',
+  'app/api/boards/[id]/library-items/[libraryItemId]/image-placement/route.ts',
 ] as const;
 
 function after(source: string, anchor: string, count = 900): string {
@@ -802,5 +807,189 @@ describe('F37-F40: MAINTAIN privilege and installed-helper identity', () => {
     // What it does contain is JSON and numeric validation only.
     expect(body).toContain('jsonb_typeof');
     expect(body).toContain('double precision');
+  });
+});
+
+/**
+ * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE, group F41-F48 -- reusing a durable
+ * PDF-area Library Image.
+ *
+ * Runtime proved the defect these pin: the Library reuse drag copied the
+ * snapshot verbatim, so the new placement carried `metadata.imageUrl` for the
+ * ORIGIN card. That URL dies with the origin, and the renderer reads it before
+ * every row-level field, so the card painted nothing.
+ *
+ * The correction is a server-owned mapping plus a trusted write, NOT a renderer
+ * change -- so these also pin what stayed the same.
+ */
+describe('F41-F48: durable Library Image reuse goes through the trusted server path', () => {
+  const reuseRoute = sourceOf('lib/server/knowledge/knowledgePdfAreaLibraryReuseRoute.ts');
+  const placement = sourceOf('lib/domain/knowledge/knowledgePdfAreaLibraryPlacement.ts');
+  const serveRoute = sourceOf('lib/server/knowledge/knowledgePdfAreaImageServeRoute.ts');
+  const libraryRoute = sourceOf('lib/server/collabboard/libraryImageServeRoute.ts');
+  const reuseMigration = sourceOf(
+    'supabase/migrations/20260908090000_add_knowledge_pdf_area_image_placement_mapping.sql');
+  const reuseRollout = sourceOf(
+    'supabase/production-rollouts/20260908090000_knowledge_pdf_area_image_placement_mapping.sql');
+  const reuseVerifier = sourceOf(
+    'supabase/production-rollouts/20260908090000_knowledge_pdf_area_image_placement_mapping_verify.sql');
+
+  it('F41 (R7, R8): only a durable PDF-area IMAGE takes the new path', () => {
+    const branch = after(canvasClient, 'const pdfAreaProvenance =', 1400);
+    // All three conditions, so an ordinary Library item and an ordinary image
+    // both fall through to the existing reuse call untouched.
+    expect(branch).toContain("content.type === 'image'");
+    expect(branch).toContain("typeof content.libraryItemId === 'string'");
+    expect(branch).toContain('parseKnowledgePdfAreaProvenance(content.metadata)');
+    expect(branch).toContain('if (canvasId && pdfAreaProvenance !== null && content.libraryItemId)');
+    // And the pre-existing path is still the one everything else reaches.
+    const gate = canvasClient.indexOf('const pdfAreaProvenance =');
+    const ordinary = canvasClient.indexOf('await addPadletFromLibraryItem({', gate);
+    expect(ordinary).toBeGreaterThan(gate);
+  });
+
+  it('F42: the browser sends a POSITION to the board-scoped reuse route, nothing more', () => {
+    const branch = after(canvasClient, 'const pdfAreaProvenance =', 1400);
+    expect(branch).toContain('/library-items/');
+    expect(branch).toContain('/image-placement');
+    expect(branch).toContain("method: 'POST'");
+    expect(branch).toContain('JSON.stringify({ positionX: x, positionY: y })');
+    // Nothing about the private object, the origin, or ownership is sent.
+    for (const forbidden of ['knowledge_storage_path', 'storagePath', 'originBoardId',
+      'originPadletId', 'board-derived/']) {
+      expect(branch, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('F43: a refused reuse never falls back to the browser INSERT', () => {
+    const branch = after(canvasClient, 'if (!placed || !placed.ok)', 400);
+    expect(branch).toContain('toast.error');
+    expect(branch).toContain('return;');
+    // The failure path returns BEFORE addPadletFromLibraryItem, which is what
+    // would otherwise re-create the broken card.
+    const failure = canvasClient.indexOf('if (!placed || !placed.ok)');
+    const returnAt = canvasClient.indexOf('return;', failure);
+    const insertAt = canvasClient.indexOf('await addPadletFromLibraryItem({', failure);
+    expect(returnAt).toBeGreaterThan(-1);
+    expect(insertAt).toBeGreaterThan(returnAt);
+  });
+
+  it('F44: the placement metadata is rebound by ONE canonical helper', () => {
+    expect(reuseRoute).toContain('buildKnowledgePdfAreaPlacementMetadata(item.metadata, { boardId, padletId })');
+    // The helper rebinds the base-image aliases and nothing else, and it reuses
+    // the existing sanitation contract rather than restating it.
+    expect(placement).toContain('sanitizeLibraryMetadata');
+    expect(placement).toContain('metadata.imageUrl = imageUrl');
+    expect(placement).toContain("KNOWLEDGE_PDF_AREA_PLACEMENT_URL_ALIASES = ['imageUrl', 'fileUrl', 'file_url']");
+    // The composite and the provenance are never rewritten.
+    expect(placement).not.toContain('metadata.drawing =');
+    expect(placement).not.toContain('metadata.previewUrl =');
+    expect(placement).not.toContain('metadata.source =');
+  });
+
+  it('F45 (R23, R24): neither the owner Library route nor the renderer changed', () => {
+    // The owner-scoped route still proves authority through the CALLER's own
+    // client and knows nothing about the mapping.
+    expect(libraryRoute).toContain('sessionClient');
+    expect(libraryRoute).toContain("from('library_items')");
+    expect(libraryRoute).not.toContain('knowledge_pdf_area_image_placements');
+    // The display resolver is untouched: metadata still outranks the row.
+    const resolver = sourceOf('lib/domain/canvas/imagePostDisplaySource.ts');
+    const order = ['metadata?.drawing', 'metadata?.imageUrl', 'metadata?.fileUrl',
+      'metadata?.file_url', 'padlet.image_url', 'padlet.file_url'];
+    let cursor = -1;
+    for (const field of order) {
+      const at = resolver.indexOf(field, cursor + 1);
+      expect(at, field).toBeGreaterThan(cursor);
+      cursor = at;
+    }
+  });
+
+  it('F46 (R16-R21): the serve route keeps the direct branch first and gates the fallback', () => {
+    const direct = serveRoute.indexOf('knowledgePdfAreaImagePath(boardId, padletId)');
+    const fallback = serveRoute.indexOf('resolveDurableReuseBytes(session, padletId, padlet, placementProvenance)');
+    expect(direct).toBeGreaterThan(-1);
+    expect(fallback).toBeGreaterThan(direct);
+    // Every gate, in the order that makes the mapping -- not the browser
+    // writable column -- the thing that authorises the read.
+    const resolver = after(serveRoute, 'async function resolveDurableReuseBytes', 2600);
+    expect(resolver).toContain('session.findPlacementMapping(padletId)');
+    expect(resolver).toContain('mapping.padletId !== padletId');
+    expect(resolver).toContain('padlet.libraryItemId !== mapping.libraryItemId');
+    expect(resolver).toContain('session.findMappedLibraryItem(mapping.libraryItemId)');
+    expect(resolver).toContain("item.type !== 'image'");
+    expect(resolver).toContain('knowledgePdfAreaProvenanceMatches(placementProvenance, libraryProvenance)');
+    expect(resolver).toContain('item.knowledgeStoragePath');
+    // The path is never derived from, or read out of, the placement's metadata.
+    expect(resolver).not.toContain('board-derived/');
+  });
+
+  it('F47: the mapping is server-owned in SQL, and nothing is backfilled', () => {
+    for (const sql of [reuseMigration, reuseRollout]) {
+      expect(sql).toContain('CREATE TABLE IF NOT EXISTS public.knowledge_pdf_area_image_placements');
+      expect(sql).toContain('padlet_id uuid PRIMARY KEY');
+      expect(sql).toContain('REFERENCES public.padlets(id) ON DELETE CASCADE');
+      expect(sql).toContain('REFERENCES public.library_items(id) ON DELETE CASCADE');
+      expect(sql).toContain('ENABLE ROW LEVEL SECURITY');
+      expect(sql).toContain('REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM anon');
+      expect(sql).toContain('REVOKE ALL ON TABLE public.knowledge_pdf_area_image_placements FROM authenticated');
+      expect(sql).toContain('GRANT ALL ON TABLE public.knowledge_pdf_area_image_placements TO service_role');
+      // Zero policies: none is created anywhere in either file.
+      expect(sql).not.toContain('CREATE POLICY');
+      // service_role only, and it grants itself no authority.
+      // Judged on the DEFINITION, not the file: the rollout's postflight names
+      // "SECURITY DEFINER" in the error it raises when it finds one.
+      const definition = sql.slice(
+        sql.indexOf('CREATE OR REPLACE FUNCTION public.create_knowledge_pdf_area_image_reuse_placement'));
+      expect(definition).toContain('SECURITY INVOKER');
+      expect(definition.slice(0, definition.indexOf('END;'))).not.toContain('SECURITY DEFINER');
+      expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.create_knowledge_pdf_area_image_reuse_placement');
+      // It re-proves both authorities for itself.
+      expect(sql).toContain('board_collaborators');
+      expect(sql).toContain('is_knowledge_pdf_area_provenance');
+      // And it copies nothing: no storage, no second library row, no path input.
+      expect(sql).not.toContain('INSERT INTO public.library_items');
+      expect(sql).not.toContain('p_storage_path');
+      expect(sql).not.toContain('storage.objects');
+      // No backfill of the new mapping from existing rows.
+      expect(sql).not.toContain('INSERT INTO public.knowledge_pdf_area_image_placements (padlet_id, library_item_id)\nSELECT');
+      expect(sql).not.toContain('FROM public.padlets p\n     WHERE p.library_item_id IS NOT NULL');
+    }
+    // The closed durable-preview migration and rollout are not touched here.
+    expect(reuseRollout).not.toContain('ALTER TABLE public.library_items');
+  });
+
+  it('F48: the rollout is state-guarded and the verifier is portable, plain SQL', () => {
+    // Exactly two recognised states, and a PARTIAL one aborts.
+    expect(reuseRollout).toContain('DO $preflight$');
+    expect(reuseRollout).toContain('DO $postflight$');
+    expect(reuseRollout).toContain('PRE state (0 of 2 owned objects)');
+    expect(reuseRollout).toContain('POST state already released');
+    expect(reuseRollout).toContain('PARTIAL state');
+    expect(reuseRollout).toContain('BEGIN;');
+    expect(reuseRollout).toContain('COMMIT;');
+
+    // The verifier must run through any SQL API: no psql metacommands at all.
+    // Comments stripped first: the file's own header NAMES the metacommands it
+    // refuses to use, and a naive scan would fail on that sentence.
+    const verifierSql = reuseVerifier.replace(/^\s*--.*$/gm, '');
+    for (const meta of ['\\gset', '\\if', '\\else', '\\endif', '\\set', '\\echo']) {
+      expect(verifierSql, meta).not.toContain(meta);
+    }
+    // A missing object must read as false, never abort the report: privilege
+    // tests take an OID, which is NULL for an absent object.
+    expect(reuseVerifier).toContain("has_table_privilege('anon', t.oid,");
+    expect(reuseVerifier).toContain("has_table_privilege('authenticated', t.oid,");
+    expect(reuseVerifier).toContain('to_regclass(');
+    expect(reuseVerifier).toContain('to_regprocedure(');
+    // PostgreSQL 17's MAINTAIN is invisible to information_schema, so it is
+    // asked for by name or it is never checked at all.
+    expect(reuseVerifier).toContain("has_table_privilege('anon', t.oid, 'MAINTAIN')");
+    expect(reuseVerifier).toContain("has_table_privilege('authenticated', t.oid, 'MAINTAIN')");
+    // One final boolean gate, COALESCEd so a NULL can never read as success.
+    const rollup = reuseVerifier.slice(reuseVerifier.indexOf('12 AS section'));
+    expect(rollup).toContain('COMPLETE PASS');
+    expect(rollup).toContain('COALESCE(');
+    expect(rollup).toContain(', false) AS pass');
   });
 });
