@@ -32,6 +32,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_BOARD = '99999999-9999-4999-8999-999999999999';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
+const OTHER_USER = '88888888-8888-4888-8888-888888888888';
 const THREAD_ID = '33333333-3333-4333-8333-333333333333';
 
 type RouteModule = typeof import('../../../app/api/boards/[id]/ai/chat/route');
@@ -45,6 +46,8 @@ let route: RouteModule;
 let AIProviderError: typeof import('./providers/errors').AIProviderError;
 
 const ok = <T>(value: T) => ({ ok: true as const, value });
+const notFound = () => ({ ok: false as const, error: { code: 'not_found', message: 'nope' } });
+const unavailable = () => ({ ok: false as const, error: { code: 'unavailable', message: 'down' } });
 const fail = (code: string) => ({ ok: false as const, error: { code, message: code } });
 
 const thread = { id: THREAD_ID, boardId: BOARD_ID, userId: USER_ID, title: null, createdAt: 'c', updatedAt: 'u' };
@@ -69,6 +72,7 @@ function repository(overrides: Record<string, unknown> = {}) {
       const typed = input as { role: string; content: string; provider?: string; model?: string };
       return ok({ ...assistantRow, role: typed.role, content: typed.content, provider: typed.provider ?? null, model: typed.model ?? null });
     }),
+    deleteThread: vi.fn(async () => ok(undefined)),
     ...overrides,
   };
   mocks.createBoardAiThreadRepository.mockReturnValue(repo);
@@ -85,6 +89,11 @@ const post = (body: unknown, boardId = BOARD_ID) => route.POST(
   new Request('http://localhost/api/boards/' + boardId + '/ai/chat', {
     method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' },
   }),
+  { params: Promise.resolve({ id: boardId }) },
+);
+
+const del = (query = `?threadId=${THREAD_ID}`, boardId = BOARD_ID) => route.DELETE(
+  new Request(`http://localhost/api/boards/${boardId}/ai/chat${query}`, { method: 'DELETE' }),
   { params: Promise.resolve({ id: boardId }) },
 );
 
@@ -162,6 +171,78 @@ describe('5-8. thread scoping', () => {
     const body = await other.json();
     expect(JSON.stringify(body)).not.toMatch(/other user|another board|exists/i);
     expect(mocks.executeBoardAiChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE thread cleanup', () => {
+  it('requires authentication', async () => {
+    session(null);
+    expect((await del()).status).toBe(401);
+  });
+
+  it('rejects a missing or malformed thread UUID before the repository', async () => {
+    const repo = repository();
+    for (const query of ['', '?threadId=not-a-uuid']) {
+      expect((await del(query)).status, query || '(no threadId)').toBe(400);
+    }
+    expect(repo.deleteThread).not.toHaveBeenCalled();
+  });
+
+  it('requires current board readability', async () => {
+    mocks.canReadBoardKnowledge.mockResolvedValue(false);
+    const repo = repository();
+    expect((await del()).status).toBe(403);
+    expect(repo.deleteThread).not.toHaveBeenCalled();
+  });
+
+  it('deletes through the exact authenticated user, board and thread scope', async () => {
+    const repo = repository();
+    const response = await del();
+    expect(response.status).toBe(204);
+    expect(repo.deleteThread).toHaveBeenCalledWith(USER_ID, BOARD_ID, THREAD_ID);
+  });
+
+  it('accepts no override: identity comes only from session, path board and threadId', async () => {
+    const repo = repository();
+    // Every field the contract refuses, offered at once. The deletion must
+    // still be scoped exactly to the session user, the PATH board and the
+    // validated thread id -- none of these may shift it.
+    const response = await del(
+      `?threadId=${THREAD_ID}&userId=${OTHER_USER}&boardId=${OTHER_BOARD}&provider=openai&model=gpt-4&apiKey=sk-x`,
+    );
+    expect(response.status).toBe(204);
+    expect(repo.deleteThread).toHaveBeenCalledTimes(1);
+    expect(repo.deleteThread).toHaveBeenCalledWith(USER_ID, BOARD_ID, THREAD_ID);
+  });
+
+  it.each([BOARD_ID, OTHER_BOARD])('maps a missing, foreign or wrong-board thread on %s to an indistinguishable 404', async (boardId) => {
+    repository({ deleteThread: vi.fn(async () => notFound()) });
+    const response = await del(`?threadId=${THREAD_ID}`, boardId);
+    expect(response.status).toBe(404);
+    expect(JSON.stringify(await response.json())).not.toMatch(/foreign|another|user|board/i);
+  });
+
+  it('maps repository failure to 503', async () => {
+    repository({ deleteThread: vi.fn(async () => unavailable()) });
+    expect((await del()).status).toBe(503);
+  });
+
+  it('has no service-role path or body override surface', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/boards/[id]/ai/chat/route.ts'), 'utf8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(source).not.toContain('getSupabaseAdmin');
+    expect(source).not.toContain('service_role');
+    const deleteStart = source.indexOf('export async function DELETE');
+    const deleteEnd = source.indexOf('export async function GET', deleteStart);
+    const deleteSource = source.slice(deleteStart, deleteEnd);
+    expect(deleteSource).not.toContain('request.json');
+    expect(deleteSource).not.toContain('userId');
+    expect(deleteSource).not.toContain('provider');
+    expect(deleteSource).not.toContain('model');
+    expect(deleteSource).not.toContain('apiKey');
   });
 });
 

@@ -33,6 +33,10 @@ interface MessageSeed {
   created_at: string;
 }
 
+interface FakeSupabaseError {
+  message?: string;
+}
+
 /**
  * A structural stand-in for the authenticated client.
  *
@@ -41,7 +45,7 @@ interface MessageSeed {
  * boundary and is asserted separately over the migration SQL -- a fake cannot
  * prove a policy, and pretending otherwise would be the more dangerous test.
  */
-function fakeClient(seed: { threads?: ThreadSeed[]; messages?: MessageSeed[] } = {}) {
+function fakeClient(seed: { threads?: ThreadSeed[]; messages?: MessageSeed[]; threadDeleteError?: FakeSupabaseError | null } = {}) {
   const threads = seed.threads ?? [];
   const messages = seed.messages ?? [];
   const calls: { table: string; filters: Record<string, unknown>; op: string }[] = [];
@@ -96,6 +100,24 @@ function fakeClient(seed: { threads?: ThreadSeed[]; messages?: MessageSeed[] } =
                 calls.push({ table, filters: { ...filters, ...payload }, op: 'update' });
                 return Promise.resolve({ error: null }).then(resolve);
               },
+            };
+            return query;
+          },
+          delete: () => {
+            const filters: Record<string, unknown> = {};
+            const query: Record<string, unknown> = {
+              eq(column: string, value: unknown) { filters[column] = value; return query; },
+              select: () => ({
+                maybeSingle: async () => {
+                  calls.push({ table, filters: { ...filters }, op: 'delete' });
+                  if (seed.threadDeleteError) return { data: null, error: seed.threadDeleteError };
+                  const index = threads.findIndex((row) => Object.entries(filters)
+                    .every(([column, value]) => (row as unknown as Record<string, unknown>)[column] === value));
+                  if (index < 0) return { data: null, error: null };
+                  const [deleted] = threads.splice(index, 1);
+                  return { data: { id: deleted.id }, error: null };
+                },
+              }),
             };
             return query;
           },
@@ -308,5 +330,45 @@ describe('the repository exposes no way to re-associate a conversation', () => {
     }
     // Messages are inserted and read, never updated.
     expect(source).not.toMatch(/from\('board_ai_messages'\)\s*\.update/);
+  });
+});
+
+describe('H. thread deletion is scoped by user, board and thread', () => {
+  it('deletes an owned exact thread with all three filters', async () => {
+    const { client, calls, threads } = fakeClient({ threads: [ownedThread] });
+    const result = await createBoardAiThreadRepository(client).deleteThread(USER_A, BOARD_1, THREAD_A);
+
+    expect(result.ok).toBe(true);
+    expect(threads).toHaveLength(0);
+    expect(calls.find((call) => call.op === 'delete')?.filters)
+      .toEqual({ id: THREAD_A, user_id: USER_A, board_id: BOARD_1 });
+  });
+
+  it.each([
+    ['wrong user', USER_B, BOARD_1],
+    ['wrong board', USER_A, BOARD_2],
+  ])('%s is hidden as not_found', async (_label, userId, boardId) => {
+    const { client, threads } = fakeClient({ threads: [ownedThread] });
+    const result = await createBoardAiThreadRepository(client).deleteThread(userId, boardId, THREAD_A);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('not_found');
+    expect(threads).toHaveLength(1);
+  });
+
+  it('missing exact thread is hidden as not_found', async () => {
+    const { client } = fakeClient();
+    const result = await createBoardAiThreadRepository(client).deleteThread(USER_A, BOARD_1, THREAD_A);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('not_found');
+  });
+
+  it('normalizes database failure as unavailable', async () => {
+    const { client } = fakeClient({ threadDeleteError: { message: 'database down' } });
+    const result = await createBoardAiThreadRepository(client).deleteThread(USER_A, BOARD_1, THREAD_A);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unavailable');
   });
 });

@@ -62,10 +62,16 @@ interface UpdateQuery {
   eq(column: string, value: unknown): UpdateQuery & PromiseLike<{ error: SupabaseErrorLike | null }>;
 }
 
+interface DeleteQuery {
+  eq(column: string, value: unknown): DeleteQuery;
+  select(columns: string): { maybeSingle(): Promise<{ data: { id: string } | null; error: SupabaseErrorLike | null }> };
+}
+
 interface ThreadsTable {
   select(columns: string): SelectQuery<ThreadRow>;
   insert(row: Record<string, unknown>): InsertQuery<ThreadRow>;
   update(payload: Record<string, unknown>): UpdateQuery;
+  delete(): DeleteQuery;
 }
 
 interface MessagesTable {
@@ -176,6 +182,29 @@ export class SupabaseBoardAiThreadRepository {
     }
 
     return ok(data ? toThread(data) : null);
+  }
+
+  /** Deletes only this user's thread on this board; null is indistinguishable from foreign. */
+  async deleteThread(
+    userId: UserId,
+    boardId: BoardId,
+    threadId: string,
+  ): Promise<Result<void, DomainError>> {
+    const { data, error } = await this.client
+      .from('board_ai_threads')
+      .delete()
+      .eq('id', threadId)
+      .eq('user_id', userId)
+      .eq('board_id', boardId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not delete the board chat thread', { cause: error }));
+    }
+    if (!data) return err(domainError('not_found', 'Board chat thread not found'));
+
+    return ok(undefined);
   }
 
   async listMessages(

@@ -350,6 +350,51 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 }
 
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const cookieStore = await cookies();
+    const sessionClient = createChatRouteClient(cookieStore);
+    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+    if (authError || !user) return new NextResponse(null, { status: 401 });
+
+    const requestedThreadId = new URL(request.url).searchParams.get('threadId');
+    if (requestedThreadId === null || !threadIdSchema.safeParse(requestedThreadId).success) {
+      return NextResponse.json({ error: 'Invalid thread id.' }, { status: 400 });
+    }
+
+    const { id: boardId } = await context.params;
+    let allowed: boolean;
+    try {
+      allowed = await canReadBoardKnowledge(
+        sessionClient as unknown as KnowledgeBoardReadAuthorizationClient,
+        boardId,
+        user.id,
+      );
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    const repository = createBoardAiThreadRepository(
+      sessionClient as unknown as BoardAiChatSupabaseClient,
+    );
+    const result = await repository.deleteThread(
+      asUserId(user.id),
+      asBoardId(boardId),
+      requestedThreadId,
+    );
+    if (!result.ok) {
+      return result.error.code === 'not_found'
+        ? NextResponse.json({ error: 'Chat thread not found' }, { status: 404 })
+        : NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+
+    return new NextResponse(null, { status: 204 });
+  } catch {
+    return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+  }
+}
+
 /**
  * Reading a private conversation back.
  *
