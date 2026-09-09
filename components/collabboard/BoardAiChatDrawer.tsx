@@ -70,6 +70,10 @@ export interface BoardAiChatDrawerProps {
    */
   readonly draftContext?: readonly BoardAiDraftContextItem[];
   readonly onDraftContextChange?: (items: readonly BoardAiDraftContextItem[]) => void;
+  readonly documentSessions?: Record<string, BoardAiDocumentScopedSession>;
+  readonly onDocumentSessionsChange?: React.Dispatch<
+    React.SetStateAction<Record<string, BoardAiDocumentScopedSession>>
+  >;
   /**
    * The one supported board object currently selected, already reduced to a
    * draft by the shell's own selection authority. Null when the selection is
@@ -84,8 +88,8 @@ type ActiveThread = string | null;
 /** A stable empty default, so an absent prop is not a new array each render. */
 const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
 
-interface DocumentScopedSession {
-  readonly activeThreadId: ActiveThread;
+export interface BoardAiDocumentScopedSession {
+  readonly activeThreadId: string | null;
   readonly messages: readonly BoardAiChatMessageView[];
   readonly draft: string;
   readonly loadingMessages: boolean;
@@ -93,7 +97,7 @@ interface DocumentScopedSession {
   readonly error: string | null;
 }
 
-const EMPTY_DOCUMENT_SESSION: DocumentScopedSession = {
+const EMPTY_DOCUMENT_SESSION: BoardAiDocumentScopedSession = {
   activeThreadId: null,
   messages: [],
   draft: '',
@@ -127,6 +131,8 @@ export default function BoardAiChatDrawer({
   blockingEditorOpen = false,
   draftContext = EMPTY_DRAFT_CONTEXT,
   onDraftContextChange,
+  documentSessions: controlledDocumentSessions,
+  onDocumentSessionsChange,
   selectedBoardItem = null,
 }: BoardAiChatDrawerProps) {
   const [threads, setThreads] = useState<readonly BoardAiChatThreadSummary[]>([]);
@@ -137,7 +143,8 @@ export default function BoardAiChatDrawer({
   const [boardLoadingMessages, setBoardLoadingMessages] = useState(false);
   const [boardSending, setBoardSending] = useState(false);
   const [boardError, setBoardError] = useState<string | null>(null);
-  const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentScopedSession>>({});
+  const [internalDocumentSessions, setInternalDocumentSessions] =
+    useState<Record<string, BoardAiDocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -146,6 +153,8 @@ export default function BoardAiChatDrawer({
   const yieldsToEditor = blockingEditorOpen;
   const isEmbedded = presentation === 'embedded';
   const documentScopeId = documentScope?.knowledgeDocumentId ?? null;
+  const documentSessions = controlledDocumentSessions ?? internalDocumentSessions;
+  const setDocumentSessions = onDocumentSessionsChange ?? setInternalDocumentSessions;
   const documentSession = documentScopeId
     ? documentSessions[documentScopeId] ?? EMPTY_DOCUMENT_SESSION
     : EMPTY_DOCUMENT_SESSION;
@@ -163,13 +172,13 @@ export default function BoardAiChatDrawer({
 
   const setDocumentSessionValue = useCallback((
     documentId: string,
-    updater: (session: DocumentScopedSession) => DocumentScopedSession,
+    updater: (session: BoardAiDocumentScopedSession) => BoardAiDocumentScopedSession,
   ) => {
     setDocumentSessions((current) => ({
       ...current,
       [documentId]: updater(current[documentId] ?? EMPTY_DOCUMENT_SESSION),
     }));
-  }, []);
+  }, [setDocumentSessions]);
 
   const setActiveThreadId = useCallback((action: React.SetStateAction<ActiveThread>) => {
     if (documentScopeId) {

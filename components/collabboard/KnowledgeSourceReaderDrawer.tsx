@@ -15,7 +15,9 @@ import {
 import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
-import BoardAiChatDrawer from '@/components/collabboard/BoardAiChatDrawer';
+import BoardAiChatDrawer, {
+  type BoardAiDocumentScopedSession,
+} from '@/components/collabboard/BoardAiChatDrawer';
 import PdfWorkspaceLibraryPanel from '@/components/collabboard/PdfWorkspaceLibraryPanel';
 import PdfWorkspaceChrome, {
   type PdfWorkspaceRightPanel,
@@ -231,6 +233,8 @@ export default function KnowledgeSourceReaderDrawer({
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [reader, setReader] = useState<KnowledgeReaderState | null>(null);
+  const [workspaceBoardAiSessionsByDocumentId, setWorkspaceBoardAiSessionsByDocumentId] =
+    useState<Record<string, BoardAiDocumentScopedSession>>({});
   /** The same shared page memory the canvas card reads. */
   const pageCache = useKnowledgePageCache();
   // Each request is acted on at most once, and the latch has the same lifetime
@@ -609,6 +613,8 @@ export default function KnowledgeSourceReaderDrawer({
         }}
         draftContext={workspaceBoardAiDraftContext}
         onDraftContextChange={onWorkspaceBoardAiDraftContextChange}
+        documentSessions={workspaceBoardAiSessionsByDocumentId}
+        onDocumentSessionsChange={setWorkspaceBoardAiSessionsByDocumentId}
         selectedBoardItem={null}
       />
     ) : null;

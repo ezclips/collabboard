@@ -13,7 +13,9 @@ vi.mock('@/components/collabboard/BoardAiChatModelChooser', () => ({
   default: () => <div data-board-ai-chat-chooser="stub" />,
 }));
 
-import BoardAiChatDrawer from './BoardAiChatDrawer';
+import BoardAiChatDrawer, {
+  type BoardAiDocumentScopedSession,
+} from './BoardAiChatDrawer';
 import type { BoardAiDraftContextItem } from '@/lib/domain/ai/boardAiChatDraftContext';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -25,6 +27,7 @@ const read = (p: string) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const executable = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 const DRAWER = read('components/collabboard/BoardAiChatDrawer.tsx');
+const READER = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
 
 let root: Root | null = null;
 let host: HTMLElement;
@@ -403,6 +406,43 @@ describe('PDF workspace document-scoped mode', () => {
     detail: 'Note',
   };
 
+  function stubPdfScopedChat() {
+    const messages: Record<string, unknown[]> = {};
+    let sent = 0;
+    posted = [];
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as {
+          threadId?: string;
+          message: string;
+          context?: { items?: { knowledgeDocumentId?: string }[] };
+        };
+        posted.push(body as Record<string, unknown>);
+        const scopedDocumentId = body.context?.items?.[0]?.knowledgeDocumentId;
+        const threadId = body.threadId ?? (scopedDocumentId === DOC_B ? THREAD_B : THREAD_A);
+        messages[threadId] = [
+          ...(messages[threadId] ?? []),
+          { id: `u${++sent}`, role: 'user', content: body.message, provider: null, model: null, createdAt: 'n' },
+        ];
+        const reply = {
+          id: `a${sent}`,
+          role: 'assistant',
+          content: `answer for ${threadId === THREAD_B ? 'B' : 'A'}`,
+          provider: 'deepseek',
+          model: 'deepseek-chat',
+          createdAt: 'n',
+        };
+        messages[threadId] = [...messages[threadId], reply];
+        return json({ threadId, message: reply });
+      }
+      const match = url.match(/threadId=([^&]+)/);
+      if (match) return json({ thread: summary(match[1], 'x'), messages: messages[match[1]] ?? [] });
+      return json({ threads: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  }
+
   async function mountPdfScope(documentId = DOC_A, filename = 'Alpha.pdf') {
     const state: { items: readonly BoardAiDraftContextItem[] } = { items: [] };
 
@@ -448,6 +488,66 @@ describe('PDF workspace document-scoped mode', () => {
     };
   }
 
+  async function mountControlledPdfWorkspace(documentId = DOC_A, filename = 'Alpha.pdf') {
+    const state: {
+      sessions: Record<string, BoardAiDocumentScopedSession>;
+      rightPanel: 'closed' | 'ai';
+    } = { sessions: {}, rightPanel: 'ai' };
+
+    function Harness({
+      activeDocumentId,
+      activeFilename,
+      rightPanel,
+    }: {
+      activeDocumentId: string;
+      activeFilename: string;
+      rightPanel: 'closed' | 'ai';
+    }) {
+      const [items, setItems] = React.useState<readonly BoardAiDraftContextItem[]>([]);
+      const [sessions, setSessions] = React.useState<Record<string, BoardAiDocumentScopedSession>>({});
+      state.sessions = sessions;
+      state.rightPanel = rightPanel;
+      return rightPanel === 'ai' ? (
+        <BoardAiChatDrawer
+          boardId={BOARD_ID}
+          isOpen
+          onClose={vi.fn()}
+          presentation="embedded"
+          documentScope={{ knowledgeDocumentId: activeDocumentId, originalFilename: activeFilename }}
+          draftContext={items}
+          onDraftContextChange={setItems}
+          documentSessions={sessions}
+          onDocumentSessionsChange={setSessions}
+          selectedBoardItem={NOTE_DRAFT}
+        />
+      ) : <div data-pdf-workspace-panel-closed="true" />;
+    }
+
+    const render = async (
+      activeDocumentId: string,
+      activeFilename: string,
+      rightPanel: 'closed' | 'ai',
+    ) => {
+      await act(async () => {
+        root!.render(
+          <Harness
+            activeDocumentId={activeDocumentId}
+            activeFilename={activeFilename}
+            rightPanel={rightPanel}
+          />,
+        );
+      });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    };
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await render(documentId, filename, 'ai');
+    return { state, render };
+  }
+
   it('sends the active PDF identity on every turn without client-side PDF text', async () => {
     await mountPdfScope(DOC_A, 'Alpha.pdf');
     expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'GET')).toHaveLength(0);
@@ -485,7 +585,46 @@ describe('PDF workspace document-scoped mode', () => {
     expect(q('[data-board-ai-context-mandatory="knowledge-document"]')).not.toBeNull();
   });
 
+  it('captures the returned thread id into the active PDF session', async () => {
+    const { state } = await mountControlledPdfWorkspace(DOC_A, 'Alpha.pdf');
+    await type('question for A');
+    await click('[data-board-ai-chat-action="send"]');
+
+    expect(state.sessions[DOC_A]?.activeThreadId).toBe(THREAD_A);
+    expect(state.sessions[DOC_A]?.messages.map((message) => message.content)).toContain('question for A');
+  });
+
+  it('closing and reopening the PDF AI dock restores the same thread through GET', async () => {
+    stubPdfScopedChat();
+    const { state, render } = await mountControlledPdfWorkspace(DOC_A, 'Alpha.pdf');
+    await type('question for A');
+    await click('[data-board-ai-chat-action="send"]');
+    const readsBeforeClose = fetchMock.mock.calls.length;
+
+    await render(DOC_A, 'Alpha.pdf', 'closed');
+    expect(q('[data-board-ai-chat="true"]')).toBeNull();
+    expect(state.sessions[DOC_A]?.activeThreadId).toBe(THREAD_A);
+
+    await render(DOC_A, 'Alpha.pdf', 'ai');
+    expect(host.textContent).toContain('question for A');
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(readsBeforeClose);
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain(`threadId=${THREAD_A}`);
+  });
+
+  it('closing the PDF AI dock is not New chat', async () => {
+    const { state, render } = await mountControlledPdfWorkspace(DOC_A, 'Alpha.pdf');
+    await type('question for A');
+    await click('[data-board-ai-chat-action="send"]');
+
+    await render(DOC_A, 'Alpha.pdf', 'closed');
+
+    expect(state.sessions[DOC_A]?.activeThreadId).toBe(THREAD_A);
+    expect(state.sessions[DOC_A]?.messages).toHaveLength(2);
+    expect(state.sessions[DOC_A]?.messages.map((message) => message.content)).toContain('question for A');
+  });
+
   it('switches visible session immediately and restores each PDF independently', async () => {
+    stubPdfScopedChat();
     const { rerender } = await mountPdfScope(DOC_A, 'Alpha.pdf');
     await type('question for A');
     await click('[data-board-ai-chat-action="send"]');
@@ -502,13 +641,16 @@ describe('PDF workspace document-scoped mode', () => {
     expect(posted.at(-1)).toMatchObject({
       context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_B }] },
     });
+    expect(posted.at(-1)).not.toMatchObject({ threadId: THREAD_A });
 
     await rerender(DOC_A, 'Alpha.pdf');
     expect(host.textContent).toContain('question for A');
+    expect(host.textContent).not.toContain('question for B');
     expect((q('[data-board-ai-chat-input="true"]') as HTMLTextAreaElement).value).toBe('draft for A');
   });
 
   it('New chat resets only the active PDF session and keeps the mandatory scope', async () => {
+    stubPdfScopedChat();
     const { rerender } = await mountPdfScope(DOC_A, 'Alpha.pdf');
     await type('question for A');
     await click('[data-board-ai-chat-action="send"]');
@@ -522,6 +664,12 @@ describe('PDF workspace document-scoped mode', () => {
 
     await rerender(DOC_A, 'Alpha.pdf');
     expect(host.textContent).toContain('question for A');
+
+    await rerender(DOC_B, 'Beta.pdf');
+    await type('new question for B');
+    await click('[data-board-ai-chat-action="send"]');
+    expect(posted.at(-1)).toMatchObject({ message: 'new question for B' });
+    expect(posted.at(-1)).not.toMatchObject({ threadId: THREAD_A });
   });
 
   it('late responses from a previous PDF do not repaint the active PDF', async () => {
@@ -549,5 +697,11 @@ describe('PDF workspace document-scoped mode', () => {
 
     expect(host.textContent).toContain('Beta.pdf');
     expect(host.textContent).not.toContain('late A answer');
+  });
+
+  it('the workspace host owns document-scoped Board AI sessions across right-panel unmounts', () => {
+    expect(READER).toContain('const [workspaceBoardAiSessionsByDocumentId, setWorkspaceBoardAiSessionsByDocumentId]');
+    expect(READER).toContain('documentSessions={workspaceBoardAiSessionsByDocumentId}');
+    expect(READER).toContain('onDocumentSessionsChange={setWorkspaceBoardAiSessionsByDocumentId}');
   });
 });
