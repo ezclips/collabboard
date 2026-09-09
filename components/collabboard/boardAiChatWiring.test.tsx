@@ -270,6 +270,21 @@ describe('10-15. one right-side dock, two directions', () => {
     expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(4);
   });
 
+  it('the floating board shortcut stands down while a PDF reader is open', () => {
+    // PDF_READER_UI_FINAL_CLEANUP_1: while a PDF is being read, that reader's
+    // own purple AI dock is the single AI entry point in front of the user --
+    // the board's z-[1300] shortcut would otherwise float over the docked
+    // reader's chrome as a second one.
+    expect(CLIENT).toContain(
+      '{enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (');
+    // The reader reports its own open state; the board cannot derive it.
+    expect(CLIENT).toContain('onOpenChange={setIsKnowledgeReaderOpen}');
+    expect(READER).toContain('onOpenChange?.(isOpen);');
+    // Board AI itself is untouched -- only the shortcut yields.
+    expect(CLIENT).toContain('<BoardAiChatDrawer');
+    expect(CLIENT).toContain('const toggleBoardAiChat');
+  });
+
   it('14-15. the workspace is untouched and the reader is never unmounted', () => {
     // Nothing conditions the mount, and no unmount path was introduced.
     expect(CLIENT).not.toContain('isBoardAiChatOpen && <KnowledgeSourceReaderDrawer');

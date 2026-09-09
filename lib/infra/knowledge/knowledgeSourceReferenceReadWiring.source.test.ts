@@ -464,14 +464,27 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     }
   });
 
-  it('G2: a source click only requests navigation', () => {
+  it('G2: a source click requests navigation, then hands the screen back', () => {
     const control = after(noteEditor, 'data-knowledge-source-control="true"', 700);
 
-    expect(control).toContain('onOpenSourceReference?.(reference)');
-    // Never a save, a content change, or a close.
-    for (const forbidden of ['onSave', 'setTitle', 'setContent', 'onClose', 'handleSaveAndClose']) {
-      expect(control).not.toContain(forbidden);
+    expect(control).toContain('onOpenSourceReference(reference)');
+    // PDF_READER_UI_FINAL_CLEANUP_1: it also dismisses the editor, through the
+    // editor's OWN canonical dismissal -- the same save-and-close a backdrop
+    // click performs, so nothing typed is lost. Without it the click was a
+    // no-op in practice: this modal covers the reader it navigates to.
+    expect(control).toContain('handleSaveAndClose()');
+    expect(control.indexOf('onOpenSourceReference(reference)'))
+      .toBeLessThan(control.indexOf('handleSaveAndClose()'));
+    // It still edits nothing and writes no provenance of its own.
+    for (const forbidden of ['setTitle', 'setContent', 'sourceDocumentId', 'pageStart']) {
+      expect(control, forbidden).not.toContain(forbidden);
     }
+  });
+
+  it('G2b: with no navigation authority the row is a label, not a dead button', () => {
+    const rows = after(noteEditor, '{sourceReferences.length > 0 && (', 1600);
+    expect(rows).toContain('if (!onOpenSourceReference) {');
+    expect(rows).toContain('data-knowledge-source-label="true"');
   });
 
   it('G3: multiple references render one control each, keyed by reference id', () => {
@@ -487,7 +500,31 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
     const request = after(canvasClient, 'const requestKnowledgeSourceOpen = useCallback(', 520);
 
     expect(request).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference)');
+    // The card marker's route, unchanged.
     expect(canvasClient).toContain('onOpenSourceReference={requestKnowledgeSourceOpen}');
+  });
+
+  it('H2: the editor route adds host bookkeeping, and takes identity from the reference', () => {
+    const start = canvasClient.indexOf('const openSourceReferenceFromEditor = useCallback(');
+    expect(start, 'the editor route must exist').toBeGreaterThan(-1);
+    const handler = canvasClient.slice(start, canvasClient.indexOf('const requestKnowledgeDocumentOpen', start));
+
+    // The same request the card builds -- reached through the same authority.
+    expect(handler).toContain('requestKnowledgeSourceOpen(reference)');
+    // In the focused workspace the CITED document becomes the active tab, so a
+    // citation into another PDF lands on that PDF rather than the open one.
+    expect(handler).toContain("knowledgeReaderPresentation === 'workspace'");
+    expect(handler).toContain('registerPdfWorkspaceDocument({ documentId: reference.sourceDocumentId })');
+    expect(handler).toContain('rememberPdfWorkspacePage(reference.sourceDocumentId, reference.pageStart)');
+    // Identity is the reference's own: never a filename, never the reader's
+    // current document, and nothing about the reference is rewritten.
+    for (const forbidden of ['originalFilename', 'activePdfId', 'reader.documentId', 'setKnowledgeSourceOpenRequest(']) {
+      expect(handler, forbidden).not.toContain(forbidden);
+    }
+    // Registration is not a second navigation request: it opens no document.
+    const register = after(canvasClient, 'const registerPdfWorkspaceDocument = useCallback(', 900);
+    expect(register).not.toContain('buildKnowledgeDocumentOpenRequest');
+    expect(canvasClient).toContain('onOpenSourceReference={openSourceReferenceFromEditor}');
   });
 
   it('I: every click mints a new request id so the same source can reopen', () => {

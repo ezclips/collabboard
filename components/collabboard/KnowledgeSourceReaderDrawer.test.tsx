@@ -1063,6 +1063,27 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(openPanel()).toBe('library');
   });
 
+  it('the focused workspace docks the same two panels, and no legacy AI shortcut', async () => {
+    withPages();
+    await mount({
+      documentOpenRequest: docRequest(1),
+      presentation: 'workspace',
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+    } as never);
+
+    const workspace = document.querySelector('[data-pdf-workspace="true"]') as HTMLElement;
+    expect(workspace).not.toBeNull();
+    expect(workspace.querySelector('[data-pdf-workspace-dock="library"]')).not.toBeNull();
+    expect(workspace.querySelector('[data-pdf-workspace-dock="ai"]')).not.toBeNull();
+    // Exactly one AI entry point in PDF chrome: the purple dock button.
+    expect(workspace.querySelector('[data-knowledge-reader-add-document-to-chat]')).toBeNull();
+    expect(workspace.querySelector('[data-board-ai-chat-open]')).toBeNull();
+    expect(workspace.textContent).not.toContain('Add to Board AI');
+  });
+
   it('routes a page handoff into the document-scoped AI panel, sending nothing', async () => {
     const onBoardAiDraftContextChange = vi.fn();
     await openDocked({ onBoardAiDraftContextChange });

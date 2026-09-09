@@ -88,6 +88,16 @@ export interface KnowledgeSourceReaderDrawerProps {
   presentation?: 'workspace' | 'side-panel';
   canDragSourceNote?: (targetPadletId: string) => boolean;
   /**
+   * Reports whether a document is open in this reader, in either host.
+   *
+   * The board cannot derive it -- the reader owns its own open state and can
+   * be closed from inside -- and one board rule needs it: while a PDF is being
+   * read, the PDF's own AI dock is the single AI entry point, so the board's
+   * floating Board AI shortcut stands down instead of floating over the
+   * reader's chrome as a second one.
+   */
+  onOpenChange?: (open: boolean) => void;
+  /**
    * The board's OWN blocking-editor authority (`isBlockingEditorModalOpen`),
    * forwarded unchanged. It is already the single generic answer to "does a
    * modal own the screen right now" for all fourteen editors, and the canvas
@@ -202,6 +212,7 @@ export default function KnowledgeSourceReaderDrawer({
   documentOpenRequest = null,
   presentation = 'side-panel',
   canDragSourceNote,
+  onOpenChange,
   blockingEditorOpen = false,
   onCreateNoteFromPage,
   closeSidePanelRequestId,
@@ -475,6 +486,10 @@ export default function KnowledgeSourceReaderDrawer({
   useEffect(() => {
     setSidePanelRightPanel('library');
   }, [reader?.documentId]);
+
+  useEffect(() => {
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
 
   useEffect(() => {
     if (!isWorkspace || reader === null || reader.loading || reader.error) return;

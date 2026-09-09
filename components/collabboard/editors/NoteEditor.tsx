@@ -913,31 +913,55 @@ export default function NoteEditor({
                   </div>
                 )}
 
-                {/* P6J-F6-B2 -- clickable provenance. Navigation only: it never
-                    saves, edits, or closes the editor. Rows are keyed by
+                {/* P6J-F6-B2 -- clickable provenance. Rows are keyed by
                     reference id, so two citations of one document stay
-                    distinct. */}
+                    distinct.
+
+                    Navigation DISMISSES this editor, through the editor's own
+                    canonical dismissal -- the same save-and-close a backdrop
+                    click already performs, so nothing typed is lost. Without
+                    it the click was a no-op in practice: this modal owns the
+                    screen, and the reader it navigates to is either yielded
+                    (focused workspace) or below the editor tier (docked
+                    panel), so the source it opened could never be seen.
+
+                    With no navigation authority the row is not a button at
+                    all: a control that cannot act is worse than a label. */}
                 {sourceReferences.length > 0 && (
                   <div className="border-t border-gray-100 px-3 pt-1.5 pb-2">
                     <div className="flex flex-col gap-0.5">
-                      {sourceReferences.map((reference, index) => (
-                        <button
-                          key={reference.id}
-                          type="button"
-                          data-knowledge-source-control="true"
-                          className="flex items-center gap-1 rounded px-0.5 py-0.5 text-left text-[11px] leading-none text-blue-700 hover:bg-blue-50 hover:text-blue-900"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            onOpenSourceReference?.(reference);
-                          }}
-                        >
-                          <BookOpen className="h-3 w-3 shrink-0" aria-hidden="true" />
-                          <span className="truncate">
-                            {knowledgeSourceEditorLabel(reference, index, sourceReferences.length)}
-                          </span>
-                        </button>
-                      ))}
+                      {sourceReferences.map((reference, index) => {
+                        const label = knowledgeSourceEditorLabel(reference, index, sourceReferences.length);
+                        if (!onOpenSourceReference) {
+                          return (
+                            <div
+                              key={reference.id}
+                              data-knowledge-source-label="true"
+                              className="flex items-center gap-1 px-0.5 py-0.5 text-left text-[11px] leading-none text-gray-400"
+                            >
+                              <BookOpen className="h-3 w-3 shrink-0" aria-hidden="true" />
+                              <span className="truncate">{label}</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            key={reference.id}
+                            type="button"
+                            data-knowledge-source-control="true"
+                            className="flex items-center gap-1 rounded px-0.5 py-0.5 text-left text-[11px] leading-none text-blue-700 hover:bg-blue-50 hover:text-blue-900"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onOpenSourceReference(reference);
+                              handleSaveAndClose();
+                            }}
+                          >
+                            <BookOpen className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

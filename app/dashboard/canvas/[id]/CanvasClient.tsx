@@ -1821,6 +1821,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const [knowledgeReaderPresentation, setKnowledgeReaderPresentation] =
     useState<'workspace' | 'side-panel'>('side-panel');
+  /**
+   * Whether a PDF reader is on screen, reported by the reader itself.
+   *
+   * The board cannot derive this: the reader owns its own open state and can
+   * be closed from inside. It is read for one rule only -- while a PDF is
+   * being read, the PDF's own AI dock is the single AI entry point, so the
+   * board's floating Board AI shortcut stands down rather than floating over
+   * the reader's chrome as a second one.
+   */
+  const [isKnowledgeReaderOpen, setIsKnowledgeReaderOpen] = useState(false);
   const [openPdfIds, setOpenPdfIds] = useState<string[]>([]);
   const [pdfWorkspaceTabs, setPdfWorkspaceTabs] = useState<PdfWorkspaceTab[]>([]);
   const [activePdfId, setActivePdfId] = useState<string | null>(null);
@@ -1949,12 +1959,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
   }, [sourceReferenceScopeKey]);
 
-  const openPdfWorkspaceDocument = useCallback((request: {
+  /**
+   * Makes one document the workspace's active tab, opening a tab for it if it
+   * has none. Registration only -- it issues no navigation request, so a
+   * caller that carries its own (an exact citation, say) is not overridden by
+   * a second, weaker one for the same document.
+   */
+  const registerPdfWorkspaceDocument = useCallback((request: {
     documentId: string;
     originalFilename?: string;
-    pageNumber?: number;
   }) => {
-    if (!sourceReferenceScopeKey) return;
     setKnowledgeReaderPresentation('workspace');
     setIsBoardAiChatOpen(false);
     setOpenPdfIds((current) => (
@@ -1980,6 +1994,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       ];
     });
     setActivePdfId(request.documentId);
+  }, []);
+
+  const openPdfWorkspaceDocument = useCallback((request: {
+    documentId: string;
+    originalFilename?: string;
+    pageNumber?: number;
+  }) => {
+    if (!sourceReferenceScopeKey) return;
+    registerPdfWorkspaceDocument(request);
     const restoredPage = request.pageNumber ?? pdfWorkspacePageById[request.documentId];
     knowledgeDocumentRequestIdRef.current += 1;
     setKnowledgeDocumentOpenRequest(
@@ -1989,7 +2012,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         restoredPage,
       ),
     );
-  }, [sourceReferenceScopeKey, pdfWorkspacePageById]);
+  }, [sourceReferenceScopeKey, pdfWorkspacePageById, registerPdfWorkspaceDocument]);
 
   const activatePdfWorkspaceTab = useCallback((documentId: string) => {
     const tab = pdfWorkspaceTabs.find((candidate) => candidate.documentId === documentId);
@@ -2079,6 +2102,33 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * picking the same document twice is two genuine intents rather than one
    * already-handled one.
    */
+  /**
+   * The exact-citation link inside the Note editor.
+   *
+   * It is the SAME request the card's source marker builds -- identity is the
+   * reference's own document id and page range, never the filename and never
+   * whatever the reader happens to be showing. What the editor path adds is
+   * the host bookkeeping a covered reader needs: in the focused workspace the
+   * cited document becomes the active tab (opening one if it has none), so a
+   * citation into another PDF lands on that PDF rather than on the tab that
+   * was already open. The editor dismisses itself, which is what makes the
+   * result visible; nothing here closes or reloads the reader.
+   */
+  const openSourceReferenceFromEditor = useCallback((reference: SourceReference) => {
+    if (!sourceReferenceScopeKey) return;
+    if (knowledgeReaderPresentation === 'workspace') {
+      registerPdfWorkspaceDocument({ documentId: reference.sourceDocumentId });
+      rememberPdfWorkspacePage(reference.sourceDocumentId, reference.pageStart);
+    }
+    requestKnowledgeSourceOpen(reference);
+  }, [
+    knowledgeReaderPresentation,
+    registerPdfWorkspaceDocument,
+    rememberPdfWorkspacePage,
+    requestKnowledgeSourceOpen,
+    sourceReferenceScopeKey,
+  ]);
+
   const requestKnowledgeDocumentOpen = useCallback((request: {
     documentId: string;
     originalFilename?: string;
@@ -8187,7 +8237,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         />
 
         <CanvasModals
-          onOpenSourceReference={requestKnowledgeSourceOpen}
+          onOpenSourceReference={openSourceReferenceFromEditor}
           isNoteEditorOpen={isNoteEditorOpen}
           setIsNoteEditorOpen={setIsNoteEditorOpen}
           isLinkEditorOpen={isLinkEditorOpen}
@@ -10375,6 +10425,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
+          onOpenChange={setIsKnowledgeReaderOpen}
           workspaceTabs={pdfWorkspaceTabs}
           activeWorkspacePdfId={activePdfId}
           workspaceRightPanel={pdfWorkspaceRightPanel}
@@ -10413,8 +10464,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         {/* The one board-level Board AI entry point. Available to every reader
             of the board, viewers included -- private reasoning is a read -- so
             it is deliberately NOT behind canUseCanvasToolbar. Hidden while an
-            editor owns the screen, like every other floating board control. */}
-        {enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && (
+            editor owns the screen, like every other floating board control --
+            and while a PDF reader is open, because that reader's own purple AI
+            dock is then the single AI entry point in front of the user. */}
+        {enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (
           <button
             type="button"
             data-board-ai-chat-open="true"
