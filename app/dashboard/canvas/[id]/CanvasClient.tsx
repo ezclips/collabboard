@@ -141,7 +141,9 @@ import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } fr
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import type { PdfWorkspaceRightPanel, PdfWorkspaceTab } from '@/components/collabboard/PdfWorkspaceChrome';
-import BoardAiChatDrawer from '@/components/collabboard/BoardAiChatDrawer';
+import BoardAiChatDrawer, {
+  type BoardAiAssistantNoteSaveRequest,
+} from '@/components/collabboard/BoardAiChatDrawer';
 import { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import {
   addBoardAiDraftContext,
@@ -2371,9 +2373,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     sourceReference: KnowledgeSourceReferenceDraft,
     // KNI-R2: an existing-Note append never "creates" a Note, so its failure
     // wording must say so -- every pre-existing caller keeps today's message.
-    onSaveFailedMessage: string = 'Note created, but source link could not be saved',
+    onSaveFailedMessage: string | null = 'Note created, but source link could not be saved',
   ) => {
-    if (!canvasId) return;
+    if (!canvasId) return false;
     try {
       const response = await fetch(`/api/boards/${encodeURIComponent(canvasId)}/knowledge/references`, {
         method: 'POST',
@@ -2424,13 +2426,82 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       } else {
         console.warn('Knowledge source reference saved, but its response could not be indexed locally');
       }
+      return true;
     } catch (err) {
-      // The Note stays. No delete, no rollback, no retry, and nothing thrown
-      // back into the already-successful creation path.
+      // Existing editor paths ignore this boolean and keep the Note, matching
+      // their pre-existing best-effort contract. Transactional callers can
+      // pass no toast text and roll back their own just-created target.
       console.error('Failed to save Knowledge source reference:', err);
-      toast.error(onSaveFailedMessage);
+      if (onSaveFailedMessage) toast.error(onSaveFailedMessage);
+      return false;
     }
   }, [canvasId]);
+
+  const savePdfAssistantAnswerAsNote = useCallback(async (request: BoardAiAssistantNoteSaveRequest) => {
+    if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');
+    if (!Number.isInteger(request.pageNumber) || request.pageNumber < 1) {
+      throw new Error('invalid_source_page');
+    }
+
+    const noteId = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+    const width = 280;
+    const height = 280;
+    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+    const note: Padlet = {
+      id: noteId,
+      board_id: canvasId,
+      title: 'AI Note',
+      content: knowledgeSourceSelectionToNoteHtml(request.content),
+      type: 'text',
+      position_x: positionX,
+      position_y: positionY,
+      width,
+      height,
+      created_at: nowIso,
+      updated_at: nowIso,
+      metadata: {
+        cardColor: '#ffffff',
+        zIndex: nextZIndex(padlets),
+      } as any,
+    };
+    const sourceReference: KnowledgeSourceReferenceDraft = {
+      sourceDocumentId: request.sourceDocumentId,
+      pageStart: request.pageNumber,
+      pageEnd: request.pageNumber,
+      quoteText: null,
+      charStart: null,
+      charEnd: null,
+      selectedText: null,
+      region: null,
+      appliedRotation: null,
+    };
+
+    const created = await insertPostAndSelectOrThrow(note as any) as Padlet | null;
+    if (!created) throw new Error('note_save_failed');
+
+    const linked = await persistKnowledgeSourceReference(
+      created.id,
+      sourceReference,
+      null,
+    );
+    if (!linked) {
+      await deletePostOrThrow(created.id);
+      throw new Error('source_link_failed');
+    }
+
+    setPadlets((current) => [...current, created]);
+    toast.success('Note saved');
+  }, [
+    canvasId,
+    canUseCanvasToolbar,
+    deletePostOrThrow,
+    getNewPostPosition,
+    insertPostAndSelectOrThrow,
+    padlets,
+    persistKnowledgeSourceReference,
+    setPadlets,
+  ]);
 
   /** The one completion point for any Note finalised out of a placement draft. */
   const completeSourceReferenceForDraft = useCallback((
@@ -10326,6 +10397,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onWorkspacePdfSettled={handleKnowledgePdfSettled}
           workspaceBoardAiDraftContext={enableBoardAiChat ? activePdfAiDraftContext : []}
           onWorkspaceBoardAiDraftContextChange={enableBoardAiChat ? setActivePdfAiDraftContext : undefined}
+          workspaceActivePageNumber={activePdfId ? pdfWorkspacePageById[activePdfId] ?? null : null}
+          canSaveWorkspaceAssistantAsNote={canUseCanvasToolbar}
+          onSaveWorkspaceAssistantAsNote={enableBoardAiChat && canUseCanvasToolbar ? savePdfAssistantAnswerAsNote : undefined}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader

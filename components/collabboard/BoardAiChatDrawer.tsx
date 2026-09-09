@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Loader2, MessageSquarePlus, Paperclip, SendHorizontal, X } from 'lucide-react';
+import { Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, SendHorizontal, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import {
@@ -13,6 +13,7 @@ import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
   addBoardAiDraftContext,
   boardAiDraftFromDocument,
+  boardAiDraftFromPage,
   boardAiDraftContextPayload,
   boardAiDraftKey,
   removeBoardAiDraftContext,
@@ -34,8 +35,8 @@ import type {
  *
  * What it is not: it is not a Reader pane, and it holds no board content. It
  * sends IDENTITIES the user explicitly attached -- never text it read off the
- * board. There is still no citation and no Save as Note, because neither
- * exists yet, and a control that did nothing would be worse than its absence.
+ * board. PDF-scoped assistant answers can now be saved as ordinary board Notes
+ * only when the message has a stored page-level origin.
  *
  * Privacy is the product: this thread belongs to one user on one board. Two
  * collaborators on the same board never see each other's, which the server
@@ -52,6 +53,7 @@ export interface BoardAiChatDrawerProps {
   readonly documentScope?: {
     readonly knowledgeDocumentId: string;
     readonly originalFilename: string;
+    readonly pageNumber?: number | null;
   } | null;
   /**
    * The board's OWN blocking-editor authority, forwarded unchanged -- the same
@@ -74,12 +76,22 @@ export interface BoardAiChatDrawerProps {
   readonly onDocumentSessionsChange?: React.Dispatch<
     React.SetStateAction<Record<string, BoardAiDocumentScopedSession>>
   >;
+  readonly canSaveAssistantAsNote?: boolean;
+  readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
   /**
    * The one supported board object currently selected, already reduced to a
    * draft by the shell's own selection authority. Null when the selection is
    * empty, multiple, or something Board AI cannot honestly use.
    */
   readonly selectedBoardItem?: BoardAiDraftContextItem | null;
+}
+
+export interface BoardAiAssistantNoteSaveRequest {
+  readonly messageId: string;
+  readonly content: string;
+  readonly sourceDocumentId: string;
+  readonly pageNumber: number;
+  readonly originalFilename: string;
 }
 
 /** A thread the user has, or the not-yet-created one a New chat represents. */
@@ -106,6 +118,8 @@ const EMPTY_DOCUMENT_SESSION: BoardAiDocumentScopedSession = {
   error: null,
 };
 
+type AssistantNoteSaveState = 'saving' | 'saved' | 'failed';
+
 function applyStateAction<T>(current: T, action: React.SetStateAction<T>): T {
   return typeof action === 'function' ? (action as (previous: T) => T)(current) : action;
 }
@@ -122,6 +136,32 @@ function mergeMandatoryDocumentContext(
   ].slice(0, BOARD_AI_DRAFT_CONTEXT_MAX);
 }
 
+function assistantNoteSourceForMessage(
+  messages: readonly BoardAiChatMessageView[],
+  assistantIndex: number,
+  documentScope: BoardAiChatDrawerProps['documentScope'],
+): Omit<BoardAiAssistantNoteSaveRequest, 'messageId' | 'content'> | null {
+  if (!documentScope) return null;
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'user') continue;
+    const items = message.context?.items ?? [];
+    const source = items.find((item) => {
+      if (item.knowledgeDocumentId !== documentScope.knowledgeDocumentId) return false;
+      if (item.type !== 'knowledge-page' && item.type !== 'knowledge-selection') return false;
+      return Number.isInteger(item.pageNumber) && (item.pageNumber ?? 0) >= 1;
+    });
+    const pageNumber = source?.pageNumber;
+    if (typeof pageNumber !== 'number' || !Number.isInteger(pageNumber) || pageNumber < 1) return null;
+    return {
+      sourceDocumentId: documentScope.knowledgeDocumentId,
+      pageNumber,
+      originalFilename: documentScope.originalFilename,
+    };
+  }
+  return null;
+}
+
 export default function BoardAiChatDrawer({
   boardId,
   isOpen,
@@ -133,6 +173,8 @@ export default function BoardAiChatDrawer({
   onDraftContextChange,
   documentSessions: controlledDocumentSessions,
   onDocumentSessionsChange,
+  canSaveAssistantAsNote = false,
+  onSaveAssistantAsNote,
   selectedBoardItem = null,
 }: BoardAiChatDrawerProps) {
   const [threads, setThreads] = useState<readonly BoardAiChatThreadSummary[]>([]);
@@ -147,6 +189,9 @@ export default function BoardAiChatDrawer({
     useState<Record<string, BoardAiDocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
+  const [assistantNoteSaveStateByMessageId, setAssistantNoteSaveStateByMessageId] =
+    useState<Record<string, AssistantNoteSaveState>>({});
+  const assistantNoteSaveStateRef = useRef<Record<string, AssistantNoteSaveState>>({});
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const activeDocumentScopeRef = useRef<string | null>(null);
 
@@ -164,11 +209,13 @@ export default function BoardAiChatDrawer({
   const loadingMessages = documentScopeId ? documentSession.loadingMessages : boardLoadingMessages;
   const sending = documentScopeId ? documentSession.sending : boardSending;
   const error = documentScopeId ? documentSession.error : boardError;
-  const mandatoryDocumentContext = useMemo(() => (
-    documentScope
-      ? boardAiDraftFromDocument(documentScope.knowledgeDocumentId, documentScope.originalFilename)
-      : null
-  ), [documentScope]);
+  const mandatoryDocumentContext = useMemo(() => {
+    if (!documentScope) return null;
+    const pageNumber = documentScope.pageNumber;
+    return Number.isInteger(pageNumber) && (pageNumber ?? 0) >= 1
+      ? boardAiDraftFromPage(documentScope.knowledgeDocumentId, documentScope.originalFilename, pageNumber as number)
+      : boardAiDraftFromDocument(documentScope.knowledgeDocumentId, documentScope.originalFilename);
+  }, [documentScope]);
 
   const setDocumentSessionValue = useCallback((
     documentId: string,
@@ -370,6 +417,29 @@ export default function BoardAiChatDrawer({
   }, [setActiveThreadId, setDraft, setError, setLoadingMessages, setMessages]);
 
   const canSend = draft.trim().length > 0 && !sending;
+
+  const saveAssistantAsNote = useCallback(async (
+    message: BoardAiChatMessageView,
+    source: Omit<BoardAiAssistantNoteSaveRequest, 'messageId' | 'content'>,
+  ) => {
+    if (!onSaveAssistantAsNote) return;
+    const currentState = assistantNoteSaveStateRef.current[message.id];
+    if (currentState === 'saving' || currentState === 'saved') return;
+    assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saving' };
+    setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
+    try {
+      await onSaveAssistantAsNote({
+        messageId: message.id,
+        content: message.content,
+        ...source,
+      });
+      assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saved' };
+      setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
+    } catch {
+      assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'failed' };
+      setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
+    }
+  }, [onSaveAssistantAsNote]);
 
   const setDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
     onDraftContextChange?.(items);
@@ -642,7 +712,16 @@ export default function BoardAiChatDrawer({
           </div>
         ) : null}
 
-        {messages.map((message) => (
+        {messages.map((message, index) => {
+          const assistantNoteSource = message.role === 'assistant'
+            ? assistantNoteSourceForMessage(messages, index, documentScope)
+            : null;
+          const noteSaveState = assistantNoteSaveStateByMessageId[message.id];
+          const canShowSaveAsNote = message.role === 'assistant'
+            && canSaveAssistantAsNote
+            && !!onSaveAssistantAsNote
+            && !!assistantNoteSource;
+          return (
           <div
             key={message.id}
             data-board-ai-chat-message={message.role}
@@ -664,13 +743,40 @@ export default function BoardAiChatDrawer({
               {message.role === 'assistant' && message.model ? (
                 <span className="mt-1 block text-[10px] text-gray-400">{message.model}</span>
               ) : null}
+              {canShowSaveAsNote ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">
+                  <button
+                    type="button"
+                    data-board-ai-chat-action="save-note"
+                    data-board-ai-chat-save-message-id={message.id}
+                    className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-default disabled:border-green-200 disabled:bg-green-50 disabled:text-green-700"
+                    disabled={noteSaveState === 'saving' || noteSaveState === 'saved'}
+                    onClick={() => { void saveAssistantAsNote(message, assistantNoteSource!); }}
+                  >
+                    {noteSaveState === 'saved' ? (
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    ) : noteSaveState === 'saving' ? (
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <FilePlus2 className="h-3 w-3" aria-hidden="true" />
+                    )}
+                    {noteSaveState === 'saved' ? 'Saved' : noteSaveState === 'saving' ? 'Savingâ€¦' : 'Save as Note'}
+                  </button>
+                  {noteSaveState === 'failed' ? (
+                    <span data-board-ai-chat-save-note-error="true" className="text-[10px] text-red-600">
+                      Could not save note.
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               {/* Read-only, and drawn from the server's sanitized view alone.
                   Not a citation: it says what this message was allowed to
                   use, not where the answer came from. */}
               {message.role === 'user' ? <BoardAiChatPersistedChips context={message.context} /> : null}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {sending ? (
           <p data-board-ai-chat-pending="true" className="flex items-center gap-1.5 text-[11px] italic text-gray-400">
@@ -689,11 +795,14 @@ export default function BoardAiChatDrawer({
       <div className="shrink-0 border-t border-gray-200 p-2">
         {mandatoryDocumentContext ? (
           <div
-            data-board-ai-context-mandatory="knowledge-document"
+            data-board-ai-context-mandatory={mandatoryDocumentContext.request.type}
             className="mb-1.5 flex max-w-full items-center gap-1 rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-[11px] text-purple-900"
           >
             <FileText className="h-3 w-3 shrink-0 text-purple-500" aria-hidden="true" />
             <span className="min-w-0 truncate">{mandatoryDocumentContext.label}</span>
+            {mandatoryDocumentContext.detail ? (
+              <span className="shrink-0 text-purple-600">· {mandatoryDocumentContext.detail}</span>
+            ) : null}
             <span className="min-w-0 shrink truncate text-purple-500">· Using this PDF</span>
           </div>
         ) : null}

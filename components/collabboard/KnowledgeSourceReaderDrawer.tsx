@@ -16,6 +16,7 @@ import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/know
 import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
 import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
 import BoardAiChatDrawer, {
+  type BoardAiAssistantNoteSaveRequest,
   type BoardAiDocumentScopedSession,
 } from '@/components/collabboard/BoardAiChatDrawer';
 import PdfWorkspaceLibraryPanel from '@/components/collabboard/PdfWorkspaceLibraryPanel';
@@ -156,6 +157,9 @@ export interface KnowledgeSourceReaderDrawerProps {
   onWorkspacePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
   workspaceBoardAiDraftContext?: readonly BoardAiDraftContextItem[];
   onWorkspaceBoardAiDraftContextChange?: (items: readonly BoardAiDraftContextItem[]) => void;
+  workspaceActivePageNumber?: number | null;
+  canSaveWorkspaceAssistantAsNote?: boolean;
+  onSaveWorkspaceAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
 }
 
 /**
@@ -229,6 +233,9 @@ export default function KnowledgeSourceReaderDrawer({
   onWorkspacePdfSettled,
   workspaceBoardAiDraftContext = [],
   onWorkspaceBoardAiDraftContextChange,
+  workspaceActivePageNumber = null,
+  canSaveWorkspaceAssistantAsNote = false,
+  onSaveWorkspaceAssistantAsNote,
 }: KnowledgeSourceReaderDrawerProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
@@ -590,6 +597,9 @@ export default function KnowledgeSourceReaderDrawer({
       }];
     const activeDocumentId = activeWorkspacePdfId ?? reader.documentId;
     const readerMatchesActiveDocument = reader.documentId === activeDocumentId;
+    const activePageNumber = Number.isInteger(workspaceActivePageNumber) && (workspaceActivePageNumber ?? 0) >= 1
+      ? workspaceActivePageNumber
+      : reader.initialPageNumber ?? 1;
     const openBacklinkTarget = (targetPadletId: string) => onOpenBacklinkTarget?.(targetPadletId);
     const rightPanelContent = !readerMatchesActiveDocument ? (
       <p data-pdf-workspace-panel-loading="true" className="text-xs text-gray-500">
@@ -610,11 +620,14 @@ export default function KnowledgeSourceReaderDrawer({
         documentScope={{
           knowledgeDocumentId: reader.documentId,
           originalFilename: reader.originalFilename || 'Document',
+          pageNumber: activePageNumber,
         }}
         draftContext={workspaceBoardAiDraftContext}
         onDraftContextChange={onWorkspaceBoardAiDraftContextChange}
         documentSessions={workspaceBoardAiSessionsByDocumentId}
         onDocumentSessionsChange={setWorkspaceBoardAiSessionsByDocumentId}
+        canSaveAssistantAsNote={canSaveWorkspaceAssistantAsNote}
+        onSaveAssistantAsNote={onSaveWorkspaceAssistantAsNote}
         selectedBoardItem={null}
       />
     ) : null;

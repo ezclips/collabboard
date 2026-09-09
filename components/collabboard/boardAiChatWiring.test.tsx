@@ -314,10 +314,11 @@ describe('the board-level entry point', () => {
   });
 
   it('45,48. Chat offers no board mutation and no object-level AI entry points', () => {
-    // Save as Note, context chips and per-card AI belong to later slices; a
-    // viewer and an editor therefore see the same private surface.
+    // The PDF assistant Save as Note action is the one authorized mutation
+    // slice, so this guard keeps rejecting unrelated object-level AI entry
+    // points and editor-driven note creation from the board-level surface.
     const drawer = executable(read('components/collabboard/BoardAiChatDrawer.tsx'));
-    for (const forbidden of ['Save as Note', 'Add to Chat', 'Ask AI', 'createNote', 'padletToEdit']) {
+    for (const forbidden of ['Add to Chat', 'Ask AI', 'createNote', 'padletToEdit']) {
       expect(drawer).not.toContain(forbidden);
     }
     expect((CLIENT.match(/data-board-ai-chat-open/g) ?? []).length).toBe(1);

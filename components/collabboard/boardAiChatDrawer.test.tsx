@@ -28,6 +28,7 @@ const executable = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 const DRAWER = read('components/collabboard/BoardAiChatDrawer.tsx');
 const READER = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+const CLIENT = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
 let root: Root | null = null;
 let host: HTMLElement;
@@ -379,8 +380,8 @@ describe('46-48. no context is sent, and none is offered', () => {
   it('the drawer reads no board, PDF or Note source at all', async () => {
     const code = executable(DRAWER);
     for (const forbidden of [
-      'KnowledgePageCache', 'useKnowledgeSource', 'selectedText', 'pageNumber',
-      'citation', 'Save as Note', 'sourceReference', 'reader.pages', 'page.text',
+      'KnowledgePageCache', 'useKnowledgeSource', 'selectedText',
+      'citation', 'sourceReference', 'reader.pages', 'page.text',
     ]) {
       expect(code, `${forbidden} belongs to a later slice`).not.toContain(forbidden);
     }
@@ -423,7 +424,15 @@ describe('PDF workspace document-scoped mode', () => {
         const threadId = body.threadId ?? (scopedDocumentId === DOC_B ? THREAD_B : THREAD_A);
         messages[threadId] = [
           ...(messages[threadId] ?? []),
-          { id: `u${++sent}`, role: 'user', content: body.message, provider: null, model: null, createdAt: 'n' },
+          {
+            id: `u${++sent}`,
+            role: 'user',
+            content: body.message,
+            provider: null,
+            model: null,
+            createdAt: 'n',
+            context: body.context ? { version: 1, items: body.context.items ?? [] } : null,
+          },
         ];
         const reply = {
           id: `a${sent}`,
@@ -443,15 +452,17 @@ describe('PDF workspace document-scoped mode', () => {
     vi.stubGlobal('fetch', fetchMock);
   }
 
-  async function mountPdfScope(documentId = DOC_A, filename = 'Alpha.pdf') {
+  async function mountPdfScope(documentId = DOC_A, filename = 'Alpha.pdf', pageNumber = 1) {
     const state: { items: readonly BoardAiDraftContextItem[] } = { items: [] };
 
     function Harness({
       activeDocumentId,
       activeFilename,
+      activePageNumber,
     }: {
       activeDocumentId: string;
       activeFilename: string;
+      activePageNumber: number;
     }) {
       const [items, setItems] = React.useState<readonly BoardAiDraftContextItem[]>([]);
       state.items = items;
@@ -461,7 +472,7 @@ describe('PDF workspace document-scoped mode', () => {
           isOpen
           onClose={vi.fn()}
           presentation="embedded"
-          documentScope={{ knowledgeDocumentId: activeDocumentId, originalFilename: activeFilename }}
+          documentScope={{ knowledgeDocumentId: activeDocumentId, originalFilename: activeFilename, pageNumber: activePageNumber }}
           draftContext={items}
           onDraftContextChange={setItems}
           selectedBoardItem={NOTE_DRAFT}
@@ -474,21 +485,21 @@ describe('PDF workspace document-scoped mode', () => {
     document.body.appendChild(host);
     root = createRoot(host);
     await act(async () => {
-      root!.render(<Harness activeDocumentId={documentId} activeFilename={filename} />);
+      root!.render(<Harness activeDocumentId={documentId} activeFilename={filename} activePageNumber={pageNumber} />);
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     return {
       state,
-      rerender: async (activeDocumentId: string, activeFilename: string) => {
+      rerender: async (activeDocumentId: string, activeFilename: string, activePageNumber = 1) => {
         await act(async () => {
-          root!.render(<Harness activeDocumentId={activeDocumentId} activeFilename={activeFilename} />);
+          root!.render(<Harness activeDocumentId={activeDocumentId} activeFilename={activeFilename} activePageNumber={activePageNumber} />);
         });
         await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       },
     };
   }
 
-  async function mountControlledPdfWorkspace(documentId = DOC_A, filename = 'Alpha.pdf') {
+  async function mountControlledPdfWorkspace(documentId = DOC_A, filename = 'Alpha.pdf', pageNumber = 1) {
     const state: {
       sessions: Record<string, BoardAiDocumentScopedSession>;
       rightPanel: 'closed' | 'ai';
@@ -497,10 +508,12 @@ describe('PDF workspace document-scoped mode', () => {
     function Harness({
       activeDocumentId,
       activeFilename,
+      activePageNumber,
       rightPanel,
     }: {
       activeDocumentId: string;
       activeFilename: string;
+      activePageNumber: number;
       rightPanel: 'closed' | 'ai';
     }) {
       const [items, setItems] = React.useState<readonly BoardAiDraftContextItem[]>([]);
@@ -513,7 +526,7 @@ describe('PDF workspace document-scoped mode', () => {
           isOpen
           onClose={vi.fn()}
           presentation="embedded"
-          documentScope={{ knowledgeDocumentId: activeDocumentId, originalFilename: activeFilename }}
+          documentScope={{ knowledgeDocumentId: activeDocumentId, originalFilename: activeFilename, pageNumber: activePageNumber }}
           draftContext={items}
           onDraftContextChange={setItems}
           documentSessions={sessions}
@@ -527,12 +540,14 @@ describe('PDF workspace document-scoped mode', () => {
       activeDocumentId: string,
       activeFilename: string,
       rightPanel: 'closed' | 'ai',
+      activePageNumber = 1,
     ) => {
       await act(async () => {
         root!.render(
           <Harness
             activeDocumentId={activeDocumentId}
             activeFilename={activeFilename}
+            activePageNumber={activePageNumber}
             rightPanel={rightPanel}
           />,
         );
@@ -544,16 +559,121 @@ describe('PDF workspace document-scoped mode', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    await render(documentId, filename, 'ai');
+    await render(documentId, filename, 'ai', pageNumber);
     return { state, render };
+  }
+
+  const pdfThreadMessages = (
+    documentId: string,
+    pageNumber: number,
+    assistantContent = 'assistant answer text',
+    assistantId = `a-${documentId}`,
+  ) => [
+    {
+      id: `u-${documentId}`,
+      role: 'user',
+      content: 'question',
+      provider: null,
+      model: null,
+      createdAt: 'n',
+      context: {
+        version: 1,
+        items: [{ type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber }],
+      },
+    },
+    {
+      id: assistantId,
+      role: 'assistant',
+      content: assistantContent,
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      createdAt: 'n',
+      context: null,
+    },
+  ] as const;
+
+  async function mountPdfSaveHarness({
+    activeDocumentId = DOC_A,
+    activeFilename = 'Alpha.pdf',
+    activePageNumber = 3,
+    initialSessions,
+    canSave = true,
+    onSave = vi.fn().mockResolvedValue(undefined),
+    onClose = vi.fn(),
+  }: {
+    activeDocumentId?: string;
+    activeFilename?: string;
+    activePageNumber?: number;
+    initialSessions?: Record<string, BoardAiDocumentScopedSession>;
+    canSave?: boolean;
+    onSave?: React.ComponentProps<typeof BoardAiChatDrawer>['onSaveAssistantAsNote'];
+    onClose?: () => void;
+  } = {}) {
+    const seededSessions = initialSessions ?? {
+      [activeDocumentId]: {
+        activeThreadId: THREAD_A,
+        messages: pdfThreadMessages(activeDocumentId, activePageNumber),
+        draft: '',
+        loadingMessages: false,
+        sending: false,
+        error: null,
+      },
+    };
+    stubChat({
+      messages: Object.fromEntries(
+        Object.entries(seededSessions).map(([documentId, session]) => [
+          session.activeThreadId ?? documentId,
+          [...session.messages],
+        ]),
+      ),
+    });
+
+    function Harness({
+      documentId,
+      filename,
+      pageNumber,
+    }: {
+      documentId: string;
+      filename: string;
+      pageNumber: number;
+    }) {
+      const [sessions, setSessions] = React.useState<Record<string, BoardAiDocumentScopedSession>>(seededSessions);
+      return (
+        <BoardAiChatDrawer
+          boardId={BOARD_ID}
+          isOpen
+          onClose={onClose}
+          presentation="embedded"
+          documentScope={{ knowledgeDocumentId: documentId, originalFilename: filename, pageNumber }}
+          documentSessions={sessions}
+          onDocumentSessionsChange={setSessions}
+          canSaveAssistantAsNote={canSave}
+          onSaveAssistantAsNote={onSave}
+        />
+      );
+    }
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const render = async (documentId: string, filename: string, pageNumber: number) => {
+      await act(async () => {
+        root!.render(<Harness documentId={documentId} filename={filename} pageNumber={pageNumber} />);
+      });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    };
+    await render(activeDocumentId, activeFilename, activePageNumber);
+    return { render, onSave, onClose };
   }
 
   it('sends the active PDF identity on every turn without client-side PDF text', async () => {
     await mountPdfScope(DOC_A, 'Alpha.pdf');
     expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'GET')).toHaveLength(0);
     expect(q('[data-board-ai-chat-thread=""]')).toBeNull();
-    expect(q('[data-board-ai-context-mandatory="knowledge-document"]')?.textContent).toContain('Alpha.pdf');
-    expect(q('[data-board-ai-context-mandatory="knowledge-document"] button')).toBeNull();
+    expect(q('[data-board-ai-context-mandatory="knowledge-page"]')?.textContent).toContain('Alpha.pdf');
+    expect(q('[data-board-ai-context-mandatory="knowledge-page"]')?.textContent).toContain('p. 1');
+    expect(q('[data-board-ai-context-mandatory="knowledge-page"] button')).toBeNull();
 
     await type('first');
     await click('[data-board-ai-chat-action="send"]');
@@ -562,12 +682,12 @@ describe('PDF workspace document-scoped mode', () => {
 
     expect(posted[0]).toEqual({
       message: 'first',
-      context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_A }] },
+      context: { items: [{ type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 1 }] },
     });
     expect(posted[1]).toEqual({
       threadId: THREAD_A,
       message: 'second',
-      context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_A }] },
+      context: { items: [{ type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 1 }] },
     });
     expect(JSON.stringify(posted)).not.toContain('Alpha.pdf');
     expect(JSON.stringify(posted)).not.toContain('The stored page');
@@ -582,7 +702,7 @@ describe('PDF workspace document-scoped mode', () => {
 
     await click('[data-board-ai-context-remove]');
     expect(state.items).toHaveLength(0);
-    expect(q('[data-board-ai-context-mandatory="knowledge-document"]')).not.toBeNull();
+    expect(q('[data-board-ai-context-mandatory="knowledge-page"]')).not.toBeNull();
   });
 
   it('captures the returned thread id into the active PDF session', async () => {
@@ -639,7 +759,7 @@ describe('PDF workspace document-scoped mode', () => {
     await type('question for B');
     await click('[data-board-ai-chat-action="send"]');
     expect(posted.at(-1)).toMatchObject({
-      context: { items: [{ type: 'knowledge-document', knowledgeDocumentId: DOC_B }] },
+      context: { items: [{ type: 'knowledge-page', knowledgeDocumentId: DOC_B, pageNumber: 1 }] },
     });
     expect(posted.at(-1)).not.toMatchObject({ threadId: THREAD_A });
 
@@ -660,7 +780,7 @@ describe('PDF workspace document-scoped mode', () => {
     await click('[data-board-ai-chat-action="send"]');
     await click('[data-board-ai-chat-action="new"]');
     expect(host.textContent).not.toContain('question for B');
-    expect(q('[data-board-ai-context-mandatory="knowledge-document"]')?.textContent).toContain('Beta.pdf');
+    expect(q('[data-board-ai-context-mandatory="knowledge-page"]')?.textContent).toContain('Beta.pdf');
 
     await rerender(DOC_A, 'Alpha.pdf');
     expect(host.textContent).toContain('question for A');
@@ -699,9 +819,150 @@ describe('PDF workspace document-scoped mode', () => {
     expect(host.textContent).not.toContain('late A answer');
   });
 
+  it('shows Save as Note only on assistant messages for editable PDF threads', async () => {
+    await mountPdfSaveHarness();
+    expect(all('[data-board-ai-chat-action="save-note"]')).toHaveLength(1);
+    expect(q('[data-board-ai-chat-message="assistant"]')?.textContent).toContain('Save as Note');
+    expect(q('[data-board-ai-chat-message="user"]')?.querySelector('[data-board-ai-chat-action="save-note"]')).toBeNull();
+  });
+
+  it('hides Save as Note from read-only viewers and attempts no mutation', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    await mountPdfSaveHarness({ canSave: false, onSave });
+    expect(q('[data-board-ai-chat-action="save-note"]')).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('saves assistant text with the originating PDF/page, not provider metadata or the current page at click time', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    await mountPdfSaveHarness({
+      activeDocumentId: DOC_A,
+      activeFilename: 'Alpha.pdf',
+      activePageNumber: 6,
+      initialSessions: {
+        [DOC_A]: {
+          activeThreadId: THREAD_A,
+          messages: pdfThreadMessages(DOC_A, 3, 'answer body without metadata', 'assistant-a'),
+          draft: '',
+          loadingMessages: false,
+          sending: false,
+          error: null,
+        },
+      },
+      onSave,
+    });
+
+    await click('[data-board-ai-chat-action="save-note"]');
+
+    expect(onSave).toHaveBeenCalledWith({
+      messageId: 'assistant-a',
+      content: 'answer body without metadata',
+      sourceDocumentId: DOC_A,
+      pageNumber: 3,
+      originalFilename: 'Alpha.pdf',
+    });
+    expect(JSON.stringify(onSave.mock.calls[0][0])).not.toMatch(/deepseek|provider|model/i);
+  });
+
+  it('keeps PDF A and PDF B assistant saves isolated by stored message provenance', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const initialSessions = {
+      [DOC_A]: {
+        activeThreadId: THREAD_A,
+        messages: pdfThreadMessages(DOC_A, 2, 'answer A', 'assistant-a'),
+        draft: '',
+        loadingMessages: false,
+        sending: false,
+        error: null,
+      },
+      [DOC_B]: {
+        activeThreadId: THREAD_B,
+        messages: pdfThreadMessages(DOC_B, 5, 'answer B', 'assistant-b'),
+        draft: '',
+        loadingMessages: false,
+        sending: false,
+        error: null,
+      },
+    };
+    const { render } = await mountPdfSaveHarness({ initialSessions, onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+
+    await render(DOC_B, 'Beta.pdf', 5);
+    await click('[data-board-ai-chat-action="save-note"]');
+
+    expect(onSave.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({ content: 'answer A', sourceDocumentId: DOC_A, pageNumber: 2 }),
+      expect.objectContaining({ content: 'answer B', sourceDocumentId: DOC_B, pageNumber: 5 }),
+    ]);
+  });
+
+  it('shows Saved and prevents an immediate duplicate save for the same assistant message', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    await mountPdfSaveHarness({ onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+    const button = q('[data-board-ai-chat-action="save-note"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('Saved');
+
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a generic failure and never reports Saved when Note/source-link persistence fails', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('internal details'));
+    await mountPdfSaveHarness({ onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+
+    expect(q('[data-board-ai-chat-save-note-error="true"]')?.textContent).toContain('Could not save note.');
+    expect(q('[data-board-ai-chat-action="save-note"]')?.textContent).not.toContain('Saved');
+    expect(host.textContent).not.toContain('internal details');
+  });
+
+  it('Save as Note does not affect the open AI session or send another AI request', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    await mountPdfSaveHarness({ onSave, onClose });
+    const fetchesBefore = fetchMock.mock.calls.length;
+
+    await click('[data-board-ai-chat-action="save-note"]');
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('assistant answer text');
+    expect(fetchMock.mock.calls.slice(fetchesBefore).filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('CanvasClient creates one standard source-linked Note, refreshes the PDF Notes projection, and rolls back on link failure', () => {
+    const start = CLIENT.indexOf('const savePdfAssistantAnswerAsNote = useCallback(');
+    const end = CLIENT.indexOf('  /** The one completion point for any Note finalised out of a placement draft. */', start);
+    const body = CLIENT.slice(start, end);
+    expect(body).toContain("type: 'text'");
+    expect(body).toContain('title: \'AI Note\'');
+    expect(body).toContain('knowledgeSourceSelectionToNoteHtml(request.content)');
+    expect(body).not.toMatch(/request\.provider|request\.model|provider:|model:/);
+    expect(body).toContain('pageStart: request.pageNumber');
+    expect(body).toContain('pageEnd: request.pageNumber');
+    expect(body).toContain('quoteText: null');
+    expect(body).toContain('region: null');
+    expect(body.indexOf('await insertPostAndSelectOrThrow')).toBeLessThan(body.indexOf('await persistKnowledgeSourceReference'));
+    expect(body.indexOf('await persistKnowledgeSourceReference')).toBeLessThan(body.indexOf('setPadlets'));
+    expect(body).toContain('await deletePostOrThrow(created.id)');
+    expect(body).not.toContain('setIsNoteEditorOpen');
+
+    const persist = CLIENT.slice(
+      CLIENT.indexOf('const persistKnowledgeSourceReference = useCallback('),
+      CLIENT.indexOf('const savePdfAssistantAnswerAsNote = useCallback('),
+    );
+    expect(persist).toContain('setSourceReferencesByPadletId');
+    expect(persist).toContain('return true');
+    expect(persist).toContain('return false');
+    expect(CLIENT).toContain('noteSummaries={knowledgeSourceNoteSummaries}');
+  });
+
   it('the workspace host owns document-scoped Board AI sessions across right-panel unmounts', () => {
     expect(READER).toContain('const [workspaceBoardAiSessionsByDocumentId, setWorkspaceBoardAiSessionsByDocumentId]');
     expect(READER).toContain('documentSessions={workspaceBoardAiSessionsByDocumentId}');
     expect(READER).toContain('onDocumentSessionsChange={setWorkspaceBoardAiSessionsByDocumentId}');
+    expect(READER).toContain('pageNumber: activePageNumber');
+    expect(READER).toContain('onSaveAssistantAsNote={onSaveWorkspaceAssistantAsNote}');
   });
 });
