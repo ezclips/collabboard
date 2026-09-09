@@ -294,7 +294,8 @@ describe('PdfWorkspaceChrome', () => {
     click(container.querySelector('[data-pdf-workspace-dock="library"]'));
     expect(container.querySelector('[data-pdf-workspace-main="true"]')?.className).toContain('flex-1');
     expect(container.querySelector('[data-pdf-workspace-right-panel-content="true"]')?.className).toContain('w-[clamp(360px,28vw,400px)]');
-    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className).toContain('bg-blue-600');
+    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className).toContain('bg-blue-50');
+    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className).toContain('text-blue-700');
     expect(container.querySelector('[data-pdf-workspace-panel-document="true"]')?.textContent).toBe('Alpha.pdf');
     expect(container.querySelector('[data-pdf-workspace-panel-title="true"]')?.textContent).toBe('Library');
     expect(container.querySelector('[data-testid="panel-context"]')?.textContent).toBe('doc-a');
@@ -369,6 +370,63 @@ describe('PdfWorkspaceChrome', () => {
     } finally {
       Element.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+});
+
+describe('PdfWorkspaceChrome header dock', () => {
+  const headerControls = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(
+      '[data-pdf-workspace-fixed-tab-controls="true"] button',
+    ));
+
+  it('puts Library and AI in the header, immediately before the close control', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+
+    const order = headerControls(container).map((node) => (
+      node.dataset.pdfWorkspaceDock
+        ?? (node.dataset.pdfWorkspaceClose ? 'close' : node.dataset.pdfWorkspaceAllMenu ? 'all' : node.dataset.pdfWorkspaceAdd ? 'add' : 'other')
+    ));
+    expect(order.slice(-3)).toEqual(['library', 'ai', 'close']);
+
+    // The strip they used to live in is gone, and the reader keeps that width.
+    expect(container.querySelector('[data-pdf-workspace-dock-controls]')).toBeNull();
+    expect(container.querySelector('[data-pdf-reader-dock="true"]')?.parentElement
+      ?.getAttribute('data-pdf-workspace-fixed-tab-controls')).toBe('true');
+  });
+
+  it('sizes them like the header controls beside them, not as filled blocks', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+    const close = container.querySelector('[data-pdf-workspace-close="true"]') as HTMLElement;
+
+    for (const panel of ['library', 'ai']) {
+      const button = container.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLElement;
+      // The same 28px rounded square the close control uses.
+      expect(button.className).toContain('h-7');
+      expect(button.className).toContain('w-7');
+      expect(button.className).toContain('rounded-md');
+      expect(close.className).toContain('h-7');
+      // Quiet while inactive: no large filled block.
+      expect(button.className).not.toContain('bg-blue-600');
+      expect(button.className).not.toContain('bg-purple-600');
+      expect(button.className).toContain('text-gray-500');
+    }
+  });
+
+  it('keeps each panel its own colour while active, and omits AI where it is unavailable', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+
+    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
+    const ai = container.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLElement;
+    expect(ai.getAttribute('aria-pressed')).toBe('true');
+    expect(ai.className).toContain('bg-purple-50');
+    expect(ai.className).toContain('text-purple-700');
+    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className)
+      .not.toContain('bg-blue-50');
+
+    const withoutAi = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" aiAvailable={false} />);
+    expect(withoutAi.querySelector('[data-pdf-workspace-dock="library"]')).not.toBeNull();
+    expect(withoutAi.querySelector('[data-pdf-workspace-dock="ai"]')).toBeNull();
+    expect(withoutAi.querySelector('[data-pdf-workspace-close="true"]')).not.toBeNull();
   });
 });
 

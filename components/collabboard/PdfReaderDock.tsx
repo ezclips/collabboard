@@ -19,14 +19,24 @@ export interface PdfReaderDockProps {
 }
 
 /**
- * The narrow fixed dock beside a PDF: Library, then AI.
+ * The reader's compact header control shape, borrowed rather than invented:
+ * it is the same 28px rounded square the PDF header's own tab controls use, so
+ * Library and AI sit in that row as members of it instead of as two large
+ * blocks in a strip of their own.
+ */
+const DOCK_BUTTON_CLASS =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent '
+  + 'text-gray-500 transition hover:bg-white hover:text-gray-800 '
+  + 'focus:outline-none focus-visible:ring-2';
+
+/**
+ * Library and AI, in the PDF header, immediately before its close control.
  *
- * Extracted from PdfWorkspaceChrome rather than copied into the side panel,
- * because two docks that drift apart is exactly the "two different PDF
- * experiences" this consolidation exists to end. The markup, the data
- * attributes and both active colours are the workspace's own, unchanged --
- * blue for Library, purple for AI -- so the focused workspace renders byte for
- * byte what it rendered before.
+ * Extracted rather than copied into each host, because two docks that drift
+ * apart is exactly the "two different PDF experiences" this consolidation
+ * exists to end. Active state is carried by a quiet tint in each panel's own
+ * colour -- blue for Library, purple for AI -- which reads at this size where
+ * a filled block only shouted.
  */
 export default function PdfReaderDock({
   panel,
@@ -40,17 +50,15 @@ export default function PdfReaderDock({
   };
 
   return (
-    <div
-      data-pdf-workspace-dock-controls="true"
-      className="flex w-12 shrink-0 flex-col items-center gap-2 border-l border-gray-200 bg-slate-50 px-1 py-3"
-    >
+    <div data-pdf-reader-dock="true" className="flex shrink-0 items-center gap-1">
       <button
         type="button"
         data-pdf-workspace-dock="library"
         aria-pressed={panel === 'library'}
         aria-label="Library"
         title="Library"
-        className={`rounded-lg p-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${panel === 'library' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:text-gray-800'}`}
+        className={`${DOCK_BUTTON_CLASS} focus-visible:ring-blue-300${
+          panel === 'library' ? ' border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-50 hover:text-blue-700' : ''}`}
         onClick={() => toggle('library')}
       >
         <Library className="h-4 w-4" aria-hidden="true" />
@@ -62,7 +70,8 @@ export default function PdfReaderDock({
           aria-pressed={panel === 'ai'}
           aria-label="AI"
           title="AI"
-          className={`rounded-lg p-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${panel === 'ai' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:text-gray-800'}`}
+          className={`${DOCK_BUTTON_CLASS} focus-visible:ring-purple-300${
+            panel === 'ai' ? ' border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-50 hover:text-purple-700' : ''}`}
           onClick={() => toggle('ai')}
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />

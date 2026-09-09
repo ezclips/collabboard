@@ -858,14 +858,15 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(drawerEl()!.className).toContain('lg:w-[880px]');
   });
 
-  it('S: the source pane, the dock and the panel render beside the document, never inside it', async () => {
+  it('S: the panel renders beside the document, and the dock sits in the header', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
     const drawer = drawerEl()!;
-    // The document keeps its own pane; the dock and whichever panel is open
-    // sit beside it, so the PDF stays visible and usable either way.
+    // The document keeps its own pane and whichever panel is open sits beside
+    // it, so the PDF stays visible and usable either way. The dock that opens
+    // them is a header control, not a strip taking width from the document.
     const sourcePane = drawer.querySelector('[data-knowledge-reader-workspace]') as HTMLElement;
-    const dock = drawer.querySelector('[data-pdf-workspace-dock-controls]') as HTMLElement;
+    const dock = drawer.querySelector('[data-pdf-reader-dock="true"]') as HTMLElement;
     const panel = drawer.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
     expect(sourcePane).not.toBeNull();
     expect(dock).not.toBeNull();
@@ -874,7 +875,8 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
       expect(sourcePane.contains(beside)).toBe(false);
       expect(beside.contains(sourcePane)).toBe(false);
     }
-    expect(dock.parentElement).toBe(panel.parentElement);
+    expect(drawer.querySelector('[data-knowledge-reader-tabs="true"]')!.contains(dock)).toBe(true);
+    expect(drawer.querySelector('[data-pdf-workspace-dock-controls]')).toBeNull();
   });
 
   it('T: the document workspace takes the majority width, not a fixed column', async () => {
@@ -1018,6 +1020,34 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     // The PDF itself stays beside the panel, not behind it.
     expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace]')).not.toBeNull();
     expect(drawerEl()!.textContent).toContain(PAGE_ONE);
+  });
+
+  it('docks Library and AI in the header, immediately before the close control', async () => {
+    await openDocked();
+    const header = drawerEl()!.querySelector('[data-knowledge-reader-tabs="true"]') as HTMLElement;
+    const controls = Array.from(header.querySelectorAll('button'))
+      .map((node) => node.getAttribute('data-pdf-workspace-dock') ?? node.getAttribute('aria-label'));
+
+    expect(controls.slice(-3)).toEqual(['library', 'ai', 'Close Knowledge reader']);
+    // Compact, and quiet until active: the same 28px square shape the header's
+    // own controls use, never a large filled block.
+    const library = dockButton('library')!;
+    expect(library.className).toContain('h-7');
+    expect(library.className).toContain('w-7');
+    expect(library.className).toContain('rounded-md');
+    expect(library.className).not.toContain('bg-blue-600');
+    // Active keeps its own colour, quietly.
+    expect(library.className).toContain('bg-blue-50');
+    expect(library.className).toContain('text-blue-700');
+
+    await clickDock('ai');
+    expect(dockButton('ai')!.className).toContain('bg-purple-50');
+    expect(dockButton('ai')!.className).toContain('text-purple-700');
+    expect(dockButton('library')!.className).not.toContain('bg-blue-50');
+
+    // Closing the drawer is still the control after them.
+    await closeDrawer();
+    expect(drawerEl()).toBeNull();
   });
 
   it('shows one panel at a time, and the active button closes it', async () => {

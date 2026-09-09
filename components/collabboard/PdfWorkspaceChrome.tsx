@@ -259,6 +259,14 @@ export default function PdfWorkspaceChrome({
             </div>
           </div>
 
+          {/* The reader's two panels, in the header row they belong to and
+              immediately before the control that closes the whole thing. */}
+          <PdfReaderDock
+            panel={rightPanel}
+            aiAvailable={aiAvailable}
+            onPanelChange={onRightPanelChange}
+          />
+
           <button
             type="button"
             data-pdf-workspace-close="true"
@@ -276,11 +284,6 @@ export default function PdfWorkspaceChrome({
         <main data-pdf-workspace-main="true" className="min-w-0 flex-1 overflow-hidden bg-white transition-all duration-150">
           {children}
         </main>
-        <PdfReaderDock
-          panel={rightPanel}
-          aiAvailable={aiAvailable}
-          onPanelChange={onRightPanelChange}
-        />
         {rightPanel !== 'closed' ? (
           <aside
             data-pdf-workspace-right-panel-content="true"

@@ -772,7 +772,20 @@ export default function KnowledgeSourceReaderDrawer({
         {/* No "Add to Board AI" here any more. The open PDF is already the AI
             panel's mandatory context, so a header action that attached the
             same document was a second entry point saying nothing new -- the
-            dock beside the document is the one way in. */}
+            dock in this row is the one way in.
+
+            Hidden below `lg` exactly like the panel it opens: the drawer is
+            420px there, which the document alone already fills, so a control
+            that could only open an invisible panel is withheld instead. */}
+        {onOpenBacklinkTarget ? (
+          <div className="mb-1 hidden items-center lg:flex">
+            <PdfReaderDock
+              panel={sidePanelRightPanel}
+              aiAvailable={boardAiAvailable}
+              onPanelChange={setSidePanelRightPanel}
+            />
+          </div>
+        ) : null}
         <button
           ref={closeButtonRef}
           type="button"
@@ -820,10 +833,11 @@ export default function KnowledgeSourceReaderDrawer({
         </div>
         {/*
           The docked reader's right side, arranged exactly as the focused
-          workspace's: a narrow fixed dock, then at most one panel. Both are a
-          SIBLING of the reading pane, never nested inside it, so the PDF stays
-          visible and usable whichever panel is open -- and closing the panel
-          gives the document the whole drawer.
+          workspace's: at most one panel, opened from the dock in the header
+          above. It is a SIBLING of the reading pane, never nested inside it,
+          so the PDF stays visible and usable whichever panel is open -- and
+          closing the panel gives the document the whole drawer back, with no
+          strip left holding narrow space it no longer needs.
 
           Hidden below `lg`, exactly as the single pane it replaces was: the
           drawer is 420px there, which the document alone already fills. Only
@@ -832,11 +846,6 @@ export default function KnowledgeSourceReaderDrawer({
         */}
         {onOpenBacklinkTarget ? (
           <div className="hidden min-h-0 lg:flex">
-            <PdfReaderDock
-              panel={sidePanelRightPanel}
-              aiAvailable={boardAiAvailable}
-              onPanelChange={setSidePanelRightPanel}
-            />
             {sidePanelRightPanel !== 'closed' ? (
               <div
                 data-knowledge-source-notes-pane="true"
