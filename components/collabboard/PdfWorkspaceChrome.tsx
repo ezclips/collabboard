@@ -32,6 +32,21 @@ export interface PdfWorkspaceChromeProps {
   readonly activeDocumentId: string;
   readonly rightPanel: PdfWorkspaceRightPanel;
   readonly aiAvailable?: boolean;
+  /**
+   * The board's OWN blocking-editor authority, forwarded unchanged.
+   *
+   * This host is `fixed inset-0` and opaque, so a Note opened FROM it -- via
+   * Create Note, or any other editor the board raises -- would sit at the
+   * shared editor tier underneath a surface covering the whole viewport: open
+   * in state, invisible in fact. Yielding is the same answer the canvas
+   * toolbar already gives on this flag, and it changes no z-index anywhere.
+   *
+   * Hidden and inert rather than closed: the workspace stays MOUNTED, so the
+   * open PDF, its page, the right panel and the document-scoped Board AI
+   * session are still there when the editor goes away. Nothing is restored
+   * because nothing was torn down.
+   */
+  readonly yieldsToEditor?: boolean;
   readonly children: React.ReactNode;
   readonly rightPanelContent?: React.ReactNode;
   readonly onActivateTab: (documentId: string) => void;
@@ -49,6 +64,7 @@ export default function PdfWorkspaceChrome({
   activeDocumentId,
   rightPanel,
   aiAvailable = false,
+  yieldsToEditor = false,
   children,
   rightPanelContent,
   onActivateTab,
@@ -91,7 +107,13 @@ export default function PdfWorkspaceChrome({
     <aside
       data-pdf-workspace="true"
       data-pdf-workspace-right-panel={rightPanel}
-      className="fixed inset-0 z-[3100] flex flex-col bg-white"
+      data-pdf-workspace-yielded={yieldsToEditor ? 'true' : 'false'}
+      // The same band, and the same transition, as before: stepping aside is
+      // not a restacking, and invisible alone is not enough -- an opaque
+      // full-viewport host that stayed clickable would still swallow every
+      // click meant for the editor.
+      className={`fixed inset-0 z-[3100] flex flex-col bg-white transition-opacity duration-150${
+        yieldsToEditor ? ' pointer-events-none opacity-0' : ''}`}
       role="complementary"
       aria-label="PDF workspace"
     >

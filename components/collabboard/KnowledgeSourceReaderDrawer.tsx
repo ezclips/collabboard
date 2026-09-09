@@ -642,6 +642,7 @@ export default function KnowledgeSourceReaderDrawer({
         activeDocumentId={activeDocumentId}
         rightPanel={workspaceRightPanel}
         aiAvailable={boardAiAvailable}
+        yieldsToEditor={yieldsToEditor}
         rightPanelContent={rightPanelContent}
         onActivateTab={onWorkspaceTabActivate ?? (() => {})}
         onCloseTab={(documentId) => {

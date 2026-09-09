@@ -372,6 +372,69 @@ describe('PdfWorkspaceChrome', () => {
   });
 });
 
+describe('PdfWorkspaceChrome yields to a blocking editor', () => {
+  /** The board's flag, driven from outside exactly as CanvasClient drives it. */
+  function YieldingWorkspace({ blockingEditorOpen }: { blockingEditorOpen: boolean }) {
+    return (
+      <PdfWorkspaceChrome
+        boardId="board-1"
+        tabs={[alpha]}
+        activeDocumentId={alpha.documentId}
+        rightPanel="library"
+        aiAvailable
+        yieldsToEditor={blockingEditorOpen}
+        rightPanelContent={<div data-testid="panel-context">{alpha.documentId}</div>}
+        onActivateTab={() => {}}
+        onCloseTab={() => {}}
+        onCloseWorkspace={() => {}}
+        onRightPanelChange={() => {}}
+        onUploadedDocument={() => {}}
+        onOpenExistingDocument={() => false}
+      >
+        <div data-testid="active-reader">{alpha.documentId}</div>
+      </PdfWorkspaceChrome>
+    );
+  }
+
+  it('steps aside without unmounting, and comes back unchanged', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mounted.push({ root, container });
+    const render = (blockingEditorOpen: boolean) => {
+      act(() => { root.render(<YieldingWorkspace blockingEditorOpen={blockingEditorOpen} />); });
+    };
+    const host = () => container.querySelector('[data-pdf-workspace="true"]') as HTMLElement;
+
+    render(false);
+    const before = host();
+    expect(host().getAttribute('data-pdf-workspace-yielded')).toBe('false');
+    expect(host().className).not.toContain('opacity-0');
+    expect(host().className).not.toContain('pointer-events-none');
+
+    render(true);
+    // Invisible AND inert: an opaque full-viewport host that stayed clickable
+    // would still swallow every click meant for the editor.
+    expect(host().getAttribute('data-pdf-workspace-yielded')).toBe('true');
+    expect(host().className).toContain('opacity-0');
+    expect(host().className).toContain('pointer-events-none');
+    expect(host().className).toContain('transition-opacity');
+    // Same band, same element, same content: it stepped aside; it did not
+    // move, unmount, or drop the document and panel it was showing.
+    expect(host().className).toContain('z-[3100]');
+    expect(host()).toBe(before);
+    expect(activeReader(container)).toBe(alpha.documentId);
+    expect(host().getAttribute('data-pdf-workspace-right-panel')).toBe('library');
+
+    render(false);
+    expect(host().getAttribute('data-pdf-workspace-yielded')).toBe('false');
+    expect(host().className).not.toContain('opacity-0');
+    expect(host().className).not.toContain('pointer-events-none');
+    expect(host()).toBe(before);
+    expect(activeReader(container)).toBe(alpha.documentId);
+  });
+});
+
 describe('canvas toolbar PDF entry point', () => {
   const groupsFor = (flags: Partial<Parameters<typeof buildCanvasToolbarGroups>[0]>) =>
     buildCanvasToolbarGroups({
