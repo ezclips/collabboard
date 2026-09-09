@@ -146,7 +146,6 @@ import BoardAiChatDrawer, {
 } from '@/components/collabboard/BoardAiChatDrawer';
 import { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import {
-  addBoardAiDraftContext,
   boardAiDraftFromBoardItem,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
@@ -1886,31 +1885,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
 
   /**
-   * The ONE way an outside surface hands Board AI something to attach.
+   * Board AI draft context for ONE PDF, addressed by the document itself.
    *
-   * It does the three things such a handoff always has to do together: queue
-   * the identity (deduplicated and capped by the shared draft contract), bring
-   * Chat forward so the user can see it landed, and let the docked reader
-   * yield the dock through the SAME request counter a normal Chat open uses.
-   * Doing them separately at each call site is how the dock rule drifts.
+   * Keyed by document rather than by whichever PDF host happens to be on
+   * screen: the reader hands off from the focused workspace and from the
+   * docked side panel, and both must land on the same document's attachments.
+   * A board-level queue is deliberately not involved -- a PDF question belongs
+   * to that PDF's own conversation.
    */
-  const addBoardAiChatContext = useCallback((item: BoardAiDraftContextItem) => {
-    setBoardAiChatDraftContext((current) => addBoardAiDraftContext(current, item).items);
-    setIsBoardAiChatOpen(true);
-    setCloseSidePanelRequestId((current) => current + 1);
-  }, []);
-
-  const activePdfAiDraftContext = activePdfId
-    ? pdfWorkspaceAiDraftContextById[activePdfId] ?? []
-    : [];
-
-  const setActivePdfAiDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
-    if (!activePdfId) return;
+  const setPdfAiDraftContextForDocument = useCallback((
+    documentId: string,
+    items: readonly BoardAiDraftContextItem[],
+  ) => {
     setPdfWorkspaceAiDraftContextById((current) => ({
       ...current,
-      [activePdfId]: items,
+      [documentId]: items,
     }));
-  }, [activePdfId]);
+  }, []);
 
   /**
    * The selected board object, reduced to what Board AI could attach.
@@ -8170,6 +8161,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
+              onKnowledgePdfUploaded={handleKnowledgePdfUploaded}
+              onKnowledgePdfSettled={handleKnowledgePdfSettled}
             />
           </div>
         )}
@@ -10382,7 +10375,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
-          onAddBoardAiContext={enableBoardAiChat ? addBoardAiChatContext : undefined}
           workspaceTabs={pdfWorkspaceTabs}
           activeWorkspacePdfId={activePdfId}
           workspaceRightPanel={pdfWorkspaceRightPanel}
@@ -10395,11 +10387,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onWorkspacePdfUploaded={openUploadedPdfInWorkspace}
           onWorkspaceExistingPdfOpen={openExistingPdfInWorkspace}
           onWorkspacePdfSettled={handleKnowledgePdfSettled}
-          workspaceBoardAiDraftContext={enableBoardAiChat ? activePdfAiDraftContext : []}
-          onWorkspaceBoardAiDraftContextChange={enableBoardAiChat ? setActivePdfAiDraftContext : undefined}
+          boardAiDraftContextByDocumentId={enableBoardAiChat ? pdfWorkspaceAiDraftContextById : undefined}
+          onBoardAiDraftContextChange={enableBoardAiChat ? setPdfAiDraftContextForDocument : undefined}
           workspaceActivePageNumber={activePdfId ? pdfWorkspacePageById[activePdfId] ?? null : null}
-          canSaveWorkspaceAssistantAsNote={canUseCanvasToolbar}
-          onSaveWorkspaceAssistantAsNote={enableBoardAiChat && canUseCanvasToolbar ? savePdfAssistantAnswerAsNote : undefined}
+          canSaveAssistantAsNote={canUseCanvasToolbar}
+          onSaveAssistantAsNote={enableBoardAiChat && canUseCanvasToolbar ? savePdfAssistantAnswerAsNote : undefined}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader

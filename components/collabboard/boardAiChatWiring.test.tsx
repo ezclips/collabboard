@@ -255,19 +255,17 @@ describe('10-15. one right-side dock, two directions', () => {
   it('13. the ownership rule has one writer per direction, both reachable', () => {
     // Monotonic and never reset, so every open is a fresh intent.
     expect(CLIENT).toContain('const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);');
-    // Direction A is written only by the REACHABLE open authorities. D2 adds
-    // a second one -- the context handoff, which opens Chat from an outside
-    // surface and so must make the docked reader yield exactly as a toggle
-    // does. Both are entry points a user can actually reach; anything else
-    // writing this counter would be a third, unreviewed dock rule.
+    // Direction A is written only by the REACHABLE open authority -- the Chat
+    // toggle. PDF_READER_UI_CONSOLIDATION_1 removed the second writer with the
+    // board-level context handoff it belonged to: a PDF handoff now lands in
+    // that PDF's own conversation and never takes the dock from the reader.
+    // Anything else writing this counter would be an unreviewed dock rule.
     const bumps = (CLIENT.match(/setCloseSidePanelRequestId\(\(current\) => current \+ 1\)/g) ?? []).length;
-    expect(bumps).toBe(2);
+    expect(bumps).toBe(1);
     const toggle = CLIENT.indexOf('const toggleBoardAiChat');
-    const handoff = CLIENT.indexOf('const addBoardAiChatContext');
-    const outsideBoth = CLIENT.slice(0, toggle)
-      + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'), handoff)
-      + CLIENT.slice(CLIENT.indexOf('const boardAiChatSelectedItem'));
-    expect(outsideBoth).not.toContain('setCloseSidePanelRequestId((current) => current + 1)');
+    const outsideToggle = CLIENT.slice(0, toggle)
+      + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'));
+    expect(outsideToggle).not.toContain('setCloseSidePanelRequestId((current) => current + 1)');
     // ...and direction B only by the reader/workspace openers plus the close action.
     expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(4);
   });

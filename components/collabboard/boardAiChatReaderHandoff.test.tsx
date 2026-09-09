@@ -164,26 +164,37 @@ describe('23,25,26,27,29. the reader drawer hands over identity only', () => {
   const drawer = executable(read('components/collabboard/KnowledgeSourceReaderDrawer.tsx'));
   const canvas = executable(read('app/dashboard/canvas/[id]/CanvasClient.tsx'));
 
-  it('23. the document action exists and carries the document id', () => {
-    expect(drawer).toContain('data-knowledge-reader-add-document-to-chat');
-    expect(drawer).toContain('boardAiDraftFromDocument(reader.documentId, reader.originalFilename)');
+  it('23. the redundant document action is gone -- the open PDF IS the context', () => {
+    // PDF_READER_UI_CONSOLIDATION_1: an "add this document to AI" header
+    // action said nothing the document-scoped panel does not already
+    // guarantee, and it was a second AI entry point in the reader chrome.
+    expect(drawer).not.toContain('data-knowledge-reader-add-document-to-chat');
+    expect(drawer).not.toContain('boardAiDraftFromDocument');
+    // The PDF is still mandatory context -- stated by the panel that shows it.
+    expect(drawer).toContain('documentScope');
   });
 
-  it('25,26. the shell opens Chat and lets the docked reader yield the dock', () => {
-    // One handoff callback, and it is the same one the reader is given.
-    // runtime/image-library-validation: the hand-off is wired exactly as
-    // before, but behind NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT while
+  it('25,26. a PDF handoff lands on that PDF, still behind the Board AI flag', () => {
+    // The board-level queue is no longer the PDF reader's route: a page or a
+    // selection belongs to that document's own conversation, so the shell
+    // hands the reader a per-document store instead.
+    // runtime/image-library-validation: still behind
+    // NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT while
     // 20260902120000_create_board_ai_chat.sql is unapplied in production, so
-    // the reader's "add to AI context" affordance cannot reach missing tables.
+    // the reader's AI affordances cannot reach missing tables.
+    expect(canvas).not.toContain('onAddBoardAiContext=');
     expect(canvas).toContain(
-      'onAddBoardAiContext={enableBoardAiChat ? addBoardAiChatContext : undefined}');
+      'boardAiDraftContextByDocumentId={enableBoardAiChat ? pdfWorkspaceAiDraftContextById : undefined}');
+    expect(canvas).toContain(
+      'onBoardAiDraftContextChange={enableBoardAiChat ? setPdfAiDraftContextForDocument : undefined}');
     const handler = canvas.slice(
-      canvas.indexOf('const addBoardAiChatContext'),
+      canvas.indexOf('const setPdfAiDraftContextForDocument'),
       canvas.indexOf('const boardAiChatSelectedItem'),
     );
-    expect(handler).toContain('setIsBoardAiChatOpen(true)');
-    // The EXISTING close-request counter, not a new mechanism.
-    expect(handler).toContain('setCloseSidePanelRequestId((current) => current + 1)');
+    expect(handler).toContain('[documentId]: items');
+    // Board Chat keeps its own open/dock rules; they are simply not what a
+    // PDF handoff uses any more.
+    expect(canvas).toContain('setCloseSidePanelRequestId((current) => current + 1)');
   });
 
   it('27,29. the reader stays unconditionally mounted, and PDF workspace AI reuses the Board AI drawer', () => {
@@ -198,12 +209,12 @@ describe('23,25,26,27,29. the reader drawer hands over identity only', () => {
   });
 
   it('the reader never sends page or document TEXT to Board AI', () => {
-    const action = drawer.slice(
-      drawer.indexOf('data-knowledge-reader-add-document-to-chat'),
-      drawer.indexOf('Add to Board AI'),
+    const handoff = drawer.slice(
+      drawer.indexOf('const handOffToBoardAi'),
+      drawer.indexOf('const handOffToBoardAi') + 900,
     );
     for (const forbidden of ['reader.pages', 'page.text', 'pageText']) {
-      expect(action, forbidden).not.toContain(forbidden);
+      expect(handoff, forbidden).not.toContain(forbidden);
     }
   });
 });
@@ -261,25 +272,26 @@ describe('the shell owns draft context, and owns it narrowly', () => {
 describe('52-57. PDF workspace AI handoff stays inside the focused workspace', () => {
   const drawer = executable(read('components/collabboard/KnowledgeSourceReaderDrawer.tsx'));
 
-  it('52,53,54. every explicit handoff goes through one wrapper', () => {
+  it('52,53,54. every explicit handoff goes through one wrapper, in BOTH hosts', () => {
     const wrapper = drawer.slice(
       drawer.indexOf('const handOffToBoardAi'),
       drawer.indexOf('const handOffToBoardAi') + 900,
     );
-    // In the workspace, the handoff queues optional context into the embedded
-    // PDF AI pane and keeps the reader open.
-    expect(wrapper).toContain('onWorkspaceBoardAiDraftContextChange');
-    expect(wrapper.indexOf('onWorkspaceBoardAiDraftContextChange'))
+    // Queue the identity on THIS document's draft, then bring the AI panel
+    // forward beside the PDF -- the reader stays open either way.
+    expect(wrapper).toContain('onBoardAiDraftContextChange(documentId, addBoardAiDraftContext(current, item).items)');
+    expect(wrapper.indexOf('onBoardAiDraftContextChange(documentId'))
       .toBeLessThan(wrapper.indexOf("onWorkspaceRightPanelChange?.('ai')"));
     expect(wrapper).toContain("onWorkspaceRightPanelChange?.('ai')");
-    // The docked board-level fallback still exists for side-panel handoffs.
-    expect(wrapper).toContain('onAddBoardAiContext?.(item)');
+    // The docked host opens its OWN dock rather than the board-level chat.
+    expect(wrapper).toContain("setSidePanelRightPanel('ai')");
+    expect(wrapper).not.toContain('onAddBoardAiContext');
     expect(wrapper).toContain("presentation === 'workspace'");
 
-    // 52. The document action, 53/54 the page and selection actions inside
-    // KnowledgeDocumentDetails, all use the wrapper rather than the raw prop.
-    expect(drawer).toContain('onClick={() => handOffToBoardAi(');
-    expect(drawer).toContain('onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}');
+    // 53/54: the page and selection actions inside KnowledgeDocumentDetails
+    // use the wrapper rather than any raw prop, in both hosts.
+    expect((drawer.match(/onAddBoardAiContext=\{boardAiAvailable \? handOffToBoardAi : undefined\}/g) ?? []))
+      .toHaveLength(2);
   });
 
   it('55. workspace handoff does not open a second/floating board AI drawer', () => {
@@ -302,6 +314,6 @@ describe('52-57. PDF workspace AI handoff stays inside the focused workspace', (
     const canvas = executable(read('app/dashboard/canvas/[id]/CanvasClient.tsx'));
     expect(canvas).toMatch(/<KnowledgeSourceReaderDrawer\b/);
     expect(canvas).not.toMatch(/&&\s*<KnowledgeSourceReaderDrawer/);
-    expect(canvas).toContain('workspaceBoardAiDraftContext={enableBoardAiChat ? activePdfAiDraftContext : []}');
+    expect(canvas).toContain('boardAiDraftContextByDocumentId={enableBoardAiChat ? pdfWorkspaceAiDraftContextById : undefined}');
   });
 });

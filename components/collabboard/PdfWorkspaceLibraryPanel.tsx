@@ -2,7 +2,15 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
-import { useKnowledgeSourceNoteSummariesForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import {
+  useKnowledgeSourceNoteSummariesForDocument,
+  useKnowledgeStandaloneHighlights,
+} from '@/components/collabboard/KnowledgeSourceReferenceContext';
+import {
+  SOURCE_NOTE_PLACEMENT_MIME,
+  serializeKnowledgeSourceNotePlacementDrag,
+} from '@/lib/domain/knowledge/knowledgeSourceNotePlacement';
+import type { KnowledgeSourceHighlight } from '@/lib/domain/knowledge/knowledgeSourceHighlight';
 import { fetchLibraryItems } from '@/lib/collabboard/library';
 import type { LibraryItem } from '@/lib/collabboard/library';
 import {
@@ -11,12 +19,21 @@ import {
 } from '@/lib/domain/canvas/pdfWorkspaceLibraryImages';
 import type { KnowledgeSourceNoteSummary } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
 
-export type PdfWorkspaceLibraryFilter = 'all' | 'notes' | 'images';
+/**
+ * The type filters INSIDE one PDF's slice of the one Library.
+ *
+ * Deliberately types, never sources: the active document is the mandatory
+ * primary scope and no filter here can widen or clear it. There is no separate
+ * "AI Notes" type either -- a Note saved from an AI answer is an ordinary
+ * source-linked Note and appears under Notes with the rest.
+ */
+export type PdfWorkspaceLibraryFilter = 'all' | 'notes' | 'images' | 'highlights';
 
 const FILTERS: ReadonlyArray<{ id: PdfWorkspaceLibraryFilter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'notes', label: 'Notes' },
   { id: 'images', label: 'Images' },
+  { id: 'highlights', label: 'Highlights' },
 ];
 
 interface ImageState {
@@ -29,6 +46,18 @@ interface ImageState {
 export interface PdfWorkspaceLibraryPanelProps {
   readonly documentId: string;
   readonly onOpenNote: (targetPadletId: string) => void;
+  /**
+   * The board's existing placement authority, forwarded verbatim. Present only
+   * in the docked reader, where a Note row can be dragged back onto a board
+   * that is still on screen -- the drag payload is the SAME identity-only one
+   * the Source Notes panel has always written.
+   */
+  readonly canDragNote?: (targetPadletId: string) => boolean;
+  /** Sends the reader to a highlight's own page, in either host. */
+  readonly onNavigateToPage?: (request: {
+    readonly documentId: string;
+    readonly pageNumber: number;
+  }) => void;
   readonly onNavigateToImagePage?: (request: {
     readonly libraryItemId: string;
     readonly documentId: string;
@@ -40,15 +69,26 @@ export interface PdfWorkspaceLibraryPanelProps {
 function NoteRow({
   note,
   onOpenNote,
+  draggable,
 }: {
   note: KnowledgeSourceNoteSummary;
   onOpenNote: (targetPadletId: string) => void;
+  draggable?: boolean;
 }) {
   return (
     <li data-pdf-workspace-library-note={note.targetPadletId}>
       <button
         type="button"
         onClick={() => onOpenNote(note.targetPadletId)}
+        draggable={draggable || undefined}
+        title={draggable ? 'Drag to reposition this Note on the board' : undefined}
+        onDragStart={(event) => {
+          if (!draggable) { event.preventDefault(); return; }
+          event.stopPropagation();
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData(SOURCE_NOTE_PLACEMENT_MIME,
+            serializeKnowledgeSourceNotePlacementDrag(note.targetPadletId));
+        }}
         className="block w-full rounded-lg border border-gray-100 bg-white p-2 text-left transition hover:border-gray-200 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
         style={note.accentColor ? { borderLeftColor: note.accentColor, borderLeftWidth: 3 } : undefined}
       >
@@ -126,13 +166,53 @@ function ImageRow({
   );
 }
 
+/** One standalone highlight, and the page it marks. */
+function HighlightRow({
+  highlight,
+  documentId,
+  onNavigateToPage,
+}: {
+  highlight: KnowledgeSourceHighlight;
+  documentId: string;
+  onNavigateToPage?: PdfWorkspaceLibraryPanelProps['onNavigateToPage'];
+}) {
+  const canNavigate = Boolean(onNavigateToPage)
+    && Number.isInteger(highlight.pageNumber)
+    && highlight.pageNumber >= 1;
+  return (
+    <li data-pdf-workspace-library-highlight={highlight.id}>
+      <button
+        type="button"
+        disabled={!canNavigate}
+        aria-label={`Go to page ${highlight.pageNumber}`}
+        onClick={() => {
+          if (!canNavigate) return;
+          onNavigateToPage?.({ documentId, pageNumber: highlight.pageNumber });
+        }}
+        className="block w-full rounded-lg border border-gray-100 bg-white p-2 text-left transition hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-default"
+        style={{ borderLeftColor: highlight.color, borderLeftWidth: 3 }}
+      >
+        <p className="line-clamp-2 text-[11px] text-gray-700">{highlight.quoteText}</p>
+        <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          p. {highlight.pageNumber}
+        </p>
+      </button>
+    </li>
+  );
+}
+
 export default function PdfWorkspaceLibraryPanel({
   documentId,
   onOpenNote,
+  canDragNote,
+  onNavigateToPage,
   onNavigateToImagePage,
   loadLibraryItems = fetchLibraryItems,
 }: PdfWorkspaceLibraryPanelProps) {
   const notes = useKnowledgeSourceNoteSummariesForDocument(documentId);
+  // The board's own highlight index, read in the same direction as the Notes
+  // above: this panel issues no query of its own for either.
+  const highlights = useKnowledgeStandaloneHighlights(documentId);
   const [filter, setFilter] = useState<PdfWorkspaceLibraryFilter>('all');
   const [imageState, setImageState] = useState<ImageState>({
     documentId,
@@ -171,17 +251,20 @@ export default function PdfWorkspaceLibraryPanel({
   const imagesError = imageState.documentId === documentId && imageState.error;
   const showNotes = filter === 'all' || filter === 'notes';
   const showImages = filter === 'all' || filter === 'images';
+  const showHighlights = filter === 'all' || filter === 'highlights';
   const empty = filter === 'all'
     && !imagesLoading
     && !imagesError
     && notes.length === 0
-    && images.length === 0;
+    && images.length === 0
+    && highlights.length === 0;
 
   const filterCounts = useMemo(() => ({
-    all: notes.length + images.length,
+    all: notes.length + images.length + highlights.length,
     notes: notes.length,
     images: images.length,
-  }), [images.length, notes.length]);
+    highlights: highlights.length,
+  }), [highlights.length, images.length, notes.length]);
 
   return (
     <div data-pdf-workspace-library-panel="true" data-pdf-workspace-library-document={documentId}>
@@ -224,7 +307,12 @@ export default function PdfWorkspaceLibraryPanel({
           ) : (
             <ul className="space-y-1.5">
               {notes.map((note) => (
-                <NoteRow key={note.targetPadletId} note={note} onOpenNote={onOpenNote} />
+                <NoteRow
+                  key={note.targetPadletId}
+                  note={note}
+                  onOpenNote={onOpenNote}
+                  draggable={canDragNote?.(note.targetPadletId) ?? false}
+                />
               ))}
             </ul>
           )}
@@ -259,9 +347,29 @@ export default function PdfWorkspaceLibraryPanel({
         </section>
       ) : null}
 
+      {showHighlights ? (
+        <section data-pdf-workspace-library-highlights="true" className="mt-4">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Highlights</p>
+          {highlights.length === 0 ? (
+            <p className="text-[11px] text-gray-500">No highlights on this PDF yet.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {highlights.map((highlight) => (
+                <HighlightRow
+                  key={highlight.id}
+                  highlight={highlight}
+                  documentId={documentId}
+                  onNavigateToPage={onNavigateToPage}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
       {empty ? (
         <p data-pdf-workspace-library-empty="true" className="mt-3 text-[11px] text-gray-500">
-          No Notes or Images for this PDF yet.
+          Nothing in the Library for this PDF yet.
         </p>
       ) : null}
     </div>

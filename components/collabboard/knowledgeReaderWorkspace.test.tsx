@@ -82,13 +82,16 @@ describe('7-13. the Library panel owns the document identity', () => {
     expect(pane).toContain('<UsedInNotes scope="document"');
   });
 
-  it('11-12. the reference links and Source Notes are the existing ones', () => {
+  it('11-12. the reference links and the Notes list are the existing ones', () => {
     const pane = libraryPane();
-    // Imported, not reimplemented: one UsedInNotes, one Source Notes panel.
-    expect(pane).toContain('<KnowledgeSourceNotesPanel documentId={reader.documentId}');
+    // Imported, not reimplemented: one UsedInNotes, and the SAME unified
+    // Library panel the focused workspace renders -- the docked reader holds
+    // no second notion of what this PDF's Library contains.
+    expect(pane).toContain('<PdfWorkspaceLibraryPanel');
+    expect(pane).toContain('documentId={reader.documentId}');
     // Line-ending agnostic: this repo has mixed CRLF/LF sources.
     expect(DRAWER).toMatch(/import KnowledgeDocumentDetails, \{\s*UsedInNotes,\s*pageCountSummary,/);
-    expect((DRAWER.match(/<KnowledgeSourceNotesPanel/g) || []).length).toBe(1);
+    expect(DRAWER).not.toContain('<KnowledgeSourceNotesPanel');
     // And the rows come from the same board index, not a second fetch.
     expect(DRAWER).toContain('useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null)');
     expect(DRAWER).toContain('knowledgeSourceBacklinkDocumentRows(libraryBacklinks)');
@@ -99,7 +102,9 @@ describe('7-13. the Library panel owns the document identity', () => {
   });
 
   it('13. the workspace no longer repeats that metadata above the document', () => {
-    expect(DRAWER).toContain('hostRendersDocumentHeader={!!onOpenBacklinkTarget}');
+    // Suppressed only while the panel that shows it is actually open: closing
+    // the dock hands the header back to the reading pane.
+    expect(DRAWER).toContain("hostRendersDocumentHeader={!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed'}");
     expect(DETAILS).toContain('hostRendersDocumentHeader = false');
     // Suppressed only when a host actually shows it, so Back to PDFs and the
     // filename can never disappear entirely.
@@ -254,10 +259,14 @@ describe('38-45. Open and Side panel are two hosts for one reader', () => {
 
   it('45. both hosts keep the same panels and functions', () => {
     const code = executable(DRAWER);
-    // One workspace slot, one Library slot, whichever host draws them.
-    expect((code.match(/data-knowledge-reader-workspace="true"/g) || []).length).toBe(1);
+    // One reading slot per host, one Library slot, and -- since the docked
+    // reader now docks the same two panels the workspace does -- one dock
+    // component and one Library panel serving both.
     expect((code.match(/data-knowledge-library-panel="true"/g) || []).length).toBe(1);
-    expect((code.match(/<KnowledgeDocumentDetails/g) || []).length).toBe(1);
+    expect((code.match(/<PdfReaderDock/g) || []).length).toBe(1);
+    expect((code.match(/<PdfWorkspaceLibraryPanel/g) || []).length).toBe(2);
+    expect((code.match(/<BoardAiChatDrawer/g) || []).length).toBe(2);
+    expect((code.match(/<KnowledgeDocumentDetails/g) || []).length).toBe(2);
   });
 });
 
@@ -268,11 +277,14 @@ describe('30-37. everything outside the reader is untouched', () => {
     expect(SURFACE).toContain("(disabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-black/10')");
   });
 
-  it('31-32. Add PDF stays in Media, driven by the native label', () => {
-    expect(REGISTRY).toContain('type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_INPUT_ID,');
+  it('31-32. the PDF tool stays in Media, driven by the native label', () => {
+    expect(REGISTRY).toContain('type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,');
     const media = REGISTRY.slice(REGISTRY.indexOf("id: 'media'"), REGISTRY.indexOf("id: 'draw'"));
     expect(media).toContain('knowledge-pdf');
     expect(SIDEBAR).toContain('htmlFor={tool.activatesInputId}');
+    // The toolbar owns the input the label points at, on its own id so the
+    // workspace's uploader is never the one a board-level click reaches.
+    expect(SIDEBAR).toContain('inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}');
   });
 
   it('33. the Note source marker still opens the reader', () => {
@@ -288,8 +300,10 @@ describe('30-37. everything outside the reader is untouched', () => {
     const code = executable(DRAWER) + executable(DETAILS);
     expect(code).not.toMatch(/anthropic|openai|byok/i);
     expect(code).not.toMatch(/migration|supabase\/functions|workers\//i);
-    // The one-shot Source AI panel still exists; this patch adds no chat.
-    expect(DRAWER).toContain('KnowledgeSourceAIPanel');
+    // The PDF reader's AI is now the board's own private chat, document
+    // scoped -- one surface, no second provider, no second backend.
+    expect(DRAWER).not.toContain('KnowledgeSourceAIPanel');
+    expect(DRAWER).toContain('BoardAiChatDrawer');
     expect(executable(DRAWER)).not.toContain('BoardAIChat');
   });
 });

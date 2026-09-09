@@ -7,6 +7,7 @@ import {
   CloudDownload,
   Columns3,
   FileText,
+  FileUp,
   Heading,
   Image as ImageIcon,
   Link,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { ChronoMode } from '@/types/collabboard';
 import type { SidebarToolGroup } from './CanvasSidebar';
+import { KNOWLEDGE_PDF_TOOLBAR_INPUT_ID } from '@/components/collabboard/KnowledgePdfUploader';
 
 export type CanvasToolbarFlags = {
   isMapLayout: boolean;
@@ -35,9 +37,13 @@ export type CanvasToolbarFlags = {
   /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
   isDrawingLayout: boolean;
   /**
-   * Kept for the existing direct-PDF placement guard. A1 moves the visible PDF
-   * entry points into the focused workspace tab row, so the toolbar registry no
-   * longer emits the PDF upload or existing-document actions.
+   * True only on the one layout that ships direct PDF canvas objects; gates the
+   * pinned PDF entry in the Media group. Derive it with
+   * {@link isDirectPdfCanvasLayout} -- never from `isFreeformLayout`, which is
+   * a catch-all that also swallows Table/Stream and any unrecognised layout.
+   * Outside the allowlist the tool is absent from the registry entirely rather
+   * than rendered disabled, so no unsupported host can mount a control that
+   * opens the picker.
    */
   isDirectPdfLayout: boolean;
 };
@@ -56,9 +62,10 @@ export type CanvasToolbarFlags = {
  * insert, but it is deliberately EXCLUDED here: container-hosted posts vanish
  * from Drawing's rendering after a board reload. That defect is generic to the
  * Drawing host -- an ordinary Note reproduces it -- so it is not fixed by this
- * predicate and is tracked as DRAWING_CONTAINER_HOST_RELOAD_DEFECT. Shipping
- * Enabling toolbar PDF insertion there would expose a known-broken experience. Re-add 'drawing' here,
- * and nowhere else, once that host defect is fixed and independently verified.
+ * predicate and is tracked as DRAWING_CONTAINER_HOST_RELOAD_DEFECT. Enabling
+ * toolbar PDF insertion there would expose a known-broken experience. Re-add
+ * 'drawing' here, and nowhere else, once that host defect is fixed and
+ * independently verified.
  */
 export function isDirectPdfCanvasLayout(layout: string | null | undefined): boolean {
   return layout === 'freeform';
@@ -97,6 +104,7 @@ export function buildCanvasToolbarGroups({
   canManageCanvasShare,
   canUseFreeformEditButton,
   isDrawingLayout,
+  isDirectPdfLayout,
 }: CanvasToolbarFlags): SidebarToolGroup[] {
   const canvasSpecificTools = [
     { icon: MoveRight, label: "Line", color: "text-gray-600", bg: "hover:bg-gray-50", type: "line" },
@@ -160,6 +168,23 @@ export function buildCanvasToolbarGroups({
       tools: [
         { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
         { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
+        // PDF belongs in Media, and two properties keep it working there.
+        // `pinned` keeps it rendered inline even when Media overflows into the
+        // More menu -- that menu dispatches after it has closed, by which point
+        // the browser will no longer open a file dialog. `activatesInputId`
+        // makes the control a real <label htmlFor>, so the BROWSER opens the
+        // dialog natively instead of JavaScript calling input.click(). Remove
+        // either one and "PDF does nothing" returns.
+        //
+        // ONE entry, deliberately. Re-placing a PDF the board already has is
+        // reached through the PDF workspace's own "+" flow, so no second
+        // toolbar button competes with this one.
+        ...(isDirectPdfLayout ? [
+          {
+            icon: FileUp, label: "PDF", color: "text-rose-700", bg: "hover:bg-rose-50",
+            type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
+          },
+        ] : []),
         { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
         { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
       ],

@@ -7,12 +7,20 @@ import PdfWorkspaceChrome, {
   type PdfWorkspaceRightPanel,
   type PdfWorkspaceTab,
 } from './PdfWorkspaceChrome';
-import { buildCanvasToolbarGroups } from './canvas/ui/canvasToolbarRegistry';
+import {
+  buildCanvasToolbarGroups,
+  isDirectPdfCanvasLayout,
+} from './canvas/ui/canvasToolbarRegistry';
+import {
+  KNOWLEDGE_PDF_INPUT_ID,
+  KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
+} from './KnowledgePdfUploader';
 
 vi.mock('@/components/collabboard/KnowledgePdfUploader', async () => {
   const ReactModule = await import('react');
   return {
     KNOWLEDGE_PDF_INPUT_ID: 'knowledge-pdf-file-input',
+    KNOWLEDGE_PDF_TOOLBAR_INPUT_ID: 'knowledge-pdf-toolbar-file-input',
     default: ReactModule.forwardRef(function MockKnowledgePdfUploader() {
       return <input id="knowledge-pdf-file-input" data-testid="knowledge-pdf-uploader" type="file" hidden />;
     }),
@@ -364,25 +372,51 @@ describe('PdfWorkspaceChrome', () => {
   });
 });
 
-describe('canvas toolbar PDF workspace entry points', () => {
-  it('removes old PDF toolbar actions while preserving the generic board Library tool', () => {
-    const groups = buildCanvasToolbarGroups({
+describe('canvas toolbar PDF entry point', () => {
+  const groupsFor = (flags: Partial<Parameters<typeof buildCanvasToolbarGroups>[0]>) =>
+    buildCanvasToolbarGroups({
       isMapLayout: false,
-      isFreeformLayout: true,
+      isFreeformLayout: false,
       isFreeformGraphMode: false,
       isTimelineLayout: false,
       chronoMode: null,
       canManageCanvasShare: false,
       canUseFreeformEditButton: false,
       isDrawingLayout: false,
-      isDirectPdfLayout: true,
+      isDirectPdfLayout: false,
+      ...flags,
     });
-    const tools = groups.flatMap((group) => group.tools);
 
-    expect(tools.some((tool) => tool.type === 'knowledge-pdf')).toBe(false);
-    expect(tools.some((tool) => tool.type === 'knowledge-pdf-existing')).toBe(false);
-    expect(tools.some((tool) => tool.label === 'Add PDF')).toBe(false);
-    expect(tools.some((tool) => tool.label === 'Use existing PDF')).toBe(false);
-    expect(tools.some((tool) => tool.type === 'library' && tool.label === 'Library')).toBe(true);
+  it('offers ONE PDF tool in Media where direct PDF placement is supported', () => {
+    const media = groupsFor({ isFreeformLayout: true, isDirectPdfLayout: true })
+      .find((group) => group.id === 'media');
+    const pdfTools = (media?.tools ?? []).filter((tool) => tool.type.startsWith('knowledge-pdf'));
+
+    expect(pdfTools).toHaveLength(1);
+    expect(pdfTools[0].label).toBe('PDF');
+    // Pinned and label-driven: the More menu dispatches after it has closed, by
+    // which point the browser will not open a file dialog for us.
+    expect(pdfTools[0].pinned).toBe(true);
+    expect(pdfTools[0].activatesInputId).toBe(KNOWLEDGE_PDF_TOOLBAR_INPUT_ID);
+    // Re-placing an existing PDF stays in the workspace "+" flow.
+    expect(pdfTools.some((tool) => tool.type === 'knowledge-pdf-existing')).toBe(false);
+    // Its own input id, so the workspace's uploader cannot be reached by it.
+    expect(pdfTools[0].activatesInputId).not.toBe(KNOWLEDGE_PDF_INPUT_ID);
+  });
+
+  it('withholds it entirely outside the direct-PDF allowlist, Drawing included', () => {
+    for (const flags of [
+      {},
+      { isDrawingLayout: true },
+      { isTimelineLayout: true },
+      { isFreeformLayout: true },
+    ]) {
+      const tools = groupsFor(flags).flatMap((group) => group.tools);
+      expect(tools.some((tool) => tool.type.startsWith('knowledge-pdf'))).toBe(false);
+      // The generic board Library tool is untouched by any of this.
+      expect(tools.some((tool) => tool.type === 'library' && tool.label === 'Library')).toBe(true);
+    }
+    expect(isDirectPdfCanvasLayout('drawing')).toBe(false);
+    expect(isDirectPdfCanvasLayout('freeform')).toBe(true);
   });
 });

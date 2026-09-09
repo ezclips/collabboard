@@ -55,6 +55,17 @@ export interface KnowledgePdfUploadResult extends KnowledgePdfPlacementSource {
  */
 export const KNOWLEDGE_PDF_INPUT_ID = 'knowledge-pdf-file-input';
 
+/**
+ * The MAIN TOOLBAR's own input id, deliberately different from the one above.
+ *
+ * Two uploaders can be mounted at once -- the board toolbar's and the focused
+ * PDF workspace's, which covers the board rather than unmounting it. A shared
+ * DOM id would make both label controls resolve to whichever input happens to
+ * come first in the document, so the workspace's Upload PDF would silently run
+ * the board's canvas-placement handler instead of its own.
+ */
+export const KNOWLEDGE_PDF_TOOLBAR_INPUT_ID = 'knowledge-pdf-toolbar-file-input';
+
 export interface KnowledgePdfUploaderHandle {
   openPicker(): void;
 }
@@ -74,6 +85,12 @@ export interface KnowledgePdfUploaderProps {
    * the placement's stored status can converge without a second poll loop.
    */
   onDocumentSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
+  /**
+   * Which DOM id this uploader's hidden input takes. Defaults to the single
+   * shared id; a host that can be on screen beside another uploader passes its
+   * own, so each label reaches the input that belongs to it.
+   */
+  inputId?: string;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -221,7 +238,7 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({ onKnowledgeChanged, onDocumentUploaded, onDocumentSettled }, ref) {
+const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({ onKnowledgeChanged, onDocumentUploaded, onDocumentSettled, inputId = KNOWLEDGE_PDF_INPUT_ID }, ref) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -312,7 +329,7 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
     <>
       <input
         ref={inputRef}
-        id={KNOWLEDGE_PDF_INPUT_ID}
+        id={inputId}
         type="file"
         accept="application/pdf,.pdf"
         className="sr-only"

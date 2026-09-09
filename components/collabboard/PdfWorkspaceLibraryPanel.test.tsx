@@ -9,6 +9,7 @@ import PdfWorkspaceLibraryPanel from './PdfWorkspaceLibraryPanel';
 import { selectPdfWorkspaceLibraryImages } from '@/lib/domain/canvas/pdfWorkspaceLibraryImages';
 import type { LibraryItem } from '@/lib/collabboard/library';
 import type { KnowledgeSourceNoteSummary } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
+import type { KnowledgeSourceHighlight } from '@/lib/domain/knowledge/knowledgeSourceHighlight';
 
 const DOC_A = '11111111-1111-4111-8111-111111111111';
 const DOC_B = '22222222-2222-4222-8222-222222222222';
@@ -17,10 +18,16 @@ const IMG_A2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
 const IMG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 let notesByDocument = new Map<string, readonly KnowledgeSourceNoteSummary[]>();
+let highlightsByDocument = new Map<string, readonly KnowledgeSourceHighlight[]>();
 
 vi.mock('@/components/collabboard/KnowledgeSourceReferenceContext', () => ({
   useKnowledgeSourceNoteSummariesForDocument: (documentId: string | null | undefined) => (
     documentId ? notesByDocument.get(documentId) ?? [] : []
+  ),
+  // The SAME board-level index the reader already holds -- the panel adds no
+  // query of its own for highlights either.
+  useKnowledgeStandaloneHighlights: (documentId: string | null | undefined) => (
+    documentId ? highlightsByDocument.get(documentId) ?? [] : []
   ),
 }));
 
@@ -36,7 +43,32 @@ beforeAll(() => {
 
 beforeEach(() => {
   notesByDocument = new Map();
+  highlightsByDocument = new Map();
 });
+
+const highlight = (
+  id: string,
+  documentId: string,
+  pageNumber: number,
+  quoteText = 'marked passage',
+): KnowledgeSourceHighlight => ({
+  id,
+  sourceDocumentId: documentId,
+  pageNumber,
+  charStart: 0,
+  charEnd: quoteText.length,
+  quoteText,
+  quoteHash: null,
+  color: '#fde68a',
+  createdBy: null,
+  createdAt: '2026-09-08T10:00:00.000Z',
+  updatedAt: '2026-09-08T10:00:00.000Z',
+  sourceReferenceId: null,
+} as KnowledgeSourceHighlight);
+
+const highlightIds = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<HTMLElement>('[data-pdf-workspace-library-highlight]'))
+    .map((node) => node.dataset.pdfWorkspaceLibraryHighlight);
 
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
 
@@ -322,7 +354,7 @@ describe('PdfWorkspaceLibraryPanel', () => {
     expect(imageIds(container)).toEqual([IMG_A1]);
     const filters = Array.from(container.querySelectorAll<HTMLElement>('[data-pdf-workspace-library-filter]'))
       .map((node) => node.dataset.pdfWorkspaceLibraryFilter);
-    expect(filters).toEqual(['all', 'notes', 'images']);
+    expect(filters).toEqual(['all', 'notes', 'images', 'highlights']);
     expect(container.querySelector('[data-pdf-workspace-library-filters="true"]')?.className).toContain('flex-nowrap');
     expect(container.querySelector('[data-pdf-workspace-library-filters="true"]')?.className).toContain('overflow-x-auto');
     expect(container.querySelector(`[data-pdf-workspace-library-image-go="${IMG_A1}"]`)?.className).toContain('group');
@@ -338,9 +370,62 @@ describe('PdfWorkspaceLibraryPanel', () => {
     expect(imageIds(container)).toEqual([IMG_A1]);
     expect(imageIds(container)).not.toContain(IMG_B);
 
+    click(container.querySelector('[data-pdf-workspace-library-filter="highlights"]'));
+    expect(noteIds(container)).toEqual([]);
+    expect(imageIds(container)).toEqual([]);
+    expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
+
     click(container.querySelector('[data-pdf-workspace-library-filter-reset="true"]'));
     expect(noteIds(container)).toEqual(['note-a']);
     expect(imageIds(container)).toEqual([IMG_A1]);
+  });
+
+  it('lists this PDF\'s standalone highlights, scoped and navigable, under their own filter', async () => {
+    highlightsByDocument.set(DOC_A, [highlight('hl-a1', DOC_A, 4, 'the marked passage')]);
+    highlightsByDocument.set(DOC_B, [highlight('hl-b1', DOC_B, 2)]);
+    const navigated: Array<{ documentId: string; pageNumber: number }> = [];
+    const container = mount(
+      <PdfWorkspaceLibraryPanel
+        documentId={DOC_A}
+        onOpenNote={() => {}}
+        onNavigateToPage={(request) => { navigated.push({ ...request }); }}
+        loadLibraryItems={async () => []}
+      />,
+    );
+    await flush();
+
+    // Active-PDF scope is mandatory: another document's highlight is absent.
+    expect(highlightIds(container)).toEqual(['hl-a1']);
+    expect(container.textContent).toContain('the marked passage');
+
+    click(container.querySelector('[data-pdf-workspace-library-filter="highlights"]'));
+    expect(highlightIds(container)).toEqual(['hl-a1']);
+    expect(container.querySelector('[data-pdf-workspace-library-filter="highlights"]')?.textContent).toContain('1');
+
+    click(container.querySelector('[data-pdf-workspace-library-highlight="hl-a1"] button'));
+    expect(navigated).toEqual([{ documentId: DOC_A, pageNumber: 4 }]);
+  });
+
+  it('offers a Note row for dragging only where the board can accept one', async () => {
+    notesByDocument.set(DOC_A, [note('note-a', 'A note')]);
+    const readOnly = mount(
+      <PdfWorkspaceLibraryPanel documentId={DOC_A} onOpenNote={() => {}} loadLibraryItems={async () => []} />,
+    );
+    await flush();
+    expect(readOnly.querySelector('[data-pdf-workspace-library-note="note-a"] button')
+      ?.getAttribute('draggable')).toBeNull();
+
+    const draggable = mount(
+      <PdfWorkspaceLibraryPanel
+        documentId={DOC_A}
+        onOpenNote={() => {}}
+        canDragNote={(targetPadletId) => targetPadletId === 'note-a'}
+        loadLibraryItems={async () => []}
+      />,
+    );
+    await flush();
+    expect(draggable.querySelector('[data-pdf-workspace-library-note="note-a"] button')
+      ?.getAttribute('draggable')).toBe('true');
   });
 
   it('does not render Page Grid, global Library rows, storage derivation, or creation APIs', () => {

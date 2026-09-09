@@ -31,6 +31,14 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ id: BOARD_ID }),
 }));
 
+// The Library panel's durable-image read. Mocked because the real module
+// builds a Supabase client at import time, which needs env this suite has no
+// business carrying -- every Library assertion here is about the reader's own
+// wiring, never about that fetch.
+vi.mock('@/lib/collabboard/library', () => ({
+  fetchLibraryItems: vi.fn(async () => []),
+}));
+
 const drawerCode = fs
   .readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgeSourceReaderDrawer.tsx'), 'utf8')
   .replace(/^\s*\/\/.*$/gm, '');
@@ -850,20 +858,23 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(drawerEl()!.className).toContain('lg:w-[880px]');
   });
 
-  it('S: the source pane and the Source Notes pane render as siblings, never nested', async () => {
+  it('S: the source pane, the dock and the panel render beside the document, never inside it', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
     const drawer = drawerEl()!;
-    // The document workspace and the Library pane are siblings; the workspace
-    // now scrolls internally, so it is addressed by its own marker rather than
-    // by being the first scrolling element.
+    // The document keeps its own pane; the dock and whichever panel is open
+    // sit beside it, so the PDF stays visible and usable either way.
     const sourcePane = drawer.querySelector('[data-knowledge-reader-workspace]') as HTMLElement;
-    const notesPane = drawer.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+    const dock = drawer.querySelector('[data-pdf-workspace-dock-controls]') as HTMLElement;
+    const panel = drawer.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
     expect(sourcePane).not.toBeNull();
-    expect(notesPane).not.toBeNull();
-    expect(notesPane.parentElement).toBe(sourcePane.parentElement);
-    expect(sourcePane.contains(notesPane)).toBe(false);
-    expect(notesPane.contains(sourcePane)).toBe(false);
+    expect(dock).not.toBeNull();
+    expect(panel).not.toBeNull();
+    for (const beside of [dock, panel]) {
+      expect(sourcePane.contains(beside)).toBe(false);
+      expect(beside.contains(sourcePane)).toBe(false);
+    }
+    expect(dock.parentElement).toBe(panel.parentElement);
   });
 
   it('T: the document workspace takes the majority width, not a fixed column', async () => {
@@ -878,13 +889,16 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(workspace.className).not.toContain('flex-none');
   });
 
-  it('U: the Library pane is 300px wide and hidden below lg', async () => {
+  it('U: the Library pane is 300px wide, and dock plus panel are hidden below lg', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
     const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
     expect(notesPane.className).toContain('w-[300px]');
-    expect(notesPane.className).toContain('hidden');
-    expect(notesPane.className).toContain('lg:block');
+    // The breakpoint moved one level out, to the column that holds BOTH the
+    // dock and the panel: below lg the drawer is 420px, which the document
+    // alone already fills.
+    expect(notesPane.parentElement!.className).toContain('hidden');
+    expect(notesPane.parentElement!.className).toContain('lg:flex');
     // Same element, now also the Library panel -- one side pane, not two.
     expect(notesPane.getAttribute('data-knowledge-library-panel')).toBe('true');
   });
@@ -903,7 +917,7 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     const onOpen = vi.fn();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: onOpen }, [exactReference()]);
     const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]')!;
-    const button = notesPane.querySelector('[data-knowledge-source-note-item] button') as HTMLButtonElement;
+    const button = notesPane.querySelector('[data-pdf-workspace-library-note] button') as HTMLButtonElement;
     expect(button).not.toBeNull();
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onOpen).toHaveBeenCalledWith('padlet-1');
@@ -938,167 +952,140 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     const onOpen = vi.fn();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: onOpen }, [exactReference()]);
     const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]')!;
-    const button = notesPane.querySelector('[data-knowledge-source-note-item] button') as HTMLButtonElement;
+    const button = notesPane.querySelector('[data-pdf-workspace-library-note] button') as HTMLButtonElement;
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(drawerEl()).not.toBeNull();
   });
 });
 
 // ============================================================================
-// PDF Source AI Phase 1 -- the right pane's AI session and mode switch
+// PDF_READER_UI_CONSOLIDATION_1 -- the docked reader's Library/AI dock
 // ============================================================================
+//
+// This replaces the one-shot Source AI pane the docked reader used to open on
+// a selection. That surface is retired for the PDF reader: there is now ONE
+// PDF AI experience, the board's own document-scoped chat, reached from the
+// same dock in both hosts.
 
-describe('PDF Source AI Phase 1 right pane', () => {
-  const FILENAME = 'AiSource.pdf';
-  const PAGE_TEXT = 'Alpha safety text on the first page of the AI source document.';
+describe('the docked reader docks Library and AI beside the PDF', () => {
+  const FILENAME = 'Docked.pdf';
+  const PAGE_ONE = `${FILENAME} body for page 1`;
 
-  function withPagesAndAi(resultText: string) {
+  function withPages() {
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith('/api/ai/text-action')) return jsonResponse({ text: resultText });
+      if (/\/ai\/chat/.test(String(input))) return jsonResponse({ threads: [], messages: [] });
       return jsonResponse({
         document: { id: SOURCE_A, originalFilename: FILENAME, pageCount: 1 },
-        pages: [{ pageNumber: 1, text: PAGE_TEXT }],
+        pages: [{ pageNumber: 1, text: PAGE_ONE }],
       });
     });
   }
 
-  function pageTextRoot(): HTMLElement {
-    return drawerEl()!.querySelector('[data-knowledge-page-text-root="1"]') as HTMLElement;
-  }
-
-  /** Selects [start,end) on page 1's text root and dispatches the settling mouseup. */
-  async function select(start: number, end: number) {
-    const root = pageTextRoot();
-    const range = document.createRange();
-    range.setStart(root.firstChild!, start);
-    range.setEnd(root.firstChild!, end);
-    const selection = window.getSelection()!;
-    selection.removeAllRanges();
-    selection.addRange(range);
-    await act(async () => { root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
-    await settle();
-  }
-
-  async function clickAi() {
-    const button = drawerEl()!.querySelector('button[aria-label="Ask AI about the selected text"]') as HTMLButtonElement;
-    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await settle();
-  }
-
-  /** Activates AI on 'safety' -- page-relative [6,12). */
-  async function activateAi() { await select(6, 12); await clickAi(); }
-
-  const aiPanel = () => drawerEl()!.querySelector('[data-knowledge-source-ai-panel]');
-  const notesPanel = () => drawerEl()!.querySelector('[data-knowledge-source-notes-panel]');
-  const rightPane = () => drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
-  const panelButton = (text: string) =>
-    Array.from(aiPanel()!.querySelectorAll('button')).find((button) => button.textContent === text) as HTMLButtonElement;
-  const openWithAi = (result = 'unused') => {
-    withPagesAndAi(result);
-    return mount({ documentOpenRequest: docRequest(1, SOURCE_A), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
+  /** The docked reader, with Board AI available unless told otherwise. */
+  const openDocked = async (overrides: Record<string, unknown> = {}) => {
+    withPages();
+    return mount({
+      documentOpenRequest: docRequest(1),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+      ...overrides,
+    } as never);
   };
 
-  it('AA: Source Notes is the default right-pane content -- no AI panel until activated', async () => {
-    await openWithAi();
+  const dockButton = (panel: 'library' | 'ai') =>
+    drawerEl()!.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLButtonElement | null;
+  const openPanel = () =>
+    (drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
+      ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  const clickDock = async (panel: 'library' | 'ai') => {
+    await act(async () => { dockButton(panel)!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+  };
 
-    expect(notesPanel()).not.toBeNull();
-    expect(aiPanel()).toBeNull();
+  it('opens on Library, with both dock buttons and no legacy AI entry points', async () => {
+    await openDocked();
+    expect(openPanel()).toBe('library');
+    expect(dockButton('library')!.getAttribute('aria-pressed')).toBe('true');
+    expect(dockButton('ai')).not.toBeNull();
+    expect(dockButton('ai')!.getAttribute('aria-pressed')).toBe('false');
+    // The redundant header handoff and the one-shot AI pane are both gone.
+    expect(drawerEl()!.querySelector('[data-knowledge-reader-add-document-to-chat]')).toBeNull();
+    expect(drawerEl()!.textContent).not.toContain('Add to Board AI');
+    expect(drawerEl()!.querySelector('[data-knowledge-source-ai-panel]')).toBeNull();
+    expect(drawerEl()!.querySelector('button[aria-label="Ask AI about the selected text"]')).toBeNull();
+    // The PDF itself stays beside the panel, not behind it.
+    expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace]')).not.toBeNull();
+    expect(drawerEl()!.textContent).toContain(PAGE_ONE);
   });
 
-  it('AB: activating AI snapshots the exact selection, switches the pane, and keeps the 300px/880px layout', async () => {
-    await openWithAi();
-    await activateAi();
+  it('shows one panel at a time, and the active button closes it', async () => {
+    await openDocked();
+    expect(drawerEl()!.querySelector('[data-pdf-workspace-library-panel]')).not.toBeNull();
 
-    expect(aiPanel()).not.toBeNull();
-    expect(notesPanel()).toBeNull();
-    expect(aiPanel()!.textContent).toContain('safety');
-    expect(drawerEl()!.className).toContain('lg:w-[880px]');
-    expect(rightPane().className).toContain('w-[300px]');
+    await clickDock('ai');
+    expect(openPanel()).toBe('ai');
+    expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).not.toBeNull();
+    // AI replaced Library -- it did not stack on it, and it did not take the
+    // document's own pane.
+    expect(drawerEl()!.querySelector('[data-pdf-workspace-library-panel]')).toBeNull();
+    expect(drawerEl()!.textContent).toContain(PAGE_ONE);
+
+    await clickDock('ai');
+    expect(openPanel()).toBeNull();
+    expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).toBeNull();
+    // The dock stays, so the panel can come back.
+    expect(dockButton('library')).not.toBeNull();
+
+    await clickDock('library');
+    expect(openPanel()).toBe('library');
   });
 
-  it('AD: Back to Source Notes returns the pane with no new pages fetch', async () => {
-    await openWithAi();
-    await activateAi();
+  it('keeps the document and its page while switching Library and AI', async () => {
+    await openDocked();
+    const detailsBefore = drawerEl()!.querySelector('[data-knowledge-reader-workspace]');
+
+    await clickDock('ai');
+    await clickDock('library');
+
+    expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace]')).toBe(detailsBefore);
+    expect(drawerEl()!.textContent).toContain(FILENAME);
+    expect(drawerEl()!.textContent).toContain(PAGE_ONE);
+    // One /pages read for the whole session: switching panels re-reads nothing.
     expect(pageRequests()).toHaveLength(1);
-
-    const back = aiPanel()!.querySelector('[aria-label="Back to Source Notes"]') as HTMLButtonElement;
-    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await settle();
-
-    expect(aiPanel()).toBeNull();
-    expect(notesPanel()).not.toBeNull();
-    expect(pageRequests()).toHaveLength(1);
-    expect(drawerEl()).not.toBeNull();
   });
 
-  it('AE: opening another document clears any AI session', async () => {
-    await openWithAi();
-    await activateAi();
-    expect(aiPanel()).not.toBeNull();
-
-    await renderInto({ documentOpenRequest: docRequest(2, SOURCE_B), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
-
-    expect(aiPanel()).toBeNull();
-    expect(notesPanel()).not.toBeNull();
+  it('mounts no AI dock at all where Board AI is unavailable', async () => {
+    await openDocked({ onBoardAiDraftContextChange: undefined, boardAiDraftContextByDocumentId: undefined });
+    expect(dockButton('library')).not.toBeNull();
+    expect(dockButton('ai')).toBeNull();
+    expect(openPanel()).toBe('library');
   });
 
-  it('AF: closing the reader clears the AI session; reopening starts at Source Notes', async () => {
-    await openWithAi();
-    await activateAi();
-    await closeDrawer();
-    expect(drawerEl()).toBeNull();
+  it('routes a page handoff into the document-scoped AI panel, sending nothing', async () => {
+    const onBoardAiDraftContextChange = vi.fn();
+    await openDocked({ onBoardAiDraftContextChange });
+    const addPage = drawerEl()!
+      .querySelector('[data-knowledge-viewer-action="add-to-chat"]') as HTMLButtonElement;
+    expect(addPage).not.toBeNull();
 
-    await renderInto({ documentOpenRequest: docRequest(3, SOURCE_A), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
-
-    expect(aiPanel()).toBeNull();
-    expect(notesPanel()).not.toBeNull();
-  });
-
-  it('AG: activating AI on a new selection replaces the prior session and aborts its request', async () => {
-    let firstSignal: AbortSignal | null = null;
-    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/api/ai/text-action')) {
-        if (!firstSignal) { firstSignal = init?.signal as AbortSignal; return new Promise(() => {}); }
-        return jsonResponse({ text: 'second' });
-      }
-      return jsonResponse({ document: { id: SOURCE_A, originalFilename: FILENAME, pageCount: 1 }, pages: [{ pageNumber: 1, text: PAGE_TEXT }] });
-    });
-    await mount({ documentOpenRequest: docRequest(1, SOURCE_A), onCreateNoteFromPage: vi.fn(), onOpenBacklinkTarget: vi.fn() });
-    await activateAi();
-    await act(async () => { panelButton('Summarize').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postsBefore = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'POST').length;
+    await act(async () => { addPage.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await settle();
 
-    // A NEW selection -- 'Alpha' [0,5) -- activated while the first is in flight.
-    await select(0, 5);
-    await clickAi();
-
-    expect(firstSignal!.aborted, 'session B must abort whatever session A had in flight').toBe(true);
-    expect(aiPanel()!.textContent).toContain('Alpha');
-    expect(aiPanel()!.textContent).not.toContain('safety');
-  });
-
-  it('AH: AI Note Post forwards the original snapshot request plus the AI result, clears AI, leaves the reader open', async () => {
-    const onCreate = vi.fn();
-    withPagesAndAi('AI generated answer');
-    await mount({ documentOpenRequest: docRequest(1, SOURCE_A), onCreateNoteFromPage: onCreate, onOpenBacklinkTarget: vi.fn() });
-    await activateAi();
-    await act(async () => { panelButton('Summarize').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await settle();
-    await act(async () => { panelButton('Note Post').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await settle();
-
-    expect(onCreate).toHaveBeenCalledTimes(1);
-    const [request, options] = onCreate.mock.calls[0];
-    expect(request).toEqual({
-      sourceDocumentId: SOURCE_A, originalFilename: FILENAME, pageNumber: 1, pageText: PAGE_TEXT,
-      selection: { charStart: 6, charEnd: 12, selectedText: 'safety' }, topStripColor: null,
-    });
-    expect(options).toEqual({ initialContentText: 'AI generated answer' });
-    expect(aiPanel()).toBeNull();
-    expect(notesPanel()).not.toBeNull();
-    expect(drawerEl()).not.toBeNull();
-    expect(pageRequests()).toHaveLength(1);
+    // Identity only, on THIS document's draft -- and the AI panel comes
+    // forward beside the PDF rather than replacing it.
+    expect(onBoardAiDraftContextChange).toHaveBeenCalledTimes(1);
+    const [documentId, items] = onBoardAiDraftContextChange.mock.calls[0];
+    expect(documentId).toBe(SOURCE_A);
+    expect(items).toEqual([expect.objectContaining({ request: expect.objectContaining({ knowledgeDocumentId: SOURCE_A }) })]);
+    expect(JSON.stringify(items)).not.toContain(PAGE_ONE);
+    expect(openPanel()).toBe('ai');
+    expect(drawerEl()!.textContent).toContain(PAGE_ONE);
+    // Nothing was asked: the user still writes the question.
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'POST'))
+      .toHaveLength(postsBefore);
   });
 });
 

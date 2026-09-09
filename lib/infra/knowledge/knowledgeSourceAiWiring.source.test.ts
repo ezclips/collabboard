@@ -128,27 +128,31 @@ describe('PDF Source AI Phase 1 wiring', () => {
     expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(3);
   });
 
-  it('the drawer, not the Source Notes panel, owns AI session state and the pane-mode switch', () => {
-    expect(drawer).toContain('aiSession');
-    expect(drawer).toContain('KnowledgeSourceAIPanel');
-    expect(drawer).toContain('reader.aiSession && onCreateNoteFromPage');
-    // KnowledgeSourceNotesPanel (FROZEN) knows nothing about AI existing.
+  it('the PDF reader no longer hosts the one-shot AI panel: it has ONE AI surface', () => {
+    // PDF_READER_UI_CONSOLIDATION_1 retires this pane for the PDF reader. The
+    // component and its own suite stay as they are -- what changed is that the
+    // reader routes a selection into the document-scoped Board AI panel
+    // instead of opening a second, differently-shaped AI surface beside it.
+    for (const forbidden of ['aiSession', 'KnowledgeSourceAIPanel', 'onAiFromSelection', 'text-action']) {
+      expect(drawer, forbidden).not.toContain(forbidden);
+    }
+    expect(drawer).toContain('BoardAiChatDrawer');
+    expect(drawer).toContain('handOffToBoardAi');
+    // KnowledgeSourceNotesPanel (FROZEN) still knows nothing about AI existing.
     for (const forbidden of ['aiSession', 'KnowledgeSourceAIPanel', 'text-action']) {
       expect(notesPanel, forbidden).not.toContain(forbidden);
     }
   });
 
-  it('a document switch or reader close invalidates any AI session -- neither carries it forward', () => {
-    // Both direct `setReader({...})` state constructions are FRESH objects
-    // (never a spread of a prior reader), so aiSession starts null on both --
-    // there is no path by which a new document inherits a prior AI session.
-    const opener = after(drawer, 'const openDocumentById = async (', 1600);
-    expect((opener.match(/aiSession:\s*null/g) ?? []).length).toBe(2);
-    expect(opener).not.toMatch(/\.\.\.\w*[Rr]eader\w*,[\s\S]{0,200}aiSession/);
-    // Closing the reader nulls the WHOLE state object, session included --
-    // checked as separate anchors so CRLF/LF line-ending differences on disk
-    // can never make this assertion brittle.
-    const closer = after(drawer, 'const closeReader = () => {', 120);
+  it('a document switch or reader close carries no AI state forward, because none is held', () => {
+    // The strongest form of the old invariant: with no per-selection AI
+    // session in the reader at all, there is nothing a new document could
+    // inherit. What DOES survive a document switch is the document-scoped
+    // Board AI session, and it is keyed by document id -- so it is another
+    // PDF's thread that cannot leak in, not a stale one-shot request.
+    expect(drawer).not.toContain('aiSession');
+    expect(drawer).toContain('boardAiSessionsByDocumentId');
+    const closer = after(drawer, 'const closeReader = useCallback(() => {', 160);
     expect(closer).toContain('readGenerationRef.current += 1;');
     expect(closer).toContain('setReader(null);');
   });
@@ -169,7 +173,7 @@ describe('PDF Source AI Phase 1 wiring', () => {
     expect(details).toContain('onAiFromSelection?: (request: KnowledgeSourcePageRequest) => void;');
     // Nested inside the SAME `documentId && activeSelection && !regionMode`
     // toolbar block Note Post already lives in -- never a second toolbar.
-    expect(details).toContain('onCreateNoteFromPage && documentId && activeSelection && !regionMode');
+    expect(details).toContain('documentId && activeSelection && !regionMode');
     expect(details).toContain('{onAiFromSelection ? (');
     const button = after(details, 'aria-label="Ask AI about the selected text"', 400);
     expect(button).toContain('hidden');

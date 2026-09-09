@@ -80,10 +80,14 @@ describe('PDF Source Notes Panel wiring', () => {
     }
   });
 
-  it('the drawer mounts the panel as a sibling of KnowledgeDocumentDetails and forwards the EXISTING onOpenBacklinkTarget', () => {
-    expect(readerDrawer).toContain('<KnowledgeSourceNotesPanel');
-    const window = after(readerDrawer, '<KnowledgeSourceNotesPanel', 200);
-    expect(window).toContain('onOpenNote={onOpenBacklinkTarget}');
+  it('the drawer mounts the unified Library panel as a sibling of KnowledgeDocumentDetails, forwarding the EXISTING onOpenBacklinkTarget', () => {
+    // PDF_READER_UI_CONSOLIDATION_1: the docked reader's Notes list is now the
+    // active PDF's slice of the ONE Library, so both hosts render the same
+    // panel. Its Notes rows read the same summaries hook this suite covers.
+    expect(readerDrawer).not.toContain('<KnowledgeSourceNotesPanel');
+    expect((readerDrawer.match(/<PdfWorkspaceLibraryPanel/g) ?? [])).toHaveLength(2);
+    const window = after(readerDrawer, '<PdfWorkspaceLibraryPanel', 260);
+    expect(window).toContain('documentId={reader.documentId}');
     // The existing forwarding to the reading pane is untouched.
     expect(readerDrawer).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
     expect(readerDrawer).toContain('onCreateNoteFromPage={onCreateNoteFromPage}');

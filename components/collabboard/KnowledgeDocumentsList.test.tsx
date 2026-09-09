@@ -328,9 +328,13 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.querySelector('[data-knowledge-documents]')).not.toBeNull();
   });
 
-  it('keeps Add PDF, and PDF-C1 removed the Knowledge launcher beside it', () => {
-    expect(sidebarCode).toContain("if (type === 'knowledge-pdf')");
-    expect(sidebarCode).toContain('knowledgePdfUploaderRef.current?.openPicker()');
+  it('keeps the PDF tool, and PDF-C1 removed the Knowledge launcher beside it', () => {
+    // The tool is a real <label htmlFor> over the sidebar's own hidden input,
+    // so the BROWSER opens the file dialog -- no imperative openPicker() call
+    // that a lost user gesture could silently swallow.
+    expect(sidebarCode).toContain('htmlFor={tool.activatesInputId}');
+    expect(sidebarCode).toContain('inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}');
+    expect(sidebarCode).not.toContain('openPicker()');
     // PDF-C1 made PDFs canvas objects, so the board IS the library and the
     // sidebar launcher was deliberately deleted. This component and every
     // Knowledge API behind it are untouched -- only its toolbar entry point

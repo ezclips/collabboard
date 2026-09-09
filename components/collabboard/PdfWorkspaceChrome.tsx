@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Files, Library, Plus, Sparkles, Upload, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Files, Plus, Upload, X } from 'lucide-react';
+import PdfReaderDock, { type PdfReaderPanel } from '@/components/collabboard/PdfReaderDock';
 import KnowledgeExistingPdfPicker from '@/components/collabboard/KnowledgeExistingPdfPicker';
 import KnowledgePdfUploader, {
   KNOWLEDGE_PDF_INPUT_ID,
@@ -16,7 +17,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-export type PdfWorkspaceRightPanel = 'closed' | 'library' | 'ai';
+/** The dock's own vocabulary, shared with the docked side-panel reader. */
+export type PdfWorkspaceRightPanel = PdfReaderPanel;
 
 export interface PdfWorkspaceTab {
   readonly documentId: string;
@@ -83,10 +85,6 @@ export default function PdfWorkspaceChrome({
     if (!el) return;
     el.scrollBy({ left: direction * Math.max(160, el.clientWidth * 0.65), behavior: 'smooth' });
     window.setTimeout(updateScrollState, 180);
-  };
-
-  const togglePanel = (panel: Exclude<PdfWorkspaceRightPanel, 'closed'>) => {
-    onRightPanelChange(rightPanel === panel ? 'closed' : panel);
   };
 
   return (
@@ -256,35 +254,11 @@ export default function PdfWorkspaceChrome({
         <main data-pdf-workspace-main="true" className="min-w-0 flex-1 overflow-hidden bg-white transition-all duration-150">
           {children}
         </main>
-        <div
-          data-pdf-workspace-dock-controls="true"
-          className="flex w-12 shrink-0 flex-col items-center gap-2 border-l border-gray-200 bg-slate-50 px-1 py-3"
-        >
-          <button
-            type="button"
-            data-pdf-workspace-dock="library"
-            aria-pressed={rightPanel === 'library'}
-            aria-label="Library"
-            title="Library"
-            className={`rounded-lg p-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${rightPanel === 'library' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:text-gray-800'}`}
-            onClick={() => togglePanel('library')}
-          >
-            <Library className="h-4 w-4" aria-hidden="true" />
-          </button>
-          {aiAvailable ? (
-            <button
-              type="button"
-              data-pdf-workspace-dock="ai"
-              aria-pressed={rightPanel === 'ai'}
-              aria-label="AI"
-              title="AI"
-              className={`rounded-lg p-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${rightPanel === 'ai' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:text-gray-800'}`}
-              onClick={() => togglePanel('ai')}
-            >
-              <Sparkles className="h-4 w-4" aria-hidden="true" />
-            </button>
-          ) : null}
-        </div>
+        <PdfReaderDock
+          panel={rightPanel}
+          aiAvailable={aiAvailable}
+          onPanelChange={onRightPanelChange}
+        />
         {rightPanel !== 'closed' ? (
           <aside
             data-pdf-workspace-right-panel-content="true"

@@ -1091,11 +1091,15 @@ describe('PDF workspace document-scoped mode', () => {
     expect(CLIENT).toContain('noteSummaries={knowledgeSourceNoteSummaries}');
   });
 
-  it('the workspace host owns document-scoped Board AI sessions across right-panel unmounts', () => {
-    expect(READER).toContain('const [workspaceBoardAiSessionsByDocumentId, setWorkspaceBoardAiSessionsByDocumentId]');
-    expect(READER).toContain('documentSessions={workspaceBoardAiSessionsByDocumentId}');
-    expect(READER).toContain('onDocumentSessionsChange={setWorkspaceBoardAiSessionsByDocumentId}');
+  it('the reader host owns document-scoped Board AI sessions across right-panel unmounts', () => {
+    expect(READER).toContain('const [boardAiSessionsByDocumentId, setBoardAiSessionsByDocumentId]');
     expect(READER).toContain('pageNumber: activePageNumber');
-    expect(READER).toContain('onSaveAssistantAsNote={onSaveWorkspaceAssistantAsNote}');
+    expect(READER).toContain('onSaveAssistantAsNote={onSaveAssistantAsNote}');
+    // ONE store, and BOTH hosts read it: the focused workspace and the docked
+    // side panel are two geometries over the same conversation, so moving
+    // between them cannot start a second thread for the same PDF.
+    expect((READER.match(/documentSessions=\{boardAiSessionsByDocumentId\}/g) ?? [])).toHaveLength(2);
+    expect((READER.match(/onDocumentSessionsChange=\{setBoardAiSessionsByDocumentId\}/g) ?? [])).toHaveLength(2);
+    expect((READER.match(/useState<Record<string, BoardAiDocumentScopedSession>>/g) ?? [])).toHaveLength(1);
   });
 });

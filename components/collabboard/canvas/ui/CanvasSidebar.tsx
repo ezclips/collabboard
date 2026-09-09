@@ -2,6 +2,11 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
+import KnowledgePdfUploader, {
+  KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
+  type KnowledgePdfProcessingStatus,
+  type KnowledgePdfUploadResult,
+} from '@/components/collabboard/KnowledgePdfUploader';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +65,14 @@ interface CanvasSidebarProps {
   onBeforeToolClick?: (type: string) => void;
   handleToolClick: (type: string) => void;
   onBack: () => void;
+  /**
+   * The toolbar's only remaining Knowledge job: owning the hidden file input
+   * behind the Media group's PDF tool. It neither loads, lists nor reads
+   * documents -- these two are pure plumbing for the upload the shell turns
+   * into a canvas placement.
+   */
+  onKnowledgePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
+  onKnowledgePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -87,6 +100,8 @@ export default function CanvasSidebar({
   onBeforeToolClick,
   handleToolClick,
   onBack,
+  onKnowledgePdfUploaded,
+  onKnowledgePdfSettled,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -349,6 +364,14 @@ export default function CanvasSidebar({
       data-toolbar-sidebar="true"
       className={`${isCollapsed ? 'w-12' : 'w-14'} h-full bg-white border-r flex flex-col items-center py-6 gap-3 shadow-sm z-20 relative overflow-visible transition-[width] duration-150`}
     >
+      {/* The toolbar's own input, on its own DOM id: the focused PDF workspace
+          mounts a second uploader while covering this board, and a shared id
+          would send one host's label to the other host's input. */}
+      <KnowledgePdfUploader
+        inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}
+        onDocumentUploaded={onKnowledgePdfUploaded}
+        onDocumentSettled={onKnowledgePdfSettled}
+      />
       <button
         ref={moreMeasureRef}
         type="button"

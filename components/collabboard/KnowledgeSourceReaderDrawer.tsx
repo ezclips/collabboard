@@ -13,13 +13,12 @@ import {
   fetchKnowledgeReadyPages,
 } from '@/components/collabboard/KnowledgePageCache';
 import { knowledgeSourceBacklinkDocumentRows } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
-import KnowledgeSourceNotesPanel from '@/components/collabboard/KnowledgeSourceNotesPanel';
-import KnowledgeSourceAIPanel from '@/components/collabboard/KnowledgeSourceAIPanel';
 import BoardAiChatDrawer, {
   type BoardAiAssistantNoteSaveRequest,
   type BoardAiDocumentScopedSession,
 } from '@/components/collabboard/BoardAiChatDrawer';
 import PdfWorkspaceLibraryPanel from '@/components/collabboard/PdfWorkspaceLibraryPanel';
+import PdfReaderDock, { type PdfReaderPanel } from '@/components/collabboard/PdfReaderDock';
 import PdfWorkspaceChrome, {
   type PdfWorkspaceRightPanel,
   type PdfWorkspaceTab,
@@ -51,6 +50,9 @@ import type {
  * forwards its callbacks verbatim.
  */
 
+/** A stable empty default, so an absent draft is not a new array each render. */
+const NO_BOARD_AI_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
+
 /** The library modal's own marker. Read ONLY to yield Escape to it. */
 const KNOWLEDGE_LIBRARY_SELECTOR = '[data-knowledge-documents="true"]';
 
@@ -65,7 +67,6 @@ const READER_PAGES_RETRY_DELAY_MS = 2000;
 
 import {
   addBoardAiDraftContext,
-  boardAiDraftFromDocument,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
 
@@ -118,16 +119,6 @@ export interface KnowledgeSourceReaderDrawerProps {
    */
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
   /**
-   * BCHAT-D2. Hands one identity to Board AI: this document, one of its pages,
-   * or an exact selection inside it.
-   *
-   * Identity only. The reader never sends what a page SAYS -- the server
-   * reloads that from the id on every turn -- so this is a pointer, not a
-   * copy. The board shell owns what happens next (queue, open Chat, and let
-   * this drawer yield the dock through the existing close request).
-   */
-  onAddBoardAiContext?: (item: BoardAiDraftContextItem) => void;
-  /**
    * BCHAT-C. A monotonic id the board bumps when another right-side surface --
    * today Board AI Chat -- takes the dock. Two docked drawers must not stack,
    * and the board cannot reach this one's open state: `reader` lives here.
@@ -155,11 +146,24 @@ export interface KnowledgeSourceReaderDrawerProps {
   onWorkspacePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
   onWorkspaceExistingPdfOpen?: (document: KnowledgePdfPlacementSource) => Promise<boolean> | boolean;
   onWorkspacePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
-  workspaceBoardAiDraftContext?: readonly BoardAiDraftContextItem[];
-  onWorkspaceBoardAiDraftContextChange?: (items: readonly BoardAiDraftContextItem[]) => void;
+  /**
+   * Board AI draft context, keyed by the DOCUMENT it belongs to.
+   *
+   * A map rather than one list because both hosts hand off into the same
+   * place: a page or an exact selection attached in the docked reader is the
+   * same attachment the focused workspace shows for that PDF, and keying it by
+   * anything host-specific would split one conversation's attachments in two.
+   * Its absence is also the Board AI availability signal -- with no way to
+   * attach, no AI dock button is mounted at all.
+   */
+  boardAiDraftContextByDocumentId?: Record<string, readonly BoardAiDraftContextItem[]>;
+  onBoardAiDraftContextChange?: (
+    documentId: string,
+    items: readonly BoardAiDraftContextItem[],
+  ) => void;
   workspaceActivePageNumber?: number | null;
-  canSaveWorkspaceAssistantAsNote?: boolean;
-  onSaveWorkspaceAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
+  canSaveAssistantAsNote?: boolean;
+  onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
 }
 
 /**
@@ -185,22 +189,6 @@ interface KnowledgeReaderState {
   pageNavigationRequestId?: number;
   /** Null for every library and semantic-result open, so neither inherits one. */
   sourceTarget: KnowledgeSourceTarget | null;
-  /**
-   * PDF Source AI Phase 1. An IMMUTABLE snapshot of the exact selection that
-   * activated AI, taken once at click time -- later DOM/selection changes in
-   * the source pane can never retarget it. Always starts null on a fresh
-   * `KnowledgeReaderState`, which is what invalidates any prior AI session for
-   * free on both a document switch and a reader close: neither carries this
-   * object over, they build a brand new one.
-   */
-  aiSession: KnowledgeSourceAiSession | null;
-}
-
-/** PDF Source AI Phase 1. `requestId` distinguishes activation B from A even
- * when both snapshot the exact same page/selection coordinates. */
-interface KnowledgeSourceAiSession {
-  readonly requestId: number;
-  readonly request: KnowledgeSourcePageRequest;
 }
 
 /**
@@ -216,7 +204,6 @@ export default function KnowledgeSourceReaderDrawer({
   canDragSourceNote,
   blockingEditorOpen = false,
   onCreateNoteFromPage,
-  onAddBoardAiContext,
   closeSidePanelRequestId,
   onOpenBacklinkTarget,
   workspaceTabs = [],
@@ -231,17 +218,30 @@ export default function KnowledgeSourceReaderDrawer({
   onWorkspacePdfUploaded,
   onWorkspaceExistingPdfOpen,
   onWorkspacePdfSettled,
-  workspaceBoardAiDraftContext = [],
-  onWorkspaceBoardAiDraftContextChange,
+  boardAiDraftContextByDocumentId,
+  onBoardAiDraftContextChange,
   workspaceActivePageNumber = null,
-  canSaveWorkspaceAssistantAsNote = false,
-  onSaveWorkspaceAssistantAsNote,
+  canSaveAssistantAsNote = false,
+  onSaveAssistantAsNote,
 }: KnowledgeSourceReaderDrawerProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [reader, setReader] = useState<KnowledgeReaderState | null>(null);
-  const [workspaceBoardAiSessionsByDocumentId, setWorkspaceBoardAiSessionsByDocumentId] =
+  /**
+   * The document-scoped Board AI sessions, owned HERE and by nothing else.
+   *
+   * One store for both hosts, which is what stops the same PDF from acquiring
+   * a second conversation when the user moves between the focused workspace
+   * and the docked reader: this drawer instance serves both, so the thread,
+   * its messages and its saved-Note state simply stay put across the switch.
+   */
+  const [boardAiSessionsByDocumentId, setBoardAiSessionsByDocumentId] =
     useState<Record<string, BoardAiDocumentScopedSession>>({});
+  /** The docked reader's own right panel: Library first, AI on request. */
+  const [sidePanelRightPanel, setSidePanelRightPanel] = useState<PdfReaderPanel>('library');
+  /** Which page the reader is actually on, in either host. */
+  const [readerActivePage, setReaderActivePage] =
+    useState<{ readonly documentId: string; readonly pageNumber: number } | null>(null);
   /** The same shared page memory the canvas card reads. */
   const pageCache = useKnowledgePageCache();
   // Each request is acted on at most once, and the latch has the same lifetime
@@ -320,7 +320,7 @@ export default function KnowledgeSourceReaderDrawer({
         originalFilename: cached.originalFilename,
         pageCount: cached.pageCount,
         pages: cached.pages,
-        loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
+        loading: false, error: false, initialPageNumber, sourceTarget,
       });
       // Fresh enough to trust: nothing further to do.
       if (!pageCache || !pageCache.isStale(cached)) return;
@@ -342,7 +342,7 @@ export default function KnowledgeSourceReaderDrawer({
 
     setReader({
       documentId, originalFilename: '', pageCount: null, pages: [],
-      loading: true, error: false, initialPageNumber, sourceTarget, aiSession: null,
+      loading: true, error: false, initialPageNumber, sourceTarget,
     });
     // A 409 means extraction has not finished, which is a normal state for a
     // freshly uploaded document -- not a failure. Treating it as one is what
@@ -370,7 +370,7 @@ export default function KnowledgeSourceReaderDrawer({
           originalFilename: result.entry.originalFilename,
           pageCount: result.entry.pageCount,
           pages: result.entry.pages,
-          loading: false, error: false, initialPageNumber, sourceTarget, aiSession: null,
+          loading: false, error: false, initialPageNumber, sourceTarget,
         });
         return;
       } catch {
@@ -429,29 +429,17 @@ export default function KnowledgeSourceReaderDrawer({
   }, [closeSidePanelRequestId, presentation]);
 
   /**
-   * PDF Source AI Phase 1. A monotonic id, never reused, so a session B
-   * always differs from session A even when both snapshot identical page/
-   * selection coordinates -- `key={requestId}` on the AI panel below is what
-   * turns that into an actual remount, aborting whatever A had in flight.
+   * Sends the reader to one page of the document it already has open.
+   *
+   * Both hosts, one path: a Library image and a Library highlight are the same
+   * kind of jump, and the docked reader is as capable of making it as the
+   * focused workspace. The document guard is what keeps it honest -- a row for
+   * another document navigates nothing.
    */
-  const aiRequestIdRef = useRef(0);
-
-  /** Snapshots the request at the moment AI was clicked; never re-reads it. */
-  const activateAiFromSelection = (request: KnowledgeSourcePageRequest) => {
-    const requestId = ++aiRequestIdRef.current;
-    setReader((current) => (current ? { ...current, aiSession: { requestId, request } } : current));
-  };
-
-  /** Returns the right pane to Source Notes. Never closes the reader itself. */
-  const closeAiSession = () => {
-    setReader((current) => (current ? { ...current, aiSession: null } : current));
-  };
-
-  const navigateWorkspaceImageToPage = useCallback((request: {
+  const navigateReaderToPage = useCallback((request: {
     readonly documentId: string;
     readonly pageNumber: number;
   }) => {
-    if (!isWorkspace) return;
     if (!Number.isInteger(request.pageNumber) || request.pageNumber < 1) return;
     setReader((current) => {
       if (!current) return current;
@@ -465,7 +453,28 @@ export default function KnowledgeSourceReaderDrawer({
         pageNavigationRequestId: requestId,
       };
     });
-  }, [isWorkspace, onWorkspaceActivePageChange]);
+  }, [onWorkspaceActivePageChange]);
+
+  /**
+   * The page the reader is actually on, recorded for both hosts.
+   *
+   * Board AI's mandatory PDF context is a PAGE identity, so the docked reader
+   * needs this exactly as much as the workspace does -- without it a question
+   * asked from page 4 would carry the whole document instead.
+   */
+  const handleActivePageChange = useCallback((documentId: string, pageNumber: number) => {
+    setReaderActivePage((current) => (
+      current?.documentId === documentId && current.pageNumber === pageNumber
+        ? current
+        : { documentId, pageNumber }
+    ));
+    onWorkspaceActivePageChange?.(documentId, pageNumber);
+  }, [onWorkspaceActivePageChange]);
+
+  /** A newly opened document starts on Library, the docked reader's default. */
+  useEffect(() => {
+    setSidePanelRightPanel('library');
+  }, [reader?.documentId]);
 
   useEffect(() => {
     if (!isWorkspace || reader === null || reader.loading || reader.error) return;
@@ -483,20 +492,6 @@ export default function KnowledgeSourceReaderDrawer({
     reader?.error,
     onWorkspaceDocumentResolved,
   ]);
-
-  /**
-   * The AI panel's own Note Post: forwards the ORIGINAL, unmodified snapshot
-   * request plus the AI result as an initial-content override. CanvasClient
-   * derives sourceReference/topStrip from `request` alone, exactly as an
-   * ordinary Note Post would -- the AI result can only ever replace the
-   * editable body seed, never the provenance.
-   */
-  const handleAiNotePost = (resultText: string) => {
-    const session = reader?.aiSession;
-    if (!session || !onCreateNoteFromPage) return;
-    onCreateNoteFromPage(session.request, { initialContentText: resultText });
-    closeAiSession();
-  };
 
   /**
    * Non-modal, so focus is moved rather than trapped, and handed back to
@@ -548,34 +543,30 @@ export default function KnowledgeSourceReaderDrawer({
   // SAME board-level index the workspace reads, in the same direction, so it
   // issues no request and holds no second notion of what a backlink row is.
   /**
-   * PDF-R1 / BCHAT-D2 follow-up. Every explicit Board AI handoff goes through
-   * here so the workspace case is handled once.
+   * Every explicit Board AI handoff, in either host, goes through here.
    *
-   * The focused workspace is `fixed inset-0 z-[3100]` and Chat sits at
-   * z-[1200], so queuing context from here used to look like nothing had
-   * happened: the attachment was real, but invisible underneath the reader.
-   * Returning to the board is what makes the result visible, and it uses the
-   * reader's OWN existing close path rather than a new one.
-   *
-   * The docked case is deliberately untouched -- the board already closes it
-   * through the Chat-open request counter, and doing it twice here would take
-   * that rule out of its single home.
+   * A page or an exact selection becomes explicit context on THIS document's
+   * draft and the AI panel comes forward beside the PDF, which stays visible
+   * and readable. Nothing is sent: the user still writes the question. This is
+   * also why the PDF reader needs no "add this document to AI" action of its
+   * own -- the open PDF is already the conversation's mandatory context.
    */
   const handOffToBoardAi = useCallback((item: BoardAiDraftContextItem) => {
-    if (presentation === 'workspace' && onWorkspaceBoardAiDraftContextChange) {
-      onWorkspaceBoardAiDraftContextChange(addBoardAiDraftContext(workspaceBoardAiDraftContext, item).items);
+    const documentId = reader?.documentId;
+    if (!documentId || !onBoardAiDraftContextChange) return;
+    const current = boardAiDraftContextByDocumentId?.[documentId] ?? NO_BOARD_AI_DRAFT_CONTEXT;
+    onBoardAiDraftContextChange(documentId, addBoardAiDraftContext(current, item).items);
+    if (presentation === 'workspace') {
       onWorkspaceRightPanelChange?.('ai');
       return;
     }
-    onAddBoardAiContext?.(item);
-    if (presentation === 'workspace') closeReader();
+    setSidePanelRightPanel('ai');
   }, [
-    onAddBoardAiContext,
-    onWorkspaceBoardAiDraftContextChange,
+    boardAiDraftContextByDocumentId,
+    onBoardAiDraftContextChange,
     onWorkspaceRightPanelChange,
     presentation,
-    closeReader,
-    workspaceBoardAiDraftContext,
+    reader?.documentId,
   ]);
 
   const libraryBacklinks = useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null);
@@ -587,6 +578,17 @@ export default function KnowledgeSourceReaderDrawer({
   if (!boardId || reader === null) return null;
 
   const libraryPageSummary = pageCountSummary(reader.pageCount, reader.pages.length, reader.loading);
+  // Board AI is offered only where the board can actually accept an
+  // attachment; with no such authority no dock button is mounted at all.
+  const boardAiAvailable = !!onBoardAiDraftContextChange;
+  const boardAiDraftContext = boardAiDraftContextByDocumentId?.[reader.documentId]
+    ?? NO_BOARD_AI_DRAFT_CONTEXT;
+  const changeBoardAiDraftContext = (items: readonly BoardAiDraftContextItem[]) => {
+    onBoardAiDraftContextChange?.(reader.documentId, items);
+  };
+  const readerActivePageNumber = readerActivePage?.documentId === reader.documentId
+    ? readerActivePage.pageNumber
+    : reader.initialPageNumber ?? 1;
   if (isWorkspace) {
     const effectiveTabs = workspaceTabs.length > 0
       ? workspaceTabs
@@ -609,9 +611,10 @@ export default function KnowledgeSourceReaderDrawer({
       <PdfWorkspaceLibraryPanel
         documentId={reader.documentId}
         onOpenNote={openBacklinkTarget}
-        onNavigateToImagePage={navigateWorkspaceImageToPage}
+        onNavigateToPage={navigateReaderToPage}
+        onNavigateToImagePage={navigateReaderToPage}
       />
-    ) : workspaceRightPanel === 'ai' && onWorkspaceBoardAiDraftContextChange ? (
+    ) : workspaceRightPanel === 'ai' && boardAiAvailable ? (
       <BoardAiChatDrawer
         boardId={boardId}
         isOpen
@@ -622,12 +625,12 @@ export default function KnowledgeSourceReaderDrawer({
           originalFilename: reader.originalFilename || 'Document',
           pageNumber: activePageNumber,
         }}
-        draftContext={workspaceBoardAiDraftContext}
-        onDraftContextChange={onWorkspaceBoardAiDraftContextChange}
-        documentSessions={workspaceBoardAiSessionsByDocumentId}
-        onDocumentSessionsChange={setWorkspaceBoardAiSessionsByDocumentId}
-        canSaveAssistantAsNote={canSaveWorkspaceAssistantAsNote}
-        onSaveAssistantAsNote={onSaveWorkspaceAssistantAsNote}
+        draftContext={boardAiDraftContext}
+        onDraftContextChange={changeBoardAiDraftContext}
+        documentSessions={boardAiSessionsByDocumentId}
+        onDocumentSessionsChange={setBoardAiSessionsByDocumentId}
+        canSaveAssistantAsNote={canSaveAssistantAsNote}
+        onSaveAssistantAsNote={onSaveAssistantAsNote}
         selectedBoardItem={null}
       />
     ) : null;
@@ -638,7 +641,7 @@ export default function KnowledgeSourceReaderDrawer({
         tabs={effectiveTabs}
         activeDocumentId={activeDocumentId}
         rightPanel={workspaceRightPanel}
-        aiAvailable={!!onWorkspaceBoardAiDraftContextChange}
+        aiAvailable={boardAiAvailable}
         rightPanelContent={rightPanelContent}
         onActivateTab={onWorkspaceTabActivate ?? (() => {})}
         onCloseTab={(documentId) => {
@@ -675,9 +678,8 @@ export default function KnowledgeSourceReaderDrawer({
               hostRendersDocumentHeader
               onCreateNoteFromPage={onCreateNoteFromPage}
               onOpenBacklinkTarget={onOpenBacklinkTarget}
-              onAiFromSelection={onCreateNoteFromPage && onOpenBacklinkTarget ? activateAiFromSelection : undefined}
-              onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}
-              onActivePageChange={onWorkspaceActivePageChange}
+              onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
+              onActivePageChange={handleActivePageChange}
             />
           ) : (
             <div data-knowledge-reader-workspace-loading="true" className="flex h-full items-center justify-center text-sm text-gray-500">
@@ -751,20 +753,10 @@ export default function KnowledgeSourceReaderDrawer({
           {reader.originalFilename || 'Document'}
         </div>
         <span className="flex-1" />
-        {onAddBoardAiContext ? (
-          <button
-            type="button"
-            data-knowledge-reader-add-document-to-chat="true"
-            title="Add document to Board AI"
-            aria-label="Add document to Board AI"
-            className="mb-1 rounded-md px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-50"
-            onClick={() => handOffToBoardAi(
-              boardAiDraftFromDocument(reader.documentId, reader.originalFilename),
-            )}
-          >
-            Add to Board AI
-          </button>
-        ) : null}
+        {/* No "Add to Board AI" here any more. The open PDF is already the AI
+            panel's mandatory context, so a header action that attached the
+            same document was a second entry point saying nothing new -- the
+            dock beside the document is the one way in. */}
         <button
           ref={closeButtonRef}
           type="button"
@@ -791,79 +783,68 @@ export default function KnowledgeSourceReaderDrawer({
             loading={reader.loading}
             error={reader.error}
             initialPageNumber={reader.initialPageNumber}
+            pageNavigationRequestId={reader.pageNavigationRequestId}
             initialSourceReferenceId={reader.sourceTarget?.referenceId}
             initialSourceRequestId={reader.sourceTarget?.requestId}
             onBack={closeReader}
-            // The Library panel owns the document's identity -- but only when
-            // it is actually rendered. Without it (no backlink target, or below
-            // `lg`) the workspace keeps its own header, so Back to PDFs and the
-            // filename can never disappear entirely.
-            hostRendersDocumentHeader={!!onOpenBacklinkTarget}
+            // The right panel owns the document's identity -- but only while it
+            // is actually on screen. With the panel closed (or below `lg`, or
+            // with no backlink target at all) the reading pane keeps its own
+            // header, so Back to PDFs and the filename can never disappear.
+            hostRendersDocumentHeader={!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed'}
             onCreateNoteFromPage={onCreateNoteFromPage}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
-            // PDF Source AI Phase 1. Only offered when there both IS a
-            // Note-creating capability AND somewhere for the AI mode to
-            // render (the pane below is itself gated on `onOpenBacklinkTarget`)
-            // -- otherwise activating AI would switch the right pane into a
-            // mode a read-only viewer, or one with no visible pane at all,
-            // could never complete.
-            onAiFromSelection={onCreateNoteFromPage && onOpenBacklinkTarget ? activateAiFromSelection : undefined}
-            // BCHAT-D2. Page and exact-selection handoffs live where the page
-            // rows and the selection toolbar already are; both carry identity
-            // only, and neither writes anything.
-            onAddBoardAiContext={onAddBoardAiContext ? handOffToBoardAi : undefined}
+            // Page and exact-selection handoffs live where the page rows and
+            // the selection toolbar already are; both carry identity only,
+            // neither writes anything, and both land in the SAME document-
+            // scoped Board AI panel the dock opens.
+            onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
+            onActivePageChange={handleActivePageChange}
           />
         </div>
         {/*
-          Source Notes Panel -- Phase 1. A SIBLING of the reading pane above,
-          never nested inside KnowledgeDocumentDetails: it owns its own
-          vertical scroll and reads its data straight from the SAME board-
-          level context every other Knowledge surface already uses, so
-          opening it never issues a second fetch. Hidden below `lg`, exactly
-          like the reading pane's own width, stays untouched there. Only
-          rendered when there is somewhere to send a click: with no
-          `onOpenBacklinkTarget`, the panel could show Notes it can never open.
+          The docked reader's right side, arranged exactly as the focused
+          workspace's: a narrow fixed dock, then at most one panel. Both are a
+          SIBLING of the reading pane, never nested inside it, so the PDF stays
+          visible and usable whichever panel is open -- and closing the panel
+          gives the document the whole drawer.
 
-          PDF Source AI Phase 1 -- the SAME 340px column now has two modes:
-          Source Notes (default) or AI, chosen by whether `reader.aiSession`
-          is set. Swapping modes never touches `KnowledgeSourceNotesPanel`'s
-          own data source, so returning to it issues no new fetch. Keying the
-          AI panel by `requestId` is what makes activating AI on a NEW
-          selection a genuine remount -- the previous panel's own cleanup
-          effect aborts whatever it had in flight, so a stale response can
-          never land on the new session.
+          Hidden below `lg`, exactly as the single pane it replaces was: the
+          drawer is 420px there, which the document alone already fills. Only
+          rendered when there is somewhere to send a click: with no
+          `onOpenBacklinkTarget` the Library could list Notes it can never open.
         */}
         {onOpenBacklinkTarget ? (
-          <div
-            data-knowledge-source-notes-pane="true"
-            data-knowledge-library-panel="true"
-            className="hidden min-h-0 w-[300px] flex-none overflow-y-auto overscroll-contain border-l border-gray-100 px-4 py-3 lg:block"
-          >
-            {reader.aiSession && onCreateNoteFromPage ? (
-              <KnowledgeSourceAIPanel
-                key={reader.aiSession.requestId}
-                selectedText={reader.aiSession.request.selection?.selectedText ?? ''}
-                onNotePost={handleAiNotePost}
-                onClose={closeAiSession}
-              />
-            ) : (
-              <>
+          <div className="hidden min-h-0 lg:flex">
+            <PdfReaderDock
+              panel={sidePanelRightPanel}
+              aiAvailable={boardAiAvailable}
+              onPanelChange={setSidePanelRightPanel}
+            />
+            {sidePanelRightPanel !== 'closed' ? (
+              <div
+                data-knowledge-source-notes-pane="true"
+                data-knowledge-library-panel="true"
+                data-knowledge-reader-right-panel={sidePanelRightPanel}
+                className="flex min-h-0 w-[300px] flex-none flex-col overflow-hidden border-l border-gray-100"
+              >
                 {/*
                   What is this source, where did it come from, and where is it
-                  used -- answered once, here. The workspace beside it shows the
-                  document and nothing about it, so no metadata is duplicated.
-                  Both the rows and the page phrasing are the reader's existing
-                  ones, imported rather than reimplemented.
+                  used -- answered once, here, above whichever panel is open.
+                  The reading pane beside it shows the document and nothing
+                  about it, so no metadata is duplicated. Both the rows and the
+                  page phrasing are the reader's existing ones, imported rather
+                  than reimplemented.
                 */}
-                <button
-                  type="button"
-                  data-knowledge-library-back="true"
-                  className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
-                  onClick={closeReader}
-                >
-                  ← Back to PDFs
-                </button>
-                <div className="mb-3 border-b border-gray-100 pb-2">
+                <header className="shrink-0 border-b border-gray-100 px-4 pb-2 pt-3">
+                  <button
+                    type="button"
+                    data-knowledge-library-back="true"
+                    className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
+                    onClick={closeReader}
+                  >
+                    ← Back to PDFs
+                  </button>
                   <h2
                     data-knowledge-library-filename="true"
                     className="truncate text-sm font-medium text-gray-800"
@@ -877,10 +858,42 @@ export default function KnowledgeSourceReaderDrawer({
                     </p>
                   ) : null}
                   <UsedInNotes scope="document" rows={libraryBacklinkRows} onOpen={onOpenBacklinkTarget} />
+                  <p data-knowledge-reader-panel-title="true" className="mt-2 text-[11px] font-semibold text-gray-700">
+                    {sidePanelRightPanel === 'library' ? 'Library' : 'AI'}
+                  </p>
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+                  {sidePanelRightPanel === 'library' ? (
+                    <PdfWorkspaceLibraryPanel
+                      documentId={reader.documentId}
+                      onOpenNote={onOpenBacklinkTarget}
+                      canDragNote={canDragSourceNote}
+                      onNavigateToPage={navigateReaderToPage}
+                      onNavigateToImagePage={navigateReaderToPage}
+                    />
+                  ) : boardAiAvailable ? (
+                    <BoardAiChatDrawer
+                      boardId={boardId}
+                      isOpen
+                      onClose={() => setSidePanelRightPanel('closed')}
+                      presentation="embedded"
+                      documentScope={{
+                        knowledgeDocumentId: reader.documentId,
+                        originalFilename: reader.originalFilename || 'Document',
+                        pageNumber: readerActivePageNumber,
+                      }}
+                      draftContext={boardAiDraftContext}
+                      onDraftContextChange={changeBoardAiDraftContext}
+                      documentSessions={boardAiSessionsByDocumentId}
+                      onDocumentSessionsChange={setBoardAiSessionsByDocumentId}
+                      canSaveAssistantAsNote={canSaveAssistantAsNote}
+                      onSaveAssistantAsNote={onSaveAssistantAsNote}
+                      selectedBoardItem={null}
+                    />
+                  ) : null}
                 </div>
-                <KnowledgeSourceNotesPanel documentId={reader.documentId} onOpenNote={onOpenBacklinkTarget} canDragNote={!isWorkspace ? canDragSourceNote : undefined} />
-              </>
-            )}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

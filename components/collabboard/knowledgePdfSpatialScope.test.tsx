@@ -111,7 +111,7 @@ describe('1, 4. the rendered toolbar offers Add PDF on Freeform', () => {
     for (const layoutCase of SUPPORTED) {
       const media = toolbarFor(layoutCase).find((group) => group.id === 'media')!;
       const tool = media.tools.find((t) => t.type === 'knowledge-pdf')!;
-      expect(tool.label).toBe('Add PDF');
+      expect(tool.label).toBe('PDF');
       expect(tool.disabled).toBeFalsy();
       // Pinned + label-driven: the sidebar keeps it on the toolbar even when
       // Media collapses, and the browser opens the dialog natively.

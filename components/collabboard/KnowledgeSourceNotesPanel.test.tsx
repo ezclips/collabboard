@@ -427,7 +427,13 @@ describe('source Note placement contract and actual Freeform handler', () => {
   it('wires capture ahead of container drops and withholds workspace drag at the reader', () => {
     expect(canvas).toContain('onDropCapture={handleKnowledgeSourceNotePlacementDrop}');
     expect(canvas).toContain('canDragSourceNote={canDragSourceNote}');
-    expect(reader).toContain('canDragNote={!isWorkspace ? canDragSourceNote : undefined}');
+    // Offered by the DOCKED reader only, which is the host with a board still
+    // on screen to drop onto: the focused workspace's Library panel is given
+    // no drag authority at all.
+    expect((reader.match(/canDragNote=/g) ?? [])).toHaveLength(1);
+    expect(reader).toContain('canDragNote={canDragSourceNote}');
+    expect(reader.indexOf('canDragNote={canDragSourceNote}'))
+      .toBeGreaterThan(reader.indexOf('data-knowledge-source-notes-pane="true"'));
     const start = canvas.indexOf('const handleKnowledgeSourceNotePlacementDrop');
     const end = canvas.indexOf('const handleKnowledgeSourceClipDropOnExistingNote', start);
     const handler = canvas.slice(start, end);
