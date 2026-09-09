@@ -107,7 +107,20 @@ export interface BoardAiDocumentScopedSession {
   readonly loadingMessages: boolean;
   readonly sending: boolean;
   readonly error: string | null;
+  /**
+   * Assistant messages already saved as a Note, by message id.
+   *
+   * It lives HERE, in the session the workspace host owns, for the same reason
+   * the thread does: switching the right panel to Library unmounts this drawer,
+   * and a duplicate-save guard kept in drawer-local state would come back empty
+   * -- offering a second Save as Note for a Note that already exists. Absent
+   * means nothing in this document's thread has been saved yet.
+   */
+  readonly savedNoteMessageIds?: readonly string[];
 }
+
+/** A stable empty default, so an unsaved session is not a new array each read. */
+const EMPTY_SAVED_NOTE_MESSAGE_IDS: readonly string[] = [];
 
 const EMPTY_DOCUMENT_SESSION: BoardAiDocumentScopedSession = {
   activeThreadId: null,
@@ -116,8 +129,16 @@ const EMPTY_DOCUMENT_SESSION: BoardAiDocumentScopedSession = {
   loadingMessages: false,
   sending: false,
   error: null,
+  savedNoteMessageIds: EMPTY_SAVED_NOTE_MESSAGE_IDS,
 };
 
+/**
+ * What one Save as Note attempt is doing right now.
+ *
+ * 'saving' and 'failed' are this mount's business alone; only 'saved' is an
+ * outcome the session has to remember, and it is held as an identity list
+ * rather than a state entry so a remount can rebuild it.
+ */
 type AssistantNoteSaveState = 'saving' | 'saved' | 'failed';
 
 function applyStateAction<T>(current: T, action: React.SetStateAction<T>): T {
@@ -192,6 +213,9 @@ export default function BoardAiChatDrawer({
   const [assistantNoteSaveStateByMessageId, setAssistantNoteSaveStateByMessageId] =
     useState<Record<string, AssistantNoteSaveState>>({});
   const assistantNoteSaveStateRef = useRef<Record<string, AssistantNoteSaveState>>({});
+  const [boardSavedNoteMessageIds, setBoardSavedNoteMessageIds] =
+    useState<readonly string[]>(EMPTY_SAVED_NOTE_MESSAGE_IDS);
+  const savedNoteMessageIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const activeDocumentScopeRef = useRef<string | null>(null);
 
@@ -209,6 +233,13 @@ export default function BoardAiChatDrawer({
   const loadingMessages = documentScopeId ? documentSession.loadingMessages : boardLoadingMessages;
   const sending = documentScopeId ? documentSession.sending : boardSending;
   const error = documentScopeId ? documentSession.error : boardError;
+  const savedNoteMessageIds = documentScopeId
+    ? documentSession.savedNoteMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS
+    : boardSavedNoteMessageIds;
+  const savedNoteMessageIdSet = useMemo(
+    () => new Set(savedNoteMessageIds),
+    [savedNoteMessageIds],
+  );
   const mandatoryDocumentContext = useMemo(() => {
     if (!documentScope) return null;
     const pageNumber = documentScope.pageNumber;
@@ -292,6 +323,33 @@ export default function BoardAiChatDrawer({
     }
     setBoardError(action);
   }, [documentScopeId, setDocumentSessionValue]);
+
+  /**
+   * Records one assistant message as saved, in whichever session owns it.
+   *
+   * Appending an identity -- never replacing the list -- is what keeps several
+   * saved answers in one thread independent, and what stops a later turn from
+   * un-saving an earlier one.
+   */
+  const markAssistantNoteSaved = useCallback((messageId: string) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => {
+        const current = session.savedNoteMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS;
+        if (current.includes(messageId)) return session;
+        return { ...session, savedNoteMessageIds: [...current, messageId] };
+      });
+      return;
+    }
+    setBoardSavedNoteMessageIds((current) => (
+      current.includes(messageId) ? current : [...current, messageId]
+    ));
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  // The click guard reads the saved identities synchronously; this mirror is
+  // what a REMOUNTED drawer consults, since its own attempt map starts empty.
+  useEffect(() => {
+    savedNoteMessageIdsRef.current = savedNoteMessageIdSet;
+  }, [savedNoteMessageIdSet]);
 
   useEffect(() => {
     activeDocumentScopeRef.current = documentScopeId;
@@ -423,6 +481,10 @@ export default function BoardAiChatDrawer({
     source: Omit<BoardAiAssistantNoteSaveRequest, 'messageId' | 'content'>,
   ) => {
     if (!onSaveAssistantAsNote) return;
+    // Two guards, one rule: this mount's in-flight attempt, and the session's
+    // memory of every save that already succeeded -- including ones made
+    // before the last unmount.
+    if (savedNoteMessageIdsRef.current.has(message.id)) return;
     const currentState = assistantNoteSaveStateRef.current[message.id];
     if (currentState === 'saving' || currentState === 'saved') return;
     assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saving' };
@@ -435,11 +497,14 @@ export default function BoardAiChatDrawer({
       });
       assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saved' };
       setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
+      // Only a save that actually completed is remembered. A failure leaves the
+      // message saveable, because no Note exists for it.
+      markAssistantNoteSaved(message.id);
     } catch {
       assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'failed' };
       setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
     }
-  }, [onSaveAssistantAsNote]);
+  }, [markAssistantNoteSaved, onSaveAssistantAsNote]);
 
   const setDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
     onDraftContextChange?.(items);
@@ -716,7 +781,9 @@ export default function BoardAiChatDrawer({
           const assistantNoteSource = message.role === 'assistant'
             ? assistantNoteSourceForMessage(messages, index, documentScope)
             : null;
-          const noteSaveState = assistantNoteSaveStateByMessageId[message.id];
+          const noteSaveState: AssistantNoteSaveState | undefined = savedNoteMessageIdSet.has(message.id)
+            ? 'saved'
+            : assistantNoteSaveStateByMessageId[message.id];
           const canShowSaveAsNote = message.role === 'assistant'
             && canSaveAssistantAsNote
             && !!onSaveAssistantAsNote

@@ -101,6 +101,8 @@ async function mount(props: Partial<React.ComponentProps<typeof BoardAiChatDrawe
 
 const q = (selector: string) => host.querySelector(selector) as HTMLElement | null;
 const all = (selector: string) => Array.from(host.querySelectorAll(selector)) as HTMLElement[];
+const saveButton = (messageId: string) =>
+  q(`[data-board-ai-chat-save-message-id="${messageId}"]`) as HTMLButtonElement | null;
 const type = async (value: string) => {
   const input = q('[data-board-ai-chat-input="true"]') as HTMLTextAreaElement;
   await act(async () => {
@@ -592,6 +594,45 @@ describe('PDF workspace document-scoped mode', () => {
     },
   ] as const;
 
+  const pdfTwoAnswerThread = (documentId: string, pageNumber: number) => [
+    {
+      id: 'u-one',
+      role: 'user',
+      content: 'question one',
+      provider: null,
+      model: null,
+      createdAt: 'n',
+      context: { version: 1, items: [{ type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber }] },
+    },
+    {
+      id: 'assistant-a',
+      role: 'assistant',
+      content: 'answer A',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      createdAt: 'n',
+      context: null,
+    },
+    {
+      id: 'u-two',
+      role: 'user',
+      content: 'question two',
+      provider: null,
+      model: null,
+      createdAt: 'n',
+      context: { version: 1, items: [{ type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber }] },
+    },
+    {
+      id: 'assistant-b',
+      role: 'assistant',
+      content: 'answer B',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      createdAt: 'n',
+      context: null,
+    },
+  ] as const;
+
   async function mountPdfSaveHarness({
     activeDocumentId = DOC_A,
     activeFilename = 'Alpha.pdf',
@@ -632,12 +673,15 @@ describe('PDF workspace document-scoped mode', () => {
       documentId,
       filename,
       pageNumber,
+      panel,
     }: {
       documentId: string;
       filename: string;
       pageNumber: number;
+      panel: 'ai' | 'library';
     }) {
       const [sessions, setSessions] = React.useState<Record<string, BoardAiDocumentScopedSession>>(seededSessions);
+      if (panel === 'library') return <div data-pdf-workspace-panel="library" />;
       return (
         <BoardAiChatDrawer
           boardId={BOARD_ID}
@@ -657,9 +701,14 @@ describe('PDF workspace document-scoped mode', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    const render = async (documentId: string, filename: string, pageNumber: number) => {
+    const render = async (
+      documentId: string,
+      filename: string,
+      pageNumber: number,
+      panel: 'ai' | 'library' = 'ai',
+    ) => {
       await act(async () => {
-        root!.render(<Harness documentId={documentId} filename={filename} pageNumber={pageNumber} />);
+        root!.render(<Harness documentId={documentId} filename={filename} pageNumber={pageNumber} panel={panel} />);
       });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     };
@@ -906,6 +955,90 @@ describe('PDF workspace document-scoped mode', () => {
 
     await click('[data-board-ai-chat-action="save-note"]');
     expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a saved answer Saved and disabled across an AI -> Library -> AI switch', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { render } = await mountPdfSaveHarness({ onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(saveButton(`a-${DOC_A}`)?.textContent).toContain('Saved');
+
+    // Library owns the panel: the AI drawer is gone, not hidden.
+    await render(DOC_A, 'Alpha.pdf', 3, 'library');
+    expect(q('[data-board-ai-chat-action="save-note"]')).toBeNull();
+    await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+
+    const button = saveButton(`a-${DOC_A}`) as HTMLButtonElement;
+    expect(button.textContent).toContain('Saved');
+    expect(button.disabled).toBe(true);
+
+    // The remounted panel offers no second Note for a message already saved.
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps saved and unsaved answers in one thread independent across the switch', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { render } = await mountPdfSaveHarness({
+      initialSessions: {
+        [DOC_A]: {
+          activeThreadId: THREAD_A,
+          messages: pdfTwoAnswerThread(DOC_A, 2),
+          draft: '',
+          loadingMessages: false,
+          sending: false,
+          error: null,
+        },
+      },
+      onSave,
+    });
+
+    await click('[data-board-ai-chat-save-message-id="assistant-a"]');
+    await render(DOC_A, 'Alpha.pdf', 3, 'library');
+    await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+
+    expect(saveButton('assistant-a')?.textContent).toContain('Saved');
+    expect((saveButton('assistant-a') as HTMLButtonElement).disabled).toBe(true);
+    expect(saveButton('assistant-b')?.textContent).toContain('Save as Note');
+    expect((saveButton('assistant-b') as HTMLButtonElement).disabled).toBe(false);
+
+    await click('[data-board-ai-chat-save-message-id="assistant-b"]');
+    await render(DOC_A, 'Alpha.pdf', 3, 'library');
+    await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+
+    expect(saveButton('assistant-a')?.textContent).toContain('Saved');
+    expect(saveButton('assistant-b')?.textContent).toContain('Saved');
+    expect((saveButton('assistant-a') as HTMLButtonElement).disabled).toBe(true);
+    expect((saveButton('assistant-b') as HTMLButtonElement).disabled).toBe(true);
+    expect(onSave.mock.calls.map((call) => call[0].messageId)).toEqual(['assistant-a', 'assistant-b']);
+  });
+
+  it('remembers no save that failed, so the answer is still saveable after the switch', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('internal details'));
+    const { render } = await mountPdfSaveHarness({ onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(q('[data-board-ai-chat-save-note-error="true"]')).not.toBeNull();
+
+    await render(DOC_A, 'Alpha.pdf', 3, 'library');
+    await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+
+    const button = saveButton(`a-${DOC_A}`) as HTMLButtonElement;
+    expect(button.textContent).toContain('Save as Note');
+    expect(button.textContent).not.toContain('Saved');
+    expect(button.disabled).toBe(false);
+  });
+
+  it('leaves an earlier saved answer saved when a new turn is generated', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    await mountPdfSaveHarness({ onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+
+    await type('another question');
+    await click('[data-board-ai-chat-action="send"]');
+
+    const button = saveButton(`a-${DOC_A}`) as HTMLButtonElement;
+    expect(button.textContent).toContain('Saved');
+    expect(button.disabled).toBe(true);
   });
 
   it('shows a generic failure and never reports Saved when Note/source-link persistence fails', async () => {
