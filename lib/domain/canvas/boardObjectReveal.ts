@@ -83,3 +83,68 @@ export function resolveRevealPanDelta(
     dy: targetCentre.y - viewportCentre.y,
   };
 }
+
+/** The minimum of a post this resolver reads: identity, type, parent link. */
+export interface RevealCandidatePost {
+  readonly id: string;
+  readonly type?: string | null;
+  readonly metadata?: { readonly parentId?: unknown } | null;
+}
+
+/** How deep a container nest may be before we stop walking and refuse. */
+const MAX_CONTAINER_DEPTH = 16;
+
+function parentIdOf(post: RevealCandidatePost): string | null {
+  const parentId = post.metadata?.parentId;
+  return typeof parentId === 'string' && parentId.length > 0 ? parentId : null;
+}
+
+/**
+ * WHICH post's geometry describes where this Note is actually on screen.
+ *
+ * A Note grouped into a container is dropped from `rootPadlets` and drawn
+ * inside its parent, but `attachPostToContainer` only writes metadata -- the
+ * child keeps whatever `position_x/position_y` it had when it was loose. Those
+ * coordinates are therefore a record of where the Note USED to be, and reading
+ * them sends the camera somewhere the Note demonstrably is not.
+ *
+ * So the anchor is the outermost ancestor that is actually rendered: walk the
+ * `parentId` chain to the container nobody else contains, and use that. V1
+ * deliberately stops there rather than centring the exact card inside the
+ * container -- the container is where the Note visibly is, and that is a true
+ * answer. Inventing nested child world coordinates to do better would be a
+ * persistence change, not a navigation one.
+ *
+ * Returns null whenever the chain cannot be trusted: a parent that is not on
+ * the board, a `parentId` pointing at something that is not a container, a
+ * cycle, or a nest deeper than anything real. Null means do not move. Falling
+ * back to the child's stale coordinates would be the one wrong answer -- it
+ * looks like success and lands the camera in the wrong place.
+ */
+export function resolveRevealAnchorPost<T extends RevealCandidatePost>(
+  target: T | null | undefined,
+  allPosts: readonly T[],
+): T | null {
+  if (!target) return null;
+
+  let current: T = target;
+  const seen = new Set<string>([target.id]);
+
+  for (let depth = 0; depth < MAX_CONTAINER_DEPTH; depth += 1) {
+    const parentId = parentIdOf(current);
+    // Nobody contains this one: it is drawn at its own coordinates.
+    if (parentId === null) return current;
+
+    const parent = allPosts.find((post) => post.id === parentId);
+    // Metadata says "I live inside something" and that something is not here.
+    // We do not know where this Note is drawn, so we do not guess.
+    if (!parent) return null;
+    if (parent.type !== 'container') return null;
+    if (seen.has(parent.id)) return null;
+
+    seen.add(parent.id);
+    current = parent;
+  }
+
+  return null;
+}

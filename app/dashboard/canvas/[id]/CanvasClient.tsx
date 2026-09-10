@@ -33,7 +33,7 @@ import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { canEditBoard } from '@/lib/domain/canvas/boardEditAuthority';
-import { resolveRevealPanDelta, type BoardObjectRevealRequest } from '@/lib/domain/canvas/boardObjectReveal';
+import { resolveRevealAnchorPost, resolveRevealPanDelta, type BoardObjectRevealRequest } from '@/lib/domain/canvas/boardObjectReveal';
 import { getViewportWorldRect } from '@/components/collabboard/canvas/minimap/freeformMinimapGeometry';
 import { getFallbackMinimapItem } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
 import { useBoardCollaboratorAuthority } from '@/components/collabboard/canvas/hooks/useBoardCollaboratorAuthority';
@@ -8276,8 +8276,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const worldOrigin = freeformWorldOriginRef.current;
     if (!viewport || !worldOrigin) return;
 
+    // Where the Note is actually DRAWN, which is not always where its own
+    // coordinates say: a Note grouped into a container is rendered inside its
+    // parent and keeps the stale position it had when it was loose.
+    const anchor = resolveRevealAnchorPost(target, padlets);
+    if (!anchor) return;
+
     const delta = resolveRevealPanDelta(
-      getFallbackMinimapItem(target),
+      getFallbackMinimapItem(anchor),
       getViewportWorldRect({
         viewportRect: viewport.getBoundingClientRect(),
         clientLeft: viewport.clientLeft,

@@ -93,10 +93,24 @@ describe('the reveal request and the camera it drives', () => {
     expect(canvasClient).toContain('}, [boardRevealRequest?.requestId]);');
   });
 
+  it('the consumer anchors on the RENDERED post, not the requested one', () => {
+    // The container-child correction, pinned at the wiring: geometry is read
+    // from the anchor, and a target whose anchor cannot be resolved never
+    // reaches the camera at all.
+    expect(canvasClient).toContain('const anchor = resolveRevealAnchorPost(target, padlets);');
+    expect(canvasClient).toContain('if (!anchor) return;');
+    expect(canvasClient).toContain('getFallbackMinimapItem(anchor)');
+    // The stale child coordinates are never the source of the pan.
+    expect(canvasClient).not.toContain('getFallbackMinimapItem(target)');
+    // ...and the REQUEST still names the Note, not its container.
+    expect(canvasClient).toContain('setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId });');
+  });
+
   it('it reuses the minimap camera rather than inventing a second one', () => {
     expect(canvasClient).toContain('panByWorldDelta(delta.dx, delta.dy)');
     expect(canvasClient).toContain('getViewportWorldRect({');
-    expect(canvasClient).toContain('getFallbackMinimapItem(target)');
+    // Geometry comes from the ANCHOR since the container-child correction.
+    expect(canvasClient).toContain('getFallbackMinimapItem(anchor)');
     // No parallel viewport system, and no zoom change smuggled into a pan.
     const revealEffect = canvasClient.slice(
       canvasClient.indexOf('if (!boardRevealRequest || !isFreeformLayout) return;'),
