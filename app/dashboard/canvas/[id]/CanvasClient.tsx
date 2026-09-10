@@ -32,6 +32,7 @@ import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { canEditBoard } from '@/lib/domain/canvas/boardEditAuthority';
 import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';
 import { createCommentModeMutations } from '@/lib/infra/canvas/commentMutations';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
@@ -379,11 +380,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
   }, [user]);
 
-  const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
-  // Keep the canvas creation toolbar aligned with board editability.
-  // Otherwise editable member accounts can open and modify a board but lose the
-  // left toolbar entirely because they are not workspace admins.
-  const canUseCanvasToolbar = canUseFreeformEditButton;
+  // The board's edit capability is resolved below, once the board row itself
+  // has been read -- ownership is part of the answer and lives on that row.
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
   // PATCH 8O.1/8O.2 -- resolved once at the controller boundary from
   // WorkspaceRole, the only permission signal with any live wiring today.
@@ -487,6 +485,36 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
     insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, createContainerOrThrow, dropDraftIntoContainerOrThrow, updatePostFieldsSwallowResolved, updatePostFieldsOrThrow, updatePostFieldsPreservingFailureChannels, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
+
+  /**
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_1. Who may edit THIS board.
+   *
+   * Resolved here rather than beside the workspace role above, because it
+   * reads the loaded board row -- no extra request: `boards.user_id` already
+   * arrives with the `select('*')` the canvas read performs.
+   *
+   * Ownership is what the live write policy authorises, and it is independent
+   * of workspace membership: an owner whose workspace role is later changed to
+   * readonly still owns the board and the database still accepts their writes.
+   * Deriving the UI from workspace role alone told that person they could not
+   * edit their own board. Ownership can therefore only ever GRANT here -- the
+   * pre-existing workspace capability is kept unchanged for everyone else, so
+   * nobody who could edit before can edit less now.
+   *
+   * One capability, and every board-edit gate below derives from it: a
+   * per-feature exception would leave the rest of the UI telling the same
+   * person the opposite thing.
+   */
+  const canEditCurrentBoard = canEditBoard({
+    userId: user?.id,
+    board: canvas,
+    workspaceRole: currentWorkspaceRole,
+  });
+  const canUseFreeformEditButton = canEditCurrentBoard;
+  // Keep the canvas creation toolbar aligned with board editability.
+  // Otherwise editable member accounts can open and modify a board but lose the
+  // left toolbar entirely because they are not workspace admins.
+  const canUseCanvasToolbar = canUseFreeformEditButton;
 
   // PATCH 8O.2 -- persistence path for 'comment'-mode mutations (own-comment
   // add/edit/style/delete), kept separate from the existing

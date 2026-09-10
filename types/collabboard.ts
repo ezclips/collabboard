@@ -72,6 +72,14 @@ export type SavedAIComponent = {
 
 export interface Canvas {
   id: string;
+  /**
+   * The board's owner. Already present on every `boards` row the canvas
+   * read returns (`select('*')`), and the column live write policy
+   * authorises against -- typed here so the UI can read the ownership it
+   * was already being handed. Optional because a legacy row, or a partial
+   * fixture, may not carry it; every reader must fail closed without it.
+   */
+  user_id?: string;
   title: string;
   description?: string;
   layout: LayoutType;

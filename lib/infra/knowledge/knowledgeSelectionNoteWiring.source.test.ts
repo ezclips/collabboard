@@ -25,6 +25,8 @@ function sourceOf(relativePath: string): string {
 const canvasClient = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const readerDrawer = sourceOf('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
 const details = sourceOf('components/collabboard/KnowledgeDocumentDetails.tsx');
+const canvasViewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
+const canvasTypes = sourceOf('types/collabboard.ts');
 
 /** The body of the one command this gate adds. */
 const command = (() => {
@@ -229,8 +231,12 @@ describe('Save as Note is gated on this board edit capability', () => {
     expect(canEditWorkspace(null)).toBe(false);
     expect(canEditWorkspace(undefined)).toBe(false);
 
-    // ...and that this is what the controller resolves the capability from.
-    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+    // PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_1: this is now the NON-OWNER
+    // half of the answer, not the whole of it -- the board's own owner column
+    // is the other half. It is passed through unchanged, which is what keeps
+    // every non-owner's rights exactly as they were.
+    expect(canvasClient).toContain('workspaceRole: currentWorkspaceRole,');
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
   });
 
   it('8: the same capability every other shared post mutation is gated on', () => {
@@ -291,5 +297,75 @@ describe('Save as Note is gated on this board edit capability', () => {
     // And no scalar current-save slot survives.
     expect(details).not.toContain('selectionSaveInFlightRef.current = null');
     expect(details).not.toContain('selectionSaveState?.key');
+  });
+});
+
+// ============================================================================
+// PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_1 -- the board's own authority
+// ============================================================================
+
+describe('the canvas derives board-edit rights from the board, not only the workspace', () => {
+  it('B: the controller resolves ONE capability, from the board row and the role', () => {
+    // The exact call the controller makes. `user?.id` and the loaded `canvas`
+    // are what make an owner an owner; the workspace role is the pre-existing
+    // non-owner half, passed through unchanged.
+    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
+    expect(canvasClient).toContain('userId: user?.id,');
+    expect(canvasClient).toContain('board: canvas,');
+    expect(canvasClient).toContain('workspaceRole: currentWorkspaceRole,');
+    // ...and every existing board-edit gate is derived from that one answer.
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
+    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
+    // The old workspace-only derivation is gone, not merely bypassed.
+    expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+  });
+
+  it('the ownership fact comes from the board already read -- no second request', () => {
+    // `boards.select('*')` already returns the owner column; the canvas read
+    // is untouched and nothing new is fetched to learn who owns the board.
+    expect(canvasViewReads).toContain("from('boards').select('*')");
+    const derivation = canvasClient.slice(
+      canvasClient.indexOf('const canEditCurrentBoard = canEditBoard({'),
+      canvasClient.indexOf('const canUseCanvasToolbar = canUseFreeformEditButton;'),
+    );
+    for (const forbidden of ['fetch(', 'supabase.from', 'await ', 'useEffect', 'rpc(']) {
+      expect(derivation, forbidden).not.toContain(forbidden);
+    }
+    // Typed where the row is typed, rather than cast at the point of use.
+    expect(canvasTypes).toContain('user_id?: string;');
+    expect(canvasClient).not.toContain('(canvas as any).user_id');
+  });
+
+  it('5: Save as Note is gated on that same capability, with no exception of its own', () => {
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(command).toContain("if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');");
+    // No feature-local owner escape hatch anywhere near this feature.
+    for (const forbidden of ['canSavePdfSelection', 'ownerException', 'isOwnerOverride']) {
+      expect(canvasClient, forbidden).not.toContain(forbidden);
+    }
+    expect(command).not.toContain('isBoardOwner');
+    expect(command).not.toContain('user_id');
+  });
+
+  it('6: the backend remains the boundary -- this changes what is offered only', () => {
+    // Nothing here writes, elevates, or routes around the server. The
+    // reference write still goes through the one authorised route.
+    const authority = readFileSync(resolve(process.cwd(), 'lib/domain/canvas/boardEditAuthority.ts'), 'utf8');
+    for (const forbidden of ['supabase', 'fetch(', 'service_role', 'rpc(', 'process.env']) {
+      expect(authority, forbidden).not.toContain(forbidden);
+    }
+    expect(authority).toContain("import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';");
+  });
+
+  it('7: the concurrency correction is untouched by this gate', () => {
+    expect(details).toContain('useRef<Map<string, SelectionSaveStatus>>(new Map())');
+    expect(details).toContain('setSelectionSaveStates((current) => ({ ...current, [key]: status }))');
+    const save = details.slice(
+      details.indexOf('const saveActiveSelectionAsNote = useCallback('),
+      details.indexOf('useEffect(() => {\n    setActiveMatchIndex(0);'),
+    );
+    expect(save).toContain("if (claimed === 'pending' || claimed === 'saved') return;");
+    expect(save.indexOf("writeSelectionSaveStatus(key, 'pending');"))
+      .toBeLessThan(save.indexOf('await onSaveSelectionAsNote('));
   });
 });
