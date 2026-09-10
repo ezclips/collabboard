@@ -8383,7 +8383,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canvasId={canvas.id}
           canvas={canvas}
           hasSections={sections.length > 0}
-          currentWorkspaceRole={currentWorkspaceRole}
+          /* The modal consumes the board's capability; it never recomputes one
+             from a role, an owner id or a user id it should not see. */
+          canEdit={canEditCurrentBoard}
           onSaved={() => fetchData()}
         />
 
@@ -9440,7 +9442,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setPadletToEdit(padlet);
                   setIsNoteEditorOpen(true);
                 }}
-                readOnly={currentWorkspaceRole === 'readonly'}
+                /*
+                  PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2. Drawing is board
+                  state, so it reads the board's own edit capability -- not the
+                  workspace role, which said "read only" to the owner of the
+                  board the database was still accepting drawings for. Only the
+                  gate changed; Drawing's behaviour is untouched.
+                */
+                readOnly={!canEditCurrentBoard}
                 fetchData={fetchData}
                 commentAccessMode={commentAccessMode}
                 onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
@@ -9600,8 +9609,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     handleToolClick(toolType);
                   }) : undefined}
                   sections={sections}
-                  canManageSections={canEditWorkspace(currentWorkspaceRole)}
-                  canReorderPosts={canEditWorkspace(currentWorkspaceRole)}
+                  /* Board-owned sections and ordering: the board's own
+                     capability decides them, as it decides every other Map
+                     mutation beside them. */
+                  canManageSections={canEditCurrentBoard}
+                  canReorderPosts={canEditCurrentBoard}
                   onAddSection={handleAddSection}
                   onRenameSection={(sectionId, title) => {
                     const numeric = Number(sectionId);

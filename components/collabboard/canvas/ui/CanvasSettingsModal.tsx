@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Columns3, Grid3X3, Layers3, Clock, Loader2, X } from 'lucide-react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
-import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+
 import { toast } from 'sonner';
 import type { Canvas, LayoutType } from '@/types/collabboard';
 import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
@@ -31,7 +31,15 @@ interface CanvasSettingsModalProps {
   canvasId: string;
   canvas: Canvas | null;
   hasSections: boolean;
-  currentWorkspaceRole: WorkspaceRole | null;
+  /**
+   * May this user edit THIS board?
+   *
+   * Resolved once by the board shell and passed in. The modal deliberately
+   * receives no role, no owner id and no user id: a second place deciding who
+   * may edit a board is a second place to get it wrong, and this one used to
+   * answer from workspace role alone -- refusing the board's own owner.
+   */
+  canEdit: boolean;
   onSaved: () => void;
 }
 
@@ -41,11 +49,10 @@ export default function CanvasSettingsModal({
   canvasId,
   canvas,
   hasSections,
-  currentWorkspaceRole,
+  canEdit,
   onSaved,
 }: CanvasSettingsModalProps) {
   const supabase = useMemo(() => supabaseBrowser(), []);
-  const canEdit = canEditWorkspace(currentWorkspaceRole);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');

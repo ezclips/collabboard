@@ -59,5 +59,11 @@ export function canEditBoard(input: {
   readonly board: BoardOwnershipRow | null | undefined;
   readonly workspaceRole: WorkspaceRole | null | undefined;
 }): boolean {
+  // Authenticated FIRST, and unconditionally. Workspace role and the board row
+  // are both cached client state that outlives a session: on logout or an
+  // account switch the id goes null while a stale editable role can still be
+  // sitting there, and without this line that stale role alone would keep
+  // every board mutation control on screen for nobody in particular.
+  if (typeof input.userId !== 'string' || input.userId.length === 0) return false;
   return isBoardOwner(input.userId, input.board) || canEditWorkspace(input.workspaceRole);
 }

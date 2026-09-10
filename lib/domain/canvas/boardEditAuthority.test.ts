@@ -73,3 +73,52 @@ describe('who may edit this board', () => {
     expect(canEditBoard({ userId: OTHER, board: { user_id: U }, workspaceRole: 'admin' })).toBe(true);
   });
 });
+
+// ============================================================================
+// PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2 -- an unresolved identity denies
+// ============================================================================
+
+describe('nobody edits a board without an identity', () => {
+  it('E: a null user with a still-editable workspace role may not edit', () => {
+    // The role is cached client state. It survives a logout by a render or
+    // two, and on its own it used to be enough.
+    for (const workspaceRole of ['owner', 'admin', 'member'] as const) {
+      expect(canEditBoard({ userId: null, board: null, workspaceRole })).toBe(false);
+      expect(canEditBoard({ userId: undefined, board: null, workspaceRole })).toBe(false);
+      expect(canEditBoard({ userId: '', board: null, workspaceRole })).toBe(false);
+    }
+  });
+
+  it('F: a null user with a readonly workspace role may not edit', () => {
+    expect(canEditBoard({ userId: null, board: null, workspaceRole: 'readonly' })).toBe(false);
+    expect(canEditBoard({ userId: null, board: null, workspaceRole: null })).toBe(false);
+  });
+
+  it('G: a null user with the previous owner\'s board still loaded may not edit', () => {
+    // The signed-out session's board row is still in state, and it names the
+    // person who just left. Neither half may answer for them.
+    expect(canEditBoard({ userId: null, board: { user_id: U }, workspaceRole: 'member' })).toBe(false);
+    expect(canEditBoard({ userId: null, board: { user_id: U }, workspaceRole: 'readonly' })).toBe(false);
+    expect(canEditBoard({ userId: undefined, board: { user_id: U }, workspaceRole: 'admin' })).toBe(false);
+  });
+
+  it('the whole logout transition, in order', () => {
+    // Signed in, owner of this board, workspace membership downgraded to
+    // readonly: still an editor, because the database still says so.
+    const board = { user_id: U };
+    expect(canEditBoard({ userId: U, board, workspaceRole: 'member' })).toBe(true);
+    expect(canEditBoard({ userId: U, board, workspaceRole: 'readonly' })).toBe(true);
+    // Signs out. The role and the board row linger for a render; the identity
+    // does not. Every board mutation capability goes with it.
+    expect(canEditBoard({ userId: null, board, workspaceRole: 'readonly' })).toBe(false);
+    expect(canEditBoard({ userId: null, board, workspaceRole: 'member' })).toBe(false);
+    // A different account signs in before the board row is refetched.
+    expect(canEditBoard({ userId: OTHER, board, workspaceRole: 'readonly' })).toBe(false);
+    // ...and that account's own workspace rights still work normally.
+    expect(canEditBoard({ userId: OTHER, board, workspaceRole: 'member' })).toBe(true);
+  });
+
+  it('H: an authenticated non-owner with a readonly role is denied', () => {
+    expect(canEditBoard({ userId: OTHER, board: { user_id: U }, workspaceRole: 'readonly' })).toBe(false);
+  });
+});
