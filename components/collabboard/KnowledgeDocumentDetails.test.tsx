@@ -2903,3 +2903,189 @@ describe('saving a PDF selection as a Note', () => {
     expect(knowledgeSelectionSaveIdentity('doc-2', base)).not.toBe(key);
   });
 });
+
+// ============================================================================
+// PDF_SELECTION_TO_NOTE_CORRECTIONS_1 -- overlapping saves are independent
+// ============================================================================
+//
+// A save belongs to the selection it was made from. Two of them can be in
+// flight at once -- start one, select something else, start another -- and a
+// single current-save slot cannot express that: the first completion would
+// overwrite the second's state and release the only in-flight claim, leaving a
+// running save looking armed and one press away from a duplicate Note.
+
+describe('overlapping selection saves stay independent', () => {
+  function saveButton(container: HTMLElement): HTMLButtonElement {
+    return container.querySelector('[data-knowledge-selection-save-note="true"]')!;
+  }
+
+  /** Two different spans on page 1: "safety" [4,10) and "PDF" [0,3). */
+  function selectA(container: HTMLElement) {
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+  }
+  function selectB(container: HTMLElement) {
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 0, root.firstChild!, 3);
+    finishSelectionOn(root);
+  }
+
+  /** One host that never settles until the test says so, per selection. */
+  function pendingSaves() {
+    const settlers = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+    const onSaveSelectionAsNote = vi.fn((request: KnowledgeSourcePageRequest) => {
+      const key = `${request.selection!.charStart}:${request.selection!.charEnd}`;
+      return new Promise<void>((resolve, reject) => {
+        settlers.set(key, { resolve, reject });
+      });
+    });
+    return {
+      onSaveSelectionAsNote,
+      settle: (key: string) => settlers.get(key)!,
+      startedFor: (key: string) => onSaveSelectionAsNote.mock.calls
+        .filter((call) => `${call[0].selection!.charStart}:${call[0].selection!.charEnd}` === key).length,
+    };
+  }
+
+  const A = '4:10';
+  const B = '0:3';
+
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('2: A completing while B is in flight leaves B protected', async () => {
+    const saves = pendingSaves();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote: saves.onSaveSelectionAsNote,
+    });
+
+    selectA(container);
+    await act(async () => { saveButton(container).click(); });
+    selectB(container);
+    await act(async () => { saveButton(container).click(); });
+
+    // Two legitimate saves, one per selection.
+    expect(saves.onSaveSelectionAsNote).toHaveBeenCalledTimes(2);
+    expect(saves.startedFor(A)).toBe(1);
+    expect(saves.startedFor(B)).toBe(1);
+    // B is the selection on screen, and it is still running.
+    expect(saveButton(container).textContent).toBe('Saving…');
+    expect(saveButton(container).disabled).toBe(true);
+
+    // A finishes FIRST, while B is still unresolved.
+    await act(async () => { saves.settle(A).resolve(); });
+
+    expect(saveButton(container).textContent, 'A finishing must not restate B').toBe('Saving…');
+    expect(saveButton(container).disabled, 'B is still in flight').toBe(true);
+    // And pressing B again starts no third save.
+    await act(async () => { saveButton(container).click(); });
+    expect(saves.onSaveSelectionAsNote).toHaveBeenCalledTimes(2);
+
+    await act(async () => { saves.settle(B).resolve(); });
+    expect(saveButton(container).textContent).toBe('Saved');
+    expect(saves.onSaveSelectionAsNote).toHaveBeenCalledTimes(2);
+    expect(saves.startedFor(A)).toBe(1);
+    expect(saves.startedFor(B)).toBe(1);
+  });
+
+  it('3: the same holds when B completes first', async () => {
+    const saves = pendingSaves();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote: saves.onSaveSelectionAsNote,
+    });
+
+    selectA(container);
+    await act(async () => { saveButton(container).click(); });
+    selectB(container);
+    await act(async () => { saveButton(container).click(); });
+
+    await act(async () => { saves.settle(B).resolve(); });
+    expect(saveButton(container).textContent).toBe('Saved');
+
+    // Going back to A: it is still running, and still cannot be restarted.
+    selectA(container);
+    expect(saveButton(container).textContent).toBe('Saving…');
+    expect(saveButton(container).disabled).toBe(true);
+    await act(async () => { saveButton(container).click(); });
+    expect(saves.onSaveSelectionAsNote).toHaveBeenCalledTimes(2);
+
+    await act(async () => { saves.settle(A).resolve(); });
+    expect(saveButton(container).textContent).toBe('Saved');
+    expect(saves.startedFor(A)).toBe(1);
+    expect(saves.startedFor(B)).toBe(1);
+  });
+
+  it('4/D: A failing leaves B untouched, and only A is armed again', async () => {
+    const saves = pendingSaves();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote: saves.onSaveSelectionAsNote,
+    });
+
+    selectA(container);
+    await act(async () => { saveButton(container).click(); });
+    selectB(container);
+    await act(async () => { saveButton(container).click(); });
+
+    await act(async () => { saves.settle(A).reject(new Error('source_link_failed')); });
+
+    // B is on screen and unaffected by A's failure.
+    expect(saveButton(container).textContent).toBe('Saving…');
+    expect(saveButton(container).disabled).toBe(true);
+
+    // A shows its own failure, and only A may be retried.
+    selectA(container);
+    expect(saveButton(container).textContent).toBe('Save failed — retry');
+    expect(saveButton(container).disabled).toBe(false);
+    await act(async () => { saveButton(container).click(); });
+    expect(saves.startedFor(A), 'G: a failed save is retryable').toBe(2);
+    expect(saves.startedFor(B), 'and the retry belongs to A alone').toBe(1);
+
+    await act(async () => { saves.settle(B).resolve(); });
+    selectB(container);
+    expect(saveButton(container).textContent).toBe('Saved');
+  });
+
+  it('F/H: the button always shows the CURRENT selection, and Saved never spreads', async () => {
+    const saves = pendingSaves();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote: saves.onSaveSelectionAsNote,
+    });
+
+    selectA(container);
+    await act(async () => { saveButton(container).click(); });
+    await act(async () => { saves.settle(A).resolve(); });
+    expect(saveButton(container).textContent).toBe('Saved');
+
+    // H: a saved A must not suppress an unrelated B.
+    selectB(container);
+    expect(saveButton(container).textContent).toBe('Save as Note');
+    expect(saveButton(container).disabled).toBe(false);
+
+    // F: switching back shows A's own state again -- state follows the key.
+    selectA(container);
+    expect(saveButton(container).textContent).toBe('Saved');
+    selectB(container);
+    expect(saveButton(container).textContent).toBe('Save as Note');
+  });
+
+  it('the key names the document as well as the span', () => {
+    // Offsets alone collide: page 1 [4,10) exists in every PDF.
+    const span = { pageNumber: 1, charStart: 4, charEnd: 10, selectedText: 'safety' };
+    expect(knowledgeSelectionSaveIdentity('doc-1', span))
+      .not.toBe(knowledgeSelectionSaveIdentity('doc-2', span));
+    expect(knowledgeSelectionSaveIdentity('doc-1', span)).toContain('doc-1');
+    // ...and the text, so re-extracted page text cannot silence a new span.
+    expect(knowledgeSelectionSaveIdentity('doc-1', { ...span, selectedText: 'other!' }))
+      .not.toBe(knowledgeSelectionSaveIdentity('doc-1', span));
+  });
+});

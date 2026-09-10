@@ -759,61 +759,77 @@ export default function KnowledgeDocumentDetails({
     && activeSelection.selectedText.length > TEXT_ACTION_SELECTED_TEXT_MAX;
 
   /**
-   * PDF_SELECTION_TO_NOTE_1. What the Save as Note action has done about the
-   * selection it is currently offered for -- and about that one only.
+   * PDF_SELECTION_TO_NOTE_1. What Save as Note has done about each selection
+   * it has been pressed for.
    *
-   * Keyed by the selection's own coordinates, so the state is scoped to the
-   * selection rather than to this component: selecting anything else leaves
-   * the key behind and the action comes back armed. Nothing here is
-   * persisted, global or time-based.
+   * PDF_SELECTION_TO_NOTE_CORRECTIONS_1 makes this a MAP rather than one
+   * current-save slot. Saves are per selection and may overlap: a user can
+   * start one, select something else, and start another before the first
+   * settles. With a single slot the first completion would overwrite the
+   * second's state and release the only in-flight claim -- leaving a save
+   * that is still running looking armed, and one more press away from a
+   * duplicate Note. Keyed state has no such crosstalk: a completion touches
+   * its own key and no other.
+   *
+   * Nothing here is persisted, global or time-based, and the map only ever
+   * gains an entry for a selection the user actually pressed save on.
    */
-  const [selectionSaveState, setSelectionSaveState] = useState<
-    { readonly key: string; readonly status: 'pending' | 'saved' | 'failed' } | null
-  >(null);
+  type SelectionSaveStatus = 'pending' | 'saved' | 'failed';
+  const [selectionSaveStates, setSelectionSaveStates] =
+    useState<Readonly<Record<string, SelectionSaveStatus>>>({});
   /**
-   * The same claim, readable synchronously.
+   * The same statuses, readable SYNCHRONOUSLY.
    *
-   * Two clicks in one tick would both read the pre-update state, so the guard
-   * that makes a save at-most-once cannot be the state above -- it is written
-   * before the write starts and cleared only when that write settles.
+   * A state setter's updater does not run until the next render, so a second
+   * click in the same tick would still read the pre-click value: the guard
+   * that makes a save at-most-once cannot be the state above. This ref is
+   * written first and is the authority the guard reads; the state exists so
+   * the button re-renders. `pending` here IS the in-flight claim -- keyed, so
+   * claiming B never releases A.
    */
-  const selectionSaveInFlightRef = useRef<string | null>(null);
+  const selectionSaveRef = useRef<Map<string, SelectionSaveStatus>>(new Map());
+  const writeSelectionSaveStatus = useCallback((key: string, status: SelectionSaveStatus) => {
+    selectionSaveRef.current.set(key, status);
+    // One key at a time, always merged: a completion for A must leave every
+    // other selection's entry -- B's `pending` above all -- exactly as it is.
+    setSelectionSaveStates((current) => ({ ...current, [key]: status }));
+  }, []);
 
   const activeSelectionSaveKey = activeSelection === null || !documentId
     ? null
     : knowledgeSelectionSaveIdentity(documentId, activeSelection);
-  const selectionSaveStatus = selectionSaveState !== null
-    && activeSelectionSaveKey !== null
-    && selectionSaveState.key === activeSelectionSaveKey
-    ? selectionSaveState.status
-    : null;
+  // What the button shows is the CURRENT selection's own status. A save that
+  // settles for some other selection changes that selection's entry, so it
+  // can never make what is on screen read Saved or Failed.
+  const selectionSaveStatus = activeSelectionSaveKey === null
+    ? null
+    : selectionSaveStates[activeSelectionSaveKey] ?? null;
 
   /**
    * One selection, at most one Note.
    *
    * The in-flight key is claimed BEFORE the host is called, so a double click
-   * finds the claim already made. A rejection clears the claim and says so:
-   * the host rolls its own Note back, and a failed save must stay retryable
-   * rather than sit there looking finished.
+   * finds the claim already made. A rejection clears that key alone and says
+   * so: the host rolls its own Note back, and a failed save must stay
+   * retryable rather than sit there looking finished.
    */
   const saveActiveSelectionAsNote = useCallback(async () => {
     if (!onSaveSelectionAsNote || !documentId || activeSelection === null) return;
     const key = knowledgeSelectionSaveIdentity(documentId, activeSelection);
-    if (selectionSaveInFlightRef.current === key) return;
-    if (selectionSaveState?.key === key && selectionSaveState.status === 'saved') return;
-    selectionSaveInFlightRef.current = key;
-    setSelectionSaveState({ key, status: 'pending' });
+    // Claimed synchronously, before the first await: a save already running
+    // or already finished for THIS selection is never started again.
+    const claimed = selectionSaveRef.current.get(key);
+    if (claimed === 'pending' || claimed === 'saved') return;
+    writeSelectionSaveStatus(key, 'pending');
     try {
       await onSaveSelectionAsNote(
         buildSelectionSourceRequest(documentId, originalFilename, pages, activeSelection, selectionColor),
       );
-      setSelectionSaveState({ key, status: 'saved' });
+      writeSelectionSaveStatus(key, 'saved');
     } catch {
       // The host owns the user-facing detail; this surface owns the fact that
-      // nothing was saved and the action is armed again.
-      setSelectionSaveState({ key, status: 'failed' });
-    } finally {
-      selectionSaveInFlightRef.current = null;
+      // nothing was saved and that THIS selection is armed again.
+      writeSelectionSaveStatus(key, 'failed');
     }
   }, [
     activeSelection,
@@ -822,7 +838,7 @@ export default function KnowledgeDocumentDetails({
     originalFilename,
     pages,
     selectionColor,
-    selectionSaveState,
+    writeSelectionSaveStatus,
   ]);
 
   useEffect(() => {

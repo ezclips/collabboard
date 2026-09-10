@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildKnowledgeSourceNoteDraft } from '../../domain/knowledge/knowledgeSourceNoteDraft';
+import { canEditWorkspace } from '@/lib/workspace/context';
 
 /**
  * PDF_SELECTION_TO_NOTE_1 governance seam.
@@ -155,8 +156,8 @@ describe('a PDF selection becomes one source-linked Note', () => {
   });
 
   it('2/7: editor authority decides the control, on the same rule as the editor path', () => {
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseCanvasToolbar ? saveKnowledgeSelectionAsNote : undefined}');
-    expect(command).toContain("if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');");
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(command).toContain("if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');");
     // Exact spans only: a page-only or region request keeps its own path.
     expect(command).toContain("if (!request.selection) throw new Error('selection_required');");
 
@@ -172,8 +173,8 @@ describe('a PDF selection becomes one source-linked Note', () => {
       details.indexOf('const saveActiveSelectionAsNote = useCallback('),
       details.indexOf('useEffect(() => {\n    setActiveMatchIndex(0);'),
     );
-    expect(save).toContain('if (selectionSaveInFlightRef.current === key) return;');
-    expect(save.indexOf('selectionSaveInFlightRef.current = key;'))
+    expect(save).toContain("if (claimed === 'pending' || claimed === 'saved') return;");
+    expect(save.indexOf("writeSelectionSaveStatus(key, 'pending');"))
       .toBeLessThan(save.indexOf('await onSaveSelectionAsNote('));
     // Scoped to one selection, and to nothing else.
     expect(details).toContain('knowledgeSelectionSaveIdentity(documentId, activeSelection)');
@@ -201,5 +202,94 @@ describe('a PDF selection becomes one source-linked Note', () => {
     expect(details).toContain('buildSelectionSourceRequest(documentId, originalFilename, pages, activeSelection, selectionColor)');
     expect(canvasClient).toContain('onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}');
     expect(details).toContain('onAiFromSelection(');
+  });
+});
+
+// ============================================================================
+// PDF_SELECTION_TO_NOTE_CORRECTIONS_1 -- the authority that gates the write
+// ============================================================================
+
+describe('Save as Note is gated on this board edit capability', () => {
+  /**
+   * What "may edit this board" actually resolves to here.
+   *
+   * The controller boundary documents why: per-board collaborator roles are a
+   * nav-orphaned vertical with no live data and no writers, so
+   * `canEditWorkspace(currentWorkspaceRole)` IS the canonical board-edit
+   * authority in this application -- the same one that gates creating,
+   * editing and deleting posts and opening the mutation-capable editor. This
+   * suite proves that derivation rather than inventing a second one.
+   */
+  it('8: the derivation is the app\'s one edit capability, exercised directly', () => {
+    expect(canEditWorkspace('owner')).toBe(true);
+    expect(canEditWorkspace('admin')).toBe(true);
+    expect(canEditWorkspace('member')).toBe(true);
+    // 'readonly' is this domain's read-only role -- there is no 'viewer'.
+    expect(canEditWorkspace('readonly')).toBe(false);
+    expect(canEditWorkspace(null)).toBe(false);
+    expect(canEditWorkspace(undefined)).toBe(false);
+
+    // ...and that this is what the controller resolves the capability from.
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+  });
+
+  it('8: the same capability every other shared post mutation is gated on', () => {
+    // Create / edit / delete a post, and open the mutation-capable editor.
+    expect(canvasClient).toContain('canEditPosts={canUseFreeformEditButton}');
+    expect(canvasClient).toContain('isEditable={canUseFreeformEditButton}');
+    expect(canvasClient).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+  });
+
+  it('6/7: the handler is supplied iff this user may edit the board', () => {
+    // A board editor gets the handler; a viewer gets `undefined`, so the
+    // control is not rendered at all -- the reader renders it only when the
+    // callback exists.
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(details).toContain('{onSaveSelectionAsNote ? (');
+    // And the command refuses on its own account too, not only in the UI.
+    expect(command).toContain("if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');");
+  });
+
+  it('the toolbar alias is no longer what gates this mutation', () => {
+    // `canUseCanvasToolbar` answers "does this surface get the creation
+    // toolbar", not "may this user change this board". They hold the same
+    // value today, which is exactly why the wrong one reads as correct --
+    // so the write names the edit capability explicitly.
+    expect(command).not.toContain('canUseCanvasToolbar');
+    const wiring = canvasClient.slice(
+      canvasClient.indexOf('onSaveSelectionAsNote={'),
+      canvasClient.indexOf('onSaveSelectionAsNote={') + 120,
+    );
+    expect(wiring).not.toContain('canUseCanvasToolbar');
+  });
+
+  it('9/D: the private AI actions are not tied to board mutation authority', () => {
+    // Ask AI and the page/selection handoff travel on the feature flag and
+    // the reader's own availability -- never on the edit capability.
+    expect(canvasClient).toContain('onBoardAiDraftContextChange={enableBoardAiChat ? setPdfAiDraftContextForDocument : undefined}');
+    expect(readerDrawer).toContain('const boardAiAvailable = !!onBoardAiDraftContextChange;');
+    expect(readerDrawer).toContain('onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}');
+    expect(readerDrawer).not.toContain('onAddBoardAiContext={canUseFreeformEditButton');
+  });
+
+  it('1/A: the save claim is keyed and synchronous, not one current-save slot', () => {
+    const save = details.slice(
+      details.indexOf('const saveActiveSelectionAsNote = useCallback('),
+      details.indexOf('useEffect(() => {\n    setActiveMatchIndex(0);'),
+    );
+    // The guard reads a keyed ref BEFORE the first await -- a state setter's
+    // updater would not have run yet when a second click in the same tick
+    // reads it.
+    expect(details).toContain('useRef<Map<string, SelectionSaveStatus>>(new Map())');
+    expect(save).toContain('const claimed = selectionSaveRef.current.get(key);');
+    expect(save).toContain("if (claimed === 'pending' || claimed === 'saved') return;");
+    expect(save.indexOf("writeSelectionSaveStatus(key, 'pending');"))
+      .toBeLessThan(save.indexOf('await onSaveSelectionAsNote('));
+    // Every write merges into the map: a completion for one selection can
+    // never restate another's entry.
+    expect(details).toContain('setSelectionSaveStates((current) => ({ ...current, [key]: status }))');
+    // And no scalar current-save slot survives.
+    expect(details).not.toContain('selectionSaveInFlightRef.current = null');
+    expect(details).not.toContain('selectionSaveState?.key');
   });
 });

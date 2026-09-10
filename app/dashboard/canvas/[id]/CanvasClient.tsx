@@ -2599,7 +2599,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * thing this must never do is report success.
    */
   const saveKnowledgeSelectionAsNote = useCallback(async (request: KnowledgeSourcePageRequest) => {
-    if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');
+    if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');
     // Exact spans only. A page-only or region request has its own established
     // path through the Note editor and is not what this action offers.
     if (!request.selection) throw new Error('selection_required');
@@ -2658,7 +2658,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Note saved');
   }, [
     canvasId,
-    canUseCanvasToolbar,
+    canUseFreeformEditButton,
     deletePostOrThrow,
     getNewPostPosition,
     insertPostAndSelectOrThrow,
@@ -10547,11 +10547,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           blockingEditorOpen={isBlockingOverlayOpen}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
           /*
-            PDF_SELECTION_TO_NOTE_1. Gated on the SAME board-edit capability
-            the Note editor path is: a viewer receives no shared mutation
-            control here, while the private AI actions keep their own rule.
+            PDF_SELECTION_TO_NOTE_CORRECTIONS_1. Gated on this board's EDIT
+            capability -- `canUseFreeformEditButton` -- and not on
+            `canUseCanvasToolbar`.
+
+            The two hold the same value today (the toolbar alias is assigned
+            from it), but they mean different things: one is "may this user
+            change this board", the other is "does this surface get the
+            creation toolbar". Every other shared post mutation -- create,
+            edit, delete, and opening the mutation-capable editor -- is gated
+            on the edit capability, so a write must be too. See the controller
+            boundary above for why WorkspaceRole IS that authority here: the
+            per-board collaborator vertical has no live data or writers, and
+            RLS enforces the boundary independently regardless.
+
+            The private AI actions keep their own read-derived rule.
           */
-          onSaveSelectionAsNote={canUseCanvasToolbar ? saveKnowledgeSelectionAsNote : undefined}
+          onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
           onOpenChange={setIsKnowledgeReaderOpen}
