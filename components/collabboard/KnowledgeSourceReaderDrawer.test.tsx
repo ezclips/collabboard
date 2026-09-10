@@ -20,7 +20,10 @@ import { knowledgeStandaloneHighlightIndexOf }
   from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
-import { buildKnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import {
+  buildKnowledgeDocumentOpenRequest,
+  buildKnowledgeSourceOpenRequest,
+} from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import {
   KNOWLEDGE_CONTROL_ACTIVE_BLUE,
   KNOWLEDGE_CONTROL_ACTIVE_PURPLE,
@@ -632,7 +635,11 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     await mount({ documentOpenRequest: docRequest(1, SOURCE_A, 2) });
 
     expect(drawerEl()!.querySelector('[data-page-number="2"]')).not.toBeNull();
-    expect(drawerCode).toContain('openDocumentById(documentOpenRequest.sourceDocumentId, documentOpenRequest.pageNumber, null)');
+    expect(drawerCode).toContain('documentOpenRequest.sourceDocumentId,');
+    expect(drawerCode).toContain('documentOpenRequest.pageNumber,');
+    // A library or semantic-result open still inherits no citation target, and
+    // states no reveal intent unless the request carried one.
+    expect(drawerCode).toContain('documentOpenRequest.revealSource === true,');
   });
 
   // --- E: the reader survives opening the Note it cites.
@@ -1725,5 +1732,168 @@ describe('repeat source navigation', () => {
     scrolls = [];
     await clickSource(reference);
     expect(scrolls).toContain('4');
+  });
+});
+
+// ============================================================================
+// BOARD_AI_PDF_CITATIONS_NARROW_FIX_1 -- a citation click shows the source
+// ============================================================================
+//
+// The defect: the reader presents a freshly opened document with its Library
+// panel, and below `lg` that panel is an opaque overlay over the reading pane.
+// A Board AI citation therefore loaded the cited page and then covered it --
+// from the global chat (reader opens fresh) and from a PDF-scoped chat citing
+// ANOTHER document (the document change reopened Library over it).
+
+describe('citation navigation reveals the cited document', () => {
+  const FILENAME_A = 'Alpha.pdf';
+  const FILENAME_B = 'Beta.pdf';
+
+  function withTwoDocuments() {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const forB = String(input).includes(SOURCE_B);
+      return jsonResponse({
+        document: {
+          id: forB ? SOURCE_B : SOURCE_A,
+          originalFilename: forB ? FILENAME_B : FILENAME_A,
+          pageCount: 6,
+        },
+        pages: Array.from({ length: 6 }, (_, index) => ({
+          pageNumber: index + 1,
+          text: `${forB ? FILENAME_B : FILENAME_A} body for page ${index + 1}`,
+        })),
+      });
+    });
+  }
+
+  /** The canonical request, exactly as CanvasClient builds it. */
+  let requestId = 0;
+  const documentOpen = (documentId: string, pageNumber?: number, revealSource?: boolean) =>
+    buildKnowledgeDocumentOpenRequest(++requestId, documentId, pageNumber, { revealSource });
+
+  const openPanel = () =>
+    (drawerEl()?.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
+      ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  /** Nothing is covering the reading pane when no panel is mounted at all. */
+  const readingPaneCovered = () =>
+    (drawerEl()?.querySelectorAll('[data-knowledge-source-notes-pane]').length ?? 0) > 0;
+  const currentPage = async () => {
+    const text = await drawerEl()?.querySelector('[data-knowledge-viewer-page-indicator="true"]')?.textContent;
+    return Number((text ?? '').split('/')[0]?.trim() ?? NaN);
+  };
+  const readerProps = (request: unknown) => ({
+    documentOpenRequest: request,
+    onOpenBacklinkTarget: vi.fn(),
+    onCreateNoteFromPage: vi.fn(),
+    boardAiDraftContextByDocumentId: {},
+    onBoardAiDraftContextChange: vi.fn(),
+  });
+
+  beforeEach(() => { requestId = 0; });
+
+  it('A: a citation from the global chat opens the cited page with nothing over it', async () => {
+    withTwoDocuments();
+    // The reader is closed; the citation is the thing that opens it.
+    await mount(readerProps(documentOpen(SOURCE_B, 4, true)) as never);
+    await settle();
+
+    expect(drawerEl()!.textContent).toContain(FILENAME_B);
+    expect(await currentPage()).toBe(4);
+    expect(openPanel(), 'the cited page must not open behind Library').toBeNull();
+    expect(readingPaneCovered()).toBe(false);
+    expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace]')).not.toBeNull();
+  });
+
+  it('B: a cross-document citation switches document and page, and Library does not reopen', async () => {
+    withTwoDocuments();
+    await mount(readerProps(documentOpen(SOURCE_A, 1)) as never);
+    await settle();
+
+    // Document A, presented the ordinary way: Library open, as it always was.
+    expect(openPanel()).toBe('library');
+    // The user opens AI over it, then clicks a citation into document B.
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLElement).click();
+    });
+    await settle();
+    expect(openPanel()).toBe('ai');
+
+    await renderInto(readerProps(documentOpen(SOURCE_B, 4, true)) as never);
+    await settle();
+
+    expect(drawerEl()!.textContent).toContain(FILENAME_B);
+    expect(await currentPage()).toBe(4);
+    expect(openPanel(), 'the document change must not reopen Library over the citation').toBeNull();
+    expect(readingPaneCovered()).toBe(false);
+  });
+
+  it('C/D: the same document, cited and cited again, ends visible each time', async () => {
+    withTwoDocuments();
+    let scrolls: string[] = [];
+    const originalScrollIntoView = (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = function record(this: Element) {
+      const page = this.getAttribute?.('data-page-number');
+      if (page) scrolls.push(page);
+    };
+    try {
+      await mount(readerProps(documentOpen(SOURCE_A, 1)) as never);
+      await settle();
+      expect(openPanel()).toBe('library');
+
+      // Same document, cited: the page is asked for and the panel stands down.
+      scrolls = [];
+      await renderInto(readerProps(documentOpen(SOURCE_A, 4, true)) as never);
+      await settle();
+      expect(scrolls).toContain('4');
+      expect(openPanel()).toBeNull();
+      expect(readingPaneCovered()).toBe(false);
+
+      // The SAME citation again is a second navigation, not a no-op.
+      scrolls = [];
+      await renderInto(readerProps(documentOpen(SOURCE_A, 4, true)) as never);
+      await settle();
+      expect(scrolls, 'a repeated citation navigates again').toContain('4');
+      expect(openPanel()).toBeNull();
+      expect(readingPaneCovered()).toBe(false);
+    } finally {
+      (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it('E: an ordinary open keeps the reader default -- Library, as before', async () => {
+    withTwoDocuments();
+    await mount(readerProps(documentOpen(SOURCE_A, 2)) as never);
+    await settle();
+    expect(openPanel(), 'a Library pick or tab activation is not a citation').toBe('library');
+
+    // And an ordinary open of ANOTHER document still presents Library.
+    await renderInto(readerProps(documentOpen(SOURCE_B, 1)) as never);
+    await settle();
+    expect(drawerEl()!.textContent).toContain(FILENAME_B);
+    expect(openPanel()).toBe('library');
+  });
+
+  it('F: the panel keeps its 300px-from-lg geometry, so wide layout is unchanged', async () => {
+    withTwoDocuments();
+    await mount(readerProps(documentOpen(SOURCE_A, 1)) as never);
+    await settle();
+
+    const pane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+    expect(pane.className).toContain('lg:w-[300px]');
+    expect(pane.className).toContain('lg:static');
+    // The intent is carried by the request, not by measuring the viewport.
+    expect(drawerCode).not.toContain('matchMedia');
+    expect(drawerCode).not.toContain('innerWidth');
+    expect(drawerCode).not.toContain('setTimeout(() => setSidePanelRightPanel');
+  });
+
+  it('states the intent on the request itself, and only for a source reveal', () => {
+    expect(buildKnowledgeDocumentOpenRequest(1, SOURCE_A, 4, { revealSource: true }))
+      .toEqual({ requestId: 1, sourceDocumentId: SOURCE_A, pageNumber: 4, revealSource: true });
+    // Every ordinary open is untouched: no field, no behaviour change.
+    expect(buildKnowledgeDocumentOpenRequest(2, SOURCE_A, 4)).toEqual({
+      requestId: 2, sourceDocumentId: SOURCE_A, pageNumber: 4,
+    });
+    expect(buildKnowledgeDocumentOpenRequest(3, SOURCE_A)).toEqual({ requestId: 3, sourceDocumentId: SOURCE_A });
   });
 });

@@ -95,6 +95,20 @@ export interface KnowledgeDocumentOpenRequest {
   readonly requestId: number;
   readonly sourceDocumentId: string;
   readonly pageNumber?: number;
+  /**
+   * This open exists to SHOW the document, not merely to have it open.
+   *
+   * A Board AI citation is the case it was added for: the click means "show me
+   * the source", and the reader's own habit of presenting a freshly opened
+   * document with its Library panel would then cover the very page that was
+   * asked for -- which below `lg`, where that panel is an opaque overlay,
+   * leaves the cited PDF loaded and invisible.
+   *
+   * Absent on every ordinary open, so a Library pick, a semantic result and a
+   * tab activation all keep the default they already had. The reader decides
+   * what to do about it: this only states the intent.
+   */
+  readonly revealSource?: boolean;
 }
 
 /** Builds a library open request. Pure: the caller owns the id. */
@@ -102,8 +116,12 @@ export function buildKnowledgeDocumentOpenRequest(
   requestId: number,
   sourceDocumentId: string,
   pageNumber?: number,
+  options: { readonly revealSource?: boolean } = {},
 ): KnowledgeDocumentOpenRequest {
-  return pageNumber === undefined
-    ? { requestId, sourceDocumentId }
-    : { requestId, sourceDocumentId, pageNumber };
+  return {
+    requestId,
+    sourceDocumentId,
+    ...(pageNumber === undefined ? {} : { pageNumber }),
+    ...(options.revealSource ? { revealSource: true } : {}),
+  };
 }

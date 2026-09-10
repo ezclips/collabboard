@@ -2000,6 +2000,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     documentId: string;
     originalFilename?: string;
     pageNumber?: number;
+    revealSource?: boolean;
   }) => {
     if (!sourceReferenceScopeKey) return;
     registerPdfWorkspaceDocument(request);
@@ -2010,6 +2011,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         knowledgeDocumentRequestIdRef.current,
         request.documentId,
         restoredPage,
+        { revealSource: request.revealSource },
       ),
     );
   }, [sourceReferenceScopeKey, pdfWorkspacePageById, registerPdfWorkspaceDocument]);
@@ -2134,6 +2136,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     originalFilename?: string;
     pageNumber?: number;
     presentation?: 'workspace' | 'side-panel';
+    revealSource?: boolean;
   }) => {
     if (!sourceReferenceScopeKey) return;
     if ((request.presentation ?? 'side-panel') === 'workspace') {
@@ -2151,7 +2154,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsBoardAiChatOpen(false);
     setKnowledgeReaderPresentation(presentation);
     setKnowledgeDocumentOpenRequest(
-      buildKnowledgeDocumentOpenRequest(knowledgeDocumentRequestIdRef.current, request.documentId, request.pageNumber),
+      buildKnowledgeDocumentOpenRequest(
+        knowledgeDocumentRequestIdRef.current,
+        request.documentId,
+        request.pageNumber,
+        { revealSource: request.revealSource },
+      ),
     );
   }, [sourceReferenceScopeKey, openPdfWorkspaceDocument]);
 
@@ -2170,6 +2178,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       documentId: request.knowledgeDocumentId,
       ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),
       presentation: 'side-panel',
+      // The click meant "show me the source", so the reader must not present
+      // this document behind the panel it normally opens with.
+      revealSource: true,
     });
   }, [requestKnowledgeDocumentOpen]);
 

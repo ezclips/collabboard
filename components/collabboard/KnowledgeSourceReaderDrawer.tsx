@@ -109,6 +109,8 @@ export interface KnowledgeSourceReaderDrawerProps {
     readonly documentId: string;
     readonly pageNumber?: number;
     readonly presentation?: 'workspace' | 'side-panel';
+    /** This open must end with the document visible. See the request type. */
+    readonly revealSource?: boolean;
   }) => void;
   /**
    * The board's OWN blocking-editor authority (`isBlockingEditorModalOpen`),
@@ -212,6 +214,14 @@ interface KnowledgeReaderState {
   pageNavigationRequestId?: number;
   /** Null for every library and semantic-result open, so neither inherits one. */
   sourceTarget: KnowledgeSourceTarget | null;
+  /**
+   * True when this open exists to SHOW the document -- a Board AI citation.
+   *
+   * Held on the reader state rather than read from the request, because the
+   * panel decision is made when the document CHANGES, which is one render
+   * after the request was handled.
+   */
+  revealSource?: boolean;
 }
 
 /**
@@ -337,6 +347,8 @@ export default function KnowledgeSourceReaderDrawer({
     // Defaulted rather than optional at the call site: a library pick must
     // arrive with no exact target, and forgetting it would inherit one.
     sourceTarget: KnowledgeSourceTarget | null = null,
+    // Same rule: an ordinary open must arrive as an ordinary open.
+    revealSource = false,
   ) => {
     if (!boardId) return;
     const generation = ++readGenerationRef.current;
@@ -358,7 +370,7 @@ export default function KnowledgeSourceReaderDrawer({
         originalFilename: cached.originalFilename,
         pageCount: cached.pageCount,
         pages: cached.pages,
-        loading: false, error: false, initialPageNumber, sourceTarget,
+        loading: false, error: false, initialPageNumber, sourceTarget, revealSource,
         pageNavigationRequestId: navigationRequestId,
       });
       // Fresh enough to trust: nothing further to do.
@@ -381,7 +393,7 @@ export default function KnowledgeSourceReaderDrawer({
 
     setReader({
       documentId, originalFilename: '', pageCount: null, pages: [],
-      loading: true, error: false, initialPageNumber, sourceTarget,
+      loading: true, error: false, initialPageNumber, sourceTarget, revealSource,
       pageNavigationRequestId: navigationRequestId,
     });
     // A 409 means extraction has not finished, which is a normal state for a
@@ -410,7 +422,7 @@ export default function KnowledgeSourceReaderDrawer({
           originalFilename: result.entry.originalFilename,
           pageCount: result.entry.pageCount,
           pages: result.entry.pages,
-          loading: false, error: false, initialPageNumber, sourceTarget,
+          loading: false, error: false, initialPageNumber, sourceTarget, revealSource,
           pageNavigationRequestId: navigationRequestId,
         });
         return;
@@ -439,7 +451,12 @@ export default function KnowledgeSourceReaderDrawer({
     if (!boardId || !documentOpenRequest) return;
     if (handledDocumentRequestRef.current === documentOpenRequest.requestId) return;
     handledDocumentRequestRef.current = documentOpenRequest.requestId;
-    void openDocumentById(documentOpenRequest.sourceDocumentId, documentOpenRequest.pageNumber, null);
+    void openDocumentById(
+      documentOpenRequest.sourceDocumentId,
+      documentOpenRequest.pageNumber,
+      null,
+      documentOpenRequest.revealSource === true,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, documentOpenRequest]);
 
@@ -529,14 +546,30 @@ export default function KnowledgeSourceReaderDrawer({
       documentId: request.knowledgeDocumentId,
       ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),
       presentation,
+      // Whichever document this lands on -- this one or another -- the reader
+      // must end up showing it, not presenting it behind a panel.
+      revealSource: true,
     });
     if (presentation !== 'workspace') setSidePanelRightPanel('closed');
   }, [onOpenKnowledgeDocument, presentation]);
 
-  /** A newly opened document starts on Library, the docked reader's default. */
+  /**
+   * What the docked reader presents when a document arrives.
+   *
+   * A newly opened document normally starts on Library -- that is the reader's
+   * existing default and it stays. The exception is an open whose whole point
+   * was to SHOW the document: a Board AI citation. Below `lg` this panel is an
+   * opaque overlay over the reading pane, so defaulting it open there would
+   * load the cited page and then cover it, which is the one thing a citation
+   * click must not do.
+   *
+   * Keyed on the document AND the intent, never on the navigation id: a page
+   * jump inside the open document -- a Library image, a highlight -- must
+   * leave the panel exactly as the user left it.
+   */
   useEffect(() => {
-    setSidePanelRightPanel('library');
-  }, [reader?.documentId]);
+    setSidePanelRightPanel(reader?.revealSource ? 'closed' : 'library');
+  }, [reader?.documentId, reader?.revealSource]);
 
   useEffect(() => {
     onOpenChange?.(isOpen);
