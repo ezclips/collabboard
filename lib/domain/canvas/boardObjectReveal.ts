@@ -94,9 +94,32 @@ export interface RevealCandidatePost {
 /** How deep a container nest may be before we stop walking and refuse. */
 const MAX_CONTAINER_DEPTH = 16;
 
-function parentIdOf(post: RevealCandidatePost): string | null {
+/**
+ * What this post's `parentId` says about who owns it.
+ *
+ * Three answers, not two, because the Freeform renderer only asks one question:
+ * `padlets.filter(p => !p.metadata?.parentId)`. ANY truthy value takes a post
+ * out of the root render, including one that is not a usable id at all.
+ *
+ * So a truthy non-string is not "no parent" -- it is a post the board is
+ * drawing somewhere inside something, described by metadata we cannot read.
+ * Collapsing that to "no parent" would send the camera to the child's own
+ * coordinates, which are exactly the stale ones it stopped being drawn at.
+ */
+type ParentLink =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'id'; readonly parentId: string }
+  | { readonly kind: 'malformed' };
+
+function parentLinkOf(post: RevealCandidatePost): ParentLink {
   const parentId = post.metadata?.parentId;
-  return typeof parentId === 'string' && parentId.length > 0 ? parentId : null;
+  // Falsy is precisely what the root filter treats as unparented -- including
+  // the empty string, which is why this is a truthiness test and not a null
+  // check.
+  if (!parentId) return { kind: 'none' };
+  if (typeof parentId === 'string') return { kind: 'id', parentId };
+  // Truthy, but nothing we can look up. We do not guess, and we do not repair.
+  return { kind: 'malformed' };
 }
 
 /**
@@ -115,11 +138,12 @@ function parentIdOf(post: RevealCandidatePost): string | null {
  * answer. Inventing nested child world coordinates to do better would be a
  * persistence change, not a navigation one.
  *
- * Returns null whenever the chain cannot be trusted: a parent that is not on
- * the board, a `parentId` pointing at something that is not a container, a
- * cycle, or a nest deeper than anything real. Null means do not move. Falling
- * back to the child's stale coordinates would be the one wrong answer -- it
- * looks like success and lands the camera in the wrong place.
+ * Returns null whenever the chain cannot be trusted: a malformed `parentId`
+ * that is truthy but not a usable id, a parent that is not on the board, a
+ * `parentId` pointing at something that is not a container, a cycle, or a nest
+ * deeper than anything real. Null means do not move. Falling back to the
+ * child's stale coordinates would be the one wrong answer -- it looks like
+ * success and lands the camera in the wrong place.
  */
 export function resolveRevealAnchorPost<T extends RevealCandidatePost>(
   target: T | null | undefined,
@@ -131,11 +155,15 @@ export function resolveRevealAnchorPost<T extends RevealCandidatePost>(
   const seen = new Set<string>([target.id]);
 
   for (let depth = 0; depth < MAX_CONTAINER_DEPTH; depth += 1) {
-    const parentId = parentIdOf(current);
+    const link = parentLinkOf(current);
     // Nobody contains this one: it is drawn at its own coordinates.
-    if (parentId === null) return current;
+    if (link.kind === 'none') return current;
+    // Owned by something we cannot name. The renderer has already taken this
+    // post out of the root layer, so its own coordinates describe where it no
+    // longer is -- refuse rather than pan to them.
+    if (link.kind === 'malformed') return null;
 
-    const parent = allPosts.find((post) => post.id === parentId);
+    const parent = allPosts.find((post) => post.id === link.parentId);
     // Metadata says "I live inside something" and that something is not here.
     // We do not know where this Note is drawn, so we do not guess.
     if (!parent) return null;

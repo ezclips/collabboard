@@ -104,11 +104,55 @@ describe('every reveal hook runs on every render', () => {
     expect(at('}, [boardRevealRequest?.requestId]);')).toBeLessThan(earlyReturn);
   });
 
+  /**
+   * Any React hook call shape, built-in or custom: `useX(` on a word boundary.
+   *
+   * Written once and asserted against known strings below, because the first
+   * version of this rule shipped with a literal backspace where the word
+   * boundary belonged -- it matched nothing, and a matcher that can never fire
+   * proves nothing while looking like it does.
+   */
+  const HOOK_CALL = /\buse[A-Z][A-Za-z0-9_]*\s*\(/g;
+
+  it('the hook matcher actually recognises hook calls -- and only hook calls', () => {
+    const matches = (source: string) => new RegExp(HOOK_CALL.source).test(source);
+    for (const hook of [
+      'const a = useRef(0);',
+      'const [x, setX] = useState(null);',
+      'useEffect(() => {}, []);',
+      'const m = useMemo(() => 1, []);',
+      'const c = useCallback(() => {}, []);',
+      'const v = useCanvasCamera(containerRef);',
+      'const p = useBoardCollaboratorAuthority(canvasId, user?.id);',
+      'const spaced = useState ("x");',
+    ]) {
+      expect(matches(hook), hook).toBe(true);
+    }
+    // Not hooks: a word that merely starts with "use", and a lowercase call.
+    for (const notHook of [
+      'const u = user(1);',
+      'const x = useful(1);',
+      'const y = reuseThing(1);',
+      'const z = usePlain;',
+    ]) {
+      expect(matches(notHook), notHook).toBe(false);
+    }
+  });
+
   it('no hook of any kind is called after that return', () => {
     const body = raw.slice(at('if (!hasMounted || loading) {'));
     const stripped = body.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    const hooks = stripped.match(/use(State|Effect|Memo|Callback|Ref|LayoutEffect|Reducer|Context)\(/g) ?? [];
+    const hooks = stripped.match(new RegExp(HOOK_CALL.source, 'g')) ?? [];
     expect(hooks, `hooks after the early return: ${hooks.join(', ')}`).toHaveLength(0);
+  });
+
+  it('...and that assertion would FAIL if a hook were added down there', () => {
+    // Non-vacuity, proved against the real post-return source rather than a
+    // hand-written sample: inject one hook call and the rule must catch it.
+    const body = raw.slice(at('if (!hasMounted || loading) {'));
+    const stripped = body.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const withSyntheticHook = `${stripped}\n  const sneaky = useState(0);\n`;
+    expect(withSyntheticHook.match(new RegExp(HOOK_CALL.source, 'g')) ?? []).toHaveLength(1);
   });
 
   it('the handler that raises the request is a plain function, not a hook', () => {
@@ -135,7 +179,19 @@ describe('the reveal request and the camera it drives', () => {
     // from the anchor, and a target whose anchor cannot be resolved never
     // reaches the camera at all.
     expect(canvasClient).toContain('const anchor = resolveRevealAnchorPost(target, padlets);');
+    // One refusal covers every unresolvable ownership case the resolver
+    // reports -- a missing parent, a non-container parent, a cycle, and a
+    // truthy-but-unusable parentId that the root filter has already hidden.
+    // None of them reaches the camera.
     expect(canvasClient).toContain('if (!anchor) return;');
+    const revealEffect = canvasClient.slice(
+      canvasClient.indexOf('const anchor = resolveRevealAnchorPost(target, padlets);'),
+      canvasClient.indexOf('}, [boardRevealRequest?.requestId]);'),
+    );
+    // The refusal is BEFORE any geometry is read, so stale child coordinates
+    // are never even measured, let alone panned to.
+    expect(revealEffect.indexOf('if (!anchor) return;'))
+      .toBeLessThan(revealEffect.indexOf('getFallbackMinimapItem('));
     expect(canvasClient).toContain('getFallbackMinimapItem(anchor)');
     // The stale child coordinates are never the source of the pan.
     expect(canvasClient).not.toContain('getFallbackMinimapItem(target)');

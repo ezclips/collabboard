@@ -194,12 +194,44 @@ describe('reveal anchors on the post that is actually rendered', () => {
     expect(resolveRevealAnchorPost(selfish, [selfish])).toBeNull();
   });
 
-  it('an absent target refuses, and a blank parentId is treated as loose', () => {
+  it('an absent target refuses, and a FALSY parentId is treated as loose', () => {
     expect(resolveRevealAnchorPost(null, [])).toBeNull();
     expect(resolveRevealAnchorPost(undefined, [])).toBeNull();
-    const blank = { id: 'blank', type: 'text', metadata: { parentId: '' } };
-    expect(resolveRevealAnchorPost(blank, [blank])).toBe(blank);
-    const bogus = { id: 'bogus', type: 'text', metadata: { parentId: 42 } };
-    expect(resolveRevealAnchorPost(bogus, [bogus])).toBe(bogus);
+    // Falsy is exactly what the Freeform root filter counts as unparented,
+    // so these really are drawn at their own coordinates.
+    for (const parentId of ['', null, undefined, 0, false] as const) {
+      const loose = { id: 'loose', type: 'text', metadata: { parentId } };
+      expect(resolveRevealAnchorPost(loose, [loose]), String(parentId)).toBe(loose);
+    }
+  });
+
+  it('a TRUTHY but unusable parentId refuses -- the renderer already hid it', () => {
+    // `padlets.filter(p => !p.metadata?.parentId)` drops this post from the
+    // root layer, so the board is drawing it inside something. We cannot name
+    // that something, so we must not pretend the post is loose and pan to the
+    // coordinates it stopped being drawn at.
+    for (const parentId of [42, { id: 'c' }, ['c'], true] as const) {
+      const malformed = {
+        id: 'malformed-child',
+        type: 'text',
+        position_x: 9000,
+        position_y: 9000,
+        metadata: { parentId },
+      };
+      expect(resolveRevealAnchorPost(malformed, [malformed, CONTAINER]), JSON.stringify(parentId))
+        .toBeNull();
+    }
+  });
+
+  it('a malformed parentId never lets the stale child coordinates reach the camera', () => {
+    // The finding, end to end: a hidden child at (9000, 9000) must produce no
+    // pan whatsoever, not a pan to (9000, 9000).
+    const malformed = { ...STALE_CHILD, id: 'hidden-child', metadata: { parentId: 42 } };
+    const anchor = resolveRevealAnchorPost(malformed, [malformed, CONTAINER]);
+    expect(anchor).toBeNull();
+    expect(resolveRevealPanDelta(
+      anchor === null ? null : getFallbackMinimapItem(anchor as unknown as Padlet),
+      { x: 0, y: 0, width: 1000, height: 800 },
+    )).toBeNull();
   });
 });
