@@ -2060,3 +2060,160 @@ describe('a Note source link reveals its source', () => {
     expect(buildKnowledgeSourceOpenRequest(2, cited)).not.toHaveProperty('revealSource');
   });
 });
+
+// ============================================================================
+// KNOWLEDGE_SOURCE_REVEAL_INTENT_FIX_1 -- a reveal is one arrival, not a mode
+// ============================================================================
+//
+// The defect: reader state kept `revealSource` after the reveal, so the NEXT
+// ordinary page jump -- a Library image, a highlight -- inherited it, minted a
+// fresh navigation id, and closed the panel the user had just reopened to
+// click from. State semantics, so it happened at every width.
+
+describe('the reveal intent belongs to one navigation', () => {
+  const FILENAME_A = 'Alpha.pdf';
+  const FILENAME_B = 'Beta.pdf';
+
+  function withTwoDocuments() {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const forB = String(input).includes(SOURCE_B);
+      return jsonResponse({
+        document: { id: forB ? SOURCE_B : SOURCE_A, originalFilename: forB ? FILENAME_B : FILENAME_A, pageCount: 6 },
+        pages: Array.from({ length: 6 }, (_, index) => ({
+          pageNumber: index + 1,
+          text: `${forB ? FILENAME_B : FILENAME_A} body for page ${index + 1}`,
+        })),
+      });
+    });
+  }
+
+  /** A citation with a span, so the provider renders it as a highlight row. */
+  const markedReference = (documentId: string, page: number) => ({
+    id: `ref-${documentId}-${page}`,
+    targetPadletId: 'padlet-1',
+    sourceDocumentId: documentId,
+    pageStart: page,
+    pageEnd: page,
+    quoteText: `${documentId === SOURCE_B ? FILENAME_B : FILENAME_A} body`,
+    quoteHash: null,
+    charStart: 0,
+    charEnd: 9,
+    region: null,
+    locator: null,
+  }) as unknown as SourceReference;
+
+  let requestId = 0;
+  const sourceClick = (documentId: string, page: number) =>
+    buildKnowledgeSourceOpenRequest(++requestId, markedReference(documentId, page), { revealSource: true });
+  const ordinaryOpen = (documentId: string, page: number) =>
+    buildKnowledgeDocumentOpenRequest(++requestId, documentId, page);
+
+  const openPanel = () =>
+    (drawerEl()?.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
+      ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  const clickDock = async (panel: 'library' | 'ai') => {
+    await act(async () => {
+      (drawerEl()!.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLElement).click();
+    });
+    await settle();
+  };
+
+  let scrolls: string[] = [];
+  let originalScrollIntoView: unknown;
+  beforeEach(() => {
+    requestId = 0;
+    scrolls = [];
+    originalScrollIntoView = (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = function record(this: Element) {
+      const page = this.getAttribute?.('data-page-number');
+      if (page) scrolls.push(page);
+    };
+  });
+  afterEach(() => {
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = originalScrollIntoView;
+  });
+
+  const props = (request: Record<string, unknown>) => ({
+    ...request,
+    onOpenBacklinkTarget: vi.fn(),
+    onCreateNoteFromPage: vi.fn(),
+    boardAiDraftContextByDocumentId: {},
+    onBoardAiDraftContextChange: vi.fn(),
+  });
+
+  it('A: reveal, reopen Library, ordinary jump keeps it open, then reveal closes it again', async () => {
+    withTwoDocuments();
+    const marked = [markedReference(SOURCE_A, 2)];
+
+    // 1. An ordinary open: Library, as always.
+    await mount(props({ documentOpenRequest: ordinaryOpen(SOURCE_A, 1) }) as never, marked);
+    await settle();
+    expect(openPanel()).toBe('library');
+
+    // 2. A source click: the panel stands down and the cited page is shown.
+    scrolls = [];
+    await renderInto(props({ sourceOpenRequest: sourceClick(SOURCE_A, 4) }) as never, marked);
+    await settle();
+    expect(scrolls).toContain('4');
+    expect(openPanel()).toBeNull();
+
+    // 3. The user reopens Library to look for something else.
+    await clickDock('library');
+    expect(openPanel()).toBe('library');
+
+    // 4. An ORDINARY jump from that Library -- a highlight row for page 2.
+    const highlight = drawerEl()!.querySelector('[data-pdf-workspace-library-highlight] button') as HTMLElement;
+    expect(highlight, 'the Library must offer a highlight to jump from').not.toBeNull();
+    scrolls = [];
+    await act(async () => { highlight.click(); });
+    await settle();
+
+    expect(scrolls, 'the ordinary jump still navigates').toContain('2');
+    expect(openPanel(), 'an ordinary jump must not inherit the earlier reveal').toBe('library');
+
+    // 5. A real source click after it still reveals, with its own navigation.
+    scrolls = [];
+    await renderInto(props({ sourceOpenRequest: sourceClick(SOURCE_A, 4) }) as never, marked);
+    await settle();
+    expect(scrolls, 'a later source click is a fresh navigation').toContain('4');
+    expect(openPanel(), 'and it reveals what it navigated to').toBeNull();
+  });
+
+  it('B: the same rule holds after a cross-document reveal', async () => {
+    withTwoDocuments();
+    const marked = [markedReference(SOURCE_A, 2), markedReference(SOURCE_B, 3)];
+
+    await mount(props({ documentOpenRequest: ordinaryOpen(SOURCE_A, 1) }) as never, marked);
+    await settle();
+    expect(openPanel()).toBe('library');
+
+    // Reveal into the OTHER document.
+    scrolls = [];
+    await renderInto(props({ sourceOpenRequest: sourceClick(SOURCE_B, 4) }) as never, marked);
+    await settle();
+    expect(drawerEl()!.textContent).toContain(FILENAME_B);
+    expect(scrolls).toContain('4');
+    expect(openPanel()).toBeNull();
+
+    // Reopen Library there, then jump within B the ordinary way.
+    await clickDock('library');
+    expect(openPanel()).toBe('library');
+    const highlight = drawerEl()!.querySelector('[data-pdf-workspace-library-highlight] button') as HTMLElement;
+    expect(highlight).not.toBeNull();
+    scrolls = [];
+    await act(async () => { highlight.click(); });
+    await settle();
+
+    expect(scrolls).toContain('3');
+    expect(openPanel(), 'a jump inside the revealed document is still ordinary').toBe('library');
+  });
+
+  it('the ordinary jump says so in state, rather than inheriting the last intent', () => {
+    const jump = drawerCode.slice(
+      drawerCode.indexOf('const navigateReaderToPage = useCallback('),
+      drawerCode.indexOf('const handleActivePageChange = useCallback('),
+    );
+    expect(jump).toContain('pageNavigationRequestId: requestId,');
+    expect(jump).toContain('revealSource: false,');
+  });
+});

@@ -498,6 +498,11 @@ export default function KnowledgeSourceReaderDrawer({
    * kind of jump, and the docked reader is as capable of making it as the
    * focused workspace. The document guard is what keeps it honest -- a row for
    * another document navigates nothing.
+   *
+   * This is an ordinary jump, so it says so: `revealSource` describes the
+   * purpose of ONE arrival, not a mode the reader stays in. Carrying an
+   * earlier reveal forward would make this navigation look like another source
+   * click and close the panel the user had just reopened to click from.
    */
   const navigateReaderToPage = useCallback((request: {
     readonly documentId: string;
@@ -514,6 +519,7 @@ export default function KnowledgeSourceReaderDrawer({
         ...current,
         initialPageNumber: request.pageNumber,
         pageNavigationRequestId: requestId,
+        revealSource: false,
       };
     });
   }, [onWorkspaceActivePageChange]);
@@ -573,8 +579,12 @@ export default function KnowledgeSourceReaderDrawer({
    * navigation id, so clicking a source again closes the panel again -- even
    * when the document is the one already open and the user has since reopened
    * Library over it. A page jump that is neither -- a Library image, a
-   * highlight -- changes no key at all and leaves the panel exactly as the
-   * user left it.
+   * highlight -- states `revealSource: false` and so keys back to its own
+   * document, leaving the panel exactly as the user left it.
+   *
+   * That last part is why the flag belongs to one arrival rather than to the
+   * reader: a sticky reveal would turn the next ordinary jump into a reveal it
+   * never was.
    */
   const panelArrivalKey = reader === null
     ? 'none'
