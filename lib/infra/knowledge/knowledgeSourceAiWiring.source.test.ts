@@ -125,7 +125,11 @@ describe('PDF Source AI Phase 1 wiring', () => {
     expect(handler).toContain('options?.initialContentText === undefined');
     expect(handler).toContain(': knowledgeSourceSelectionToNoteHtml(options.initialContentText)');
     // No second, AI-specific draft builder was introduced anywhere.
-    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(3);
+    // PDF_SELECTION_TO_NOTE_1 adds a FOURTH caller of the same builder -- the
+    // selection's one-action save. A census of entry points, not a cap: what
+    // this pins is that every one of them reaches this builder and none rolls
+    // provenance of its own.
+    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(4);
   });
 
   it('the PDF reader no longer hosts the one-shot AI panel: it has ONE AI surface', () => {

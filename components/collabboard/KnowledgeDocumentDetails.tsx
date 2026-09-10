@@ -31,6 +31,7 @@ import {
   PAGE_TEXT_ROOT,
   buildSelectionSourceRequest,
   captureExactSelection,
+  knowledgeSelectionSaveIdentity,
   type CapturedPageSelection,
 } from '@/components/collabboard/knowledgeSourceTextSelection';
 import { TEXT_ACTION_SELECTED_TEXT_MAX } from '@/lib/ai/textActions';
@@ -131,6 +132,16 @@ export interface KnowledgeDocumentDetailsProps {
    * unlike Note Post, it opens no editor and performs no write.
    */
   onAiFromSelection?: (request: KnowledgeSourcePageRequest) => void;
+  /**
+   * PDF_SELECTION_TO_NOTE_1. Turns the current exact selection into an
+   * ordinary source-linked Note in ONE action -- no editor, no AI.
+   *
+   * Absent for exactly the readers `onCreateNoteFromPage` is absent for: it
+   * writes to the board, so a viewer is never offered it. Rejecting means
+   * rejecting: the promise settles, and this surface reports what happened
+   * rather than assuming a Note exists.
+   */
+  onSaveSelectionAsNote?: (request: KnowledgeSourcePageRequest) => Promise<void>;
   /**
    * BCHAT-D2. Hands one page, or one exact selection, to Board AI as an
    * IDENTITY. Never the text: the server reloads that from the id on every
@@ -563,6 +574,7 @@ export default function KnowledgeDocumentDetails({
   onBack,
   onCreateNoteFromPage,
   onAiFromSelection,
+  onSaveSelectionAsNote,
   onAddBoardAiContext,
   initialPageNumber,
   pageNavigationRequestId,
@@ -745,6 +757,73 @@ export default function KnowledgeDocumentDetails({
    */
   const activeSelectionOverAiLimit = activeSelection !== null
     && activeSelection.selectedText.length > TEXT_ACTION_SELECTED_TEXT_MAX;
+
+  /**
+   * PDF_SELECTION_TO_NOTE_1. What the Save as Note action has done about the
+   * selection it is currently offered for -- and about that one only.
+   *
+   * Keyed by the selection's own coordinates, so the state is scoped to the
+   * selection rather than to this component: selecting anything else leaves
+   * the key behind and the action comes back armed. Nothing here is
+   * persisted, global or time-based.
+   */
+  const [selectionSaveState, setSelectionSaveState] = useState<
+    { readonly key: string; readonly status: 'pending' | 'saved' | 'failed' } | null
+  >(null);
+  /**
+   * The same claim, readable synchronously.
+   *
+   * Two clicks in one tick would both read the pre-update state, so the guard
+   * that makes a save at-most-once cannot be the state above -- it is written
+   * before the write starts and cleared only when that write settles.
+   */
+  const selectionSaveInFlightRef = useRef<string | null>(null);
+
+  const activeSelectionSaveKey = activeSelection === null || !documentId
+    ? null
+    : knowledgeSelectionSaveIdentity(documentId, activeSelection);
+  const selectionSaveStatus = selectionSaveState !== null
+    && activeSelectionSaveKey !== null
+    && selectionSaveState.key === activeSelectionSaveKey
+    ? selectionSaveState.status
+    : null;
+
+  /**
+   * One selection, at most one Note.
+   *
+   * The in-flight key is claimed BEFORE the host is called, so a double click
+   * finds the claim already made. A rejection clears the claim and says so:
+   * the host rolls its own Note back, and a failed save must stay retryable
+   * rather than sit there looking finished.
+   */
+  const saveActiveSelectionAsNote = useCallback(async () => {
+    if (!onSaveSelectionAsNote || !documentId || activeSelection === null) return;
+    const key = knowledgeSelectionSaveIdentity(documentId, activeSelection);
+    if (selectionSaveInFlightRef.current === key) return;
+    if (selectionSaveState?.key === key && selectionSaveState.status === 'saved') return;
+    selectionSaveInFlightRef.current = key;
+    setSelectionSaveState({ key, status: 'pending' });
+    try {
+      await onSaveSelectionAsNote(
+        buildSelectionSourceRequest(documentId, originalFilename, pages, activeSelection, selectionColor),
+      );
+      setSelectionSaveState({ key, status: 'saved' });
+    } catch {
+      // The host owns the user-facing detail; this surface owns the fact that
+      // nothing was saved and the action is armed again.
+      setSelectionSaveState({ key, status: 'failed' });
+    } finally {
+      selectionSaveInFlightRef.current = null;
+    }
+  }, [
+    activeSelection,
+    documentId,
+    onSaveSelectionAsNote,
+    originalFilename,
+    pages,
+    selectionColor,
+    selectionSaveState,
+  ]);
 
   useEffect(() => {
     setActiveMatchIndex(0);
@@ -1353,7 +1432,7 @@ export default function KnowledgeDocumentDetails({
         not from a live selection -- pressing a button here would otherwise
         collapse the very selection it is acting on.
       */}
-      {(onCreateNoteFromPage || onAddBoardAiContext) && documentId && activeSelection && !regionMode ? (
+      {(onCreateNoteFromPage || onAddBoardAiContext || onSaveSelectionAsNote) && documentId && activeSelection && !regionMode ? (
         <div
           data-knowledge-selection-toolbar="true"
           style={selectionRect
@@ -1394,6 +1473,41 @@ export default function KnowledgeDocumentDetails({
             )}
           >
             Note Post
+          </button>
+          ) : null}
+          {/*
+            PDF_SELECTION_TO_NOTE_1. Research capture in one action: the
+            selection becomes an ordinary source-linked Note with no editor
+            step and no AI. Rendered on the same capability that decides Note
+            Post, so a viewer is offered no shared mutation control at all --
+            not a disabled one.
+          */}
+          {onSaveSelectionAsNote ? (
+          <button
+            type="button"
+            data-knowledge-selection-save-note="true"
+            data-knowledge-selection-save-state={selectionSaveStatus ?? 'idle'}
+            aria-label={`Save selection on page ${activeSelection.pageNumber} as a Note`}
+            title={selectionSaveStatus === 'failed'
+              ? 'Nothing was saved. Try again.'
+              : 'Save the selected text as a source-linked Note'}
+            // Armed again after a failure: the host rolled its Note back, so
+            // there is nothing to duplicate and every reason to retry.
+            disabled={selectionSaveStatus === 'pending' || selectionSaveStatus === 'saved'}
+            className={`rounded px-2 py-1 text-xs font-medium disabled:cursor-default ${
+              selectionSaveStatus === 'failed'
+                ? 'text-red-700 hover:bg-red-50'
+                : 'text-blue-700 hover:bg-blue-50 disabled:text-gray-400 disabled:hover:bg-transparent'
+            }`}
+            onClick={() => { void saveActiveSelectionAsNote(); }}
+          >
+            {selectionSaveStatus === 'saved'
+              ? 'Saved'
+              : selectionSaveStatus === 'pending'
+                ? 'Saving…'
+                : selectionSaveStatus === 'failed'
+                  ? 'Save failed — retry'
+                  : 'Save as Note'}
           </button>
           ) : null}
           <button

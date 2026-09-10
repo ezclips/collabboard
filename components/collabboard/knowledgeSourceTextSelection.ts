@@ -131,3 +131,20 @@ export function buildSelectionSourceRequest(
     topStripColor,
   };
 }
+
+/**
+ * PDF_SELECTION_TO_NOTE_1. The identity of ONE exact selection.
+ *
+ * A save is at-most-once for the selection it was made from, so the toolbar
+ * needs a name for "this selection" that changes the moment the user selects
+ * anything else -- a different span, a different page, a different document.
+ * Deliberately derived from the coordinates alone: no counter, no timestamp,
+ * no random id, so remounting the reader on the same selection recognises it
+ * and a NEW selection can never inherit the previous one's Saved state.
+ */
+export function knowledgeSelectionSaveIdentity(
+  documentId: string,
+  selection: CapturedPageSelection,
+): string {
+  return `${documentId}:${selection.pageNumber}:${selection.charStart}:${selection.charEnd}`;
+}

@@ -217,9 +217,10 @@ describe('P6J-F5 source note wiring', () => {
    * grown a second write path that nothing else in this suite guards.
    */
   it('C7/C9/C10: a region uses the one Note writer and the one reference writer', () => {
-    // C9: three entry points now -- the F8 clip drop, the page/region request,
-    // and KNI-R2's existing-Note drop -- all reaching the ONE builder.
-    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(3);
+    // C9: four entry points now -- the F8 clip drop, the page/region request,
+    // KNI-R2's existing-Note drop, and PDF_SELECTION_TO_NOTE_1's one-action
+    // save of a selection -- all reaching the ONE builder.
+    expect(canvasClient.match(/buildKnowledgeSourceNoteDraft\(/g) ?? []).toHaveLength(4);
     // Nothing hand-builds provenance: the only value EVER stashed is a
     // draft's. Text Phase 1: two call sites now, click and drag, both
     // staging the SAME shape from the SAME builder -- never a second one.

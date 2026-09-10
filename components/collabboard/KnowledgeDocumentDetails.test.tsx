@@ -56,6 +56,8 @@ import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowl
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import { KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS } from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
+import { knowledgeSelectionSaveIdentity } from '@/components/collabboard/knowledgeSourceTextSelection';
+import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 const pages = [
   { pageNumber: 1, text: 'PDF safety PDF\nLiteral [brackets] and (parentheses).' },
@@ -2679,5 +2681,225 @@ describe('KnowledgeDocumentDetails PDF Source AI Phase 1 toolbar', () => {
     finishSelectionOn(root);
 
     expect(aiButton(container)!.disabled).toBe(false);
+  });
+});
+
+// ============================================================================
+// PDF_SELECTION_TO_NOTE_1 -- one selection, one source-linked Note
+// ============================================================================
+//
+// Research capture: select, press once, and an ordinary Note exists with exact
+// provenance. No editor step, no AI, and no second selection model -- the
+// request is the SAME exact-span request Note Post and Ask AI already build.
+
+describe('saving a PDF selection as a Note', () => {
+  function saveButton(container: HTMLElement): HTMLButtonElement | null {
+    return container.querySelector('[data-knowledge-selection-save-note="true"]');
+  }
+
+  /** Selects "safety" -- page-relative [4,10) -- on page 1. */
+  function selectSafety(container: HTMLElement) {
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 4, root.firstChild!, 10);
+    finishSelectionOn(root);
+  }
+
+  /** Selects "PDF" -- page-relative [0,3) -- a DIFFERENT span on page 1. */
+  function selectPdf(container: HTMLElement) {
+    const root = pageRoot(container, 1);
+    selectRange(root.firstChild!, 0, root.firstChild!, 3);
+    finishSelectionOn(root);
+  }
+
+  /** A save whose fate the test decides. */
+  function deferredSave() {
+    const settle: { resolve?: () => void; reject?: (error: Error) => void } = {};
+    const onSaveSelectionAsNote = vi.fn((_request: KnowledgeSourcePageRequest) => new Promise<void>((resolve, reject) => {
+      settle.resolve = resolve;
+      settle.reject = reject;
+    }));
+    return { onSaveSelectionAsNote, settle };
+  }
+
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('1: an editor with a valid selection is offered Save as Note', () => {
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote: vi.fn(async () => {}),
+    });
+
+    // No selection, no action: this acts on a span, not on a page.
+    expect(saveButton(container)).toBeNull();
+
+    selectSafety(container);
+
+    const button = saveButton(container)!;
+    expect(button).not.toBeNull();
+    expect(button.textContent).toBe('Save as Note');
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe('Save selection on page 1 as a Note');
+  });
+
+  it('2: a viewer is offered no mutation control, and keeps the read actions it had', () => {
+    const container = mountWith({
+      documentId: 'doc-1',
+      // Exactly what the drawer hands a read-only reader: no create, no save.
+      onAddBoardAiContext: vi.fn(),
+      onAiFromSelection: vi.fn(),
+    });
+    selectSafety(container);
+
+    expect(saveButton(container), 'a viewer must not be offered a shared write').toBeNull();
+    // Not "rendered disabled" -- absent, like every other capability here.
+    expect(container.querySelector('[data-knowledge-selection-save-note]')).toBeNull();
+    // The private read actions are untouched by this gate.
+    expect(container.querySelector('[data-knowledge-selection-add-to-chat="true"]')).not.toBeNull();
+    expect(selectionToolbar(container)).not.toBeNull();
+  });
+
+  it('3/4: one click forwards the exact captured span, and nothing else', async () => {
+    const { onSaveSelectionAsNote, settle } = deferredSave();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote,
+    });
+    selectSafety(container);
+
+    await act(async () => { saveButton(container)!.click(); });
+
+    expect(onSaveSelectionAsNote).toHaveBeenCalledTimes(1);
+    expect(onSaveSelectionAsNote.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: pages[0].text,
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+      topStripColor: null,
+    });
+    // The coordinates describe exactly what was selected, in the page's own
+    // text -- the same comparison the server repeats against its stored page.
+    expect(pages[0].text.slice(4, 10)).toBe('safety');
+
+    // While it is in flight the action says so and cannot be pressed again.
+    expect(saveButton(container)!.disabled).toBe(true);
+    expect(saveButton(container)!.textContent).toBe('Saving…');
+
+    await act(async () => { settle.resolve!(); });
+    expect(saveButton(container)!.textContent).toBe('Saved');
+    expect(saveButton(container)!.disabled).toBe(true);
+  });
+
+  it('5: a double click creates at most one Note', async () => {
+    const { onSaveSelectionAsNote, settle } = deferredSave();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote,
+    });
+    selectSafety(container);
+
+    // Both presses inside ONE act: the second lands before any state update
+    // from the first could have rendered, which is what a real double click
+    // does and what a state-only guard would miss.
+    await act(async () => {
+      const button = saveButton(container)!;
+      button.click();
+      button.click();
+    });
+
+    expect(onSaveSelectionAsNote).toHaveBeenCalledTimes(1);
+
+    await act(async () => { settle.resolve!(); });
+    // And a third press on a finished save is still not a second Note.
+    await act(async () => { saveButton(container)!.click(); });
+    expect(onSaveSelectionAsNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('C: a new selection is armed again, and never inherits the old Saved state', async () => {
+    const { onSaveSelectionAsNote, settle } = deferredSave();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote,
+    });
+    selectSafety(container);
+    await act(async () => { saveButton(container)!.click(); });
+    await act(async () => { settle.resolve!(); });
+    expect(saveButton(container)!.textContent).toBe('Saved');
+
+    // A DIFFERENT span on the same page: a different selection entirely.
+    selectPdf(container);
+
+    expect(saveButton(container)!.textContent, 'the new selection has never been saved').toBe('Save as Note');
+    expect(saveButton(container)!.disabled).toBe(false);
+
+    await act(async () => { saveButton(container)!.click(); });
+    expect(onSaveSelectionAsNote).toHaveBeenCalledTimes(2);
+    expect(onSaveSelectionAsNote.mock.calls[1][0]).toMatchObject({
+      selection: { charStart: 0, charEnd: 3, selectedText: 'PDF' },
+    });
+  });
+
+  it('E: a rejected save reports failure, claims nothing, and stays retryable', async () => {
+    const { onSaveSelectionAsNote, settle } = deferredSave();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onSaveSelectionAsNote,
+    });
+    selectSafety(container);
+
+    await act(async () => { saveButton(container)!.click(); });
+    await act(async () => { settle.reject!(new Error('source_link_failed')); });
+
+    const button = saveButton(container)!;
+    expect(button.textContent, 'a failed save must never read as Saved').toBe('Save failed — retry');
+    expect(button.disabled, 'the host rolled its Note back, so retrying is safe').toBe(false);
+    expect(button.getAttribute('data-knowledge-selection-save-state')).toBe('failed');
+
+    await act(async () => { saveButton(container)!.click(); });
+    expect(onSaveSelectionAsNote).toHaveBeenCalledTimes(2);
+  });
+
+  it('9: the existing Ask AI selection action is unchanged', () => {
+    const onAiFromSelection = vi.fn();
+    const container = mountWith({
+      documentId: 'doc-1',
+      onCreateNoteFromPage: vi.fn(),
+      onAiFromSelection,
+      onSaveSelectionAsNote: vi.fn(async () => {}),
+    });
+    selectSafety(container);
+
+    const ai = selectionToolbar(container)!
+      .querySelector('button[aria-label="Ask AI about the selected text"]') as HTMLButtonElement;
+    expect(ai).not.toBeNull();
+    act(() => ai.click());
+
+    expect(onAiFromSelection).toHaveBeenCalledTimes(1);
+    expect(onAiFromSelection.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-1',
+      originalFilename: 'EMG_checklist.pdf',
+      pageNumber: 1,
+      pageText: pages[0].text,
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+      topStripColor: null,
+    });
+    // Note Post still opens the editor path it always did.
+    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+  });
+
+  it('the save identity is the selection itself -- no counter, clock or random', () => {
+    const base = { pageNumber: 1, charStart: 4, charEnd: 10, selectedText: 'safety' };
+    const key = knowledgeSelectionSaveIdentity('doc-1', base);
+    expect(knowledgeSelectionSaveIdentity('doc-1', base), 'the same selection is the same save').toBe(key);
+    expect(knowledgeSelectionSaveIdentity('doc-1', { ...base, charEnd: 9 })).not.toBe(key);
+    expect(knowledgeSelectionSaveIdentity('doc-1', { ...base, pageNumber: 2 })).not.toBe(key);
+    expect(knowledgeSelectionSaveIdentity('doc-2', base)).not.toBe(key);
   });
 });

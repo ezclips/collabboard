@@ -2579,6 +2579,94 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets,
   ]);
 
+  /**
+   * PDF_SELECTION_TO_NOTE_1. One verified PDF selection becomes one ordinary
+   * source-linked Note, in one action.
+   *
+   * Deliberately a SIBLING of the AI answer's save rather than a shared
+   * helper: that slice is closed, and its behaviour is asserted against the
+   * text of its own callback, so folding the two together would rewrite a
+   * finished contract to save a dozen lines. What is shared is what matters --
+   * `buildKnowledgeSourceNoteDraft` decides the provenance, the ordinary post
+   * insert decides placement, `persistKnowledgeSourceReference` is the one
+   * source-reference authority, and the server re-proves the span against its
+   * own stored page. The browser's selection is evidence, never authority.
+   *
+   * Atomic as the user experiences it: if the source link cannot be written
+   * there must be no Note left behind claiming one, so the just-created Note
+   * is removed through the ordinary delete path and the caller is told the
+   * save failed. A rollback that itself fails still reports failure -- the one
+   * thing this must never do is report success.
+   */
+  const saveKnowledgeSelectionAsNote = useCallback(async (request: KnowledgeSourcePageRequest) => {
+    if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');
+    // Exact spans only. A page-only or region request has its own established
+    // path through the Note editor and is not what this action offers.
+    if (!request.selection) throw new Error('selection_required');
+    if (!Number.isInteger(request.pageNumber) || request.pageNumber < 1) {
+      throw new Error('invalid_source_page');
+    }
+
+    const draft = buildKnowledgeSourceNoteDraft(request);
+    const nowIso = new Date().toISOString();
+    const width = 280;
+    const height = 280;
+    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+    const note: Padlet = {
+      id: crypto.randomUUID(),
+      board_id: canvasId,
+      title: draft.title,
+      // The selection itself, escaped by the same authority every other
+      // exact-span Note body goes through. No summary, no attribution line,
+      // no page text outside what was selected.
+      content: draft.content,
+      type: 'text',
+      position_x: positionX,
+      position_y: positionY,
+      width,
+      height,
+      created_at: nowIso,
+      updated_at: nowIso,
+      metadata: {
+        cardColor: '#ffffff',
+        zIndex: nextZIndex(padlets),
+        // The toolbar's chosen highlight color seeds the SAME existing field
+        // an editor-created source Note uses; absent when none was chosen.
+        ...(draft.topStripColor ? { topStrip: draft.topStripColor } : {}),
+      } as any,
+    };
+
+    const created = await insertPostAndSelectOrThrow(note as any) as Padlet | null;
+    if (!created) throw new Error('note_save_failed');
+
+    const linked = await persistKnowledgeSourceReference(
+      created.id,
+      draft.sourceReference,
+      null,
+    );
+    if (!linked) {
+      try {
+        await deletePostOrThrow(created.id);
+      } catch (rollbackError) {
+        console.error('Failed to roll back an unlinked source Note:', rollbackError);
+        throw new Error('source_link_failed_rollback_failed');
+      }
+      throw new Error('source_link_failed');
+    }
+
+    setPadlets((current) => [...current, created]);
+    toast.success('Note saved');
+  }, [
+    canvasId,
+    canUseCanvasToolbar,
+    deletePostOrThrow,
+    getNewPostPosition,
+    insertPostAndSelectOrThrow,
+    padlets,
+    persistKnowledgeSourceReference,
+    setPadlets,
+  ]);
+
   /** The one completion point for any Note finalised out of a placement draft. */
   const completeSourceReferenceForDraft = useCallback((
     targetPadletId: string,
@@ -10458,6 +10546,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canDragSourceNote={canDragSourceNote}
           blockingEditorOpen={isBlockingOverlayOpen}
           onCreateNoteFromPage={handleCreateNoteFromKnowledgePage}
+          /*
+            PDF_SELECTION_TO_NOTE_1. Gated on the SAME board-edit capability
+            the Note editor path is: a viewer receives no shared mutation
+            control here, while the private AI actions keep their own rule.
+          */
+          onSaveSelectionAsNote={canUseCanvasToolbar ? saveKnowledgeSelectionAsNote : undefined}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
           onOpenChange={setIsKnowledgeReaderOpen}

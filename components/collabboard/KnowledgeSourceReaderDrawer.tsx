@@ -138,6 +138,12 @@ export interface KnowledgeSourceReaderDrawerProps {
    */
   onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest, options?: { initialContentText?: string }) => void;
   /**
+   * PDF_SELECTION_TO_NOTE_1. Forwarded untouched to the reader, which is where
+   * the selection toolbar lives. The drawer neither builds the request nor
+   * writes anything: both hosts hand the board the same one action.
+   */
+  onSaveSelectionAsNote?: (request: KnowledgeSourcePageRequest) => Promise<void>;
+  /**
    * Forwarded verbatim, and deliberately WITHOUT closing this drawer: reading
    * the source beside the Note it supports is the whole point of F7. The old
    * modal had to close first only because it painted over the editor.
@@ -239,6 +245,7 @@ export default function KnowledgeSourceReaderDrawer({
   onOpenKnowledgeDocument,
   blockingEditorOpen = false,
   onCreateNoteFromPage,
+  onSaveSelectionAsNote,
   closeSidePanelRequestId,
   onOpenBacklinkTarget,
   workspaceTabs = [],
@@ -804,6 +811,7 @@ export default function KnowledgeSourceReaderDrawer({
               onBack={closeReader}
               hostRendersDocumentHeader
               onCreateNoteFromPage={onCreateNoteFromPage}
+              onSaveSelectionAsNote={onSaveSelectionAsNote}
               onOpenBacklinkTarget={onOpenBacklinkTarget}
               onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
               onActivePageChange={handleActivePageChange}
@@ -940,6 +948,7 @@ export default function KnowledgeSourceReaderDrawer({
             // filename can never disappear.
             hostRendersDocumentHeader={!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed'}
             onCreateNoteFromPage={onCreateNoteFromPage}
+            onSaveSelectionAsNote={onSaveSelectionAsNote}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
             // Page and exact-selection handoffs live where the page rows and
             // the selection toolbar already are; both carry identity only,
