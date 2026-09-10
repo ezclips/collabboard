@@ -7,7 +7,6 @@ import type {
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
 import { useKnowledgeReaderActivePage } from './useKnowledgeReaderActivePage';
-
 /**
  * PDF-R6J. One compact icon button, used by every page/document action in the
  * reader.
@@ -16,12 +15,12 @@ import { useKnowledgeReaderActivePage } from './useKnowledgeReaderActivePage';
  * sat above. Fixed square dimensions keep the whole row on one line and keep
  * the buttons the same size as each other, which is what makes them read as a
  * group rather than as four unrelated controls.
+ *
+ * It now lives beside the reader's other control constants, shared with the
+ * header dock: one shape for both ends of this reader, so they cannot drift
+ * into lookalikes of each other.
  */
-const KNOWLEDGE_ICON_BUTTON_CLASS =
-  'inline-flex h-6 w-6 flex-none shrink-0 items-center justify-center rounded border border-gray-200 '
-  + 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 '
-  + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 '
-  + 'disabled:cursor-not-allowed disabled:opacity-40';
+import { KNOWLEDGE_ICON_BUTTON_CLASS } from '@/components/collabboard/knowledgeReaderControls';
 /**
  * PDF-C1 Text -- the exact-span selection contract moved OUT of this file so
  * the canvas card obeys the same one instead of re-deriving it. Nothing about

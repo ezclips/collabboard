@@ -264,10 +264,20 @@ export default function KnowledgeSourceReaderDrawer({
   const handledCloseRequestRef = useRef<number | null>(null);
   // Two rapid picks are a race; only the newest read may commit.
   const readGenerationRef = useRef(0);
+  /**
+   * The reader's monotonic page-navigation intent, minted for EVERY deliberate
+   * arrival: a source click, a document open, a Library image or highlight.
+   *
+   * It exists because the viewer scrolls on a CHANGED intent, not on a page
+   * number: without it, clicking the same citation twice handed the viewer
+   * identical props, its own "already scrolled there" latch stayed closed, and
+   * the second click did nothing -- even though the user had scrolled the
+   * reader somewhere else in between. Never reused, so a repeat is a repeat.
+   */
+  const pageNavigationRequestIdRef = useRef(0);
   const openerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
-  const workspaceImageNavigationRequestIdRef = useRef(0);
   const isOpen = reader !== null;
 
   const isWorkspace = presentation === 'workspace';
@@ -316,6 +326,9 @@ export default function KnowledgeSourceReaderDrawer({
   ) => {
     if (!boardId) return;
     const generation = ++readGenerationRef.current;
+    // One click, one intent -- even when the document, the page and the cited
+    // row are all exactly what the last click asked for.
+    const navigationRequestId = ++pageNavigationRequestIdRef.current;
 
     /**
      * Stale-while-revalidate. A document this session already read opens on its
@@ -332,6 +345,7 @@ export default function KnowledgeSourceReaderDrawer({
         pageCount: cached.pageCount,
         pages: cached.pages,
         loading: false, error: false, initialPageNumber, sourceTarget,
+        pageNavigationRequestId: navigationRequestId,
       });
       // Fresh enough to trust: nothing further to do.
       if (!pageCache || !pageCache.isStale(cached)) return;
@@ -354,6 +368,7 @@ export default function KnowledgeSourceReaderDrawer({
     setReader({
       documentId, originalFilename: '', pageCount: null, pages: [],
       loading: true, error: false, initialPageNumber, sourceTarget,
+      pageNavigationRequestId: navigationRequestId,
     });
     // A 409 means extraction has not finished, which is a normal state for a
     // freshly uploaded document -- not a failure. Treating it as one is what
@@ -382,6 +397,7 @@ export default function KnowledgeSourceReaderDrawer({
           pageCount: result.entry.pageCount,
           pages: result.entry.pages,
           loading: false, error: false, initialPageNumber, sourceTarget,
+          pageNavigationRequestId: navigationRequestId,
         });
         return;
       } catch {
@@ -456,7 +472,7 @@ export default function KnowledgeSourceReaderDrawer({
       if (!current) return current;
       if (current.documentId !== request.documentId) return current;
       if (!current.pages.some((page) => page.pageNumber === request.pageNumber)) return current;
-      const requestId = ++workspaceImageNavigationRequestIdRef.current;
+      const requestId = ++pageNavigationRequestIdRef.current;
       onWorkspaceActivePageChange?.(current.documentId, request.pageNumber);
       return {
         ...current,

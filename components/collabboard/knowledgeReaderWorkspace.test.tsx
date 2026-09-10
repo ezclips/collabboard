@@ -26,6 +26,8 @@ const SURFACE = read('components/collabboard/KnowledgePdfCanvasSurface.tsx');
 const REGISTRY = read('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
 const SIDEBAR = read('components/collabboard/canvas/ui/CanvasSidebar.tsx');
 const POST_CARD = read('components/collabboard/PostCardContent.tsx');
+const CONTROLS = read('components/collabboard/knowledgeReaderControls.ts');
+const DOCK = read('components/collabboard/PdfReaderDock.tsx');
 
 describe('1-6. two regions, a document tab, and no reserved AI space', () => {
   it('1-2. exactly two panes exist, and neither is an empty AI column', () => {
@@ -373,8 +375,13 @@ describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
     for (const label of ['>Select area<', '>Create Note<', '>Clear<', '>Add page to Board AI<']) {
       expect(bar, label).not.toContain(label);
     }
-    expect(code()).toContain('const KNOWLEDGE_ICON_BUTTON_CLASS =');
-    expect(code()).toContain('inline-flex h-6 w-6 flex-none shrink-0 items-center justify-center');
+    // ONE compact control shape for the whole reader: the toolbar imports it
+    // rather than owning it, and the header dock draws from the same string.
+    expect(code()).toContain("import { KNOWLEDGE_ICON_BUTTON_CLASS } from '@/components/collabboard/knowledgeReaderControls'");
+    expect(CONTROLS).toContain('inline-flex h-6 w-6 flex-none shrink-0 items-center justify-center');
+    expect(DOCK).toContain("import {");
+    expect(DOCK).toContain('KNOWLEDGE_ICON_BUTTON_CLASS');
+    expect(DOCK).toContain('${KNOWLEDGE_ICON_BUTTON_CLASS}');
     expect((bar.match(/KNOWLEDGE_ICON_BUTTON_CLASS/g) || []).length).toBeGreaterThanOrEqual(6);
   });
 

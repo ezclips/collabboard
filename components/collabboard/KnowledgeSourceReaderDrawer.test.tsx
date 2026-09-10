@@ -20,6 +20,12 @@ import { knowledgeStandaloneHighlightIndexOf }
   from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
 import { buildKnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
 import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowledgeSourceBacklinks';
+import { buildKnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import {
+  KNOWLEDGE_CONTROL_ACTIVE_BLUE,
+  KNOWLEDGE_CONTROL_ACTIVE_PURPLE,
+  KNOWLEDGE_ICON_BUTTON_CLASS,
+} from './knowledgeReaderControls';
 import { buildKnowledgeSourceNoteSummaryIndex } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
@@ -1029,21 +1035,17 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
       .map((node) => node.getAttribute('data-pdf-workspace-dock') ?? node.getAttribute('aria-label'));
 
     expect(controls.slice(-3)).toEqual(['library', 'ai', 'Close Knowledge reader']);
-    // Compact, and quiet until active: the same 28px square shape the header's
-    // own controls use, never a large filled block.
+    // Literally the bottom toolbar's own control class, tint aside -- the
+    // header and the footer of this reader are one toolbar.
     const library = dockButton('library')!;
-    expect(library.className).toContain('h-7');
-    expect(library.className).toContain('w-7');
-    expect(library.className).toContain('rounded-md');
+    expect(library.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
+    expect(library.querySelector('svg')?.getAttribute('class')).toContain('h-3.5 w-3.5');
     expect(library.className).not.toContain('bg-blue-600');
-    // Active keeps its own colour, quietly.
-    expect(library.className).toContain('bg-blue-50');
-    expect(library.className).toContain('text-blue-700');
 
     await clickDock('ai');
-    expect(dockButton('ai')!.className).toContain('bg-purple-50');
-    expect(dockButton('ai')!.className).toContain('text-purple-700');
-    expect(dockButton('library')!.className).not.toContain('bg-blue-50');
+    expect(dockButton('ai')!.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_PURPLE);
+    // The shape never changes when a panel turns on or off.
+    expect(dockButton('library')!.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
 
     // Closing the drawer is still the control after them.
     await closeDrawer();
@@ -1476,5 +1478,143 @@ describe('PDF-C1 focused workspace yields to a blocking editor modal', () => {
     await openIn('workspace', true);
     expect(pageRequests()).toHaveLength(1);
     expect(pageRequests()[0]).toContain(SOURCE_A);
+  });
+});
+
+// ============================================================================
+// PDF_UI_NAV_FINAL_1 -- a repeated source click is a repeated navigation
+// ============================================================================
+//
+// The defect this pins: the reader used to hand the viewer a page NUMBER and
+// nothing else. Clicking the same citation twice produced identical props, the
+// viewer's own "already scrolled there" latch stayed closed, and the second
+// click did nothing -- even though the user had scrolled the reader elsewhere
+// in between. Every deliberate click now mints a fresh navigation intent.
+
+describe('repeat source navigation', () => {
+  const DOC_B_FILE = 'Beta.pdf';
+  const PAGES = 4;
+
+  /** Records the page each scrollIntoView landed on, in order. */
+  let scrolls: string[] = [];
+  let originalScrollIntoView: unknown;
+
+  beforeEach(() => {
+    scrolls = [];
+    originalScrollIntoView = (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = function record(this: Element) {
+      const page = this.getAttribute?.('data-page-number');
+      if (page) scrolls.push(page);
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const forB = String(input).includes(SOURCE_B);
+      return jsonResponse({
+        document: {
+          id: forB ? SOURCE_B : SOURCE_A,
+          originalFilename: forB ? DOC_B_FILE : 'Alpha.pdf',
+          pageCount: PAGES,
+        },
+        pages: Array.from({ length: PAGES }, (_, index) => ({
+          pageNumber: index + 1,
+          text: `page ${index + 1} body`,
+        })),
+      });
+    });
+  });
+
+  afterEach(() => {
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = originalScrollIntoView;
+  });
+
+  const citation = (documentId: string, page: number) => ({
+    id: `ref-${documentId}-${page}`,
+    targetPadletId: 'padlet-1',
+    sourceDocumentId: documentId,
+    pageStart: page,
+    pageEnd: page,
+    quoteText: null,
+    quoteHash: null,
+    charStart: null,
+    charEnd: null,
+    region: null,
+    locator: null,
+  }) as unknown as SourceReference;
+
+  /** One deliberate click, through the SAME builder both entry points use. */
+  let clickId = 0;
+  const clickSource = async (reference: SourceReference, props: Record<string, unknown> = {}) => {
+    const request = buildKnowledgeSourceOpenRequest(++clickId, reference);
+    const render = root ? renderInto : mount;
+    await render({
+      sourceOpenRequest: request,
+      onOpenBacklinkTarget: vi.fn(),
+      ...props,
+    } as never);
+    await settle();
+    return request;
+  };
+
+  it('A/B: the same page-4 citation navigates again, and again', async () => {
+    clickId = 0;
+    const reference = citation(SOURCE_A, 4);
+
+    await clickSource(reference);
+    expect(scrolls).toContain('4');
+
+    // The user reads on: the reader is no longer where the citation put it.
+    scrolls = [];
+
+    // The SAME reference, the same document, the same page -- a new click.
+    await clickSource(reference);
+    expect(scrolls, 'a second click on the same source must navigate again').toContain('4');
+
+    scrolls = [];
+    await clickSource(reference);
+    expect(scrolls, 'and a third, indefinitely').toContain('4');
+  });
+
+  it('C: both entry points mint their intent through the one canonical builder', () => {
+    // The card marker and the editor link differ only in which board handler
+    // they reach; neither builds a request of its own.
+    const client = fs.readFileSync(path.join(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+    expect(client).toContain('onOpenSourceReference={requestKnowledgeSourceOpen}');
+    expect(client).toContain('onOpenSourceReference={openSourceReferenceFromEditor}');
+    expect(client).toContain('requestKnowledgeSourceOpen(reference)');
+    expect((client.match(/buildKnowledgeSourceOpenRequest\(/g) ?? [])).toHaveLength(1);
+    expect(client).toContain('knowledgeSourceRequestIdRef.current += 1;');
+    // And the reader mints its own page-navigation intent per open, so an
+    // unchanged page number is still a new arrival.
+    expect(drawerCode).toContain('const navigationRequestId = ++pageNavigationRequestIdRef.current;');
+    expect((drawerCode.match(/pageNavigationRequestId: navigationRequestId/g) ?? [])).toHaveLength(3);
+  });
+
+  it('D: a repeated citation into ANOTHER document keeps working', async () => {
+    clickId = 0;
+    await clickSource(citation(SOURCE_A, 4));
+    expect(scrolls).toContain('4');
+
+    scrolls = [];
+    await clickSource(citation(SOURCE_B, 2));
+    expect(scrolls).toContain('2');
+    expect(drawerEl()!.textContent).toContain(DOC_B_FILE);
+
+    scrolls = [];
+    await clickSource(citation(SOURCE_B, 2));
+    expect(scrolls, 'the same cross-document citation repeats too').toContain('2');
+    expect(drawerEl()!.textContent).toContain(DOC_B_FILE);
+  });
+
+  it('E: clicking while already there does not poison the next click', async () => {
+    clickId = 0;
+    const reference = citation(SOURCE_A, 4);
+
+    await clickSource(reference);
+    // A second click with the reader still on page 4: a real intent, and it
+    // must not leave the next one latched shut.
+    await clickSource(reference);
+
+    scrolls = [];
+    await clickSource(reference);
+    expect(scrolls).toContain('4');
   });
 });

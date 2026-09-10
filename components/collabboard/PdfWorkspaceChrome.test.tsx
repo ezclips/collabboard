@@ -15,6 +15,11 @@ import {
   KNOWLEDGE_PDF_INPUT_ID,
   KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
 } from './KnowledgePdfUploader';
+import {
+  KNOWLEDGE_CONTROL_ACTIVE_BLUE,
+  KNOWLEDGE_CONTROL_ACTIVE_PURPLE,
+  KNOWLEDGE_ICON_BUTTON_CLASS,
+} from './knowledgeReaderControls';
 
 vi.mock('@/components/collabboard/KnowledgePdfUploader', async () => {
   const ReactModule = await import('react');
@@ -394,22 +399,32 @@ describe('PdfWorkspaceChrome header dock', () => {
       ?.getAttribute('data-pdf-workspace-fixed-tab-controls')).toBe('true');
   });
 
-  it('sizes them like the header controls beside them, not as filled blocks', () => {
+  it('is drawn from the reader toolbar\'s own control class, not a lookalike', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
-    const close = container.querySelector('[data-pdf-workspace-close="true"]') as HTMLElement;
 
     for (const panel of ['library', 'ai']) {
       const button = container.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLElement;
-      // The same 28px rounded square the close control uses.
-      expect(button.className).toContain('h-7');
-      expect(button.className).toContain('w-7');
-      expect(button.className).toContain('rounded-md');
-      expect(close.className).toContain('h-7');
-      // Quiet while inactive: no large filled block.
+      // Literally the bottom toolbar's class, tint aside: same box, border,
+      // radius, weight and hover as search / Create Note / Select area.
+      expect(button.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
+      expect(button.querySelector('svg')?.getAttribute('class')).toContain('h-3.5 w-3.5');
+      // Quiet while inactive: no filled block, no oversized treatment.
       expect(button.className).not.toContain('bg-blue-600');
       expect(button.className).not.toContain('bg-purple-600');
-      expect(button.className).toContain('text-gray-500');
     }
+  });
+
+  it('tints on activation without changing the shape', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+    const library = () => container.querySelector('[data-pdf-workspace-dock="library"]') as HTMLElement;
+
+    click(library());
+    expect(library().className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
+    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
+    expect(container.querySelector('[data-pdf-workspace-dock="ai"]')?.className)
+      .toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_PURPLE);
+    // The shape is untouched by either tint.
+    expect(library().className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
   });
 
   it('keeps each panel its own colour while active, and omits AI where it is unavailable', () => {
