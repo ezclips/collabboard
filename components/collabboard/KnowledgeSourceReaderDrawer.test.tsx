@@ -897,16 +897,21 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
     expect(workspace.className).not.toContain('flex-none');
   });
 
-  it('U: the Library pane is 300px wide, and dock plus panel are hidden below lg', async () => {
+  it('U: the Library pane is a 300px column from lg up, and an overlay below it -- never hidden', async () => {
     withPages();
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: vi.fn() });
     const notesPane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
-    expect(notesPane.className).toContain('w-[300px]');
-    // The breakpoint moved one level out, to the column that holds BOTH the
-    // dock and the panel: below lg the drawer is 420px, which the document
-    // alone already fills.
-    expect(notesPane.parentElement!.className).toContain('hidden');
-    expect(notesPane.parentElement!.className).toContain('lg:flex');
+    expect(notesPane.className).toContain('lg:w-[300px]');
+    // Below lg the drawer is 420px, too narrow to sit beside the document --
+    // so an open panel covers it rather than disappearing, which is what keeps
+    // a page or selection handoff from activating something invisible.
+    expect(notesPane.className).toContain('absolute inset-0');
+    expect(notesPane.className).toContain('lg:static');
+    // The token, not the substring: `overflow-hidden` is not a display rule.
+    const display = (element: HTMLElement) => element.className.split(/\s+/)
+      .filter((token) => token === 'hidden' || /:hidden$/.test(token));
+    expect(display(notesPane)).toEqual([]);
+    expect(display(notesPane.parentElement!)).toEqual([]);
     // Same element, now also the Library panel -- one side pane, not two.
     expect(notesPane.getAttribute('data-knowledge-library-panel')).toBe('true');
   });
@@ -1116,6 +1121,109 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(workspace.textContent).not.toContain('Add to Board AI');
   });
 
+  /**
+   * The rule the review found broken: a panel the user just activated must be
+   * ON SCREEN. It used to live in a `hidden lg:flex` column while the page and
+   * selection AI actions inside the document could activate it at any width --
+   * and the board's own AI shortcut correctly stands down while a reader is
+   * open, so a narrow viewport had a live AI panel and nothing to show for it.
+   */
+  const displayClasses = (element: HTMLElement) => element.className.split(/\s+/)
+    .filter((token) => token === 'hidden' || /^(?:sm|md|lg|xl|2xl):hidden$/.test(token));
+
+  /** Every display class between the panel and the drawer root, inclusive. */
+  const hiddenAncestry = (panel: HTMLElement) => {
+    const tokens: string[] = [];
+    let node: HTMLElement | null = panel;
+    while (node && node !== drawerEl()!.parentElement) {
+      tokens.push(...displayClasses(node));
+      node = node.parentElement;
+    }
+    return tokens;
+  };
+
+  it('A/B: an ACTIVE panel is never hidden by a breakpoint, Library or AI', async () => {
+    await openDocked();
+
+    for (const panel of ['library', 'ai'] as const) {
+      if (openPanel() !== panel) await clickDock(panel);
+      expect(openPanel()).toBe(panel);
+      const pane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+      expect(pane, `the ${panel} panel must be mounted`).not.toBeNull();
+      expect(hiddenAncestry(pane), `the active ${panel} panel must never be CSS-hidden`).toEqual([]);
+      // The dock that opens it is reachable at every width too.
+      expect(hiddenAncestry(dockButton(panel)!)).toEqual([]);
+    }
+  });
+
+  it('E/F: it covers the reader when narrow and sits beside it from lg up, without unmounting the PDF', async () => {
+    await openDocked();
+    const pane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
+
+    // Narrow: an overlay over the reading area. From lg: the 300px column.
+    expect(pane.className).toContain('absolute inset-0');
+    expect(pane.className).toContain('lg:static');
+    expect(pane.className).toContain('lg:w-[300px]');
+    expect(pane.className).toContain('lg:flex-none');
+    // Opaque, or the document would read through it at narrow widths.
+    expect(pane.className).toContain('bg-white');
+    // The document is still MOUNTED underneath -- covered, never torn down.
+    const reader = drawerEl()!.querySelector('[data-knowledge-reader-workspace]') as HTMLElement;
+    expect(reader).not.toBeNull();
+    expect(reader.contains(pane)).toBe(false);
+    expect(pane.parentElement!.className).toContain('relative');
+
+    // Toggling the panel off gives the reading view back, same element.
+    await clickDock('library');
+    expect(openPanel()).toBeNull();
+    expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace]')).toBe(reader);
+    expect(drawerEl()!.textContent).toContain(PAGE_ONE);
+  });
+
+  it('C/D: page and selection handoffs both open a panel that is actually on screen', async () => {
+    const onBoardAiDraftContextChange = vi.fn();
+    await openDocked({ onBoardAiDraftContextChange });
+
+    // The page action, from the reader's own bottom toolbar.
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-viewer-action="add-to-chat"]') as HTMLElement)
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    expect(openPanel()).toBe('ai');
+    expect(hiddenAncestry(drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement)).toEqual([]);
+    expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).not.toBeNull();
+
+    // The exact-selection action, from the selection toolbar over the page.
+    await clickDock('ai');
+    expect(openPanel()).toBeNull();
+    const root = drawerEl()!.querySelector('[data-knowledge-page-text-root="1"]') as HTMLElement;
+    const range = document.createRange();
+    range.setStart(root.firstChild!, 0);
+    range.setEnd(root.firstChild!, 6);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => { root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+    await settle();
+    const postsBefore = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'POST').length;
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-selection-add-to-chat="true"]') as HTMLElement)
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(openPanel(), 'a selection handoff must land on a visible panel').toBe('ai');
+    expect(hiddenAncestry(drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement)).toEqual([]);
+    // The selection reached the SAME document-scoped draft, and nothing was
+    // sent: the user still writes the question.
+    const selectionHandoff = onBoardAiDraftContextChange.mock.calls.at(-1);
+    expect(selectionHandoff?.[0]).toBe(SOURCE_A);
+    expect(JSON.stringify(selectionHandoff?.[1])).toContain('knowledge-selection');
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'POST'))
+      .toHaveLength(postsBefore);
+  });
+
   it('routes a page handoff into the document-scoped AI panel, sending nothing', async () => {
     const onBoardAiDraftContextChange = vi.fn();
     await openDocked({ onBoardAiDraftContextChange });
@@ -1200,9 +1308,10 @@ describe('PDF-C1 a still-extracting source recovers without reopening', () => {
   });
 
   it('the two-pane reader layout is untouched by the recovery path', () => {
-    // Widths and panes stay exactly as the reader-workspace commit set them.
+    // Widths and panes stay exactly as the reader-workspace commit set them,
+    // with the panel width now stated at the breakpoint that owns it.
     expect(drawerCode).toContain('lg:w-[880px]');
-    expect(drawerCode).toContain('w-[300px] flex-none');
+    expect(drawerCode).toContain('lg:w-[300px] lg:flex-none');
     expect(drawerCode).toContain('data-knowledge-reader-workspace="true"');
     expect(drawerCode).toContain('data-knowledge-library-panel="true"');
   });

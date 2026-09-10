@@ -1041,6 +1041,103 @@ describe('PDF workspace document-scoped mode', () => {
     expect(button.disabled).toBe(true);
   });
 
+  it('A/D: a save still in flight survives remounts, and cannot be started twice', async () => {
+    let release: (() => void) | undefined;
+    const onSave = vi.fn(() => new Promise<void>((resolve) => { release = () => resolve(); }));
+    const { render } = await mountPdfSaveHarness({ onSave });
+
+    // The write begins and does not resolve.
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect((saveButton(`a-${DOC_A}`) as HTMLButtonElement).disabled).toBe(true);
+
+    // Library and back, twice: the panel that started the save is gone, and
+    // the one that replaces it must still refuse to start a second one.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await render(DOC_A, 'Alpha.pdf', 3, 'library');
+      await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+      const button = saveButton(`a-${DOC_A}`) as HTMLButtonElement;
+      expect(button, 'the remounted panel must still know the save is running').not.toBeNull();
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toContain('Saving');
+      await click('[data-board-ai-chat-action="save-note"]');
+      expect(onSave, 'no remount may start a second Note for one answer').toHaveBeenCalledTimes(1);
+    }
+
+    // The original write finishes: pending becomes saved, still once.
+    await act(async () => { release!(); await Promise.resolve(); await Promise.resolve(); });
+    const button = saveButton(`a-${DOC_A}`) as HTMLButtonElement;
+    expect(button.textContent).toContain('Saved');
+    expect(button.disabled).toBe(true);
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    // And it stays saved across another switch.
+    await render(DOC_A, 'Alpha.pdf', 3, 'library');
+    await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+    expect(saveButton(`a-${DOC_A}`)?.textContent).toContain('Saved');
+  });
+
+  it('B: a failed save releases the claim, and the answer can be retried once', async () => {
+    let reject: (() => void) | undefined;
+    const onSave = vi.fn(() => new Promise<void>((_resolve, rejectPromise) => {
+      reject = () => rejectPromise(new Error('internal details'));
+    }));
+    const { render } = await mountPdfSaveHarness({ onSave });
+
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect((saveButton(`a-${DOC_A}`) as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => { reject!(); await Promise.resolve(); await Promise.resolve(); });
+
+    // Saveable again, and nothing was recorded as saved -- no Note exists.
+    const button = saveButton(`a-${DOC_A}`) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain('Save as Note');
+    expect(q('[data-board-ai-chat-save-note-error="true"]')).not.toBeNull();
+
+    // The release survives a remount too: still retryable, not stuck pending.
+    await render(DOC_A, 'Alpha.pdf', 3, 'library');
+    await render(DOC_A, 'Alpha.pdf', 3, 'ai');
+    expect((saveButton(`a-${DOC_A}`) as HTMLButtonElement).disabled).toBe(false);
+
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(onSave, 'a released claim allows exactly one retry').toHaveBeenCalledTimes(2);
+  });
+
+  it('C: one answer saving does not block a different answer in the same thread', async () => {
+    const pending = new Map<string, () => void>();
+    const onSave = vi.fn((request: { messageId: string }) => new Promise<void>((resolve) => {
+      pending.set(request.messageId, () => resolve());
+    }));
+    await mountPdfSaveHarness({
+      initialSessions: {
+        [DOC_A]: {
+          activeThreadId: THREAD_A,
+          messages: pdfTwoAnswerThread(DOC_A, 2),
+          draft: '',
+          loadingMessages: false,
+          sending: false,
+          error: null,
+        },
+      },
+      onSave,
+    });
+
+    await click('[data-board-ai-chat-save-message-id="assistant-a"]');
+    // B is untouched by A's claim: different message, independent save.
+    expect((saveButton('assistant-b') as HTMLButtonElement).disabled).toBe(false);
+    await click('[data-board-ai-chat-save-message-id="assistant-b"]');
+    expect(onSave).toHaveBeenCalledTimes(2);
+
+    // They resolve independently, in the other order.
+    await act(async () => { pending.get('assistant-b')!(); await Promise.resolve(); await Promise.resolve(); });
+    expect(saveButton('assistant-b')?.textContent).toContain('Saved');
+    expect(saveButton('assistant-a')?.textContent).toContain('Saving');
+
+    await act(async () => { pending.get('assistant-a')!(); await Promise.resolve(); await Promise.resolve(); });
+    expect(saveButton('assistant-a')?.textContent).toContain('Saved');
+  });
+
   it('shows a generic failure and never reports Saved when Note/source-link persistence fails', async () => {
     const onSave = vi.fn().mockRejectedValue(new Error('internal details'));
     await mountPdfSaveHarness({ onSave });
@@ -1089,6 +1186,34 @@ describe('PDF workspace document-scoped mode', () => {
     expect(persist).toContain('return true');
     expect(persist).toContain('return false');
     expect(CLIENT).toContain('noteSummaries={knowledgeSourceNoteSummaries}');
+  });
+
+  it('the in-flight save claim is session state, written before the write begins', () => {
+    // The claim has to outlive the panel that made it, so it lives in the
+    // host-owned session beside the completed one -- not in mount-local state,
+    // and not in a second registry, a global, storage or a timestamp.
+    expect(DRAWER).toContain('readonly pendingNoteSaveMessageIds?: readonly string[];');
+    const save = DRAWER.slice(
+      DRAWER.indexOf('const saveAssistantAsNote = useCallback('),
+      DRAWER.indexOf('const setDraftContext = useCallback('),
+    );
+    expect(save).toContain("setAssistantNoteSaveOutcome(message.id, 'pending');");
+    expect(save.indexOf("setAssistantNoteSaveOutcome(message.id, 'pending');"))
+      .toBeLessThan(save.indexOf('await onSaveAssistantAsNote('));
+    expect(save).toContain("setAssistantNoteSaveOutcome(message.id, 'saved');");
+    expect(save).toContain("setAssistantNoteSaveOutcome(message.id, 'idle');");
+    for (const forbidden of ['localStorage', 'sessionStorage', 'Date.now', 'window.']) {
+      expect(save, forbidden).not.toContain(forbidden);
+    }
+    // A completion that lands after its own panel unmounted merges into the
+    // CURRENT session rather than restoring a snapshot of it.
+    const writer = DRAWER.slice(
+      DRAWER.indexOf('const setAssistantNoteSaveOutcome = useCallback('),
+      DRAWER.indexOf('// The click guard reads both identity sets'),
+    );
+    expect(writer).toContain('setDocumentSessionValue(documentScopeId, apply)');
+    expect(writer).toContain('...session,');
+    expect(writer).toContain('pendingNoteSaveMessageIds: nextPending, savedNoteMessageIds: nextSaved');
   });
 
   it('the reader host owns document-scoped Board AI sessions across right-panel unmounts', () => {

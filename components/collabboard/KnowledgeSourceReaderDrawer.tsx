@@ -790,11 +790,14 @@ export default function KnowledgeSourceReaderDrawer({
             same document was a second entry point saying nothing new -- the
             dock in this row is the one way in.
 
-            Hidden below `lg` exactly like the panel it opens: the drawer is
-            420px there, which the document alone already fills, so a control
-            that could only open an invisible panel is withheld instead. */}
+            Available at EVERY width. It used to be withheld below `lg`, where
+            the panel it opens was hidden -- but the page and selection AI
+            actions inside the document could still activate that panel, and
+            the board's own AI shortcut correctly stands down while a reader is
+            open, so a narrow viewport ended up with a live AI panel and no way
+            to see it. The panel below is visible at every width instead. */}
         {onOpenBacklinkTarget ? (
-          <div className="mb-1 hidden items-center lg:flex">
+          <div className="mb-1 flex items-center">
             <PdfReaderDock
               panel={sidePanelRightPanel}
               aiAvailable={boardAiAvailable}
@@ -812,9 +815,12 @@ export default function KnowledgeSourceReaderDrawer({
           ×
         </button>
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {/* The document workspace: the majority of the drawer, and the only
-            place the document itself is read and worked with. */}
+            place the document itself is read and worked with. Below `lg` an
+            open panel covers it rather than squeezing it; it is never
+            unmounted, so nothing about the document is rebuilt on the way
+            back. */}
         <div
           data-knowledge-reader-workspace="true"
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-3"
@@ -832,10 +838,11 @@ export default function KnowledgeSourceReaderDrawer({
             initialSourceReferenceId={reader.sourceTarget?.referenceId}
             initialSourceRequestId={reader.sourceTarget?.requestId}
             onBack={closeReader}
-            // The right panel owns the document's identity -- but only while it
-            // is actually on screen. With the panel closed (or below `lg`, or
-            // with no backlink target at all) the reading pane keeps its own
-            // header, so Back to PDFs and the filename can never disappear.
+            // The right panel owns the document's identity while it is open --
+            // and it is on screen at every width now, so this follows the panel
+            // alone. With it closed (or with no backlink target at all) the
+            // reading pane keeps its own header, so Back to PDFs and the
+            // filename can never disappear.
             hostRendersDocumentHeader={!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed'}
             onCreateNoteFromPage={onCreateNoteFromPage}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
@@ -855,19 +862,30 @@ export default function KnowledgeSourceReaderDrawer({
           closing the panel gives the document the whole drawer back, with no
           strip left holding narrow space it no longer needs.
 
-          Hidden below `lg`, exactly as the single pane it replaces was: the
-          drawer is 420px there, which the document alone already fills. Only
-          rendered when there is somewhere to send a click: with no
+          ONE panel, two geometries, and never a hidden one. From `lg` up it is
+          the 300px column beside the document it belongs to. Below that the
+          drawer is 420px -- too narrow to sit beside anything -- so the panel
+          covers the reading pane instead of disappearing: the document stays
+          MOUNTED underneath with its page, scroll and session intact, and
+          toggling the panel off in the header brings it straight back.
+
+          The rule this enforces is that an ACTIVE panel is always on screen. A
+          page or selection handoff activates this panel from inside the
+          document at any width, and the board's floating AI shortcut stands
+          down while a reader is open, so a panel that could be hidden by a
+          breakpoint would leave that handoff with nowhere to land.
+
+          Only rendered when there is somewhere to send a click: with no
           `onOpenBacklinkTarget` the Library could list Notes it can never open.
         */}
         {onOpenBacklinkTarget ? (
-          <div className="hidden min-h-0 lg:flex">
+          <>
             {sidePanelRightPanel !== 'closed' ? (
               <div
                 data-knowledge-source-notes-pane="true"
                 data-knowledge-library-panel="true"
                 data-knowledge-reader-right-panel={sidePanelRightPanel}
-                className="flex min-h-0 w-[300px] flex-none flex-col overflow-hidden border-l border-gray-100"
+                className="absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden border-l border-gray-100 bg-white lg:static lg:z-auto lg:w-[300px] lg:flex-none"
               >
                 {/*
                   What is this source, where did it come from, and where is it
@@ -935,7 +953,7 @@ export default function KnowledgeSourceReaderDrawer({
                 </div>
               </div>
             ) : null}
-          </div>
+          </>
         ) : null}
       </div>
     </aside>

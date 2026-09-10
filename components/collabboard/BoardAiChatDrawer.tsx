@@ -117,6 +117,21 @@ export interface BoardAiDocumentScopedSession {
    * means nothing in this document's thread has been saved yet.
    */
   readonly savedNoteMessageIds?: readonly string[];
+  /**
+   * Assistant messages whose Note save is IN FLIGHT, by message id.
+   *
+   * The completed list above is not enough on its own. A save is an async
+   * write, and the panel can be unmounted while it is still running -- switch
+   * to Library and back and the drawer that started it is gone. With the
+   * in-flight identity held only by that mount, the remounted panel saw a
+   * message that was neither saved nor saving and offered Save as Note again,
+   * which is two Notes for one answer.
+   *
+   * So the pending identity lives in the session the host owns, exactly as the
+   * completed one does, and is written BEFORE the write begins. Absent means
+   * nothing is in flight for this document.
+   */
+  readonly pendingNoteSaveMessageIds?: readonly string[];
 }
 
 /** A stable empty default, so an unsaved session is not a new array each read. */
@@ -130,16 +145,38 @@ const EMPTY_DOCUMENT_SESSION: BoardAiDocumentScopedSession = {
   sending: false,
   error: null,
   savedNoteMessageIds: EMPTY_SAVED_NOTE_MESSAGE_IDS,
+  pendingNoteSaveMessageIds: EMPTY_SAVED_NOTE_MESSAGE_IDS,
 };
 
 /**
  * What one Save as Note attempt is doing right now.
  *
- * 'saving' and 'failed' are this mount's business alone; only 'saved' is an
- * outcome the session has to remember, and it is held as an identity list
- * rather than a state entry so a remount can rebuild it.
+ * 'failed' is this mount's business alone -- it is a message to the person who
+ * clicked, and a remount has nothing to apologise for. 'saving' and 'saved'
+ * are outcomes the SESSION remembers, held as identity lists rather than state
+ * entries so a remount can rebuild them.
  */
 type AssistantNoteSaveState = 'saving' | 'saved' | 'failed';
+
+/** Where one assistant message's save has got to, in the session's own terms. */
+type AssistantNoteSaveOutcome = 'pending' | 'saved' | 'idle';
+
+/** Adds an identity once; returns the SAME array when it is already there. */
+function withMessageId(
+  identities: readonly string[],
+  messageId: string,
+): readonly string[] {
+  return identities.includes(messageId) ? identities : [...identities, messageId];
+}
+
+function withoutMessageId(
+  identities: readonly string[],
+  messageId: string,
+): readonly string[] {
+  return identities.includes(messageId)
+    ? identities.filter((identity) => identity !== messageId)
+    : identities;
+}
 
 function applyStateAction<T>(current: T, action: React.SetStateAction<T>): T {
   return typeof action === 'function' ? (action as (previous: T) => T)(current) : action;
@@ -215,7 +252,10 @@ export default function BoardAiChatDrawer({
   const assistantNoteSaveStateRef = useRef<Record<string, AssistantNoteSaveState>>({});
   const [boardSavedNoteMessageIds, setBoardSavedNoteMessageIds] =
     useState<readonly string[]>(EMPTY_SAVED_NOTE_MESSAGE_IDS);
+  const [boardPendingNoteSaveMessageIds, setBoardPendingNoteSaveMessageIds] =
+    useState<readonly string[]>(EMPTY_SAVED_NOTE_MESSAGE_IDS);
   const savedNoteMessageIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
+  const pendingNoteSaveMessageIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const activeDocumentScopeRef = useRef<string | null>(null);
 
@@ -239,6 +279,13 @@ export default function BoardAiChatDrawer({
   const savedNoteMessageIdSet = useMemo(
     () => new Set(savedNoteMessageIds),
     [savedNoteMessageIds],
+  );
+  const pendingNoteSaveMessageIds = documentScopeId
+    ? documentSession.pendingNoteSaveMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS
+    : boardPendingNoteSaveMessageIds;
+  const pendingNoteSaveMessageIdSet = useMemo(
+    () => new Set(pendingNoteSaveMessageIds),
+    [pendingNoteSaveMessageIds],
   );
   const mandatoryDocumentContext = useMemo(() => {
     if (!documentScope) return null;
@@ -325,31 +372,53 @@ export default function BoardAiChatDrawer({
   }, [documentScopeId, setDocumentSessionValue]);
 
   /**
-   * Records one assistant message as saved, in whichever session owns it.
+   * Moves ONE assistant message between the session's save states.
    *
-   * Appending an identity -- never replacing the list -- is what keeps several
-   * saved answers in one thread independent, and what stops a later turn from
+   * One writer for both lists, and one update, so a completing save cannot be
+   * observed half-applied -- pending is dropped and saved is added together.
+   * Every write is a function of the CURRENT session: a save that finishes
+   * after its own panel unmounted merges into whatever the session holds by
+   * then rather than restoring a snapshot taken before it started.
+   *
+   * Appending an identity -- never replacing a list -- is what keeps several
+   * answers in one thread independent, and what stops a later turn from
    * un-saving an earlier one.
    */
-  const markAssistantNoteSaved = useCallback((messageId: string) => {
+  const setAssistantNoteSaveOutcome = useCallback((
+    messageId: string,
+    outcome: AssistantNoteSaveOutcome,
+  ) => {
+    const apply = (session: BoardAiDocumentScopedSession): BoardAiDocumentScopedSession => {
+      const pending = session.pendingNoteSaveMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS;
+      const saved = session.savedNoteMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS;
+      const nextPending = outcome === 'pending'
+        ? withMessageId(pending, messageId)
+        : withoutMessageId(pending, messageId);
+      const nextSaved = outcome === 'saved' ? withMessageId(saved, messageId) : saved;
+      if (nextPending === pending && nextSaved === saved) return session;
+      return { ...session, pendingNoteSaveMessageIds: nextPending, savedNoteMessageIds: nextSaved };
+    };
     if (documentScopeId) {
-      setDocumentSessionValue(documentScopeId, (session) => {
-        const current = session.savedNoteMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS;
-        if (current.includes(messageId)) return session;
-        return { ...session, savedNoteMessageIds: [...current, messageId] };
-      });
+      setDocumentSessionValue(documentScopeId, apply);
       return;
     }
-    setBoardSavedNoteMessageIds((current) => (
-      current.includes(messageId) ? current : [...current, messageId]
+    setBoardPendingNoteSaveMessageIds((current) => (
+      outcome === 'pending' ? withMessageId(current, messageId) : withoutMessageId(current, messageId)
     ));
+    if (outcome === 'saved') {
+      setBoardSavedNoteMessageIds((current) => withMessageId(current, messageId));
+    }
   }, [documentScopeId, setDocumentSessionValue]);
 
-  // The click guard reads the saved identities synchronously; this mirror is
+  // The click guard reads both identity sets synchronously; these mirrors are
   // what a REMOUNTED drawer consults, since its own attempt map starts empty.
   useEffect(() => {
     savedNoteMessageIdsRef.current = savedNoteMessageIdSet;
   }, [savedNoteMessageIdSet]);
+
+  useEffect(() => {
+    pendingNoteSaveMessageIdsRef.current = pendingNoteSaveMessageIdSet;
+  }, [pendingNoteSaveMessageIdSet]);
 
   useEffect(() => {
     activeDocumentScopeRef.current = documentScopeId;
@@ -481,12 +550,18 @@ export default function BoardAiChatDrawer({
     source: Omit<BoardAiAssistantNoteSaveRequest, 'messageId' | 'content'>,
   ) => {
     if (!onSaveAssistantAsNote) return;
-    // Two guards, one rule: this mount's in-flight attempt, and the session's
-    // memory of every save that already succeeded -- including ones made
-    // before the last unmount.
+    // Three guards, one rule: this message must not already be saved, must not
+    // already be in flight, and must not be mid-attempt in this mount. The
+    // first two read the SESSION, so they hold across an unmount; the third is
+    // synchronous, so a second click in the same tick loses too.
     if (savedNoteMessageIdsRef.current.has(message.id)) return;
+    if (pendingNoteSaveMessageIdsRef.current.has(message.id)) return;
     const currentState = assistantNoteSaveStateRef.current[message.id];
     if (currentState === 'saving' || currentState === 'saved') return;
+    // Claimed BEFORE the write can begin a second time -- both in the session,
+    // which outlives this panel, and in the mirror the next click reads.
+    setAssistantNoteSaveOutcome(message.id, 'pending');
+    pendingNoteSaveMessageIdsRef.current = new Set([...pendingNoteSaveMessageIdsRef.current, message.id]);
     assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saving' };
     setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
     try {
@@ -497,14 +572,20 @@ export default function BoardAiChatDrawer({
       });
       assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saved' };
       setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
-      // Only a save that actually completed is remembered. A failure leaves the
-      // message saveable, because no Note exists for it.
-      markAssistantNoteSaved(message.id);
+      // Only a save that actually completed is remembered, and the pending
+      // claim is released in the same update.
+      setAssistantNoteSaveOutcome(message.id, 'saved');
     } catch {
       assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'failed' };
       setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
+      // A failure leaves the message saveable: the claim is released and
+      // nothing is recorded as saved, because no Note exists for it.
+      pendingNoteSaveMessageIdsRef.current = new Set(
+        [...pendingNoteSaveMessageIdsRef.current].filter((identity) => identity !== message.id),
+      );
+      setAssistantNoteSaveOutcome(message.id, 'idle');
     }
-  }, [markAssistantNoteSaved, onSaveAssistantAsNote]);
+  }, [setAssistantNoteSaveOutcome, onSaveAssistantAsNote]);
 
   const setDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
     onDraftContextChange?.(items);
@@ -783,7 +864,9 @@ export default function BoardAiChatDrawer({
             : null;
           const noteSaveState: AssistantNoteSaveState | undefined = savedNoteMessageIdSet.has(message.id)
             ? 'saved'
-            : assistantNoteSaveStateByMessageId[message.id];
+            : pendingNoteSaveMessageIdSet.has(message.id)
+              ? 'saving'
+              : assistantNoteSaveStateByMessageId[message.id];
           const canShowSaveAsNote = message.role === 'assistant'
             && canSaveAssistantAsNote
             && !!onSaveAssistantAsNote

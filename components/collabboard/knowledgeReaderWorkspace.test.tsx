@@ -45,7 +45,10 @@ describe('1-6. two regions, a document tab, and no reserved AI space', () => {
   it('3. the workspace takes the majority width; the Library pane is fixed', () => {
     const code = executable(DRAWER);
     expect(code).toContain('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden');
-    expect(code).toContain('w-[300px] flex-none');
+    // Fixed from lg up, where a column beside the document is possible; below
+    // that the panel covers the reader instead of being hidden by a
+    // breakpoint, so an activated panel is always on screen.
+    expect(code).toContain('lg:w-[300px] lg:flex-none');
     expect(code).toContain('lg:w-[880px]');
     // The old fixed reading column is gone -- it was the narrower half.
     expect(code).not.toContain('lg:w-[420px]');

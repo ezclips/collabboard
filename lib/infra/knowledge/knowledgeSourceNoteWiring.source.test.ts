@@ -261,9 +261,11 @@ describe('P6J-F5 source note wiring', () => {
     const helper = after(canvasClient, 'const persistKnowledgeSourceReference', 1900);
     const failure = helper.slice(helper.indexOf('} catch'));
     expect(failure).toContain('toast.error');
-    // KNI-R2: the message is now a defaulted parameter, unchanged for every pre-existing caller.
+    // KNI-R2: the message is a defaulted, nullable parameter -- unchanged for
+    // every pre-existing caller, and null where the caller reports the failure
+    // itself.
     expect(failure).toContain('toast.error(onSaveFailedMessage)');
-    expect(helper).toContain("onSaveFailedMessage: string = 'Note created, but source link could not be saved'");
+    expect(helper).toContain("onSaveFailedMessage: string | null = 'Note created, but source link could not be saved'");
     // No rollback of any kind, and nothing rethrown into the creation path.
     for (const forbidden of ['delete', 'setPadlets', 'fetchData', 'filter', 'throw']) {
       expect(failure, forbidden).not.toContain(forbidden);

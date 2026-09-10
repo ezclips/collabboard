@@ -186,9 +186,12 @@ describe('P6J-F6-B1 board-scoped source reference read wiring', () => {
     expect(block.slice(elseBranch, catchIndex)).toContain('console.warn(');
     expect(block.slice(elseBranch, catchIndex)).not.toContain('toast.');
     expect(failureToast).toBeGreaterThan(catchIndex);
-    // KNI-R2: the message is now a parameter, defaulted to the ORIGINAL
-    // NEW-Note wording -- every pre-existing caller still sees it unchanged.
-    expect(block).toContain("onSaveFailedMessage: string = 'Note created, but source link could not be saved'");
+    // KNI-R2: the message is a parameter, defaulted to the ORIGINAL NEW-Note
+    // wording -- every pre-existing caller still sees it unchanged. It is
+    // NULLABLE by intent: null is how a caller says "this failure is already
+    // reported elsewhere", and the toast below is gated on it.
+    expect(block).toContain("onSaveFailedMessage: string | null = 'Note created, but source link could not be saved'");
+    expect(block).toContain('if (onSaveFailedMessage) toast.error(onSaveFailedMessage);');
   });
 
   it('K3: F5 failure semantics are untouched -- one toast, no rollback', () => {

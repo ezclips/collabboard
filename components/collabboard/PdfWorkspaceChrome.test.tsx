@@ -320,6 +320,20 @@ describe('PdfWorkspaceChrome', () => {
     expect(container.querySelector('[data-pdf-workspace-right-panel-content="true"]')).toBeNull();
   });
 
+  it('G: the focused host owns the whole viewport, so its active panel is never hidden either', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
+
+    // Same rule as the docked reader, reached differently: this host is
+    // fixed inset-0, so its panel needs no responsive relocation -- but it
+    // must still carry no display class that could hide it at any width.
+    const display = (element: Element) => element.className.split(/s+/)
+      .filter((token) => token === 'hidden' || /:hidden$/.test(token));
+    const panel = container.querySelector('[data-pdf-workspace-right-panel-content="true"]')!;
+    expect(display(panel)).toEqual([]);
+    expect(display(container.querySelector('[data-pdf-reader-dock="true"]')!)).toEqual([]);
+  });
+
   it('keeps the tab row one-line overflow capable and omits deferred PDF subnavigation', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha, beta]} initialActive="doc-a" />);
     const row = container.querySelector<HTMLElement>('[data-pdf-workspace-tab-row="true"]');
