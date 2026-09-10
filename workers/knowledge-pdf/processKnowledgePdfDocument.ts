@@ -21,6 +21,7 @@ import type {
 import { DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS } from '../../lib/domain/knowledge/knowledgeExtraction';
 import { normalizeOpenDataLoaderPdf } from '../../lib/infra/knowledge/openDataLoaderPdfNormalizer';
 import { buildKnowledgeChunks } from '../../lib/domain/knowledge/knowledgeChunking';
+import { knowledgeMalformedPageWarnings } from '../../lib/domain/knowledge/knowledgeTextQuality';
 import {
   KNOWLEDGE_STORAGE_BUCKET,
   NodeKnowledgeContentHasher,
@@ -628,6 +629,26 @@ export async function processKnowledgePdfDocument(
       },
       pageGeometry: geometryRecord(geometry),
     });
+    /**
+     * Measured, never repaired, and never able to change what is stored.
+     *
+     * A page whose own font carries no Unicode for a glyph reaches this point
+     * already missing that character -- the normalizer's NUL substitution is
+     * the last honest thing anyone can do with it. This loop only counts what
+     * was lost and says so, so a degraded page is visible instead of silently
+     * slightly wrong. It reads `extraction.pages` and writes nothing.
+     */
+    for (const warning of knowledgeMalformedPageWarnings(extraction.pages)) {
+      console.error(JSON.stringify({
+        documentId: job.documentId,
+        stage: 'text-quality',
+        event: 'PDF_TEXT_EXTRACTION_QUALITY_WARNING',
+        page: warning.pageNumber,
+        invalidCharacterCount: warning.invalidCharacterCount,
+        nonWhitespaceLength: warning.nonWhitespaceLength,
+      }));
+    }
+
     const chunks = buildKnowledgeChunks(extraction.pages);
     assertLease();
 

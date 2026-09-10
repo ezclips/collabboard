@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { asBoardId, asKnowledgeDocumentId } from '../../lib/domain/core/ids';
 import { domainError } from '../../lib/domain/core/errors';
 import type { DomainError } from '../../lib/domain/core/errors';
@@ -363,6 +363,121 @@ describe('processKnowledgePdfDocument', () => {
  * derivative-induced recordFailure would move the row to `failed`, which the
  * dispatcher and claim RPC both treat as claimable work to re-run.
  */
+describe('processKnowledgePdfDocument -- extraction quality signal', () => {
+  const NUL = '\u0000';
+
+  /** The basic fixture, with one page whose glyphs carry no Unicode. */
+  const malformedFixture = () => ({
+    ...basicFixture,
+    kids: [
+      ...basicFixture.kids,
+      {
+        type: 'paragraph',
+        id: 99,
+        'page number': 2,
+        'bounding box': [72, 400, 500, 440],
+        content: `${NUL} / 7 ${NUL}ran live updates`,
+      },
+    ],
+  });
+
+  const parserWith = (fixture: unknown): KnowledgePdfParser => ({
+    async run(input: OpenDataLoaderRunInput) {
+      await fs.writeFile(path.join(input.outputDir, 'result.json'), JSON.stringify(fixture));
+      return { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, elapsedMs: 1 };
+    },
+  });
+
+  const qualityWarnings = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls
+    .map(([line]) => { try { return JSON.parse(String(line)); } catch { return null; } })
+    .filter((entry) => entry?.event === 'PDF_TEXT_EXTRACTION_QUALITY_WARNING');
+
+  it('F: a clean document logs no quality warning and completes exactly as before', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    const root = await tempRoot();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = await processKnowledgePdfDocument(deps(repository, storage, parserFromFixture(), root), DOCUMENT);
+
+      expect(result.status).toBe('ready');
+      expect(qualityWarnings(errorSpy)).toEqual([]);
+    } finally {
+      errorSpy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('G: a malformed page warns once, with counts and a page number only', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    const root = await tempRoot();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = await processKnowledgePdfDocument(
+        deps(repository, storage, parserWith(malformedFixture()), root),
+        DOCUMENT,
+      );
+
+      expect(result.status).toBe('ready');
+      const warnings = qualityWarnings(errorSpy);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({
+        documentId: DOCUMENT,
+        stage: 'text-quality',
+        page: 2,
+        invalidCharacterCount: 2,
+      });
+      expect(typeof warnings[0].nonWhitespaceLength).toBe('number');
+      // Metadata only: no page text, no excerpt, no word from the document.
+      const line = JSON.stringify(warnings[0]);
+      expect(line).not.toContain('ran');
+      expect(line).not.toContain('live updates');
+      expect(line).not.toContain('Project Notes');
+      expect(line).not.toContain(NUL);
+      expect(line).not.toContain('\uFFFD');
+    } finally {
+      errorSpy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('H: detection changes nothing that is stored -- text, chunks and hashing are untouched', async () => {
+    const withDetection = new FakeRepository();
+    const storage = new FakeStorage();
+    const root = await tempRoot();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await processKnowledgePdfDocument(
+        deps(withDetection, storage, parserWith(malformedFixture()), root),
+        DOCUMENT,
+      );
+
+      const completion = withDetection.completions[0];
+      const page = completion.pages.find((entry) => entry.pageNumber === 2)!;
+      // The existing normalization rule still owns the text: NUL became the
+      // replacement character, one code unit for one, and nothing else moved.
+      expect(page.text).toContain('\uFFFD / 7 \uFFFDran live updates');
+      expect(page.text).not.toContain(NUL);
+      expect(page.textHash).toEqual(expect.any(String));
+
+      // Chunks still quote the page text they were built from, offsets intact,
+      // and each hash still belongs to the text actually stored.
+      const chunks = completion.chunks ?? [];
+      expect(chunks.length).toBeGreaterThan(0);
+      for (const chunk of chunks) {
+        const source = completion.pages.find((entry) => entry.pageNumber === chunk.pageStart);
+        if (!source) continue;
+        expect(source.text.slice(chunk.charStart, chunk.charEnd)).toBe(chunk.text);
+        expect(chunk.textHash).toEqual(expect.any(String));
+      }
+    } finally {
+      errorSpy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('processKnowledgePdfDocument -- optional page derivatives', () => {
   const eligible = (
     repository: FakeRepository,
