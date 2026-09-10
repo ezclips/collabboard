@@ -59,8 +59,12 @@ async function failReadFor(boardId: string, userId: string) {
 
 /**
  * The production derivation, rendered: the hook's answer joined to the board
- * row exactly as CanvasClient joins them, feeding the one gate that shows or
- * hides every shared-board mutation control (Save as Note among them).
+ * row exactly as CanvasClient joins them, feeding the gate that shows or hides
+ * the PDF selection's Save as Note. That gate, and no other control -- see
+ * boardEditAuthorityWiring.source.test.ts for the fence around its scope.
+ *
+ * Every rendered value is appended to `renders`, so a test can assert not just
+ * where the gate ENDS UP but that it was never briefly open on the way there.
  */
 function BoardEditGate({
   boardId,
@@ -80,7 +84,31 @@ function BoardEditGate({
     board: { id: boardRowId, user_id: boardOwnerId },
     collaboratorAuthority,
   });
+  renders.push(`${boardId}|${userId}|${canEdit ? 'can-edit' : 'cannot-edit'}`);
   return <div data-testid="gate">{canEdit ? 'can-edit' : 'cannot-edit'}</div>;
+}
+
+/** Every value the gate has rendered, in order, since the last reset. */
+const renders: string[] = [];
+
+/**
+ * The hook's OWN answer, unjoined.
+ *
+ * `canEditBoard` independently refuses a stamp that names another scope, so a
+ * gate assertion alone stays green even if the hook let a superseded request
+ * write to state. That redundancy is deliberate in production and useless in
+ * a test: it would hide exactly the defect this suite exists to catch. This
+ * probe therefore asserts on what the hook itself returns.
+ */
+let lastAuthority: ReturnType<typeof useBoardCollaboratorAuthority> = null;
+
+function AuthorityProbe({ boardId, userId }: { boardId: string; userId: string | null }) {
+  lastAuthority = useBoardCollaboratorAuthority(boardId, userId);
+  return <div data-testid="probe">{lastAuthority ? `${lastAuthority.userId}|${lastAuthority.boardId}|${lastAuthority.role}` : 'unresolved'}</div>;
+}
+
+function probe(): string {
+  return screen.getByTestId('probe').textContent ?? '';
 }
 
 function gate(): string {
@@ -89,6 +117,8 @@ function gate(): string {
 
 beforeEach(() => {
   pending.clear();
+  renders.length = 0;
+  lastAuthority = null;
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -225,5 +255,211 @@ describe('a failed read is not an answer', () => {
       rerender(<BoardEditGate boardId={BOARD} userId={B} boardOwnerId={B} />);
     });
     expect(gate()).toBe('can-edit');
+  });
+});
+
+// ============================================================================
+// PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1 -- the accepted LOW:
+// a request from a SUPERSEDED scope that completes LATE
+// ============================================================================
+
+/**
+ * The cases above switch scope and then resolve the new scope's request. This
+ * suite covers the harder ordering: the OLD scope's request is still in
+ * flight when the switch happens, the new scope resolves first, and only
+ * afterwards does the old one come back.
+ *
+ * The first promise is genuinely left unresolved until after the switch --
+ * nothing here stands in an already-completed request and calls it stale.
+ */
+describe('a request from a superseded scope completes late and is ignored', () => {
+  it('account AND board both change; the old answer lands last and changes nothing', async () => {
+    // 1. Scope A/X. A is an editor there -- but the read has not come back.
+    const { rerender } = render(
+      <BoardEditGate boardId={BOARD} userId={A} boardOwnerId={'someone-else'} />,
+    );
+    expect(gate()).toBe('cannot-edit');
+    expect(pending.has(`${BOARD}|${A}`)).toBe(true);
+
+    // 2. Switch to B/Y before A/X resolves. Note the ORDER: the A/X promise
+    //    is still outstanding at this point, and stays outstanding.
+    await act(async () => {
+      rerender(
+        <BoardEditGate
+          boardId={OTHER_BOARD}
+          userId={B}
+          boardOwnerId={'someone-else'}
+          boardRowId={OTHER_BOARD}
+        />,
+      );
+    });
+    expect(gate()).toBe('cannot-edit');
+
+    // 3. B/Y resolves: B is only a viewer on Y.
+    await resolveRoleFor(OTHER_BOARD, B, 'viewer');
+    expect(gate()).toBe('cannot-edit');
+
+    // 4. NOW the superseded A/X request finally comes back -- as an editor,
+    //    the most dangerous answer it could carry.
+    await resolveRoleFor(BOARD, A, 'editor');
+
+    // A/X cannot replace B/Y's authority.
+    expect(gate()).toBe('cannot-edit');
+    // The current scope is still B/Y, and it is still the one being asked.
+    expect(renders[renders.length - 1]).toBe(`${OTHER_BOARD}|${B}|cannot-edit`);
+    // ...and the gate was never briefly open at any point in the sequence.
+    expect(renders.filter((r) => r.endsWith('can-edit'))).toEqual([]);
+  });
+
+  it('account only changes; the old account\'s late editor answer is ignored', async () => {
+    const { rerender } = render(
+      <BoardEditGate boardId={BOARD} userId={A} boardOwnerId={'someone-else'} />,
+    );
+    expect(pending.has(`${BOARD}|${A}`)).toBe(true);
+
+    await act(async () => {
+      rerender(<BoardEditGate boardId={BOARD} userId={B} boardOwnerId={'someone-else'} />);
+    });
+    await resolveRoleFor(BOARD, B, null);
+    expect(gate()).toBe('cannot-edit');
+
+    // A's editor role on this same board arrives late. It is A's, not B's.
+    await resolveRoleFor(BOARD, A, 'editor');
+    expect(gate()).toBe('cannot-edit');
+    expect(renders.filter((r) => r.endsWith('can-edit'))).toEqual([]);
+  });
+
+  it('board only changes; the previous board\'s late editor answer is ignored', async () => {
+    const { rerender } = render(
+      <BoardEditGate boardId={BOARD} userId={B} boardOwnerId={'someone-else'} />,
+    );
+    expect(pending.has(`${BOARD}|${B}`)).toBe(true);
+
+    await act(async () => {
+      rerender(
+        <BoardEditGate
+          boardId={OTHER_BOARD}
+          userId={B}
+          boardOwnerId={'someone-else'}
+          boardRowId={OTHER_BOARD}
+        />,
+      );
+    });
+    await resolveRoleFor(OTHER_BOARD, B, 'viewer');
+    expect(gate()).toBe('cannot-edit');
+
+    // B really is an editor -- on the board they navigated AWAY from.
+    await resolveRoleFor(BOARD, B, 'editor');
+    expect(gate()).toBe('cannot-edit');
+    expect(renders.filter((r) => r.endsWith('can-edit'))).toEqual([]);
+  });
+
+  it('a late FAILURE from the old scope cannot disturb the new scope either', async () => {
+    // The new scope has resolved and granted; the old scope then errors. An
+    // error handler that wrote to shared state would revoke a live grant.
+    const { rerender } = render(
+      <BoardEditGate boardId={BOARD} userId={A} boardOwnerId={'someone-else'} />,
+    );
+    expect(pending.has(`${BOARD}|${A}`)).toBe(true);
+
+    await act(async () => {
+      rerender(
+        <BoardEditGate
+          boardId={OTHER_BOARD}
+          userId={B}
+          boardOwnerId={'someone-else'}
+          boardRowId={OTHER_BOARD}
+        />,
+      );
+    });
+    await resolveRoleFor(OTHER_BOARD, B, 'editor');
+    expect(gate()).toBe('can-edit');
+
+    await failReadFor(BOARD, A);
+    expect(gate()).toBe('can-edit');
+    expect(renders[renders.length - 1]).toBe(`${OTHER_BOARD}|${B}|can-edit`);
+  });
+
+  it('the new scope resolving AFTER the old one still wins', async () => {
+    // The reverse interleaving, for completeness: old lands first this time,
+    // then the current scope's own answer arrives.
+    const { rerender } = render(
+      <BoardEditGate boardId={BOARD} userId={A} boardOwnerId={'someone-else'} />,
+    );
+    await act(async () => {
+      rerender(
+        <BoardEditGate
+          boardId={OTHER_BOARD}
+          userId={B}
+          boardOwnerId={'someone-else'}
+          boardRowId={OTHER_BOARD}
+        />,
+      );
+    });
+
+    await resolveRoleFor(BOARD, A, 'editor');
+    expect(gate()).toBe('cannot-edit');
+
+    await resolveRoleFor(OTHER_BOARD, B, 'editor');
+    expect(gate()).toBe('can-edit');
+  });
+});
+
+// ============================================================================
+// The hook's own cancellation, asserted directly
+// ============================================================================
+
+describe('the hook itself discards a superseded scope\'s late completion', () => {
+  it('a late A/X success never becomes the hook\'s answer for B/Y', async () => {
+    const { rerender } = render(<AuthorityProbe boardId={BOARD} userId={A} />);
+    expect(probe()).toBe('unresolved');
+    expect(pending.has(`${BOARD}|${A}`)).toBe(true);
+
+    // Switch while A/X is still outstanding.
+    await act(async () => {
+      rerender(<AuthorityProbe boardId={OTHER_BOARD} userId={B} />);
+    });
+    expect(probe()).toBe('unresolved');
+
+    await resolveRoleFor(OTHER_BOARD, B, 'viewer');
+    expect(probe()).toBe(`${B}|${OTHER_BOARD}|viewer`);
+
+    // The superseded request returns 'editor', late. It must not reach state
+    // at all -- not as a wrong answer, and not as a right one for the wrong
+    // scope.
+    await resolveRoleFor(BOARD, A, 'editor');
+    expect(probe()).toBe(`${B}|${OTHER_BOARD}|viewer`);
+    expect(lastAuthority).toEqual({ userId: B, boardId: OTHER_BOARD, role: 'viewer' });
+  });
+
+  it('a late A/X success cannot overwrite an unresolved B/Y', async () => {
+    // The window that matters most: B/Y has NOT answered yet, so a stale
+    // write would be the only value present and would look authoritative.
+    const { rerender } = render(<AuthorityProbe boardId={BOARD} userId={A} />);
+    await act(async () => {
+      rerender(<AuthorityProbe boardId={OTHER_BOARD} userId={B} />);
+    });
+
+    await resolveRoleFor(BOARD, A, 'editor');
+    expect(probe()).toBe('unresolved');
+    expect(lastAuthority).toBeNull();
+
+    // B/Y's own answer still lands normally afterwards.
+    await resolveRoleFor(OTHER_BOARD, B, 'editor');
+    expect(lastAuthority).toEqual({ userId: B, boardId: OTHER_BOARD, role: 'editor' });
+  });
+
+  it('a late A/X failure cannot disturb B/Y either', async () => {
+    const { rerender } = render(<AuthorityProbe boardId={BOARD} userId={A} />);
+    await act(async () => {
+      rerender(<AuthorityProbe boardId={OTHER_BOARD} userId={B} />);
+    });
+    await resolveRoleFor(OTHER_BOARD, B, 'editor');
+    expect(lastAuthority).toEqual({ userId: B, boardId: OTHER_BOARD, role: 'editor' });
+
+    await failReadFor(BOARD, A);
+    expect(lastAuthority).toEqual({ userId: B, boardId: OTHER_BOARD, role: 'editor' });
+    // The superseded scope's error is not even logged as the current one's.
+    expect(probe()).toBe(`${B}|${OTHER_BOARD}|editor`);
   });
 });

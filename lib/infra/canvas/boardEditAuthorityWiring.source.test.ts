@@ -3,14 +3,25 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2 governance seam.
+ * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1 governance seam.
  *
- * One capability decides who may change this board, and every board-level
- * mutation surface is derived from it. This suite is the census: it pins the
- * consumers that were converted, catches a future surface that goes back to
- * asking the workspace role directly, and -- the part that matters most --
- * checks the frontend rule against the BACKEND POLICY TEXT it is supposed to
- * mirror, so the two cannot drift apart silently again.
+ * The board-scoped authority exists for ONE feature: saving a PDF selection as
+ * a Note. This suite is the fence around it, and it has two halves:
+ *
+ *   1. the capability really is derived from the board (ownership OR an
+ *      editor collaborator row), matching the padlets/source-reference write
+ *      policies that the save actually goes through; and
+ *
+ *   2. it reaches NOTHING else. Canvas Settings, Map, Drawing, the graph, the
+ *      toolbar and the post controls write through other tables with other
+ *      policies -- `boards_update` is owner-only, the graph tables have their
+ *      own `can_edit_board` -- so each keeps the authority it already had.
+ *      An earlier pass propagated this capability to all of them and offered
+ *      writes those backends refuse; these assertions are what stops that
+ *      happening again.
+ *
+ * Half 2 pins the pre-existing wiring verbatim. It is NOT a claim that those
+ * authorities are correct -- only that this slice did not change them.
  *
  * Line comments only, as the sibling suites do -- a block-comment strip would
  * swallow JSX and turn every "not found" assertion into a false pass.
@@ -33,72 +44,47 @@ const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
 const collaboratorHook = sourceOf('components/collabboard/canvas/hooks/useBoardCollaboratorAuthority.ts');
 
-/**
- * The board surface, as far as board-level mutation gating is concerned.
- * Workspace administration screens (members, collections, sharing) are a
- * different question and are deliberately not in this list.
- */
-const BOARD_SURFACE = [
-  'app/dashboard/canvas/[id]/CanvasClient.tsx',
-  'components/collabboard/canvas/ui/CanvasSettingsModal.tsx',
-  'components/collabboard/canvas/layouts/DrawingLayout.tsx',
-  'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
-] as const;
-
 // ============================================================================
-// The backend contract this frontend rule exists to mirror
+// Half 1 -- the capability mirrors the policy the PDF save writes through
 // ============================================================================
 
-describe('the frontend rule encodes the backend rule, not a looser one', () => {
+describe('the PDF save capability encodes the rule its own write is judged by', () => {
   const padletPolicy = policyOf('supabase/migrations/20260706_fix_blanket_permissive_policies.sql');
-  const sectionPolicy = policyOf('supabase/migrations/120260710_fix_board_sections_wrong_table_rls.sql');
 
-  it('the backend board-content write rule is ownership OR an editor collaborator', () => {
-    // Read straight out of the migrations the reviewer cited. If either of
-    // these stops matching, the frontend rule below is mirroring something
-    // that no longer exists and this suite must be revisited deliberately.
-    for (const policy of [padletPolicy, sectionPolicy]) {
-      expect(policy).toContain('SELECT id FROM boards WHERE user_id = auth.uid()');
-      expect(policy).toMatch(
-        /SELECT board_id FROM board_collaborators WHERE user_id = auth\.uid\(\) AND role = 'editor'/,
-      );
+  it('the padlets write rule is ownership OR an editor collaborator', () => {
+    // The save inserts a padlet. This is the policy that decides whether the
+    // insert is accepted, read straight out of the migration.
+    expect(padletPolicy).toContain('SELECT id FROM boards WHERE user_id = auth.uid()');
+    expect(padletPolicy).toMatch(
+      /SELECT board_id FROM board_collaborators WHERE user_id = auth\.uid\(\) AND role = 'editor'/,
+    );
+  });
+
+  it('that write rule has NO workspace-membership branch', () => {
+    for (const forbidden of ['workspace_members', 'workspace_id', 'workspaces']) {
+      expect(padletPolicy, forbidden).not.toContain(forbidden);
     }
   });
 
-  it('the backend write rule has NO workspace-membership branch', () => {
-    // The substitution the accepted MEDIUM finding was about. There is no
-    // workspace term in these policies to justify a workspace term in the UI.
-    for (const policy of [padletPolicy, sectionPolicy]) {
-      for (const forbidden of ['workspace_members', 'workspace_id', 'workspaces']) {
-        expect(policy, forbidden).not.toContain(forbidden);
-      }
-    }
-  });
-
-  it('the frontend authority names those same two terms and nothing else', () => {
-    // Ownership half: the board row's own owner column.
+  it('the frontend capability names those same two terms and nothing else', () => {
     expect(authority).toContain('board.user_id === userId');
-    // Collaborator half: role 'editor', matching the policy exactly. Neither
-    // 'viewer' nor 'commenter' -- the other two values the CHECK allows --
-    // may grant.
+    // 'editor' exactly -- neither 'viewer' nor 'commenter', the other two
+    // values the CHECK constraint allows, may grant.
     expect(authority).toContain("authority.role === 'editor'");
     expect(authority).toContain("export type BoardCollaboratorRole = 'editor' | 'viewer' | 'commenter';");
-    // ...and no workspace term is even in scope to be reached for.
     for (const forbidden of ['canEditWorkspace', 'WorkspaceRole', 'workspaceRole', '@/lib/workspace/context']) {
       expect(authority, forbidden).not.toContain(forbidden);
     }
   });
 
   it('the collaborator read is scoped to THIS user and THIS board', () => {
-    // One boolean's worth of authority, read as one row -- the roster is not
-    // fetched to answer it.
     expect(viewReads).toContain("from('board_collaborators')");
     expect(viewReads).toContain(".eq('board_id', boardId)");
     expect(viewReads).toContain(".eq('user_id', userId)");
     expect(viewReads).toContain('.maybeSingle()');
   });
 
-  it('the frontend is a mirror, not a second boundary: it writes nothing', () => {
+  it('the capability is UX only: it reaches for nothing the server owns', () => {
     for (const forbidden of ['supabase', 'fetch(', 'rpc(', 'service_role', 'process.env']) {
       expect(authority, forbidden).not.toContain(forbidden);
     }
@@ -106,113 +92,119 @@ describe('the frontend rule encodes the backend rule, not a looser one', () => {
 });
 
 // ============================================================================
-// Fail-closed on identity and on board
+// Half 1b -- fail closed on identity and on board
 // ============================================================================
 
 describe('cached authority never outlives the identity or board it names', () => {
   it('identity is required before either half is consulted', () => {
     expect(authority).toContain('if (!isId(input.userId) || !isId(input.boardId)) return false;');
     const body = authority.slice(authority.indexOf('export function canEditBoard('));
-    // The guard comes first, so no stale answer can speak for a missing user.
     expect(body.indexOf('isId(input.userId)')).toBeLessThan(body.indexOf('isBoardOwner('));
   });
 
   it('every board-scoped fact is stamped with whose and which board it is', () => {
     // This -- not the effect's timing -- is what makes an account or board
-    // switch fail closed. The render after a switch happens BEFORE the effect
-    // reruns, and on that render the previous answer no longer matches.
+    // switch fail closed, including when a request from the previous scope
+    // completes LATE, after the switch.
     expect(authority).toContain('readonly userId: string | null | undefined;');
     expect(authority).toContain('readonly boardId: string | null | undefined;');
     expect(authority).toContain('if (authority.userId !== userId || authority.boardId !== boardId) return false;');
-    // The board row is checked against the current board id too, so the
-    // previous board's ownership cannot answer for this one.
     expect(authority).toContain('if (!isId(board?.id) || board.id !== boardId) return false;');
-    // No timing hack stands in for any of it.
     for (const forbidden of ['setTimeout', 'setInterval', 'requestAnimationFrame']) {
       expect(authority, forbidden).not.toContain(forbidden);
     }
   });
 
-  it('the resolution re-runs on identity AND on board, dropping the old answer', () => {
-    // Both are dependencies, so neither switch can leave the previous answer
-    // in place once the effect has run; the stamp covers the render before it.
+  it('the resolution re-runs on identity AND on board, and drops the old answer', () => {
     expect(collaboratorHook).toContain('}, [boardId, userId]);');
     expect(collaboratorHook).toContain('setAuthority(null);');
-    // A failed read stays UNRESOLVED rather than resolving to "no role" -- it
-    // must not read as a denial for an owner nor a grant for anyone.
+    // A late completion from a superseded scope is discarded by the cleanup
+    // flag, before it can reach state at all.
+    expect(collaboratorHook).toContain('if (cancelled) return;');
+    expect(collaboratorHook).toContain('cancelled = true;');
+    // A failed read stays UNRESOLVED rather than resolving to "no role".
     expect(collaboratorHook).toContain('if (!result.ok) {');
-    expect(collaboratorHook).not.toContain('setAuthority({ userId, boardId, role: null })');
-    // The controller consumes it; it does not run a second resolution.
-    expect(canvasClient).toContain('const boardCollaboratorAuthority = useBoardCollaboratorAuthority(canvasId, user?.id);');
-    expect(canvasClient.match(/useBoardCollaboratorAuthority\(/g) ?? []).toHaveLength(1);
   });
 });
 
 // ============================================================================
-// One capability, wired everywhere it decides a mutation
+// Half 2 -- the fence: this capability gates the PDF save and nothing else
 // ============================================================================
 
-describe('one board-edit capability, wired everywhere it decides a mutation', () => {
-  it('the shell resolves it once, and never per feature', () => {
-    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
-    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
-    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
-    // Exactly one call: no surface recomputes the rule for itself.
-    expect(canvasClient.match(/canEditBoard\(/g) ?? []).toHaveLength(1);
-    expect(canvasClient.match(/isBoardOwner\(/g) ?? []).toHaveLength(0);
-    // It is fed board-scoped facts only.
+describe('the board capability is scoped to the PDF selection save', () => {
+  it('it is resolved once, under a name that says what it gates', () => {
+    expect(canvasClient).toContain('const canSavePdfSelectionAsNote = canEditBoard({');
     expect(canvasClient).toContain('boardId: canvasId,');
     expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
-    expect(canvasClient).not.toContain('workspaceRole: currentWorkspaceRole,');
+    // Exactly one derivation, and no general "can edit this board" flag for a
+    // future surface to reach for by mistake.
+    expect(canvasClient.match(/canEditBoard\(/g) ?? []).toHaveLength(1);
+    expect(canvasClient).not.toContain('canEditCurrentBoard');
+    expect(canvasClient.match(/isBoardOwner\(/g) ?? []).toHaveLength(0);
   });
 
-  it('Drawing asks the board, not the workspace', () => {
-    expect(canvasClient).toContain('readOnly={!canEditCurrentBoard}');
-    expect(canvasClient).not.toContain("readOnly={currentWorkspaceRole === 'readonly'}");
-  });
-
-  it('Map section management and ordering ask the board', () => {
-    expect(canvasClient).toContain('canManageSections={canEditCurrentBoard}');
-    expect(canvasClient).toContain('canReorderPosts={canEditCurrentBoard}');
-    // The Map mutations beside them were already on the same capability.
-    expect(canvasClient).toContain('onDeletePinContainer={canUseFreeformEditButton ?');
-  });
-
-  it('Canvas Settings consumes the capability instead of deciding one', () => {
-    expect(canvasClient).toContain('canEdit={canEditCurrentBoard}');
-    expect(settingsModal).toContain('canEdit: boolean;');
-    // It is handed no material to invent an answer from.
-    for (const forbidden of ['canEditWorkspace', 'WorkspaceRole', 'currentWorkspaceRole', 'user_id', 'userId']) {
-      expect(settingsModal, forbidden).not.toContain(forbidden);
-    }
-  });
-
-  it('the PDF selection save is one consumer among the rest, not a special case', () => {
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
-    for (const forbidden of ['canSavePdfSelection', 'ownerException', 'isOwnerOverride']) {
+  it('the PDF save is its ONLY consumer -- the affordance and the guard', () => {
+    // Prose mentions do not count; only real references do. `sourceOf` strips
+    // line comments, so the JSDoc that explains the scope is stripped here too.
+    const code = canvasClient.replace(/\/\*[\s\S]*?\*\//g, '');
+    const uses = code.match(/canSavePdfSelectionAsNote/g) ?? [];
+    // The derivation, the callback guard, that callback's dependency entry,
+    // and the affordance. Nothing else in the file may consume it.
+    expect(uses).toHaveLength(4);
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(canvasClient).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
+    // No feature-local escape hatch beside it, either.
+    for (const forbidden of ['ownerException', 'isOwnerOverride']) {
       expect(canvasClient, forbidden).not.toContain(forbidden);
     }
   });
+});
 
-  it('census: no board-level mutation surface gates on workspace role directly', () => {
-    for (const path of BOARD_SURFACE) {
-      const source = sourceOf(path);
-      // `canEditWorkspace` is the workspace EDIT predicate: legitimate for
-      // workspace administration, never for a board mutation. Workspace
-      // ADMIN checks (`canManageWorkspace`) are a different question and stay.
-      expect(source, `${path} must not derive board edits from workspace role`)
-        .not.toContain('canEditWorkspace(');
-      expect(source, `${path} must not test the readonly role directly`)
-        .not.toContain("currentWorkspaceRole === 'readonly'");
-    }
+// ============================================================================
+// Half 2b -- the unrelated authorities, pinned exactly as they were
+// ============================================================================
+
+describe('every unrelated mutation authority is untouched by this slice', () => {
+  it('the general edit button and toolbar stay on the workspace role', () => {
+    // Pre-existing wiring, restored verbatim. Not endorsed here -- only
+    // fenced off from this slice.
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
   });
 
-  it('census: workspace administration keeps its own authority', () => {
-    // Deliberately unchanged -- sharing a canvas is a workspace act, not a
-    // board mutation, and board ownership must not confer it.
+  it('Canvas Settings keeps its own workspace-role authority', () => {
+    // MEDIUM 1: `boards_update` is owner-only, so a collaborator editor must
+    // not be offered board title / layout / wallpaper / comment settings.
+    expect(canvasClient).toContain('currentWorkspaceRole={currentWorkspaceRole}');
+    expect(canvasClient).not.toContain('canEdit={canSavePdfSelectionAsNote}');
+    expect(settingsModal).toContain('currentWorkspaceRole: WorkspaceRole | null;');
+    expect(settingsModal).toContain('const canEdit = canEditWorkspace(currentWorkspaceRole);');
+    expect(settingsModal).not.toContain('canEdit: boolean;');
+  });
+
+  it('Map section management and ordering keep theirs', () => {
+    expect(canvasClient).toContain('canManageSections={canEditWorkspace(currentWorkspaceRole)}');
+    expect(canvasClient).toContain('canReorderPosts={canEditWorkspace(currentWorkspaceRole)}');
+  });
+
+  it('Drawing keeps its readonly-role test', () => {
+    expect(canvasClient).toContain("readOnly={currentWorkspaceRole === 'readonly'}");
+    expect(canvasClient).not.toContain('readOnly={!canSavePdfSelectionAsNote}');
+  });
+
+  it('Freeform Graph keeps its own authority', () => {
+    // MEDIUM 2: the graph tables authorise through their own
+    // `can_edit_board`, which does not recognise this boards /
+    // board_collaborators model. The capability must not appear near them.
+    const graphUse = canvasClient.match(/canSavePdfSelectionAsNote[^\n]*graph/gi) ?? [];
+    expect(graphUse).toHaveLength(0);
+  });
+
+  it('Share / admin keeps workspace administration authority', () => {
     expect(canvasClient).toContain('const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);');
-    // Comment access stays on its own resolved tier model (manage/comment/
-    // read), which is not a board-edit boolean and is out of scope here.
+  });
+
+  it('the comment model is untouched', () => {
     expect(canvasClient).toContain('resolveCommentAccessMode(currentWorkspaceRole)');
   });
 });

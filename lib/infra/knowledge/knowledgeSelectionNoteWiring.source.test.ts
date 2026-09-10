@@ -156,9 +156,12 @@ describe('a PDF selection becomes one source-linked Note', () => {
     expect(request).toContain('knowledgeSourceRequestIdRef.current += 1;');
   });
 
-  it('2/7: editor authority decides the control, on the same rule as the editor path', () => {
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
-    expect(command).toContain("if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');");
+  it('2/7: board mutation authority decides the control, on this write\'s own rule', () => {
+    // PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1: the gate is the
+    // board-scoped capability, because the padlets insert this performs is
+    // judged by the board's own policy. It is this feature's gate alone.
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(command).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
     // Exact spans only: a page-only or region request keeps its own path.
     expect(command).toContain("if (!request.selection) throw new Error('selection_required');");
 
@@ -212,37 +215,43 @@ describe('a PDF selection becomes one source-linked Note', () => {
 
 describe('Save as Note is gated on this board edit capability', () => {
   /**
-   * What "may edit this board" actually resolves to here.
+   * What gates this feature, and what deliberately does not.
    *
-   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2: the board's own two facts --
-   * `boards.user_id` and this user's `board_collaborators` role on this board
-   * -- which together are the rule the padlet / board_sections / source
-   * reference write policies enforce. Workspace role governs workspace
-   * administration and is no longer any part of this answer.
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1: the save is gated on
+   * the board's own two facts -- `boards.user_id` and this user's
+   * `board_collaborators` role on this board -- because those are the terms
+   * of the padlets policy this write is judged by. Workspace role is not one
+   * of them.
+   *
+   * That capability is scoped to THIS feature. The post controls beside it
+   * write through other paths and keep the workspace-derived authority they
+   * have always had; see boardEditAuthorityWiring.source.test.ts for the
+   * fence around it.
    */
   it('8: the derivation is the board-scoped capability, not a workspace one', () => {
-    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
+    expect(canvasClient).toContain('const canSavePdfSelectionAsNote = canEditBoard({');
     expect(canvasClient).toContain('boardId: canvasId,');
     expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
     expect(canvasClient).not.toContain('workspaceRole: currentWorkspaceRole,');
-    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
   });
 
-  it('8: the same capability every other shared post mutation is gated on', () => {
+  it('8: the surrounding post mutations keep their own, unchanged authority', () => {
     // Create / edit / delete a post, and open the mutation-capable editor.
+    // Pinned as-is: this slice did not change them.
     expect(canvasClient).toContain('canEditPosts={canUseFreeformEditButton}');
     expect(canvasClient).toContain('isEditable={canUseFreeformEditButton}');
     expect(canvasClient).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
   });
 
   it('6/7: the handler is supplied iff this user may edit the board', () => {
     // A board editor gets the handler; a viewer gets `undefined`, so the
     // control is not rendered at all -- the reader renders it only when the
     // callback exists.
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}');
     expect(details).toContain('{onSaveSelectionAsNote ? (');
     // And the command refuses on its own account too, not only in the UI.
-    expect(command).toContain("if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');");
+    expect(command).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
   });
 
   it('the toolbar alias is no longer what gates this mutation', () => {
@@ -293,20 +302,21 @@ describe('Save as Note is gated on this board edit capability', () => {
 // PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_1 -- the board's own authority
 // ============================================================================
 
-describe('the canvas derives board-edit rights from the board, not only the workspace', () => {
-  it('B: the controller resolves ONE capability, from the board row and the role', () => {
+describe('this save derives its authority from the board, and only this save does', () => {
+  it('B: the controller resolves it from the board row and this board\'s role', () => {
     // The exact call the controller makes. `user?.id` and the loaded `canvas`
     // are what make an owner an owner; the collaborator role for THIS user on
     // THIS board is the non-owner half.
-    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
+    expect(canvasClient).toContain('const canSavePdfSelectionAsNote = canEditBoard({');
     expect(canvasClient).toContain('userId: user?.id,');
     expect(canvasClient).toContain('board: canvas,');
     expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
-    // ...and every existing board-edit gate is derived from that one answer.
-    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
+    // ...and it is resolved exactly once, for this feature.
+    expect(canvasClient.match(/canEditBoard\(/g) ?? []).toHaveLength(1);
+    // The surrounding controls keep the authority they already had: this
+    // slice is a PDF-selection gate, not a permissions rewrite.
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
-    // The old workspace-only derivation is gone, not merely bypassed.
-    expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
   });
 
   it('the ownership fact comes from the board already read -- no second request', () => {
@@ -320,10 +330,8 @@ describe('the canvas derives board-edit rights from the board, not only the work
     expect(canvasViewReads).toContain(".eq('board_id', boardId)");
     expect(canvasViewReads).toContain(".eq('user_id', userId)");
     expect(canvasViewReads).toContain('.maybeSingle()');
-    const derivation = canvasClient.slice(
-      canvasClient.indexOf('const canEditCurrentBoard = canEditBoard({'),
-      canvasClient.indexOf('const canUseCanvasToolbar = canUseFreeformEditButton;'),
-    );
+    const derivationStart = canvasClient.indexOf('const canSavePdfSelectionAsNote = canEditBoard({');
+    const derivation = canvasClient.slice(derivationStart, canvasClient.indexOf('});', derivationStart) + 3);
     for (const forbidden of ['fetch(', 'supabase.from', 'await ', 'useEffect', 'rpc(']) {
       expect(derivation, forbidden).not.toContain(forbidden);
     }
@@ -332,11 +340,11 @@ describe('the canvas derives board-edit rights from the board, not only the work
     expect(canvasClient).not.toContain('(canvas as any).user_id');
   });
 
-  it('5: Save as Note is gated on that same capability, with no exception of its own', () => {
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}');
-    expect(command).toContain("if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');");
+  it('5: Save as Note is gated on it in both places, with no exception of its own', () => {
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(command).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
     // No feature-local owner escape hatch anywhere near this feature.
-    for (const forbidden of ['canSavePdfSelection', 'ownerException', 'isOwnerOverride']) {
+    for (const forbidden of ['ownerException', 'isOwnerOverride']) {
       expect(canvasClient, forbidden).not.toContain(forbidden);
     }
     expect(command).not.toContain('isBoardOwner');

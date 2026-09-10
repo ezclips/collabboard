@@ -7,13 +7,13 @@ import {
 } from './boardEditAuthority';
 
 /**
- * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2.
+ * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1.
  *
  * The exact authority CanvasClient resolves, exercised directly. The
  * controller passes `user?.id`, the route's board id, the loaded board row and
- * the stamped collaborator answer into this function and derives every
- * board-edit gate -- including the PDF selection's Save as Note -- from it, so
- * these cases are the controller's cases.
+ * the stamped collaborator answer into this function to derive
+ * `canSavePdfSelectionAsNote` -- the PDF selection save gate, and the only
+ * consumer of this rule -- so these cases are that gate's cases.
  *
  * The matrix below IS the backend rule for padlets / board_sections /
  * source references:

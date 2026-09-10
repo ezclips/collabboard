@@ -31,7 +31,7 @@ import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerC
 import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
-import { canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { canEditBoard } from '@/lib/domain/canvas/boardEditAuthority';
 import { useBoardCollaboratorAuthority } from '@/components/collabboard/canvas/hooks/useBoardCollaboratorAuthority';
 import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';
@@ -381,10 +381,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
   }, [user]);
 
+  const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
+  // Keep the canvas creation toolbar aligned with board editability.
+  // Otherwise editable member accounts can open and modify a board but lose the
+  // left toolbar entirely because they are not workspace admins.
+  const canUseCanvasToolbar = canUseFreeformEditButton;
+
   /**
-   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2 -- this user's
-   * `board_collaborators` role on THIS board, the half of the board-edit rule
-   * that does not live on the board row. `null` means unresolved, and denies.
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1 -- this user's
+   * `board_collaborators` role on THIS board. `null` means unresolved, and
+   * denies.
+   *
+   * SCOPE: this feeds `canSavePdfSelectionAsNote` and nothing else. It is not
+   * a general board-edit capability, and the surrounding controls
+   * deliberately keep the authorities they have always had -- see that
+   * derivation below for why.
    *
    * The answer is stamped with the identity and the board it was resolved
    * for; see the hook for why that stamp, and not its timing, is what makes
@@ -392,9 +403,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const boardCollaboratorAuthority = useBoardCollaboratorAuthority(canvasId, user?.id);
 
-  // The board's edit capability is resolved below, once the board row itself
-  // has been read -- ownership is the other half of the answer and lives on
-  // that row.
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
   // PATCH 8O.1/8O.2 -- resolved once at the controller boundary from
   // WorkspaceRole, the only permission signal with any live wiring today.
@@ -500,36 +508,37 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   } = useCanvasData({ canvasId, dispatch });
 
   /**
-   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2. Who may edit THIS board.
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1. May this user save a
+   * PDF selection as a Note on THIS board?
    *
-   * The board's own two facts, and only those: ownership, which arrives free
-   * on the loaded board row (`boards.user_id`, already in the canvas read's
-   * `select('*')`), and this user's `board_collaborators` role on this board,
-   * resolved above. Together they are the rule the padlets / board_sections /
-   * source-reference write policies actually enforce.
+   * This ONE feature's gate, and deliberately nothing else's.
    *
-   * Workspace role is deliberately absent. It governs workspace
-   * administration (`canManageCanvasShare` above, membership screens
-   * elsewhere) and appears nowhere in the board-content write policies, so
-   * granting board edits from it offered mutation controls the database goes
-   * on to reject -- and let a previous account's cached role answer for the
-   * current one.
+   * The write it guards is a `padlets` insert plus a source reference, and
+   * those policies authorise exactly two things: `boards.user_id =
+   * auth.uid()`, or a `board_collaborators` row with role 'editor'. So this
+   * reads exactly those two facts -- ownership from the loaded board row, the
+   * collaborator role from the stamped answer above -- and offers the control
+   * only when the server would accept the write.
    *
-   * One capability, and every board-edit gate below derives from it: a
-   * per-feature exception would leave the rest of the UI telling the same
-   * person the opposite thing.
+   * Workspace role is not an input, because it is not a term in that policy.
+   * An owner whose workspace membership is later set to readonly still owns
+   * the board and the database still accepts their notes.
+   *
+   * SCOPE, and it matters: this capability is NOT the board's general edit
+   * authority and must not be spread into one. The controls around it --
+   * Canvas Settings, Map, Drawing, the graph, the toolbar, the post controls
+   * -- write through other tables whose policies are NOT this rule
+   * (boards_update is owner-only; the graph tables use their own
+   * can_edit_board). They keep `canUseFreeformEditButton` /
+   * `currentWorkspaceRole`, unchanged. Widening this one would offer each of
+   * them a write its own backend refuses.
    */
-  const canEditCurrentBoard = canEditBoard({
+  const canSavePdfSelectionAsNote = canEditBoard({
     userId: user?.id,
     boardId: canvasId,
     board: canvas,
     collaboratorAuthority: boardCollaboratorAuthority,
   });
-  const canUseFreeformEditButton = canEditCurrentBoard;
-  // Keep the canvas creation toolbar aligned with board editability.
-  // Otherwise editable member accounts can open and modify a board but lose the
-  // left toolbar entirely because they are not workspace admins.
-  const canUseCanvasToolbar = canUseFreeformEditButton;
 
   // PATCH 8O.2 -- persistence path for 'comment'-mode mutations (own-comment
   // add/edit/style/delete), kept separate from the existing
@@ -2642,7 +2651,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * thing this must never do is report success.
    */
   const saveKnowledgeSelectionAsNote = useCallback(async (request: KnowledgeSourcePageRequest) => {
-    if (!canvasId || !canUseFreeformEditButton) throw new Error('note_save_not_allowed');
+    if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');
     // Exact spans only. A page-only or region request has its own established
     // path through the Note editor and is not what this action offers.
     if (!request.selection) throw new Error('selection_required');
@@ -2701,7 +2710,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Note saved');
   }, [
     canvasId,
-    canUseFreeformEditButton,
+    canSavePdfSelectionAsNote,
     deletePostOrThrow,
     getNewPostPosition,
     insertPostAndSelectOrThrow,
@@ -8398,9 +8407,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canvasId={canvas.id}
           canvas={canvas}
           hasSections={sections.length > 0}
-          /* The modal consumes the board's capability; it never recomputes one
-             from a role, an owner id or a user id it should not see. */
-          canEdit={canEditCurrentBoard}
+          currentWorkspaceRole={currentWorkspaceRole}
           onSaved={() => fetchData()}
         />
 
@@ -9457,14 +9464,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setPadletToEdit(padlet);
                   setIsNoteEditorOpen(true);
                 }}
-                /*
-                  PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2. Drawing is board
-                  state, so it reads the board's own edit capability -- not the
-                  workspace role, which said "read only" to the owner of the
-                  board the database was still accepting drawings for. Only the
-                  gate changed; Drawing's behaviour is untouched.
-                */
-                readOnly={!canEditCurrentBoard}
+                readOnly={currentWorkspaceRole === 'readonly'}
                 fetchData={fetchData}
                 commentAccessMode={commentAccessMode}
                 onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
@@ -9624,11 +9624,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     handleToolClick(toolType);
                   }) : undefined}
                   sections={sections}
-                  /* Board-owned sections and ordering: the board's own
-                     capability decides them, as it decides every other Map
-                     mutation beside them. */
-                  canManageSections={canEditCurrentBoard}
-                  canReorderPosts={canEditCurrentBoard}
+                  canManageSections={canEditWorkspace(currentWorkspaceRole)}
+                  canReorderPosts={canEditWorkspace(currentWorkspaceRole)}
                   onAddSection={handleAddSection}
                   onRenameSection={(sectionId, title) => {
                     const numeric = Number(sectionId);
@@ -10618,7 +10615,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             The private AI actions keep their own read-derived rule.
           */
-          onSaveSelectionAsNote={canUseFreeformEditButton ? saveKnowledgeSelectionAsNote : undefined}
+          onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
           onOpenChange={setIsKnowledgeReaderOpen}
