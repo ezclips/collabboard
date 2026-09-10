@@ -502,7 +502,11 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
   it('H: a source click becomes a request carrying document id and page range', () => {
     const request = after(canvasClient, 'const requestKnowledgeSourceOpen = useCallback(', 520);
 
-    expect(request).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference)');
+    expect(request).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference, {');
+    // KNOWLEDGE_SOURCE_REVEAL_NOTE_FIX_1: every caller of this is a source
+    // link, so the request states that it must end with the source visible --
+    // the same intent a Board AI citation already carried.
+    expect(request).toContain('revealSource: true,');
     // The card marker's route, unchanged.
     expect(canvasClient).toContain('onOpenSourceReference={requestKnowledgeSourceOpen}');
   });
@@ -582,7 +586,11 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
   it('L: the reader opens by document id, once per request id (now the drawer)', () => {
     // Ownership moved to KnowledgeSourceReaderDrawer; the guarantees did not.
     // The document id and page remain the first two arguments.
-    expect(readerDrawer).toContain('openDocumentById(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
+    expect(readerDrawer).toContain('sourceOpenRequest.sourceDocumentId,');
+    expect(readerDrawer).toContain('sourceOpenRequest.pageStart,');
+    // ...and the reveal intent travels with them, so the reader shows what it
+    // just navigated to rather than presenting it behind a panel.
+    expect(readerDrawer).toContain('sourceOpenRequest.revealSource === true,');
     // Handled-once latch, so closing the reader never replays a stale request.
     expect(readerDrawer).toContain('if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;');
     // The library's own pick gets the same once-per-request contract.
@@ -953,8 +961,10 @@ describe('P6J-F6-B4-B4 exact source interaction wiring', () => {
   it('CanvasClient is untouched: the pure request builder carried the whole change', () => {
     // The full SourceReference was already in scope at the call site, so adding
     // the row id to the request needed nothing here. If a hook, state or an
-    // effect had been added for provenance, this would catch it.
-    expect(canvasClient).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference)');
+    // effect had been added for provenance, this would catch it. The one later
+    // addition is the reveal intent -- an option on the same pure builder, not
+    // provenance and not new state.
+    expect(canvasClient).toContain('buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference, {');
     for (const forbidden of [
       'sourceReferenceId', 'initialSourceReferenceId', 'initialSourceRequestId',
       'data-knowledge-source-navigation-target', 'data-knowledge-source-choice',

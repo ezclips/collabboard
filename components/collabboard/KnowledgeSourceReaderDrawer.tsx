@@ -440,10 +440,15 @@ export default function KnowledgeSourceReaderDrawer({
     if (!boardId || !sourceOpenRequest) return;
     if (handledSourceRequestRef.current === sourceOpenRequest.requestId) return;
     handledSourceRequestRef.current = sourceOpenRequest.requestId;
-    void openDocumentById(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {
-      referenceId: sourceOpenRequest.sourceReferenceId,
-      requestId: sourceOpenRequest.requestId,
-    });
+    void openDocumentById(
+      sourceOpenRequest.sourceDocumentId,
+      sourceOpenRequest.pageStart,
+      {
+        referenceId: sourceOpenRequest.sourceReferenceId,
+        requestId: sourceOpenRequest.requestId,
+      },
+      sourceOpenRequest.revealSource === true,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, sourceOpenRequest]);
 
@@ -557,19 +562,30 @@ export default function KnowledgeSourceReaderDrawer({
    * What the docked reader presents when a document arrives.
    *
    * A newly opened document normally starts on Library -- that is the reader's
-   * existing default and it stays. The exception is an open whose whole point
-   * was to SHOW the document: a Board AI citation. Below `lg` this panel is an
-   * opaque overlay over the reading pane, so defaulting it open there would
-   * load the cited page and then cover it, which is the one thing a citation
-   * click must not do.
+   * existing default and it stays. The exception is an arrival whose whole
+   * point was to SHOW the source: a Board AI citation, a Note's own "Source ·
+   * p. N". Below `lg` this panel is an opaque overlay over the reading pane,
+   * so defaulting it open there would load the cited page and then cover it,
+   * which is the one thing those clicks must not do.
    *
-   * Keyed on the document AND the intent, never on the navigation id: a page
-   * jump inside the open document -- a Library image, a highlight -- must
-   * leave the panel exactly as the user left it.
+   * The key is what decides it. An ordinary open is keyed by DOCUMENT, so
+   * reopening the same one changes nothing. A reveal is keyed by its own
+   * navigation id, so clicking a source again closes the panel again -- even
+   * when the document is the one already open and the user has since reopened
+   * Library over it. A page jump that is neither -- a Library image, a
+   * highlight -- changes no key at all and leaves the panel exactly as the
+   * user left it.
    */
+  const panelArrivalKey = reader === null
+    ? 'none'
+    : reader.revealSource
+      ? `reveal:${reader.pageNavigationRequestId ?? 0}`
+      : `open:${reader.documentId}`;
+
   useEffect(() => {
-    setSidePanelRightPanel(reader?.revealSource ? 'closed' : 'library');
-  }, [reader?.documentId, reader?.revealSource]);
+    if (panelArrivalKey === 'none') return;
+    setSidePanelRightPanel(panelArrivalKey.startsWith('reveal:') ? 'closed' : 'library');
+  }, [panelArrivalKey]);
 
   useEffect(() => {
     onOpenChange?.(isOpen);

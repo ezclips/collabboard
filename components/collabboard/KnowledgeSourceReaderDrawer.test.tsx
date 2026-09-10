@@ -195,7 +195,11 @@ describe('P6J-F6-B2 source-open requests (relocated)', () => {
 
     expect(drawerEl()!.querySelector('[data-page-number="3"]')).not.toBeNull();
     expect(drawerCode).toContain('initialPageNumber={reader.initialPageNumber}');
-    expect(drawerCode).toContain('openDocumentById(sourceOpenRequest.sourceDocumentId, sourceOpenRequest.pageStart, {');
+    expect(drawerCode).toContain('sourceOpenRequest.sourceDocumentId,');
+    expect(drawerCode).toContain('sourceOpenRequest.pageStart,');
+    // The citation target still travels, and so does the reveal intent.
+    expect(drawerCode).toContain('referenceId: sourceOpenRequest.sourceReferenceId,');
+    expect(drawerCode).toContain('sourceOpenRequest.revealSource === true,');
   });
 
   it('C: hydrates the header from the document the endpoint returned', async () => {
@@ -1895,5 +1899,164 @@ describe('citation navigation reveals the cited document', () => {
       requestId: 2, sourceDocumentId: SOURCE_A, pageNumber: 4,
     });
     expect(buildKnowledgeDocumentOpenRequest(3, SOURCE_A)).toEqual({ requestId: 3, sourceDocumentId: SOURCE_A });
+  });
+});
+
+// ============================================================================
+// KNOWLEDGE_SOURCE_REVEAL_NOTE_FIX_1 -- a Note's source link reveals it too
+// ============================================================================
+//
+// A Board AI citation and a Note's own "Source · p. N" mean the same thing and
+// travel different request types. Only the first carried the reveal intent, so
+// below `lg` the second still landed behind the Library overlay.
+
+describe('a Note source link reveals its source', () => {
+  const FILENAME_A = 'Alpha.pdf';
+  const FILENAME_B = 'Beta.pdf';
+
+  function withTwoDocuments() {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const forB = String(input).includes(SOURCE_B);
+      return jsonResponse({
+        document: { id: forB ? SOURCE_B : SOURCE_A, originalFilename: forB ? FILENAME_B : FILENAME_A, pageCount: 6 },
+        pages: Array.from({ length: 6 }, (_, index) => ({
+          pageNumber: index + 1,
+          text: `${forB ? FILENAME_B : FILENAME_A} body for page ${index + 1}`,
+        })),
+      });
+    });
+  }
+
+  /** One citation, exactly as a stored source reference names it. */
+  const reference = (documentId: string, pageStart: number) => ({
+    id: `ref-${documentId}-${pageStart}`,
+    targetPadletId: 'padlet-1',
+    sourceDocumentId: documentId,
+    pageStart,
+    pageEnd: pageStart,
+    quoteText: null,
+    quoteHash: null,
+    charStart: null,
+    charEnd: null,
+    region: null,
+    locator: null,
+  }) as unknown as SourceReference;
+
+  let requestId = 0;
+  /** The request the board builds when a Note source link is clicked. */
+  const sourceClick = (documentId: string, pageStart: number) =>
+    buildKnowledgeSourceOpenRequest(++requestId, reference(documentId, pageStart), { revealSource: true });
+
+  const openPanel = () =>
+    (drawerEl()?.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
+      ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  const panelMounted = () => (drawerEl()?.querySelectorAll('[data-knowledge-source-notes-pane]').length ?? 0) > 0;
+  const currentPage = async () => {
+    const text = await drawerEl()?.querySelector('[data-knowledge-viewer-page-indicator="true"]')?.textContent;
+    return Number((text ?? '').split('/')[0]?.trim() ?? NaN);
+  };
+  const props = (request: unknown, extra: Record<string, unknown> = {}) => ({
+    sourceOpenRequest: request,
+    onOpenBacklinkTarget: vi.fn(),
+    onCreateNoteFromPage: vi.fn(),
+    boardAiDraftContextByDocumentId: {},
+    onBoardAiDraftContextChange: vi.fn(),
+    ...extra,
+  });
+
+  beforeEach(() => { requestId = 0; });
+
+  it('1/4: the cited page opens with nothing over it', async () => {
+    withTwoDocuments();
+    await mount(props(sourceClick(SOURCE_A, 5)) as never);
+    await settle();
+
+    expect(drawerEl()!.textContent).toContain(FILENAME_A);
+    expect(await currentPage()).toBe(5);
+    expect(openPanel(), 'a Note source link must not land behind Library').toBeNull();
+    expect(panelMounted()).toBe(false);
+  });
+
+  it('6: a Note citing ANOTHER document activates it, at its own page', async () => {
+    withTwoDocuments();
+    // Document A is open the ordinary way: Library, as always.
+    await mount(props(undefined, {
+      documentOpenRequest: buildKnowledgeDocumentOpenRequest(90, SOURCE_A, 1),
+    }) as never);
+    await settle();
+    expect(openPanel()).toBe('library');
+
+    await renderInto(props(sourceClick(SOURCE_B, 4), {
+      documentOpenRequest: buildKnowledgeDocumentOpenRequest(90, SOURCE_A, 1),
+    }) as never);
+    await settle();
+
+    expect(drawerEl()!.textContent).toContain(FILENAME_B);
+    expect(await currentPage()).toBe(4);
+    expect(openPanel()).toBeNull();
+  });
+
+  it('5: clicking the same source again is a fresh navigation, and reveals it again', async () => {
+    withTwoDocuments();
+    let scrolls: string[] = [];
+    const original = (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = function record(this: Element) {
+      const page = this.getAttribute?.('data-page-number');
+      if (page) scrolls.push(page);
+    };
+    try {
+      await mount(props(sourceClick(SOURCE_A, 5)) as never);
+      await settle();
+      expect(scrolls).toContain('5');
+      expect(openPanel()).toBeNull();
+
+      // The user reopens Library over the document, then clicks the SAME
+      // source again: it must reveal the page a second time.
+      await act(async () => {
+        (drawerEl()!.querySelector('[data-pdf-workspace-dock="library"]') as HTMLElement).click();
+      });
+      await settle();
+      expect(openPanel()).toBe('library');
+
+      scrolls = [];
+      await renderInto(props(sourceClick(SOURCE_A, 5)) as never);
+      await settle();
+      expect(scrolls, 'a repeated source click navigates again').toContain('5');
+      expect(openPanel(), 'and reveals what it navigated to').toBeNull();
+    } finally {
+      (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = original;
+    }
+  });
+
+  it('7: an ordinary open still defaults to Library, and a page jump leaves the panel alone', async () => {
+    withTwoDocuments();
+    await mount(props(undefined, {
+      documentOpenRequest: buildKnowledgeDocumentOpenRequest(80, SOURCE_A, 2),
+    }) as never);
+    await settle();
+    expect(openPanel(), 'a Library pick is not a source click').toBe('library');
+
+    // A Library image or highlight jump inside the open document is neither an
+    // open nor a reveal: the panel stays exactly where the user left it.
+    await act(async () => {
+      const row = drawerEl()!.querySelector('[data-pdf-workspace-library-image] button, [data-pdf-workspace-library-highlight] button');
+      if (row instanceof HTMLElement) row.click();
+    });
+    await settle();
+    expect(openPanel()).toBe('library');
+  });
+
+  it('1/2/3: the request itself carries the intent, and only for a source click', () => {
+    const cited = reference(SOURCE_A, 5);
+    expect(buildKnowledgeSourceOpenRequest(1, cited, { revealSource: true })).toEqual({
+      requestId: 1,
+      sourceDocumentId: SOURCE_A,
+      sourceReferenceId: cited.id,
+      pageStart: 5,
+      pageEnd: 5,
+      revealSource: true,
+    });
+    // The shape is unchanged for any caller that does not ask to reveal.
+    expect(buildKnowledgeSourceOpenRequest(2, cited)).not.toHaveProperty('revealSource');
   });
 });

@@ -1955,7 +1955,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!sourceReferenceScopeKey) return;
     knowledgeSourceRequestIdRef.current += 1;
     setKnowledgeSourceOpenRequest(
-      buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference),
+      // Every caller of this is a source link -- a card marker, or the Note
+      // editor's own "Source · p. N". All of them mean "show me this", so the
+      // reader must end with the cited page visible rather than presented
+      // behind the panel a fresh document normally opens with.
+      buildKnowledgeSourceOpenRequest(knowledgeSourceRequestIdRef.current, reference, {
+        revealSource: true,
+      }),
     );
   }, [sourceReferenceScopeKey]);
 

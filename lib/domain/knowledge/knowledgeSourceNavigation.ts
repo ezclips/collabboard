@@ -24,6 +24,14 @@ export interface KnowledgeSourceOpenRequest {
   readonly sourceReferenceId: string;
   readonly pageStart: number;
   readonly pageEnd: number;
+  /**
+   * This open exists to SHOW the cited page. Same meaning, same name and same
+   * reader behaviour as the document request's own field: a Note's "Source ·
+   * p. 5" and a Board AI citation are one intent said in two places, so they
+   * must not end differently -- with the page loaded behind the panel the
+   * reader normally opens with.
+   */
+  readonly revealSource?: boolean;
 }
 
 /** `p. 3` for a single page, `pp. 3-5` for a span. */
@@ -68,6 +76,7 @@ export function knowledgeSourceEditorLabel(
 export function buildKnowledgeSourceOpenRequest(
   requestId: number,
   reference: SourceReference,
+  options: { readonly revealSource?: boolean } = {},
 ): KnowledgeSourceOpenRequest {
   return {
     requestId,
@@ -75,6 +84,7 @@ export function buildKnowledgeSourceOpenRequest(
     sourceReferenceId: String(reference.id),
     pageStart: reference.pageStart,
     pageEnd: reference.pageEnd,
+    ...(options.revealSource ? { revealSource: true } : {}),
   };
 }
 
