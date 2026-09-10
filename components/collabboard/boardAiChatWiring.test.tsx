@@ -270,6 +270,34 @@ describe('10-15. one right-side dock, two directions', () => {
     expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(4);
   });
 
+  it('a citation opens its source through the board\'s own navigation authority', () => {
+    // ONE navigation authority: the citation hands identity to the same
+    // request a Library pick or a semantic result builds, so there is no
+    // second reader and every click is a fresh intent.
+    expect(CLIENT).toContain('onOpenCitation={openBoardAiCitation}');
+    expect(CLIENT).toContain('onOpenKnowledgeDocument={requestKnowledgeDocumentOpen}');
+    const handler = CLIENT.slice(
+      CLIENT.indexOf('const openBoardAiCitation = useCallback('),
+      CLIENT.indexOf('// R1-A-2. Placement gate lives on usePadletSave'),
+    );
+    expect(handler).toContain('requestKnowledgeDocumentOpen({');
+    expect(handler).toContain('documentId: request.knowledgeDocumentId');
+    expect(handler).toContain("presentation: 'side-panel'");
+
+    // In a PDF host the reader forwards to the same authority, and the docked
+    // panel -- an overlay over the document below lg -- steps aside so the
+    // navigation it just made is actually visible.
+    const readerHandler = READER.slice(
+      READER.indexOf('const openCitation = useCallback('),
+      READER.indexOf('/** A newly opened document starts on Library'),
+    );
+    expect(readerHandler).toContain('onOpenKnowledgeDocument({');
+    expect(readerHandler).toContain('documentId: request.knowledgeDocumentId');
+    expect(readerHandler).toContain('presentation,');
+    expect(readerHandler).toContain("if (presentation !== 'workspace') setSidePanelRightPanel('closed');");
+    expect((READER.match(/onOpenCitation=\{openCitation\}/g) ?? [])).toHaveLength(2);
+  });
+
   it('the floating board shortcut stands down while a PDF reader is open', () => {
     // PDF_READER_UI_FINAL_CLEANUP_1: while a PDF is being read, that reader's
     // own purple AI dock is the single AI entry point in front of the user --

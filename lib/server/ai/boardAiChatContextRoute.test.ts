@@ -394,3 +394,147 @@ describe('32-34. reading a thread back re-derives the context view', () => {
     expect(body.messages[0].context).toBeNull();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* BOARD_AI_PDF_CITATIONS_1 -- citations are the server's, or nothing  */
+/* ------------------------------------------------------------------ */
+
+describe('grounded citations', () => {
+  const OTHER_DOC_ID = '66666666-6666-4666-8666-666666666666';
+  const answerWith = (footer: string) => {
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: `Page two says so.\n\n${footer}`, provider: 'deepseek', model: 'deepseek-chat',
+    });
+  };
+  const attachPage = () => attach([{ type: 'knowledge-page', knowledgeDocumentId: DOC_ID, pageNumber: 2 }]);
+  const assistantInput = (repo: { appended: Record<string, unknown>[] }) =>
+    repo.appended.find((input) => input.role === 'assistant') as Record<string, unknown>;
+
+  it('B/G: a named token cites the SERVER block, and the footer never reaches content', async () => {
+    const repo = repository();
+    answerWith('[[COLLABBOARD_CITATIONS:S1]]');
+
+    const response = await post(attachPage());
+    const body = await response.json();
+    const assistant = assistantInput(repo);
+
+    // Stored content is the prose alone.
+    expect(assistant.content).toBe('Page two says so.');
+    expect(JSON.stringify(repo.appended)).not.toContain('COLLABBOARD_CITATIONS');
+    // The citation is built from the block the server resolved and sent.
+    expect(assistant.citations).toEqual({
+      version: 1,
+      items: [{
+        type: 'knowledge-page',
+        knowledgeDocumentId: DOC_ID,
+        pageNumber: 2,
+        label: 'source.pdf - page 2',
+      }],
+    });
+    // The POST response carries the same sanitized shape a reload would.
+    expect(body.message.citations).toEqual(assistant.citations);
+    expect(body.message.content).toBe('Page two says so.');
+  });
+
+  it('I: a citation carries identity and label only -- never the page text', async () => {
+    const repo = repository();
+    answerWith('[[COLLABBOARD_CITATIONS:S1]]');
+    await post(attachPage());
+
+    const serialized = JSON.stringify(assistantInput(repo).citations);
+    expect(serialized).not.toContain('AUTHORITATIVE');
+    expect(serialized).not.toContain('"text"');
+    expect(serialized).not.toContain('"excerpt"');
+  });
+
+  it('C/D: an unknown token, or identity written as prose, cites nothing', async () => {
+    for (const footer of [
+      '[[COLLABBOARD_CITATIONS:S999]]',
+      `[[COLLABBOARD_CITATIONS:${DOC_ID}]]`,
+      '[[COLLABBOARD_CITATIONS:NONE]]',
+    ]) {
+      const repo = repository();
+      answerWith(footer);
+      await post(attachPage());
+      const assistant = assistantInput(repo);
+      expect(assistant, footer).not.toHaveProperty('citations');
+      expect(assistant.content, footer).toBe('Page two says so.');
+    }
+  });
+
+  it('F: a malformed footer leaves the answer whole and cites nothing', async () => {
+    const repo = repository();
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: 'Page two says so. [[COLLABBOARD_CITATIONS:S1]] and then more prose.',
+      provider: 'deepseek', model: 'deepseek-chat',
+    });
+
+    const response = await post(attachPage());
+    expect(response.status).toBe(200);
+    const assistant = assistantInput(repo);
+    expect(assistant).not.toHaveProperty('citations');
+    // Not a FINAL footer, so nothing is stripped: the answer is what was written.
+    expect(assistant.content).toBe('Page two says so. [[COLLABBOARD_CITATIONS:S1]] and then more prose.');
+  });
+
+  it('A: the browser cannot supply citations, and an uncited answer stores none', async () => {
+    const forged = { version: 1, items: [{ type: 'knowledge-page', knowledgeDocumentId: DOC_ID, pageNumber: 99, label: 'forged' }] };
+    const response = await post({ ...attachPage(), citations: forged });
+    // The request schema is unchanged and strict: there is no field to send.
+    expect(response.status).toBe(400);
+
+    const repo = repository();
+    mocks.executeBoardAiChat.mockResolvedValue({ text: 'No sources used.', provider: 'deepseek', model: 'deepseek-chat' });
+    await post(attachPage());
+    expect(assistantInput(repo)).not.toHaveProperty('citations');
+  });
+
+  it('J: a token names a block the SERVER authorized this turn, by position', async () => {
+    const repo = repository();
+    // Two blocks were authorized and sent; the answer cites the second.
+    mocks.resolveBoardAiChatContext.mockResolvedValue(ok([
+      pageBlock,
+      {
+        type: 'knowledge-page' as const, label: 'other.pdf - page 7',
+        knowledgeDocumentId: OTHER_DOC_ID, pageNumber: 7, text: 'other page text',
+      },
+    ]));
+    answerWith('[[COLLABBOARD_CITATIONS:S2]]');
+
+    await post(attach([
+      { type: 'knowledge-page', knowledgeDocumentId: DOC_ID, pageNumber: 2 },
+      { type: 'knowledge-page', knowledgeDocumentId: OTHER_DOC_ID, pageNumber: 7 },
+    ]));
+
+    // The blocks the model actually received are the ones the tokens index.
+    expect(modelContext().map((block) => block.label))
+      .toEqual(['source.pdf - page 2', 'other.pdf - page 7']);
+    const citations = assistantInput(repo).citations as { items: unknown[] };
+    expect(citations.items).toEqual([{
+      type: 'knowledge-page', knowledgeDocumentId: OTHER_DOC_ID, pageNumber: 7, label: 'other.pdf - page 7',
+    }]);
+  });
+
+  it('H: a hand-written citation row is sanitized on the way out', async () => {
+    repository([{
+      ...row,
+      id: 'a1',
+      role: 'assistant',
+      content: 'answer',
+      citations: {
+        version: 1,
+        items: [
+          { type: 'knowledge-page', knowledgeDocumentId: DOC_ID, pageNumber: 2, label: 'ok', text: 'smuggled page text' },
+          { type: 'knowledge-page', knowledgeDocumentId: 'not-a-real-shape' },
+        ],
+      },
+    }]);
+
+    const body = await (await get(THREAD_ID)).json();
+    expect(body.messages[0].citations).toEqual({
+      version: 1,
+      items: [{ type: 'knowledge-page', knowledgeDocumentId: DOC_ID, pageNumber: 2, label: 'ok' }],
+    });
+    expect(JSON.stringify(body)).not.toContain('smuggled page text');
+  });
+});

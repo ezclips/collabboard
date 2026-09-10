@@ -98,6 +98,19 @@ export interface KnowledgeSourceReaderDrawerProps {
    */
   onOpenChange?: (open: boolean) => void;
   /**
+   * The board's canonical "open this Knowledge document, at this page".
+   *
+   * Used by a Board AI citation, which is identity the server authorized. It
+   * is the SAME request a Library pick or a semantic result builds, so a
+   * citation opens a document exactly as every other navigation does -- one
+   * reader, one navigation authority, and a fresh intent on every click.
+   */
+  onOpenKnowledgeDocument?: (request: {
+    readonly documentId: string;
+    readonly pageNumber?: number;
+    readonly presentation?: 'workspace' | 'side-panel';
+  }) => void;
+  /**
    * The board's OWN blocking-editor authority (`isBlockingEditorModalOpen`),
    * forwarded unchanged. It is already the single generic answer to "does a
    * modal own the screen right now" for all fourteen editors, and the canvas
@@ -213,6 +226,7 @@ export default function KnowledgeSourceReaderDrawer({
   presentation = 'side-panel',
   canDragSourceNote,
   onOpenChange,
+  onOpenKnowledgeDocument,
   blockingEditorOpen = false,
   onCreateNoteFromPage,
   closeSidePanelRequestId,
@@ -498,6 +512,27 @@ export default function KnowledgeSourceReaderDrawer({
     onWorkspaceActivePageChange?.(documentId, pageNumber);
   }, [onWorkspaceActivePageChange]);
 
+  /**
+   * A Board AI citation, sent to the board's own navigation authority.
+   *
+   * The docked host's panel COVERS the document below `lg`, so a navigation
+   * the user cannot see would be no navigation at all: that panel steps aside
+   * once the request is made. The focused workspace keeps its panel, because
+   * there the document stays beside it at every width.
+   */
+  const openCitation = useCallback((request: {
+    readonly knowledgeDocumentId: string;
+    readonly pageNumber?: number;
+  }) => {
+    if (!onOpenKnowledgeDocument) return;
+    onOpenKnowledgeDocument({
+      documentId: request.knowledgeDocumentId,
+      ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),
+      presentation,
+    });
+    if (presentation !== 'workspace') setSidePanelRightPanel('closed');
+  }, [onOpenKnowledgeDocument, presentation]);
+
   /** A newly opened document starts on Library, the docked reader's default. */
   useEffect(() => {
     setSidePanelRightPanel('library');
@@ -660,6 +695,7 @@ export default function KnowledgeSourceReaderDrawer({
         onDraftContextChange={changeBoardAiDraftContext}
         documentSessions={boardAiSessionsByDocumentId}
         onDocumentSessionsChange={setBoardAiSessionsByDocumentId}
+        onOpenCitation={openCitation}
         canSaveAssistantAsNote={canSaveAssistantAsNote}
         onSaveAssistantAsNote={onSaveAssistantAsNote}
         selectedBoardItem={null}
@@ -945,6 +981,7 @@ export default function KnowledgeSourceReaderDrawer({
                       onDraftContextChange={changeBoardAiDraftContext}
                       documentSessions={boardAiSessionsByDocumentId}
                       onDocumentSessionsChange={setBoardAiSessionsByDocumentId}
+                      onOpenCitation={openCitation}
                       canSaveAssistantAsNote={canSaveAssistantAsNote}
                       onSaveAssistantAsNote={onSaveAssistantAsNote}
                       selectedBoardItem={null}

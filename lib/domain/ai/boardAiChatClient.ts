@@ -13,6 +13,7 @@
  */
 
 import { BOARD_AI_MESSAGE_ROLES, type BoardAiMessageRole } from './boardAiChat';
+import type { BoardAiCitationEnvelope } from './boardAiChatCitation';
 import type { BoardAiContextView } from './boardAiChatContext';
 
 /** Re-exported so a client bounds its composer by the SAME number the route enforces. */
@@ -43,4 +44,12 @@ export interface BoardAiChatMessageView {
    * identity on every turn.
    */
   readonly context: BoardAiContextView | null;
+  /**
+   * Which of the attached sources this answer actually used, or null.
+   *
+   * Server-built from the blocks it authorized for that turn, and sanitized on
+   * the way out exactly as `context` is: identity plus a server-authored
+   * label, never source text, and never anything a model wrote.
+   */
+  readonly citations?: BoardAiCitationEnvelope | null;
 }

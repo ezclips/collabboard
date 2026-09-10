@@ -12,6 +12,10 @@
 // providers.
 
 import { AI_ROLE_CHAT } from '../../ai/aiRoles';
+import {
+  BOARD_AI_CITATION_INSTRUCTIONS,
+  boardAiCitationSourceToken,
+} from '../../domain/ai/boardAiChatCitation';
 import type { ResolvedBoardAiContextBlock } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
 import { resolveAIModelForRole, type AIModelResolverDeps } from './resolveAIModelForRole';
@@ -60,6 +64,10 @@ export const BOARD_AI_CHAT_SYSTEM_PROMPT = [
   'Nothing else from the board has been inspected. If `explicitContext` is empty you have been given no posts, no PDF and no page text at all.',
   'Never claim or imply that you read, opened, searched or inspected the board or any document beyond what `explicitContext` contains. If answering would need more than was attached, say plainly that it has not been shared with you.',
   'Do not invent quotations, page numbers or sources. Answer from the conversation, the attached context, and your general knowledge. Reply with the assistant message only.',
+  // Which of the sources it was given an answer actually leaned on. The ids
+  // are the server's, and the server maps them back to its own blocks: this
+  // asks the model to point at what it used, never to name a document.
+  ...BOARD_AI_CITATION_INSTRUCTIONS,
 ].join('\n');
 
 /** The only two fields of a stored message that carry conversation meaning. */
@@ -128,7 +136,11 @@ export function serializeBoardAiChatPayload(
 ): string {
   return JSON.stringify({
     conversation: turns.map((turn) => ({ role: turn.role, content: turn.content })),
-    explicitContext: context.map((block) => ({
+    explicitContext: context.map((block, index) => ({
+      // Position IS the mapping: the server reads a returned token back
+      // against this same array, so a model can only ever point at a block it
+      // was actually given.
+      sourceId: boardAiCitationSourceToken(index),
       type: block.type,
       label: block.label,
       ...(block.knowledgeDocumentId ? { knowledgeDocumentId: block.knowledgeDocumentId } : {}),

@@ -5,6 +5,11 @@ import { z } from 'zod';
 
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import {
+  boardAiCitationsFromStored,
+  buildBoardAiCitationEnvelope,
+  parseBoardAiCitationFooter,
+} from '@/lib/domain/ai/boardAiChatCitation';
 import { createBoardAiThreadRepository } from '@/lib/infra/ai/boardAiThreadRepository';
 import type { BoardAiChatSupabaseClient } from '@/lib/infra/ai/boardAiThreadRepository';
 import {
@@ -307,7 +312,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'AI request failed.', threadId: thread.id }, { status: 502 });
     }
 
-    const text = result.text.trim();
+    // The machine footer is read here and nowhere else, and it never reaches
+    // storage or a browser: what the user sees is the prose the model wrote.
+    const answer = parseBoardAiCitationFooter(result.text);
+    const text = answer.content;
     if (!text) {
       return NextResponse.json(
         { error: 'AI returned an empty result.', threadId: thread.id },
@@ -315,13 +323,25 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
+    /**
+     * Citations are built from the SAME authorized blocks that were sent, by
+     * position. The model named tokens; the server decides what they meant.
+     * Nothing it wrote in prose -- a document id, a page number, a filename --
+     * can reach this envelope, and an unknown or malformed token simply
+     * yields no citation rather than failing the answer.
+     */
+    const citations = buildBoardAiCitationEnvelope(answer.tokens, modelContext);
+
     const assistant = await repository.appendMessage(scopedUser, scopedBoard, thread.id, {
       role: 'assistant',
       content: text,
-      // Names only, and only on the reply that was actually generated. Context
-      // and citations stay null until the slices that authorize them.
+      // Names only, and only on the reply that was actually generated.
       provider: result.provider,
       model: result.model,
+      // Present only when the answer actually cited something: an uncited
+      // reply carries no citation field at all, exactly as it carries no
+      // context of its own.
+      ...(citations ? { citations: citations as unknown as BoardAiJsonValue } : {}),
     });
     if (!assistant.ok) {
       // The thread id travels even on this failure. The answer was generated
@@ -342,6 +362,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         provider: assistant.value.provider,
         model: assistant.value.model,
         createdAt: assistant.value.createdAt,
+        // Re-derived from what was stored, through the same parser the history
+        // read uses: one sanitized shape, whichever way a client got here.
+        citations: boardAiCitationsFromStored(assistant.value.citations),
       },
     });
   } catch {
@@ -495,6 +518,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         // hand-wrote can hold anything, so only fields the contract defines
         // reach a browser -- and none of them is authorization.
         context: boardAiContextViewFromStored(entry.context),
+        citations: boardAiCitationsFromStored(entry.citations),
       })),
     });
   } catch {

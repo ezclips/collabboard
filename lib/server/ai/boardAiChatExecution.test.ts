@@ -106,12 +106,26 @@ const contextBlock = (over: Partial<ResolvedBoardAiContextBlock> = {}): Resolved
 describe('35,36,42. attached sources travel BESIDE the conversation, never inside it', () => {
   it('35. each block carries its text and its provenance', () => {
     const parsed = JSON.parse(serializeBoardAiChatPayload([turn('user', 'hi')], [contextBlock()]));
+    // BOARD_AI_PDF_CITATIONS_1 adds exactly one field: the opaque token the
+    // server reads back if the model says it used this block. It grants no new
+    // capability -- position in this array is the whole mapping.
     expect(parsed.explicitContext).toEqual([{
+      sourceId: 'S1',
       type: 'knowledge-page', label: 'source.pdf - page 2',
       knowledgeDocumentId: 'doc-1', pageNumber: 2, text: 'authoritative page text',
     }]);
     // 42. Two separate fields: a source cannot appear as a turn.
     expect(JSON.stringify(parsed.conversation)).not.toContain('authoritative page text');
+  });
+
+  it('numbers the sources by position, so a token can only name a block that was sent', () => {
+    const parsed = JSON.parse(serializeBoardAiChatPayload([turn('user', 'hi')], [
+      contextBlock({ label: 'first' }),
+      contextBlock({ label: 'second' }),
+    ]));
+    expect(parsed.explicitContext.map((block: { sourceId: string }) => block.sourceId)).toEqual(['S1', 'S2']);
+    // An empty attachment list offers no token at all.
+    expect(JSON.parse(serializeBoardAiChatPayload([turn('user', 'hi')], [])).explicitContext).toEqual([]);
   });
 
   it('a source cannot forge a turn, and a turn cannot forge a source', () => {
@@ -132,7 +146,7 @@ describe('35,36,42. attached sources travel BESIDE the conversation, never insid
       { ...contextBlock(), apiKey: 'sk-secret', signedUrl: 'https://leak', provider: 'openai' } as never,
     ]));
     expect(Object.keys(parsed.explicitContext[0]).sort())
-      .toEqual(['knowledgeDocumentId', 'label', 'pageNumber', 'text', 'type']);
+      .toEqual(['knowledgeDocumentId', 'label', 'pageNumber', 'sourceId', 'text', 'type']);
     for (const leak of ['sk-secret', 'signedUrl', 'openai']) {
       expect(JSON.stringify(parsed)).not.toContain(leak);
     }

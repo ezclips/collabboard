@@ -9,6 +9,8 @@ import {
   BoardAiChatPersistedChips,
 } from '@/components/collabboard/BoardAiChatContextChips';
 import { BOARD_AI_CHAT_MESSAGE_MAX } from '@/lib/domain/ai/boardAiChatClient';
+import { boardAiCitationIdentityKey } from '@/lib/domain/ai/boardAiChatCitation';
+import type { BoardAiCitationItem } from '@/lib/domain/ai/boardAiChatCitation';
 import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
   addBoardAiDraftContext,
@@ -76,6 +78,18 @@ export interface BoardAiChatDrawerProps {
   readonly onDocumentSessionsChange?: React.Dispatch<
     React.SetStateAction<Record<string, BoardAiDocumentScopedSession>>
   >;
+  /**
+   * Opens a cited source, through the board's OWN Knowledge navigation.
+   *
+   * A citation is identity the server authorized -- a document and, where the
+   * source had one, a page -- so this hands both to the existing authority and
+   * nothing else. Absent means citations still render, as plain labels: a
+   * source is worth naming even where this surface cannot navigate to it.
+   */
+  readonly onOpenCitation?: (request: {
+    readonly knowledgeDocumentId: string;
+    readonly pageNumber?: number;
+  }) => void;
   readonly canSaveAssistantAsNote?: boolean;
   readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
   /**
@@ -99,6 +113,39 @@ type ActiveThread = string | null;
 
 /** A stable empty default, so an absent prop is not a new array each render. */
 const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
+
+/** A stable empty default, so an uncited answer is not a new array each render. */
+const NO_CITATIONS: readonly BoardAiCitationItem[] = [];
+
+/**
+ * The sources one answer shows, each named once.
+ *
+ * The server already de-duplicates what it builds and what it reads back, so
+ * this is the surface's own guard rather than its only one: a repeated
+ * identity would otherwise render twice and collide on its React key.
+ */
+function visibleCitations(items: readonly BoardAiCitationItem[]): readonly BoardAiCitationItem[] {
+  const seen = new Set<string>();
+  const unique: BoardAiCitationItem[] = [];
+  for (const item of items) {
+    const key = boardAiCitationIdentityKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique.length === items.length ? items : unique;
+}
+
+/**
+ * What one cited source is called on screen.
+ *
+ * The label is the server's; the page is appended only where the citation has
+ * one. A whole-document or post citation says so by saying nothing more -- it
+ * never borrows a page it was not given.
+ */
+function boardAiCitationLabel(item: BoardAiCitationItem): string {
+  return item.pageNumber === undefined ? item.label : `${item.label} · p. ${item.pageNumber}`;
+}
 
 export interface BoardAiDocumentScopedSession {
   readonly activeThreadId: string | null;
@@ -231,6 +278,7 @@ export default function BoardAiChatDrawer({
   onDraftContextChange,
   documentSessions: controlledDocumentSessions,
   onDocumentSessionsChange,
+  onOpenCitation,
   canSaveAssistantAsNote = false,
   onSaveAssistantAsNote,
   selectedBoardItem = null,
@@ -867,6 +915,9 @@ export default function BoardAiChatDrawer({
             : pendingNoteSaveMessageIdSet.has(message.id)
               ? 'saving'
               : assistantNoteSaveStateByMessageId[message.id];
+          const citations = message.role === 'assistant'
+            ? visibleCitations(message.citations?.items ?? NO_CITATIONS)
+            : NO_CITATIONS;
           const canShowSaveAsNote = message.role === 'assistant'
             && canSaveAssistantAsNote
             && !!onSaveAssistantAsNote
@@ -892,6 +943,57 @@ export default function BoardAiChatDrawer({
               {message.content}
               {message.role === 'assistant' && message.model ? (
                 <span className="mt-1 block text-[10px] text-gray-400">{message.model}</span>
+              ) : null}
+              {/*
+                Which of the attached sources this answer actually used.
+                Server-built and server-labelled: the model named tokens for
+                blocks it had been given, and wrote none of this itself. An
+                uncited answer renders nothing at all -- no empty heading.
+              */}
+              {citations.length > 0 ? (
+                <div data-board-ai-chat-citations="true" className="mt-1.5 whitespace-normal border-t border-gray-200 pt-1.5">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">Sources</p>
+                  <div className="flex flex-wrap gap-1">
+                    {citations.map((item) => {
+                      const citationKey = boardAiCitationIdentityKey(item);
+                      const citationLabel = boardAiCitationLabel(item);
+                      const citedDocumentId = item.knowledgeDocumentId;
+                      const chipClass = 'inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] leading-none';
+                      if (!onOpenCitation || !citedDocumentId) {
+                        return (
+                          <span
+                            key={citationKey}
+                            data-board-ai-chat-citation={citationKey}
+                            className={`${chipClass} border-gray-200 text-gray-500`}
+                            title={citationLabel}
+                          >
+                            <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{citationLabel}</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          key={citationKey}
+                          type="button"
+                          data-board-ai-chat-citation={citationKey}
+                          data-board-ai-chat-citation-document={citedDocumentId}
+                          data-board-ai-chat-citation-page={item.pageNumber ?? ''}
+                          title={`Open ${citationLabel}`}
+                          aria-label={`Open ${citationLabel}`}
+                          className={`${chipClass} border-gray-200 text-blue-700 transition hover:border-blue-200 hover:bg-blue-50`}
+                          onClick={() => onOpenCitation({
+                            knowledgeDocumentId: citedDocumentId,
+                            ...(item.pageNumber === undefined ? {} : { pageNumber: item.pageNumber }),
+                          })}
+                        >
+                          <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{citationLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ) : null}
               {canShowSaveAsNote ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">

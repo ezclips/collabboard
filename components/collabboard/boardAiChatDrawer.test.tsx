@@ -381,11 +381,14 @@ describe('46-48. no context is sent, and none is offered', () => {
 
   it('the drawer reads no board, PDF or Note source at all', async () => {
     const code = executable(DRAWER);
+    // BOARD_AI_PDF_CITATIONS_1 added citations -- which are the SERVER's, read
+    // off the message it sent, never a source this surface goes and reads. The
+    // list below is what the drawer still must not reach for.
     for (const forbidden of [
       'KnowledgePageCache', 'useKnowledgeSource', 'selectedText',
-      'citation', 'sourceReference', 'reader.pages', 'page.text',
+      'sourceReference', 'reader.pages', 'page.text',
     ]) {
-      expect(code, `${forbidden} belongs to a later slice`).not.toContain(forbidden);
+      expect(code, `${forbidden} is not this surface's to read`).not.toContain(forbidden);
     }
     // Its only endpoint is the chat route.
     const urls = code.match(/\/api\/[^`'"]*/g) ?? [];
@@ -1041,6 +1044,37 @@ describe('PDF workspace document-scoped mode', () => {
     expect(button.disabled).toBe(true);
   });
 
+  it('B: a citation survives an AI -> Library -> AI switch, with the thread', async () => {
+    const cited = {
+      version: 1,
+      items: [{ type: 'knowledge-page' as const, knowledgeDocumentId: DOC_A, pageNumber: 4, label: 'Alpha.pdf' }],
+    };
+    const { render } = await mountPdfSaveHarness({
+      initialSessions: {
+        [DOC_A]: {
+          activeThreadId: THREAD_A,
+          messages: [
+            ...pdfThreadMessages(DOC_A, 4, 'answer body', 'assistant-a').slice(0, 1),
+            { ...pdfThreadMessages(DOC_A, 4, 'answer body', 'assistant-a')[1], citations: cited },
+          ],
+          draft: '',
+          loadingMessages: false,
+          sending: false,
+          error: null,
+        },
+      },
+    });
+
+    expect(q('[data-board-ai-chat-citations="true"]')).not.toBeNull();
+    expect(q('[data-board-ai-chat-citation]')?.textContent).toContain('Alpha.pdf · p. 4');
+
+    await render(DOC_A, 'Alpha.pdf', 4, 'library');
+    await render(DOC_A, 'Alpha.pdf', 4, 'ai');
+
+    expect(q('[data-board-ai-chat-citations="true"]')).not.toBeNull();
+    expect(q('[data-board-ai-chat-citation]')?.textContent).toContain('Alpha.pdf · p. 4');
+  });
+
   it('A/D: a save still in flight survives remounts, and cannot be started twice', async () => {
     let release: (() => void) | undefined;
     const onSave = vi.fn(() => new Promise<void>((resolve) => { release = () => resolve(); }));
@@ -1226,5 +1260,124 @@ describe('PDF workspace document-scoped mode', () => {
     expect((READER.match(/documentSessions=\{boardAiSessionsByDocumentId\}/g) ?? [])).toHaveLength(2);
     expect((READER.match(/onDocumentSessionsChange=\{setBoardAiSessionsByDocumentId\}/g) ?? [])).toHaveLength(2);
     expect((READER.match(/useState<Record<string, BoardAiDocumentScopedSession>>/g) ?? [])).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// BOARD_AI_PDF_CITATIONS_1 -- the Sources area under an assistant answer
+// ============================================================================
+
+describe('grounded citations', () => {
+  const CITED_DOC = '44444444-4444-4444-8444-444444444444';
+  const OTHER_DOC = '66666666-6666-4666-8666-666666666666';
+
+  /** A page citation, or -- with no page -- a whole-document one. */
+  const citation = (documentId: string, pageNumber: number | undefined, label: string) => (
+    pageNumber === undefined
+      ? { type: 'knowledge-document', knowledgeDocumentId: documentId, label }
+      : { type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber, label }
+  );
+
+  const threadWith = (citations: unknown) => [
+    {
+      id: 'u-1', role: 'user', content: 'what does page 4 say?', provider: null, model: null, createdAt: 'n',
+      context: { version: 1, items: [{ type: 'knowledge-page', knowledgeDocumentId: CITED_DOC, pageNumber: 4 }] },
+    },
+    {
+      id: 'a-1', role: 'assistant', content: 'Page four says so.', provider: 'deepseek', model: 'deepseek-chat',
+      createdAt: 'n', context: null, ...(citations === null ? {} : { citations }),
+    },
+  ] as const;
+
+  async function mountWithCitations(citations: unknown, onOpenCitation?: (request: unknown) => void) {
+    stubChat({
+      threads: [summary(THREAD_A, 'z')],
+      messages: { [THREAD_A]: [...threadWith(citations)] },
+    });
+    await mount({ onOpenCitation } as never);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    return host;
+  }
+
+  const chips = () => all('[data-board-ai-chat-citation]');
+
+  it('A: renders the cited page beneath the answer it belongs to', async () => {
+    await mountWithCitations({
+      version: 1,
+      items: [citation(CITED_DOC, 4, 'My fancy padlet-slideshow.pdf')],
+    });
+
+    expect(q('[data-board-ai-chat-citations="true"]')).not.toBeNull();
+    expect(host.textContent).toContain('Sources');
+    expect(chips()).toHaveLength(1);
+    expect(chips()[0].textContent).toContain('My fancy padlet-slideshow.pdf · p. 4');
+    // Under the assistant turn, never the user's.
+    const assistant = q('[data-board-ai-chat-message="assistant"]')!;
+    expect(assistant.querySelector('[data-board-ai-chat-citations="true"]')).not.toBeNull();
+    expect(q('[data-board-ai-chat-message="user"]')!.querySelector('[data-board-ai-chat-citations]')).toBeNull();
+  });
+
+  it('F: an answer that cited nothing shows no Sources area at all', async () => {
+    await mountWithCitations(null);
+    expect(q('[data-board-ai-chat-citations]')).toBeNull();
+    expect(host.textContent).not.toContain('Sources');
+
+    await act(async () => { root!.unmount(); });
+    root = null;
+    // An empty envelope is the same thing said differently.
+    await mountWithCitations({ version: 1, items: [] });
+    expect(q('[data-board-ai-chat-citations]')).toBeNull();
+  });
+
+  it('renders several distinct sources once each, in the order given', async () => {
+    await mountWithCitations({
+      version: 1,
+      items: [
+        citation(CITED_DOC, 4, 'Alpha.pdf'),
+        citation(OTHER_DOC, 7, 'Beta.pdf'),
+        citation(CITED_DOC, 4, 'Alpha.pdf'),
+      ],
+    });
+
+    const labels = chips().map((chip) => chip.textContent?.trim());
+    expect(labels).toEqual(['Alpha.pdf · p. 4', 'Beta.pdf · p. 7']);
+  });
+
+  it('C/D: clicking a chip asks the board for that exact document and page', async () => {
+    const opened: unknown[] = [];
+    await mountWithCitations(
+      { version: 1, items: [citation(CITED_DOC, 4, 'Alpha.pdf'), citation(OTHER_DOC, 7, 'Beta.pdf')] },
+      (request) => { opened.push(request); },
+    );
+
+    await click('[data-board-ai-chat-citation-document="' + CITED_DOC + '"]');
+    await click('[data-board-ai-chat-citation-document="' + OTHER_DOC + '"]');
+    // Repeat: a second click on the same chip is a second navigation.
+    await click('[data-board-ai-chat-citation-document="' + CITED_DOC + '"]');
+
+    expect(opened).toEqual([
+      { knowledgeDocumentId: CITED_DOC, pageNumber: 4 },
+      { knowledgeDocumentId: OTHER_DOC, pageNumber: 7 },
+      { knowledgeDocumentId: CITED_DOC, pageNumber: 4 },
+    ]);
+  });
+
+  it('names a whole-document citation without inventing a page', async () => {
+    const opened: unknown[] = [];
+    await mountWithCitations(
+      { version: 1, items: [citation(CITED_DOC, undefined, 'Alpha.pdf')] },
+      (request) => { opened.push(request); },
+    );
+
+    expect(chips()[0].textContent?.trim()).toBe('Alpha.pdf');
+    await click('[data-board-ai-chat-citation-document="' + CITED_DOC + '"]');
+    expect(opened).toEqual([{ knowledgeDocumentId: CITED_DOC }]);
+  });
+
+  it('states the source as a label where this surface cannot navigate', async () => {
+    await mountWithCitations({ version: 1, items: [citation(CITED_DOC, 4, 'Alpha.pdf')] });
+    expect(chips()).toHaveLength(1);
+    expect(chips()[0].tagName).toBe('SPAN');
+    expect(chips()[0].textContent).toContain('Alpha.pdf · p. 4');
   });
 });

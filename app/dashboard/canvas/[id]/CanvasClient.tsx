@@ -2155,6 +2155,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
   }, [sourceReferenceScopeKey, openPdfWorkspaceDocument]);
 
+  /**
+   * A citation clicked in the BOARD's own chat.
+   *
+   * The same authority every other navigation uses, asked for the docked
+   * reader: that host keeps the board usable beside the document, and its own
+   * existing rule already closes this chat as the reader takes the dock.
+   */
+  const openBoardAiCitation = useCallback((request: {
+    readonly knowledgeDocumentId: string;
+    readonly pageNumber?: number;
+  }) => {
+    requestKnowledgeDocumentOpen({
+      documentId: request.knowledgeDocumentId,
+      ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),
+      presentation: 'side-panel',
+    });
+  }, [requestKnowledgeDocumentOpen]);
+
   // R1-A-2. Placement gate lives on usePadletSave (constructed below); this ref
   // bridges the ordering without duplicating any placement policy.
   const requestPlacementIfRequiredRef = useRef<((draft: any) => boolean) | null>(null);
@@ -10426,6 +10444,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           closeSidePanelRequestId={closeSidePanelRequestId}
           onOpenChange={setIsKnowledgeReaderOpen}
+          onOpenKnowledgeDocument={requestKnowledgeDocumentOpen}
           workspaceTabs={pdfWorkspaceTabs}
           activeWorkspacePdfId={activePdfId}
           workspaceRightPanel={pdfWorkspaceRightPanel}
@@ -10457,6 +10476,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             blockingEditorOpen={isBlockingOverlayOpen}
             draftContext={boardAiChatDraftContext}
             onDraftContextChange={setBoardAiChatDraftContext}
+            onOpenCitation={openBoardAiCitation}
             selectedBoardItem={boardAiChatSelectedItem}
           />
         )}
