@@ -536,7 +536,9 @@ export function UsedInNotes({ scope, rows, onOpen }: {
   if (rows.length === 0) return null;
   return (
     <div data-knowledge-used-in-notes={scope} className="mt-1">
-      <p className="text-[11px] font-medium text-gray-500">Used in Notes · {rows.length}</p>
+      <p className="text-[11px] font-medium text-gray-500">
+        {scope === 'page' ? 'Notes on this page' : 'Used in Notes'} · {rows.length}
+      </p>
       <ul className="mt-0.5 space-y-0.5">
         {rows.map((row) => (
           <li key={row.targetPadletId} data-knowledge-backlink-target={row.targetPadletId} className="min-w-0">
@@ -892,6 +894,27 @@ export default function KnowledgeDocumentDetails({
    * and that stays authoritative.
    */
   const activePageNumber = useKnowledgeReaderActivePage(pagesContainerRef, pages.length, initialPageNumber);
+
+  /*
+    PDF BACKLINKS -- the Notes that cite the page being READ, from the same
+    in-memory index the document list above already uses. No request, no second
+    projection: `knowledgeSourceBacklinkPageRows` owns the page-matching rule
+    (a cited range covering N counts, whatever the reference's kind), so this
+    is a filter of what the board already loaded and nothing more.
+
+    Recomputed from `activePageNumber`, so it follows the reader rather than
+    accumulating: turning the page replaces the set, and a Note citing pp. 1-2
+    is present on both.
+
+    NOT the per-page chrome PDF-R6K removed. That was one block repeated inside
+    EVERY page section, restating the Library's document list directly above the
+    text. This is a single list, at the foot beside the page control, answering
+    a question the document list cannot: what is linked to the page I am on.
+  */
+  const activePageRows = useMemo(
+    () => knowledgeSourceBacklinkPageRows(documentBacklinks, activePageNumber),
+    [documentBacklinks, activePageNumber],
+  );
 
   useEffect(() => {
     if (!documentId || pages.length === 0) return;
@@ -1439,6 +1462,18 @@ export default function KnowledgeDocumentDetails({
           </div>
         ) : null}
       </div>
+
+      {/*
+        The page's own backlinks, directly under the page control that names
+        the page. UsedInNotes renders nothing at all for an empty list, so a
+        page with no linked Notes shows no heading and no empty-state copy --
+        the reader simply looks as it did before.
+
+        Read-only: these rows come from already-loaded data and open through
+        the same `onOpenBacklinkTarget` the document list uses, so no edit
+        authority is consulted here or below it.
+      */}
+      <UsedInNotes scope="page" rows={activePageRows} onOpen={onOpenBacklinkTarget} />
 
       {/*
         Text Phase 1 -- the ONE floating selection toolbar, a SIBLING of the

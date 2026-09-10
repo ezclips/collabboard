@@ -3089,3 +3089,192 @@ describe('overlapping selection saves stay independent', () => {
       .not.toBe(knowledgeSelectionSaveIdentity('doc-1', span));
   });
 });
+
+// ============================================================================
+// PDF BACKLINKS -- Notes linked to the page being READ
+// ============================================================================
+
+/**
+ * The page-scoped backlink list, driven by the reader's own active page.
+ *
+ * The page-matching RULE lives in knowledgeSourceBacklinkPageRows and is
+ * proved in its own suite; what these cases prove is the wiring: that the
+ * reader asks for the ACTIVE page, re-asks when that page changes, and does
+ * not disturb the document-scoped list beside it.
+ */
+const threePages = [
+  ...pages,
+  { pageNumber: 3, text: 'a third page, cited by nobody.' },
+];
+
+function mountPageBacklinks(
+  references: readonly SourceReference[],
+  posts: readonly ReturnType<typeof notePost>[],
+  initialPageNumber: number,
+  documentPages: typeof pages = pages,
+) {
+  const onOpenBacklinkTarget = vi.fn();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+
+  const paint = (page: number) => {
+    act(() => {
+      root!.render(
+        <KnowledgeSourceReferenceProvider
+          index={buildKnowledgeSourceReferenceIndex(references)}
+          backlinks={buildKnowledgeSourceBacklinkIndex(references, posts)}
+          highlights={knowledgeStandaloneHighlightIndexOf([])}
+          onDeleteHighlight={() => {}}
+        >
+          <KnowledgeDocumentDetails
+            documentId={DOC_ID}
+            originalFilename="doc.pdf"
+            pageCount={documentPages.length}
+            pages={documentPages}
+            loading={false}
+            error={false}
+            initialPageNumber={page}
+            onBack={vi.fn()}
+            onOpenBacklinkTarget={onOpenBacklinkTarget}
+          />
+        </KnowledgeSourceReferenceProvider>,
+      );
+    });
+  };
+
+  paint(initialPageNumber);
+  return { paint, onOpenBacklinkTarget };
+}
+
+/** The Note ids the PAGE-scoped list is currently showing. */
+function pageBacklinkIds(): string[] {
+  const list = host!.querySelector('[data-knowledge-used-in-notes="page"]');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('[data-knowledge-backlink-target]'))
+    .map((li) => li.getAttribute('data-knowledge-backlink-target') ?? '');
+}
+
+/** The Note ids the DOCUMENT-scoped list is currently showing. */
+function documentBacklinkIds(): string[] {
+  const list = host!.querySelector('[data-knowledge-used-in-notes="document"]');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('[data-knowledge-backlink-target]'))
+    .map((li) => li.getAttribute('data-knowledge-backlink-target') ?? '');
+}
+
+describe('the reader shows the Notes linked to the page being read', () => {
+  it('1. page match: a page-1 citation shows on page 1, a page-2 citation does not', () => {
+    const references = [
+      sourceRef({ ...ids('r-p1', 'note-p1'), pageStart: 1, pageEnd: 1 }),
+      sourceRef({ ...ids('r-p2', 'note-p2'), pageStart: 2, pageEnd: 2 }),
+    ];
+    const posts = [notePost('note-p1', 'Note on page one'), notePost('note-p2', 'Note on page two')];
+
+    mountPageBacklinks(references, posts, 1);
+    expect(pageBacklinkIds()).toEqual(['note-p1']);
+  });
+
+  it('2. page range: pp. 1-2 counts on BOTH pages, and not on page 3', () => {
+    const references = [sourceRef({ ...ids('r-span', 'note-span'), pageStart: 1, pageEnd: 2 })];
+    const posts = [notePost('note-span', 'Spans two pages')];
+
+    // A three-page document, because the reader sends an out-of-range page
+    // back to page 1 -- asking for page 3 of a two-page PDF would have proved
+    // nothing about page matching.
+    const { paint } = mountPageBacklinks(references, posts, 1, threePages);
+    expect(pageBacklinkIds()).toEqual(['note-span']);
+
+    paint(2);
+    expect(pageBacklinkIds()).toEqual(['note-span']);
+
+    paint(3);
+    expect(pageBacklinkIds()).toEqual([]);
+  });
+
+  it('3. reference kinds: exact-span, page-only and page-region all count on their page', () => {
+    // Whatever a citation's kind, the page it names is what makes it relevant
+    // here -- no kind is filtered out and no new matching rule is introduced.
+    const references = [
+      exactRef(0, 8, { ...ids('r-exact', 'note-exact') }),
+      sourceRef({ ...ids('r-pageonly', 'note-pageonly'), pageStart: 1, pageEnd: 1 }),
+      sourceRef({
+        ...ids('r-region', 'note-region'),
+        pageStart: 1,
+        pageEnd: 1,
+        regionX: 0.1, regionY: 0.1, regionWidth: 0.2, regionHeight: 0.2,
+      } as unknown as Partial<SourceReference>),
+    ];
+    const posts = [
+      notePost('note-exact', 'Exact span Note'),
+      notePost('note-pageonly', 'Page-only Note'),
+      notePost('note-region', 'Region Note'),
+    ];
+
+    mountPageBacklinks(references, posts, 1);
+    expect(pageBacklinkIds().sort()).toEqual(['note-exact', 'note-pageonly', 'note-region']);
+  });
+
+  it('4. page change: turning the page replaces the set, with nothing sticky', () => {
+    const references = [
+      sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 }),
+      sourceRef({ ...ids('r-b', 'note-b'), pageStart: 2, pageEnd: 2 }),
+    ];
+    const posts = [notePost('note-a', 'Page one Note'), notePost('note-b', 'Page two Note')];
+
+    const { paint } = mountPageBacklinks(references, posts, 1);
+    expect(pageBacklinkIds()).toEqual(['note-a']);
+
+    paint(2);
+    // The page-1 Note is GONE, not merely joined by the page-2 one.
+    expect(pageBacklinkIds()).toEqual(['note-b']);
+
+    paint(1);
+    expect(pageBacklinkIds()).toEqual(['note-a']);
+  });
+
+  it('5. the document-scoped list is unchanged beside it', () => {
+    const references = [
+      sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 }),
+      sourceRef({ ...ids('r-b', 'note-b'), pageStart: 2, pageEnd: 2 }),
+    ];
+    const posts = [notePost('note-a', 'Page one Note'), notePost('note-b', 'Page two Note')];
+
+    const { paint } = mountPageBacklinks(references, posts, 1);
+    // Every Note citing the document, on every page -- the page list narrows,
+    // this one does not.
+    expect(documentBacklinkIds().sort()).toEqual(['note-a', 'note-b']);
+    expect(pageBacklinkIds()).toEqual(['note-a']);
+
+    paint(2);
+    expect(documentBacklinkIds().sort()).toEqual(['note-a', 'note-b']);
+  });
+
+  it('6. read path: rendering and opening consult no edit authority', () => {
+    const references = [sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 })];
+    const posts = [notePost('note-a', 'Page one Note')];
+
+    // The component is given no capability prop of any kind, and the rows
+    // still render: page backlinks are read information.
+    const { onOpenBacklinkTarget } = mountPageBacklinks(references, posts, 1);
+    expect(pageBacklinkIds()).toEqual(['note-a']);
+
+    const row = host!.querySelector('[data-knowledge-used-in-notes="page"] [data-knowledge-backlink-target="note-a"] button');
+    act(() => { (row as HTMLButtonElement).click(); });
+    // It opens through the SAME callback the document list uses -- the id
+    // only, and no second permission decision of its own.
+    expect(onOpenBacklinkTarget).toHaveBeenCalledTimes(1);
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
+  });
+
+  it('7. empty state: a page with no linked Notes renders no list at all', () => {
+    const references = [sourceRef({ ...ids('r-b', 'note-b'), pageStart: 2, pageEnd: 2 })];
+    const posts = [notePost('note-b', 'Page two Note')];
+
+    mountPageBacklinks(references, posts, 1);
+    // Not an empty heading and not a "0" count -- nothing, so the reader looks
+    // exactly as it did before this feature existed.
+    expect(host!.querySelector('[data-knowledge-used-in-notes="page"]')).toBeNull();
+    expect(host!.textContent).not.toContain('Notes on this page');
+  });
+});
