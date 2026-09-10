@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildKnowledgeSourceNoteDraft } from '../../domain/knowledge/knowledgeSourceNoteDraft';
-import { canEditWorkspace } from '@/lib/workspace/context';
 
 /**
  * PDF_SELECTION_TO_NOTE_1 governance seam.
@@ -215,27 +214,17 @@ describe('Save as Note is gated on this board edit capability', () => {
   /**
    * What "may edit this board" actually resolves to here.
    *
-   * The controller boundary documents why: per-board collaborator roles are a
-   * nav-orphaned vertical with no live data and no writers, so
-   * `canEditWorkspace(currentWorkspaceRole)` IS the canonical board-edit
-   * authority in this application -- the same one that gates creating,
-   * editing and deleting posts and opening the mutation-capable editor. This
-   * suite proves that derivation rather than inventing a second one.
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2: the board's own two facts --
+   * `boards.user_id` and this user's `board_collaborators` role on this board
+   * -- which together are the rule the padlet / board_sections / source
+   * reference write policies enforce. Workspace role governs workspace
+   * administration and is no longer any part of this answer.
    */
-  it('8: the derivation is the app\'s one edit capability, exercised directly', () => {
-    expect(canEditWorkspace('owner')).toBe(true);
-    expect(canEditWorkspace('admin')).toBe(true);
-    expect(canEditWorkspace('member')).toBe(true);
-    // 'readonly' is this domain's read-only role -- there is no 'viewer'.
-    expect(canEditWorkspace('readonly')).toBe(false);
-    expect(canEditWorkspace(null)).toBe(false);
-    expect(canEditWorkspace(undefined)).toBe(false);
-
-    // PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_1: this is now the NON-OWNER
-    // half of the answer, not the whole of it -- the board's own owner column
-    // is the other half. It is passed through unchanged, which is what keeps
-    // every non-owner's rights exactly as they were.
-    expect(canvasClient).toContain('workspaceRole: currentWorkspaceRole,');
+  it('8: the derivation is the board-scoped capability, not a workspace one', () => {
+    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
+    expect(canvasClient).toContain('boardId: canvasId,');
+    expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
+    expect(canvasClient).not.toContain('workspaceRole: currentWorkspaceRole,');
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
   });
 
@@ -307,12 +296,12 @@ describe('Save as Note is gated on this board edit capability', () => {
 describe('the canvas derives board-edit rights from the board, not only the workspace', () => {
   it('B: the controller resolves ONE capability, from the board row and the role', () => {
     // The exact call the controller makes. `user?.id` and the loaded `canvas`
-    // are what make an owner an owner; the workspace role is the pre-existing
-    // non-owner half, passed through unchanged.
+    // are what make an owner an owner; the collaborator role for THIS user on
+    // THIS board is the non-owner half.
     expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
     expect(canvasClient).toContain('userId: user?.id,');
     expect(canvasClient).toContain('board: canvas,');
-    expect(canvasClient).toContain('workspaceRole: currentWorkspaceRole,');
+    expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
     // ...and every existing board-edit gate is derived from that one answer.
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
@@ -324,6 +313,13 @@ describe('the canvas derives board-edit rights from the board, not only the work
     // `boards.select('*')` already returns the owner column; the canvas read
     // is untouched and nothing new is fetched to learn who owns the board.
     expect(canvasViewReads).toContain("from('boards').select('*')");
+    // The collaborator half is the one thing the client did not already hold.
+    // It is ONE row -- this user, this board -- not the roster.
+    expect(canvasViewReads).toContain("from('board_collaborators')");
+    expect(canvasViewReads).toContain("select('role')");
+    expect(canvasViewReads).toContain(".eq('board_id', boardId)");
+    expect(canvasViewReads).toContain(".eq('user_id', userId)");
+    expect(canvasViewReads).toContain('.maybeSingle()');
     const derivation = canvasClient.slice(
       canvasClient.indexOf('const canEditCurrentBoard = canEditBoard({'),
       canvasClient.indexOf('const canUseCanvasToolbar = canUseFreeformEditButton;'),
@@ -354,7 +350,11 @@ describe('the canvas derives board-edit rights from the board, not only the work
     for (const forbidden of ['supabase', 'fetch(', 'service_role', 'rpc(', 'process.env']) {
       expect(authority, forbidden).not.toContain(forbidden);
     }
-    expect(authority).toContain("import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';");
+    // The authority module imports NOTHING from the workspace layer: the
+    // substitution it used to make is now structurally impossible.
+    expect(authority).not.toContain('@/lib/workspace/context');
+    expect(authority).not.toContain('canEditWorkspace');
+    expect(authority).not.toContain('WorkspaceRole');
   });
 
   it('7: the concurrency correction is untouched by this gate', () => {

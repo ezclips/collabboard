@@ -26,6 +26,7 @@ export default defineConfig({
       'components/collabboard/comments/*.test.tsx',
       'components/collabboard/canvas/engine/*.test.ts',
       'components/collabboard/canvas/hooks/*.test.ts',
+      'components/collabboard/canvas/hooks/*.test.tsx',
       'components/settings/ai/*.test.ts',
       'components/settings/ai/*.test.tsx',
       'components/ui/*.test.tsx',

@@ -31,8 +31,9 @@ import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerC
 import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
-import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { canEditBoard } from '@/lib/domain/canvas/boardEditAuthority';
+import { useBoardCollaboratorAuthority } from '@/components/collabboard/canvas/hooks/useBoardCollaboratorAuthority';
 import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';
 import { createCommentModeMutations } from '@/lib/infra/canvas/commentMutations';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
@@ -380,8 +381,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
   }, [user]);
 
+  /**
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2 -- this user's
+   * `board_collaborators` role on THIS board, the half of the board-edit rule
+   * that does not live on the board row. `null` means unresolved, and denies.
+   *
+   * The answer is stamped with the identity and the board it was resolved
+   * for; see the hook for why that stamp, and not its timing, is what makes
+   * an account or board switch fail closed.
+   */
+  const boardCollaboratorAuthority = useBoardCollaboratorAuthority(canvasId, user?.id);
+
   // The board's edit capability is resolved below, once the board row itself
-  // has been read -- ownership is part of the answer and lives on that row.
+  // has been read -- ownership is the other half of the answer and lives on
+  // that row.
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
   // PATCH 8O.1/8O.2 -- resolved once at the controller boundary from
   // WorkspaceRole, the only permission signal with any live wiring today.
@@ -487,19 +500,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   } = useCanvasData({ canvasId, dispatch });
 
   /**
-   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_1. Who may edit THIS board.
+   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_FIX_2. Who may edit THIS board.
    *
-   * Resolved here rather than beside the workspace role above, because it
-   * reads the loaded board row -- no extra request: `boards.user_id` already
-   * arrives with the `select('*')` the canvas read performs.
+   * The board's own two facts, and only those: ownership, which arrives free
+   * on the loaded board row (`boards.user_id`, already in the canvas read's
+   * `select('*')`), and this user's `board_collaborators` role on this board,
+   * resolved above. Together they are the rule the padlets / board_sections /
+   * source-reference write policies actually enforce.
    *
-   * Ownership is what the live write policy authorises, and it is independent
-   * of workspace membership: an owner whose workspace role is later changed to
-   * readonly still owns the board and the database still accepts their writes.
-   * Deriving the UI from workspace role alone told that person they could not
-   * edit their own board. Ownership can therefore only ever GRANT here -- the
-   * pre-existing workspace capability is kept unchanged for everyone else, so
-   * nobody who could edit before can edit less now.
+   * Workspace role is deliberately absent. It governs workspace
+   * administration (`canManageCanvasShare` above, membership screens
+   * elsewhere) and appears nowhere in the board-content write policies, so
+   * granting board edits from it offered mutation controls the database goes
+   * on to reject -- and let a previous account's cached role answer for the
+   * current one.
    *
    * One capability, and every board-edit gate below derives from it: a
    * per-feature exception would leave the rest of the UI telling the same
@@ -507,8 +521,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const canEditCurrentBoard = canEditBoard({
     userId: user?.id,
+    boardId: canvasId,
     board: canvas,
-    workspaceRole: currentWorkspaceRole,
+    collaboratorAuthority: boardCollaboratorAuthority,
   });
   const canUseFreeformEditButton = canEditCurrentBoard;
   // Keep the canvas creation toolbar aligned with board editability.

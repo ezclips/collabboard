@@ -55,6 +55,24 @@ interface CanvasViewSupabaseClient {
       }>;
     };
   };
+  from(table: 'board_collaborators'): {
+    select(columns: 'role'): {
+      eq(
+        column: 'board_id',
+        value: string,
+      ): {
+        eq(
+          column: 'user_id',
+          value: string,
+        ): {
+          maybeSingle(): Promise<{
+            data: { role?: unknown } | null;
+            error: SupabaseErrorLike | null;
+          }>;
+        };
+      };
+    };
+  };
 }
 
 function client(): CanvasViewSupabaseClient {
@@ -108,4 +126,35 @@ export async function findSectionsByBoardId(
   }
 
   return ok(data ?? []);
+}
+
+/**
+ * The CURRENT user's `board_collaborators` role on ONE board, or null when
+ * they have no row on it.
+ *
+ * One boolean's worth of authority, read as one row. The roster is
+ * deliberately not fetched: `board_collaborators_select` would return the
+ * whole thing to a board owner, and nothing in the canvas UI has any use for
+ * it. This answers "may I edit this board", nothing more.
+ *
+ * A failed read resolves to err, and the caller leaves the authority
+ * UNRESOLVED rather than treating the failure as an absent role -- a network
+ * error must not read as a denial for the owner, nor as a grant for anyone.
+ */
+export async function findBoardCollaboratorRole(
+  boardId: string,
+  userId: string,
+): Promise<Result<string | null, DomainError>> {
+  const { data, error } = await client()
+    .from('board_collaborators')
+    .select('role')
+    .eq('board_id', boardId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    return err(domainError('unavailable', 'Could not load the board collaborator role', { cause: error }));
+  }
+
+  return ok(typeof data?.role === 'string' ? data.role : null);
 }
