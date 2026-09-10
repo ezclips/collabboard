@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Crop, GripVertical, Search, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Crop, Crosshair, GripVertical, Search, Sparkles, SquareDashedMousePointer, StickyNote, X } from 'lucide-react';
 import type {
   KnowledgeSourcePageRequest,
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
@@ -175,6 +175,7 @@ export interface KnowledgeDocumentDetailsProps {
    * outside a canvas, which is what keeps the rows non-interactive there.
    */
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
+  onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;
 }
 
 /**
@@ -528,10 +529,15 @@ function highlightedText(
  * a canvas never offers an action that cannot work. Either way the target id
  * rides on the row as a data attribute -- the visible text is never looked up.
  */
-export function UsedInNotes({ scope, rows, onOpen }: {
+export function UsedInNotes({ scope, rows, onOpen, onShowOnBoard }: {
   scope: 'document' | 'page';
   rows: readonly KnowledgeSourceBacklinkRow[];
   onOpen?: (targetPadletId: string) => void;
+  /**
+   * Take the board to this Note. Absent on layouts that cannot reveal
+   * spatially, so no dead or lying control is ever rendered.
+   */
+  onShowOnBoard?: (targetPadletId: string) => void;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -543,15 +549,34 @@ export function UsedInNotes({ scope, rows, onOpen }: {
         {rows.map((row) => (
           <li key={row.targetPadletId} data-knowledge-backlink-target={row.targetPadletId} className="min-w-0">
             {onOpen ? (
+              <span className="flex min-w-0 items-center gap-1">
               <button
                 type="button"
                 // The id, never the row's text: two Notes can read identically.
                 onClick={() => onOpen(row.targetPadletId)}
                 title={row.displayText}
-                className="block w-full cursor-pointer truncate rounded pl-2 text-left text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+                className="block min-w-0 flex-1 cursor-pointer truncate rounded pl-2 text-left text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
               >
                 {row.displayText}
               </button>
+              {/*
+                A SECOND action, not a replacement: the row itself still opens
+                the Note exactly as it always has. This one additionally takes
+                the board to where that Note lives.
+              */}
+              {onShowOnBoard ? (
+                <button
+                  type="button"
+                  data-knowledge-backlink-show-on-board={row.targetPadletId}
+                  onClick={() => onShowOnBoard(row.targetPadletId)}
+                  title="Show on board"
+                  aria-label={`Show ${row.label} on the board`}
+                  className="flex-none rounded p-0.5 text-gray-400 transition hover:bg-gray-50 hover:text-blue-700 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+                >
+                  <Crosshair className="h-3 w-3" aria-hidden="true" />
+                </button>
+              ) : null}
+              </span>
             ) : (
               <span className="block truncate pl-2 text-[11px] text-gray-600" title={row.displayText}>
                 {row.displayText}
@@ -584,6 +609,7 @@ export default function KnowledgeDocumentDetails({
   initialSourceReferenceId,
   initialSourceRequestId,
   onOpenBacklinkTarget,
+  onRevealBacklinkTargetOnBoard,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -1154,7 +1180,12 @@ export default function KnowledgeDocumentDetails({
             {pageSummary !== null ? (
               <p className="text-[11px] text-gray-500">{pageSummary}</p>
             ) : null}
-            <UsedInNotes scope="document" rows={documentRows} onOpen={onOpenBacklinkTarget} />
+            <UsedInNotes
+              scope="document"
+              rows={documentRows}
+              onOpen={onOpenBacklinkTarget}
+              onShowOnBoard={onRevealBacklinkTargetOnBoard}
+            />
           </div>
         </>
       )}
@@ -1473,7 +1504,12 @@ export default function KnowledgeDocumentDetails({
         the same `onOpenBacklinkTarget` the document list uses, so no edit
         authority is consulted here or below it.
       */}
-      <UsedInNotes scope="page" rows={activePageRows} onOpen={onOpenBacklinkTarget} />
+      <UsedInNotes
+        scope="page"
+        rows={activePageRows}
+        onOpen={onOpenBacklinkTarget}
+        onShowOnBoard={onRevealBacklinkTargetOnBoard}
+      />
 
       {/*
         Text Phase 1 -- the ONE floating selection toolbar, a SIBLING of the

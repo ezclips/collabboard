@@ -84,7 +84,8 @@ describe('7-13. the Library panel owns the document identity', () => {
     expect(pane).toContain('← Back to PDFs');
     expect(pane).toContain('data-knowledge-library-filename="true"');
     expect(pane).toContain('data-knowledge-library-pagecount="true"');
-    expect(pane).toContain('<UsedInNotes scope="document"');
+    // Multi-line since the reveal action joined it; the scope is what matters.
+    expect(pane).toMatch(/<UsedInNotes[\s\S]{0,120}scope="document"/);
   });
 
   it('11-12. the reference links and the Notes list are the existing ones', () => {
@@ -486,7 +487,7 @@ describe('PDF-R6K: clean page chrome, a pager, and a transient area rectangle', 
     expect(header).not.toContain('<UsedInNotes');
     expect(header).not.toContain('knowledgeSourceBacklinkPageRows');
     // Document-scoped provenance is untouched: the Library still renders it.
-    expect(c).toContain('<UsedInNotes scope="document"');
+    expect(c).toMatch(/<UsedInNotes[\s\S]{0,120}scope="document"/);
     expect(c).toContain('documentRows');
   });
 

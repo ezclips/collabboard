@@ -1,0 +1,185 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+/**
+ * "Show on board" -- the wiring, and the boundaries it must not cross.
+ *
+ * The arithmetic is proved in boardObjectReveal.test.ts. What this suite pins
+ * is everything the arithmetic cannot see: that the action reaches only the
+ * layout that can honour it, that it never becomes a mutation or a permission
+ * decision, that it reuses the one camera this board already has, and that the
+ * ordinary backlink click it sits beside is completely unchanged.
+ *
+ * Line comments only, as the sibling suites do -- a block-comment strip would
+ * swallow JSX and turn every "not found" assertion into a false pass.
+ */
+function sourceOf(relativePath: string): string {
+  return readFileSync(resolve(process.cwd(), relativePath), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+const canvasClient = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
+const details = sourceOf('components/collabboard/KnowledgeDocumentDetails.tsx');
+const drawer = sourceOf('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+const libraryPanel = sourceOf('components/collabboard/PdfWorkspaceLibraryPanel.tsx');
+const revealDomain = sourceOf('lib/domain/canvas/boardObjectReveal.ts');
+
+// ============================================================================
+// The layout gate -- one decision, made once
+// ============================================================================
+
+describe('only a layout that can reveal is offered the action', () => {
+  it('the gate is Freeform, decided in ONE place', () => {
+    expect(canvasClient).toContain('const canRevealOnBoard = isFreeformLayout;');
+    // Handed down as presence-or-absence, so an unsupported layout renders no
+    // control at all rather than a disabled one that promises something false.
+    expect(canvasClient).toContain(
+      'onRevealBacklinkTargetOnBoard={canRevealOnBoard ? revealKnowledgeBacklinkTargetOnBoard : undefined}',
+    );
+    // Exactly one gate: no per-surface layout test to drift out of step.
+    expect(canvasClient.match(/canRevealOnBoard/g) ?? []).toHaveLength(2);
+  });
+
+  it('no unsupported layout is named anywhere in the reveal path', () => {
+    // Wall, columns, grid, table, timeline, stream and map keep today's
+    // behaviour untouched; V1 must not so much as mention them here.
+    const revealBlock = canvasClient.slice(
+      canvasClient.indexOf('const revealKnowledgeBacklinkTargetOnBoard'),
+      canvasClient.indexOf('const canRevealOnBoard'),
+    );
+    for (const forbidden of [
+      'isWallLayout', 'isColumnsLayout', 'isGridLayout', 'isTimelineLayout',
+      'isMapLayout', 'flyTo', 'scrollIntoView',
+    ]) {
+      expect(revealBlock, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('the surfaces render the action only when handed the callback', () => {
+    expect(details).toContain('onShowOnBoard?: (targetPadletId: string) => void;');
+    expect(details).toContain('{onShowOnBoard ? (');
+    expect(details).toContain('data-knowledge-backlink-show-on-board={row.targetPadletId}');
+    expect(libraryPanel).toContain('readonly onShowNoteOnBoard?: (targetPadletId: string) => void;');
+    expect(libraryPanel).toContain('{onShowNoteOnBoard ? (');
+    expect(libraryPanel).toContain('data-pdf-workspace-library-note-show-on-board={note.targetPadletId}');
+  });
+
+  it('the callback reaches both backlink surfaces through the existing plumbing', () => {
+    // Beside `onOpenBacklinkTarget` the whole way down -- no second transport.
+    expect(drawer).toContain('onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;');
+    expect(drawer).toContain('onShowNoteOnBoard={onRevealBacklinkTargetOnBoard}');
+    expect(drawer).toContain('onShowOnBoard={onRevealBacklinkTargetOnBoard}');
+    // Both reader hosts (workspace and docked) are fed it.
+    expect(drawer.match(/onRevealBacklinkTargetOnBoard=\{onRevealBacklinkTargetOnBoard\}/g) ?? [])
+      .toHaveLength(2);
+    // And both of the reader's own lists, page-scoped and document-scoped.
+    expect(details.match(/onShowOnBoard=\{onRevealBacklinkTargetOnBoard\}/g) ?? []).toHaveLength(2);
+  });
+});
+
+// ============================================================================
+// A reveal is an event, and it moves the camera this board already has
+// ============================================================================
+
+describe('the reveal request and the camera it drives', () => {
+  it('every ask carries a fresh id, so the same Note can be revealed twice', () => {
+    expect(canvasClient).toContain('const boardRevealRequestIdRef = useRef(0);');
+    expect(canvasClient).toContain('boardRevealRequestIdRef.current += 1;');
+    expect(canvasClient).toContain(
+      'setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId });',
+    );
+    // Consumed by request id, never by target id -- the whole point.
+    expect(canvasClient).toContain('}, [boardRevealRequest?.requestId]);');
+  });
+
+  it('it reuses the minimap camera rather than inventing a second one', () => {
+    expect(canvasClient).toContain('panByWorldDelta(delta.dx, delta.dy)');
+    expect(canvasClient).toContain('getViewportWorldRect({');
+    expect(canvasClient).toContain('getFallbackMinimapItem(target)');
+    // No parallel viewport system, and no zoom change smuggled into a pan.
+    const revealEffect = canvasClient.slice(
+      canvasClient.indexOf('if (!boardRevealRequest || !isFreeformLayout) return;'),
+      canvasClient.indexOf('}, [boardRevealRequest?.requestId]);'),
+    );
+    for (const forbidden of ['setCanvasZoom', 'zoomAtViewportPoint', 'scrollTo', 'scrollLeft', 'scrollTop']) {
+      expect(revealEffect, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('a zero delta is never handed to the camera', () => {
+    // "Already visible" must not produce a no-op pan call.
+    expect(canvasClient).toContain('if (delta && (delta.dx !== 0 || delta.dy !== 0)) panByWorldDelta');
+  });
+});
+
+// ============================================================================
+// Fail-safe, read-only, and the untouched neighbours
+// ============================================================================
+
+describe('the reveal is navigation and nothing else', () => {
+  it('a missing or non-Note target raises no request at all', () => {
+    const handler = canvasClient.slice(
+      canvasClient.indexOf('const revealKnowledgeBacklinkTargetOnBoard'),
+      canvasClient.indexOf('Freeform\'s answer to a reveal request'),
+    );
+    expect(handler).toContain('if (!target || !isKnowledgeBacklinkNote(target)) return;');
+    // The consumer re-checks too, because the board can change between ask
+    // and answer.
+    expect(canvasClient).toContain('if (!target || !isKnowledgeBacklinkNote(target)) return;');
+  });
+
+  it('it consults no edit authority anywhere', () => {
+    const revealRegion = canvasClient.slice(
+      canvasClient.indexOf('const revealKnowledgeBacklinkTargetOnBoard'),
+      canvasClient.indexOf('const canRevealOnBoard'),
+    );
+    for (const forbidden of [
+      'canEditBoard', 'canSavePdfSelectionAsNote', 'canUseFreeformEditButton',
+      'canEditWorkspace', 'currentWorkspaceRole', 'canManageWorkspace',
+    ]) {
+      expect(revealRegion, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('it writes nothing -- no board mutation of any kind', () => {
+    const revealRegion = canvasClient.slice(
+      canvasClient.indexOf('const revealKnowledgeBacklinkTargetOnBoard'),
+      canvasClient.indexOf('const canRevealOnBoard'),
+    );
+    for (const forbidden of [
+      'supabase', 'insertPost', 'updatePost', 'deletePost', 'setPadlets',
+      'fetch(', 'rpc(', 'position_x:', 'position_y:',
+    ]) {
+      expect(revealRegion, forbidden).not.toContain(forbidden);
+    }
+    // The domain half reaches for nothing the server owns either.
+    for (const forbidden of ['supabase', 'fetch(', 'rpc(', 'process.env']) {
+      expect(revealDomain, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('the ordinary backlink click is completely unchanged', () => {
+    // Still the same four lines it has always been, and still what the row
+    // itself does. Show on board is a SECOND action beside it.
+    expect(canvasClient).toContain('const openKnowledgeBacklinkTarget = (targetPadletId: string) => {');
+    expect(canvasClient).toContain('setSelectedPadletId(target.id);');
+    expect(canvasClient).toContain('openPadletInTypeEditor(target);');
+    expect(details).toContain('onClick={() => onOpen(row.targetPadletId)}');
+    expect(libraryPanel).toContain('onClick={() => onOpenNote(note.targetPadletId)}');
+    // The reveal reuses that path rather than forking a second open.
+    expect(canvasClient).toContain('openKnowledgeBacklinkTarget(targetPadletId);');
+  });
+
+  it('no new PDF workspace close or yield mode was introduced', () => {
+    // The existing blocking-editor yield stays the only rule.
+    expect(drawer).toContain("const yieldsToEditor = isWorkspace && blockingEditorOpen;");
+    const revealRegion = canvasClient.slice(
+      canvasClient.indexOf('const revealKnowledgeBacklinkTargetOnBoard'),
+      canvasClient.indexOf('const canRevealOnBoard'),
+    );
+    for (const forbidden of ['setIsKnowledgeReaderOpen', 'closeSidePanelRequestId', 'yield', 'minimize']) {
+      expect(revealRegion, forbidden).not.toContain(forbidden);
+    }
+  });
+});

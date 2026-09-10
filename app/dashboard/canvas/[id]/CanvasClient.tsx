@@ -33,6 +33,9 @@ import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { canEditBoard } from '@/lib/domain/canvas/boardEditAuthority';
+import { resolveRevealPanDelta, type BoardObjectRevealRequest } from '@/lib/domain/canvas/boardObjectReveal';
+import { getViewportWorldRect } from '@/components/collabboard/canvas/minimap/freeformMinimapGeometry';
+import { getFallbackMinimapItem } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
 import { useBoardCollaboratorAuthority } from '@/components/collabboard/canvas/hooks/useBoardCollaboratorAuthority';
 import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';
 import { createCommentModeMutations } from '@/lib/infra/canvas/commentMutations';
@@ -8220,6 +8223,84 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     openPadletInTypeEditor(target);
   };
 
+  /**
+   * "Show on board" -- ask the board to bring a backlinked Note into view.
+   *
+   * An ASK, not a camera move. The reader knows a Note id and nothing else;
+   * which layout is on screen and how that layout reveals anything is the
+   * board's business, so this raises a request and the consumer below answers
+   * it. Only Freeform answers today.
+   *
+   * The request carries a fresh id every time, which is what makes it an event
+   * rather than a state: revealing the same Note twice must move the camera
+   * twice, and a consumer comparing target ids alone would ignore the second
+   * ask. Same idiom as the existing `closeSidePanelRequestId` counter.
+   *
+   * Navigation only -- nothing here writes, and the Note still opens through
+   * the ordinary backlink path so the existing viewer/editor and
+   * workspace-yield rules carry on untouched.
+   */
+  const boardRevealRequestIdRef = useRef(0);
+  const [boardRevealRequest, setBoardRevealRequest] = useState<BoardObjectRevealRequest | null>(null);
+
+  const revealKnowledgeBacklinkTargetOnBoard = (targetPadletId: string) => {
+    const target = padlets.find((padlet) => padlet.id === targetPadletId);
+    // A target that is gone, or was never a Note, raises no request at all.
+    if (!target || !isKnowledgeBacklinkNote(target)) return;
+
+    boardRevealRequestIdRef.current += 1;
+    setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId });
+    // The Note itself opens exactly as an ordinary backlink click opens it.
+    openKnowledgeBacklinkTarget(targetPadletId);
+  };
+
+  /**
+   * Freeform's answer to a reveal request.
+   *
+   * Keyed on the request id, so a repeat ask for the same Note runs again.
+   * Measured here rather than at the call site because the board may still be
+   * settling when the ask arrives.
+   *
+   * Every step fails closed rather than moving the camera on a guess: an
+   * unknown id, a post that is not a Note, a Note with no usable placement, an
+   * unmeasurable viewport. `resolveRevealPanDelta` returns null for each, and
+   * null means stay put -- panning to arbitrary coordinates because a number
+   * was missing is worse than doing nothing.
+   */
+  useEffect(() => {
+    if (!boardRevealRequest || !isFreeformLayout) return;
+    const target = padlets.find((padlet) => padlet.id === boardRevealRequest.targetPadletId);
+    if (!target || !isKnowledgeBacklinkNote(target)) return;
+
+    const viewport = containerRef.current;
+    const worldOrigin = freeformWorldOriginRef.current;
+    if (!viewport || !worldOrigin) return;
+
+    const delta = resolveRevealPanDelta(
+      getFallbackMinimapItem(target),
+      getViewportWorldRect({
+        viewportRect: viewport.getBoundingClientRect(),
+        clientLeft: viewport.clientLeft,
+        clientTop: viewport.clientTop,
+        clientWidth: viewport.clientWidth,
+        clientHeight: viewport.clientHeight,
+        worldOriginRect: worldOrigin.getBoundingClientRect(),
+        zoom: canvasZoom,
+      }),
+    );
+    // The same world-space camera the minimap drives. No second viewport
+    // system, no zoom change, and no scroll written behind the camera's back.
+    if (delta && (delta.dx !== 0 || delta.dy !== 0)) panByWorldDelta(delta.dx, delta.dy);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardRevealRequest?.requestId]);
+
+  /**
+   * Whether this board can honour a reveal at all. Handed to the reader as the
+   * presence or absence of the callback, so an unsupported layout shows no
+   * action rather than a disabled one that would promise something false.
+   */
+  const canRevealOnBoard = isFreeformLayout;
+
   const openPadletTargetFromContextMenu = (post: Padlet) => {
     if (post.type === 'image') {
       window.setTimeout(() => {
@@ -10617,6 +10698,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           */
           onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
+          /* Freeform only: every other layout is handed nothing, and the
+             reader therefore renders no Show on board action at all. */
+          onRevealBacklinkTargetOnBoard={canRevealOnBoard ? revealKnowledgeBacklinkTargetOnBoard : undefined}
           closeSidePanelRequestId={closeSidePanelRequestId}
           onOpenChange={setIsKnowledgeReaderOpen}
           onOpenKnowledgeDocument={requestKnowledgeDocumentOpen}

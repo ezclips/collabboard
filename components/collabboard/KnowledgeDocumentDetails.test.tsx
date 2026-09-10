@@ -3112,6 +3112,11 @@ function mountPageBacklinks(
   posts: readonly ReturnType<typeof notePost>[],
   initialPageNumber: number,
   documentPages: typeof pages = pages,
+  /**
+   * The board's answer to "can you reveal this?". Undefined is how an
+   * unsupported layout arrives -- not a flag, an absent capability.
+   */
+  onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void,
 ) {
   const onOpenBacklinkTarget = vi.fn();
   host = document.createElement('div');
@@ -3137,6 +3142,7 @@ function mountPageBacklinks(
             initialPageNumber={page}
             onBack={vi.fn()}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
+            onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
           />
         </KnowledgeSourceReferenceProvider>,
       );
@@ -3276,5 +3282,107 @@ describe('the reader shows the Notes linked to the page being read', () => {
     // exactly as it did before this feature existed.
     expect(host!.querySelector('[data-knowledge-used-in-notes="page"]')).toBeNull();
     expect(host!.textContent).not.toContain('Notes on this page');
+  });
+});
+
+// ============================================================================
+// PDF BACKLINK -> SHOW ON BOARD
+// ============================================================================
+
+/**
+ * The Show on board controls in the PAGE-scoped list.
+ *
+ * Scoped deliberately: the document-scoped list renders the same action for
+ * the same Notes, so an unscoped query would count each target twice and say
+ * nothing about either list.
+ */
+function showOnBoardIds(): string[] {
+  const list = host!.querySelector('[data-knowledge-used-in-notes="page"]');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('[data-knowledge-backlink-show-on-board]'))
+    .map((el) => el.getAttribute('data-knowledge-backlink-show-on-board') ?? '');
+}
+
+describe('Show on board sits beside the backlink, never replacing it', () => {
+  const oneNoteOnPageOne = () => ({
+    references: [sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 })],
+    posts: [notePost('note-a', 'Page one Note')],
+  });
+
+  it('1. a board that can reveal offers the action', () => {
+    const { references, posts } = oneNoteOnPageOne();
+    const onReveal = vi.fn();
+    mountPageBacklinks(references, posts, 1, pages, onReveal);
+    expect(showOnBoardIds()).toEqual(['note-a']);
+  });
+
+  it('2. a board that cannot reveal offers nothing -- not a disabled control', () => {
+    // This is how every non-Freeform layout arrives: no callback at all. A
+    // greyed-out button would promise a capability the layout does not have.
+    const { references, posts } = oneNoteOnPageOne();
+    mountPageBacklinks(references, posts, 1);
+    expect(showOnBoardIds()).toEqual([]);
+    // Absent from every backlink list, not merely from the page one.
+    expect(host!.querySelectorAll('[data-knowledge-backlink-show-on-board]')).toHaveLength(0);
+    // ...and the backlink row itself is still fully present.
+    expect(pageBacklinkIds()).toEqual(['note-a']);
+  });
+
+  it('3. it is navigation: no edit authority is passed to the reader at all', () => {
+    // The component is handed no capability prop of any kind and still renders
+    // the action, so a read-only viewer keeps it.
+    const { references, posts } = oneNoteOnPageOne();
+    const onReveal = vi.fn();
+    mountPageBacklinks(references, posts, 1, pages, onReveal);
+    expect(showOnBoardIds()).toEqual(['note-a']);
+
+    const button = host!.querySelector('[data-knowledge-used-in-notes="page"] [data-knowledge-backlink-show-on-board="note-a"]');
+    act(() => { (button as HTMLButtonElement).click(); });
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    expect(onReveal).toHaveBeenCalledWith('note-a');
+  });
+
+  it('6. asking twice for the same Note calls out twice', () => {
+    // The row must not latch: a second ask is a second navigation.
+    const { references, posts } = oneNoteOnPageOne();
+    const onReveal = vi.fn();
+    mountPageBacklinks(references, posts, 1, pages, onReveal);
+
+    const button = host!.querySelector('[data-knowledge-used-in-notes="page"] [data-knowledge-backlink-show-on-board="note-a"]') as HTMLButtonElement;
+    act(() => { button.click(); });
+    act(() => { button.click(); });
+    expect(onReveal).toHaveBeenCalledTimes(2);
+    expect(onReveal.mock.calls).toEqual([['note-a'], ['note-a']]);
+  });
+
+  it('7. two Notes on one page each ask for themselves', () => {
+    const references = [
+      sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 }),
+      sourceRef({ ...ids('r-b', 'note-b'), pageStart: 1, pageEnd: 1 }),
+    ];
+    const posts = [notePost('note-a', 'First Note'), notePost('note-b', 'Second Note')];
+    const onReveal = vi.fn();
+    mountPageBacklinks(references, posts, 1, pages, onReveal);
+    expect(showOnBoardIds().sort()).toEqual(['note-a', 'note-b']);
+
+    act(() => {
+      (host!.querySelector('[data-knowledge-used-in-notes="page"] [data-knowledge-backlink-show-on-board="note-b"]') as HTMLButtonElement).click();
+    });
+    // B's own id, not A's -- no contamination between rows.
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    expect(onReveal).toHaveBeenCalledWith('note-b');
+  });
+
+  it('8. the ordinary backlink click is untouched by the new action', () => {
+    const { references, posts } = oneNoteOnPageOne();
+    const onReveal = vi.fn();
+    const { onOpenBacklinkTarget } = mountPageBacklinks(references, posts, 1, pages, onReveal);
+
+    // Clicking the ROW still opens the Note, exactly as before...
+    const row = host!.querySelector('[data-knowledge-used-in-notes="page"] [data-knowledge-backlink-target="note-a"] button');
+    act(() => { (row as HTMLButtonElement).click(); });
+    expect(onOpenBacklinkTarget).toHaveBeenCalledWith('note-a');
+    // ...and opening is not a reveal.
+    expect(onReveal).not.toHaveBeenCalled();
   });
 });

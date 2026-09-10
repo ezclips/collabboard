@@ -148,6 +148,14 @@ export interface KnowledgeSourceReaderDrawerProps {
    * the source beside the Note it supports is the whole point of F7. The old
    * modal had to close first only because it painted over the editor.
    */
+  /**
+   * Move the board to this Note, when the board can do that.
+   *
+   * Optional on purpose: a layout that cannot reveal spatially is handed
+   * nothing, so the action is absent rather than present-but-dead. Navigation
+   * only -- it never edits, and read authority is all it needs.
+   */
+  onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
   /**
    * BCHAT-C. A monotonic id the board bumps when another right-side surface --
@@ -248,6 +256,7 @@ export default function KnowledgeSourceReaderDrawer({
   onSaveSelectionAsNote,
   closeSidePanelRequestId,
   onOpenBacklinkTarget,
+  onRevealBacklinkTargetOnBoard,
   workspaceTabs = [],
   activeWorkspacePdfId = null,
   workspaceRightPanel = 'closed',
@@ -813,6 +822,7 @@ export default function KnowledgeSourceReaderDrawer({
               onCreateNoteFromPage={onCreateNoteFromPage}
               onSaveSelectionAsNote={onSaveSelectionAsNote}
               onOpenBacklinkTarget={onOpenBacklinkTarget}
+            onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
               onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
               onActivePageChange={handleActivePageChange}
             />
@@ -950,6 +960,7 @@ export default function KnowledgeSourceReaderDrawer({
             onCreateNoteFromPage={onCreateNoteFromPage}
             onSaveSelectionAsNote={onSaveSelectionAsNote}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
+            onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
             // Page and exact-selection handoffs live where the page rows and
             // the selection toolbar already are; both carry identity only,
             // neither writes anything, and both land in the SAME document-
@@ -1020,7 +1031,12 @@ export default function KnowledgeSourceReaderDrawer({
                       {libraryPageSummary}
                     </p>
                   ) : null}
-                  <UsedInNotes scope="document" rows={libraryBacklinkRows} onOpen={onOpenBacklinkTarget} />
+                  <UsedInNotes
+                    scope="document"
+                    rows={libraryBacklinkRows}
+                    onOpen={onOpenBacklinkTarget}
+                    onShowOnBoard={onRevealBacklinkTargetOnBoard}
+                  />
                   <p data-knowledge-reader-panel-title="true" className="mt-2 text-[11px] font-semibold text-gray-700">
                     {sidePanelRightPanel === 'library' ? 'Library' : 'AI'}
                   </p>
@@ -1030,6 +1046,7 @@ export default function KnowledgeSourceReaderDrawer({
                     <PdfWorkspaceLibraryPanel
                       documentId={reader.documentId}
                       onOpenNote={onOpenBacklinkTarget}
+                      onShowNoteOnBoard={onRevealBacklinkTargetOnBoard}
                       canDragNote={canDragSourceNote}
                       onNavigateToPage={navigateReaderToPage}
                       onNavigateToImagePage={navigateReaderToPage}

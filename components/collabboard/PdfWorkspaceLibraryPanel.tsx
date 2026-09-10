@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { Crosshair, RotateCcw } from 'lucide-react';
 import {
   useKnowledgeSourceNoteSummariesForDocument,
   useKnowledgeStandaloneHighlights,
@@ -47,6 +47,14 @@ export interface PdfWorkspaceLibraryPanelProps {
   readonly documentId: string;
   readonly onOpenNote: (targetPadletId: string) => void;
   /**
+   * Move the board to this Note, when the board can do that.
+   *
+   * Optional on purpose: a layout that cannot reveal spatially is handed
+   * nothing, so the action is absent rather than present-but-dead. Navigation
+   * only -- it never edits, and read authority is all it needs.
+   */
+  readonly onShowNoteOnBoard?: (targetPadletId: string) => void;
+  /**
    * The board's existing placement authority, forwarded verbatim. Present only
    * in the docked reader, where a Note row can be dragged back onto a board
    * that is still on screen -- the drag payload is the SAME identity-only one
@@ -69,10 +77,12 @@ export interface PdfWorkspaceLibraryPanelProps {
 function NoteRow({
   note,
   onOpenNote,
+  onShowNoteOnBoard,
   draggable,
 }: {
   note: KnowledgeSourceNoteSummary;
   onOpenNote: (targetPadletId: string) => void;
+  onShowNoteOnBoard?: (targetPadletId: string) => void;
   draggable?: boolean;
 }) {
   return (
@@ -100,6 +110,24 @@ function NoteRow({
           <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">{note.pageHint}</p>
         ) : null}
       </button>
+      {/*
+        A second action beside the row, never instead of it: opening the Note
+        is unchanged, and this additionally takes the board to it. Rendered
+        only where the board can actually honour the request.
+      */}
+      {onShowNoteOnBoard ? (
+        <button
+          type="button"
+          data-pdf-workspace-library-note-show-on-board={note.targetPadletId}
+          onClick={() => onShowNoteOnBoard(note.targetPadletId)}
+          title="Show on board"
+          aria-label={`Show ${note.title} on the board`}
+          className="mt-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium text-gray-400 transition hover:bg-slate-50 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
+        >
+          <Crosshair className="h-3 w-3" aria-hidden="true" />
+          Show on board
+        </button>
+      ) : null}
     </li>
   );
 }
@@ -204,6 +232,7 @@ function HighlightRow({
 export default function PdfWorkspaceLibraryPanel({
   documentId,
   onOpenNote,
+  onShowNoteOnBoard,
   canDragNote,
   onNavigateToPage,
   onNavigateToImagePage,
@@ -311,6 +340,7 @@ export default function PdfWorkspaceLibraryPanel({
                   key={note.targetPadletId}
                   note={note}
                   onOpenNote={onOpenNote}
+                  onShowNoteOnBoard={onShowNoteOnBoard}
                   draggable={canDragNote?.(note.targetPadletId) ?? false}
                 />
               ))}
