@@ -752,6 +752,10 @@ export default function KnowledgeSourceReaderDrawer({
       <PdfWorkspaceLibraryPanel
         documentId={reader.documentId}
         onOpenNote={openBacklinkTarget}
+        /* Passed straight through, exactly as the docked Library site does:
+           its ABSENCE is the layout gate, so an unsupported layout still
+           renders no Show on board here either. */
+        onShowNoteOnBoard={onRevealBacklinkTargetOnBoard}
         onNavigateToPage={navigateReaderToPage}
         onNavigateToImagePage={navigateReaderToPage}
       />

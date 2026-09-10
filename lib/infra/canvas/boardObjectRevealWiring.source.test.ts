@@ -65,16 +65,70 @@ describe('only a layout that can reveal is offered the action', () => {
     expect(libraryPanel).toContain('data-pdf-workspace-library-note-show-on-board={note.targetPadletId}');
   });
 
-  it('the callback reaches both backlink surfaces through the existing plumbing', () => {
-    // Beside `onOpenBacklinkTarget` the whole way down -- no second transport.
-    expect(drawer).toContain('onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;');
-    expect(drawer).toContain('onShowNoteOnBoard={onRevealBacklinkTargetOnBoard}');
-    expect(drawer).toContain('onShowOnBoard={onRevealBacklinkTargetOnBoard}');
-    // Both reader hosts (workspace and docked) are fed it.
-    expect(drawer.match(/onRevealBacklinkTargetOnBoard=\{onRevealBacklinkTargetOnBoard\}/g) ?? [])
+  /**
+   * Every JSX invocation of one component in the drawer, as its own prop text.
+   *
+   * The previous version of this rule asked only whether the drawer contained
+   * `onShowNoteOnBoard` SOMEWHERE, which one wired site satisfied while the
+   * other went without -- and runtime found exactly that: the full-screen
+   * workspace Library listed Notes with no Show on board. A per-invocation
+   * census is the only shape that can catch a second render site.
+   */
+  const invocationsOf = (source: string, component: string): string[] => {
+    const out: string[] = [];
+    let from = 0;
+    for (;;) {
+      const start = source.indexOf(`<${component}`, from);
+      if (start === -1) return out;
+      const end = source.indexOf('/>', start);
+      expect(end, `unterminated <${component}`).toBeGreaterThan(start);
+      out.push(source.slice(start, end + 2));
+      from = end + 2;
+    }
+  };
+
+  it('the drawer really has TWO Library sites, and BOTH are wired', () => {
+    const sites = invocationsOf(drawer, 'PdfWorkspaceLibraryPanel');
+    // The census itself must not silently shrink to one.
+    expect(sites, 'expected the full-screen workspace site and the docked site')
       .toHaveLength(2);
-    // And both of the reader's own lists, page-scoped and document-scoped.
-    expect(details.match(/onShowOnBoard=\{onRevealBacklinkTargetOnBoard\}/g) ?? []).toHaveLength(2);
+    for (const [index, site] of sites.entries()) {
+      expect(site, `Library site ${index} must offer Show on board`)
+        .toContain('onShowNoteOnBoard={onRevealBacklinkTargetOnBoard}');
+      // ...and the ordinary open is untouched on each.
+      expect(site, `Library site ${index} must keep its open callback`)
+        .toMatch(/onOpenNote=\{(openBacklinkTarget|onOpenBacklinkTarget)\}/);
+    }
+  });
+
+  it('both reader hosts are wired for the page-scoped list too', () => {
+    const hosts = invocationsOf(drawer, 'KnowledgeDocumentDetails');
+    expect(hosts).toHaveLength(2);
+    for (const [index, host] of hosts.entries()) {
+      expect(host, `reader host ${index}`)
+        .toContain('onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}');
+      expect(host, `reader host ${index}`).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
+    }
+  });
+
+  it('both of the reader\'s own backlink lists get the action', () => {
+    const lists = invocationsOf(details, 'UsedInNotes');
+    expect(lists).toHaveLength(2);
+    expect(lists.map((list) => /scope="(document|page)"/.exec(list)?.[1]).sort())
+      .toEqual(['document', 'page']);
+    for (const list of lists) {
+      expect(list).toContain('onShowOnBoard={onRevealBacklinkTargetOnBoard}');
+      expect(list).toContain('onOpen={onOpenBacklinkTarget}');
+    }
+  });
+
+  it('the drawer declares the callback once and forwards it -- no second handler', () => {
+    expect(drawer).toContain('onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;');
+    // One prop threaded through; the gate and the handler stay in CanvasClient.
+    expect(drawer).not.toContain('canRevealOnBoard');
+    expect(drawer).not.toContain('resolveRevealAnchorPost');
+    expect(drawer).not.toContain('panByWorldDelta');
+    expect(drawer).not.toContain('BoardObjectRevealRequest');
   });
 });
 
