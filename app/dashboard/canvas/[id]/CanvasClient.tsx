@@ -1857,6 +1857,72 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   );
 
   // ==========================================================================
+  // PDF backlink -> board reveal request ("Show on board")
+  // ==========================================================================
+  /**
+   * The ask, and Freeform's answer to it.
+   *
+   * BOTH live here, with the other cross-surface requests, because both are
+   * hooks: the component returns early while it is still loading, and a hook
+   * declared after that return would be skipped on those renders. React counts
+   * hooks per render, so that is precisely the "change in the order of Hooks"
+   * / "rendered more hooks than during the previous render" crash -- the reveal
+   * hooks used to sit further down, beside the handler that raises them.
+   *
+   * The handler itself is an ordinary function and stays down there with the
+   * other backlink behaviour; only the hooks had to move.
+   *
+   * A request is consumed by its id, so revealing the same Note twice moves
+   * the camera twice. Same idiom as `knowledgeSourceRequestIdRef` below.
+   */
+  const boardRevealRequestIdRef = useRef(0);
+  const [boardRevealRequest, setBoardRevealRequest] = useState<BoardObjectRevealRequest | null>(null);
+
+  /**
+   * Keyed on the request id, so a repeat ask for the same Note runs again.
+   * Measured here rather than at the call site because the board may still be
+   * settling when the ask arrives.
+   *
+   * Every step fails closed rather than moving the camera on a guess: an
+   * unknown id, a post that is not a Note, a Note grouped into a container
+   * whose parent cannot be resolved, an unmeasurable viewport. Each returns
+   * null, and null means stay put -- panning to arbitrary coordinates because
+   * a number was missing is worse than doing nothing.
+   */
+  useEffect(() => {
+    if (!boardRevealRequest || !isFreeformLayout) return;
+    const target = padlets.find((padlet) => padlet.id === boardRevealRequest.targetPadletId);
+    if (!target || !isKnowledgeBacklinkNote(target)) return;
+
+    const viewport = containerRef.current;
+    const worldOrigin = freeformWorldOriginRef.current;
+    if (!viewport || !worldOrigin) return;
+
+    // Where the Note is actually DRAWN, which is not always where its own
+    // coordinates say: a Note grouped into a container is rendered inside its
+    // parent and keeps the stale position it had when it was loose.
+    const anchor = resolveRevealAnchorPost(target, padlets);
+    if (!anchor) return;
+
+    const delta = resolveRevealPanDelta(
+      getFallbackMinimapItem(anchor),
+      getViewportWorldRect({
+        viewportRect: viewport.getBoundingClientRect(),
+        clientLeft: viewport.clientLeft,
+        clientTop: viewport.clientTop,
+        clientWidth: viewport.clientWidth,
+        clientHeight: viewport.clientHeight,
+        worldOriginRect: worldOrigin.getBoundingClientRect(),
+        zoom: canvasZoom,
+      }),
+    );
+    // The same world-space camera the minimap drives. No second viewport
+    // system, no zoom change, and no scroll written behind the camera's back.
+    if (delta && (delta.dx !== 0 || delta.dy !== 0)) panByWorldDelta(delta.dx, delta.dy);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardRevealRequest?.requestId]);
+
+  // ==========================================================================
   // P6J-F6-B2 -- source navigation request (Note -> exact document/page)
   // ==========================================================================
   // A request is consumed at most once by the reader, so re-opening the same
@@ -8228,21 +8294,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    *
    * An ASK, not a camera move. The reader knows a Note id and nothing else;
    * which layout is on screen and how that layout reveals anything is the
-   * board's business, so this raises a request and the consumer below answers
-   * it. Only Freeform answers today.
+   * board's business, so this raises a request and Freeform answers it.
    *
-   * The request carries a fresh id every time, which is what makes it an event
-   * rather than a state: revealing the same Note twice must move the camera
-   * twice, and a consumer comparing target ids alone would ignore the second
-   * ask. Same idiom as the existing `closeSidePanelRequestId` counter.
+   * This is a plain function, deliberately: it sits AFTER the loading return
+   * above, where a hook could never go. The request state and the effect that
+   * consumes it live with the other cross-surface requests near the top of the
+   * component, which is the only place they can be called on every render.
    *
    * Navigation only -- nothing here writes, and the Note still opens through
    * the ordinary backlink path so the existing viewer/editor and
    * workspace-yield rules carry on untouched.
    */
-  const boardRevealRequestIdRef = useRef(0);
-  const [boardRevealRequest, setBoardRevealRequest] = useState<BoardObjectRevealRequest | null>(null);
-
   const revealKnowledgeBacklinkTargetOnBoard = (targetPadletId: string) => {
     const target = padlets.find((padlet) => padlet.id === targetPadletId);
     // A target that is gone, or was never a Note, raises no request at all.
@@ -8253,52 +8315,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // The Note itself opens exactly as an ordinary backlink click opens it.
     openKnowledgeBacklinkTarget(targetPadletId);
   };
-
-  /**
-   * Freeform's answer to a reveal request.
-   *
-   * Keyed on the request id, so a repeat ask for the same Note runs again.
-   * Measured here rather than at the call site because the board may still be
-   * settling when the ask arrives.
-   *
-   * Every step fails closed rather than moving the camera on a guess: an
-   * unknown id, a post that is not a Note, a Note with no usable placement, an
-   * unmeasurable viewport. `resolveRevealPanDelta` returns null for each, and
-   * null means stay put -- panning to arbitrary coordinates because a number
-   * was missing is worse than doing nothing.
-   */
-  useEffect(() => {
-    if (!boardRevealRequest || !isFreeformLayout) return;
-    const target = padlets.find((padlet) => padlet.id === boardRevealRequest.targetPadletId);
-    if (!target || !isKnowledgeBacklinkNote(target)) return;
-
-    const viewport = containerRef.current;
-    const worldOrigin = freeformWorldOriginRef.current;
-    if (!viewport || !worldOrigin) return;
-
-    // Where the Note is actually DRAWN, which is not always where its own
-    // coordinates say: a Note grouped into a container is rendered inside its
-    // parent and keeps the stale position it had when it was loose.
-    const anchor = resolveRevealAnchorPost(target, padlets);
-    if (!anchor) return;
-
-    const delta = resolveRevealPanDelta(
-      getFallbackMinimapItem(anchor),
-      getViewportWorldRect({
-        viewportRect: viewport.getBoundingClientRect(),
-        clientLeft: viewport.clientLeft,
-        clientTop: viewport.clientTop,
-        clientWidth: viewport.clientWidth,
-        clientHeight: viewport.clientHeight,
-        worldOriginRect: worldOrigin.getBoundingClientRect(),
-        zoom: canvasZoom,
-      }),
-    );
-    // The same world-space camera the minimap drives. No second viewport
-    // system, no zoom change, and no scroll written behind the camera's back.
-    if (delta && (delta.dx !== 0 || delta.dy !== 0)) panByWorldDelta(delta.dx, delta.dy);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boardRevealRequest?.requestId]);
 
   /**
    * Whether this board can honour a reveal at all. Handed to the reader as the

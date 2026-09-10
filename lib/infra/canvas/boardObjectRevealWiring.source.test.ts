@@ -82,6 +82,43 @@ describe('only a layout that can reveal is offered the action', () => {
 // A reveal is an event, and it moves the camera this board already has
 // ============================================================================
 
+describe('every reveal hook runs on every render', () => {
+  // The regression this guards: the reveal hooks were first written beside the
+  // handler that raises them, which sits AFTER CanvasClient's loading return.
+  // On a loading render React saw fewer hooks than on a loaded one -- "change
+  // in the order of Hooks", then "rendered more hooks than during the previous
+  // render", then a Fast Refresh reload loop.
+  //
+  // Read with comments intact: the ORDER of real lines is the whole subject.
+  const raw = readFileSync(resolve(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+  const at = (needle: string) => {
+    const index = raw.indexOf(needle);
+    expect(index, `not found: ${needle}`).toBeGreaterThan(-1);
+    return index;
+  };
+
+  it('the component has exactly one conditional return, and the hooks precede it', () => {
+    const earlyReturn = at('if (!hasMounted || loading) {');
+    expect(at('const boardRevealRequestIdRef = useRef(0);')).toBeLessThan(earlyReturn);
+    expect(at('const [boardRevealRequest, setBoardRevealRequest]')).toBeLessThan(earlyReturn);
+    expect(at('}, [boardRevealRequest?.requestId]);')).toBeLessThan(earlyReturn);
+  });
+
+  it('no hook of any kind is called after that return', () => {
+    const body = raw.slice(at('if (!hasMounted || loading) {'));
+    const stripped = body.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const hooks = stripped.match(/use(State|Effect|Memo|Callback|Ref|LayoutEffect|Reducer|Context)\(/g) ?? [];
+    expect(hooks, `hooks after the early return: ${hooks.join(', ')}`).toHaveLength(0);
+  });
+
+  it('the handler that raises the request is a plain function, not a hook', () => {
+    // It legitimately lives after the return; it must therefore never become
+    // a useCallback without also moving.
+    expect(raw).toContain('const revealKnowledgeBacklinkTargetOnBoard = (targetPadletId: string) => {');
+    expect(raw).not.toContain('const revealKnowledgeBacklinkTargetOnBoard = useCallback');
+  });
+});
+
 describe('the reveal request and the camera it drives', () => {
   it('every ask carries a fresh id, so the same Note can be revealed twice', () => {
     expect(canvasClient).toContain('const boardRevealRequestIdRef = useRef(0);');
