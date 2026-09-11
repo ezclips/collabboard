@@ -11,8 +11,6 @@ import {
 import { BOARD_AI_CHAT_MESSAGE_MAX } from '@/lib/domain/ai/boardAiChatClient';
 import { boardAiCitationIdentityKey } from '@/lib/domain/ai/boardAiChatCitation';
 import type { BoardAiCitationItem } from '@/lib/domain/ai/boardAiChatCitation';
-import { boardAiNoteEvidenceFromCitations } from '@/lib/domain/ai/boardAiNoteProvenance';
-import type { BoardAiNoteEvidence } from '@/lib/domain/ai/boardAiNoteProvenance';
 import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
   addBoardAiDraftContext,
@@ -105,15 +103,6 @@ export interface BoardAiChatDrawerProps {
 export interface BoardAiAssistantNoteSaveRequest {
   readonly messageId: string;
   readonly content: string;
-  /**
-   * The answer's VALIDATED supporting evidence -- 0..N canonical citations the
-   * server already vouched for, in the shape a source_reference can store.
-   *
-   * Not the model's context: a source the model was shown and never cited is
-   * not provenance, and an answer that cited nothing arrives here with an
-   * empty array and saves unsourced. The browser never adds to this set.
-   */
-  readonly evidence: readonly BoardAiNoteEvidence[];
 }
 
 /** A thread the user has, or the not-yet-created one a New chat represents. */
@@ -125,8 +114,6 @@ const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
 /** A stable empty default, so an uncited answer is not a new array each render. */
 const NO_CITATIONS: readonly BoardAiCitationItem[] = [];
 
-/** A stable empty default, so an uncited answer is not a new array each render. */
-const NO_NOTE_EVIDENCE: readonly BoardAiNoteEvidence[] = [];
 
 /**
  * The sources one answer shows, each named once.
@@ -252,24 +239,19 @@ function mergeMandatoryDocumentContext(
   ].slice(0, BOARD_AI_DRAFT_CONTEXT_MAX);
 }
 
-/**
- * The evidence one assistant answer may claim, read from its OWN validated
- * citations.
+/*
+ * There is deliberately NO evidence derivation here any more.
  *
- * Replaces a backward walk to the preceding user message's context. That
- * answered "what was the model shown", which is a different question: it
- * credited sources the answer never used, could only ever produce one
- * reference, and flattened an exact selection to its page on the way.
+ * The browser used to turn `message.citations` into the provenance a Note
+ * would be saved with. But `board_ai_messages` is writable by the thread's
+ * owner, so that JSON is not proof of anything the AI route produced -- a
+ * user could hand-write an assistant row and mint a citation for any page
+ * their board can read. The save now sends the message ID and nothing else,
+ * and the server recovers provenance from the signed row it stored itself.
  *
- * An answer with no validated citations yields an empty set, and saving is
- * still offered -- the Note is simply unsourced. There is deliberately no
- * fallback to the open document, the active page or the live selection.
+ * `message.citations` remains what it always was for DISPLAY: the sanitized
+ * chips below, which carry no proof and confer no authority.
  */
-function assistantNoteEvidenceForMessage(
-  message: BoardAiChatMessageView,
-): readonly BoardAiNoteEvidence[] {
-  return boardAiNoteEvidenceFromCitations(message.citations ?? null);
-}
 
 export default function BoardAiChatDrawer({
   boardId,
@@ -599,7 +581,6 @@ export default function BoardAiChatDrawer({
 
   const saveAssistantAsNote = useCallback(async (
     message: BoardAiChatMessageView,
-    source: Omit<BoardAiAssistantNoteSaveRequest, 'messageId' | 'content'>,
   ) => {
     if (!onSaveAssistantAsNote) return;
     // Three guards, one rule: this message must not already be saved, must not
@@ -617,10 +598,11 @@ export default function BoardAiChatDrawer({
     assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saving' };
     setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
     try {
+      // The id and the visible text. No provenance: the server resolves that
+      // from the message it signed.
       await onSaveAssistantAsNote({
         messageId: message.id,
         content: message.content,
-        ...source,
       });
       assistantNoteSaveStateRef.current = { ...assistantNoteSaveStateRef.current, [message.id]: 'saved' };
       setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
@@ -911,11 +893,6 @@ export default function BoardAiChatDrawer({
         ) : null}
 
         {messages.map((message, index) => {
-          // The answer's own validated evidence -- possibly none, which is a
-          // saveable outcome and not a reason to withhold the action.
-          const assistantNoteEvidence = message.role === 'assistant'
-            ? assistantNoteEvidenceForMessage(message)
-            : NO_NOTE_EVIDENCE;
           const noteSaveState: AssistantNoteSaveState | undefined = savedNoteMessageIdSet.has(message.id)
             ? 'saved'
             : pendingNoteSaveMessageIdSet.has(message.id)
@@ -1010,7 +987,7 @@ export default function BoardAiChatDrawer({
                     data-board-ai-chat-save-message-id={message.id}
                     className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-default disabled:border-green-200 disabled:bg-green-50 disabled:text-green-700"
                     disabled={noteSaveState === 'saving' || noteSaveState === 'saved'}
-                    onClick={() => { void saveAssistantAsNote(message, { evidence: assistantNoteEvidence }); }}
+                    onClick={() => { void saveAssistantAsNote(message); }}
                   >
                     {noteSaveState === 'saved' ? (
                       <Check className="h-3 w-3" aria-hidden="true" />

@@ -257,6 +257,8 @@ export class SupabaseBoardAiThreadRepository {
     const { data, error } = await this.client
       .from('board_ai_messages')
       .insert({
+        // Only when the caller had to know the id before the row existed.
+        ...(input.id ? { id: input.id } : {}),
         thread_id: threadId,
         role: input.role,
         content: input.content,

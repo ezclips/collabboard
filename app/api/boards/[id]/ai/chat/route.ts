@@ -1,4 +1,6 @@
+import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
+import { createBoardAiProvenanceProof } from '@/lib/server/ai/boardAiProvenanceProof';
 import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { z } from 'zod';
@@ -332,7 +334,35 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      */
     const citations = buildBoardAiCitationEnvelope(answer.tokens, modelContext);
 
+    /**
+     * The citation envelope, signed.
+     *
+     * `board_ai_messages` is writable by the thread's owner, so a stored
+     * envelope is not by itself evidence that THIS route produced it: a user
+     * can insert an assistant row citing any page their board can read. The
+     * proof is what separates provenance the server authorized from JSON a
+     * browser wrote, and the Save-as-Note path refuses anything unsigned.
+     *
+     * The id is chosen here rather than by the database because it is part of
+     * what is signed -- a signature that did not bind the message could be
+     * lifted onto another one.
+     */
+    const assistantMessageId = crypto.randomUUID();
+    const signedCitations = citations
+      ? {
+        ...citations,
+        proof: createBoardAiProvenanceProof({
+          messageId: assistantMessageId,
+          threadId: thread.id,
+          boardId: String(scopedBoard),
+          content: text,
+          citationItems: citations.items as unknown as readonly Record<string, unknown>[],
+        }),
+      }
+      : null;
+
     const assistant = await repository.appendMessage(scopedUser, scopedBoard, thread.id, {
+      id: assistantMessageId,
       role: 'assistant',
       content: text,
       // Names only, and only on the reply that was actually generated.
@@ -340,8 +370,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       model: result.model,
       // Present only when the answer actually cited something: an uncited
       // reply carries no citation field at all, exactly as it carries no
-      // context of its own.
-      ...(citations ? { citations: citations as unknown as BoardAiJsonValue } : {}),
+      // context of its own. The proof rides inside that same envelope and is
+      // stripped by `boardAiCitationsFromStored` before anything reaches the
+      // browser.
+      ...(signedCitations ? { citations: signedCitations as unknown as BoardAiJsonValue } : {}),
     });
     if (!assistant.ok) {
       // The thread id travels even on this failure. The answer was generated

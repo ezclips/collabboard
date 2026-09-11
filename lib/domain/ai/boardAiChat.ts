@@ -79,6 +79,14 @@ export interface CreateBoardAiThreadInput {
 }
 
 export interface AppendBoardAiMessageInput {
+  /**
+   * A server-chosen row id, when the caller must know it BEFORE the insert.
+   *
+   * The AI route signs an assistant message's provenance over its own id, so
+   * the id has to exist first. Omitted everywhere else, and the database
+   * default still applies.
+   */
+  readonly id?: string;
   readonly role: BoardAiMessageRole;
   readonly content: string;
   readonly provider?: string | null;

@@ -96,6 +96,9 @@ const modelContext = () =>
 beforeEach(async () => {
   vi.clearAllMocks();
   vi.resetModules();
+  // The route signs the citation envelope it builds, so it needs a key. A
+  // deterministic test key: nothing here reads the real one.
+  process.env.BOARD_AI_PROVENANCE_SIGNING_KEY = Buffer.alloc(32, 13).toString('base64');
   mocks.cookies.mockResolvedValue({});
   mocks.createRouteHandlerClient.mockReturnValue({
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })) },
@@ -422,17 +425,23 @@ describe('grounded citations', () => {
     expect(assistant.content).toBe('Page two says so.');
     expect(JSON.stringify(repo.appended)).not.toContain('COLLABBOARD_CITATIONS');
     // The citation is built from the block the server resolved and sent.
-    expect(assistant.citations).toEqual({
-      version: 1,
-      items: [{
-        type: 'knowledge-page',
-        knowledgeDocumentId: DOC_ID,
-        pageNumber: 2,
-        label: 'source.pdf - page 2',
-      }],
-    });
-    // The POST response carries the same sanitized shape a reload would.
-    expect(body.message.citations).toEqual(assistant.citations);
+    const storedCitations = assistant.citations as Record<string, unknown>;
+    expect(storedCitations.version).toBe(1);
+    expect(storedCitations.items).toEqual([{
+      type: 'knowledge-page',
+      knowledgeDocumentId: DOC_ID,
+      pageNumber: 2,
+      label: 'source.pdf - page 2',
+    }]);
+    // The STORED envelope also carries the provenance proof, which is what
+    // lets Save as Note tell this row apart from one a user hand-wrote.
+    expect(storedCitations.proof).toMatchObject({ version: 1, algorithm: 'HMAC-SHA-256' });
+
+    // The POST response carries the sanitized shape a reload would -- items
+    // only. The proof is server-only and must never cross this boundary.
+    expect(body.message.citations).toEqual({ version: 1, items: storedCitations.items });
+    expect(JSON.stringify(body)).not.toContain('proof');
+    expect(JSON.stringify(body)).not.toContain('signature');
     expect(body.message.content).toBe('Page two says so.');
   });
 

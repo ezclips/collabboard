@@ -919,14 +919,17 @@ describe('PDF workspace document-scoped mode', () => {
 
     await click('[data-board-ai-chat-action="save-note"]');
 
-    // The answer's OWN validated citation decides this, not the reader's
-    // current page and not the preceding user message's context.
+    // The request names the message and nothing else. Provenance is recovered
+    // server-side from the signed row -- the browser cannot state it, and a
+    // request that could would be a way to mint citations.
     expect(onSave).toHaveBeenCalledWith({
       messageId: 'assistant-a',
       content: 'answer body without metadata',
-      evidence: [{ sourceDocumentId: DOC_A, pageStart: 3, pageEnd: 3, charStart: null, charEnd: null }],
     });
-    expect(JSON.stringify(onSave.mock.calls[0][0])).not.toMatch(/deepseek|provider|model/i);
+    const request = JSON.stringify(onSave.mock.calls[0][0]);
+    expect(request).not.toMatch(/deepseek|provider|model/i);
+    expect(request).not.toContain(DOC_A);
+    expect(request).not.toContain('evidence');
   });
 
   /**
@@ -947,20 +950,20 @@ describe('PDF workspace document-scoped mode', () => {
     },
   });
 
-  it('CONTEXT IS NOT PROVENANCE: context A+B+C, cited A+C, saved with A+C only', async () => {
+  it('CONTEXT IS NOT PROVENANCE: the browser sends no source, whatever it was shown', async () => {
+    // The message's citations and the user's context both mention documents.
+    // Neither reaches the request: a browser that could name a source could
+    // name one the answer never used.
     const onSave = vi.fn().mockResolvedValue(undefined);
     await mountPdfSaveHarness({
       initialSessions: sessionWith(
-        // cited: A p4 and A p31
         [
           { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 4, label: 'A p4' },
           { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 31, label: 'A p31' },
         ],
-        // context also carried B p9, which the answer never cited
         [
           { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 4 },
           { type: 'knowledge-page', knowledgeDocumentId: DOC_B, pageNumber: 9 },
-          { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 31 },
         ],
       ),
       onSave,
@@ -969,35 +972,35 @@ describe('PDF workspace document-scoped mode', () => {
     await click('[data-board-ai-chat-action="save-note"]');
 
     const request = onSave.mock.calls[0][0];
-    expect(request.evidence).toEqual([
-      { sourceDocumentId: DOC_A, pageStart: 4, pageEnd: 4, charStart: null, charEnd: null },
-      { sourceDocumentId: DOC_A, pageStart: 31, pageEnd: 31, charStart: null, charEnd: null },
-    ]);
-    // The context-only source is nowhere in the request.
-    expect(JSON.stringify(request)).not.toContain(DOC_B);
+    expect(Object.keys(request).sort()).toEqual(['content', 'messageId']);
+    const serialized = JSON.stringify(request);
+    for (const leak of [DOC_A, DOC_B, 'evidence', 'pageStart', 'charStart', 'sourceDocumentId']) {
+      expect(serialized, leak).not.toContain(leak);
+    }
   });
 
-  it('ZERO validated citations: Save as Note still offered, and saves with no evidence', async () => {
+  it('ZERO validated citations: Save as Note is still offered and still saves', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     await mountPdfSaveHarness({
-      // The user's context DID carry PDF A. The answer cited nothing.
       initialSessions: sessionWith(null, [
         { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 3 },
       ]),
       onSave,
     });
 
-    // The action is available -- an uncited answer is still a saveable Note.
+    // An uncited answer is still a saveable Note -- the server will simply
+    // find no proven provenance and save it unsourced.
     expect(q('[data-board-ai-chat-action="save-note"]')).not.toBeNull();
     await click('[data-board-ai-chat-action="save-note"]');
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave.mock.calls[0][0].evidence).toEqual([]);
-    // No fallback to the open document, the active page or anything else.
-    expect(JSON.stringify(onSave.mock.calls[0][0])).not.toContain(DOC_A);
+    expect(onSave.mock.calls[0][0]).toEqual({ messageId: 'assistant-a', content: 'the answer' });
   });
 
-  it('EXACT SELECTION: a cited selection reaches the save with its span intact', async () => {
+  it('an EXACT SELECTION citation still sends no offsets -- the server owns the span', async () => {
+    // The displayed chip knows the span; the save request must not carry it.
+    // Server-side re-derivation from the stored page is what makes it
+    // trustworthy (see lib/server/ai/boardAiNoteProvenance.test.ts).
     const onSave = vi.fn().mockResolvedValue(undefined);
     await mountPdfSaveHarness({
       initialSessions: sessionWith([{
@@ -1012,27 +1015,21 @@ describe('PDF workspace document-scoped mode', () => {
     });
 
     await click('[data-board-ai-chat-action="save-note"]');
-
-    // Page-only provenance here would be a silent degradation of a location
-    // the server already knew exactly.
-    expect(onSave.mock.calls[0][0].evidence).toEqual([
-      { sourceDocumentId: DOC_A, pageStart: 5, pageEnd: 5, charStart: 120, charEnd: 214 },
-    ]);
+    const serialized = JSON.stringify(onSave.mock.calls[0][0]);
+    expect(serialized).not.toContain('120');
+    expect(serialized).not.toContain('214');
+    expect(serialized).not.toContain(DOC_A);
   });
 
-  it('MULTIPLE citations across documents become multiple references', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    await mountPdfSaveHarness({
-      initialSessions: sessionWith([
-        { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 14, label: 'A p14' },
-        { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 37, label: 'A p37' },
-        { type: 'knowledge-page', knowledgeDocumentId: DOC_B, pageNumber: 8, label: 'B p8' },
-      ]),
-      onSave,
-    });
-
-    await click('[data-board-ai-chat-action="save-note"]');
-    expect(onSave.mock.calls[0][0].evidence).toHaveLength(3);
+  it('the drawer derives no evidence at all any more', () => {
+    // Structural: the helper that turned citations into provenance is gone,
+    // and the module no longer imports the reducer.
+    const drawerSource = fs.readFileSync('components/collabboard/BoardAiChatDrawer.tsx', 'utf8');
+    expect(drawerSource).not.toContain('assistantNoteEvidenceForMessage');
+    expect(drawerSource).not.toContain('boardAiNoteEvidenceFromCitations');
+    expect(drawerSource).not.toContain('BoardAiNoteEvidence');
+    // ...and the request type has no provenance field to fill.
+    expect(drawerSource).not.toContain('readonly evidence:');
   });
 
   it('a failing save leaves the message saveable again -- retry is not lost', async () => {
@@ -1075,15 +1072,11 @@ describe('PDF workspace document-scoped mode', () => {
     await render(DOC_B, 'Beta.pdf', 5);
     await click('[data-board-ai-chat-action="save-note"]');
 
+    // Each save names its own message. Which sources each answer cited is the
+    // server's business, recovered from that message's signed row.
     expect(onSave.mock.calls.map((call) => call[0])).toEqual([
-      expect.objectContaining({
-        content: 'answer A',
-        evidence: [{ sourceDocumentId: DOC_A, pageStart: 2, pageEnd: 2, charStart: null, charEnd: null }],
-      }),
-      expect.objectContaining({
-        content: 'answer B',
-        evidence: [{ sourceDocumentId: DOC_B, pageStart: 5, pageEnd: 5, charStart: null, charEnd: null }],
-      }),
+      { messageId: 'assistant-a', content: 'answer A' },
+      { messageId: 'assistant-b', content: 'answer B' },
     ]);
   });
 
@@ -1344,32 +1337,36 @@ describe('PDF workspace document-scoped mode', () => {
     expect(body).toContain('title: \'AI Note\'');
     expect(body).toContain('knowledgeSourceSelectionToNoteHtml(request.content)');
     expect(body).not.toMatch(/request\.provider|request\.model|provider:|model:/);
-    // 0..N references, each from the validated evidence set, exact span kept.
-    expect(body).toContain('const evidence = request.evidence ?? [];');
-    expect(body).toContain('for (const item of evidence) {');
-    expect(body).toContain('pageStart: item.pageStart');
-    expect(body).toContain('pageEnd: item.pageEnd');
-    expect(body).toContain('charStart: item.charStart');
-    expect(body).toContain('charEnd: item.charEnd');
-    expect(body).toContain('quoteText: null');
-    expect(body).toContain('region: null');
-    // The context-derived rule is gone, not merely bypassed.
-    expect(body).not.toContain('request.pageNumber');
-    expect(body).not.toContain('request.sourceDocumentId');
-    expect(body.indexOf('await insertPostAndSelectOrThrow')).toBeLessThan(body.indexOf('await persistKnowledgeSourceReference'));
+    // Provenance is asked for, not asserted: the client names the message and
+    // the Note, and the server resolves what that answer proved it cited.
+    expect(body).toContain('/ai/notes/provenance');
+    expect(body).toContain('JSON.stringify({ messageId: request.messageId, targetPadletId: created.id })');
+    // No source of any kind travels from here. Checked against CODE only: the
+    // slice runs up to the next callback, whose doc comment legitimately
+    // mentions the selection path's own helper by name.
+    const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const forbidden of [
+      'request.evidence', 'request.pageNumber', 'request.sourceDocumentId',
+      'sourceDocumentId:', 'charStart:', 'selectedText:', 'persistKnowledgeSourceReference',
+    ]) {
+      expect(code, forbidden).not.toContain(forbidden);
+    }
+    expect(body.indexOf('await insertPostAndSelectOrThrow')).toBeLessThan(body.indexOf('/ai/notes/provenance'));
     expect(body.indexOf('await persistKnowledgeSourceReference')).toBeLessThan(body.indexOf('setPadlets'));
     // MULTI-REFERENCE ROLLBACK: the delete sits INSIDE the evidence loop, so a
     // failure on the third reference removes the Note (and, by the schema's
     // cascade, the two already written) rather than leaving a Note claiming
     // partial provenance.
     expect(body).toContain('await deletePostOrThrow(created.id)');
-    const loopStart = body.indexOf('for (const item of evidence) {');
-    expect(loopStart).toBeGreaterThan(-1);
-    expect(body.indexOf('await deletePostOrThrow(created.id)')).toBeGreaterThan(loopStart);
-    expect(body.indexOf("throw new Error('source_link_failed')")).toBeGreaterThan(loopStart);
-    // Success is published only after the loop completes.
+    const callStart = body.indexOf('/ai/notes/provenance');
+    expect(callStart).toBeGreaterThan(-1);
+    // A refused or partial provenance write rolls the Note back rather than
+    // leaving one claiming a source it cannot prove.
+    expect(body.indexOf('await deletePostOrThrow(created.id)')).toBeGreaterThan(callStart);
+    expect(body.indexOf("throw new Error('source_link_failed')")).toBeGreaterThan(callStart);
+    // Success is published only after provenance has been attached.
     expect(body.indexOf('setPadlets')).toBeGreaterThan(body.indexOf('await deletePostOrThrow(created.id)'));
-    expect(body.indexOf("toast.success('Note saved')")).toBeGreaterThan(loopStart);
+    expect(body.indexOf("toast.success('Note saved')")).toBeGreaterThan(callStart);
     expect(body).not.toContain('setIsNoteEditorOpen');
 
     const persist = CLIENT.slice(

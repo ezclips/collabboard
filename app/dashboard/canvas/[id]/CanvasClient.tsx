@@ -2652,7 +2652,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const savePdfAssistantAnswerAsNote = useCallback(async (request: BoardAiAssistantNoteSaveRequest) => {
     if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');
-    const evidence = request.evidence ?? [];
 
     const noteId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
@@ -2679,30 +2678,38 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const created = await insertPostAndSelectOrThrow(note as any) as Padlet | null;
     if (!created) throw new Error('note_save_failed');
 
-    // Every validated citation, in order, through the one source-reference
-    // authority. The exact span is carried when the citation had one: a
-    // selection the model cited must not arrive on the board as a page.
-    for (const item of evidence) {
-      const draft: KnowledgeSourceReferenceDraft = {
-        sourceDocumentId: item.sourceDocumentId,
-        pageStart: item.pageStart,
-        pageEnd: item.pageEnd,
-        quoteText: null,
-        charStart: item.charStart,
-        charEnd: item.charEnd,
-        selectedText: null,
-        region: null,
-        appliedRotation: null,
-      };
-      const linked = await persistKnowledgeSourceReference(created.id, draft, null);
-      if (!linked) {
-        // Partial provenance is not a Note. Deleting the Note removes the
-        // references already written for it, so there is nothing left behind
-        // claiming a source it does not have.
-        await deletePostOrThrow(created.id);
-        throw new Error('source_link_failed');
-      }
+    // The server decides what this answer cited. This request names the
+    // message and the Note and carries no source of its own -- the route has
+    // no parameter through which one could be supplied.
+    let referenceCount = 0;
+    try {
+      const response = await fetch(
+        `/api/boards/${encodeURIComponent(canvasId)}/ai/notes/provenance`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId: request.messageId, targetPadletId: created.id }),
+        },
+      );
+      if (!response.ok) throw new Error(`provenance rejected with ${response.status}`);
+      const payload = await response.json().catch(() => null);
+      referenceCount = typeof (payload as { referenceCount?: unknown } | null)?.referenceCount === 'number'
+        ? (payload as { referenceCount: number }).referenceCount
+        : 0;
+    } catch (error) {
+      // Partial or unverifiable provenance is not a Note. Deleting the Note
+      // removes any references written for it by the schema's own cascade, so
+      // nothing is left behind claiming a source it cannot prove.
+      console.error('AI note provenance failed:', error);
+      await deletePostOrThrow(created.id);
+      throw new Error('source_link_failed');
     }
+
+    // No generation bump here: exactly two sites own that (the scope clear and
+    // the successful-write upsert), and this path needs neither. Adding the
+    // Note to `padlets` changes the batch read's target key, so the source
+    // references the server just wrote are re-read by the existing effect.
+    void referenceCount;
 
     setPadlets((current) => [...current, created]);
     toast.success('Note saved');
@@ -2713,7 +2720,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     getNewPostPosition,
     insertPostAndSelectOrThrow,
     padlets,
-    persistKnowledgeSourceReference,
     setPadlets,
   ]);
 

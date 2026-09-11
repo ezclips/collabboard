@@ -267,9 +267,13 @@ describe('16-20. persistence order and metadata', () => {
   it('18-19. the assistant reply persists with provider and model; the user turn has neither', async () => {
     const repo = repository();
     await post({ message: 'hello' });
-    expect(repo.appended[1]).toEqual({
+    // The id is server-chosen now, because the provenance proof is signed over
+    // it -- a signature that did not bind the message could be lifted onto
+    // another one. Its value is a UUID, so it is matched by shape.
+    expect(repo.appended[1]).toMatchObject({
       role: 'assistant', content: 'answer', provider: 'deepseek', model: 'deepseek-chat',
     });
+    expect((repo.appended[1] as { id?: unknown }).id).toMatch(/^[0-9a-f-]{36}$/);
     expect(repo.appended[0]).not.toHaveProperty('provider');
   });
 
