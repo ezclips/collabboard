@@ -532,6 +532,8 @@ describe('canvas toolbar PDF entry point', () => {
       chronoMode: null,
       canManageCanvasShare: false,
       canUseFreeformEditButton: false,
+      // CORRECTION_2: the Create group asks the BOARD, not the workspace role.
+      canCreateBoardContent: false,
       isDrawingLayout: false,
       isDirectPdfLayout: false,
       ...flags,

@@ -79,7 +79,8 @@ describe('P6J-F5 source note wiring', () => {
     expect(handler).toContain("id: 'new'");
     expect(handler).toContain("type: 'text'");
     // Gated on the same capability as the creation toolbar, and fails closed.
-    expect(handler).toMatch(/if \(!canUseCanvasToolbar\) return;/);
+    // CORRECTION_2: Note creation asks the board, not the workspace role.
+    expect(handler).toMatch(/if \(!canEditBoardContent\) return;/);
     // Nothing is written here.
     expect(handler).not.toContain('.insert(');
     expect(handler).not.toContain('knowledge/references');
@@ -599,8 +600,8 @@ describe('P6J-F8-B1 source clip drop', () => {
   it('re-checks the creation capability before staging the editor', () => {
     const handler = dropHandler();
     // The SAME signal the creation toolbar and the click path are gated on.
-    expect(handler).toContain('if (!canUseCanvasToolbar || !canvasId) return true;');
-    const capabilityIndex = handler.indexOf('if (!canUseCanvasToolbar');
+    expect(handler).toContain('if (!canEditBoardContent || !canvasId) return true;');
+    const capabilityIndex = handler.indexOf('if (!canEditBoardContent');
     const stageIndex = handler.indexOf('setPadletToEdit({');
     // A forged DataTransfer from a viewer never reaches the staging call: the
     // absent grip is defence in depth, not the defence.
@@ -786,7 +787,7 @@ describe('KNI-R2 existing-Note source clip drop', () => {
     const bailIndex = handler.indexOf('if (!payload) return false;');
     const stopIndex = handler.indexOf('event.stopPropagation();');
     const typeGuardIndex = handler.indexOf("targetPadlet.type !== 'text' && targetPadlet.type !== 'note'");
-    const capabilityIndex = handler.indexOf('if (!canUseCanvasToolbar || !canvasId) return true;');
+    const capabilityIndex = handler.indexOf('if (!canEditBoardContent || !canvasId) return true;');
     expect(bailIndex).toBeGreaterThan(parseIndex);
     // Claimed before any await -- a deferred stopPropagation lets the same clip also create a second Note.
     expect(stopIndex).toBeGreaterThan(bailIndex);

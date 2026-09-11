@@ -31,6 +31,74 @@ function sourceOf(relativePath: string): string {
     .replace(/^\s*\/\/.*$/gm, '');
 }
 
+/**
+ * The source with EVERY comment removed -- line and block -- for assertions
+ * that count real consumers.
+ *
+ * `sourceOf` above removes only `//` lines, which is what a census must not
+ * rely on: a `canEditBoardContent` written in prose inside a block comment
+ * counted as a consumer, so a real consumer could be deleted and a comment
+ * mention would keep the total right.
+ *
+ * A regex cannot do this job here. `/*` and `*&#47;` are not balanced in
+ * CanvasClient.tsx -- some appear inside string and JSX content -- so a
+ * non-greedy `/\*[\s\S]*?\*&#47;` pairs an opening delimiter from a string with a
+ * closing one 90,000 characters later and silently deletes the code between
+ * them. That is how a slice taken after such a point comes back empty and an
+ * assertion passes for the wrong reason.
+ *
+ * So this is a character scanner that knows where it is: inside code, a line
+ * comment, a block comment, or a quoted string. String contents are KEPT --
+ * they are executable text, and several assertions here match on them -- and
+ * only comment bodies are dropped. Newlines are preserved in every state so
+ * line numbers and slice boundaries survive.
+ */
+function executableSource(raw: string): string {
+  let out = '';
+  // 'code' | 'line' | 'block' | a quote character that is currently open.
+  let state = 'code';
+  let index = 0;
+
+  while (index < raw.length) {
+    const char = raw[index];
+    const next = raw[index + 1];
+
+    if (state === 'code') {
+      if (char === '/' && next === '/') { state = 'line'; index += 2; continue; }
+      if (char === '/' && next === '*') { state = 'block'; index += 2; continue; }
+      if (char === "'" || char === '"' || char === '`') { state = char; out += char; index += 1; continue; }
+      out += char; index += 1; continue;
+    }
+
+    if (state === 'line') {
+      if (char === '\n') { state = 'code'; out += char; }
+      index += 1; continue;
+    }
+
+    if (state === 'block') {
+      if (char === '*' && next === '/') { state = 'code'; index += 2; continue; }
+      // Keep the newline, drop the prose: line numbers must not shift.
+      if (char === '\n') out += char;
+      index += 1; continue;
+    }
+
+    // Inside a quoted string. An escape consumes the next character whatever
+    // it is, so a \' never closes the literal.
+    if (char === '\\') { out += char + (next ?? ''); index += 2; continue; }
+    if (char === state) state = 'code';
+    // An unterminated ' or " cannot run past its line; a template can.
+    else if (char === '\n' && state !== '`') state = 'code';
+    out += char; index += 1;
+  }
+
+  return out;
+}
+
+/** A production file with every comment removed. */
+function codeOf(relativePath: string): string {
+  return executableSource(readFileSync(resolve(process.cwd(), relativePath), 'utf8'));
+}
+
 /** SQL, with its own `--` comments stripped, whitespace-collapsed. */
 function policyOf(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf8')
@@ -39,6 +107,10 @@ function policyOf(relativePath: string): string {
 }
 
 const canvasClient = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
+const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
+
+/** Executable occurrences of the padlets capability in CanvasClient. */
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 25;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -147,6 +219,48 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
     expect(canvasClient).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
   });
 
+  it('ordinary Note CREATION reads it, at the control and at the callback', () => {
+    /*
+      CORRECTION_2. Creation used to ask the workspace role while the selection
+      save asked the board, so one board answered the same question two ways.
+      Both halves move together here: the control that is rendered, and the
+      callback that executes it.
+    */
+    const registry = codeOf('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
+
+    // The toolbar's board-CONTENT group.
+    expect(canvasClientCode).toContain('canCreateBoardContent: canEditBoardContent,');
+    expect(registry).toContain('...(canCreateBoardContent ? [{');
+    expect(registry).toContain("id: 'create',");
+    expect(registry).toContain('tools: CREATE_TOOLS,');
+
+    // The callback half, over the same list the registry renders.
+    expect(canvasClientCode).toContain(
+      'if (BOARD_CONTENT_TOOL_TYPES.has(toolType) && !canEditBoardContent) return;',
+    );
+    expect(registry).toContain('export const BOARD_CONTENT_TOOL_TYPES: ReadonlySet<string> = new Set(');
+    expect(registry).toContain('CREATE_TOOLS.map((tool) => tool.type),');
+
+    // Knowledge-page Note creation, both the affordance and its guard.
+    expect(canvasClientCode).toContain(
+      'onCreateNoteFromPage={canEditBoardContent ? handleCreateNoteFromKnowledgePage : null}',
+    );
+    expect(canvasClientCode).toContain('if (!canEditBoardContent) return;');
+
+    // The freeform board menu, which carries Note creation through onToolAction.
+    expect(canvasClientCode).toContain(
+      'if (!isFreeformLayout || isAnyEditorOpen || !canEditBoardContent) return;',
+    );
+
+    // None of these may fall back to the workspace role.
+    for (const stale of [
+      'onCreateNoteFromPage={canUseCanvasToolbar',
+      'if (!canUseCanvasToolbar) return;',
+    ]) {
+      expect(canvasClientCode, stale).not.toContain(stale);
+    }
+  });
+
   it('ordinary Note edit/delete read it', () => {
     expect(canvasClient).toContain('isEditable={canEditBoardContent}');
     expect(canvasClient).toContain('canEditPosts={canEditBoardContent}');
@@ -160,8 +274,16 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
     // NOT among them -- it never went through these aliases at all; it has
     // its own owner authority, pinned in its own test below.)
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
-    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
     expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditBoardContent;');
+    /*
+      CORRECTION_2 changed `canUseCanvasToolbar` from an alias of the workspace
+      capability into a UNION of the two. It decides only whether the toolbar
+      CONTAINER is reachable; each group inside still carries its own authority,
+      and the group that writes `padlets` is gated separately. A union cannot
+      take anything away, and it is not board authority standing in for the
+      workspace one -- which is what this assertion is here to prevent.
+    */
+    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton || canEditBoardContent;');
     expect(canvasClient).not.toContain('const canUseCanvasToolbar = canEditBoardContent;');
   });
 
@@ -262,21 +384,135 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
   it('census: the padlets capability has a small, enumerable set of consumers', () => {
     // A future edit that quietly routes a boards-backed or graph surface
     // through canEditBoardContent re-introduces exactly the defect this suite
-    // exists for, and moves this count.
-    const uses = canvasClient.match(/canEditBoardContent/g) ?? [];
-    expect(uses.length).toBe(15);
-    // Non-vacuity: the matcher does find the thing it is counting.
+    // exists for, and moves this count. Counted over EXECUTABLE source only --
+    // the prose mentions in the two doc comments are not consumers.
+    const uses = canvasClientCode.match(/canEditBoardContent/g) ?? [];
+    expect(uses.length).toBe(EXPECTED_BOARD_CONTENT_CONSUMERS);
     expect(uses.length).toBeGreaterThan(0);
+
+    // The comment mentions exist, and are excluded. If the scanner ever stops
+    // excluding them this fails, rather than quietly inflating the count.
+    expect(canvasClient).toContain('answers for padlets');
+    expect(canvasClientCode).not.toContain('answers for padlets');
+    expect(canvasClient).toContain('A different question from `canEditBoardContent`');
+    expect(canvasClientCode).not.toContain('A different question from `canEditBoardContent`');
+  });
+
+  it('census: the counted consumers are the real wiring, named one by one', () => {
+    // A count alone does not say WHAT was counted. These are the distinct
+    // expressions the capability actually appears in, so a consumer swapped
+    // for a comment of the same length cannot keep the total right.
+    for (const consumer of [
+      'const canEditBoardContent = canEditBoard({',
+      'const canSavePdfSelectionAsNote = canEditBoardContent;',
+      'const canUseCanvasToolbar = canUseFreeformEditButton || canEditBoardContent;',
+      'canCreateBoardContent: canEditBoardContent,',
+      'if (BOARD_CONTENT_TOOL_TYPES.has(toolType) && !canEditBoardContent) return;',
+      'onCreateNoteFromPage={canEditBoardContent ? handleCreateNoteFromKnowledgePage : null}',
+      'if (!canEditBoardContent || !canvasId) return true;',
+      'isEditable={canEditBoardContent}',
+      'canEditPosts={canEditBoardContent}',
+      'selectDocumentModalDestination(post, canEditBoardContent)',
+    ]) {
+      expect(canvasClientCode, consumer).toContain(consumer);
+    }
+  });
+});
+
+/**
+ * CORRECTION_2 -- the census helper itself, proved.
+ *
+ * The LOW finding was that the census counted comment text. A corrected census
+ * is only as trustworthy as the sanitizer under it, so the sanitizer is tested
+ * directly: on shapes it must keep, shapes it must drop, and on the real file.
+ */
+describe('the census sanitizer counts executable source, not prose', () => {
+  const FIXTURE = [
+    "const a = canEditBoardContent;",
+    "// canEditBoardContent in a line comment",
+    "/* canEditBoardContent in a block comment */",
+    "/**",
+    " * canEditBoardContent across several",
+    " * lines of a doc comment",
+    " */",
+    "const b = 'canEditBoardContent in a string';",
+    "const c = `canEditBoardContent in a template`;",
+    "const d = 'it\\'s not a comment: // nor /* this */';",
+    "const e = canEditBoardContent;",
+  ].join('\n');
+
+  it('keeps code and string contents, drops both comment forms', () => {
+    const code = executableSource(FIXTURE);
+    // Two real consumers, plus the two that live in quoted text, which IS
+    // executable content -- a string is not a comment.
+    expect(code).toContain('const a = canEditBoardContent;');
+    expect(code).toContain('const e = canEditBoardContent;');
+    expect(code).toContain("'canEditBoardContent in a string'");
+    expect(code).toContain('`canEditBoardContent in a template`');
+    // ...and nothing that was written as a comment.
+    expect(code).not.toContain('in a line comment');
+    expect(code).not.toContain('in a block comment');
+    expect(code).not.toContain('doc comment');
+    // A comment delimiter inside a string is not a comment.
+    expect(code).toContain('// nor /* this */');
+    // Line count is preserved, so slices and line numbers still line up.
+    expect(code.split('\n')).toHaveLength(FIXTURE.split('\n').length);
+  });
+
+  it('does not swallow the file the way a non-greedy regex does', () => {
+    // Exactly the old chain: line comments by regex, then block comments by a
+    // non-greedy regex. That second step is the one that goes wrong.
+    const naive = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    // The delimiters are NOT balanced in this file -- that is the whole
+    // problem -- so the regex deletes far more than the comments.
+    expect(canvasClientCode.length).toBeGreaterThan(naive.length + 40000);
+    // And what the regex loses is executable code, not prose: the whole
+    // Set-as-cover mutation, guard and all, disappears from it. The scanner
+    // keeps it. (Note that the two sanitizers happen to agree on the
+    // canEditBoardContent TOTAL right now -- which is exactly why a count
+    // alone is not evidence that a sanitizer works.)
+    for (const real of ['const setAsPadletCover = async', 'if (!canManageBoardSettings) {']) {
+      expect(canvasClientCode, real).toContain(real);
+      expect(naive, real).not.toContain(real);
+    }
+  });
+
+  it('an added consumer, or a removed one, moves the census', () => {
+    const counted = (source: string) => (source.match(/canEditBoardContent/g) ?? []).length;
+    expect(counted(canvasClientCode)).toBe(EXPECTED_BOARD_CONTENT_CONSUMERS);
+
+    // One more real consumer.
+    const added = `${canvasClientCode}\nconst extra = canEditBoardContent;\n`;
+    expect(counted(added)).not.toBe(EXPECTED_BOARD_CONTENT_CONSUMERS);
+
+    // One real consumer removed.
+    const removed = canvasClientCode.replace('canEditPosts={canEditBoardContent}', 'canEditPosts={false}');
+    expect(removed).not.toBe(canvasClientCode);
+    expect(counted(removed)).not.toBe(EXPECTED_BOARD_CONTENT_CONSUMERS);
+
+    // A consumer replaced by a COMMENT mentioning it -- the exact substitution
+    // the old census could not see.
+    const commented = canvasClientCode.replace(
+      'canEditPosts={canEditBoardContent}',
+      'canEditPosts={false} /* canEditBoardContent */',
+    );
+    expect(counted(executableSource(commented))).not.toBe(EXPECTED_BOARD_CONTENT_CONSUMERS);
   });
 });
 
 describe('every unrelated mutation authority is untouched by this slice', () => {
-  it('the toolbar keeps the workspace authority it has always had', () => {
-    // It hosts Map style, the freeform background, Set as cover and Graph
-    // Line alongside Note creation. Those write `boards` and the graph tables,
-    // so the toolbar cannot follow the padlets capability.
-    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
+  it('the toolbar CONTAINER opens for either authority, and no group changes hands', () => {
+    // The strip hosts Map style, the freeform background and Graph Line
+    // alongside Note creation. Those write `boards` and the graph tables, so
+    // the container's reachability is a union and the groups keep their own
+    // gates -- the workspace-derived capability still decides Canvas settings,
+    // and `canManageCanvasShare` still decides Share.
+    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton || canEditBoardContent;');
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+    const registry = codeOf('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
+    expect(registry).toContain('...(canUseFreeformEditButton ? [{');
+    expect(registry).toContain('...(canManageCanvasShare ? [{');
   });
 
   it('Canvas Settings keeps its own workspace-role authority', () => {

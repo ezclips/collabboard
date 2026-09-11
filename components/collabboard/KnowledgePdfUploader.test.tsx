@@ -113,6 +113,8 @@ describe('P6C Knowledge PDF upload client', () => {
       chronoMode: null,
       canManageCanvasShare: false,
       canUseFreeformEditButton: true,
+      // CORRECTION_2: the Create group asks the BOARD, not the workspace role.
+      canCreateBoardContent: true,
       isDrawingLayout: false,
       // PDF-C1 spatial scope: Add PDF only exists on a direct-PDF layout, so
       // this registration proof has to ask on one. Which layouts qualify is

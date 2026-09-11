@@ -34,6 +34,21 @@ export type CanvasToolbarFlags = {
   chronoMode: ChronoMode | string | null;
   canManageCanvasShare: boolean;
   canUseFreeformEditButton: boolean;
+  /**
+   * The board's own edit authority -- ownership, or a `board_collaborators`
+   * row with role 'editor' -- which is what the `padlets` policy actually
+   * names.
+   *
+   * The Create group is the toolbar's board-CONTENT group: every tool in it
+   * inserts a `padlets` row. It is therefore gated on this and not on the
+   * workspace role, so a board owner or editor whose workspace membership is
+   * readonly can still create a Note, and a workspace editor who is only a
+   * board VIEWER cannot -- which is what the database says in both cases.
+   *
+   * Every other group keeps the authority it already had. This gate is about
+   * Note creation, not a repermissioning of the toolbar.
+   */
+  canCreateBoardContent: boolean;
   /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
   isDrawingLayout: boolean;
   /**
@@ -95,6 +110,27 @@ function MapPinToolbarIcon({ size = 18, className, ...rest }: { size?: number; c
   );
 }
 
+/**
+ * The board-content creation tools, in their rendered order.
+ *
+ * Exported as the single list so the callback that executes a tool can refuse
+ * exactly the set the toolbar refuses to render -- one definition, two
+ * enforcement points, no drift between what is shown and what is allowed.
+ */
+export const CREATE_TOOLS: SidebarToolGroup['tools'] = [
+  { icon: Sparkles, label: "AI", color: "text-purple-600", bg: "hover:bg-purple-50", type: "ai-component" },
+  { icon: StickyNote, label: "Note", color: "text-yellow-600", bg: "hover:bg-yellow-50", type: "note" },
+  { icon: FileText, label: "Document", color: "text-sky-700", bg: "hover:bg-sky-50", type: "document" },
+  { icon: CheckSquare, label: "To-do", color: "text-green-600", bg: "hover:bg-green-50", type: "todo" },
+  { icon: MessageCircle, label: "Comment", color: "text-orange-600", bg: "hover:bg-orange-50", type: "comment" },
+  { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
+];
+
+/** The same set, as the callback guard consumes it. */
+export const BOARD_CONTENT_TOOL_TYPES: ReadonlySet<string> = new Set(
+  CREATE_TOOLS.map((tool) => tool.type),
+);
+
 export function buildCanvasToolbarGroups({
   isMapLayout,
   isFreeformLayout,
@@ -103,6 +139,7 @@ export function buildCanvasToolbarGroups({
   chronoMode,
   canManageCanvasShare,
   canUseFreeformEditButton,
+  canCreateBoardContent,
   isDrawingLayout,
   isDirectPdfLayout,
 }: CanvasToolbarFlags): SidebarToolGroup[] {
@@ -127,21 +164,16 @@ export function buildCanvasToolbarGroups({
       priority: 1,
       alwaysVisible: true,
     }] : []),
-    // Group 2 - Create (always visible, priority 2); AI is always first
-    {
+    // Group 2 - Create (always visible, priority 2); AI is always first.
+    // Present only for a user the BOARD authorises to write its content --
+    // every tool here inserts a `padlets` row under that one policy.
+    ...(canCreateBoardContent ? [{
       id: 'create',
       label: 'Create',
-      tools: [
-        { icon: Sparkles, label: "AI", color: "text-purple-600", bg: "hover:bg-purple-50", type: "ai-component" },
-        { icon: StickyNote, label: "Note", color: "text-yellow-600", bg: "hover:bg-yellow-50", type: "note" },
-        { icon: FileText, label: "Document", color: "text-sky-700", bg: "hover:bg-sky-50", type: "document" },
-        { icon: CheckSquare, label: "To-do", color: "text-green-600", bg: "hover:bg-green-50", type: "todo" },
-        { icon: MessageCircle, label: "Comment", color: "text-orange-600", bg: "hover:bg-orange-50", type: "comment" },
-        { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
-      ],
+      tools: CREATE_TOOLS,
       priority: 2,
       alwaysVisible: true,
-    },
+    }] : []),
     // Group 3 - Structure (priority 3)
     {
       id: 'structure',

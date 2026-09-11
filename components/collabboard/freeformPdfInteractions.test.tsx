@@ -90,6 +90,8 @@ function groupsFor(layout: string): SidebarToolGroup[] {
     chronoMode: null,
     canManageCanvasShare: true,
     canUseFreeformEditButton: true,
+    // CORRECTION_2: the Create group asks the BOARD, not the workspace role.
+    canCreateBoardContent: true,
     isDrawingLayout: layout === 'drawing',
     isDirectPdfLayout: isDirectPdfCanvasLayout(layout),
   });

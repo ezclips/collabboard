@@ -317,10 +317,13 @@ describe('this save derives its authority from the board, and only this save doe
     expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
     // ...and it is resolved exactly once, for this feature.
     expect(canvasClient.match(/canEditBoard\(/g) ?? []).toHaveLength(1);
-    // The surrounding controls keep the authority they already had: this
-    // slice is a PDF-selection gate, not a permissions rewrite.
+    // The surrounding controls keep the authority they already had. The one
+    // deliberate exception is Note CREATION, which PDF_SELECTION_TO_NOTE_
+    // PERMISSION_CORRECTION_2 moved onto this same board capability so the two
+    // halves of one `padlets` policy stop disagreeing; the toolbar CONTAINER
+    // became a union for that reason, and no group changed hands.
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
-    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
+    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton || canEditBoardContent;');
   });
 
   it('the ownership fact comes from the board already read -- no second request', () => {

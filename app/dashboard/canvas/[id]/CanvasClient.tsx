@@ -195,7 +195,7 @@ import type mapboxgl from 'mapbox-gl';
 import MapStylePanel from '@/components/map/MapStylePanel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
-import { buildCanvasToolbarGroups, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
+import { buildCanvasToolbarGroups, BOARD_CONTENT_TOOL_TYPES, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import CanvasSettingsModal from '@/components/collabboard/canvas/ui/CanvasSettingsModal';
 import CanvasTitleHeader, { CANVAS_TITLE_HEADER_HEIGHT } from '@/components/collabboard/canvas/ui/CanvasTitleHeader';
@@ -570,7 +570,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     at the surfaces that genuinely share its policy, and these keep theirs.
   */
   const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
-  const canUseCanvasToolbar = canUseFreeformEditButton;
+
+  /**
+   * Can this user REACH the creation toolbar at all?
+   *
+   * A union, and deliberately so. The toolbar is one strip hosting several
+   * policies: the Create group writes `padlets`, Canvas settings and the
+   * background write `boards`, Graph Line writes the graph tables. Gating the
+   * strip on either authority alone would be wrong in one direction or the
+   * other -- board editors could not reach Note creation, or workspace editors
+   * would lose controls they still legitimately have.
+   *
+   * So the container opens for either, and each GROUP inside keeps the
+   * authority its own backend names. Nothing is added to anyone's reach by
+   * this union: a user with no authority at all still sees no toolbar.
+   */
+  const canUseCanvasToolbar = canUseFreeformEditButton || canEditBoardContent;
 
   // PATCH 8O.2 -- persistence path for 'comment'-mode mutations (own-comment
   // add/edit/style/delete), kept separate from the existing
@@ -7330,7 +7345,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // Synchronous and before any await: the drop finishes dispatching the
     // instant this handler yields, so a deferred stopPropagation is a no-op.
     event.stopPropagation();
-    if (!canUseCanvasToolbar || !canvasId) return true;
+    if (!canEditBoardContent || !canvasId) return true;
 
     if (!isFreeformLayout && !isDrawingLayout) {
       toast.error('Drop PDF areas on a Freeform or Drawing board');
@@ -7366,7 +7381,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPdfAreaDraftTitle(payload.originalFilename || '');
     return true;
   }, [
-    canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout,
+    canEditBoardContent, canvasId, isDrawingLayout, isFreeformLayout,
     getCanvasPointFromClient, setPendingPdfAreaDraft, setPdfAreaDraftTitle,
   ]);
 
@@ -7445,7 +7460,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // await would be a no-op and the outer surface would receive the very same
     // clip -- opening the editor twice from one gesture.
     event.stopPropagation();
-    if (!canUseCanvasToolbar || !canvasId) return true;
+    if (!canEditBoardContent || !canvasId) return true;
 
     if (!isFreeformLayout && !isDrawingLayout) {
       // Wall/columns/grid/timeline/map place by flow or section order and never
@@ -7491,7 +7506,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsNoteEditorOpen(true);
     return true;
   }, [
-    canUseCanvasToolbar, canvasId, isDrawingLayout, isFreeformLayout, getCanvasPointFromClient,
+    canEditBoardContent, canvasId, isDrawingLayout, isFreeformLayout, getCanvasPointFromClient,
     clampRectPositionToFreeformBounds, setPadletToEdit, setIsNoteEditorOpen, setSourceNoteReference,
     setPendingSourceDropPosition,
   ]);
@@ -7573,7 +7588,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // outer blank-canvas handler and create a second Note.
     event.preventDefault();
     event.stopPropagation();
-    if (!canUseCanvasToolbar || !canvasId) return true;
+    if (!canEditBoardContent || !canvasId) return true;
     if (targetPadlet.type !== 'text' && targetPadlet.type !== 'note') return true;
 
     const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload));
@@ -7600,7 +7615,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       }
     })();
     return true;
-  }, [canUseCanvasToolbar, canvasId, updatePostFieldsOrThrow, setPadlets, persistKnowledgeSourceReference]);
+  }, [canEditBoardContent, canvasId, updatePostFieldsOrThrow, setPadlets, persistKnowledgeSourceReference]);
 
   const handleDrawingNewContainer = useCallback(async () => {
     if (!drawingPendingDraft || !canvasId) return;
@@ -7885,11 +7900,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     chronoMode,
     canManageCanvasShare,
     canUseFreeformEditButton,
+    canCreateBoardContent: canEditBoardContent,
     isDrawingLayout,
     isDirectPdfLayout: canPlaceDirectPdf,
   });
 
+  /**
+   * The callback half of the gate the toolbar renders.
+   *
+   * Not rendering the Create group is what stops a tool being CLICKED; the
+   * guard below is what stops one being EXECUTED -- from the freeform board
+   * menu, from a queued document switch that replays an action, or from any
+   * entry point added later that forgets to ask. Both read the one list the
+   * registry exports, so the control and the action cannot disagree about who
+   * may write this board's content.
+   */
   const executeToolAction = (toolType: string) => {
+    if (BOARD_CONTENT_TOOL_TYPES.has(toolType) && !canEditBoardContent) return;
     // Any ordinary toolbar creation starts clean: a source workflow the user
     // abandoned can never attach itself to the next Note.
     setSourceNoteReference(null);
@@ -8428,8 +8455,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     request: KnowledgeSourcePageRequest,
     options?: { initialContentText?: string },
   ) => {
-    // The same capability the creation toolbar itself is gated on.
-    if (!canUseCanvasToolbar) return;
+    // The same capability the Create group itself is gated on: this inserts a
+    // `padlets` row, so the board decides, not the workspace role.
+    if (!canEditBoardContent) return;
     const draft = buildKnowledgeSourceNoteDraft(request);
     setSourceNoteReference(draft.sourceReference);
     closeDrawingSelectedShapePanel();
@@ -8516,7 +8544,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         that check internally -- this only decides whether the affordance
         exists, exactly as the reader decides by withholding the prop.
       */
-      onCreateNoteFromPage={canUseCanvasToolbar ? handleCreateNoteFromKnowledgePage : null}
+      onCreateNoteFromPage={canEditBoardContent ? handleCreateNoteFromKnowledgePage : null}
     >
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
@@ -8839,7 +8867,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             }
           }}
           onContextMenu={(e) => {
-            if (!isFreeformLayout || isAnyEditorOpen || !canUseFreeformEditButton) return;
+            // Board-content authority: this menu's own `isEditable` is already
+            // that answer, and it carries Note creation through onToolAction.
+            if (!isFreeformLayout || isAnyEditorOpen || !canEditBoardContent) return;
             if ((e.target as HTMLElement).closest('[data-padlet-id]')) return;
             e.preventDefault();
             e.stopPropagation();

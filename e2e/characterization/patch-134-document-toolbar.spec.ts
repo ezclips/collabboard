@@ -129,6 +129,8 @@ test.describe('PATCH-134 Document toolbar registry', () => {
       chronoMode: null,
       canManageCanvasShare: true,
       canUseFreeformEditButton: true,
+      // CORRECTION_2: the Create group asks the BOARD, not the workspace role.
+      canCreateBoardContent: true,
       isDrawingLayout: false,
       // This PATCH-134 inventory snapshot predates Add PDF, so it keeps asking
       // for a registry without it. Which layouts do offer it is asserted in

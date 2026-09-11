@@ -143,7 +143,8 @@ describe('F6-F10: the canvas asks the server, and claims the drop exactly once',
     // A viewer can synthesise a DataTransfer, so the surface that writes must
     // authorise -- the absent grip is not a permission check.
     const handler = after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2200);
-    expect(handler).toContain('if (!canUseCanvasToolbar || !canvasId) return true;');
+    // CORRECTION_2: the creation capability is the board's, not the workspace's.
+    expect(handler).toContain('if (!canEditBoardContent || !canvasId) return true;');
     // Claimed regardless, so a refusal cannot fall through to another handler.
     expect(handler).toContain('return true;');
   });
