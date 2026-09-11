@@ -384,21 +384,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
   }, [user]);
 
-  const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
-  // Keep the canvas creation toolbar aligned with board editability.
-  // Otherwise editable member accounts can open and modify a board but lose the
-  // left toolbar entirely because they are not workspace admins.
-  const canUseCanvasToolbar = canUseFreeformEditButton;
-
   /**
    * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1 -- this user's
    * `board_collaborators` role on THIS board. `null` means unresolved, and
    * denies.
    *
-   * SCOPE: this feeds `canSavePdfSelectionAsNote` and nothing else. It is not
-   * a general board-edit capability, and the surrounding controls
-   * deliberately keep the authorities they have always had -- see that
-   * derivation below for why.
+   * SCOPE: this feeds `canEditCurrentBoard` below -- the one capability that
+   * governs every padlets-backed board content mutation. Surfaces writing
+   * through other tables keep the authorities they have always had.
    *
    * The answer is stamped with the identity and the board it was resolved
    * for; see the hook for why that stamp, and not its timing, is what makes
@@ -511,37 +504,40 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   } = useCanvasData({ canvasId, dispatch });
 
   /**
-   * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1. May this user save a
-   * PDF selection as a Note on THIS board?
+   * THE board-edit capability: may this user change the shared content of THIS
+   * board?
    *
-   * This ONE feature's gate, and deliberately nothing else's.
+   * One answer, for every mutation that writes a `padlets` row -- creating,
+   * editing and deleting an ordinary Note, and saving a PDF selection as one.
+   * Those all go through the same policy, so they must not disagree: a board
+   * owner whose workspace membership later becomes readonly could otherwise
+   * save a PDF selection as a Note while the ordinary Note controls vanished
+   * around it, which is one user, one board, and two different answers.
    *
-   * The write it guards is a `padlets` insert plus a source reference, and
-   * those policies authorise exactly two things: `boards.user_id =
-   * auth.uid()`, or a `board_collaborators` row with role 'editor'. So this
-   * reads exactly those two facts -- ownership from the loaded board row, the
-   * collaborator role from the stamped answer above -- and offers the control
-   * only when the server would accept the write.
+   * Derived from the two facts that policy actually names: `boards.user_id =
+   * auth.uid()`, or a `board_collaborators` row with role 'editor'. Workspace
+   * role is not an input, because it is not a term there -- it neither grants
+   * a board viewer the right to write nor takes it away from the board's owner.
    *
-   * Workspace role is not an input, because it is not a term in that policy.
-   * An owner whose workspace membership is later set to readonly still owns
-   * the board and the database still accepts their notes.
-   *
-   * SCOPE, and it matters: this capability is NOT the board's general edit
-   * authority and must not be spread into one. The controls around it --
-   * Canvas Settings, Map, Drawing, the graph, the toolbar, the post controls
-   * -- write through other tables whose policies are NOT this rule
-   * (boards_update is owner-only; the graph tables use their own
-   * can_edit_board). They keep `canUseFreeformEditButton` /
-   * `currentWorkspaceRole`, unchanged. Widening this one would offer each of
-   * them a write its own backend refuses.
+   * SCOPE. This governs padlets-backed board CONTENT and nothing else. The
+   * surfaces beside it write through different tables under different rules --
+   * Canvas Settings and the board background through `boards_update`, which is
+   * owner-only; the Map's sections; Drawing; the freeform graph, which has its
+   * own `can_edit_board`. Each keeps the authority it already had, because
+   * widening this one would offer them writes their own backends refuse.
    */
-  const canSavePdfSelectionAsNote = canEditBoard({
+  const canEditCurrentBoard = canEditBoard({
     userId: user?.id,
     boardId: canvasId,
     board: canvas,
     collaboratorAuthority: boardCollaboratorAuthority,
   });
+
+  // Ordinary post/Note mutation, and the creation toolbar that produces one.
+  // The toolbar necessarily follows: it is how an ordinary Note is created, so
+  // a user who may write one must be able to reach it.
+  const canUseFreeformEditButton = canEditCurrentBoard;
+  const canUseCanvasToolbar = canUseFreeformEditButton;
 
   // PATCH 8O.2 -- persistence path for 'comment'-mode mutations (own-comment
   // add/edit/style/delete), kept separate from the existing
@@ -2743,7 +2739,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * thing this must never do is report success.
    */
   const saveKnowledgeSelectionAsNote = useCallback(async (request: KnowledgeSourcePageRequest) => {
-    if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');
+    if (!canvasId || !canEditCurrentBoard) throw new Error('note_save_not_allowed');
     // Exact spans only. A page-only or region request has its own established
     // path through the Note editor and is not what this action offers.
     if (!request.selection) throw new Error('selection_required');
@@ -2802,7 +2798,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Note saved');
   }, [
     canvasId,
-    canSavePdfSelectionAsNote,
+    canEditCurrentBoard,
     deletePostOrThrow,
     getNewPostPosition,
     insertPostAndSelectOrThrow,
@@ -10741,7 +10737,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             The private AI actions keep their own read-derived rule.
           */
-          onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}
+          onSaveSelectionAsNote={canEditCurrentBoard ? saveKnowledgeSelectionAsNote : undefined}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           /* Freeform only: every other layout is handed nothing, and the
              reader therefore renders no Show on board action at all. */

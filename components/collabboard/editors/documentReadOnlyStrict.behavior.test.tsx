@@ -204,9 +204,14 @@ describe('PERMISSION RULE: one predicate governs Edit visibility, Read-modal edi
     expect(readBranch).toContain('selectDocumentModalDestination(padlet, canUseFreeformEditButton)');
   });
 
-  it('CanvasClient threads one real permission source (canEditWorkspace(currentWorkspaceRole)) into canUseFreeformEditButton -- not inferred from any button/UI state', () => {
+  it('CanvasClient threads one real permission source into canUseFreeformEditButton -- not inferred from any button/UI state', () => {
+    // Still exactly ONE source, which is what this has always been about. It
+    // is now the board's own edit capability rather than the workspace role,
+    // so ordinary Note mutation and the PDF selection save cannot disagree.
     const canvasClientSrc = fs.readFileSync('app/dashboard/canvas/[id]/CanvasClient.tsx', 'utf8');
-    expect(canvasClientSrc).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+    expect(canvasClientSrc).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
+    expect(canvasClientSrc).toContain('const canEditCurrentBoard = canEditBoard({');
+    expect(canvasClientSrc).not.toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
   });
 
   it('runtime: an editable capability renders an active Edit affordance and an editable modal from the same boolean; a non-editable one renders neither', () => {

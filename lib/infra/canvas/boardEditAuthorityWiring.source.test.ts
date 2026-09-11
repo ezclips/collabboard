@@ -12,13 +12,13 @@ import { describe, expect, it } from 'vitest';
  *      editor collaborator row), matching the padlets/source-reference write
  *      policies that the save actually goes through; and
  *
- *   2. it reaches NOTHING else. Canvas Settings, Map, Drawing, the graph, the
- *      toolbar and the post controls write through other tables with other
- *      policies -- `boards_update` is owner-only, the graph tables have their
- *      own `can_edit_board` -- so each keeps the authority it already had.
- *      An earlier pass propagated this capability to all of them and offered
- *      writes those backends refuse; these assertions are what stops that
- *      happening again.
+ *   2. it reaches every padlets-backed board CONTENT mutation -- ordinary Note
+ *      create/edit/delete and the PDF selection save -- and nothing beyond
+ *      them. Canvas Settings, Map, Drawing and the graph write through other
+ *      tables with other policies (`boards_update` is owner-only; the graph
+ *      tables have their own `can_edit_board`), so each keeps the authority it
+ *      already had. An earlier pass propagated this capability to those too
+ *      and offered writes their backends refuse; half 2b is what stops that.
  *
  * Half 2 pins the pre-existing wiring verbatim. It is NOT a claim that those
  * authorities are correct -- only that this slice did not change them.
@@ -131,44 +131,44 @@ describe('cached authority never outlives the identity or board it names', () =>
 // Half 2 -- the fence: this capability gates the PDF save and nothing else
 // ============================================================================
 
-describe('the board capability is scoped to the PDF selection save', () => {
-  it('it is resolved once, under a name that says what it gates', () => {
-    expect(canvasClient).toContain('const canSavePdfSelectionAsNote = canEditBoard({');
+describe('ONE capability governs every board Note mutation', () => {
+  it('it is resolved once, under a name that says what it governs', () => {
+    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
     expect(canvasClient).toContain('boardId: canvasId,');
     expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
-    // Exactly one derivation, and no general "can edit this board" flag for a
-    // future surface to reach for by mistake.
+    // Exactly one derivation. The earlier PDF-only alias is gone, not aliased.
     expect(canvasClient.match(/canEditBoard\(/g) ?? []).toHaveLength(1);
-    expect(canvasClient).not.toContain('canEditCurrentBoard');
+    expect(canvasClient).not.toContain('canSavePdfSelectionAsNote');
     expect(canvasClient.match(/isBoardOwner\(/g) ?? []).toHaveLength(0);
   });
 
-  it('the PDF save is its ONLY consumer -- the affordance and the guard', () => {
-    // Prose mentions do not count; only real references do. `sourceOf` strips
-    // line comments, so the JSDoc that explains the scope is stripped here too.
-    const code = canvasClient.replace(/\/\*[\s\S]*?\*\//g, '');
-    const uses = code.match(/canSavePdfSelectionAsNote/g) ?? [];
-    // The derivation, the callback guard, that callback's dependency entry,
-    // and the affordance. Nothing else in the file may consume it.
-    expect(uses).toHaveLength(4);
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}');
-    expect(canvasClient).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
-    // No feature-local escape hatch beside it, either.
-    for (const forbidden of ['ownerException', 'isOwnerOverride']) {
-      expect(canvasClient, forbidden).not.toContain(forbidden);
-    }
+  it('ordinary post/Note mutation reads it -- not the workspace role', () => {
+    // The defect this closes: these two answered the same question differently,
+    // so a board owner with a readonly workspace role could save a PDF
+    // selection as a Note while the ordinary Note controls vanished.
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
+    expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
+    expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+  });
+
+  it('the PDF selection save reads the SAME capability', () => {
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canEditCurrentBoard ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(canvasClient).toContain("if (!canvasId || !canEditCurrentBoard) throw new Error('note_save_not_allowed');");
+  });
+
+  it('ordinary Note create / edit / delete all hang off that one answer', () => {
+    // Create (the toolbar), edit (the mutation-capable editor route) and the
+    // editable surfaces that own delete.
+    expect(canvasClient).toContain('isEditable={canUseFreeformEditButton}');
+    expect(canvasClient).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(canvasClient).toContain('canEditPosts={canUseFreeformEditButton}');
   });
 });
 
-// ============================================================================
-// Half 2b -- the unrelated authorities, pinned exactly as they were
-// ============================================================================
-
 describe('every unrelated mutation authority is untouched by this slice', () => {
-  it('the general edit button and toolbar stay on the workspace role', () => {
-    // Pre-existing wiring, restored verbatim. Not endorsed here -- only
-    // fenced off from this slice.
-    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+  it('the toolbar follows Note creation, because it IS Note creation', () => {
+    // It moved with the post mutations deliberately: a user who may write a
+    // Note must be able to reach the control that creates one.
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
   });
 

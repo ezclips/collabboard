@@ -296,7 +296,7 @@ describe('the reveal is navigation and nothing else', () => {
       canvasClient.indexOf('const canRevealOnBoard'),
     );
     for (const forbidden of [
-      'canEditBoard', 'canSavePdfSelectionAsNote', 'canUseFreeformEditButton',
+      'canEditBoard', 'canEditCurrentBoard', 'canUseFreeformEditButton',
       'canEditWorkspace', 'currentWorkspaceRole', 'canManageWorkspace',
     ]) {
       expect(revealRegion, forbidden).not.toContain(forbidden);
