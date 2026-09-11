@@ -65,6 +65,8 @@ type ColumnsLayoutProps = {
   onDuplicate?: (post: Padlet) => void;
   onCopyToAnotherPadlet?: (post: Padlet) => void;
   onTransferToAnotherPadlet?: (post: Padlet) => void;
+  // Owner-only: a board write, not a padlet one. Availability is the presence
+  // of this callback, never `isEditable` -- see RowLane for the reasoning.
   onSetAsCover?: (post: Padlet) => void;
   onPin?: (post: Padlet) => void;
   onReport?: (post: Padlet) => void;
@@ -370,9 +372,7 @@ export default function ColumnsCanvasRow({
                     ? () => onTransferToAnotherPadlet(post)
                     : undefined
                 }
-                onSetAsPadletCover={
-                  isEditable && onSetAsCover ? () => onSetAsCover(post) : undefined
-                }
+                onSetAsPadletCover={onSetAsCover ? () => onSetAsCover(post) : undefined}
                 onPin={isEditable && onPin ? () => onPin(post) : undefined}
                 onReport={onReport ? () => onReport(post) : undefined}
                 onDelete={isEditable && onDeletePost ? () => onDeletePost(post) : undefined}
@@ -437,9 +437,7 @@ export default function ColumnsCanvasRow({
                     ? () => onTransferToAnotherPadlet(post)
                     : undefined
                 }
-                onSetAsPadletCover={
-                  isEditable && onSetAsCover ? () => onSetAsCover(post) : undefined
-                }
+                onSetAsPadletCover={onSetAsCover ? () => onSetAsCover(post) : undefined}
                 onPin={isEditable && onPin ? () => onPin(post) : undefined}
                 onReport={onReport ? () => onReport(post) : undefined}
                 onDelete={isEditable && onDeletePost ? () => onDeletePost(post) : undefined}

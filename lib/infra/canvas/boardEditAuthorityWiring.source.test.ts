@@ -155,16 +155,21 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
 
   it('the SHARED aliases do NOT read it -- this is the SPLIT_3 regression', () => {
     // Giving these the padlets capability handed a collaborator editor Map
-    // style, the freeform background, Set as cover and Graph Line, none of
-    // which their backend authorises. They stay on the workspace role.
+    // style, the freeform background and Graph Line, none of which their
+    // backend authorises. They stay on the workspace role. (Set as cover is
+    // NOT among them -- it never went through these aliases at all; it has
+    // its own owner authority, pinned in its own test below.)
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
     expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditBoardContent;');
     expect(canvasClient).not.toContain('const canUseCanvasToolbar = canEditBoardContent;');
   });
 
-  it('the four reported surfaces are gated exactly as they were before the defect', () => {
-    const code = canvasClient.replace(/\/\*[\s\S]*?\*\//g, '');
+  it('the alias-carried surfaces are gated exactly as they were before the defect', () => {
+    // `canvasClient` already has line comments stripped. A block-comment strip
+    // is NOT applied: an unbalanced `/*` inside JSX swallows ~90k characters of
+    // this file, which silently empties every slice taken after it.
+    const code = canvasClient;
 
     // Freeform background -> writes boards.background_type/background_value,
     // so `boards_update`, so owner-only. Its guard stays on the alias.
@@ -184,21 +189,82 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
     expect(toolbarRegistry).toContain("type: \"graph-line\"");
     expect(toolbarRegistry).not.toContain('canEditBoardContent');
 
-    // Set as cover writes the board row too.
-    const cover = code.slice(
-      code.indexOf('coverPostId: post.id') - 600,
-      code.indexOf('coverPostId: post.id'),
+  });
+
+  /**
+   * CORRECTION_3. Set as cover was the one surface this fence got wrong.
+   *
+   * The earlier model said it was toolbar-gated, and it is not: the structured
+   * layouts pass their own `onSetAsCover`, so it arrived through
+   * `isEditable={canEditBoardContent}` -- board CONTENT authority for a
+   * mutation that writes the BOARD row. A non-owner collaborator editor was
+   * therefore offered an enabled owner-only action.
+   *
+   * It has its own authority now, and that authority is ownership.
+   */
+  it('Set as cover is board OWNER authority -- not content, not the toolbar alias', () => {
+    // Reuses the existing canonical ownership predicate. No second ownership
+    // model: this is the same stamped fact `canEditBoard` is built from.
+    expect(canvasClient).toContain(
+      "import { canEditBoard, isBoardOwner } from '@/lib/domain/canvas/boardEditAuthority';",
     );
-    expect(cover).not.toContain('canEditBoardContent');
+    expect(canvasClient).toContain(
+      'const canManageBoardSettings = isBoardOwner(user?.id, canvasId, canvas);',
+    );
+
+    // Both structured layouts withhold the callback entirely, rather than
+    // passing one that fails on click.
+    expect(canvasClient).toContain(
+      'onSetAsCover={canManageBoardSettings ? ((post: Padlet) => setAsPadletCover(post)) : undefined}',
+    );
+    expect(canvasClient).toContain('onSetAsCover={canManageBoardSettings ? setAsPadletCover : undefined}');
+    // No remaining unconditional supply anywhere.
+    expect(canvasClient).not.toContain('onSetAsCover={setAsPadletCover}');
+    expect(canvasClient).not.toContain('onSetAsCover={(post: Padlet) => setAsPadletCover(post)}');
+    expect(canvasClient).not.toContain('onSetAsCover={canEditBoardContent');
+
+    // And the mutation itself fails closed, so hiding the control is not the
+    // only thing standing between a non-owner and the call.
+    const cover = canvasClient.slice(
+      canvasClient.indexOf('const setAsPadletCover = async (post: Padlet) => {'),
+      canvasClient.indexOf('const pinPost = async (post: Padlet) => {'),
+    );
+    expect(cover.length).toBeGreaterThan(200);
+    expect(cover).toContain('if (!canManageBoardSettings) {');
+    expect(cover.indexOf('if (!canManageBoardSettings) {')).toBeLessThan(cover.indexOf('createSetBoardCoverCommand'));
+    // Never the workspace role, and never board-content authority.
+    for (const forbidden of ['canEditBoardContent', 'canEditWorkspace', 'currentWorkspaceRole', 'canUseCanvasToolbar']) {
+      expect(cover, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('the structured layouts make cover availability independent of isEditable', () => {
+    // `isEditable` keeps meaning ordinary board-content editing. If it still
+    // gated the cover action, a collaborator editor would get it back.
+    for (const path of [
+      'components/collabboard/row/RowLane.tsx',
+      'components/canvas/layouts/ColumnsCanvasRow.tsx',
+    ]) {
+      const layout = sourceOf(path);
+      expect(layout, path).not.toContain('isEditable && onSetAsCover');
+      expect(layout, path).toContain('onSetAsCover ?');
+      // Content actions beside it are untouched -- this is a narrowing of one
+      // action, not a downgrade of collaborator editing.
+      expect(layout, path).toContain('isEditable && onDeletePost');
+      expect(layout, path).toContain('isEditable && onDuplicate');
+    }
+    // The row controller's prop became optional so that "not authorised" is
+    // expressible at all.
+    expect(sourceOf('components/collabboard/row/RowCanvasDnD.tsx'))
+      .toContain('onSetAsCover?: (post: Padlet) => void;');
   });
 
   it('census: the padlets capability has a small, enumerable set of consumers', () => {
     // A future edit that quietly routes a boards-backed or graph surface
     // through canEditBoardContent re-introduces exactly the defect this suite
     // exists for, and moves this count.
-    const code = canvasClient.replace(/\/\*[\s\S]*?\*\//g, '');
-    const uses = code.match(/canEditBoardContent/g) ?? [];
-    expect(uses.length).toBe(13);
+    const uses = canvasClient.match(/canEditBoardContent/g) ?? [];
+    expect(uses.length).toBe(15);
     // Non-vacuity: the matcher does find the thing it is counting.
     expect(uses.length).toBeGreaterThan(0);
   });

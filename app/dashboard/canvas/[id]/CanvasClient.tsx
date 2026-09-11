@@ -32,7 +32,7 @@ import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
-import { canEditBoard } from '@/lib/domain/canvas/boardEditAuthority';
+import { canEditBoard, isBoardOwner } from '@/lib/domain/canvas/boardEditAuthority';
 import { resolveRevealAnchorPost, resolveRevealPanDelta, type BoardObjectRevealRequest } from '@/lib/domain/canvas/boardObjectReveal';
 import { getViewportWorldRect } from '@/components/collabboard/canvas/minimap/freeformMinimapGeometry';
 import { getFallbackMinimapItem } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
@@ -534,6 +534,27 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * surfaces this user may well not be authorised for.
    */
   const canSavePdfSelectionAsNote = canEditBoardContent;
+
+  /**
+   * May this user change the BOARD ROW itself -- its settings and metadata?
+   *
+   * A different question from `canEditBoardContent`, with a different answer,
+   * because it mirrors a different policy. `boards_update` names ownership and
+   * only ownership: a `board_collaborators` row with role 'editor' authorises
+   * padlets, never the board they hang off. So this reads the one canonical
+   * ownership fact the authority module already exposes -- stamped with whose
+   * it is and which board it describes -- and it is deliberately NOT derived
+   * from the workspace role: an owner whose workspace membership later went
+   * readonly still owns the board, and the database still takes their writes.
+   *
+   * Set as cover is the mutation this exists for. It writes the board row, so
+   * offering it from board-CONTENT authority put an enabled owner-only action
+   * in front of every collaborator editor -- a control that can only end in
+   * the server refusing it. Ownership is strictly narrower than content
+   * authority (every owner may edit content; not every content editor owns),
+   * so gating on it takes nothing away from anyone who already had it.
+   */
+  const canManageBoardSettings = isBoardOwner(user?.id, canvasId, canvas);
 
   /*
     The shared canvas aliases, on the workspace authority they have always had.
@@ -5951,6 +5972,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   };
 
   const setAsPadletCover = async (post: Padlet) => {
+    // Fail closed here too, not only where the affordance is offered. Not
+    // rendering the control is what stops it being CLICKED; this is what stops
+    // it being CALLED -- from a closure that captured an earlier authority, or
+    // from a second caller added later that forgets the gate.
+    if (!canManageBoardSettings) {
+      toast.error('Only the board owner can change the cover');
+      return;
+    }
+
     const imageUrl = (post.metadata as any)?.imageUrl || (post.metadata as any)?.file_url;
     try {
       const setBoardCover = createSetBoardCoverCommand(createCanvasBoardRepository());
@@ -9334,7 +9364,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onDuplicate={(post: Padlet) => duplicatePadlet(post.id)}
                 onCopyToAnotherPadlet={(post: Padlet) => copyToAnotherPadlet(post)}
                 onTransferToAnotherPadlet={(post: Padlet) => transferToAnotherPadlet(post)}
-                onSetAsCover={(post: Padlet) => setAsPadletCover(post)}
+                onSetAsCover={canManageBoardSettings ? ((post: Padlet) => setAsPadletCover(post)) : undefined}
                 onPin={(post: Padlet) => pinPost(post)}
                 onReport={(_post: Padlet) => reportPost()}
                 onCopyLink={(post: Padlet) => copyPostLink(post)}
@@ -9431,7 +9461,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onDuplicate={(post) => duplicatePadlet(post.id)}
                     onCopyToAnotherPadlet={copyToAnotherPadlet}
                     onTransferToAnotherPadlet={transferToAnotherPadlet}
-                    onSetAsCover={setAsPadletCover}
+                    onSetAsCover={canManageBoardSettings ? setAsPadletCover : undefined}
                     onPin={pinPost}
                     onReport={reportPost}
                     currentUserId={user?.id}

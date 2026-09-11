@@ -63,7 +63,10 @@ export interface RowCanvasDnDProps {
     onDuplicate: (post: Padlet) => void;
     onCopyToAnotherPadlet: (post: Padlet) => void;
     onTransferToAnotherPadlet: (post: Padlet) => void;
-    onSetAsCover: (post: Padlet) => void;
+    // Optional BY DESIGN: absent means this viewer is not authorised to set
+    // the board cover, which is an owner-only board write and is not part of
+    // `isEditable`. See RowLane -- absence removes the action outright.
+    onSetAsCover?: (post: Padlet) => void;
     onPin: (post: Padlet) => void;
     onReport: (post: Padlet) => void;
     // Comment handling

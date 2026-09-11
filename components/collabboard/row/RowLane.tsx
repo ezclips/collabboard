@@ -103,6 +103,11 @@ interface RowLaneProps {
     onDuplicate?: (post: Padlet) => void;
     onCopyToAnotherPadlet?: (post: Padlet) => void;
     onTransferToAnotherPadlet?: (post: Padlet) => void;
+    // Set as cover writes the BOARD row, not a padlet, and that policy names
+    // ownership only. It is therefore deliberately NOT part of `isEditable`:
+    // the presence of this callback IS the authority, decided upstream by
+    // whoever owns that question, and its absence removes the action rather
+    // than leaving an enabled click the server goes on to refuse.
     onSetAsCover?: (post: Padlet) => void;
     onPin?: (post: Padlet) => void;
     onReport?: (post: Padlet) => void;
@@ -438,7 +443,7 @@ export default function RowLane({
                                                 onDuplicate={isEditable && onDuplicate ? (() => onDuplicate(post)) : undefined}
                                                 onCopyToAnotherPadlet={isEditable && onCopyToAnotherPadlet ? (() => onCopyToAnotherPadlet(post)) : undefined}
                                                 onTransferToAnotherPadlet={isEditable && onTransferToAnotherPadlet ? (() => onTransferToAnotherPadlet(post)) : undefined}
-                                                onSetAsPadletCover={isEditable && onSetAsCover ? (() => onSetAsCover(post)) : undefined}
+                                                onSetAsPadletCover={onSetAsCover ? (() => onSetAsCover(post)) : undefined}
                                                 onPin={isEditable && onPin ? (() => onPin(post)) : undefined}
                                                 onReport={isEditable && onReport ? (() => onReport(post)) : undefined}
                                                 onDelete={isEditable && onDeletePost ? (() => onDeletePost(post)) : undefined}
@@ -497,7 +502,7 @@ export default function RowLane({
                                             onDuplicate={isEditable && onDuplicate ? (() => onDuplicate(post)) : undefined}
                                             onCopyToAnotherPadlet={isEditable && onCopyToAnotherPadlet ? (() => onCopyToAnotherPadlet(post)) : undefined}
                                             onTransferToAnotherPadlet={isEditable && onTransferToAnotherPadlet ? (() => onTransferToAnotherPadlet(post)) : undefined}
-                                            onSetAsPadletCover={isEditable && onSetAsCover ? (() => onSetAsCover(post)) : undefined}
+                                            onSetAsPadletCover={onSetAsCover ? (() => onSetAsCover(post)) : undefined}
                                             onPin={isEditable && onPin ? (() => onPin(post)) : undefined}
                                             onReport={isEditable && onReport ? (() => onReport(post)) : undefined}
                                             onDelete={isEditable && onDeletePost ? (() => onDeletePost(post)) : undefined}
