@@ -187,16 +187,19 @@ describe('a PDF selection becomes one source-linked Note', () => {
     }
   });
 
-  it('10: the AI answer save is left exactly as it was', () => {
-    // This gate adds a sibling command; it does not fold the closed AI->Note
-    // slice into a shared helper, so that contract still reads as its own.
+  it('10: the AI answer save remains a separate command from this one', () => {
+    // This gate adds a sibling command; it does not fold the AI->Note slice
+    // into a shared helper, so that contract still reads as its own. Its
+    // PROVENANCE rule changed later (PDF_AI_VALIDATED_PROVENANCE: 0..N
+    // validated citations instead of one context-derived page), which is why
+    // the page assertion below is no longer part of this suite -- that rule is
+    // owned by boardAiNoteProvenance.test.ts and boardAiChatDrawer.test.tsx.
     const ai = canvasClient.slice(
       canvasClient.indexOf('const savePdfAssistantAnswerAsNote = useCallback('),
       canvasClient.indexOf('const saveKnowledgeSelectionAsNote = useCallback('),
     );
     expect(ai).toContain("title: 'AI Note'");
     expect(ai).toContain('knowledgeSourceSelectionToNoteHtml(request.content)');
-    expect(ai).toContain('pageStart: request.pageNumber');
     expect(ai).toContain('await deletePostOrThrow(created.id);');
     expect(ai).toContain("throw new Error('source_link_failed')");
     expect(canvasClient).toContain('onSaveAssistantAsNote={enableBoardAiChat && canUseCanvasToolbar ? savePdfAssistantAnswerAsNote : undefined}');

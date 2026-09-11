@@ -11,6 +11,8 @@ import {
 import { BOARD_AI_CHAT_MESSAGE_MAX } from '@/lib/domain/ai/boardAiChatClient';
 import { boardAiCitationIdentityKey } from '@/lib/domain/ai/boardAiChatCitation';
 import type { BoardAiCitationItem } from '@/lib/domain/ai/boardAiChatCitation';
+import { boardAiNoteEvidenceFromCitations } from '@/lib/domain/ai/boardAiNoteProvenance';
+import type { BoardAiNoteEvidence } from '@/lib/domain/ai/boardAiNoteProvenance';
 import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
   addBoardAiDraftContext,
@@ -103,9 +105,15 @@ export interface BoardAiChatDrawerProps {
 export interface BoardAiAssistantNoteSaveRequest {
   readonly messageId: string;
   readonly content: string;
-  readonly sourceDocumentId: string;
-  readonly pageNumber: number;
-  readonly originalFilename: string;
+  /**
+   * The answer's VALIDATED supporting evidence -- 0..N canonical citations the
+   * server already vouched for, in the shape a source_reference can store.
+   *
+   * Not the model's context: a source the model was shown and never cited is
+   * not provenance, and an answer that cited nothing arrives here with an
+   * empty array and saves unsourced. The browser never adds to this set.
+   */
+  readonly evidence: readonly BoardAiNoteEvidence[];
 }
 
 /** A thread the user has, or the not-yet-created one a New chat represents. */
@@ -116,6 +124,9 @@ const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
 
 /** A stable empty default, so an uncited answer is not a new array each render. */
 const NO_CITATIONS: readonly BoardAiCitationItem[] = [];
+
+/** A stable empty default, so an uncited answer is not a new array each render. */
+const NO_NOTE_EVIDENCE: readonly BoardAiNoteEvidence[] = [];
 
 /**
  * The sources one answer shows, each named once.
@@ -241,30 +252,23 @@ function mergeMandatoryDocumentContext(
   ].slice(0, BOARD_AI_DRAFT_CONTEXT_MAX);
 }
 
-function assistantNoteSourceForMessage(
-  messages: readonly BoardAiChatMessageView[],
-  assistantIndex: number,
-  documentScope: BoardAiChatDrawerProps['documentScope'],
-): Omit<BoardAiAssistantNoteSaveRequest, 'messageId' | 'content'> | null {
-  if (!documentScope) return null;
-  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== 'user') continue;
-    const items = message.context?.items ?? [];
-    const source = items.find((item) => {
-      if (item.knowledgeDocumentId !== documentScope.knowledgeDocumentId) return false;
-      if (item.type !== 'knowledge-page' && item.type !== 'knowledge-selection') return false;
-      return Number.isInteger(item.pageNumber) && (item.pageNumber ?? 0) >= 1;
-    });
-    const pageNumber = source?.pageNumber;
-    if (typeof pageNumber !== 'number' || !Number.isInteger(pageNumber) || pageNumber < 1) return null;
-    return {
-      sourceDocumentId: documentScope.knowledgeDocumentId,
-      pageNumber,
-      originalFilename: documentScope.originalFilename,
-    };
-  }
-  return null;
+/**
+ * The evidence one assistant answer may claim, read from its OWN validated
+ * citations.
+ *
+ * Replaces a backward walk to the preceding user message's context. That
+ * answered "what was the model shown", which is a different question: it
+ * credited sources the answer never used, could only ever produce one
+ * reference, and flattened an exact selection to its page on the way.
+ *
+ * An answer with no validated citations yields an empty set, and saving is
+ * still offered -- the Note is simply unsourced. There is deliberately no
+ * fallback to the open document, the active page or the live selection.
+ */
+function assistantNoteEvidenceForMessage(
+  message: BoardAiChatMessageView,
+): readonly BoardAiNoteEvidence[] {
+  return boardAiNoteEvidenceFromCitations(message.citations ?? null);
 }
 
 export default function BoardAiChatDrawer({
@@ -907,9 +911,11 @@ export default function BoardAiChatDrawer({
         ) : null}
 
         {messages.map((message, index) => {
-          const assistantNoteSource = message.role === 'assistant'
-            ? assistantNoteSourceForMessage(messages, index, documentScope)
-            : null;
+          // The answer's own validated evidence -- possibly none, which is a
+          // saveable outcome and not a reason to withhold the action.
+          const assistantNoteEvidence = message.role === 'assistant'
+            ? assistantNoteEvidenceForMessage(message)
+            : NO_NOTE_EVIDENCE;
           const noteSaveState: AssistantNoteSaveState | undefined = savedNoteMessageIdSet.has(message.id)
             ? 'saved'
             : pendingNoteSaveMessageIdSet.has(message.id)
@@ -918,10 +924,11 @@ export default function BoardAiChatDrawer({
           const citations = message.role === 'assistant'
             ? visibleCitations(message.citations?.items ?? NO_CITATIONS)
             : NO_CITATIONS;
+          // Board edit authority and a handler -- nothing about provenance.
+          // An uncited answer saves as an ordinary unsourced Note.
           const canShowSaveAsNote = message.role === 'assistant'
             && canSaveAssistantAsNote
-            && !!onSaveAssistantAsNote
-            && !!assistantNoteSource;
+            && !!onSaveAssistantAsNote;
           return (
           <div
             key={message.id}
@@ -1003,7 +1010,7 @@ export default function BoardAiChatDrawer({
                     data-board-ai-chat-save-message-id={message.id}
                     className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-default disabled:border-green-200 disabled:bg-green-50 disabled:text-green-700"
                     disabled={noteSaveState === 'saving' || noteSaveState === 'saved'}
-                    onClick={() => { void saveAssistantAsNote(message, assistantNoteSource!); }}
+                    onClick={() => { void saveAssistantAsNote(message, { evidence: assistantNoteEvidence }); }}
                   >
                     {noteSaveState === 'saved' ? (
                       <Check className="h-3 w-3" aria-hidden="true" />

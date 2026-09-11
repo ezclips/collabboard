@@ -2634,11 +2634,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   }, [canvasId]);
 
+  /**
+   * PDF_AI_VALIDATED_PROVENANCE. One AI answer becomes one Note carrying 0..N
+   * canonical source references.
+   *
+   * The evidence arrives already decided: it is the server's own validated
+   * citation set for THIS message, reduced to storable references. Nothing
+   * here adds to it, and an empty set is an ordinary outcome -- the Note saves
+   * unsourced rather than borrowing the reader's open document.
+   *
+   * Truthful publication, as the selection save does it: the Note exists first,
+   * then every required reference, and only then is the save reported as
+   * succeeded. If any one reference fails the Note is deleted through the
+   * ordinary path -- which takes its references with it by the schema's own
+   * cascade -- so the user is never told a sourced Note saved when part of its
+   * provenance did not.
+   */
   const savePdfAssistantAnswerAsNote = useCallback(async (request: BoardAiAssistantNoteSaveRequest) => {
     if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');
-    if (!Number.isInteger(request.pageNumber) || request.pageNumber < 1) {
-      throw new Error('invalid_source_page');
-    }
+    const evidence = request.evidence ?? [];
 
     const noteId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
@@ -2662,29 +2676,32 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         zIndex: nextZIndex(padlets),
       } as any,
     };
-    const sourceReference: KnowledgeSourceReferenceDraft = {
-      sourceDocumentId: request.sourceDocumentId,
-      pageStart: request.pageNumber,
-      pageEnd: request.pageNumber,
-      quoteText: null,
-      charStart: null,
-      charEnd: null,
-      selectedText: null,
-      region: null,
-      appliedRotation: null,
-    };
-
     const created = await insertPostAndSelectOrThrow(note as any) as Padlet | null;
     if (!created) throw new Error('note_save_failed');
 
-    const linked = await persistKnowledgeSourceReference(
-      created.id,
-      sourceReference,
-      null,
-    );
-    if (!linked) {
-      await deletePostOrThrow(created.id);
-      throw new Error('source_link_failed');
+    // Every validated citation, in order, through the one source-reference
+    // authority. The exact span is carried when the citation had one: a
+    // selection the model cited must not arrive on the board as a page.
+    for (const item of evidence) {
+      const draft: KnowledgeSourceReferenceDraft = {
+        sourceDocumentId: item.sourceDocumentId,
+        pageStart: item.pageStart,
+        pageEnd: item.pageEnd,
+        quoteText: null,
+        charStart: item.charStart,
+        charEnd: item.charEnd,
+        selectedText: null,
+        region: null,
+        appliedRotation: null,
+      };
+      const linked = await persistKnowledgeSourceReference(created.id, draft, null);
+      if (!linked) {
+        // Partial provenance is not a Note. Deleting the Note removes the
+        // references already written for it, so there is nothing left behind
+        // claiming a source it does not have.
+        await deletePostOrThrow(created.id);
+        throw new Error('source_link_failed');
+      }
     }
 
     setPadlets((current) => [...current, created]);
