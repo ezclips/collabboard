@@ -3,7 +3,7 @@ import { canEditBoard, type BoardCollaboratorAuthority } from './boardEditAuthor
 import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 
 /**
- * PDF_SELECTION_TO_NOTE_PERMISSION_FIX_2 -- ONE authority for board Notes.
+ * PDF_SELECTION_TO_NOTE_PERMISSION_SPLIT_3 -- one authority per POLICY.
  *
  * The defect this closes: two frontend authorities answered the same question.
  * Ordinary Note create/edit/delete asked `canEditWorkspace(role)`, while the
@@ -32,29 +32,38 @@ const collaborator = (
 /**
  * CanvasClient's real derivation, in one place.
  *
- * `canEditCurrentBoard` is the capability the component computes; ordinary
- * Note mutation and the PDF save both read it. Modelling it as one function
- * is the point -- if a future change gave either surface its own answer, the
- * matrix below could no longer be written this way.
+ * `canEditBoardContent` is the padlets capability the component computes;
+ * ordinary Note mutation and the PDF save both read it. The shared canvas
+ * aliases are modelled alongside it deliberately -- they answer a DIFFERENT
+ * question, for surfaces backed by `boards` and by the graph tables, and the
+ * suite below exists to keep the two from collapsing into one again.
  */
 function canvasClientAuthority(input: {
   readonly userId: string | null;
   readonly collaboratorAuthority: BoardCollaboratorAuthority | null;
   readonly workspaceRole: WorkspaceRole | null;
 }) {
-  const canEditCurrentBoard = canEditBoard({
+  // The padlets capability.
+  const canEditBoardContent = canEditBoard({
     userId: input.userId,
     boardId: BOARD,
     board,
     collaboratorAuthority: input.collaboratorAuthority,
   });
+  // The shared canvas aliases, which carry surfaces backed by `boards`
+  // (owner-only) and by the graph tables (their own can_edit_board).
+  const canUseFreeformEditButton = canEditWorkspace(input.workspaceRole);
+  const canUseCanvasToolbar = canUseFreeformEditButton;
+
   return {
-    // Ordinary Note create / edit / delete, and the toolbar that creates one.
-    ordinaryNoteMutation: canEditCurrentBoard,
-    canUseCanvasToolbar: canEditCurrentBoard,
-    // PDF selection -> Save as Note.
-    selectionSaveAsNote: canEditCurrentBoard,
-    // Kept only to prove it is NOT what decides either of the above.
+    // padlets writes
+    ordinaryNoteMutation: canEditBoardContent,
+    selectionSaveAsNote: canEditBoardContent,
+    // NOT padlets: each reached only through the toolbar alias
+    mapStyle: canUseCanvasToolbar,
+    freeformBackground: canUseCanvasToolbar,
+    setAsCover: canUseCanvasToolbar,
+    graphLine: canUseCanvasToolbar,
     workspaceEdit: canEditWorkspace(input.workspaceRole),
   };
 }
@@ -79,11 +88,9 @@ describe('one authority governs every board Note mutation', () => {
   for (const row of MATRIX) {
     it(`${row.name} -> ${row.expected ? 'may edit' : 'may not edit'}`, () => {
       const authority = canvasClientAuthority(row);
-      // The whole point: these are not merely equal by coincidence, they are
-      // the same answer, and it is the board's.
+      // The padlets surfaces share one answer, and it is the board's.
       expect(authority.ordinaryNoteMutation, 'ordinary Note mutation').toBe(row.expected);
       expect(authority.selectionSaveAsNote, 'selection -> Note').toBe(row.expected);
-      expect(authority.canUseCanvasToolbar, 'creation toolbar').toBe(row.expected);
       expect(authority.ordinaryNoteMutation).toBe(authority.selectionSaveAsNote);
     });
   }
@@ -129,6 +136,66 @@ describe('workspace role is not the board mutation authority', () => {
       const authority = canvasClientAuthority(unresolved);
       expect(authority.ordinaryNoteMutation).toBe(false);
       expect(authority.selectionSaveAsNote).toBe(false);
+    }
+  });
+});
+
+// ============================================================================
+// SPLIT_3 -- the padlets capability must not leak into other backends
+// ============================================================================
+
+/**
+ * The regression this closes: giving the shared canvas aliases the padlets
+ * capability handed a board_collaborators editor four controls whose backends
+ * refuse them -- Map style, the freeform background and Set as cover write
+ * `boards` (owner-only), and Graph Line writes the freeform graph tables
+ * (their own `can_edit_board`).
+ */
+describe('board-content authority does not reach other backends', () => {
+  const collaboratorEditor = {
+    userId: EDITOR,
+    collaboratorAuthority: collaborator(EDITOR, 'editor'),
+    workspaceRole: 'readonly' as const,
+  };
+
+  it('CASE 2: a collaborator editor may write padlets and NOTHING backed by boards', () => {
+    const a = canvasClientAuthority(collaboratorEditor);
+    // What their policy does authorise.
+    expect(a.ordinaryNoteMutation, 'ordinary Note mutation').toBe(true);
+    expect(a.selectionSaveAsNote, 'selection -> Note').toBe(true);
+    // What it does not. `boards_update` is owner-only; this user is not the
+    // owner, so offering these would promise a write the server refuses.
+    expect(a.mapStyle, 'Map style').toBe(false);
+    expect(a.freeformBackground, 'Freeform background').toBe(false);
+    expect(a.setAsCover, 'Set as cover').toBe(false);
+    // The graph tables have their own can_edit_board, which does not read
+    // board_collaborators.
+    expect(a.graphLine, 'Graph Line').toBe(false);
+  });
+
+  it('the two capabilities are genuinely independent, not one renamed', () => {
+    // A case where they disagree in each direction proves the split is real.
+    const ownerReadonly = canvasClientAuthority({
+      userId: OWNER, collaboratorAuthority: collaborator(OWNER, null), workspaceRole: 'readonly',
+    });
+    expect(ownerReadonly.ordinaryNoteMutation).toBe(true);
+    expect(ownerReadonly.mapStyle).toBe(false);
+
+    const viewerWithWorkspaceEdit = canvasClientAuthority({
+      userId: VIEWER, collaboratorAuthority: collaborator(VIEWER, 'viewer'), workspaceRole: 'member',
+    });
+    expect(viewerWithWorkspaceEdit.ordinaryNoteMutation).toBe(false);
+    expect(viewerWithWorkspaceEdit.mapStyle).toBe(true);
+  });
+
+  it('CASE 5: unresolved authority fails closed on the padlets surfaces', () => {
+    for (const unresolved of [
+      { userId: null, collaboratorAuthority: collaborator(EDITOR, 'editor'), workspaceRole: 'member' as const },
+      { userId: EDITOR, collaboratorAuthority: null, workspaceRole: 'member' as const },
+    ]) {
+      const a = canvasClientAuthority(unresolved);
+      expect(a.ordinaryNoteMutation).toBe(false);
+      expect(a.selectionSaveAsNote).toBe(false);
     }
   });
 });

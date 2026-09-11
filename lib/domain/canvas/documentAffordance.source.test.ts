@@ -100,7 +100,9 @@ describe('23: CanvasClient supplies one Document-open callback, reused everywher
   );
 
   it('reuses the B1b-ii destination helper and state; T1: capability-blind early return; T2: complete post retained', () => {
-    expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    // SPLIT_3: the Document editor route ends in a `padlets` write, so it asks
+    // the board's content capability rather than the shared canvas alias.
+    expect(body).toContain('selectDocumentModalDestination(post, canEditBoardContent)');
     // PATCH-149B2-ii: routed through the shared guard (requestOpenDocument
     // receives the complete post, same T2 invariant as before).
     expect(body).toContain('requestOpenDocument(post, destination)');

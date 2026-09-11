@@ -3,22 +3,22 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * PDF_SELECTION_TO_NOTE_BOARD_AUTHORITY_SCOPE_FIX_1 governance seam.
+ * PDF_SELECTION_TO_NOTE_PERMISSION_SPLIT_3 governance seam.
  *
- * The board-scoped authority exists for ONE feature: saving a PDF selection as
- * a Note. This suite is the fence around it, and it has two halves:
+ * `canEditBoardContent` answers ONE question -- may this user write a `padlets`
+ * row on this board -- and this suite is the fence around it:
  *
  *   1. the capability really is derived from the board (ownership OR an
  *      editor collaborator row), matching the padlets/source-reference write
- *      policies that the save actually goes through; and
+ *      policies the save actually goes through; and
  *
- *   2. it reaches every padlets-backed board CONTENT mutation -- ordinary Note
- *      create/edit/delete and the PDF selection save -- and nothing beyond
- *      them. Canvas Settings, Map, Drawing and the graph write through other
- *      tables with other policies (`boards_update` is owner-only; the graph
- *      tables have their own `can_edit_board`), so each keeps the authority it
- *      already had. An earlier pass propagated this capability to those too
- *      and offered writes their backends refuse; half 2b is what stops that.
+ *   2. it reaches the padlets surfaces and stops. The shared canvas aliases
+ *      beside it carry surfaces with entirely different backends -- Map style,
+ *      the freeform background and Set as cover write `boards`, whose policy is
+ *      owner-only, and Graph Line writes the freeform graph tables, which have
+ *      their own `can_edit_board`. A previous pass gave those aliases this
+ *      capability, which handed a board_collaborators editor four controls
+ *      their backends refuse. These assertions are what stops that recurring.
  *
  * Half 2 pins the pre-existing wiring verbatim. It is NOT a claim that those
  * authorities are correct -- only that this slice did not change them.
@@ -131,45 +131,86 @@ describe('cached authority never outlives the identity or board it names', () =>
 // Half 2 -- the fence: this capability gates the PDF save and nothing else
 // ============================================================================
 
-describe('ONE capability governs every board Note mutation', () => {
-  it('it is resolved once, under a name that says what it governs', () => {
-    expect(canvasClient).toContain('const canEditCurrentBoard = canEditBoard({');
+describe('the padlets capability is wired to padlets surfaces only', () => {
+  it('it is resolved once, named for the policy it answers for', () => {
+    expect(canvasClient).toContain('const canEditBoardContent = canEditBoard({');
     expect(canvasClient).toContain('boardId: canvasId,');
     expect(canvasClient).toContain('collaboratorAuthority: boardCollaboratorAuthority,');
-    // Exactly one derivation. The earlier PDF-only alias is gone, not aliased.
     expect(canvasClient.match(/canEditBoard\(/g) ?? []).toHaveLength(1);
-    expect(canvasClient).not.toContain('canSavePdfSelectionAsNote');
-    expect(canvasClient.match(/isBoardOwner\(/g) ?? []).toHaveLength(0);
+    // The previous, over-broad name is gone.
+    expect(canvasClient).not.toContain('canEditCurrentBoard');
   });
 
-  it('ordinary post/Note mutation reads it -- not the workspace role', () => {
-    // The defect this closes: these two answered the same question differently,
-    // so a board owner with a readonly workspace role could save a PDF
-    // selection as a Note while the ordinary Note controls vanished.
-    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditCurrentBoard;');
+  it('the PDF selection save reads it', () => {
+    expect(canvasClient).toContain('const canSavePdfSelectionAsNote = canEditBoardContent;');
+    expect(canvasClient).toContain('onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}');
+    expect(canvasClient).toContain("if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');");
+  });
+
+  it('ordinary Note edit/delete read it', () => {
+    expect(canvasClient).toContain('isEditable={canEditBoardContent}');
+    expect(canvasClient).toContain('canEditPosts={canEditBoardContent}');
+    expect(canvasClient).toContain('selectDocumentModalDestination(post, canEditBoardContent)');
+  });
+
+  it('the SHARED aliases do NOT read it -- this is the SPLIT_3 regression', () => {
+    // Giving these the padlets capability handed a collaborator editor Map
+    // style, the freeform background, Set as cover and Graph Line, none of
+    // which their backend authorises. They stay on the workspace role.
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
-    expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
+    expect(canvasClient).not.toContain('const canUseFreeformEditButton = canEditBoardContent;');
+    expect(canvasClient).not.toContain('const canUseCanvasToolbar = canEditBoardContent;');
   });
 
-  it('the PDF selection save reads the SAME capability', () => {
-    expect(canvasClient).toContain('onSaveSelectionAsNote={canEditCurrentBoard ? saveKnowledgeSelectionAsNote : undefined}');
-    expect(canvasClient).toContain("if (!canvasId || !canEditCurrentBoard) throw new Error('note_save_not_allowed');");
+  it('the four reported surfaces are gated exactly as they were before the defect', () => {
+    const code = canvasClient.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // Freeform background -> writes boards.background_type/background_value,
+    // so `boards_update`, so owner-only. Its guard stays on the alias.
+    const background = code.slice(
+      code.indexOf('const persistFreeformBoardAppearance = useCallback('),
+      code.indexOf('const setFreeformGridPreference = useCallback('),
+    );
+    expect(background.length).toBeGreaterThan(200);
+    expect(background).toContain('if (!canUseFreeformEditButton) {');
+    expect(background).not.toContain('canEditBoardContent');
+
+    // Map style and Graph Line are toolbar entries; the toolbar as a whole is
+    // what decides whether they are reachable.
+    expect(code).toContain('{canUseCanvasToolbar && !effectiveToolbarCollapsed && (');
+    const toolbarRegistry = sourceOf('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
+    expect(toolbarRegistry).toContain("type: \"map-style\"");
+    expect(toolbarRegistry).toContain("type: \"graph-line\"");
+    expect(toolbarRegistry).not.toContain('canEditBoardContent');
+
+    // Set as cover writes the board row too.
+    const cover = code.slice(
+      code.indexOf('coverPostId: post.id') - 600,
+      code.indexOf('coverPostId: post.id'),
+    );
+    expect(cover).not.toContain('canEditBoardContent');
   });
 
-  it('ordinary Note create / edit / delete all hang off that one answer', () => {
-    // Create (the toolbar), edit (the mutation-capable editor route) and the
-    // editable surfaces that own delete.
-    expect(canvasClient).toContain('isEditable={canUseFreeformEditButton}');
-    expect(canvasClient).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
-    expect(canvasClient).toContain('canEditPosts={canUseFreeformEditButton}');
+  it('census: the padlets capability has a small, enumerable set of consumers', () => {
+    // A future edit that quietly routes a boards-backed or graph surface
+    // through canEditBoardContent re-introduces exactly the defect this suite
+    // exists for, and moves this count.
+    const code = canvasClient.replace(/\/\*[\s\S]*?\*\//g, '');
+    const uses = code.match(/canEditBoardContent/g) ?? [];
+    expect(uses.length).toBe(13);
+    // Non-vacuity: the matcher does find the thing it is counting.
+    expect(uses.length).toBeGreaterThan(0);
   });
 });
 
 describe('every unrelated mutation authority is untouched by this slice', () => {
-  it('the toolbar follows Note creation, because it IS Note creation', () => {
-    // It moved with the post mutations deliberately: a user who may write a
-    // Note must be able to reach the control that creates one.
+  it('the toolbar keeps the workspace authority it has always had', () => {
+    // It hosts Map style, the freeform background, Set as cover and Graph
+    // Line alongside Note creation. Those write `boards` and the graph tables,
+    // so the toolbar cannot follow the padlets capability.
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton;');
+    expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
   });
 
   it('Canvas Settings keeps its own workspace-role authority', () => {

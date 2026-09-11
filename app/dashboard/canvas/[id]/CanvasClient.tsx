@@ -389,9 +389,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * `board_collaborators` role on THIS board. `null` means unresolved, and
    * denies.
    *
-   * SCOPE: this feeds `canEditCurrentBoard` below -- the one capability that
-   * governs every padlets-backed board content mutation. Surfaces writing
-   * through other tables keep the authorities they have always had.
+   * SCOPE: this feeds `canEditBoardContent` below, which answers for padlets
+   * writes only. Surfaces backed by `boards` or the graph tables keep their
+   * own authorities -- one capability cannot speak for two policies.
    *
    * The answer is stamped with the identity and the board it was resolved
    * for; see the hook for why that stamp, and not its timing, is what makes
@@ -504,39 +504,51 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   } = useCanvasData({ canvasId, dispatch });
 
   /**
-   * THE board-edit capability: may this user change the shared content of THIS
-   * board?
+   * May this user change the shared CONTENT of this board -- its padlets?
    *
-   * One answer, for every mutation that writes a `padlets` row -- creating,
-   * editing and deleting an ordinary Note, and saving a PDF selection as one.
-   * Those all go through the same policy, so they must not disagree: a board
-   * owner whose workspace membership later becomes readonly could otherwise
-   * save a PDF selection as a Note while the ordinary Note controls vanished
-   * around it, which is one user, one board, and two different answers.
+   * Derived from the two facts the padlets policy actually names:
+   * `boards.user_id = auth.uid()`, or a `board_collaborators` row with role
+   * 'editor'. Workspace role is not an input, because it is not a term there:
+   * it neither grants a board viewer the right to write nor takes it away from
+   * the board's own owner whose workspace membership later went readonly.
    *
-   * Derived from the two facts that policy actually names: `boards.user_id =
-   * auth.uid()`, or a `board_collaborators` row with role 'editor'. Workspace
-   * role is not an input, because it is not a term there -- it neither grants
-   * a board viewer the right to write nor takes it away from the board's owner.
-   *
-   * SCOPE. This governs padlets-backed board CONTENT and nothing else. The
-   * surfaces beside it write through different tables under different rules --
-   * Canvas Settings and the board background through `boards_update`, which is
-   * owner-only; the Map's sections; Drawing; the freeform graph, which has its
-   * own `can_edit_board`. Each keeps the authority it already had, because
-   * widening this one would offer them writes their own backends refuse.
+   * SCOPE, and it is narrow on purpose. This answers for `padlets` writes and
+   * nothing else -- editing and deleting an ordinary Note, and saving a PDF
+   * selection as one. It is deliberately NOT wired into the shared canvas
+   * aliases above: those carry surfaces with entirely different backends
+   * (`boards_update` is owner-only; the graph tables have their own
+   * `can_edit_board`), and a capability that spans two policies will always be
+   * wrong for one of them.
    */
-  const canEditCurrentBoard = canEditBoard({
+  const canEditBoardContent = canEditBoard({
     userId: user?.id,
     boardId: canvasId,
     board: canvas,
     collaboratorAuthority: boardCollaboratorAuthority,
   });
 
-  // Ordinary post/Note mutation, and the creation toolbar that produces one.
-  // The toolbar necessarily follows: it is how an ordinary Note is created, so
-  // a user who may write one must be able to reach it.
-  const canUseFreeformEditButton = canEditCurrentBoard;
+  /**
+   * PDF selection -> Save as Note. Board CONTENT authority, because the write
+   * it guards is a `padlets` insert plus a source reference under that same
+   * policy -- never the toolbar alias, which carries `boards` and graph
+   * surfaces this user may well not be authorised for.
+   */
+  const canSavePdfSelectionAsNote = canEditBoardContent;
+
+  /*
+    The shared canvas aliases, on the workspace authority they have always had.
+    They are NOT board-content authority, and must not be given it.
+
+    `canUseCanvasToolbar` in particular is one control hosting many tools, and
+    several of them do not write padlets at all: Map style, the freeform
+    background and Set as cover ultimately write `boards`, whose policy is
+    owner-only, and Graph Line writes the freeform graph tables, which have
+    their own `can_edit_board`. A board_collaborators editor is authorised by
+    none of those. Routing these through the padlets capability handed that
+    collaborator four controls their backends refuse -- so the capability stops
+    at the surfaces that genuinely share its policy, and these keep theirs.
+  */
+  const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
   const canUseCanvasToolbar = canUseFreeformEditButton;
 
   // PATCH 8O.2 -- persistence path for 'comment'-mode mutations (own-comment
@@ -2739,7 +2751,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * thing this must never do is report success.
    */
   const saveKnowledgeSelectionAsNote = useCallback(async (request: KnowledgeSourcePageRequest) => {
-    if (!canvasId || !canEditCurrentBoard) throw new Error('note_save_not_allowed');
+    if (!canvasId || !canSavePdfSelectionAsNote) throw new Error('note_save_not_allowed');
     // Exact spans only. A page-only or region request has its own established
     // path through the Note editor and is not what this action offers.
     if (!request.selection) throw new Error('selection_required');
@@ -2798,7 +2810,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Note saved');
   }, [
     canvasId,
-    canEditCurrentBoard,
+    canSavePdfSelectionAsNote,
     deletePostOrThrow,
     getNewPostPosition,
     insertPostAndSelectOrThrow,
@@ -8259,7 +8271,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       return;
     }
     if (post.type === 'card') {
-      const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+      const destination = selectDocumentModalDestination(post, canEditBoardContent);
       if (destination) { setPadletToEdit(post); setDocumentModalDestination(destination); return; }
     }
     setPadletToEdit(post);
@@ -8277,7 +8289,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     else setIsNoteEditorOpen(true);
   };
   const openPadletInTypeEditor = (post: Padlet) => {
-    const destination = post.type === 'card' ? selectDocumentModalDestination(post, canUseFreeformEditButton) : null;
+    const destination = post.type === 'card' ? selectDocumentModalDestination(post, canEditBoardContent) : null;
     if (destination) { requestOpenDocument(post, destination); return; }
     executePadletTypeEditor(post);
   };
@@ -8287,7 +8299,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // PATCH-149B1b-iii §27.4: the Read affordance's routing owner -- reuses
   // the existing B1b-ii destination/state, no new predicate or permission model.
   const openDocumentFromPreview = (post: Padlet) => {
-    const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+    const destination = selectDocumentModalDestination(post, canEditBoardContent);
     if (!destination) return;
     requestOpenDocument(post, destination);
   };
@@ -9292,7 +9304,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             {/* Columns Layout */}
             {isColumnsLayout && (
               <ColumnsLayout
-                isEditable={canUseFreeformEditButton}
+                isEditable={canEditBoardContent}
                 columns={columnsLayoutData}
                 widthClass="w-[280px]"
                 onAddPost={handleAddPostToSection}
@@ -9305,7 +9317,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onAddGlobalSection={() => handleAddSection()}
                 onEditPost={openPadletTargetFromContextMenu}
                 onOpenPost={(post: Padlet) => {
-                  const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+                  const destination = selectDocumentModalDestination(post, canEditBoardContent);
                   if (destination) { requestOpenDocument(post, destination); return; }
                   closeAllToolbarLaunchedUi();
                   setPadletToEdit(post);
@@ -9382,7 +9394,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   {/* Render Sections */}
                   {/* Use Shared Row Canvas DnD Controller */}
                   <RowCanvasDnD
-                    isEditable={canUseFreeformEditButton}
+                    isEditable={canEditBoardContent}
                     sections={sortedSections}
                     padlets={padlets}
                     allPadlets={padlets}
@@ -9400,7 +9412,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onEditPost={openPadletTargetFromContextMenu}
                     onDeletePost={(post) => deletePadletById(post.id)}
                     onOpenPost={(post) => {
-                      const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+                      const destination = selectDocumentModalDestination(post, canEditBoardContent);
                       if (destination) { requestOpenDocument(post, destination); return; }
                       closeAllToolbarLaunchedUi();
                       setPadletToEdit(post);
@@ -9460,7 +9472,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 allPadlets={padlets} // Pass complete dataset for child lookups
                 canvasId={canvas?.id ?? ''}
                 canvasSettings={wallCanvasSettings}
-                isEditable={canUseFreeformEditButton}
+                isEditable={canEditBoardContent}
                 onOpenDocument={openDocumentFromPreview}
                 onPadletUpdate={(updatedPadlet) => {
                   setPadlets(prev => prev.map(p => p.id === updatedPadlet.id ? updatedPadlet : p));
@@ -9605,7 +9617,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   canvasId={canvasId || ''}
                   chronoMode={chronoMode}
                   backgroundStyle={canvasBackgroundStyle}
-                  isEditable={canUseFreeformEditButton}
+                  isEditable={canEditBoardContent}
                   onOpenContainer={(container) => {
                     if (!canUseFreeformEditButton) return;
                     closeAllToolbars();
@@ -9722,7 +9734,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   posts={padlets}
                   lines={passiveMapLines}
                   mapStyle={currentMapStyleId}
-                  canEditPosts={canUseFreeformEditButton}
+                  canEditPosts={canEditBoardContent}
                   onPinContainerOpen={handleMapPinContainerOpen}
                   onPinContainerClose={handleMapPinContainerClose}
                   onOpenDocument={openDocumentFromPreview}
@@ -10737,7 +10749,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             The private AI actions keep their own read-derived rule.
           */
-          onSaveSelectionAsNote={canEditCurrentBoard ? saveKnowledgeSelectionAsNote : undefined}
+          onSaveSelectionAsNote={canSavePdfSelectionAsNote ? saveKnowledgeSelectionAsNote : undefined}
           onOpenBacklinkTarget={openKnowledgeBacklinkTarget}
           /* Freeform only: every other layout is handed nothing, and the
              reader therefore renders no Show on board action at all. */
@@ -10936,7 +10948,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           <FreeformCanvasBoardMenu
             x={freeformBoardMenu.x}
             y={freeformBoardMenu.y}
-            isEditable={canUseFreeformEditButton}
+            isEditable={canEditBoardContent}
             showGraphLine={isFreeformGraphMode}
             canPaste={canPasteFromClipboard}
             canUndoPaste={lastPastedPadletIds.length > 0}

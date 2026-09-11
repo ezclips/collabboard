@@ -23,7 +23,7 @@ describe('central route (openPadletInTypeEditor): Document branch', () => {
   it('the exact-Document branch uses the shared destination helper (PATCH-149B2-ii: via requestOpenDocument)', () => {
     const wrapper = slice(canvasClientSrc, 'const openPadletInTypeEditor = (post: Padlet) => {', '\n  };');
     expect(wrapper).toContain("post.type === 'card'");
-    expect(wrapper).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(wrapper).toContain('selectDocumentModalDestination(post, canEditBoardContent)');
     expect(wrapper).toContain('requestOpenDocument(post, destination)');
   });
 
@@ -59,7 +59,7 @@ describe('Columns onOpenPost: Document branch', () => {
   const body = slice(canvasClientSrc, 'onAddGlobalSection={() => handleAddSection()}', 'onDeletePost={(post: Padlet) => deletePadletById(post.id)}');
 
   it('uses the shared Document destination and no longer opens NoteEditor unconditionally', () => {
-    expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(body).toContain('selectDocumentModalDestination(post, canEditBoardContent)');
     expect(body).toContain('requestOpenDocument(post, destination)');
     expect(body).toContain('setIsNoteEditorOpen(true);');
   });
@@ -73,7 +73,7 @@ describe('Rows onOpenPost: Document branch', () => {
   const body = slice(canvasClientSrc, 'onReorderPost={handleColumnReorder}', 'onOpenTarget={openPadletTargetFromContextMenu}');
 
   it('uses the shared Document destination and no longer opens NoteEditor unconditionally', () => {
-    expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(body).toContain('selectDocumentModalDestination(post, canEditBoardContent)');
     expect(body).toContain('requestOpenDocument(post, destination)');
     expect(body).toContain('setIsNoteEditorOpen(true);');
   });
