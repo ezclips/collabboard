@@ -131,6 +131,20 @@ export const BOARD_CONTENT_TOOL_TYPES: ReadonlySet<string> = new Set(
   CREATE_TOOLS.map((tool) => tool.type),
 );
 
+/**
+ * Tool types whose backends are NOT `padlets`, and which therefore answer to
+ * the workspace capability rather than the board's content authority.
+ *
+ * Map style writes the board row; Graph Line drives the freeform graph tables,
+ * which carry their own `can_edit_board`. Both are refused at the callback as
+ * well as withheld from the toolbar, so reaching the action by another route
+ * changes nothing.
+ */
+export const WORKSPACE_CANVAS_TOOL_TYPES: ReadonlySet<string> = new Set([
+  'map-style',
+  'graph-line',
+]);
+
 export function buildCanvasToolbarGroups({
   isMapLayout,
   isFreeformLayout,
@@ -156,8 +170,12 @@ export function buildCanvasToolbarGroups({
   ];
 
   return [
-    // Group 1 - Canvas-specific (always visible, priority 1); only rendered when there are canvas-specific tools
-    ...(canvasSpecificTools.length > 0 ? [{
+    // Group 1 - Canvas-specific (always visible, priority 1); only rendered when
+    // there are canvas-specific tools AND the workspace capability is present.
+    // Line, Map style and Graph Line do not write `padlets` -- Map style and
+    // the graph tools reach `boards` and the freeform graph tables -- so the
+    // board-content capability that opens the Create group must not open this.
+    ...(canUseFreeformEditButton && canvasSpecificTools.length > 0 ? [{
       id: 'canvas',
       label: isMapLayout ? 'Map' : 'Canvas',
       tools: canvasSpecificTools,
@@ -174,8 +192,9 @@ export function buildCanvasToolbarGroups({
       priority: 2,
       alwaysVisible: true,
     }] : []),
-    // Group 3 - Structure (priority 3)
-    {
+    // Group 3 - Structure (priority 3). Workspace capability, unchanged: this
+    // gate only stops the Create group's authority reaching it.
+    ...(canUseFreeformEditButton ? [{
       id: 'structure',
       label: 'Blocks',
       tools: [
@@ -192,9 +211,9 @@ export function buildCanvasToolbarGroups({
           hint: "Switch to Horizontal or Alternating view to use the Library." },
       ],
       priority: 4,
-    },
-    // Group 4 - Media (priority 4)
-    {
+    }] : []),
+    // Group 4 - Media (priority 4). Workspace capability, unchanged.
+    ...(canUseFreeformEditButton ? [{
       id: 'media',
       label: 'Media',
       tools: [
@@ -221,16 +240,17 @@ export function buildCanvasToolbarGroups({
         { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
       ],
       priority: 5,
-    },
-    // Group 5 - Draw (priority 5, collapsed first on small screens)
-    {
+    }] : []),
+    // Group 5 - Draw (priority 5, collapsed first on small screens). Workspace
+    // capability, unchanged.
+    ...(canUseFreeformEditButton ? [{
       id: 'draw',
       label: 'Draw',
       tools: [
         { icon: PenTool, label: "Draw", color: "text-red-600", bg: "hover:bg-red-50", type: "draw" },
       ],
       priority: 6,
-    },
+    }] : []),
     ...(canManageCanvasShare ? [{
       id: 'share',
       label: 'Share',

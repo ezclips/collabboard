@@ -202,7 +202,9 @@ describe('a PDF selection becomes one source-linked Note', () => {
     expect(ai).toContain('knowledgeSourceSelectionToNoteHtml(request.content)');
     expect(ai).toContain('await deletePostOrThrow(created.id);');
     expect(ai).toContain("throw new Error('source_link_failed')");
-    expect(canvasClient).toContain('onSaveAssistantAsNote={enableBoardAiChat && canUseCanvasToolbar ? savePdfAssistantAnswerAsNote : undefined}');
+    // CORRECTION_3 moved this onto the board's own edit authority; it is
+    // still its own command, which is what this assertion is about.
+    expect(canvasClient).toContain('onSaveAssistantAsNote={enableBoardAiChat && canEditBoardContent ? savePdfAssistantAnswerAsNote : undefined}');
   });
 
   it('9: Note Post and Ask AI keep their own, unchanged routes', () => {

@@ -110,7 +110,9 @@ const canvasClient = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
 /** Executable occurrences of the padlets capability in CanvasClient. */
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 25;
+// CORRECTION_3 moved AI -> Note onto this capability (guard, dependency and
+// both exposure props), which is why this moved from 25.
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 29;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -413,6 +415,8 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       'isEditable={canEditBoardContent}',
       'canEditPosts={canEditBoardContent}',
       'selectDocumentModalDestination(post, canEditBoardContent)',
+      'canSaveAssistantAsNote={canEditBoardContent}',
+      'onSaveAssistantAsNote={enableBoardAiChat && canEditBoardContent ? savePdfAssistantAnswerAsNote : undefined}',
     ]) {
       expect(canvasClientCode, consumer).toContain(consumer);
     }
@@ -511,8 +515,83 @@ describe('every unrelated mutation authority is untouched by this slice', () => 
     expect(canvasClient).toContain('const canUseCanvasToolbar = canUseFreeformEditButton || canEditBoardContent;');
     expect(canvasClient).toContain('const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);');
     const registry = codeOf('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
-    expect(registry).toContain('...(canUseFreeformEditButton ? [{');
     expect(registry).toContain('...(canManageCanvasShare ? [{');
+    /*
+      CORRECTION_3. The union opens the CONTAINER only. Every group that was
+      workspace-governed before it now says so explicitly, so a board editor
+      with a readonly workspace role reaches Create and nothing else -- the
+      union cannot hand them Map style, Blocks, Media or Draw.
+    */
+    expect(registry).toContain('...(canUseFreeformEditButton && canvasSpecificTools.length > 0 ? [{');
+    for (const group of ["id: 'structure',", "id: 'media',", "id: 'draw',", "id: 'settings',"]) {
+      const at = registry.indexOf(group);
+      expect(at, group).toBeGreaterThan(0);
+      expect(registry.slice(Math.max(0, at - 120), at), group).toContain('canUseFreeformEditButton ? [{');
+    }
+    // Create is the one group on board-content authority.
+    const createAt = registry.indexOf("id: 'create',");
+    expect(registry.slice(Math.max(0, createAt - 120), createAt)).toContain('canCreateBoardContent ? [{');
+  });
+
+  it('Map style and Graph Line are refused at the callback, before any state change', () => {
+    // Withholding the controls is not enough: the board menu and any later
+    // caller reach executeToolAction directly.
+    expect(canvasClientCode).toContain(
+      'if (WORKSPACE_CANVAS_TOOL_TYPES.has(toolType) && !canUseFreeformEditButton) return;',
+    );
+    const registry = codeOf('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
+    expect(registry).toContain("export const WORKSPACE_CANVAS_TOOL_TYPES: ReadonlySet<string> = new Set([");
+    expect(registry).toContain("'map-style',");
+    expect(registry).toContain("'graph-line',");
+
+    // The guard precedes every mutation in the function.
+    const body = canvasClientCode.slice(
+      canvasClientCode.indexOf('const executeToolAction = (toolType: string) => {'),
+      canvasClientCode.indexOf('const handleToolClick = (toolType: string) => {'),
+    );
+    expect(body.length).toBeGreaterThan(200);
+    const guardAt = body.indexOf('WORKSPACE_CANVAS_TOOL_TYPES.has(toolType)');
+    expect(guardAt).toBeGreaterThan(0);
+    for (const mutation of ['setSourceNoteReference(null);', 'setSelectedPadletIds([]);', 'setIsGraphConnectMode(false);']) {
+      expect(body.indexOf(mutation), mutation).toBeGreaterThan(guardAt);
+    }
+  });
+
+  it('AI -> Note asks the board, like every other Note save', () => {
+    // CORRECTION_3. It was gated on toolbar reachability, which is a union and
+    // therefore not an authority at all.
+    expect(canvasClientCode).toContain("if (!canvasId || !canEditBoardContent) throw new Error('note_save_not_allowed');");
+    expect(canvasClientCode).toContain('canSaveAssistantAsNote={canEditBoardContent}');
+    expect(canvasClientCode).toContain(
+      'onSaveAssistantAsNote={enableBoardAiChat && canEditBoardContent ? savePdfAssistantAnswerAsNote : undefined}',
+    );
+    expect(canvasClientCode).not.toContain('canSaveAssistantAsNote={canUseCanvasToolbar}');
+
+    // The callback reads the CURRENT answer: the capability is in its own
+    // dependency list, so a permission loss re-creates it rather than leaving
+    // a closure that still remembers yes.
+    const save = canvasClientCode.slice(
+      canvasClientCode.indexOf('const savePdfAssistantAnswerAsNote = useCallback('),
+      canvasClientCode.indexOf('const saveKnowledgeSelectionAsNote = useCallback('),
+    );
+    expect(save.length).toBeGreaterThan(200);
+    expect(save).toContain('canEditBoardContent,');
+    expect(save).not.toContain('canUseCanvasToolbar');
+  });
+
+  it('the AI citation and provenance path is untouched by this correction', () => {
+    // Only the PERMISSION changed. The Note still carries the SERVER's
+    // validated citation set for that message -- the client sends an id pair
+    // and nothing else -- so the open document, the open page and any live
+    // selection still cannot become evidence.
+    const save = canvasClientCode.slice(
+      canvasClientCode.indexOf('const savePdfAssistantAnswerAsNote = useCallback('),
+      canvasClientCode.indexOf('const saveKnowledgeSelectionAsNote = useCallback('),
+    );
+    expect(save).toContain('body: JSON.stringify({ messageId: request.messageId, targetPadletId: created.id }),');
+    for (const forbidden of ['knowledgeReaderDocumentId', 'activeSelection', 'activePageNumber', 'sourceDocumentId:']) {
+      expect(save, forbidden).not.toContain(forbidden);
+    }
   });
 
   it('Canvas Settings keeps its own workspace-role authority', () => {

@@ -22,7 +22,10 @@ import {
   type BoardCollaboratorAuthority,
 } from '@/lib/domain/canvas/boardEditAuthority';
 import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
-import { buildCanvasToolbarGroups } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
+import {
+  buildCanvasToolbarGroups,
+  WORKSPACE_CANVAS_TOOL_TYPES,
+} from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
 
 const OWNER = '11111111-1111-4111-8111-111111111111';
 const EDITOR = '22222222-2222-4222-8222-222222222222';
@@ -92,13 +95,15 @@ function createGroupAuthority(viewer: Viewer): boolean {
   throw new Error('UNRECOGNISED_CREATE_GROUP_AUTHORITY');
 }
 
+type Layout = 'freeform' | 'map' | 'graph';
+
 /** The real toolbar this viewer would be shown, or null when unreachable. */
-function toolbarFor(viewer: Viewer) {
+function toolbarFor(viewer: Viewer, layout: Layout = 'freeform') {
   if (!toolbarReachable(viewer)) return null;
   return buildCanvasToolbarGroups({
-    isMapLayout: false,
-    isFreeformLayout: true,
-    isFreeformGraphMode: false,
+    isMapLayout: layout === 'map',
+    isFreeformLayout: layout !== 'map',
+    isFreeformGraphMode: layout === 'graph',
     isTimelineLayout: false,
     chronoMode: null,
     canManageCanvasShare: capabilities(viewer).workspaceEdit,
@@ -107,6 +112,43 @@ function toolbarFor(viewer: Viewer) {
     isDrawingLayout: false,
     isDirectPdfLayout: false,
   });
+}
+
+/** Every tool type this viewer is offered, on this layout. */
+function toolTypesFor(viewer: Viewer, layout: Layout = 'freeform'): string[] {
+  return (toolbarFor(viewer, layout) ?? []).flatMap((group) => group.tools.map((tool) => tool.type));
+}
+
+/** The workspace-governed half of executeToolAction's guard, from source. */
+function executeToolActionAllowsWorkspaceTool(viewer: Viewer, toolType: string): boolean {
+  const guard = 'if (WORKSPACE_CANVAS_TOOL_TYPES.has(toolType) && !canUseFreeformEditButton) return;';
+  if (!canvasClient.includes(guard)) return true; // pre-correction: no guard at all
+  if (!WORKSPACE_CANVAS_TOOL_TYPES.has(toolType)) return true;
+  return capabilities(viewer).workspaceEdit;
+}
+
+/** AI answer -> Note, as CanvasClient gates it. */
+function canSaveAiAnswerAsNote(viewer: Viewer): boolean {
+  if (canvasClient.includes('canSaveAssistantAsNote={canEditBoardContent}')) {
+    return capabilities(viewer).boardEdit;
+  }
+  if (canvasClient.includes('canSaveAssistantAsNote={canUseCanvasToolbar}')) {
+    return toolbarReachable(viewer); // the state this correction replaces
+  }
+  throw new Error('UNRECOGNISED_AI_NOTE_AUTHORITY');
+}
+
+/** Ask AI publishes nothing, so it answers to neither mutation capability. */
+function askAiIsUngated(): boolean {
+  const reader = readFileSync(
+    resolve(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8',
+  );
+  const at = reader.indexOf('data-knowledge-selection-add-to-chat');
+  const button = reader.slice(at, at + 900);
+  return at > 0
+    && !button.includes('canEditBoardContent')
+    && !button.includes('canUseCanvasToolbar')
+    && !button.includes('canEditWorkspace');
 }
 
 /** Can this viewer reach the ordinary Note tool? */
@@ -237,5 +279,98 @@ describe('the surfaces beside Note creation keep their own authority', () => {
     expect(ids).toContain('share');
     expect(ids).toContain('canvas');
     expect(ids).not.toContain('create');
+  });
+});
+
+// CORRECTION_3 -- the union opens a container, never a permission.
+const OWNER_READONLY = MATRIX[1];
+const BOARD_EDITOR_ONLY = MATRIX[2];
+const WORKSPACE_EDITOR_BOARD_VIEWER = MATRIX[3];
+const BOARD_VIEWER = MATRIX[4];
+const UNRESOLVED: Viewer = {
+  name: 'F. non-owner whose collaborator authority has not resolved',
+  userId: EDITOR,
+  collaboratorAuthority: null,
+  workspaceRole: 'readonly',
+};
+
+describe('a board editor with a readonly workspace role reaches Create and nothing else', () => {
+  for (const layout of ['freeform', 'map', 'graph'] as const) {
+    it(`${layout}: Create is present, and every workspace-governed group is not`, () => {
+      const groups = toolbarFor(BOARD_EDITOR_ONLY, layout);
+      expect(groups, 'the toolbar container is reachable').not.toBeNull();
+      const ids = (groups ?? []).map((group) => group.id);
+
+      expect(ids, 'Create').toContain('create');
+      for (const withheld of ['canvas', 'structure', 'media', 'draw', 'settings', 'share']) {
+        expect(ids, withheld).not.toContain(withheld);
+      }
+      // The controls the review named, by tool type rather than by group.
+      const types = toolTypesFor(BOARD_EDITOR_ONLY, layout);
+      for (const withheld of ['map-style', 'graph-line', 'line', 'draw']) {
+        expect(types, withheld).not.toContain(withheld);
+      }
+      expect(types, 'the Note they came for').toContain('note');
+    });
+  }
+
+  it('a workspace editor keeps every group they had, minus board content', () => {
+    // This correction takes nothing away from the workspace role.
+    for (const layout of ['freeform', 'map', 'graph'] as const) {
+      const ids = (toolbarFor(WORKSPACE_EDITOR_BOARD_VIEWER, layout) ?? []).map((group) => group.id);
+      for (const kept of ['canvas', 'structure', 'media', 'draw', 'settings', 'share']) {
+        expect(ids, `${layout} ${kept}`).toContain(kept);
+      }
+      expect(ids, `${layout} create`).not.toContain('create');
+    }
+    expect(toolTypesFor(WORKSPACE_EDITOR_BOARD_VIEWER, 'map')).toContain('map-style');
+    expect(toolTypesFor(WORKSPACE_EDITOR_BOARD_VIEWER, 'graph')).toContain('graph-line');
+  });
+
+  it('Settings and Share keep their own, distinct policies', () => {
+    // Settings follows the workspace capability, Share canManageCanvasShare;
+    // neither is the board's content authority.
+    expect((toolbarFor(MATRIX[0]) ?? []).map((g) => g.id))
+      .toEqual(expect.arrayContaining(['settings', 'share', 'create']));
+    const readonlyOwner = (toolbarFor(OWNER_READONLY) ?? []).map((g) => g.id);
+    expect(readonlyOwner).not.toContain('settings');
+    expect(readonlyOwner).not.toContain('share');
+  });
+});
+
+describe('Map style and Graph Line are refused at the action, not only hidden', () => {
+  it('the workspace capability decides, for every viewer and both tools', () => {
+    for (const toolType of ['map-style', 'graph-line']) {
+      for (const viewer of [BOARD_EDITOR_ONLY, OWNER_READONLY]) {
+        expect(executeToolActionAllowsWorkspaceTool(viewer, toolType), `${viewer.name} ${toolType}`).toBe(false);
+      }
+      expect(executeToolActionAllowsWorkspaceTool(WORKSPACE_EDITOR_BOARD_VIEWER, toolType), toolType).toBe(true);
+    }
+    // Scoped: it does not catch board content, so Note is decided elsewhere.
+    expect(executeToolActionAllowsWorkspaceTool(BOARD_EDITOR_ONLY, 'note')).toBe(true);
+    expect(WORKSPACE_CANVAS_TOOL_TYPES.has('note')).toBe(false);
+  });
+});
+
+describe('AI -> Note publication answers to the board, as every Note save does', () => {
+  // The same five viewers as the Note matrix, on the same expectations, plus
+  // the unresolved case: one table, so the three paths cannot drift apart.
+  const EXPECTED_AI: ReadonlyArray<readonly [Viewer, boolean]> = [
+    ...MATRIX.map((viewer) => [viewer, EXPECTED[viewer.name]] as const),
+    [UNRESOLVED, false] as const,
+  ];
+
+  for (const [viewer, expected] of EXPECTED_AI) {
+    it(`${viewer.name} -> AI save ${expected ? 'YES' : 'NO'}`, () => {
+      expect(canSaveAiAnswerAsNote(viewer)).toBe(expected);
+      // The three Note paths give one answer, and it is the board's.
+      expect(canSaveAiAnswerAsNote(viewer)).toBe(canSaveSelectionAsNote(viewer));
+      expect(canSaveAiAnswerAsNote(viewer)).toBe(canCreateOrdinaryNote(viewer));
+    });
+  }
+
+  it('a reader may still ask privately; only publication is gated', () => {
+    expect(askAiIsUngated(), 'Ask AI answers to no mutation capability').toBe(true);
+    expect(canSaveAiAnswerAsNote(WORKSPACE_EDITOR_BOARD_VIEWER), 'publication').toBe(false);
   });
 });

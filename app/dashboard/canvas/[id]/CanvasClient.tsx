@@ -195,7 +195,7 @@ import type mapboxgl from 'mapbox-gl';
 import MapStylePanel from '@/components/map/MapStylePanel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
-import { buildCanvasToolbarGroups, BOARD_CONTENT_TOOL_TYPES, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
+import { buildCanvasToolbarGroups, BOARD_CONTENT_TOOL_TYPES, WORKSPACE_CANVAS_TOOL_TYPES, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import CanvasSettingsModal from '@/components/collabboard/canvas/ui/CanvasSettingsModal';
 import CanvasTitleHeader, { CANVAS_TITLE_HEADER_HEIGHT } from '@/components/collabboard/canvas/ui/CanvasTitleHeader';
@@ -2695,7 +2695,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * provenance did not.
    */
   const savePdfAssistantAnswerAsNote = useCallback(async (request: BoardAiAssistantNoteSaveRequest) => {
-    if (!canvasId || !canUseCanvasToolbar) throw new Error('note_save_not_allowed');
+    if (!canvasId || !canEditBoardContent) throw new Error('note_save_not_allowed');
 
     const noteId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
@@ -2759,7 +2759,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Note saved');
   }, [
     canvasId,
-    canUseCanvasToolbar,
+    canEditBoardContent,
     deletePostOrThrow,
     getNewPostPosition,
     insertPostAndSelectOrThrow,
@@ -7917,6 +7917,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const executeToolAction = (toolType: string) => {
     if (BOARD_CONTENT_TOOL_TYPES.has(toolType) && !canEditBoardContent) return;
+    // Map style and Graph Line write the board row and the graph tables, so
+    // board-content authority does not reach them. Refused HERE, above every
+    // line below: the clean-up that follows already mutates component state,
+    // and an unauthorised tool must not get that far.
+    if (WORKSPACE_CANVAS_TOOL_TYPES.has(toolType) && !canUseFreeformEditButton) return;
     // Any ordinary toolbar creation starts clean: a source workflow the user
     // abandoned can never attach itself to the next Note.
     setSourceNoteReference(null);
@@ -10832,8 +10837,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           boardAiDraftContextByDocumentId={enableBoardAiChat ? pdfWorkspaceAiDraftContextById : undefined}
           onBoardAiDraftContextChange={enableBoardAiChat ? setPdfAiDraftContextForDocument : undefined}
           workspaceActivePageNumber={activePdfId ? pdfWorkspacePageById[activePdfId] ?? null : null}
-          canSaveAssistantAsNote={canUseCanvasToolbar}
-          onSaveAssistantAsNote={enableBoardAiChat && canUseCanvasToolbar ? savePdfAssistantAnswerAsNote : undefined}
+          canSaveAssistantAsNote={canEditBoardContent}
+          onSaveAssistantAsNote={enableBoardAiChat && canEditBoardContent ? savePdfAssistantAnswerAsNote : undefined}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader
