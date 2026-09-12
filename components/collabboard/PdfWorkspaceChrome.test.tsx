@@ -531,17 +531,31 @@ describe('canvas toolbar PDF entry point', () => {
       isTimelineLayout: false,
       chronoMode: null,
       canManageCanvasShare: false,
-      // CORRECTION_3: Media, Blocks, Draw and the canvas group are explicitly
-      // workspace-governed, so this suite's subject (the PDF tool inside Media)
-      // needs the capability that renders Media at all. Share and Settings keep
-      // their own flags, which stay false here.
+      // The canvas group and Settings stay workspace-governed; Share keeps its
+      // own flag. Both stay false here -- this suite's subject is the shape of
+      // the PDF tool, not who may reach the toolbar.
       canUseFreeformEditButton: true,
-      // CORRECTION_2: the Create group asks the BOARD, not the workspace role.
-      canCreateBoardContent: false,
+      // CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_1: Media is board content
+      // now, so the capability that renders Media -- and with it this suite's
+      // subject, the PDF tool inside it -- is the board's own. Granted
+      // DELIBERATELY, not defaulted: the false-authority case is proved in
+      // noteCreationBoardAuthority.behavior.test.tsx and in the negative
+      // control below.
+      canCreateBoardContent: true,
       isDrawingLayout: false,
       isDirectPdfLayout: false,
       ...flags,
     });
+
+  it('withholds Media, and the PDF tool with it, from a board viewer', () => {
+    // The explicit false-authority case, kept beside the granted one so the
+    // default above can never quietly become the only thing asserted.
+    const groups = groupsFor({
+      isFreeformLayout: true, isDirectPdfLayout: true, canCreateBoardContent: false,
+    });
+    expect(groups.find((group) => group.id === 'media')).toBeUndefined();
+    expect(groups.flatMap((group) => group.tools).some((tool) => tool.type === 'knowledge-pdf')).toBe(false);
+  });
 
   it('offers ONE PDF tool in Media where direct PDF placement is supported', () => {
     const media = groupsFor({ isFreeformLayout: true, isDirectPdfLayout: true })

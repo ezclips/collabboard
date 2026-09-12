@@ -934,6 +934,9 @@ describe('SECTION-H2 frozen regressions [81-91]', () => {
     isMapLayout: false, isFreeformLayout: false, isFreeformGraphMode: false,
     isTimelineLayout: false, chronoMode: null, canManageCanvasShare: false,
     canUseFreeformEditButton: true, isDrawingLayout: false,
+    // CORRECTION_1: Blocks is board content now. Granted deliberately -- this
+    // freeze is about the layouts the H tool appears on.
+    canCreateBoardContent: true,
   };
   const toolTypes = (flags: Partial<typeof FLAGS>) =>
     buildCanvasToolbarGroups({ ...FLAGS, ...flags } as never).flatMap((g) => g.tools.map((t) => t.type));

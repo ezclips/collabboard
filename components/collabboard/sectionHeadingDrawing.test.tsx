@@ -51,6 +51,9 @@ const FLAGS = {
   isMapLayout: false, isFreeformLayout: false, isFreeformGraphMode: false,
   isTimelineLayout: false, chronoMode: null, canManageCanvasShare: false,
   canUseFreeformEditButton: true, isDrawingLayout: false,
+  // CORRECTION_1: Blocks is board content now. Granted deliberately -- this
+  // suite is about Drawing exposing the H tool, not about who may use it.
+  canCreateBoardContent: true,
 };
 function toolTypes(flags: Partial<typeof FLAGS>): string[] {
   return buildCanvasToolbarGroups({ ...FLAGS, ...flags } as never).flatMap((g) => g.tools.map((t) => t.type));

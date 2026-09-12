@@ -112,7 +112,15 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 /** Executable occurrences of the padlets capability in CanvasClient. */
 // CORRECTION_3 moved AI -> Note onto this capability (guard, dependency and
 // both exposure props), which is why this moved from 25.
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 29;
+/*
+  CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_1 moved this from 29 to 39. The
+  ten added occurrences are all real executable consumers: the live authority
+  ref (its declaration and the assignment that keeps it current, two mentions
+  each), the four shared-content mutation handlers that read it before writing,
+  the one save fence the shared-content editors commit through, and the sidebar
+  prop that decides whether the hidden PDF input is mounted at all.
+*/
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 39;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -417,6 +425,15 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       'selectDocumentModalDestination(post, canEditBoardContent)',
       'canSaveAssistantAsNote={canEditBoardContent}',
       'onSaveAssistantAsNote={enableBoardAiChat && canEditBoardContent ? savePdfAssistantAnswerAsNote : undefined}',
+      // CORRECTION_1: the live mirror, and the fence the shared-content
+      // handlers and editor saves read through it.
+      'const canEditBoardContentRef = useRef(canEditBoardContent);',
+      'canEditBoardContentRef.current = canEditBoardContent;',
+      'if (!canEditBoardContentRef.current) return;',
+      'if (!canEditBoardContentRef.current) return false;',
+      // The hidden board-canvas PDF input is mounted on this same capability,
+      // so an unauthorised user has no element to activate.
+      'canAddBoardContentPdf={canEditBoardContent}',
     ]) {
       expect(canvasClientCode, consumer).toContain(consumer);
     }
@@ -517,20 +534,24 @@ describe('every unrelated mutation authority is untouched by this slice', () => 
     const registry = codeOf('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
     expect(registry).toContain('...(canManageCanvasShare ? [{');
     /*
-      CORRECTION_3. The union opens the CONTAINER only. Every group that was
-      workspace-governed before it now says so explicitly, so a board editor
-      with a readonly workspace role reaches Create and nothing else -- the
-      union cannot hand them Map style, Blocks, Media or Draw.
+      CORRECTION_3 made the union open the CONTAINER only, and every group
+      state its own gate. CORRECTION_1 then moved the three groups that write
+      `padlets` -- Blocks, Media and Draw -- onto the board's own authority,
+      where Create already was. Canvas and Settings keep the workspace
+      capability, because they write `boards` and the graph tables.
     */
     expect(registry).toContain('...(canUseFreeformEditButton && canvasSpecificTools.length > 0 ? [{');
-    for (const group of ["id: 'structure',", "id: 'media',", "id: 'draw',", "id: 'settings',"]) {
+    for (const group of ["id: 'settings',"]) {
       const at = registry.indexOf(group);
       expect(at, group).toBeGreaterThan(0);
       expect(registry.slice(Math.max(0, at - 120), at), group).toContain('canUseFreeformEditButton ? [{');
     }
-    // Create is the one group on board-content authority.
-    const createAt = registry.indexOf("id: 'create',");
-    expect(registry.slice(Math.max(0, createAt - 120), createAt)).toContain('canCreateBoardContent ? [{');
+    // The board-content groups, all four on the board's own authority.
+    for (const group of ["id: 'create',", "id: 'structure',", "id: 'media',", "id: 'draw',"]) {
+      const at = registry.indexOf(group);
+      expect(at, group).toBeGreaterThan(0);
+      expect(registry.slice(Math.max(0, at - 260), at), group).toContain('canCreateBoardContent ? [{');
+    }
   });
 
   it('Map style and Graph Line are refused at the callback, before any state change', () => {

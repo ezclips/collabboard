@@ -528,6 +528,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   });
 
   /**
+   * The SAME authority, readable at the moment a write actually happens.
+   *
+   * A flow that is already open -- an editor modal, the Library panel, the
+   * drawing surface, a pending paste, a file dialog -- holds callbacks built
+   * when it opened. Asking this ref instead of that closure is what makes an
+   * authority revoked mid-flow refuse the final write rather than commit on a
+   * stale answer. It mirrors `canEditBoardContent` and never derives it again.
+   */
+  const canEditBoardContentRef = useRef(canEditBoardContent);
+  canEditBoardContentRef.current = canEditBoardContent;
+
+  /**
    * PDF selection -> Save as Note. Board CONTENT authority, because the write
    * it guards is a `padlets` insert plus a source reference under that same
    * policy -- never the toolbar alias, which carries `boards` and graph
@@ -2383,6 +2395,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const handleKnowledgePdfUploaded = useCallback(async (document: KnowledgePdfPlacementSource): Promise<boolean> => {
     if (!canvasId) return false;
+    // Board content, asked FIRST and asked live: placing a PDF inserts a
+    // `padlets` row, so a user the board does not authorise gets no placement
+    // -- and gets it refused here even if their authority changed while the
+    // file dialog was open. The Knowledge document itself is not this gate's
+    // to remove; see the header above on its board-independent durability.
+    if (!canEditBoardContentRef.current) return false;
     // PDF-C1 release scope, defensive layer. The toolbar already withholds Add
     // PDF outside the allowlist, so this only catches a stale or impossible
     // invocation. It returns BEFORE the placement gate is consulted, so an
@@ -2987,6 +3005,27 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     },
   });
   requestPlacementIfRequiredRef.current = requestPlacementIfRequired;
+
+  /**
+   * The commit fence for the shared-content editors.
+   *
+   * Withholding a tool stops the editor being OPENED; this stops it being
+   * SAVED. Link, Image, Upload and Import (both finish through the image
+   * editor) and Draw all end in a `padlets` write, so the save asks the board
+   * -- live, through the ref -- rather than trusting the authority that was
+   * true when the modal opened. The save hook itself is left exactly as it is:
+   * this is a wrapper at the boundary, not a new permission layer inside it.
+   */
+  const guardBoardContentSave = useCallback(
+    (save: (...args: any[]) => any) => async (...args: any[]) => {
+      if (!canEditBoardContentRef.current) return;
+      return save(...args);
+    },
+    [],
+  );
+  const saveLinkIfBoardEditable = useMemo(() => guardBoardContentSave(saveLink), [guardBoardContentSave, saveLink]);
+  const saveImageIfBoardEditable = useMemo(() => guardBoardContentSave(saveImage), [guardBoardContentSave, saveImage]);
+  const saveDrawingIfBoardEditable = useMemo(() => guardBoardContentSave(saveDrawing), [guardBoardContentSave, saveDrawing]);
 
   // Scroll to bottom when toggling Gantt or Scheduler so they are instantly visible
   useEffect(() => {
@@ -3783,6 +3822,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const handleCreateSectionHeading = useCallback(async () => {
     if (!canvasId || !(isFreeformLayout || isDrawingLayout)) return;
+    // Before the id, before the optimistic card, before the insert: a heading
+    // is shared board content, so an unauthorised caller leaves no trace at
+    // all -- not even a card that appears and is then taken away.
+    if (!canEditBoardContentRef.current) return;
 
     const headingId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
@@ -5296,6 +5339,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [canvasId]);
 
   const handlePaste = async (targetPosition?: { x: number; y: number }) => {
+    // Pasting publishes copies onto this board, so it answers to the board and
+    // not to whatever surface offered the command.
+    if (!canEditBoardContentRef.current) return;
     const clipboard = await clipboardManager.paste();
     if (!clipboard || !canvasId) return;
 
@@ -7025,6 +7071,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const handleFreeformLibraryDrop = useCallback(async (e: React.DragEvent) => {
     const libraryContentStr = e.dataTransfer.getData('application/collabboard-library');
     if (!libraryContentStr) return;
+    // A Library drop PLACES the item on this board -- a `padlets` insert, and
+    // on the durable path a reuse link beside it. Reading the panel is not
+    // placing, so the gate is here on the drop rather than on the panel.
+    if (!canEditBoardContentRef.current) return;
     try {
       const content: LibraryItemContent = JSON.parse(libraryContentStr);
       const cleanMetadata = sanitizeLibraryMetadata(content.metadata);
@@ -8585,6 +8635,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBack={() => router.push('/dashboard')}
               onKnowledgePdfUploaded={handleKnowledgePdfUploaded}
               onKnowledgePdfSettled={handleKnowledgePdfSettled}
+              // The same board authority the Media group is built from, so the
+              // hidden input cannot outlive the control that opens it.
+              canAddBoardContentPdf={canEditBoardContent}
             />
           </div>
         )}
@@ -8648,13 +8701,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canvasId={canvasId}
           commentAccessMode={commentAccessMode}
           saveNote={saveNote}
-          saveLink={saveLink}
+          saveLink={saveLinkIfBoardEditable}
           saveTable={saveTable}
           saveTodo={saveTodo}
           saveContainer={saveContainer}
           saveComment={saveComment}
-          saveImage={saveImage}
-          saveDrawing={saveDrawing}
+          saveImage={saveImageIfBoardEditable}
+          saveDrawing={saveDrawingIfBoardEditable}
           saveAIComponent={saveAIComponent}
           saveCard={saveCard}
           closeAllToolbars={closeAllToolbars}

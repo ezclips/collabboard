@@ -23,6 +23,8 @@ import {
 } from '@/lib/domain/canvas/boardEditAuthority';
 import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import {
+  BOARD_CONTENT_TOOL_TYPES,
+  SHARED_BOARD_CONTENT_TOOL_TYPES,
   buildCanvasToolbarGroups,
   WORKSPACE_CANVAS_TOOL_TYPES,
 } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
@@ -167,14 +169,26 @@ function canCreateOrdinaryNote(viewer: Viewer): boolean {
 function executeToolActionAllows(viewer: Viewer, toolType: string): boolean {
   const guard = 'if (BOARD_CONTENT_TOOL_TYPES.has(toolType) && !canEditBoardContent) return;';
   if (!canvasClient.includes(guard)) return true; // pre-correction: no guard at all
-  // The guarded set is the Create group's own tools, read from a viewer the
-  // board DOES authorise -- asking the viewer under test would hand back an
-  // empty set precisely when they are the one being refused.
-  const createTools = (toolbarFor(MATRIX[0]) ?? []).find((group) => group.id === 'create')?.tools ?? [];
-  const boardContentTypes = new Set(createTools.map((tool) => tool.type));
-  expect(boardContentTypes.size, 'the guarded set is not empty').toBeGreaterThan(0);
-  if (!boardContentTypes.has(toolType)) return true;
+  // The guarded set is the production classification itself, not a set
+  // reconstructed from one group -- the toolbar and the callback read the same
+  // export, and this asks the very thing they read.
+  expect(BOARD_CONTENT_TOOL_TYPES.size, 'the guarded set is not empty').toBeGreaterThan(0);
+  if (!BOARD_CONTENT_TOOL_TYPES.has(toolType)) return true;
   return capabilities(viewer).boardEdit;
+}
+
+/**
+ * One shared-content handler's own early return, as CanvasClient writes it.
+ *
+ * These are the LAST line before a write, and they read the live authority ref
+ * rather than a closed-over boolean -- which is what makes a permission lost
+ * while a flow is open still refuse the commit.
+ */
+function handlerRefusesWithoutBoardEdit(handler: string): boolean {
+  const at = canvasClient.indexOf(`const ${handler} = `);
+  if (at < 0) throw new Error(`HANDLER_NOT_FOUND: ${handler}`);
+  const head = canvasClient.slice(at, at + 1400);
+  return head.includes('if (!canEditBoardContentRef.current) return');
 }
 
 /** Selection -> Note, which this correction must leave exactly as it is. */
@@ -251,10 +265,84 @@ describe('the creation callback refuses what the toolbar refuses to render', () 
   });
 
   it('the guard is scoped to board content -- unrelated tools are not caught by it', () => {
-    // `library` opens a chooser and writes nothing, so it is not in the set and
-    // this gate must not be the thing that decides it.
-    expect(executeToolActionAllows(MATRIX[3], 'library')).toBe(true);
+    // Corrected: `library` is NOT an innocent chooser. Its drop places the item
+    // on the board -- a `padlets` insert -- so it is board content and the gate
+    // is exactly the thing that must decide it. Map style still is not: it
+    // writes `boards`, and keeps the workspace authority.
+    expect(executeToolActionAllows(MATRIX[3], 'library')).toBe(false);
     expect(executeToolActionAllows(MATRIX[3], 'map-style')).toBe(true);
+    expect(BOARD_CONTENT_TOOL_TYPES.has('map-style')).toBe(false);
+    expect(BOARD_CONTENT_TOOL_TYPES.has('graph-line')).toBe(false);
+    expect(BOARD_CONTENT_TOOL_TYPES.has('line')).toBe(false);
+  });
+
+  it('every shared-content tool is refused for a board viewer and allowed for a board editor', () => {
+    for (const toolType of SHARED_BOARD_CONTENT_TOOL_TYPES) {
+      for (const viewer of [WORKSPACE_EDITOR_BOARD_VIEWER, BOARD_VIEWER]) {
+        expect(executeToolActionAllows(viewer, toolType), `${viewer.name} ${toolType}`).toBe(false);
+      }
+      for (const viewer of [MATRIX[0], OWNER_READONLY, BOARD_EDITOR_ONLY]) {
+        expect(executeToolActionAllows(viewer, toolType), `${viewer.name} ${toolType}`).toBe(true);
+      }
+    }
+  });
+
+  it('the eight locked shared-content actions are all classified as board content', () => {
+    for (const toolType of [
+      'section-heading', 'library', 'link', 'image', 'upload', 'import', 'draw', 'knowledge-pdf',
+    ]) {
+      expect(BOARD_CONTENT_TOOL_TYPES.has(toolType), toolType).toBe(true);
+    }
+  });
+});
+
+describe('the final write handlers refuse without CURRENT board authority', () => {
+  // The named mutation handlers, each the last thing before a write. A guard
+  // here is what stops a flow that was opened while authorised from committing
+  // after the authority went away.
+  for (const handler of [
+    'handleCreateSectionHeading',
+    'handleFreeformLibraryDrop',
+    'handleKnowledgePdfUploaded',
+    'handlePaste',
+  ]) {
+    it(`${handler} returns early without board authority`, () => {
+      expect(handlerRefusesWithoutBoardEdit(handler)).toBe(true);
+    });
+  }
+
+  it('the section heading refuses BEFORE it mints an id or shows an optimistic card', () => {
+    const at = canvasClient.indexOf('const handleCreateSectionHeading = ');
+    const body = canvasClient.slice(at, at + 1400);
+    const guard = body.indexOf('if (!canEditBoardContentRef.current) return');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard, 'guard precedes crypto.randomUUID()').toBeLessThan(body.indexOf('crypto.randomUUID()'));
+  });
+
+  it('the PDF placement refuses before any placement is requested or inserted', () => {
+    const at = canvasClient.indexOf('const handleKnowledgePdfUploaded = ');
+    const body = canvasClient.slice(at, at + 2600);
+    const guard = body.indexOf('if (!canEditBoardContentRef.current) return');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(body.indexOf('requestPlacementIfRequiredRef.current'));
+  });
+
+  it('the editors commit through a board-gated save, not the raw hook', () => {
+    // usePadletSave is deliberately untouched: the fence is a wrapper at the
+    // boundary. Link, Image (Upload and Import finish here too) and Draw.
+    expect(canvasClient).toContain('saveLink={saveLinkIfBoardEditable}');
+    expect(canvasClient).toContain('saveImage={saveImageIfBoardEditable}');
+    expect(canvasClient).toContain('saveDrawing={saveDrawingIfBoardEditable}');
+    expect(canvasClient).toContain('if (!canEditBoardContentRef.current) return;');
+    // The raw callbacks are not handed to the modal host any more.
+    expect(canvasClient).not.toContain('saveLink={saveLink}');
+    expect(canvasClient).not.toContain('saveImage={saveImage}');
+    expect(canvasClient).not.toContain('saveDrawing={saveDrawing}');
+  });
+
+  it('the live ref mirrors the canonical capability and never re-derives it', () => {
+    expect(canvasClient).toContain('const canEditBoardContentRef = useRef(canEditBoardContent);');
+    expect(canvasClient).toContain('canEditBoardContentRef.current = canEditBoardContent;');
   });
 });
 
@@ -272,13 +360,17 @@ describe('the surfaces beside Note creation keep their own authority', () => {
     expect(ids).not.toContain('share');
   });
 
-  it('a workspace editor keeps everything they had except board content', () => {
+  it('a workspace editor keeps their workspace surfaces and no board content', () => {
     const workspaceEditorBoardViewer = MATRIX[3];
     const ids = (toolbarFor(workspaceEditorBoardViewer) ?? []).map((group) => group.id);
     expect(ids).toContain('settings');
     expect(ids).toContain('share');
     expect(ids).toContain('canvas');
-    expect(ids).not.toContain('create');
+    // CORRECTED: these three write `padlets`, so a board VIEWER does not get
+    // them however editable their workspace membership is.
+    for (const withheld of ['create', 'structure', 'media', 'draw']) {
+      expect(ids, withheld).not.toContain(withheld);
+    }
   });
 });
 
@@ -294,37 +386,59 @@ const UNRESOLVED: Viewer = {
   workspaceRole: 'readonly',
 };
 
-describe('a board editor with a readonly workspace role reaches Create and nothing else', () => {
+describe('a board editor with a readonly workspace role reaches every board-content group', () => {
   for (const layout of ['freeform', 'map', 'graph'] as const) {
-    it(`${layout}: Create is present, and every workspace-governed group is not`, () => {
+    it(`${layout}: the board-content groups are present, the workspace ones are not`, () => {
       const groups = toolbarFor(BOARD_EDITOR_ONLY, layout);
       expect(groups, 'the toolbar container is reachable').not.toBeNull();
       const ids = (groups ?? []).map((group) => group.id);
 
-      expect(ids, 'Create').toContain('create');
-      for (const withheld of ['canvas', 'structure', 'media', 'draw', 'settings', 'share']) {
+      // CORRECTED: a readonly workspace membership does not close this board.
+      // Everything that writes `padlets` is theirs.
+      for (const present of ['create', 'structure', 'media', 'draw']) {
+        expect(ids, present).toContain(present);
+      }
+      for (const withheld of ['canvas', 'settings', 'share']) {
         expect(ids, withheld).not.toContain(withheld);
       }
-      // The controls the review named, by tool type rather than by group.
+      // The workspace-backed controls, by tool type rather than by group.
       const types = toolTypesFor(BOARD_EDITOR_ONLY, layout);
-      for (const withheld of ['map-style', 'graph-line', 'line', 'draw']) {
+      for (const withheld of ['map-style', 'graph-line', 'line']) {
         expect(types, withheld).not.toContain(withheld);
       }
       expect(types, 'the Note they came for').toContain('note');
+      expect(types, 'and the drawing they may also make').toContain('draw');
     });
   }
 
-  it('a workspace editor keeps every group they had, minus board content', () => {
-    // This correction takes nothing away from the workspace role.
+  it('a workspace editor who only views the board gets no board-content group', () => {
     for (const layout of ['freeform', 'map', 'graph'] as const) {
       const ids = (toolbarFor(WORKSPACE_EDITOR_BOARD_VIEWER, layout) ?? []).map((group) => group.id);
-      for (const kept of ['canvas', 'structure', 'media', 'draw', 'settings', 'share']) {
+      for (const kept of ['canvas', 'settings', 'share']) {
         expect(ids, `${layout} ${kept}`).toContain(kept);
       }
-      expect(ids, `${layout} create`).not.toContain('create');
+      // CORRECTED: structure/media/draw are board content, not workspace tools.
+      for (const withheld of ['create', 'structure', 'media', 'draw']) {
+        expect(ids, `${layout} ${withheld}`).not.toContain(withheld);
+      }
+      const types = toolTypesFor(WORKSPACE_EDITOR_BOARD_VIEWER, layout);
+      for (const withheld of SHARED_BOARD_CONTENT_TOOL_TYPES) {
+        expect(types, `${layout} ${withheld}`).not.toContain(withheld);
+      }
     }
+    // The workspace role keeps everything that is genuinely the workspace's.
     expect(toolTypesFor(WORKSPACE_EDITOR_BOARD_VIEWER, 'map')).toContain('map-style');
     expect(toolTypesFor(WORKSPACE_EDITOR_BOARD_VIEWER, 'graph')).toContain('graph-line');
+  });
+
+  it('F. an unresolved non-owner authority hides every shared-content control', () => {
+    const types = toolTypesFor(UNRESOLVED);
+    for (const withheld of SHARED_BOARD_CONTENT_TOOL_TYPES) {
+      expect(types, withheld).not.toContain(withheld);
+    }
+    for (const toolType of SHARED_BOARD_CONTENT_TOOL_TYPES) {
+      expect(executeToolActionAllows(UNRESOLVED, toolType), toolType).toBe(false);
+    }
   });
 
   it('Settings and Share keep their own, distinct policies', () => {
@@ -335,6 +449,43 @@ describe('a board editor with a readonly workspace role reaches Create and nothi
     const readonlyOwner = (toolbarFor(OWNER_READONLY) ?? []).map((g) => g.id);
     expect(readonlyOwner).not.toContain('settings');
     expect(readonlyOwner).not.toContain('share');
+  });
+});
+
+describe('the toolbar and the freeform context menu agree about permission', () => {
+  const boardMenu = readFileSync(
+    resolve(process.cwd(), 'components/collabboard/canvas/ui/FreeformCanvasBoardMenu.tsx'), 'utf8',
+  );
+
+  it('the menu opens only for board-content authority, and so do its items', () => {
+    expect(canvasClient).toContain('if (!isFreeformLayout || isAnyEditorOpen || !canEditBoardContent) return;');
+    expect(canvasClient).toContain('isEditable={canEditBoardContent}');
+    expect(boardMenu).toContain('disabled={!isEditable}');
+  });
+
+  it('every shared-content item the menu offers is board-gated on BOTH routes', () => {
+    // The menu routes its items through the same callback the toolbar does, so
+    // the callback guard is the single answer for both entry points.
+    expect(canvasClient).toContain('onToolAction={(toolType) => {');
+    for (const toolType of SHARED_BOARD_CONTENT_TOOL_TYPES) {
+      if (!boardMenu.includes(`type: '${toolType}'`)) continue;
+      expect(executeToolActionAllows(WORKSPACE_EDITOR_BOARD_VIEWER, toolType), toolType).toBe(false);
+      expect(executeToolActionAllows(BOARD_EDITOR_ONLY, toolType), toolType).toBe(true);
+    }
+  });
+
+  it('the menu adds no shared-content action the toolbar does not classify', () => {
+    const menuTypes = Array.from(boardMenu.matchAll(/type: '([a-z-]+)'/g)).map((m) => m[1]);
+    expect(menuTypes.length).toBeGreaterThan(0);
+    for (const toolType of menuTypes) {
+      // Each menu item is either board content or a workspace canvas tool --
+      // never an unclassified write.
+      const classified = BOARD_CONTENT_TOOL_TYPES.has(toolType)
+        || WORKSPACE_CANVAS_TOOL_TYPES.has(toolType)
+        || toolType === 'line'
+        || toolType === 'container';
+      expect(classified, `${toolType} is classified`).toBe(true);
+    }
   });
 });
 

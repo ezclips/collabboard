@@ -39,14 +39,15 @@ export type CanvasToolbarFlags = {
    * row with role 'editor' -- which is what the `padlets` policy actually
    * names.
    *
-   * The Create group is the toolbar's board-CONTENT group: every tool in it
-   * inserts a `padlets` row. It is therefore gated on this and not on the
-   * workspace role, so a board owner or editor whose workspace membership is
-   * readonly can still create a Note, and a workspace editor who is only a
-   * board VIEWER cannot -- which is what the database says in both cases.
+   * It gates every group that writes this board's shared content: Create,
+   * Blocks, Media and Draw. Each tool in them ends in a `padlets` row, so a
+   * board owner or editor whose workspace membership is readonly can use them,
+   * and a workspace editor who is only a board VIEWER cannot -- which is what
+   * the database says in both cases.
    *
-   * Every other group keeps the authority it already had. This gate is about
-   * Note creation, not a repermissioning of the toolbar.
+   * Canvas, Settings and Share keep the workspace authority they had: they
+   * write `boards`, the graph tables or the workspace, not this board's
+   * content, and one capability must not speak for two policies.
    */
   canCreateBoardContent: boolean;
   /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
@@ -126,10 +127,38 @@ export const CREATE_TOOLS: SidebarToolGroup['tools'] = [
   { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
 ];
 
-/** The same set, as the callback guard consumes it. */
-export const BOARD_CONTENT_TOOL_TYPES: ReadonlySet<string> = new Set(
-  CREATE_TOOLS.map((tool) => tool.type),
-);
+/**
+ * The shared-content tools that live OUTSIDE the Create group -- Blocks, Media
+ * and Draw. Every one of them ends in a `padlets` write for this board, so they
+ * answer to the same board authority Create does; the workspace role is not a
+ * term in that policy.
+ *
+ * `knowledge-pdf` belongs here even though it reaches the board through a
+ * native file input rather than the tool callback: this registry decides
+ * whether that control exists at all, and the placement handler asks the same
+ * capability again before anything is written.
+ */
+export const SHARED_BOARD_CONTENT_TOOL_TYPES: readonly string[] = [
+  'section-heading',
+  'library',
+  'link',
+  'image',
+  'upload',
+  'import',
+  'draw',
+  'knowledge-pdf',
+];
+
+/**
+ * THE board-content classification: the Create group's tools and the shared
+ * content tools, in one set, as both the toolbar and the callback guard consume
+ * it. One list, two enforcement points -- what is not rendered is also not
+ * executable, and neither half can drift from the other.
+ */
+export const BOARD_CONTENT_TOOL_TYPES: ReadonlySet<string> = new Set([
+  ...CREATE_TOOLS.map((tool) => tool.type),
+  ...SHARED_BOARD_CONTENT_TOOL_TYPES,
+]);
 
 /**
  * Tool types whose backends are NOT `padlets`, and which therefore answer to
@@ -192,9 +221,9 @@ export function buildCanvasToolbarGroups({
       priority: 2,
       alwaysVisible: true,
     }] : []),
-    // Group 3 - Structure (priority 3). Workspace capability, unchanged: this
-    // gate only stops the Create group's authority reaching it.
-    ...(canUseFreeformEditButton ? [{
+    // Group 3 - Structure (priority 3). Board content: Section heading inserts
+    // a `padlets` row, and the Library's drop places one.
+    ...(canCreateBoardContent ? [{
       id: 'structure',
       label: 'Blocks',
       tools: [
@@ -212,8 +241,10 @@ export function buildCanvasToolbarGroups({
       ],
       priority: 4,
     }] : []),
-    // Group 4 - Media (priority 4). Workspace capability, unchanged.
-    ...(canUseFreeformEditButton ? [{
+    // Group 4 - Media (priority 4). Board content: every entry ends in a
+    // `padlets` row for this board. Storage and provider quotas are a separate
+    // concern and are deliberately NOT proxied through the workspace role here.
+    ...(canCreateBoardContent ? [{
       id: 'media',
       label: 'Media',
       tools: [
@@ -241,9 +272,9 @@ export function buildCanvasToolbarGroups({
       ],
       priority: 5,
     }] : []),
-    // Group 5 - Draw (priority 5, collapsed first on small screens). Workspace
-    // capability, unchanged.
-    ...(canUseFreeformEditButton ? [{
+    // Group 5 - Draw (priority 5, collapsed first on small screens). Board
+    // content: a drawing is a `padlets` row like any other.
+    ...(canCreateBoardContent ? [{
       id: 'draw',
       label: 'Draw',
       tools: [

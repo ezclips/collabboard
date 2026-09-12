@@ -116,6 +116,12 @@ const FLAGS = {
   chronoMode: null,
   canManageCanvasShare: false,
   canUseFreeformEditButton: true,
+  // CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_1: Blocks is board content, so
+  // the H tool needs board-edit authority to be rendered at all. Granted
+  // DELIBERATELY here -- this suite's subject is which LAYOUTS expose the
+  // tool, and the authority case is proved separately in
+  // noteCreationBoardAuthority.behavior.test.tsx.
+  canCreateBoardContent: true,
   isDrawingLayout: false,
 };
 function toolTypes(flags: Partial<typeof FLAGS>): string[] {

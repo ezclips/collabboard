@@ -2,12 +2,27 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import CanvasSidebar from './canvas/ui/CanvasSidebar';
+import { KNOWLEDGE_PDF_TOOLBAR_INPUT_ID } from './KnowledgePdfUploader';
 import {
   buildCanvasToolbarGroups,
   isDirectPdfCanvasLayout,
   type CanvasToolbarFlags,
 } from './canvas/ui/canvasToolbarRegistry';
+
+const MOUNT_BOARD_ID = '11111111-1111-4111-8111-111111111111';
+vi.mock('next/navigation', () => ({ useParams: () => ({ id: MOUNT_BOARD_ID }) }));
+
+/** jsdom ships no ResizeObserver, and the sidebar measures itself with one. */
+class NoopResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = NoopResizeObserver;
 
 /**
  * PDF-C1 final release scope. Direct PDF canvas objects ship on Freeform ONLY.
@@ -334,10 +349,16 @@ async function runPlacement(over: {
   padlets?: any[];
   placementTaken?: boolean;
   insertOk?: boolean;
+  /**
+   * CORRECTION_1: the board-content authority the handler now reads LIVE,
+   * through a ref. Supplied here as the ref the handler actually closes over,
+   * so the permission-loss case can be executed rather than described.
+   */
+  canEditBoardContent?: boolean;
 } = {}): Promise<PlacementRun> {
   const o = {
     canvasId: 'board-1', canPlaceDirectPdf: true, padlets: [] as any[],
-    placementTaken: false, insertOk: true, ...over,
+    placementTaken: false, insertOk: true, canEditBoardContent: true, ...over,
   };
   const inserted: any[] = [];
   const errors: string[] = [];
@@ -348,6 +369,7 @@ async function runPlacement(over: {
     'canvasId', 'canPlaceDirectPdf', 'padlets', 'toast', 'requestPlacementIfRequiredRef',
     'getNewPostPosition', 'nextZIndex', 'setPadlets', 'insertPostPreservingFailureChannels',
     'fetchData', 'KNOWLEDGE_PDF_PLACEMENT_WIDTH', 'KNOWLEDGE_PDF_PLACEMENT_HEIGHT', 'crypto',
+    'canEditBoardContentRef',
     `return ${HANDLER_JS};`,
   );
   const handler = build(
@@ -361,6 +383,7 @@ async function runPlacement(over: {
     () => {},
     260, 320,
     { randomUUID: () => 'placement-1' },
+    { current: o.canEditBoardContent },
   );
 
   const result = await handler({
@@ -368,6 +391,36 @@ async function runPlacement(over: {
   });
   return { result, inserted, onBoard, errors, gateCalls };
 }
+
+/**
+ * CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_1. Placing a PDF is a `padlets`
+ * write, so it answers to the board -- EXECUTED here, not asserted from source.
+ */
+describe('11a. board authority decides placement, live', () => {
+  it('without board authority nothing is placed, shown, or even attempted', async () => {
+    const run = await runPlacement({ canEditBoardContent: false });
+    expect(run.result).toBe(false);
+    expect(run.inserted, 'no network write').toHaveLength(0);
+    expect(run.onBoard, 'no optimistic card').toHaveLength(0);
+    expect(run.gateCalls, 'the placement flow is never even entered').toHaveLength(0);
+  });
+
+  it('authority lost while the file dialog was open still refuses the write', async () => {
+    // The handler reads the LIVE ref, so an authority that was true when the
+    // picker opened and false when the file came back refuses the placement.
+    const run = await runPlacement({ canEditBoardContent: false, placementTaken: true });
+    expect(run.result).toBe(false);
+    expect(run.inserted).toHaveLength(0);
+    expect(run.onBoard).toHaveLength(0);
+    expect(run.gateCalls).toHaveLength(0);
+  });
+
+  it('with board authority the placement proceeds exactly as before', async () => {
+    const run = await runPlacement({ canEditBoardContent: true });
+    expect(run.result).toBe(true);
+    expect(run.inserted).toHaveLength(1);
+  });
+});
 
 describe('11. the result contract, executed', () => {
   it('a confirmed insert is the ONLY branch that reports true', async () => {
@@ -429,3 +482,89 @@ describe('11. the result contract, executed', () => {
 });
 
 const errorsFor = (run: PlacementRun) => run.errors.join(' | ');
+
+/**
+ * CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_1 -- the hidden uploader itself.
+ *
+ * The placement guard above refuses to put a PDF on the board. This proves the
+ * step BEFORE it: without board authority the toolbar's file input is never
+ * mounted, so there is nothing for a programmatic `click()` to activate and no
+ * ingestion request can leave the browser at all.
+ *
+ * The real KnowledgePdfUploader is used here -- deliberately not mocked, since
+ * a mock could not show whether the upload would have been sent.
+ */
+describe('12. the board-canvas PDF uploader answers to board authority', () => {
+  let root: Root | null = null;
+  let host: HTMLElement | null = null;
+
+  afterEach(() => {
+    if (root) act(() => root!.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+    vi.unstubAllGlobals();
+  });
+
+  function mountSidebar(canAddBoardContentPdf: boolean) {
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })));
+    vi.stubGlobal('fetch', fetchSpy);
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const groups = buildCanvasToolbarGroups({
+      isMapLayout: false,
+      isFreeformLayout: true,
+      isFreeformGraphMode: false,
+      isTimelineLayout: false,
+      chronoMode: null,
+      canManageCanvasShare: true,
+      canUseFreeformEditButton: true,
+      // The board authority the Media group is built from -- the same answer
+      // the sidebar prop below carries, because they are one capability.
+      canCreateBoardContent: canAddBoardContentPdf,
+      isDrawingLayout: false,
+      isDirectPdfLayout: isDirectPdfCanvasLayout('freeform'),
+    });
+    act(() => {
+      root!.render(
+        <CanvasSidebar
+          groups={groups}
+          isLineMode={false}
+          isGraphConnectMode={false}
+          handleToolClick={vi.fn()}
+          onBack={vi.fn()}
+          onKnowledgePdfUploaded={vi.fn()}
+          canAddBoardContentPdf={canAddBoardContentPdf}
+        />,
+      );
+    });
+    return { fetchSpy, host: host! };
+  }
+
+  it('a board viewer gets no input, no control, and cannot start an upload', () => {
+    const { fetchSpy, host: mounted } = mountSidebar(false);
+
+    // Nothing to click, and nothing to activate programmatically.
+    expect(mounted.querySelector('input[type="file"][accept*="pdf"]')).toBeNull();
+    expect(document.getElementById(KNOWLEDGE_PDF_TOOLBAR_INPUT_ID)).toBeNull();
+    expect(mounted.querySelector('[data-toolbar-tool="knowledge-pdf"]')).toBeNull();
+
+    // The direct programmatic route the audit named, executed.
+    act(() => {
+      document.getElementById(KNOWLEDGE_PDF_TOOLBAR_INPUT_ID)?.click();
+    });
+
+    // Zero ingestion, storage or padlet requests -- not a refused one.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a board editor still gets exactly one working input', () => {
+    const { fetchSpy, host: mounted } = mountSidebar(true);
+    const input = mounted.querySelectorAll('input[type="file"][accept*="pdf"]');
+    expect(input).toHaveLength(1);
+    expect(document.getElementById(KNOWLEDGE_PDF_TOOLBAR_INPUT_ID)).not.toBeNull();
+    // Mounting alone uploads nothing; the request needs a real file choice.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

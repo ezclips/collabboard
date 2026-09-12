@@ -73,6 +73,22 @@ interface CanvasSidebarProps {
    */
   onKnowledgePdfUploaded?: (document: KnowledgePdfUploadResult) => void;
   onKnowledgePdfSettled?: (documentId: string, status: KnowledgePdfProcessingStatus) => void;
+  /**
+   * May this user write this board's shared content? The board's own
+   * authority, passed in -- never re-derived here, and never the workspace
+   * role.
+   *
+   * It gates the hidden PDF input itself, not merely the label in front of it.
+   * The input's own `onChange` starts the ingestion request, so leaving it
+   * mounted for an unauthorised user would let a programmatic `click()` create
+   * a Knowledge document before any placement guard is ever consulted.
+   * Withholding the element is what makes that impossible rather than merely
+   * unreachable.
+   *
+   * Defaults to FALSE so it fails closed: a host that forgets to say gets no
+   * uploader, rather than silently getting an unguarded one.
+   */
+  canAddBoardContentPdf?: boolean;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -102,6 +118,7 @@ export default function CanvasSidebar({
   onBack,
   onKnowledgePdfUploaded,
   onKnowledgePdfSettled,
+  canAddBoardContentPdf = false,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -366,12 +383,21 @@ export default function CanvasSidebar({
     >
       {/* The toolbar's own input, on its own DOM id: the focused PDF workspace
           mounts a second uploader while covering this board, and a shared id
-          would send one host's label to the other host's input. */}
-      <KnowledgePdfUploader
-        inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}
-        onDocumentUploaded={onKnowledgePdfUploaded}
-        onDocumentSettled={onKnowledgePdfSettled}
-      />
+          would send one host's label to the other host's input.
+
+          Mounted ONLY for a user the board authorises to write its content.
+          Rendering nothing -- rather than rendering it disabled -- is the
+          point: the element that would start the upload does not exist, so
+          `getElementById(...).click()` finds nothing to activate and no
+          ingestion request can be made. The PDF workspace's own uploader is a
+          different surface and is deliberately untouched here. */}
+      {canAddBoardContentPdf ? (
+        <KnowledgePdfUploader
+          inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}
+          onDocumentUploaded={onKnowledgePdfUploaded}
+          onDocumentSettled={onKnowledgePdfSettled}
+        />
+      ) : null}
       <button
         ref={moreMeasureRef}
         type="button"
