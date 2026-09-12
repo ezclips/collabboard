@@ -31,6 +31,20 @@ interface ExcalidrawWrapperProps {
     renderEmbeddable?: (element: any, appState: any) => React.ReactElement | null;
     onImportScene?: (scene: ImportedDrawingScene) => void | Promise<void>;
     /**
+     * May this host still accept an imported scene, RIGHT NOW?
+     *
+     * Reading a file is asynchronous, and `onImportScene` is captured when the
+     * read starts -- so a host that loses the right to edit while `file.text()`
+     * is pending would still be handed the result. This is asked again on the
+     * far side of that await, immediately before delivery, so a result that
+     * arrives too late becomes inert.
+     *
+     * Optional, allow-by-default: a host with no such notion (the drawing-post
+     * editor) is unchanged, and no board semantics are imposed on surfaces
+     * that do not have them.
+     */
+    canImportScene?: () => boolean;
+    /**
      * Opt in to rendering Excalidraw's own right-click menu on the shared
      * CollabBoard menu surface instead of Excalidraw's native one.
      *
@@ -53,6 +67,7 @@ export default function ExcalidrawWrapper({
     validateEmbeddable,
     renderEmbeddable,
     onImportScene,
+    canImportScene,
     useCollabBoardContextMenu = false,
 }: ExcalidrawWrapperProps) {
     // API kept in a ref to avoid triggering renders when Excalidraw fires the callback
@@ -78,17 +93,25 @@ export default function ExcalidrawWrapper({
         const file = event.target.files?.[0];
         event.target.value = "";
         if (!file || !onImportScene) return;
+        // Before the read even starts.
+        if (canImportScene && !canImportScene()) return;
 
         try {
             assertImportFileSize(file.size);
             const text = await file.text();
+            // The far side of the await. `file.text()` cannot be cancelled, so
+            // the result is made inert instead: nothing is parsed and no
+            // callback runs for a host that may no longer accept a scene.
+            if (canImportScene && !canImportScene()) return;
             const scene = parseImportedDrawingText(text);
+            // Asked once more immediately before delivery.
+            if (canImportScene && !canImportScene()) return;
             await onImportScene(scene);
         } catch (error) {
             const message = error instanceof Error ? error.message : "Import failed.";
             window.alert(message);
         }
-    }, [onImportScene]);
+    }, [onImportScene, canImportScene]);
 
     React.useEffect(() => {
         let mounted = true;

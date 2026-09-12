@@ -25,6 +25,35 @@ vi.mock('@/lib/imports/clientAuth', () => ({
 }));
 
 import ImportBrowser from './imports/ImportBrowser';
+import ExcalidrawWrapper from './editors/ExcalidrawWrapper';
+
+/**
+ * The wrapper renders its hidden import input only once the Excalidraw
+ * bundle has loaded, so the bundle is stubbed. Everything under test -- the
+ * file read, the capability probe and the delivery -- is the wrapper's own
+ * code.
+ */
+// The wrapper imports Excalidraw's stylesheet for its side effect; in this
+// environment that would drag in the project's PostCSS pipeline for nothing.
+vi.mock('@excalidraw/excalidraw/index.css', () => ({ default: '' }));
+
+vi.mock('@excalidraw/excalidraw', () => {
+  const Passthrough = ({ children }: { children?: React.ReactNode }) =>
+    React.createElement('div', null, children);
+  const Noop = () => null;
+  const MainMenu = Object.assign(Passthrough, {
+    Item: Passthrough,
+    Separator: Noop,
+    DefaultItems: {
+      Help: Noop,
+      ClearCanvas: Noop,
+      ToggleTheme: Noop,
+      ChangeCanvasBackground: Noop,
+    },
+  });
+  return { Excalidraw: Passthrough, MainMenu, WelcomeScreen: Passthrough };
+});
+
 
 /** jsdom ships neither observer, and the import grid lazy-loads thumbnails. */
 class NoopObserver {
@@ -560,7 +589,8 @@ describe('E. already-open Drawing surfaces cannot mutate after revocation', () =
       // containing `: any`, and a strip that stopped matching would surface
       // as a syntax error here rather than a silently mangled handler.
       const source = drawingCallback(name, extra)
-        .replace(/: any(?=[,)])/g, '')
+        .replace(/: Record<[^>]*>(?=[,)])/g, '')
+      .replace(/: (?:any|number|string|boolean)(?=[,)])/g, '')
         .replace(/ as any\[\]/g, '')
         .replace(/ as any/g, '');
       const handler = new Function(
@@ -646,5 +676,277 @@ describe('E. already-open Drawing surfaces cannot mutate after revocation', () =
     const body = DRAWING.slice(at, DRAWING.indexOf('\n  }, [readOnly]);', at));
     expect(body).not.toContain('setPresentationActive');
     expect(body).not.toContain('onDeletePadlet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F. Drawing scene import across a revocation
+// ---------------------------------------------------------------------------
+
+/** A scene with one frame, for the arrange-layout census case. */
+const IMPORT_SCENE_FIXTURE = [
+  { id: 'slide-1', type: 'frame', x: 0, y: 0, width: 100, height: 100, name: 'Slide 1' },
+];
+
+describe('F1. the wrapper will not deliver a scene read after revocation', () => {
+  let root: Root | null = null;
+  let host: HTMLElement | null = null;
+
+  afterEach(() => {
+    if (root) act(() => root!.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+  });
+
+  /** A File whose `text()` resolves by hand, so revocation lands mid-read. */
+  function pendingTextFile() {
+    let release: ((text: string) => void) | null = null;
+    const file = new File(['{}'], 'scene.excalidraw', { type: 'application/json' });
+    Object.defineProperty(file, 'text', {
+      value: () => new Promise<string>((resolveText) => { release = resolveText; }),
+      configurable: true,
+    });
+    return { file, release: () => release! };
+  }
+
+  type WrapperProps = React.ComponentProps<typeof ExcalidrawWrapper>;
+
+  async function mountWrapper(props: Partial<WrapperProps>) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <ExcalidrawWrapper
+          excalidrawKey={1}
+          initialData={{ elements: [], appState: {}, files: {}, scrollToContent: false }}
+          onChange={() => {}}
+          readOnly={false}
+          onShowHelp={() => {}}
+          {...props}
+        />,
+      );
+    });
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input, 'the wrapper mounts its hidden import input').not.toBeNull();
+    return input!;
+  }
+
+  async function runImport(input: HTMLInputElement, release: () => (text: string) => void, before?: () => void) {
+    const { file, release: getRelease } = pendingTextFile();
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    before?.();
+    await act(async () => {
+      getRelease()(JSON.stringify({ type: 'excalidraw', elements: [{ id: 'a' }], appState: {} }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    void release;
+  }
+
+  it('a read that finishes after revocation delivers nothing', async () => {
+    const onImportScene = vi.fn();
+    let allowed = true;
+    const input = await mountWrapper({ onImportScene, canImportScene: () => allowed });
+
+    // The revocation happens while `file.text()` is genuinely pending.
+    await runImport(input, () => () => {}, () => { allowed = false; });
+
+    expect(onImportScene, 'no staging callback runs for a stale read').not.toHaveBeenCalled();
+  });
+
+  it('positive control: an authorized read is still delivered', async () => {
+    const onImportScene = vi.fn();
+    const input = await mountWrapper({ onImportScene, canImportScene: () => true });
+    await runImport(input, () => () => {});
+    expect(onImportScene, 'the authorized import is delivered').toHaveBeenCalledTimes(1);
+  });
+
+  it('a host that passes no capability keeps its previous behaviour', async () => {
+    // The drawing-post editor passes none; allow-by-default must hold.
+    const onImportScene = vi.fn();
+    const input = await mountWrapper({ onImportScene });
+    await runImport(input, () => () => {});
+    expect(onImportScene).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('F2. the Drawing import handlers refuse after revocation', () => {
+  it('handleImportedSceneReady stages nothing once readOnly flips', () => {
+    const ref = { current: false };
+    const staged: unknown[] = [];
+    const source = drawingCallback('handleImportedSceneReady', [
+      ['(scene: ImportedDrawingScene)', '(scene)'],
+    ]);
+    const stage = new Function('readOnlyRef', 'setPendingImportedScene', `return ${source};`)(
+      ref,
+      (scene: unknown) => { staged.push(scene); },
+    ) as (scene: unknown) => void;
+
+    stage({ elements: [{ id: 'a' }] });
+    expect(staged, 'positive control: an authorised scene is staged').toHaveLength(1);
+
+    ref.current = true;
+    stage({ elements: [{ id: 'b' }] });
+    expect(staged, 'zero staged/pending scene state').toHaveLength(1);
+  });
+
+  it('the staging guard precedes the only state it parks', () => {
+    // Equivalence: the body executed above is production's, and its guard comes
+    // first rather than after the staging call.
+    const at = DRAWING.indexOf('const handleImportedSceneReady = useCallback(');
+    const body = DRAWING.slice(at, DRAWING.indexOf('\n  }, []);', at));
+    expect(body.indexOf('if (readOnlyRef.current) return;'))
+      .toBeLessThan(body.indexOf('setPendingImportedScene(scene);'));
+  });
+
+  /**
+   * `handleImportScene` is long and reaches many refs, so its dependencies are
+   * injected. The ONE substitution made to its body is the dynamic
+   * `import("@excalidraw/excalidraw")`, which cannot resolve inside
+   * `new Function`; it becomes an injected loader that returns the same shape.
+   * Everything else -- every guard, every await, every application step -- is
+   * production's own source.
+   */
+  function buildImportScene(
+    ref: { current: boolean },
+    applied: unknown[],
+    saved: unknown[],
+    saveInFlight: { current: Promise<void> | null } = { current: null },
+    alerts: string[] = [],
+  ) {
+    const source = drawingCallback('handleImportScene', [
+      ["(mode: 'replace' | 'add')", '(mode)'],
+      ['await import("@excalidraw/excalidraw")', 'await loadExcalidrawModule()'],
+    ])
+      .replace(/ as Array<\{[^}]*\}>/g, '')
+      .replace(/: DrawingSceneSnapshot/g, '')
+      .replace(/ as Record<string, any>/g, '')
+      .replace(/ as any\[\]/g, '')
+      .replace(/: Record<[^>]*>(?=[,)])/g, '')
+      .replace(/: (?:any|number|string|boolean)(?=[,)])/g, '')
+      .replace(/ as any/g, '');
+
+    const api = {
+      getAppState: () => ({}),
+      getSceneElements: () => [] as unknown[],
+      updateScene: (payload: unknown) => { applied.push(payload); },
+      addFiles: () => {},
+    };
+    const names = {
+      readOnlyRef: ref,
+      pendingImportedScene: { elements: [{ id: 'a' }], appState: {}, files: {} },
+      excalidrawAPIRef: { current: api },
+      excalidrawAPI: api,
+      setIsImportingScene: () => {},
+      autoSaveTimerRef: { current: null },
+      dirtyDataRef: { current: null },
+      saveGenerationRef: { current: 0 },
+      pendingPosTimersRef: { current: new Map() },
+      clearDrawingOverlayRuntimeState: () => {},
+      saveInFlightRef: saveInFlight,
+      loadExcalidrawModule: async () => ({
+        loadFromBlob: async () => ({ elements: [{ id: 'a' }], appState: {}, files: {} }),
+      }),
+      appStateRef: { current: {} },
+      runtimeSceneElementsRef: { current: [] },
+      currentFilesRef: { current: {} },
+      collectDrawingLinkedContainerDeletionPlan: () => ({ rootIds: [], affectedIds: [] }),
+      paddletsRef: { current: [] },
+      preserveImportedTransientAppState: (next: unknown) => next,
+      prepareImportedSceneForAdd: () => ({ elements: [], files: {} }),
+      getViewportCenter: () => ({ x: 0, y: 0 }),
+      importPlacementCountRef: { current: 0 },
+      isApplyingImportedSceneRef: { current: false },
+      hasSeenElementsRef: { current: false },
+      activeElementCountRef: { current: 0 },
+      frameNameSigRef: { current: '' },
+      buildActiveFrameNameSignature: () => '',
+      setElements: (next: unknown) => { applied.push(next); },
+      buildDrawingSceneUpdate: (payload: unknown) => payload,
+      saveDrawingSnapshot: async (snapshot: unknown) => { saved.push(snapshot); },
+      onDeleteOverlayPadlets: async () => { saved.push('overlay-delete'); },
+      setPendingImportedScene: () => {},
+      window: { alert: (message: string) => { alerts.push(message); } },
+    };
+    const keys = Object.keys(names);
+    return new Function(...keys, `return ${source};`)(
+      ...keys.map((key) => (names as Record<string, unknown>)[key]),
+    ) as (mode: string) => Promise<void>;
+  }
+
+  it('applies nothing when revoked before it runs', async () => {
+    const ref = { current: false };
+    const applied: unknown[] = [];
+    const saved: unknown[] = [];
+    const alerts: string[] = [];
+    const handler = buildImportScene(ref, applied, saved, { current: null }, alerts);
+
+    await handler('replace');
+    expect(alerts, 'the harness did not fail into the alert path').toEqual([]);
+    expect(applied.length + saved.length, 'positive control: the scene is applied').toBeGreaterThan(0);
+
+    const appliedBefore = applied.length;
+    const savedBefore = saved.length;
+    ref.current = true;
+    await handler('replace');
+
+    expect(applied.length, 'zero updateScene / local replacement').toBe(appliedBefore);
+    expect(saved.length, 'zero persistence').toBe(savedBefore);
+  });
+
+  it('revocation DURING the await still prevents application', async () => {
+    const ref = { current: false };
+    const applied: unknown[] = [];
+    const saved: unknown[] = [];
+    let releaseSave: (() => void) | null = null;
+    const inFlight = new Promise<void>((done) => { releaseSave = done; });
+    const handler = buildImportScene(ref, applied, saved, { current: inFlight });
+
+    const running = handler('replace');
+    await Promise.resolve();
+    ref.current = true;           // revoked while the in-flight save was awaited
+    releaseSave!();
+    await running;
+
+    expect(applied, 'zero scene application after mid-await revocation').toHaveLength(0);
+    expect(saved, 'zero persistence after mid-await revocation').toHaveLength(0);
+  });
+});
+
+describe('F3. handleArrangeLayout completes the slide-handler census', () => {
+  it('arranges while editable and refuses once revoked', () => {
+    const ref = { current: false };
+    const updates: unknown[] = [];
+    const reads: string[] = [];
+    const api = {
+      getSceneElements: () => { reads.push('read'); return IMPORT_SCENE_FIXTURE; },
+      updateScene: (payload: unknown) => { updates.push(payload); },
+    };
+    const source = drawingCallback('handleArrangeLayout', [
+      ["    type: 'row' | 'column' | 'grid', columns = 3", '    type, columns = 3'],
+    ])
+      .replace(/: Record<[^>]*>(?=[,)])/g, '')
+      .replace(/: (?:any|number|string|boolean)(?=[,)])/g, '')
+      .replace(/ as any\[\]/g, '')
+      .replace(/ as any/g, '');
+    const arrange = new Function(
+      'readOnlyRef', 'excalidrawAPI', 'elements', 'syncSceneElementIndices', 'persistFrameOrder',
+      `return ${source};`,
+    )(ref, api, IMPORT_SCENE_FIXTURE, (els: unknown) => els, async () => {}) as (type: string) => unknown;
+
+    try { arrange('row'); } catch { /* stub depth */ }
+    expect(reads.length + updates.length, 'positive control').toBeGreaterThan(0);
+
+    const readsBefore = reads.length;
+    const updatesBefore = updates.length;
+    ref.current = true;
+    try { arrange('row'); } catch { /* unreachable past the guard */ }
+
+    expect(reads.length, 'reads nothing after revocation').toBe(readsBefore);
+    expect(updates.length, 'mutates nothing after revocation').toBe(updatesBefore);
   });
 });

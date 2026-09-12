@@ -2441,7 +2441,19 @@ export default function DrawingLayout({
     };
   }, [performSave]);
 
+  /**
+   * The wrapper's live capability probe. Stable identity, so a pending file
+   * read keeps a function that still reads the CURRENT authority rather than
+   * the boolean that was true when the read began.
+   */
+  const canImportSceneNow = useCallback(() => !readOnlyRef.current, []);
+
   const handleImportedSceneReady = useCallback((scene: ImportedDrawingScene) => {
+    // The wrapper asks too, but a parent guard is not optional: this is the
+    // handle the wrapper retained when the read began, and parking a scene
+    // here is already a local shared-scene change -- it opens the apply/cancel
+    // prompt. Live, and before anything is staged.
+    if (readOnlyRef.current) return;
     setPendingImportedScene(scene);
   }, []);
 
@@ -2471,6 +2483,9 @@ export default function DrawingLayout({
   }, [appStateRef, excalidrawAPI]);
 
   const handleImportScene = useCallback(async (mode: 'replace' | 'add') => {
+    // Entry, live: the apply buttons are withheld once readOnly, but a handle
+    // taken while editable must refuse too.
+    if (readOnlyRef.current) return;
     const scene = pendingImportedScene;
     const api = excalidrawAPIRef.current ?? excalidrawAPI;
     if (!scene || !api) return;
@@ -2491,9 +2506,11 @@ export default function DrawingLayout({
 
       if (saveInFlightRef.current) {
         await saveInFlightRef.current;
+        if (readOnlyRef.current) return;
       }
 
       const { loadFromBlob } = await import("@excalidraw/excalidraw");
+      if (readOnlyRef.current) return;
       const latestAppState = api.getAppState?.() || appStateRef.current;
       const currentSceneElements = api.getSceneElements?.() || runtimeSceneElementsRef.current;
       const restoredScene = await loadFromBlob(
@@ -2501,6 +2518,9 @@ export default function DrawingLayout({
         latestAppState,
         currentSceneElements,
       );
+      // The last asynchronous boundary is behind us; nothing below this line
+      // may run for a user who can no longer edit this board.
+      if (readOnlyRef.current) return;
       const existingFilesBeforeImport = currentFilesRef.current ?? {};
       const overlayDeletionPlan =
         mode === 'replace'
@@ -2551,6 +2571,9 @@ export default function DrawingLayout({
               };
             })();
 
+      // Immediately before application: local scene replacement, the scene
+      // update, the snapshot save and the overlay deletion all follow.
+      if (readOnlyRef.current) return;
       isApplyingImportedSceneRef.current = true;
       currentFilesRef.current = snapshot.files;
       appStateRef.current = snapshot.appState;
@@ -4445,6 +4468,7 @@ export default function DrawingLayout({
           readOnly={readOnly}
           onShowHelp={() => { }}
           onImportScene={readOnly ? undefined : handleImportedSceneReady}
+          canImportScene={canImportSceneNow}
           renderEmbeddable={renderEmbeddable}
           validateEmbeddable={(link: string) => link.startsWith('padlet://')}
           useCollabBoardContextMenu
