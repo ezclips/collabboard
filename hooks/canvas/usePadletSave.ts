@@ -365,6 +365,20 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPlacementPromptOpen,
   });
 
+  /**
+   * Authority went away AFTER a primary write had already committed.
+   *
+   * The row stands and is not ours to reverse, so the only correct act is to
+   * stop: no later request, and no optimistic shared-canvas state. The
+   * transient editor IS closed, because leaving it open invites the user to
+   * submit the same content again and create a duplicate. Deliberately
+   * silent -- no new toast for a save that did land.
+   */
+  const settleRevokedAfterPrimary = (closeEditor: () => void) => {
+    closeEditor();
+    setPadletToEdit(null);
+  };
+
   // ============================================================================
   // Unified Placement Check Helper
   // ============================================================================
@@ -527,7 +541,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         // this stops is a SECOND mutation -- the source reference and the
         // container update below -- being STARTED after the authority went
         // away while the insert was in flight.
-        if (!canEditBoardContentNow()) return;
+        if (!canEditBoardContentNow()) return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
         // P6J-F5: only now does a real target id exist. The row itself carries
         // no provenance -- source_references is its one durable home.
         if (sourceNoteReference && newPadlet?.id) {
@@ -542,6 +556,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
             .select('metadata')
             .eq('id', parentId)
             .single();
+          // The read is an await of its own: revocation can land while it is
+          // pending, so the update it feeds is not authorised by the earlier
+          // post-insert check.
+          if (!canEditBoardContentNow()) return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
 
           if (container) {
             const existingIds = (container.metadata as any)?.childPadletIds || [];
@@ -570,6 +588,13 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
         // Propagate changes to synced posts
         const syncedWithId = (padletToEdit.metadata as any)?.syncedWith;
+        // The first update is committed. The synced twin is a SECOND record
+        // and a second request: it must not start once the authority is gone.
+        // The two can therefore diverge -- an accepted partial consistency,
+        // and strictly better than writing a row the board refuses.
+        if (syncedWithId && !canEditBoardContentNow()) {
+          return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
+        }
         if (syncedWithId) {
           const { error: syncError } = await supabase
             .from('padlets')
@@ -1203,8 +1228,14 @@ export function usePadletSave(params: UsePadletSaveParams) {
         if (error) throw error;
         createdPadlet = newCard;
         // As in saveNote: the insert stands, but no follow-up write starts
-        // once the board authority is gone.
-        if (!canEditBoardContentNow()) return { status: 'failed', error: BOARD_EDIT_NOT_ALLOWED };
+        // once the board authority is gone. The result is the SUCCESS
+        // discriminant on purpose -- 'failed' makes DocumentEditor keep the
+        // editor open with a retry prompt, and retrying a committed insert
+        // would create a duplicate Card. Initial denial still fails.
+        if (!canEditBoardContentNow()) {
+          settleRevokedAfterPrimary(() => setIsCardEditorOpen(false));
+          return { status: 'saved' };
+        }
 
         // Update container's childPadletIds if this card belongs to one
         if (insertMetadata.parentId && newCard) {
@@ -1213,6 +1244,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
             .select('metadata')
             .eq('id', insertMetadata.parentId)
             .single();
+          // Revocation can land while that read is pending.
+          if (!canEditBoardContentNow()) {
+            settleRevokedAfterPrimary(() => setIsCardEditorOpen(false));
+            return { status: 'saved' };
+          }
           if (container) {
             const existingIds = (container.metadata as any)?.childPadletIds || [];
             await supabase
@@ -1382,7 +1418,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
         // decoration. The placement and the SAME linked library_items row are
         // written by one shared authority, so the Freeform "Draw on image" arm
         // cannot drift from this one again -- see persistDurableImageContent.
-        await persistDurableImageContent(supabase as never, {
+        const outcome = await persistDurableImageContent(supabase as never, {
+          mayContinue: canEditBoardContentNow,
           padletId: padletToEdit.id,
           libraryItemId: (padletToEdit as { library_item_id?: string | null }).library_item_id ?? null,
           imageUrl: data.imageUrl,
@@ -1391,6 +1428,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
           width: padletToEdit.width,
           height: padletToEdit.height,
         });
+        // The placement landed; the Library write did not. No read-back, no
+        // local reconciliation, and the retry identity is left alone.
+        if (outcome === 'placement-only') {
+          return settleRevokedAfterPrimary(() => setIsImageEditorOpen(false));
+        }
       }
 
       setIsImageEditorOpen(false);

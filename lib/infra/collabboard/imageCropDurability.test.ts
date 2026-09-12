@@ -72,6 +72,8 @@ describe('crop writes durable Image content', () => {
     const post = annotatedPdfAreaPost();
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: post.id, libraryItemId: post.library_item_id, imageUrl: CROPPED,
       metadata: metadataAfterCrop(post), title: post.title, width: post.width, height: post.height,
     });
@@ -95,6 +97,8 @@ describe('crop writes durable Image content', () => {
     const before = JSON.parse(JSON.stringify(post.metadata.source));
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: post.id, libraryItemId: post.library_item_id, imageUrl: CROPPED,
       metadata: metadataAfterCrop(post), title: post.title, width: post.width, height: post.height,
     });
@@ -135,10 +139,12 @@ describe('crop writes durable Image content', () => {
   it('4. an unlinked Image crops normally and invents no Library object', async () => {
     const { client, writes } = fakeClient();
     await expect(persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-legacy', libraryItemId: null, imageUrl: CROPPED,
       metadata: { imageUrl: CROPPED, drawing: null, drawingPaths: null, drawingText: null },
       title: 'Legacy', width: 300, height: 200,
-    })).resolves.toBeUndefined();
+    })).resolves.toBe('complete');
     expect(writes.map((w) => w.table)).toEqual(['padlets']);
     expect(writes[0].values.file_url).toBe(CROPPED);
   });

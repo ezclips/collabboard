@@ -25,6 +25,17 @@ export interface DurableImageContentInput {
   /** The placement being saved. */
   readonly padletId: string;
   /**
+   * May this caller still write shared board content RIGHT NOW?
+   *
+   * Required, and read BETWEEN the two writes below. The placement update
+   * and the Library update are one product rule but two requests, and the
+   * authority can go away in the gap: this is what stops the second one
+   * starting for a caller who has lost the right to make it.
+   *
+   * No allow-by-default -- a call site that forgets it must not compile.
+   */
+  readonly mayContinue: () => boolean;
+  /**
    * The durable object the placement references, when it has one. A legacy or
    * reused post may legitimately have none, and that is not an error: the
    * placement still saves, and no Library object is invented for it.
@@ -58,10 +69,18 @@ export interface DurableImageContentInput {
  * Errors are NOT swallowed: a caller that reports success must have seen this
  * resolve.
  */
+/**
+ * `complete` -- both writes landed (or there was no linked Library row).
+ * `placement-only` -- the placement was saved and the authority went away
+ * before the Library row could be written. The placement is NOT reversed;
+ * the caller is told so it starts nothing further.
+ */
+export type DurableImageContentOutcome = 'complete' | 'placement-only';
+
 export async function persistDurableImageContent(
   client: DurableImageContentClient,
   input: DurableImageContentInput,
-): Promise<void> {
+): Promise<DurableImageContentOutcome> {
   const savedAt = new Date().toISOString();
 
   const placement = await client
@@ -74,8 +93,12 @@ export async function persistDurableImageContent(
     .eq('id', input.padletId);
   if (placement?.error) throw placement.error;
 
+  // The placement is committed from here on and is not ours to undo. What
+  // must not happen is the SECOND write starting without authority.
+  if (!input.mayContinue()) return 'placement-only';
+
   const linkedLibraryItemId = input.libraryItemId ?? null;
-  if (!linkedLibraryItemId) return;
+  if (!linkedLibraryItemId) return 'complete';
 
   const durable = await client
     .from('library_items')
@@ -94,4 +117,5 @@ export async function persistDurableImageContent(
     })
     .eq('id', linkedLibraryItemId);
   if (durable?.error) throw durable.error;
+  return 'complete';
 }

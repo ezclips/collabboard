@@ -57,6 +57,7 @@ const authorityFor = (
 type Effects = {
   inserts: unknown[];
   updates: unknown[];
+  updateTables: string[];
   selects: string[];
   rpcs: string[];
   rpcPadletIds: string[];
@@ -70,7 +71,7 @@ type Effects = {
 
 function newEffects(): Effects {
   return {
-    inserts: [], updates: [], selects: [], rpcs: [], rpcPadletIds: [], authCalls: 0,
+    inserts: [], updates: [], updateTables: [], selects: [], rpcs: [], rpcPadletIds: [], authCalls: 0,
     fetches: [], placementDrafts: [], editorCloses: [], padletSets: 0, draftSets: 0,
   };
 }
@@ -85,7 +86,7 @@ function gate(): Gate {
 
 function installSupabase(
   effects: Effects,
-  gates: { auth?: Gate; insert?: Gate; rpc?: Gate } = {},
+  gates: { auth?: Gate; insert?: Gate; rpc?: Gate; select?: Gate; update?: Gate } = {},
 ) {
   let nextId = 1;
   const rows = new Map<string, unknown>();
@@ -104,7 +105,7 @@ function installSupabase(
       rows.set(args.p_padlet_id as string, { ...args, id: args.p_padlet_id, type: 'image' });
       return { data: [{ padlet_id: args.p_padlet_id }], error: null };
     },
-    from(_table: string) {
+    from(table: string) {
       return {
         insert(row: unknown) {
           effects.inserts.push(row);
@@ -123,16 +124,26 @@ function installSupabase(
         },
         update(fields: unknown) {
           effects.updates.push(fields);
-          return { eq: async () => ({ data: null, error: null }) };
+          effects.updateTables.push(table);
+          return {
+            eq: async () => {
+              // The update's own await -- where a revocation can land between
+              // a committed first write and the second one that follows it.
+              if (gates.update) await gates.update.promise;
+              return { data: null, error: null };
+            },
+          };
         },
         select(_cols?: string) {
           return {
             eq: (_col: string, value: string) => {
               effects.selects.push(value);
-              return {
-                single: async () => ({ data: rows.get(value) ?? null, error: null }),
-                maybeSingle: async () => ({ data: rows.get(value) ?? null, error: null }),
+              const read = async () => {
+                // The container metadata read is an await of its own.
+                if (gates.select) await gates.select.promise;
+                return { data: rows.get(value) ?? { metadata: {} }, error: null };
               };
+              return { single: read, maybeSingle: read };
             },
           };
         },
@@ -219,9 +230,9 @@ async function runEveryAction(): Promise<{ card: SaveCardResult; placement: bool
   let placement!: boolean;
   await act(async () => {
     await api!.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
-    await api!.saveLink({ title: 'l', url: 'https://example.com', metadata: {} } as never);
-    await api!.saveTodo({ title: 't', items: [], metadata: {} } as never);
-    await api!.saveTable({ title: 'tb', tableData: '{}', metadata: {} } as never);
+    await api!.saveLink({ linkTitle: 'l', linkUrl: 'https://example.com', metadata: {} } as never);
+    await api!.saveTodo({ todoTitle: 't', tasks: [{ id: 't1', text: 'x', done: false }], metadata: {} } as never);
+    await api!.saveTable({ title: 'tb', content: '{"rows":[]}', metadata: {} } as never);
     await api!.saveContainer({ title: 'ct', metadata: {} } as never);
     await api!.saveComment({ comments: [{ id: 'c1', text: 'cm' }], metadata: {} } as never);
     card = await api!.saveCard({ title: 'cd', content: 'x', metadata: {} } as never);
@@ -271,8 +282,14 @@ describe('A. authorized identities still persist', () => {
 
       const { card } = await runEveryAction();
 
-      expect(effects.inserts.length, 'writes reached the database').toBeGreaterThan(0);
-      expect(card.status, 'saveCard succeeded').not.toBe('failed');
+      // Each callback's own row, by the type IT persists -- not a total.
+      const types = effects.inserts.map((row) => (row as { type?: string }).type);
+      for (const expected of ['text', 'link', 'todo', 'table', 'container', 'comment', 'card', 'drawing', 'ai-component']) {
+        expect(types, `${name} persisted a ${expected}`).toContain(expected);
+      }
+      expect(effects.rpcs, 'saveImage reached its atomic Library RPC')
+        .toContain('create_image_post_with_library_item');
+      expect(card.status, 'saveCard succeeded').toBe('saved');
     });
   }
 });
@@ -344,9 +361,9 @@ describe('C. callbacks captured while authorized refuse after revocation', () =>
     let placement!: boolean;
     await act(async () => {
       await captured.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
-      await captured.saveLink({ title: 'l', url: 'https://example.com', metadata: {} } as never);
-      await captured.saveTodo({ title: 't', items: [], metadata: {} } as never);
-      await captured.saveTable({ title: 'tb', tableData: '{}', metadata: {} } as never);
+      await captured.saveLink({ linkTitle: 'l', linkUrl: 'https://example.com', metadata: {} } as never);
+      await captured.saveTodo({ todoTitle: 't', tasks: [{ id: 't1', text: 'x', done: false }], metadata: {} } as never);
+      await captured.saveTable({ title: 'tb', content: '{"rows":[]}', metadata: {} } as never);
       await captured.saveContainer({ title: 'ct', metadata: {} } as never);
       await captured.saveComment({ comments: [{ id: 'c1', text: 'cm' }], metadata: {} } as never);
       card = await captured.saveCard({ title: 'cd', content: 'x', metadata: {} } as never);
@@ -453,9 +470,12 @@ describe('D. revocation during an awaited step stops the next mutation', () => {
     expect(effects.inserts.length, 'the completed insert is not reversed').toBe(1);
     expect(effects.updates, 'zero container follow-up write').toEqual([]);
     expect(effects.selects, 'the container was never even read').toEqual([]);
-    expect(result, 'the implemented post-await contract')
-      .toEqual({ status: 'failed', error: BOARD_EDIT_NOT_ALLOWED });
-    expect(effects.editorCloses, 'no unrelated editor-state change').toEqual([]);
+    // The insert committed, so DocumentEditor must CLOSE rather than offer the
+    // same Card again: 'failed' shows a retry prompt and would duplicate it.
+    expect(result, 'partial success reports the established saved discriminant')
+      .toEqual({ status: 'saved' });
+    expect(effects.editorCloses, 'the transient editor is settled').toEqual(['card']);
+    expect(effects.padletSets, 'no shared canvas state added after revocation').toBe(0);
     expect(effects.placementDrafts, 'no unrelated placement change').toEqual([]);
   });
 
@@ -493,6 +513,131 @@ describe('D. revocation during an awaited step stops the next mutation', () => {
     allowed = true;
     await act(async () => { await api!.saveImage(payload); });
     expect(effects.rpcPadletIds[1], 'the retry reuses the same durable id').toBe(firstPadletId);
+  });
+
+  it('Note: revoked while the container metadata read is pending -- no container update', async () => {
+    const effects = newEffects();
+    const selectGate = gate();
+    installSupabase(effects, { select: selectGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    // Production takes the parent from padletToEdit.metadata, NOT from the
+    // payload -- a draft that only carried it in SaveNoteData never reached
+    // this branch at all.
+    act(() => { setDraft!({ id: 'new', metadata: { parentId: 'container-1' } } as unknown as Padlet); });
+
+    let running!: Promise<unknown>;
+    await act(async () => {
+      running = api!.saveNote({ title: 'n', content: 'c' } as never);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(effects.inserts.length, 'the Note insert committed while authorized').toBe(1);
+    expect(effects.selects, 'the container read began while authorized').toEqual(['container-1']);
+
+    allowed = false;
+    await act(async () => { selectGate.release(); await running; });
+
+    expect(effects.updates, 'zero container update').toEqual([]);
+    expect(effects.updateTables, 'no table was written a second time').toEqual([]);
+    expect(effects.padletSets, 'no shared canvas state after revocation').toBe(0);
+    expect(effects.editorCloses, 'the Note editor is settled, so retry cannot duplicate').toEqual(['note']);
+  });
+
+  it('Note: synced twin update never starts once authority is revoked', async () => {
+    const effects = newEffects();
+    const updateGate = gate();
+    installSupabase(effects, { update: updateGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    // A genuine EXISTING synced Note: production reads `syncedWith` from the
+    // padlet being edited, and the id must not be 'new'.
+    act(() => {
+      setDraft!({ id: 'note-1', metadata: { syncedWith: 'note-2' } } as unknown as Padlet);
+    });
+
+    let running!: Promise<unknown>;
+    await act(async () => {
+      running = api!.saveNote({ title: 'n', content: 'c' } as never);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(effects.updates.length, 'the first update was issued while authorized').toBe(1);
+
+    allowed = false;
+    await act(async () => { updateGate.release(); await running; });
+
+    // The first record (note-1) is committed and is not reversed; the second
+    // (note-2, the synced twin) is never written. The two may therefore
+    // diverge -- the accepted partial-consistency limitation.
+    expect(effects.updates.length, 'the synced twin update never starts').toBe(1);
+    expect(effects.selects, 'no container/source-reference follow-up read').toEqual([]);
+    expect(effects.padletSets, 'no new optimistic state').toBe(0);
+    expect(effects.editorCloses, 'settled as a completed primary save').toEqual(['note']);
+  });
+
+  it('Card: revoked while the container metadata read is pending -- saved, no follow-up', async () => {
+    const effects = newEffects();
+    const selectGate = gate();
+    installSupabase(effects, { select: selectGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new', metadata: { parentId: 'container-1' } } as unknown as Padlet); });
+
+    let running!: Promise<SaveCardResult>;
+    await act(async () => {
+      running = api!.saveCard({ title: 'cd', content: 'x', metadata: {} } as never);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(effects.inserts.length, 'the Card insert committed while authorized').toBe(1);
+    expect(effects.selects, 'the container read began while authorized').toEqual(['container-1']);
+
+    allowed = false;
+    let result!: SaveCardResult;
+    await act(async () => { selectGate.release(); result = await running; });
+
+    expect(effects.updates, 'zero container update').toEqual([]);
+    // DocumentEditor closes on 'saved' and only re-prompts on 'failed', so this
+    // is what stops the ordinary UI offering the committed Card again.
+    expect(result, 'the established success discriminant').toEqual({ status: 'saved' });
+    expect(effects.editorCloses, 'the transient editor is settled').toEqual(['card']);
+    expect(effects.padletSets, 'no shared canvas state after revocation').toBe(0);
+  });
+
+  it('existing Image: revoked between the padlet write and the Library write', async () => {
+    const effects = newEffects();
+    const updateGate = gate();
+    installSupabase(effects, { update: updateGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    // A genuine EXISTING image with a linked durable Library row.
+    act(() => {
+      setDraft!({
+        id: 'img-1', library_item_id: 'lib-1', title: 'Image',
+        width: 300, height: 200, metadata: {},
+      } as unknown as Padlet);
+    });
+
+    let running!: Promise<unknown>;
+    await act(async () => {
+      running = api!.saveImage({ imageUrl: 'https://img', source: 'upload' } as never);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(effects.updateTables, 'the placement write began while authorized').toEqual(['padlets']);
+
+    allowed = false;
+    await act(async () => { updateGate.release(); await running; });
+
+    // The placement landed and is not reversed; the linked Library row is not
+    // written, and nothing further is started.
+    expect(effects.updateTables, 'zero library_items write').toEqual(['padlets']);
+    expect(effects.selects, 'zero read-back').toEqual([]);
+    expect(effects.inserts, 'zero later persistence').toEqual([]);
+    expect(effects.padletSets, 'zero local reconciliation').toBe(0);
+    expect(effects.rpcs, 'no compensating mutation').toEqual([]);
+    expect(effects.editorCloses, 'the image editor is settled').toEqual(['image']);
   });
 
   it('Note: revoked after the insert -- the row stands, no follow-up write starts', async () => {

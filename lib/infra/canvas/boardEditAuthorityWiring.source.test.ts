@@ -124,6 +124,10 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
   probe this component hands the save layer (its declaration reads the ref,
   and its own name carries the capability), and the hook parameter it is
   passed as. All executable wiring.
+
+  CORRECTION_1 took it to 55: the same probe reaches the two Freeform
+  draw-on-image arms, which write the placement and then its linked Library
+  row and must not start the second write without authority.
   The earlier note, for history:
   closing the stale-flow gaps review found: the six DrawingLayout callbacks and
   its readOnly prop, the Library completion paths (the card save fence and its
@@ -131,7 +135,7 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
   icon replacement), and the import surface's mount, capability and resolved
   callback. Every one is executable wiring, not prose.
 */
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 53;
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 55;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -450,6 +454,8 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       // The save layer's own live probe, and the parameter it arrives as.
       'const canEditBoardContentProbe = useCallback(() => canEditBoardContentRef.current, []);',
       'canEditBoardContentNow: canEditBoardContentProbe,',
+      // The durable-image helper's continuation probe, both arms.
+      'mayContinue: canEditBoardContentProbe,',
       // CORRECTION_3: the knowledge-drop routes, live rather than closed over.
       'if (!canEditBoardContentRef.current || !canvasId) return true;',
       // CORRECTION_2: the stale-flow surfaces review found.

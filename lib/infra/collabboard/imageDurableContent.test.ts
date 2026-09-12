@@ -67,6 +67,8 @@ describe('persistDurableImageContent', () => {
   it('1. keeps the same placement and the same Library identity', async () => {
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-1',
       libraryItemId: 'lib-1',
       imageUrl: COMPOSITE,
@@ -88,6 +90,8 @@ describe('persistDurableImageContent', () => {
   it('2. writes the composite as durable content, not metadata alone', async () => {
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: COMPOSITE,
       metadata: metadataAfterDraw(pdfAreaMetadata()),
       title: 'Slide', width: 320, height: 144,
@@ -108,6 +112,8 @@ describe('persistDurableImageContent', () => {
     const before = pdfAreaMetadata();
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: COMPOSITE,
       metadata: metadataAfterDraw(before), title: 'Slide', width: 320, height: 144,
     });
@@ -127,6 +133,8 @@ describe('persistDurableImageContent', () => {
   it('4. the saved composite renders exactly once', async () => {
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: COMPOSITE,
       metadata: metadataAfterDraw(pdfAreaMetadata()), title: 'Slide', width: 320, height: 144,
     });
@@ -150,10 +158,12 @@ describe('persistDurableImageContent', () => {
     for (const libraryItemId of [null, undefined]) {
       const { client, writes } = fakeClient();
       await expect(persistDurableImageContent(client, {
+        // CORRECTION_1: the helper asks between its two writes.
+        mayContinue: () => true,
         padletId: 'post-legacy', libraryItemId, imageUrl: COMPOSITE,
         metadata: metadataAfterDraw({ imageUrl: ORIGINAL }),
         title: 'Legacy', width: 300, height: 200,
-      })).resolves.toBeUndefined();
+      })).resolves.toBe('complete');
 
       expect(writes.map((w) => w.table)).toEqual(['padlets']);
       expect(writes[0].values.file_url).toBe(COMPOSITE);
@@ -164,6 +174,8 @@ describe('persistDurableImageContent', () => {
     // No PDF provenance at all: the rule is about linked Images, not PDFs.
     const { client, writes } = fakeClient();
     await persistDurableImageContent(client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-2', libraryItemId: 'lib-2', imageUrl: COMPOSITE,
       metadata: metadataAfterDraw({ imageUrl: 'https://cdn.example/photo.jpg', source: 'unsplash' }),
       title: 'Photo', width: 300, height: 200,
@@ -179,6 +191,8 @@ describe('persistDurableImageContent', () => {
   it('7. a rejected write is raised, never reported as a save', async () => {
     const placementFails = fakeClient('padlets');
     await expect(persistDurableImageContent(placementFails.client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: COMPOSITE,
       metadata: metadataAfterDraw(pdfAreaMetadata()), title: 'Slide', width: 320, height: 144,
     })).rejects.toBeTruthy();
@@ -187,6 +201,8 @@ describe('persistDurableImageContent', () => {
 
     const durableFails = fakeClient('library_items');
     await expect(persistDurableImageContent(durableFails.client, {
+      // CORRECTION_1: the helper asks between its two writes.
+      mayContinue: () => true,
       padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: COMPOSITE,
       metadata: metadataAfterDraw(pdfAreaMetadata()), title: 'Slide', width: 320, height: 144,
     })).rejects.toBeTruthy();

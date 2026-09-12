@@ -10460,6 +10460,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         drawingText: textElements,
                       };
                       await persistDurableImageContent(supabase as never, {
+                        mayContinue: canEditBoardContentProbe,
                         padletId: drawingPadlet.id,
                         libraryItemId: (drawingPadlet as { library_item_id?: string | null }).library_item_id ?? null,
                         imageUrl: dataUrl,
@@ -10553,6 +10554,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         drawingText: null,
                       };
                       await persistDurableImageContent(supabase as never, {
+                        mayContinue: canEditBoardContentProbe,
                         padletId: cropPadlet.id,
                         libraryItemId: (cropPadlet as { library_item_id?: string | null }).library_item_id ?? null,
                         imageUrl: croppedDataUrl,
