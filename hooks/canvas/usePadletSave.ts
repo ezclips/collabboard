@@ -166,6 +166,13 @@ export type SaveCardData = {
 // PATCH-149B2-i §32.3: the narrowest observable-result contract -- never a
 // throwing contract, since existing CardEditor/ClipartCardDraftModal callers
 // ignore the returned Promise and would surface as unhandled rejections.
+/**
+ * The one refusal this hook raises on its own: the board did not authorise
+ * this write. Deterministic and narrow -- callers match on it rather than on
+ * a message, and it is never confused with a server failure.
+ */
+export const BOARD_EDIT_NOT_ALLOWED = 'board_edit_not_allowed' as const;
+
 export type SaveCardResult =
   | { status: 'saved' }
   | { status: 'skipped-blank' }
@@ -258,6 +265,20 @@ export type UsePadletSaveParams = {
   sourceNoteReference?: KnowledgeSourceReferenceDraft | null;
   /** Called with the REAL inserted row id, only after the insert has succeeded. */
   onSourceNoteCreated?: (targetPadletId: string, sourceReference: KnowledgeSourceReferenceDraft) => void;
+  /**
+   * May this user write this board's content RIGHT NOW?
+   *
+   * Required, and a probe rather than a boolean: these callbacks are handed to
+   * editors and placement flows that keep them across renders, so an answer
+   * captured when the callback was built is not the answer that matters when it
+   * runs. The host supplies its canonical live board authority -- ownership or a
+   * `board_collaborators` editor row, never the workspace role -- and this layer
+   * refuses on its own rather than trusting the UI that opened it.
+   *
+   * No default: a call site that forgets it must fail to compile, not silently
+   * allow.
+   */
+  canEditBoardContentNow: () => boolean;
 };
 
 // ============================================================================
@@ -281,6 +302,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
   const newImageRequestRef = useRef<{ fingerprint: string; padletId: string } | null>(null);
   const imageEditorWasOpenRef = useRef(false);
   const {
+    canEditBoardContentNow,
     canvasId,
     padletToEdit,
     isWallLayout,
@@ -448,6 +470,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveNote
   // ============================================================================
   const saveNote = useCallback(async (data: SaveNoteData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     // Build metadata object - preserve existing metadata (especially parentId for container children)
     const metadata = withSchedulerDefaults({
       ...padletToEdit?.metadata,
@@ -498,6 +523,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .single();
         if (error) throw error;
         createdPadlet = newPadlet;
+        // The row is already written and cannot be unwritten from here. What
+        // this stops is a SECOND mutation -- the source reference and the
+        // container update below -- being STARTED after the authority went
+        // away while the insert was in flight.
+        if (!canEditBoardContentNow()) return;
         // P6J-F5: only now does a real target id exist. The row itself carries
         // no provenance -- source_references is its one durable home.
         if (sourceNoteReference && newPadlet?.id) {
@@ -597,6 +627,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveLink - verbatim from CanvasClient.tsx lines 3303-3435
   // ============================================================================
   const saveLink = useCallback(async (data: SaveLinkData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     // Skip save if no URL (user canceled without entering URL)
     if (!data.linkUrl) {
       setIsLinkEditorOpen(false);
@@ -711,6 +744,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveTodo - verbatim from CanvasClient.tsx lines 3438-3553
   // ============================================================================
   const saveTodo = useCallback(async (data: SaveTodoData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
 
     // Preserve existing metadata (especially parentId for container children)
@@ -810,6 +846,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveTable - verbatim from CanvasClient.tsx lines 3556-3640
   // ============================================================================
   const saveTable = useCallback(async (data: SaveTableData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
     const tableTitle = data.title.trim();
 
@@ -900,6 +939,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveContainer - verbatim from CanvasClient.tsx lines 3643-3708
   // ============================================================================
   const saveContainer = useCallback(async (data: SaveContainerData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
 
     // Preserve existing childPadletIds when updating
@@ -980,6 +1022,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveComment - verbatim from CanvasClient.tsx lines 3771-3898
   // ============================================================================
   const saveComment = useCallback(async (data: SaveCommentData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
 
     // PREVENT EMPTY POSTS: If it's a new comment post and no comments were added, don't create it.
@@ -1093,6 +1138,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveCard - verbatim from CanvasClient.tsx lines 3901-3939
   // ============================================================================
   const saveCard = useCallback(async (data: SaveCardData): Promise<SaveCardResult> => {
+    // Board content, refused before anything is built. The discriminated
+    // contract is preserved: a denial is a failure with a known error.
+    if (!canEditBoardContentNow()) return { status: 'failed', error: BOARD_EDIT_NOT_ALLOWED };
     if (!canvasId || !padletToEdit) return { status: 'failed', error: new Error('No active canvas or target padlet') };
 
     try {
@@ -1154,6 +1202,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .single();
         if (error) throw error;
         createdPadlet = newCard;
+        // As in saveNote: the insert stands, but no follow-up write starts
+        // once the board authority is gone.
+        if (!canEditBoardContentNow()) return { status: 'failed', error: BOARD_EDIT_NOT_ALLOWED };
 
         // Update container's childPadletIds if this card belongs to one
         if (insertMetadata.parentId && newCard) {
@@ -1221,6 +1272,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveImage - verbatim from CanvasClient.tsx lines 3993-4096
   // ============================================================================
   const saveImage = useCallback(async (data: SaveImageData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId) return;
 
     try {
@@ -1288,6 +1342,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
           : crypto.randomUUID();
         newImageRequestRef.current = { fingerprint: requestFingerprint, padletId };
         const { data: auth } = await supabase.auth.getUser();
+        // The identity lookup is this callback's first await; nothing that
+        // consumes a resource has happened yet, so a revocation here costs
+        // nothing and must stop the RPC, the read-back and the retry identity.
+        if (!canEditBoardContentNow()) return;
         const userId = auth?.user?.id;
         if (!userId) throw new Error('Not signed in');
         const { error: pairError } = await supabase.rpc('create_image_post_with_library_item', {
@@ -1304,6 +1362,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
           p_metadata: metadata,
         });
         if (pairError) throw pairError;
+        // The RPC's own await is the second boundary. Returning here leaves
+        // `newImageRequestRef` untouched ON PURPOSE: the durable creation
+        // identity belongs to the request, so a later authorised retry reuses
+        // it rather than minting a second Image.
+        if (!canEditBoardContentNow()) return;
         // Read the row back so every downstream consumer still receives exactly
         // what the database stored, defaults included.
         const { data: newImage, error } = await supabase
@@ -1368,6 +1431,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // handleSaveDrawing - verbatim from CanvasClient.tsx lines 4098-4195
   // ============================================================================
   const saveDrawing = useCallback(async (data: SaveDrawingData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
 
     const metadata = {
@@ -1457,6 +1523,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
   ]);
 
   const saveAIComponent = useCallback(async (data: SaveAIComponentData) => {
+    // Board content: refused before metadata, ids, placement, editor state
+    // or any request -- and asked live, so a retained handle refuses too.
+    if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
 
     const componentId =
@@ -1471,6 +1540,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
     if (data.aiAssets?.images && data.aiAssets.images.length > 0) {
       try {
+        // Ingestion is external work this client cannot undo once started;
+        // the recheck below is what stops the BOARD write that would follow.
         const ingestResponse = await fetch('/api/ai/save-generated-component', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1495,6 +1566,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
         console.warn('[saveAIComponent] Asset ingestion error, falling back to preview URLs:', err);
       }
     }
+    // Ingestion is external work already done and not this client's to
+    // reverse. What must not happen is the BOARD write that would follow it
+    // for a user whose authority went away while assets were uploading.
+    if (!canEditBoardContentNow()) return;
 
     const normalizedImages = (data.aiAssets?.images || []).map((image) => ({
       query: image.query,
@@ -1633,10 +1708,15 @@ export function usePadletSave(params: UsePadletSaveParams) {
       closeEditor: () => void = () => {},
       // R2: an external draft is always NEW, and its parent/section come from
       // the draft itself -- never from an unrelated open editor.
-    ): boolean => checkPlacementRequired(draft, closeEditor, {
+    ): boolean => (
+      // TRUE is this contract's "do not insert". An unauthorised caller gets it
+      // before any prompt opens, any id is minted or any placement state moves,
+      // so a denial can never read as permission to continue.
+      !canEditBoardContentNow() ? true : checkPlacementRequired(draft, closeEditor, {
       isNewPost: true,
       hasParentId: Boolean(draft.metadata?.parentId),
       hasSectionId: Boolean(draft.metadata?.sectionId),
-    }),
+      })
+    ),
   };
 }

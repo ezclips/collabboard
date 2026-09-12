@@ -119,6 +119,11 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
   reading the closed-over boolean and read `canEditBoardContentRef.current`
   instead, taking two now-unneeded dependency entries with them. A reduction
   that IS the fix; the named list below says which consumers remain.
+
+  CANVAS_BOARD_EDIT_COMMAND_LAYER_AUTHORITY then took it to 53: the stable
+  probe this component hands the save layer (its declaration reads the ref,
+  and its own name carries the capability), and the hook parameter it is
+  passed as. All executable wiring.
   The earlier note, for history:
   closing the stale-flow gaps review found: the six DrawingLayout callbacks and
   its readOnly prop, the Library completion paths (the card save fence and its
@@ -126,7 +131,7 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
   icon replacement), and the import surface's mount, capability and resolved
   callback. Every one is executable wiring, not prose.
 */
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 49;
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 53;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -442,6 +447,9 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       // The hidden board-canvas PDF input is mounted on this same capability,
       // so an unauthorised user has no element to activate.
       'canAddBoardContentPdf={canEditBoardContent}',
+      // The save layer's own live probe, and the parameter it arrives as.
+      'const canEditBoardContentProbe = useCallback(() => canEditBoardContentRef.current, []);',
+      'canEditBoardContentNow: canEditBoardContentProbe,',
       // CORRECTION_3: the knowledge-drop routes, live rather than closed over.
       'if (!canEditBoardContentRef.current || !canvasId) return true;',
       // CORRECTION_2: the stale-flow surfaces review found.

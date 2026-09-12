@@ -187,6 +187,11 @@ function Harness() {
   const [rerenderTick, setRerenderTick] = React.useState(0);
 
   const { saveCard } = usePadletSave({
+    // CANVAS_BOARD_EDIT_COMMAND_LAYER_AUTHORITY: the save layer now requires an
+    // explicit live board-authority probe. Granted DELIBERATELY here -- this
+    // suite's subject is persistence, not permission, and the denial cases are
+    // proved in hooks/canvas/usePadletSave.authority.behavior.test.tsx.
+    canEditBoardContentNow: () => true,
     canvasId: 'canvas-1',
     padletToEdit,
     isWallLayout: false,

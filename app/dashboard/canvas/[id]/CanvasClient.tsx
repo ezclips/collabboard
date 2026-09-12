@@ -538,6 +538,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const canEditBoardContentRef = useRef(canEditBoardContent);
   canEditBoardContentRef.current = canEditBoardContent;
+  /**
+   * The same answer as a stable callable, for the layers that must ask at
+   * call time. Its identity never changes, so handing it to a hook adds no
+   * dependency churn.
+   */
+  const canEditBoardContentProbe = useCallback(() => canEditBoardContentRef.current, []);
 
   /**
    * PDF selection -> Save as Note. Board CONTENT authority, because the write
@@ -2926,6 +2932,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     saveAIComponent,
     requestPlacementIfRequired
   } = usePadletSave({
+    // The save layer asks the board itself, live. The ref is the canonical
+    // answer this component already derives; passing the boolean would hand
+    // the hook a snapshot its retained callbacks would outlive.
+    canEditBoardContentNow: canEditBoardContentProbe,
     canvasId: canvasId ?? null,
     padletToEdit,
     isWallLayout,

@@ -1,0 +1,557 @@
+// @vitest-environment jsdom
+//
+// CANVAS_BOARD_EDIT_COMMAND_LAYER_AUTHORITY -- the save layer answers for
+// itself.
+//
+// The UI wrappers withhold controls and RLS refuses the write, but between
+// them sat a layer that asked nobody: every editor, placement flow and modal
+// holds a save callback across renders, so an answer captured when the
+// callback was built is not the answer that matters when it runs.
+//
+// Every case here mounts the REAL hook, takes the REAL callbacks, and drives
+// them against a live probe the test controls. The positive cases derive
+// authority from the REAL `canEditBoard` policy rather than a stand-in rule,
+// so "owner with a readonly workspace may save" is the production answer and
+// not this file's opinion.
+import React from 'react';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Padlet } from '@/types/collabboard';
+import {
+  usePadletSave,
+  BOARD_EDIT_NOT_ALLOWED,
+  type SaveCardResult,
+} from '@/hooks/canvas/usePadletSave';
+import {
+  canEditBoard,
+  type BoardCollaboratorAuthority,
+} from '@/lib/domain/canvas/boardEditAuthority';
+import { supabaseBrowser } from '@/lib/supabase/browser';
+
+vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const OWNER = '11111111-1111-4111-8111-111111111111';
+const EDITOR = '22222222-2222-4222-8222-222222222222';
+const VIEWER = '33333333-3333-4333-8333-333333333333';
+const BOARD = 'canvas-1';
+const board = { id: BOARD, user_id: OWNER };
+
+const collaborator = (
+  userId: string,
+  role: BoardCollaboratorAuthority['role'],
+): BoardCollaboratorAuthority => ({ userId, boardId: BOARD, role });
+
+/** The production policy, asked exactly as CanvasClient asks it. */
+const authorityFor = (
+  userId: string | null,
+  collaboratorAuthority: BoardCollaboratorAuthority | null,
+) => canEditBoard({ userId, boardId: BOARD, board, collaboratorAuthority });
+
+// ---------------------------------------------------------------------------
+// Recording Supabase double
+// ---------------------------------------------------------------------------
+
+type Effects = {
+  inserts: unknown[];
+  updates: unknown[];
+  selects: string[];
+  rpcs: string[];
+  rpcPadletIds: string[];
+  authCalls: number;
+  fetches: string[];
+  placementDrafts: unknown[];
+  editorCloses: string[];
+  padletSets: number;
+  draftSets: number;
+};
+
+function newEffects(): Effects {
+  return {
+    inserts: [], updates: [], selects: [], rpcs: [], rpcPadletIds: [], authCalls: 0,
+    fetches: [], placementDrafts: [], editorCloses: [], padletSets: 0, draftSets: 0,
+  };
+}
+
+/** Lets a test hold one awaited step open, so revocation can land mid-flight. */
+type Gate = { promise: Promise<void>; release: () => void };
+function gate(): Gate {
+  let release!: () => void;
+  const promise = new Promise<void>((done) => { release = () => done(); });
+  return { promise, release };
+}
+
+function installSupabase(
+  effects: Effects,
+  gates: { auth?: Gate; insert?: Gate; rpc?: Gate } = {},
+) {
+  let nextId = 1;
+  const rows = new Map<string, unknown>();
+  const client = {
+    auth: {
+      getUser: async () => {
+        effects.authCalls += 1;
+        if (gates.auth) await gates.auth.promise;
+        return { data: { user: { id: OWNER } }, error: null };
+      },
+    },
+    async rpc(fn: string, args: Record<string, unknown>) {
+      effects.rpcs.push(fn);
+      effects.rpcPadletIds.push(String(args.p_padlet_id));
+      if (gates.rpc) await gates.rpc.promise;
+      rows.set(args.p_padlet_id as string, { ...args, id: args.p_padlet_id, type: 'image' });
+      return { data: [{ padlet_id: args.p_padlet_id }], error: null };
+    },
+    from(_table: string) {
+      return {
+        insert(row: unknown) {
+          effects.inserts.push(row);
+          const created = { ...(row as object), id: `persisted-${nextId++}` };
+          return {
+            select: () => ({
+              single: async () => {
+                // The primary insert's own await -- where a revocation can land
+                // after the row is committed but before any follow-up write.
+                if (gates.insert) await gates.insert.promise;
+                return { data: created, error: null };
+              },
+            }),
+            then: (resolve: (r: unknown) => void) => resolve({ data: created, error: null }),
+          };
+        },
+        update(fields: unknown) {
+          effects.updates.push(fields);
+          return { eq: async () => ({ data: null, error: null }) };
+        },
+        select(_cols?: string) {
+          return {
+            eq: (_col: string, value: string) => {
+              effects.selects.push(value);
+              return {
+                single: async () => ({ data: rows.get(value) ?? null, error: null }),
+                maybeSingle: async () => ({ data: rows.get(value) ?? null, error: null }),
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  vi.mocked(supabaseBrowser).mockReturnValue(client as never);
+}
+
+// ---------------------------------------------------------------------------
+// Mounted harness over the real hook
+// ---------------------------------------------------------------------------
+
+type SaveApi = ReturnType<typeof usePadletSave>;
+let api: SaveApi | null = null;
+let setDraft: ((padlet: Padlet | null) => void) | null = null;
+let mounted: Array<{ root: Root; container: HTMLElement }> = [];
+
+function Harness({ probe, effects }: { probe: () => boolean; effects: Effects }) {
+  const [padlets, setPadlets] = React.useState<Padlet[]>([]);
+  const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(null);
+  setDraft = setPadletToEdit;
+
+  api = usePadletSave({
+    canEditBoardContentNow: probe,
+    canvasId: BOARD,
+    padletToEdit,
+    isWallLayout: false,
+    isColumnsLayout: false,
+    isGridLayout: false,
+    isDrawingLayout: false,
+    isTimelineLayout: false,
+    isSchedulerLayout: false,
+    isFreeformLayout: true,
+    isMapLayout: false,
+    setPadletToEdit: (next) => { effects.draftSets += 1; setPadletToEdit(next as Padlet | null); },
+    fetchData: async () => {},
+    setIsNoteEditorOpen: () => { effects.editorCloses.push('note'); },
+    setIsLinkEditorOpen: () => { effects.editorCloses.push('link'); },
+    setIsTodoEditorOpen: () => { effects.editorCloses.push('todo'); },
+    setIsTableEditorOpen: () => { effects.editorCloses.push('table'); },
+    setIsContainerEditorOpen: () => { effects.editorCloses.push('container'); },
+    setIsCommentEditorOpen: () => { effects.editorCloses.push('comment'); },
+    setIsCardEditorOpen: () => { effects.editorCloses.push('card'); },
+    setIsImageEditorOpen: () => { effects.editorCloses.push('image'); },
+    isImageEditorOpen: true,
+    setIsDrawingEditorOpen: () => { effects.editorCloses.push('drawing'); },
+    setIsAIComponentEditorOpen: () => { effects.editorCloses.push('ai'); },
+    setPendingPostDraft: (d) => { effects.placementDrafts.push(d); },
+    setIsPlacementPromptOpen: (v) => { if (v) effects.placementDrafts.push('prompt-open'); },
+    setWallPendingPostDraft: (d) => { effects.placementDrafts.push(d); },
+    setWallPlacementPromptOpen: (v) => { if (v) effects.placementDrafts.push('wall-prompt-open'); },
+    padlets,
+    setPadlets: (next) => { effects.padletSets += 1; setPadlets(next); },
+    getNewPostPosition: () => ({ x: 0, y: 0 }),
+  });
+
+  return null;
+}
+
+function mount(probe: () => boolean, effects: Effects) {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => { root.render(<Harness probe={probe} effects={effects} />); });
+  mounted.push({ root, container });
+}
+
+afterEach(() => {
+  for (const m of mounted) {
+    act(() => { m.root.unmount(); });
+    m.container.remove();
+  }
+  mounted = [];
+  api = null;
+  setDraft = null;
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
+
+/** Drives every save action plus the placement boundary, once each. */
+async function runEveryAction(): Promise<{ card: SaveCardResult; placement: boolean }> {
+  let card!: SaveCardResult;
+  let placement!: boolean;
+  await act(async () => {
+    await api!.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
+    await api!.saveLink({ title: 'l', url: 'https://example.com', metadata: {} } as never);
+    await api!.saveTodo({ title: 't', items: [], metadata: {} } as never);
+    await api!.saveTable({ title: 'tb', tableData: '{}', metadata: {} } as never);
+    await api!.saveContainer({ title: 'ct', metadata: {} } as never);
+    await api!.saveComment({ comments: [{ id: 'c1', text: 'cm' }], metadata: {} } as never);
+    card = await api!.saveCard({ title: 'cd', content: 'x', metadata: {} } as never);
+    await api!.saveImage({ imageUrl: 'https://img', source: 'pexels' } as never);
+    await api!.saveDrawing({ drawingData: '{}', drawingAppState: '{}', drawingFiles: '{}' } as never);
+    await api!.saveAIComponent({ aiPrompt: 'p', aiComponentCode: 'code' } as never);
+    placement = api!.requestPlacementIfRequired(
+      { kind: 'note', content: 'c', title: 'n', metadata: {} } as never,
+    );
+  });
+  return { card, placement };
+}
+
+function expectNoEffects(effects: Effects, fetchSpy: ReturnType<typeof vi.fn>) {
+  expect(effects.inserts, 'no inserts').toEqual([]);
+  expect(effects.updates, 'no updates').toEqual([]);
+  expect(effects.selects, 'no read-backs').toEqual([]);
+  expect(effects.rpcs, 'no RPCs').toEqual([]);
+  expect(effects.authCalls, 'no auth calls').toBe(0);
+  expect(effects.placementDrafts, 'no placement state').toEqual([]);
+  expect(effects.editorCloses, 'no editor closed').toEqual([]);
+  expect(effects.padletSets, 'no optimistic/local shared state').toBe(0);
+  expect(fetchSpy, 'no fetches').not.toHaveBeenCalled();
+}
+
+// ---------------------------------------------------------------------------
+// A. Positive authority, derived from the real policy
+// ---------------------------------------------------------------------------
+
+describe('A. authorized identities still persist', () => {
+  const ALLOWED: ReadonlyArray<readonly [string, string, BoardCollaboratorAuthority | null]> = [
+    ['owner + readonly workspace', OWNER, collaborator(OWNER, null)],
+    ['board editor + readonly workspace', EDITOR, collaborator(EDITOR, 'editor')],
+  ];
+
+  for (const [name, userId, collab] of ALLOWED) {
+    it(`${name} saves normally`, async () => {
+      const effects = newEffects();
+      installSupabase(effects);
+      const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchSpy);
+
+      // The workspace role is not consulted anywhere in this chain.
+      expect(authorityFor(userId, collab), `${name} is allowed by the real policy`).toBe(true);
+      mount(() => authorityFor(userId, collab), effects);
+      act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+      const { card } = await runEveryAction();
+
+      expect(effects.inserts.length, 'writes reached the database').toBeGreaterThan(0);
+      expect(card.status, 'saveCard succeeded').not.toBe('failed');
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// B. Initial denial
+// ---------------------------------------------------------------------------
+
+describe('B. denied identities produce no effect at all', () => {
+  const DENIED: ReadonlyArray<readonly [string, () => boolean]> = [
+    ['workspace editor + board viewer', () => authorityFor(VIEWER, collaborator(VIEWER, 'viewer'))],
+    ['board viewer + readonly workspace', () => authorityFor(VIEWER, collaborator(VIEWER, 'viewer'))],
+    ['missing / still-loading authority', () => authorityFor(EDITOR, null)],
+    ['unauthenticated', () => authorityFor(null, null)],
+  ];
+
+  for (const [name, probe] of DENIED) {
+    it(`${name}: zero placement, editor, id, request, state or persistence effects`, async () => {
+      const effects = newEffects();
+      installSupabase(effects);
+      const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchSpy);
+
+      expect(probe(), `${name} is denied by the real policy`).toBe(false);
+      mount(probe, effects);
+      act(() => { setDraft!({ id: 'new' } as Padlet); });
+      const draftSetsBefore = effects.draftSets;
+
+      const { card, placement } = await runEveryAction();
+
+      expectNoEffects(effects, fetchSpy);
+      expect(card, 'saveCard keeps its discriminated contract')
+        .toEqual({ status: 'failed', error: BOARD_EDIT_NOT_ALLOWED });
+      expect(placement, 'placement denial means "caller must stop"').toBe(true);
+      expect(effects.draftSets, 'no draft/editor state was touched').toBe(draftSetsBefore);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C. Retained callbacks, revoked after capture
+// ---------------------------------------------------------------------------
+
+describe('C. callbacks captured while authorized refuse after revocation', () => {
+  it('all ten saves and requestPlacementIfRequired refuse without being rebuilt', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    let allowed = true;
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    // Captured while authorized -- these exact references are reused below.
+    const captured = api!;
+    await act(async () => {
+      await captured.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
+    });
+    expect(effects.inserts.length, 'positive control').toBeGreaterThan(0);
+
+    // The authority goes away; the callbacks are NOT rebuilt.
+    allowed = false;
+    const after = newEffects();
+    Object.assign(effects, after);
+    fetchSpy.mockClear();
+
+    let card!: SaveCardResult;
+    let placement!: boolean;
+    await act(async () => {
+      await captured.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
+      await captured.saveLink({ title: 'l', url: 'https://example.com', metadata: {} } as never);
+      await captured.saveTodo({ title: 't', items: [], metadata: {} } as never);
+      await captured.saveTable({ title: 'tb', tableData: '{}', metadata: {} } as never);
+      await captured.saveContainer({ title: 'ct', metadata: {} } as never);
+      await captured.saveComment({ comments: [{ id: 'c1', text: 'cm' }], metadata: {} } as never);
+      card = await captured.saveCard({ title: 'cd', content: 'x', metadata: {} } as never);
+      await captured.saveImage({ imageUrl: 'https://img', source: 'pexels' } as never);
+      await captured.saveDrawing({ drawingData: '{}', drawingAppState: '{}', drawingFiles: '{}' } as never);
+      await captured.saveAIComponent({ aiPrompt: 'p', aiComponentCode: 'code' } as never);
+      placement = captured.requestPlacementIfRequired(
+        { kind: 'note', content: 'c', title: 'n', metadata: {} } as never,
+      );
+    });
+
+    expectNoEffects(effects, fetchSpy);
+    expect(card).toEqual({ status: 'failed', error: BOARD_EDIT_NOT_ALLOWED });
+    expect(placement, 'the retained placement boundary still says stop').toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D. Revocation mid-flight
+// ---------------------------------------------------------------------------
+
+describe('D. revocation during an awaited step stops the next mutation', () => {
+  it('Image: revoked while auth.getUser is pending -- no RPC, no read-back', async () => {
+    const effects = newEffects();
+    const authGate = gate();
+    installSupabase(effects, { auth: authGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    let running!: Promise<unknown>;
+    await act(async () => {
+      running = api!.saveImage({ imageUrl: 'https://img', source: 'pexels' } as never);
+      await Promise.resolve();
+    });
+    expect(effects.authCalls, 'the identity lookup started while authorized').toBe(1);
+
+    allowed = false;                       // revoked mid-flight
+    await act(async () => { authGate.release(); await running; });
+
+    expect(effects.rpcs, 'zero RPC').toEqual([]);
+    expect(effects.selects, 'zero read-back').toEqual([]);
+    expect(effects.inserts, 'zero persistence').toEqual([]);
+  });
+
+  it('AI: revoked while asset ingestion is pending -- no padlet persistence', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    const ingest = gate();
+    let allowed = true;
+    const fetchSpy = vi.fn(async (url: string) => {
+      effects.fetches.push(String(url));
+      await ingest.promise;
+      return new Response(JSON.stringify({ finalCode: 'x' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    let running!: Promise<unknown>;
+    await act(async () => {
+      running = api!.saveAIComponent({
+        aiPrompt: 'p', aiComponentCode: 'code',
+        aiAssets: { images: [{ query: 'q', url: 'https://i', status: 'resolved', source: 's' }] },
+      } as never);
+      await Promise.resolve();
+    });
+    expect(effects.fetches.length, 'ingestion started while authorized').toBeGreaterThan(0);
+
+    allowed = false;                       // revoked during ingestion
+    await act(async () => { ingest.release(); await running; });
+
+    // The ingestion itself is external work already done and not reversible
+    // from here; what must not happen is the board write that follows it.
+    expect(effects.inserts, 'zero padlet persistence').toEqual([]);
+    expect(effects.padletSets, 'zero local shared state').toBe(0);
+  });
+
+  it('Card: revoked after the primary insert -- no follow-up, and the row stands', async () => {
+    const effects = newEffects();
+    const insertGate = gate();
+    installSupabase(effects, { insert: insertGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    // Started while authorized, with a parent so a container follow-up WOULD
+    // run if the authority still allowed it.
+    let running!: Promise<SaveCardResult>;
+    await act(async () => {
+      running = api!.saveCard({
+        title: 'cd', content: 'x', metadata: { parentId: 'container-1' },
+      } as never);
+      await Promise.resolve();
+    });
+    expect(effects.inserts.length, 'the primary insert was issued while authorized').toBe(1);
+
+    // Revoked while that insert is still awaiting, then released.
+    allowed = false;
+    let result!: SaveCardResult;
+    await act(async () => { insertGate.release(); result = await running; });
+
+    // The committed row is not reversed -- only the SECOND mutation is stopped.
+    expect(effects.inserts.length, 'the completed insert is not reversed').toBe(1);
+    expect(effects.updates, 'zero container follow-up write').toEqual([]);
+    expect(effects.selects, 'the container was never even read').toEqual([]);
+    expect(result, 'the implemented post-await contract')
+      .toEqual({ status: 'failed', error: BOARD_EDIT_NOT_ALLOWED });
+    expect(effects.editorCloses, 'no unrelated editor-state change').toEqual([]);
+    expect(effects.placementDrafts, 'no unrelated placement change').toEqual([]);
+  });
+
+  it('Image: revoked while the RPC is pending -- no read-back, retry identity kept', async () => {
+    const effects = newEffects();
+    const rpcGate = gate();
+    installSupabase(effects, { rpc: rpcGate });
+    let allowed = true;
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    const payload = { imageUrl: 'https://img', source: 'pexels' } as never;
+    let running!: Promise<unknown>;
+    await act(async () => {
+      running = api!.saveImage(payload);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(effects.authCalls, 'the identity lookup succeeded').toBe(1);
+    expect(effects.rpcs, 'the RPC was issued while authorized').toEqual(['create_image_post_with_library_item']);
+    const firstPadletId = effects.rpcPadletIds[0];
+
+    // Revoked while the RPC is in flight, then released.
+    allowed = false;
+    await act(async () => { rpcGate.release(); await running; });
+
+    // The RPC itself completed server-side and is not claimed to be reversible.
+    expect(effects.selects, 'zero read-back').toEqual([]);
+    expect(effects.inserts, 'zero later persistence').toEqual([]);
+    expect(effects.updates, 'zero later mutation').toEqual([]);
+
+    // Retry identity: the durable creation id was NOT cleared, so a later
+    // authorized retry of the same request reuses it instead of minting a
+    // second Image.
+    allowed = true;
+    await act(async () => { await api!.saveImage(payload); });
+    expect(effects.rpcPadletIds[1], 'the retry reuses the same durable id').toBe(firstPadletId);
+  });
+
+  it('Note: revoked after the insert -- the row stands, no follow-up write starts', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    let allowed = true;
+    const container = { id: 'container-1' };
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    // The insert is permitted; revocation lands before the follow-up writes.
+    await act(async () => {
+      const saving = api!.saveNote({
+        title: 'n', content: 'c', metadata: { parentId: container.id },
+      } as never);
+      await Promise.resolve();
+      allowed = false;
+      await saving;
+    });
+
+    expect(effects.inserts.length, 'the first write completed and is not reversed').toBe(1);
+    expect(effects.updates, 'no container follow-up write started').toEqual([]);
+    expect(effects.selects, 'the container was never even read').toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E. Contracts and state under denial
+// ---------------------------------------------------------------------------
+
+describe('E. denial leaves contracts and state intact', () => {
+  it('no toast, no editor close, no placement UI, and image retry identity survives', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    // Authorized first, so an image retry identity could exist at all.
+    let allowed = true;
+    mount(() => allowed, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    allowed = false;
+    let card!: SaveCardResult;
+    await act(async () => {
+      card = await api!.saveCard({ title: 'cd', content: 'x', metadata: {} } as never);
+      await api!.saveImage({ imageUrl: 'https://img', source: 'pexels' } as never);
+    });
+
+    expect(card).toEqual({ status: 'failed', error: BOARD_EDIT_NOT_ALLOWED });
+    expect(effects.editorCloses, 'no editor was closed').toEqual([]);
+    expect(effects.placementDrafts, 'no placement UI opened').toEqual([]);
+    // A denied image never reached the RPC, so it cannot have cleared the
+    // durable creation identity a later authorized retry depends on.
+    expect(effects.rpcs).toEqual([]);
+    expect(effects.selects).toEqual([]);
+  });
+
+  it('the refusal value is stable and distinguishable from a server error', () => {
+    expect(BOARD_EDIT_NOT_ALLOWED).toBe('board_edit_not_allowed');
+  });
+});
