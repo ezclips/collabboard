@@ -155,6 +155,72 @@ describe('P6C Knowledge PDF upload client', () => {
   });
 });
 
+/**
+ * CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_2. The upload request used to
+ * ignore the controller that already aborted polling, so unmounting the
+ * uploader -- which is what losing board authority does -- left the ingestion
+ * request running and its callbacks still able to fire.
+ */
+describe('the upload request is bound to the uploader lifetime', () => {
+  it('carries the abort signal it is given, and reports an abort AS an abort', async () => {
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const fetchImpl = vi.fn((_input: string, init?: RequestInit) => {
+      seenSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
+    });
+
+    const file = new File(['pdf'], 'lesson.pdf', { type: 'application/pdf' });
+    const pending = uploadKnowledgePdf(BOARD_ID, file, fetchImpl as never, controller.signal);
+    expect(seenSignal, 'the request is made with a signal').toBe(controller.signal);
+
+    controller.abort();
+    // An abort must surface as an AbortError, never as the generic
+    // "temporarily unavailable" message -- the caller distinguishes them.
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('unmounting the uploader aborts an upload that is still in flight', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let uploadSignal: AbortSignal | undefined;
+    const onDocumentUploaded = vi.fn();
+
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      uploadSignal = init?.signal ?? undefined;
+      return new Promise<Response>(() => { /* deliberately pending */ });
+    }));
+
+    act(() => {
+      root.render(<KnowledgePdfUploader onDocumentUploaded={onDocumentUploaded} />);
+    });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['pdf'], 'lesson.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(uploadSignal, 'the upload POST carries a signal').toBeTruthy();
+    expect(uploadSignal!.aborted).toBe(false);
+
+    // Losing board authority unmounts this uploader (CanvasSidebar only mounts
+    // it for a board editor), and the unmount must take the request with it.
+    act(() => { root.unmount(); });
+
+    expect(uploadSignal!.aborted, 'the in-flight ingestion request is aborted').toBe(true);
+    expect(onDocumentUploaded, 'no placement is announced').not.toHaveBeenCalled();
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('P6D upload notifies the Knowledge read surface', () => {
   let originalFetch: typeof globalThis.fetch;
   let fetchMock: ReturnType<typeof vi.fn>;

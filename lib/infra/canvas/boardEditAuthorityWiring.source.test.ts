@@ -110,17 +110,17 @@ const canvasClient = sourceOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
 /** Executable occurrences of the padlets capability in CanvasClient. */
-// CORRECTION_3 moved AI -> Note onto this capability (guard, dependency and
-// both exposure props), which is why this moved from 25.
 /*
-  CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_1 moved this from 29 to 39. The
-  ten added occurrences are all real executable consumers: the live authority
-  ref (its declaration and the assignment that keeps it current, two mentions
-  each), the four shared-content mutation handlers that read it before writing,
-  the one save fence the shared-content editors commit through, and the sidebar
-  prop that decides whether the hidden PDF input is mounted at all.
+  CORRECTION_3 moved AI -> Note onto this capability (guard, dependency and
+  both exposure props), taking it from 25 to 29.
+  CORRECTION_1 moved this from 29 to 39. CORRECTION_2 then moved it to 52 by
+  closing the stale-flow gaps review found: the six DrawingLayout callbacks and
+  its readOnly prop, the Library completion paths (the card save fence and its
+  three consumers, the debounced metadata commit, the panel's own mount and the
+  icon replacement), and the import surface's mount, capability and resolved
+  callback. Every one is executable wiring, not prose.
 */
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 39;
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 52;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -434,6 +434,13 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       // The hidden board-canvas PDF input is mounted on this same capability,
       // so an unauthorised user has no element to activate.
       'canAddBoardContentPdf={canEditBoardContent}',
+      // CORRECTION_2: the stale-flow surfaces review found.
+      'readOnly={!canEditBoardContent}',
+      'isOpen={isLibraryOpen && canEditBoardContent}',
+      'isOpen={isImportBrowserOpen && canEditBoardContent}',
+      'canResolveSelection={() => canEditBoardContentRef.current}',
+      'if (!canEditBoardContentRef.current) return null;',
+      'iconReplaceTargetPadlet && canEditBoardContentRef.current',
     ]) {
       expect(canvasClientCode, consumer).toContain(consumer);
     }
@@ -630,8 +637,14 @@ describe('every unrelated mutation authority is untouched by this slice', () => 
     expect(canvasClient).toContain('canReorderPosts={canEditWorkspace(currentWorkspaceRole)}');
   });
 
-  it('Drawing keeps its readonly-role test', () => {
-    expect(canvasClient).toContain("readOnly={currentWorkspaceRole === 'readonly'}");
+  it('Drawing answers to the board, not the workspace role', () => {
+    // CORRECTION_2. This previously pinned `currentWorkspaceRole === 'readonly'`
+    // as a deliberately untouched surface. It was wrong in BOTH directions --
+    // a board viewer with an editable workspace could draw, and a board owner
+    // whose workspace went readonly could not -- and a drawing object is a
+    // `padlets` row like any other, so it takes the board's own authority.
+    expect(canvasClient).toContain('readOnly={!canEditBoardContent}');
+    expect(canvasClient).not.toContain("readOnly={currentWorkspaceRole === 'readonly'}");
     expect(canvasClient).not.toContain('readOnly={!canSavePdfSelectionAsNote}');
   });
 

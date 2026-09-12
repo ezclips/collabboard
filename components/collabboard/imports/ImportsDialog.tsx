@@ -12,6 +12,13 @@ interface ImportsDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onImportResolved: (resolved: ResolvedImportItem) => void;
+  /**
+   * Passed straight through to the browser, unread here: this dialog owns
+   * presentation, and the capability belongs to the one step that makes the
+   * server work -- resolving a selection. Optional, so hosts without a
+   * publication right of their own are unchanged.
+   */
+  canResolveSelection?: () => boolean;
   initialProvider?: ImportProvider | null;
 }
 
@@ -64,7 +71,7 @@ function ProviderCard({
   );
 }
 
-export default function ImportsDialog({ isOpen, onClose, onImportResolved, initialProvider = null }: ImportsDialogProps) {
+export default function ImportsDialog({ isOpen, onClose, onImportResolved, initialProvider = null, canResolveSelection }: ImportsDialogProps) {
   const [screen, setScreen] = useState<Screen>({ name: 'chooser' });
 
   // Reset to chooser whenever dialog opens
@@ -194,6 +201,7 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
           return (
             <div className="flex flex-col" style={{ height: 'calc(80vh - 61px)' }}>
               <ImportBrowser
+                canResolveSelection={canResolveSelection}
                 provider={browserProvider}
                 onSelectItem={(resolved) => {
                   onImportResolved(resolved);

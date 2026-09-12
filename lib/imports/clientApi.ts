@@ -77,12 +77,24 @@ export async function searchImportItems(
   return data.items || [];
 }
 
+/**
+ * Resolving a selection is the resource-consuming step: the server fetches the
+ * item from the provider and materialises a preview. `signal` is OPTIONAL and
+ * purely additive, so callers that have no lifecycle to bind to are unchanged;
+ * a caller that can lose the right to publish passes one and the request is
+ * dropped with it.
+ *
+ * A client abort stops this request. It cannot undo a preview the server has
+ * already committed -- that orphan remains the import lifecycle's concern.
+ */
 export async function resolveImportSelection(
-  input: ResolveImportSelectionInput
+  input: ResolveImportSelectionInput,
+  signal?: AbortSignal
 ): Promise<ResolvedImportItem> {
   return fetchImportJson<ResolvedImportItem>('/api/imports/resolve-selection', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    signal,
   });
 }

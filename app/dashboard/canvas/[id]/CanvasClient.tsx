@@ -3023,6 +3023,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     },
     [],
   );
+  const saveCardIfBoardEditable = useMemo(() => guardBoardContentSave(saveCard), [guardBoardContentSave, saveCard]);
   const saveLinkIfBoardEditable = useMemo(() => guardBoardContentSave(saveLink), [guardBoardContentSave, saveLink]);
   const saveImageIfBoardEditable = useMemo(() => guardBoardContentSave(saveImage), [guardBoardContentSave, saveImage]);
   const saveDrawingIfBoardEditable = useMemo(() => guardBoardContentSave(saveDrawing), [guardBoardContentSave, saveDrawing]);
@@ -6256,6 +6257,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [padlets, supabase, fetchData, canvasId, setGraphRefreshToken]);
 
   const updatePadletMetadata = async (padletId: string, metadataUpdates: any) => {
+    // Guarded before the optimistic update AND before the debounced commit:
+    // a slider or icon change begun while authorised must neither paint nor
+    // schedule a write once the authority is gone.
+    if (!canEditBoardContentRef.current) return;
     const padlet = padlets.find(p => p.id === padletId);
     if (!padlet) return;
 
@@ -7156,6 +7161,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [canvasId, setPadlets, addFreeformCardPadlet]);
 
   const handleDrawingLayoutAddPadlet = useCallback(async (postData: any) => {
+    // Asked live, and asked first: the Excalidraw host keeps callbacks across
+    // renders, so a handle captured while authorised must still refuse once it
+    // is not. Before the id, before the optimistic card, before the insert.
+    if (!canEditBoardContentRef.current) return null;
     const { forceContainerPrompt: _forceContainerPrompt, ...cleanMetadata } = postData.metadata || {};
     // Provenance belongs to THIS dropped payload alone. A payload without it
     // gets no source reference, whatever happened to any earlier ghost.
@@ -7186,6 +7195,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [canvasId, setPadlets, addDrawingLayoutPadlet, persistKnowledgeSourceReference]);
 
   const handleDrawingLayoutUpdatePadlet = useCallback(async (id: string, updates: any) => {
+    if (!canEditBoardContentRef.current) return;
     const normalizedUpdates = { ...updates };
     if (typeof normalizedUpdates.position_x === 'number') {
       normalizedUpdates.position_x = Math.round(normalizedUpdates.position_x);
@@ -7197,6 +7207,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [updateDrawingLayoutPadlet]);
 
   const handleDrawingLayoutUpdatePadletStrict = useCallback(async (id: string, updates: Partial<Padlet>) => {
+    if (!canEditBoardContentRef.current) return;
     const normalizedUpdates = { ...updates };
     if (typeof normalizedUpdates.position_x === 'number') {
       normalizedUpdates.position_x = Math.round(normalizedUpdates.position_x);
@@ -7209,10 +7220,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [setPadlets, updatePostFieldsOrThrow]);
 
   const handleDrawingLayoutDeletePadlet = useCallback(async (id: string) => {
+    if (!canEditBoardContentRef.current) return;
     await deletePadletById(id);
   }, []);
 
   const handleDrawingLayoutDeleteOverlayPadlets = useCallback(async (rootIds: string[]) => {
+    if (!canEditBoardContentRef.current) return;
     const affectedIds = new Set(collectDrawingOverlayDeletionIds(
       padlets.map((padlet) => ({
         id: String(padlet.id),
@@ -7339,6 +7352,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [isDrawingLayout]);
 
   const handleDrawingLayoutAddPadletWithContainerCheck = useCallback(async (postData: any) => {
+    // Refused before the container prompt opens, so an unauthorised drop never
+    // even parks a pending draft in component state.
+    if (!canEditBoardContentRef.current) return null;
     const needsContainerPrompt =
       !postData.metadata?.parentId &&
       (postData.type === 'image' || postData.metadata?.forceContainerPrompt);
@@ -8709,7 +8725,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           saveImage={saveImageIfBoardEditable}
           saveDrawing={saveDrawingIfBoardEditable}
           saveAIComponent={saveAIComponent}
-          saveCard={saveCard}
+          saveCard={saveCardIfBoardEditable}
           closeAllToolbars={closeAllToolbars}
           openPadletInTypeEditor={openPadletInTypeEditor}
           handleDetachChildFromFreeformContainer={handleDetachChildFromFreeformContainer}
@@ -9716,7 +9732,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setPadletToEdit(padlet);
                   setIsNoteEditorOpen(true);
                 }}
-                readOnly={currentWorkspaceRole === 'readonly'}
+                // Drawing objects are `padlets` rows like any other board
+                // content, so the board decides -- not the workspace role,
+                // which was both too permissive (a board viewer with an
+                // editable workspace could draw) and too strict (a board owner
+                // whose workspace went readonly could not).
+                readOnly={!canEditBoardContent}
                 fetchData={fetchData}
                 commentAccessMode={commentAccessMode}
                 onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
@@ -10564,7 +10585,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               title={padletToEdit?.title || ''}
               initialContent={padletToEdit?.content || ''}
               initialMetadata={padletToEdit?.metadata || {}}
-              onSave={saveCard}
+              onSave={saveCardIfBoardEditable}
               readOnly={false}
             />
 
@@ -10577,7 +10598,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   return;
                 }
                 setIsClipartDraftReplaceMode(false);
-                void saveCard({
+                void saveCardIfBoardEditable({
                   title: padletToEdit.title || '',
                   content: padletToEdit.content || '',
                   metadata: padletToEdit.metadata || {},
@@ -10671,9 +10692,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             {/* Imports Dialog */}
             <ImportsDialog
-              isOpen={isImportBrowserOpen}
+              // The import surface publishes onto this board, so it closes with
+              // the board authority -- and unmounting it aborts any resolution
+              // already in flight for a user who may no longer publish here.
+              isOpen={isImportBrowserOpen && canEditBoardContent}
               onClose={() => setIsImportBrowserOpen(false)}
+              canResolveSelection={() => canEditBoardContentRef.current}
               onImportResolved={(resolved) => {
+                // The last word, live: no preview is applied and no draft is
+                // opened for a resolution that came back after the authority.
+                if (!canEditBoardContentRef.current) return;
                 closeAllToolbarLaunchedUi();
                 setPadletToEdit({
                   id: 'new',
@@ -10945,7 +10973,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             component-level closures, so this DOM relocation has no other
             behavioral effect. */}
         <LibraryPanel
-          isOpen={isLibraryOpen}
+          // The panel places items on this board and replaces icons on it,
+          // so the surface itself closes with the authority. Unmounting is
+          // what stops a completion callback firing from a stale tree.
+          isOpen={isLibraryOpen && canEditBoardContent}
           onClose={() => {
             setIsLibraryOpen(false);
             setIconReplaceTargetPadlet(null);
@@ -11000,7 +11031,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               return;
             }
 
-            if (iconReplaceTargetPadlet) {
+            if (iconReplaceTargetPadlet && canEditBoardContentRef.current) {
               // Update metadata with new SVG
               await updatePadletMetadata(iconReplaceTargetPadlet.id, { svgUrl });
 

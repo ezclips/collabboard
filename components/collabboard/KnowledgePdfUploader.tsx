@@ -127,14 +127,19 @@ export async function uploadKnowledgePdf(
   boardId: string,
   file: File,
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<KnowledgePdfUploadResult> {
   const body = new FormData();
   body.set('file', file);
 
   let response: Response;
   try {
-    response = await fetchImpl(apiPath(boardId), { method: 'POST', body });
-  } catch {
+    response = await fetchImpl(apiPath(boardId), { method: 'POST', body, signal });
+  } catch (error) {
+    // An abort is not a failure to report: it is this caller being told to
+    // stop, and it must reach the caller AS an abort so nothing downstream
+    // treats it as an upload that merely went wrong.
+    if (isAbortError(error)) throw error;
     throw new Error('PDF upload is temporarily unavailable. Please try again.');
   }
 
@@ -276,7 +281,10 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
     setNotice({ tone: 'info', message: `Uploading ${file.name}…` });
 
     try {
-      const uploaded = await uploadKnowledgePdf(boardId, file);
+      const uploaded = await uploadKnowledgePdf(boardId, file, fetch, controller.signal);
+      // Unmounted mid-upload -- because the board authority went away, say --
+      // means no document may be announced and no placement attempted.
+      if (controller.signal.aborted) return;
       // The row exists server-side from here on, so any read surface should be
       // able to show it as `uploaded` before processing has finished. PDF-C1
       // places the canvas object HERE, on the same signal and for the same

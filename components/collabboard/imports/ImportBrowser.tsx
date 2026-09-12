@@ -20,6 +20,16 @@ interface ImportBrowserProps {
   onSelectItem: (resolved: ResolvedImportItem) => void;
   onClose: () => void;
   onReconnectRequired?: () => void;
+  /**
+   * May this host still publish what a selection resolves to, RIGHT NOW?
+   *
+   * Optional and read at the moment of use, so a host with no such notion is
+   * unaffected and board semantics are not imposed on unrelated surfaces. The
+   * board passes its own content authority: browsing and searching a provider
+   * read nothing of this board, but resolving a selection makes the server do
+   * real work on the way to publishing here, so that step asks first.
+   */
+  canResolveSelection?: () => boolean;
 }
 
 interface BreadcrumbEntry {
@@ -32,6 +42,7 @@ export default function ImportBrowser({
   onSelectItem,
   onClose,
   onReconnectRequired,
+  canResolveSelection,
 }: ImportBrowserProps) {
   const [items, setItems] = useState<ImportBrowserItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,10 +54,26 @@ export default function ImportBrowser({
   const [resolving, setResolving] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const reconnectHandlerRef = React.useRef(onReconnectRequired);
+  /**
+   * The in-flight resolution, so losing the surface takes the request with it.
+   * A host that unmounts this browser because the user may no longer publish
+   * here stops the server work that was under way for them.
+   */
+  const resolveAbortRef = React.useRef<AbortController | null>(null);
+  const canResolveRef = React.useRef(canResolveSelection);
 
   useEffect(() => {
     reconnectHandlerRef.current = onReconnectRequired;
   }, [onReconnectRequired]);
+
+  useEffect(() => {
+    canResolveRef.current = canResolveSelection;
+  }, [canResolveSelection]);
+
+  useEffect(() => () => {
+    resolveAbortRef.current?.abort();
+    resolveAbortRef.current = null;
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -142,6 +169,13 @@ export default function ImportBrowser({
 
   const handleSelect = async () => {
     if (!selectedItem) return;
+    // Checked IMMEDIATELY before the request, not when this callback was made:
+    // a stale handle from before the authority went away starts no server work.
+    if (canResolveRef.current && !canResolveRef.current()) return;
+
+    resolveAbortRef.current?.abort();
+    const controller = new AbortController();
+    resolveAbortRef.current = controller;
     setResolving(true);
 
     try {
@@ -153,9 +187,14 @@ export default function ImportBrowser({
         thumbnailUrl: selectedItem.rawThumbnailUrl ?? selectedItem.thumbnailUrl,
         openUrl: selectedItem.openUrl,
         sizeBytes: selectedItem.sizeBytes,
-      });
+      }, controller.signal);
+      // Asked again on the way back: the answer arrives later than the request,
+      // and nothing may be handed on for publication once the right is gone.
+      if (controller.signal.aborted) return;
+      if (canResolveRef.current && !canResolveRef.current()) return;
       onSelectItem(resolved);
     } catch (err) {
+      if (controller.signal.aborted) return;
       if (err instanceof ImportAuthError) {
         if (reconnectHandlerRef.current) {
           reconnectHandlerRef.current();
@@ -166,7 +205,8 @@ export default function ImportBrowser({
       }
       setError(err instanceof Error ? err.message : 'Failed to resolve file');
     } finally {
-      setResolving(false);
+      if (resolveAbortRef.current === controller) resolveAbortRef.current = null;
+      if (!controller.signal.aborted) setResolving(false);
     }
   };
 
