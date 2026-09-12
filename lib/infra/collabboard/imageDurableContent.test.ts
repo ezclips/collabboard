@@ -241,3 +241,88 @@ describe('the Freeform Draw arm is wired to the shared authority', () => {
     expect(savePath).not.toContain("from('library_items')");
   });
 });
+
+/**
+ * CANVAS_BOARD_EDIT_COMMAND_LAYER_AUTHORITY_CORRECTION_2.
+ *
+ * This helper is the choke point every durable image edit goes through, so it
+ * answers for itself at BOTH phases: before the placement write, and again
+ * before the linked Library write. The three outcomes are distinguishable
+ * because a caller must be able to tell an untouched board from a half-written
+ * one.
+ */
+describe('persistDurableImageContent authority lifecycle', () => {
+  function recordingClient() {
+    const writes: Array<{ table: string; values: Record<string, unknown> }> = [];
+    const client = {
+      from(table: string) {
+        return {
+          update(values: Record<string, unknown>) {
+            writes.push({ table, values });
+            return { eq: async () => ({ error: null }) };
+          },
+        };
+      },
+    };
+    return { client, writes };
+  }
+
+  const input = (mayContinue: () => boolean) => ({
+    mayContinue,
+    padletId: 'padlet-1',
+    libraryItemId: 'library-1',
+    imageUrl: 'https://img/new.png',
+    metadata: { drawing: 'data:image/png;base64,AAA' },
+    title: 'Image',
+    width: 300,
+    height: 200,
+  });
+
+  it('A. denied before the primary write: nothing is written at all', async () => {
+    const { client, writes } = recordingClient();
+
+    const outcome = await persistDurableImageContent(client as never, input(() => false));
+
+    expect(outcome, 'the caller can tell nothing was persisted').toBe('denied');
+    expect(writes, 'zero padlet update and zero Library update').toEqual([]);
+  });
+
+  it('B. revoked after the primary write: placement stands, Library is skipped', async () => {
+    const { client, writes } = recordingClient();
+    // True for the pre-write probe, false for the post-write one -- the exact
+    // transition a revocation during the placement request produces.
+    let calls = 0;
+    const outcome = await persistDurableImageContent(
+      client as never,
+      input(() => { calls += 1; return calls === 1; }),
+    );
+
+    expect(outcome).toBe('placement-only');
+    expect(writes.map((w) => w.table), 'the placement landed, the Library row did not')
+      .toEqual(['padlets']);
+  });
+
+  it('C. authorized: both writes land and the outcome is complete', async () => {
+    const { client, writes } = recordingClient();
+
+    const outcome = await persistDurableImageContent(client as never, input(() => true));
+
+    expect(outcome).toBe('complete');
+    expect(writes.map((w) => w.table)).toEqual(['padlets', 'library_items']);
+  });
+
+  it('F. guard-to-helper race: a caller that passed its own check still writes nothing', async () => {
+    const { client, writes } = recordingClient();
+    // The consumer's entry guard saw `true`; the authority then went away before
+    // this helper was reached. The pre-write probe is what catches that.
+    let live = true;
+    const entryGuardSaw = live;
+    live = false;
+
+    const outcome = await persistDurableImageContent(client as never, input(() => live));
+
+    expect(entryGuardSaw, 'the caller was authorized when it decided to proceed').toBe(true);
+    expect(outcome, 'the helper refuses independently').toBe('denied');
+    expect(writes, 'zero primary write').toEqual([]);
+  });
+});

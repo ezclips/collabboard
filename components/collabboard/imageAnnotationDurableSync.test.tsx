@@ -23,6 +23,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Padlet } from '@/types/collabboard';
 import { usePadletSave } from '@/hooks/canvas';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 
 vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
@@ -230,5 +232,182 @@ describe('defect D: annotations are durable Library content', () => {
 
     expect(writes.filter((w) => w.table === 'padlets')).toHaveLength(1);
     expect(writes.filter((w) => w.table === 'library_items')).toHaveLength(0);
+  });
+});
+
+/**
+ * CANVAS_BOARD_EDIT_COMMAND_LAYER_AUTHORITY_CORRECTION_2 -- the two DIRECT
+ * image-edit callbacks.
+ *
+ * These live inline in CanvasClient, which is the whole board shell and cannot
+ * be mounted here, so each callback body is EXTRACTED FROM ITS OWN SOURCE and
+ * executed with its dependencies injected. The live ref is modelled exactly as
+ * production holds it -- one mutable `{ current }` the test flips -- so a
+ * callback captured while authorized is the same object invoked after
+ * revocation.
+ *
+ * This is the outer layer only. The actual persistence choke point is proved
+ * independently, and behaviourally, in imageDurableContent.test.ts.
+ */
+const CLIENT_SOURCE = readFileSync(
+  resolvePath(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'),
+  'utf8',
+);
+
+/** The real body of one inline `onSave={async (...) => { ... }}` callback. */
+function extractOnSave(afterMarker: string): string {
+  const at = CLIENT_SOURCE.indexOf(afterMarker);
+  if (at < 0) throw new Error(`MARKER_NOT_FOUND: ${afterMarker}`);
+  const start = CLIENT_SOURCE.lastIndexOf('onSave={async (', at);
+  if (start < 0) throw new Error(`ONSAVE_NOT_FOUND_BEFORE: ${afterMarker}`);
+  const end = CLIENT_SOURCE.indexOf('\n                  }}', start);
+  if (end < 0) throw new Error(`ONSAVE_END_NOT_FOUND: ${afterMarker}`);
+  const body = CLIENT_SOURCE.slice(start + 'onSave={'.length, end) + '\n                  }';
+  // `new Function` parses JavaScript; these bodies carry two TypeScript
+  // casts. Both removals must match, so an edit that changes their shape
+  // fails loudly here instead of running a mangled copy of the callback.
+  let js = body;
+  const casts: ReadonlyArray<readonly [RegExp, string]> = [
+    [/\((drawingPadlet|cropPadlet) as \{[^}]*\}\)/g, '$1'],
+    [/ as never/g, ''],
+  ];
+  for (const [pattern, replacement] of casts) {
+    if (!pattern.test(js)) throw new Error(`TYPE_STRIP_NO_LONGER_MATCHES: ${pattern}`);
+    pattern.lastIndex = 0;
+    js = js.replace(pattern, replacement);
+  }
+  return js;
+}
+
+function buildOnSave(source: string, deps: Record<string, unknown>) {
+  const names = Object.keys(deps);
+  return new Function(...names, `return ${source};`)(
+    ...names.map((name) => deps[name]),
+  ) as (...args: unknown[]) => Promise<void>;
+}
+
+describe('CORRECTION_2: the direct draw and crop callbacks answer to live authority', () => {
+  type Recorder = {
+    helperCalls: unknown[];
+    modeSets: string[];
+    refreshes: number;
+    errors: string[];
+  };
+
+  function deps(ref: { current: boolean }, log: Recorder, outcome = 'complete') {
+    return {
+      canEditBoardContentRef: ref,
+      canEditBoardContentProbe: () => ref.current,
+      supabase: {},
+      persistDurableImageContent: async (_client: unknown, payload: unknown) => {
+        log.helperCalls.push(payload);
+        return outcome;
+      },
+      drawingPadlet: { id: PADLET_ID, library_item_id: LIBRARY_ID, title: 'Image', width: 300, height: 200, metadata: {} },
+      cropPadlet: { id: PADLET_ID, library_item_id: LIBRARY_ID, title: 'Image', width: 300, height: 200, metadata: {} },
+      setIsDrawingMode: (v: boolean) => { log.modeSets.push(`draw:${v}`); },
+      setDrawingPadlet: () => { log.modeSets.push('draw:padlet'); },
+      setIsCropMode: (v: boolean) => { log.modeSets.push(`crop:${v}`); },
+      setCropPadlet: () => { log.modeSets.push('crop:padlet'); },
+      fetchData: () => { log.refreshes += 1; },
+      // Surfaced, not swallowed: the callback catches its own failures, and a
+      // harness that quietly fell into that path would look like a refusal.
+      console: { error: (...parts: unknown[]) => { log.errors.push(parts.map(String).join(' ')); } },
+    };
+  }
+
+  const recorder = (): Recorder => ({ helperCalls: [], modeSets: [], refreshes: 0, errors: [] });
+
+  const CASES: ReadonlyArray<readonly [string, string, unknown[]]> = [
+    ['draw-on-image', "'Failed to save drawing:'", [ANNOTATED, [], []]],
+    ['crop-image', "'Failed to save cropped image:'", [ANNOTATED]],
+  ];
+
+  for (const [name, marker, args] of CASES) {
+    it(`${name}: a callback retained from an authorized render refuses after revocation`, async () => {
+      const ref = { current: true };
+      const log = recorder();
+      const onSave = buildOnSave(extractOnSave(marker), deps(ref, log));
+
+      // Positive control, with the very same reference reused below.
+      await onSave(...args);
+      expect(log.errors, `${name} harness did not fall into the catch`).toEqual([]);
+      expect(log.helperCalls, `${name} positive control reaches the helper`).toHaveLength(1);
+      expect(log.refreshes, `${name} refreshes once authorized`).toBe(1);
+
+      ref.current = false;
+      await onSave(...args);
+
+      expect(log.helperCalls, 'zero helper call after revocation').toHaveLength(1);
+      expect(log.modeSets.length, 'zero further callback state effect')
+        .toBe(log.modeSets.length);
+      expect(log.refreshes, 'zero further refresh').toBe(1);
+    });
+
+    it(`${name}: a denied helper result produces no state change and no refresh`, async () => {
+      // The guard-to-helper race, from the consumer's side: the entry probe saw
+      // true, the helper refused, and nothing downstream may run.
+      const ref = { current: true };
+      const log = recorder();
+      const onSave = buildOnSave(extractOnSave(marker), deps(ref, log, 'denied'));
+
+      await onSave(...args);
+
+      expect(log.errors, 'harness did not fall into the catch').toEqual([]);
+      expect(log.helperCalls, 'the helper was reached').toHaveLength(1);
+      expect(log.modeSets, 'zero editor state change').toEqual([]);
+      expect(log.refreshes, 'zero refresh for a write that never happened').toBe(0);
+    });
+  }
+
+  it('both callbacks hand the helper a LIVE probe, not a captured boolean', () => {
+    for (const marker of ["'Failed to save drawing:'", "'Failed to save cropped image:'"]) {
+      const body = extractOnSave(marker);
+      expect(body, 'entry guard reads the live ref')
+        .toContain('if (!canEditBoardContentRef.current) return;');
+      expect(body, 'the helper gets the live probe')
+        .toContain('mayContinue: canEditBoardContentProbe,');
+      expect(body, 'a denied helper result stops everything downstream')
+        .toContain("if (outcome === 'denied') return;");
+    }
+  });
+});
+
+describe('CORRECTION_2: revocation dismisses both mutation-capable image modals', () => {
+  it('clears draw and crop state, touches nothing else, and is not sticky', () => {
+    const marker = '   * Losing board-edit authority closes the two image tools';
+    const at = CLIENT_SOURCE.indexOf(marker);
+    expect(at, 'the revocation effect exists').toBeGreaterThan(-1);
+    const start = CLIENT_SOURCE.indexOf('  useEffect(() => {', at);
+    const end = CLIENT_SOURCE.indexOf('\n  }, [canEditBoardContent,', start);
+    const body = CLIENT_SOURCE.slice(start, end);
+
+    // No board, Library, optimistic, placement or network work in here.
+    for (const forbidden of ['supabase', 'persistDurableImageContent', 'fetchData', 'setPadlets']) {
+      expect(body, `the effect performs no ${forbidden}`).not.toContain(forbidden);
+    }
+
+    const cleared: string[] = [];
+    const run = new Function(
+      'canEditBoardContent', 'setIsDrawingMode', 'setDrawingPadlet', 'setIsCropMode', 'setCropPadlet',
+      `${body.replace('  useEffect(() => {', 'const effect = () => {')}\n  }; return effect;`,
+    );
+
+    // Authorized: the tools are left exactly as they are.
+    run(true, () => cleared.push('draw'), () => cleared.push('drawPadlet'),
+      () => cleared.push('crop'), () => cleared.push('cropPadlet'))();
+    expect(cleared, 'nothing is dismissed while authorized').toEqual([]);
+
+    // Revoked: both mutation-capable modals are cleared.
+    run(false, () => cleared.push('draw'), () => cleared.push('drawPadlet'),
+      () => cleared.push('crop'), () => cleared.push('cropPadlet'))();
+    expect(cleared).toEqual(['draw', 'drawPadlet', 'crop', 'cropPadlet']);
+
+    // Restoring authority dismisses nothing further, so the tools reopen
+    // normally -- the effect holds no sticky state.
+    const before = cleared.length;
+    run(true, () => cleared.push('draw'), () => cleared.push('drawPadlet'),
+      () => cleared.push('crop'), () => cleared.push('cropPadlet'))();
+    expect(cleared.length, 'authority restored: nothing re-dismissed').toBe(before);
   });
 });

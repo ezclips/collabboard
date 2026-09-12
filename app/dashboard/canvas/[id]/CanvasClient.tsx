@@ -545,6 +545,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const canEditBoardContentProbe = useCallback(() => canEditBoardContentRef.current, []);
 
+
   /**
    * PDF selection -> Save as Note. Board CONTENT authority, because the write
    * it guards is a `padlets` insert plus a source reference under that same
@@ -807,6 +808,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const viewDrawingPadlet = canvasState.editors.viewDrawingPadlet; // SHARED: overlays + editors
   const setViewDrawingPadlet = (v: Padlet | null) => dispatch({ type: 'EDITORS_PATCH', payload: { viewDrawingPadlet: v } });
   const [isClipartDraftModalOpen, setIsClipartDraftModalOpen] = useState(false);
+  /**
+   * Losing board-edit authority closes the two image tools that exist only to
+   * mutate: Draw-on-image and Crop. Transient editor state only -- no board,
+   * Library, optimistic, placement or network work happens here, and viewing
+   * an image is untouched. Nothing is sticky, so regaining the authority lets
+   * both reopen normally. The callback and helper guards stay regardless:
+   * unmount timing is not a correctness mechanism.
+   */
+  useEffect(() => {
+    if (canEditBoardContent) return;
+    setIsDrawingMode(false);
+    setDrawingPadlet(null);
+    setIsCropMode(false);
+    setCropPadlet(null);
+  }, [canEditBoardContent, setIsDrawingMode, setDrawingPadlet, setIsCropMode, setCropPadlet]);
+
   /**
    * R6I. A dropped PDF area waiting to be confirmed.
    *
@@ -10430,6 +10447,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setDrawingPadlet(null);
                   }}
                   onSave={async (dataUrl, paths, textElements) => {
+                    // Live, and first: this handle outlives the render that made
+                    // it, so a revoked user must not even build the payload.
+                    if (!canEditBoardContentRef.current) return;
                     try {
                       /**
                        * IMAGE-LIBRARY: a stroke is DURABLE IMAGE CONTENT.
@@ -10459,7 +10479,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         drawingPaths: paths,
                         drawingText: textElements,
                       };
-                      await persistDurableImageContent(supabase as never, {
+                      const outcome = await persistDurableImageContent(supabase as never, {
                         mayContinue: canEditBoardContentProbe,
                         padletId: drawingPadlet.id,
                         libraryItemId: (drawingPadlet as { library_item_id?: string | null }).library_item_id ?? null,
@@ -10469,8 +10489,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         width: drawingPadlet.width,
                         height: drawingPadlet.height,
                       });
+                      // Nothing was written, so nothing is settled and no refresh
+                      // is owed.
+                      if (outcome === 'denied') return;
                       setIsDrawingMode(false);
                       setDrawingPadlet(null);
+                      // Read-only refresh, and only for a primary write that did
+                      // commit. `placement-only` starts no second mutation.
                       fetchData();
                     } catch (err) {
                       console.error('Failed to save drawing:', err);
@@ -10528,6 +10553,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setCropPadlet(null);
                   }}
                   onSave={async (croppedDataUrl) => {
+                    // Live, and first -- see the Draw arm above.
+                    if (!canEditBoardContentRef.current) return;
                     try {
                       /**
                        * IMAGE-LIBRARY: a crop is DURABLE IMAGE CONTENT, exactly
@@ -10553,7 +10580,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         drawingPaths: null,
                         drawingText: null,
                       };
-                      await persistDurableImageContent(supabase as never, {
+                      const outcome = await persistDurableImageContent(supabase as never, {
                         mayContinue: canEditBoardContentProbe,
                         padletId: cropPadlet.id,
                         libraryItemId: (cropPadlet as { library_item_id?: string | null }).library_item_id ?? null,
@@ -10563,6 +10590,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         width: cropPadlet.width,
                         height: cropPadlet.height,
                       });
+                      if (outcome === 'denied') return;
                       setIsCropMode(false);
                       setCropPadlet(null);
                       fetchData();

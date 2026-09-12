@@ -231,7 +231,7 @@ async function runEveryAction(): Promise<{ card: SaveCardResult; placement: bool
   await act(async () => {
     await api!.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
     await api!.saveLink({ linkTitle: 'l', linkUrl: 'https://example.com', metadata: {} } as never);
-    await api!.saveTodo({ todoTitle: 't', tasks: [{ id: 't1', text: 'x', done: false }], metadata: {} } as never);
+    await api!.saveTodo({ todoTitle: 't', tasks: [{ id: 't1', text: 'x', completed: false }], metadata: {} } as never);
     await api!.saveTable({ title: 'tb', content: '{"rows":[]}', metadata: {} } as never);
     await api!.saveContainer({ title: 'ct', metadata: {} } as never);
     await api!.saveComment({ comments: [{ id: 'c1', text: 'cm' }], metadata: {} } as never);
@@ -362,7 +362,7 @@ describe('C. callbacks captured while authorized refuse after revocation', () =>
     await act(async () => {
       await captured.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
       await captured.saveLink({ linkTitle: 'l', linkUrl: 'https://example.com', metadata: {} } as never);
-      await captured.saveTodo({ todoTitle: 't', tasks: [{ id: 't1', text: 'x', done: false }], metadata: {} } as never);
+      await captured.saveTodo({ todoTitle: 't', tasks: [{ id: 't1', text: 'x', completed: false }], metadata: {} } as never);
       await captured.saveTable({ title: 'tb', content: '{"rows":[]}', metadata: {} } as never);
       await captured.saveContainer({ title: 'ct', metadata: {} } as never);
       await captured.saveComment({ comments: [{ id: 'c1', text: 'cm' }], metadata: {} } as never);
@@ -644,15 +644,14 @@ describe('D. revocation during an awaited step stops the next mutation', () => {
     const effects = newEffects();
     installSupabase(effects);
     let allowed = true;
-    const container = { id: 'container-1' };
     mount(() => allowed, effects);
-    act(() => { setDraft!({ id: 'new' } as Padlet); });
+    // The parent comes from padletToEdit.metadata -- production ignores any
+    // parentId handed in SaveNoteData, so putting it there proved nothing.
+    act(() => { setDraft!({ id: 'new', metadata: { parentId: 'container-1' } } as unknown as Padlet); });
 
     // The insert is permitted; revocation lands before the follow-up writes.
     await act(async () => {
-      const saving = api!.saveNote({
-        title: 'n', content: 'c', metadata: { parentId: container.id },
-      } as never);
+      const saving = api!.saveNote({ title: 'n', content: 'c' } as never);
       await Promise.resolve();
       allowed = false;
       await saving;
@@ -660,7 +659,11 @@ describe('D. revocation during an awaited step stops the next mutation', () => {
 
     expect(effects.inserts.length, 'the first write completed and is not reversed').toBe(1);
     expect(effects.updates, 'no container follow-up write started').toEqual([]);
-    expect(effects.selects, 'the container was never even read').toEqual([]);
+    expect(effects.updateTables, 'no second table was written').toEqual([]);
+    // The read itself may legitimately have begun while still authorized --
+    // what must never happen is the WRITE it feeds. The pending-read case is
+    // covered separately above.
+    expect(effects.padletSets, 'no shared canvas state after revocation').toBe(0);
   });
 });
 

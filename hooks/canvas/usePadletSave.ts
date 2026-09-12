@@ -1428,6 +1428,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
           width: padletToEdit.width,
           height: padletToEdit.height,
         });
+        // Nothing was written at all: the authority was already gone when the
+        // helper was reached. Settle nothing -- no editor close, no read-back,
+        // no reconciliation, no toast -- and leave the retry identity alone.
+        if (outcome === 'denied') return;
         // The placement landed; the Library write did not. No read-back, no
         // local reconciliation, and the retry identity is left alone.
         if (outcome === 'placement-only') {

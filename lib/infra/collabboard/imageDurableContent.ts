@@ -70,17 +70,32 @@ export interface DurableImageContentInput {
  * resolve.
  */
 /**
+ * Three distinguishable states, because a caller must be able to tell an
+ * untouched board from a half-written one:
+ *
+ * `denied` -- the authority was already gone when this was called. NOTHING
+ * was written: no placement, no Library row. The caller settles nothing and
+ * keeps whatever retry identity it holds.
+ *
+ * `placement-only` -- the placement WAS saved and the authority went away
+ * before the Library row could follow. The placement is not reversed; the
+ * caller is told so it starts nothing further.
+ *
  * `complete` -- both writes landed (or there was no linked Library row).
- * `placement-only` -- the placement was saved and the authority went away
- * before the Library row could be written. The placement is NOT reversed;
- * the caller is told so it starts nothing further.
+ *
+ * These are expected outcomes, not errors: none of them throws.
  */
-export type DurableImageContentOutcome = 'complete' | 'placement-only';
+export type DurableImageContentOutcome = 'denied' | 'placement-only' | 'complete';
 
 export async function persistDurableImageContent(
   client: DurableImageContentClient,
   input: DurableImageContentInput,
 ): Promise<DurableImageContentOutcome> {
+  // Asked BEFORE the primary write, not only between the two. This helper is
+  // the choke point every durable image edit goes through, so a caller whose
+  // own entry guard passed and then lost the authority still writes nothing.
+  if (!input.mayContinue()) return 'denied';
+
   const savedAt = new Date().toISOString();
 
   const placement = await client
