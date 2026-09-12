@@ -472,3 +472,165 @@ describe('P6J-D2 completed upload notice auto-dismiss', () => {
     }
   });
 });
+
+/**
+ * CANVAS_SHARED_CONTENT_PERMISSION_CORRECTION_3. The poll half of the upload
+ * lifecycle. The upload request was already abort-aware; the status polling
+ * behind it was not, so a cancelled uploader kept asking the server and could
+ * still deliver a terminal callback for a surface that no longer existed.
+ */
+describe('the polling lifecycle is abort-aware end to end', () => {
+  it('listKnowledgePdfs still works without a signal (existing callers unchanged)', async () => {
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) => (
+      jsonResponse({ documents: [summary('ready')] })
+    ));
+    const documents = await listKnowledgePdfs(BOARD_ID, fetchImpl as never);
+    expect(documents).toHaveLength(1);
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ method: 'GET' });
+  });
+
+  it('waitForKnowledgePdf hands its signal to the status fetch', async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const fetchImpl = vi.fn(async (_input: string, init?: RequestInit) => {
+      seen = init?.signal ?? undefined;
+      return jsonResponse({ documents: [summary('ready')] });
+    });
+
+    const completed = await waitForKnowledgePdf(BOARD_ID, DOCUMENT_ID, {
+      fetchImpl: fetchImpl as never,
+      signal: controller.signal,
+    });
+
+    expect(seen, 'the poll carries the signal').toBe(controller.signal);
+    expect(completed?.processingStatus, 'positive control').toBe('ready');
+  });
+
+  it('a poll cancelled in flight reports an abort instead of terminal state', async () => {
+    const controller = new AbortController();
+    let release: ((response: Response) => void) | null = null;
+    const fetchImpl = vi.fn(() => new Promise<Response>((resolveFetch) => {
+      release = resolveFetch;
+    }));
+
+    const pending = waitForKnowledgePdf(BOARD_ID, DOCUMENT_ID, {
+      fetchImpl: fetchImpl as never,
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+
+    // Cancelled while the request was open, then the server answers TERMINAL.
+    controller.abort();
+    release!(jsonResponse({ documents: [summary('ready')] }));
+
+    // The terminal answer must not be read: the caller is gone.
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('unmounting during polling aborts the status request and silences callbacks', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const previousFetch = globalThis.fetch;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const onKnowledgeChanged = vi.fn();
+    const onDocumentUploaded = vi.fn();
+    const onDocumentSettled = vi.fn();
+    let pollSignal: AbortSignal | undefined;
+    let releasePoll: ((response: Response) => void) | null = null;
+
+    globalThis.fetch = (vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(summary('uploaded'), 201));
+      }
+      pollSignal = init?.signal ?? undefined;
+      return new Promise<Response>((resolveFetch) => { releasePoll = resolveFetch; });
+    }) as unknown) as typeof globalThis.fetch;
+
+    await act(async () => {
+      root.render(
+        <KnowledgePdfUploader
+          onKnowledgeChanged={onKnowledgeChanged}
+          onDocumentUploaded={onDocumentUploaded}
+          onDocumentSettled={onDocumentSettled}
+        />,
+      );
+    });
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    // The upload succeeded, so the document was announced once and polling began.
+    expect(onDocumentUploaded, 'positive control: the upload was announced').toHaveBeenCalledTimes(1);
+    expect(pollSignal, 'the poll carries a signal').toBeTruthy();
+    expect(pollSignal!.aborted).toBe(false);
+    const changedBefore = onKnowledgeChanged.mock.calls.length;
+
+    // Permission loss unmounts this uploader.
+    act(() => { root.unmount(); });
+    expect(pollSignal!.aborted, 'the in-flight poll is aborted').toBe(true);
+
+    // The server answers terminal anyway. Nothing may be delivered.
+    await act(async () => {
+      releasePoll!(jsonResponse({ documents: [summary('ready')] }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(onDocumentSettled, 'no terminal callback after cancellation').not.toHaveBeenCalled();
+    expect(onKnowledgeChanged.mock.calls.length, 'no further change callback').toBe(changedBefore);
+
+    container.remove();
+    globalThis.fetch = previousFetch;
+  });
+
+  it('an authorized upload still polls to a terminal answer and settles', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const previousFetch = globalThis.fetch;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const onDocumentUploaded = vi.fn();
+    const onDocumentSettled = vi.fn();
+
+    globalThis.fetch = (vi.fn(async (_url: string, init?: RequestInit) => (
+      init?.method === 'POST'
+        ? jsonResponse(summary('uploaded'), 201)
+        : jsonResponse({ documents: [summary('ready')] })
+    )) as unknown) as typeof globalThis.fetch;
+
+    await act(async () => {
+      root.render(
+        <KnowledgePdfUploader
+          onDocumentUploaded={onDocumentUploaded}
+          onDocumentSettled={onDocumentSettled}
+        />,
+      );
+    });
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(onDocumentUploaded).toHaveBeenCalledTimes(1);
+    expect(onDocumentSettled).toHaveBeenCalledWith(DOCUMENT_ID, 'ready');
+
+    act(() => { root.unmount(); });
+    container.remove();
+    globalThis.fetch = previousFetch;
+  });
+});

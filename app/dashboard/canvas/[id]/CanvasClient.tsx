@@ -7411,7 +7411,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // Synchronous and before any await: the drop finishes dispatching the
     // instant this handler yields, so a deferred stopPropagation is a no-op.
     event.stopPropagation();
-    if (!canEditBoardContent || !canvasId) return true;
+    if (!canEditBoardContentRef.current || !canvasId) return true;
 
     if (!isFreeformLayout && !isDrawingLayout) {
       toast.error('Drop PDF areas on a Freeform or Drawing board');
@@ -7447,7 +7447,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPdfAreaDraftTitle(payload.originalFilename || '');
     return true;
   }, [
-    canEditBoardContent, canvasId, isDrawingLayout, isFreeformLayout,
+    canvasId, isDrawingLayout, isFreeformLayout,
     getCanvasPointFromClient, setPendingPdfAreaDraft, setPdfAreaDraftTitle,
   ]);
 
@@ -7526,7 +7526,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // await would be a no-op and the outer surface would receive the very same
     // clip -- opening the editor twice from one gesture.
     event.stopPropagation();
-    if (!canEditBoardContent || !canvasId) return true;
+    if (!canEditBoardContentRef.current || !canvasId) return true;
 
     if (!isFreeformLayout && !isDrawingLayout) {
       // Wall/columns/grid/timeline/map place by flow or section order and never
@@ -7572,7 +7572,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsNoteEditorOpen(true);
     return true;
   }, [
-    canEditBoardContent, canvasId, isDrawingLayout, isFreeformLayout, getCanvasPointFromClient,
+    canvasId, isDrawingLayout, isFreeformLayout, getCanvasPointFromClient,
     clampRectPositionToFreeformBounds, setPadletToEdit, setIsNoteEditorOpen, setSourceNoteReference,
     setPendingSourceDropPosition,
   ]);
@@ -7654,7 +7654,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // outer blank-canvas handler and create a second Note.
     event.preventDefault();
     event.stopPropagation();
-    if (!canEditBoardContent || !canvasId) return true;
+    if (!canEditBoardContentRef.current || !canvasId) return true;
     if (targetPadlet.type !== 'text' && targetPadlet.type !== 'note') return true;
 
     const draft = buildKnowledgeSourceNoteDraft(knowledgeSourceClipPageRequest(payload));
@@ -7681,7 +7681,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       }
     })();
     return true;
-  }, [canEditBoardContent, canvasId, updatePostFieldsOrThrow, setPadlets, persistKnowledgeSourceReference]);
+  }, [canvasId, updatePostFieldsOrThrow, setPadlets, persistKnowledgeSourceReference]);
 
   const handleDrawingNewContainer = useCallback(async () => {
     if (!drawingPendingDraft || !canvasId) return;
@@ -8527,8 +8527,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     options?: { initialContentText?: string },
   ) => {
     // The same capability the Create group itself is gated on: this inserts a
-    // `padlets` row, so the board decides, not the workspace role.
-    if (!canEditBoardContent) return;
+    // `padlets` row, so the board decides, not the workspace role. Read
+    // LIVE: the reader panel keeps this handle across renders.
+    if (!canEditBoardContentRef.current) return;
     const draft = buildKnowledgeSourceNoteDraft(request);
     setSourceNoteReference(draft.sourceReference);
     closeDrawingSelectedShapePanel();

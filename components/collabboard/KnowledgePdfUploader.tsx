@@ -164,11 +164,17 @@ export async function uploadKnowledgePdf(
 export async function listKnowledgePdfs(
   boardId: string,
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<readonly KnowledgePdfSummary[]> {
   let response: Response;
   try {
-    response = await fetchImpl(apiPath(boardId), { method: 'GET' });
-  } catch {
+    response = await fetchImpl(apiPath(boardId), { method: 'GET', signal });
+  } catch (error) {
+    // A cancelled poll is not a status outage. It must reach the caller AS an
+    // abort so nothing downstream reports a failure to a user who simply lost
+    // the surface. `signal` is optional, so callers without a lifecycle are
+    // unchanged.
+    if (isAbortError(error)) throw error;
     throw new Error('PDF status is temporarily unavailable.');
   }
 
@@ -225,7 +231,10 @@ export async function waitForKnowledgePdf(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    const documents = await listKnowledgePdfs(boardId, fetchImpl);
+    const documents = await listKnowledgePdfs(boardId, fetchImpl, signal);
+    // Checked AFTER the await: the answer arrives later than the request, and a
+    // poll that was cancelled while in flight must not report terminal state.
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const document = documents.find((item) => item.id === documentId);
     if (document?.processingStatus === 'ready' || document?.processingStatus === 'failed') {
       return document;
@@ -297,6 +306,11 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
         signal: controller.signal,
       });
 
+      // Asked once more between the terminal answer and its delivery: a poll
+      // that returned just as this uploader was taken away must announce
+      // nothing. `waitForKnowledgePdf` already throws on a cancelled request,
+      // so this covers only the narrow window after it returned.
+      if (controller.signal.aborted) return;
       // Terminal status, or polling gave up while the worker continues: either
       // way the last known server state is newer than what was fetched above.
       onKnowledgeChanged?.();
@@ -328,8 +342,12 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
-      setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
+      // A cancelled run owns no state any more: this component may already be
+      // unmounted, and a later run has its own controller.
+      if (!controller.signal.aborted) {
+        setBusy(false);
+        if (inputRef.current) inputRef.current.value = '';
+      }
     }
   };
 

@@ -1698,6 +1698,39 @@ export default function DrawingLayout({
   const [presentationActive, setPresentationActive] = useState(false);
   const [presentationStartId, setPresentationStartId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; padlet: Padlet } | null>(null);
+
+  /**
+   * `readOnly` as it stands RIGHT NOW.
+   *
+   * This layout hands long-lived callbacks to hosts that keep them: the
+   * Excalidraw API, an open context menu, the presentation sidebar. Those
+   * handles outlive the render that made them, so a handler that closed over
+   * the boolean would still mutate the scene after the board authority was
+   * revoked. The ref is the same fact, read at call time.
+   *
+   * It is NOT another authority: `readOnly` arrives from the board's canonical
+   * capability, and nothing here re-derives it.
+   */
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
+  /**
+   * Losing the right to edit takes the mutation-capable surfaces with it.
+   *
+   * Dismissal alone would not be enough -- a handle already taken from one of
+   * these could still be called -- which is why every mutating handler also
+   * asks `readOnlyRef` above. This is the other half: an open context menu or
+   * slide sidebar must not sit there offering actions that now do nothing.
+   *
+   * Nothing here is sticky. Regaining the authority re-renders the toolbar and
+   * the surfaces normally, with no reload. Read-only viewing is untouched: a
+   * running fullscreen presentation keeps playing.
+   */
+  useEffect(() => {
+    if (!readOnly) return;
+    setContextMenu(null);
+    setActiveTool((current) => (current === 'present' || current === 'library' ? 'select' : current));
+  }, [readOnly]);
   // PATCH SECTION-H3C: Section Heading selection.
   //
   // Two representations of the SAME fact, deliberately kept separate:
@@ -2690,6 +2723,7 @@ export default function DrawingLayout({
   }, [navigateToPresentationFrame]);
 
   const handleAddSlide = useCallback(() => {
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     const currentElements = excalidrawAPI.getSceneElements();
     const activeFrames = currentElements.filter((el: any) => el.type === 'frame' && !el.isDeleted);
@@ -2709,6 +2743,7 @@ export default function DrawingLayout({
   }, [excalidrawAPI, makeFrameElement, navigateToPresentationFrameSoon]);
 
   const handleAddSlideBelow = useCallback((id: string) => {
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     const currentElements = excalidrawAPI.getSceneElements();
     const frame = currentElements.find((el: any) => el.id === id && el.type === 'frame');
@@ -2824,6 +2859,7 @@ export default function DrawingLayout({
   }, [canvasId, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, padlets]);
 
   const handleDuplicateSlide = useCallback(async (id: string) => {
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     const frame = elements.find((el: any) => el.id === id && el.type === 'frame');
     if (!frame) return;
@@ -2859,6 +2895,7 @@ export default function DrawingLayout({
   }, [cloneLinkedRowsForDuplicateSlide, excalidrawAPI, elements]);
 
   const handleRemoveSlide = useCallback((id: string) => {
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     const updated = elements.map((el: any) =>
       el.id === id || el.frameId === id
@@ -2870,6 +2907,7 @@ export default function DrawingLayout({
   }, [excalidrawAPI, elements, activeSlideId]);
 
   const handleRenameSlide = useCallback((id: string, name: string) => {
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     const updated = elements.map((el: any) =>
       el.id === id ? { ...el, name, updated: Date.now() } : el
@@ -2880,6 +2918,7 @@ export default function DrawingLayout({
   const handleArrangeLayout = useCallback((
     type: 'row' | 'column' | 'grid', columns = 3
   ) => {
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     const GAP = 80;
     const activeFrames = elements
@@ -2959,6 +2998,7 @@ export default function DrawingLayout({
    * `padlets` array keeps one z-order convention across the whole board.
    */
   const moveSectionHeadingZOrder = useCallback(async (padlet: Padlet, action: 'bringToFront' | 'sendToBack') => {
+    if (readOnlyRef.current) return;
     const zValues = padlets.map((p) => (p.metadata as { zIndex?: number } | undefined)?.zIndex || 100);
     const maxZ = Math.max(...zValues);
     const minZ = Math.min(...zValues);
@@ -3416,6 +3456,11 @@ export default function DrawingLayout({
   }, [excalidrawAPI]);
 
   const updateDrawingSceneElements = useCallback((nextElements: readonly any[], options?: { commitToHistory?: boolean }) => {
+    // THE local-scene funnel for every context-menu action -- cut, paste,
+    // duplicate, delete and the four ordering commands all reach the scene
+    // through here. One live check therefore closes all of them, including a
+    // menu that was already open when the authority went away.
+    if (readOnlyRef.current) return;
     if (!excalidrawAPI) return;
     excalidrawAPI.updateScene({
       ...buildDrawingSceneUpdate({

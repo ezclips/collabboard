@@ -113,14 +113,20 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
 /*
   CORRECTION_3 moved AI -> Note onto this capability (guard, dependency and
   both exposure props), taking it from 25 to 29.
-  CORRECTION_1 moved this from 29 to 39. CORRECTION_2 then moved it to 52 by
+  CORRECTION_1 moved this from 29 to 39, and CORRECTION_2 to 52, by closing
+  the stale-flow gaps review found. CORRECTION_3 moves it DOWN to 49: the
+  three knowledge-drop routes and the knowledge-page Note creation stopped
+  reading the closed-over boolean and read `canEditBoardContentRef.current`
+  instead, taking two now-unneeded dependency entries with them. A reduction
+  that IS the fix; the named list below says which consumers remain.
+  The earlier note, for history:
   closing the stale-flow gaps review found: the six DrawingLayout callbacks and
   its readOnly prop, the Library completion paths (the card save fence and its
   three consumers, the debounced metadata commit, the panel's own mount and the
   icon replacement), and the import surface's mount, capability and resolved
   callback. Every one is executable wiring, not prose.
 */
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 52;
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 49;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -255,7 +261,10 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
     expect(canvasClientCode).toContain(
       'onCreateNoteFromPage={canEditBoardContent ? handleCreateNoteFromKnowledgePage : null}',
     );
-    expect(canvasClientCode).toContain('if (!canEditBoardContent) return;');
+    // CORRECTION_3: the reader panel keeps this handle across renders, so the
+    // guard reads the live ref rather than the boolean it closed over.
+    expect(canvasClientCode).toContain('if (!canEditBoardContentRef.current) return;');
+    expect(canvasClientCode).not.toContain('if (!canEditBoardContent) return;');
 
     // The freeform board menu, which carries Note creation through onToolAction.
     expect(canvasClientCode).toContain(
@@ -419,7 +428,6 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       'canCreateBoardContent: canEditBoardContent,',
       'if (BOARD_CONTENT_TOOL_TYPES.has(toolType) && !canEditBoardContent) return;',
       'onCreateNoteFromPage={canEditBoardContent ? handleCreateNoteFromKnowledgePage : null}',
-      'if (!canEditBoardContent || !canvasId) return true;',
       'isEditable={canEditBoardContent}',
       'canEditPosts={canEditBoardContent}',
       'selectDocumentModalDestination(post, canEditBoardContent)',
@@ -434,6 +442,8 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       // The hidden board-canvas PDF input is mounted on this same capability,
       // so an unauthorised user has no element to activate.
       'canAddBoardContentPdf={canEditBoardContent}',
+      // CORRECTION_3: the knowledge-drop routes, live rather than closed over.
+      'if (!canEditBoardContentRef.current || !canvasId) return true;',
       // CORRECTION_2: the stale-flow surfaces review found.
       'readOnly={!canEditBoardContent}',
       'isOpen={isLibraryOpen && canEditBoardContent}',
