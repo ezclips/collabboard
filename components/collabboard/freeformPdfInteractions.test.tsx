@@ -11,6 +11,8 @@ import {
 } from './canvas/ui/canvasToolbarRegistry';
 import { KnowledgeSourceMarker } from './PostCardContent';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { KNOWLEDGE_PDF_INPUT_ID } from './KnowledgePdfUploader';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
@@ -105,6 +107,12 @@ function sidebar(layout: string, extra: Partial<React.ComponentProps<typeof Canv
       isGraphConnectMode={false}
       handleToolClick={extra.handleToolClick ?? vi.fn()}
       onBack={vi.fn()}
+      // CANVAS_SIDEBAR_PROGRAMMATIC_PDF_INGESTION: render-time and
+      // event-time authority are both required now. Granted DELIBERATELY --
+      // this suite's subject is the control's shape and wiring, and the
+      // denial cases are proved in KnowledgePdfUploader.test.tsx.
+      canAddBoardContentPdf
+      canAddBoardContentPdfNow={() => true}
       {...extra}
     />,
   );
@@ -377,3 +385,121 @@ function slice(source: string, from: string, to: string) {
   const end = source.indexOf(to, start);
   return source.slice(start, end + to.length);
 }
+
+/**
+ * CANVAS_SIDEBAR_PROGRAMMATIC_PDF_INGESTION_INITIATION.
+ *
+ * The toolbar control is withheld once a revoked render commits. These cover
+ * the interval BEFORE that: the label and the keyboard handler are retained
+ * from an authorized render and invoked after the authority is gone, without
+ * relying on unmount.
+ */
+describe('the Add PDF control answers to live authority, not its last render', () => {
+  /**
+   * Found by its tool identity, not by label text. The suite's older helper
+   * searches for the string 'Add PDF', which the registry no longer uses --
+   * that stale expectation is the pre-existing baseline failure above, and
+   * these cases must not inherit it.
+   */
+  const addPdfControl = (host: HTMLElement) =>
+    host.querySelector('[data-toolbar-tool="knowledge-pdf"]') as HTMLElement | null;
+
+  function authorizedSidebar(probe: () => boolean) {
+    return sidebar('freeform', {
+      canAddBoardContentPdf: true,
+      canAddBoardContentPdfNow: probe,
+    } as never);
+  }
+
+  it('A. an unauthorized board renders no Add PDF control and no hidden input', () => {
+    // The real unauthorized shape: the registry withholds the whole Media group
+    // for a user the board does not authorise, so the groups are rebuilt that
+    // way rather than only flipping the sidebar's own props.
+    const deniedGroups = buildCanvasToolbarGroups({
+      isMapLayout: false,
+      isFreeformLayout: true,
+      isFreeformGraphMode: false,
+      isTimelineLayout: false,
+      chronoMode: null,
+      canManageCanvasShare: true,
+      canUseFreeformEditButton: true,
+      canCreateBoardContent: false,
+      isDrawingLayout: false,
+      isDirectPdfLayout: isDirectPdfCanvasLayout('freeform'),
+    });
+    const host = sidebar('freeform', {
+      groups: deniedGroups,
+      canAddBoardContentPdf: false,
+      canAddBoardContentPdfNow: () => false,
+    } as never);
+
+    expect(addPdfControl(host), 'no visible control').toBeNull();
+    expect(host.querySelector('input[type="file"][accept*="pdf"]'), 'no hidden input').toBeNull();
+  });
+
+  it('B. a retained Enter/Space handler clicks nothing once authority is gone', () => {
+    let allowed = true;
+    const host = authorizedSidebar(() => allowed);
+    const control = addPdfControl(host);
+    expect(control, 'positive control: the label is rendered').not.toBeNull();
+
+    const input = host.querySelector('input[type="file"][accept*="pdf"]') as HTMLInputElement;
+    let clicks = 0;
+    input.addEventListener('click', (event) => { clicks += 1; event.preventDefault(); });
+
+    // Authorized keyboard activation still reaches the input.
+    act(() => {
+      control!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(clicks, 'authorized Enter activates the input').toBe(1);
+
+    // The SAME retained handler, after revocation and before any re-render.
+    allowed = false;
+    act(() => {
+      control!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      control!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    });
+    expect(clicks, 'zero input.click after revocation').toBe(1);
+  });
+
+  it('B2. other keys are untouched by the guard', () => {
+    const host = authorizedSidebar(() => true);
+    const control = addPdfControl(host)!;
+    const input = host.querySelector('input[type="file"][accept*="pdf"]') as HTMLInputElement;
+    let clicks = 0;
+    input.addEventListener('click', (event) => { clicks += 1; event.preventDefault(); });
+
+    act(() => {
+      control.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+      control.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    expect(clicks, 'unrelated keys never activated the input before or now').toBe(0);
+  });
+
+  it('C. a retained label click is prevented from activating natively', () => {
+    let allowed = true;
+    const host = authorizedSidebar(() => allowed);
+    const control = addPdfControl(host)!;
+
+    // Authorized: the label's default activation is left alone.
+    const authorized = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => { control.dispatchEvent(authorized); });
+    expect(authorized.defaultPrevented, 'authorized mouse behaviour is unchanged').toBe(false);
+
+    // Revoked: the native activation is prevented, so no chooser opens.
+    allowed = false;
+    const denied = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => { control.dispatchEvent(denied); });
+    expect(denied.defaultPrevented, 'native activation is prevented').toBe(true);
+  });
+
+  it('the sidebar hands the uploader board-content mode and the same probe', () => {
+    const source = readFileSync(
+      resolvePath(process.cwd(), 'components/collabboard/canvas/ui/CanvasSidebar.tsx'), 'utf8',
+    );
+    expect(source).toContain('initiationPolicy="board-content"');
+    expect(source).toContain('canInitiateUploadNow={canAddBoardContentPdfNow}');
+    expect(source).toContain('if (!canAddBoardContentPdfNow()) event.preventDefault();');
+    expect(source).toContain('if (!canAddBoardContentPdfNow()) return;');
+  });
+});

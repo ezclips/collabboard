@@ -8682,6 +8682,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               // The same board authority the Media group is built from, so the
               // hidden input cannot outlive the control that opens it.
               canAddBoardContentPdf={canEditBoardContent}
+              // The same authority as a live probe, for the activation
+              // events that land before a revoked render has committed.
+              canAddBoardContentPdfNow={canEditBoardContentProbe}
             />
           </div>
         )}

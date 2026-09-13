@@ -536,6 +536,7 @@ describe('12. the board-canvas PDF uploader answers to board authority', () => {
           onBack={vi.fn()}
           onKnowledgePdfUploaded={vi.fn()}
           canAddBoardContentPdf={canAddBoardContentPdf}
+          canAddBoardContentPdfNow={() => canAddBoardContentPdf}
         />,
       );
     });

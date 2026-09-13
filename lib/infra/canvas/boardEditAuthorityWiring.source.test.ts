@@ -132,6 +132,10 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
   CORRECTION_2 took it to 59: those two arms now also refuse on ENTRY, from
   the live ref, and one revocation effect closes the two mutation-capable
   image tools when the authority goes away (its guard and its dependency).
+
+  The PDF-ingestion initiation slice took it to 60: the sidebar receives the
+  same probe for the activation events that land before a revoked render
+  has committed.
   The earlier note, for history:
   closing the stale-flow gaps review found: the six DrawingLayout callbacks and
   its readOnly prop, the Library completion paths (the card save fence and its
@@ -139,7 +143,7 @@ const canvasClientCode = codeOf('app/dashboard/canvas/[id]/CanvasClient.tsx');
   icon replacement), and the import surface's mount, capability and resolved
   callback. Every one is executable wiring, not prose.
 */
-const EXPECTED_BOARD_CONTENT_CONSUMERS = 59;
+const EXPECTED_BOARD_CONTENT_CONSUMERS = 60;
 const settingsModal = sourceOf('components/collabboard/canvas/ui/CanvasSettingsModal.tsx');
 const authority = sourceOf('lib/domain/canvas/boardEditAuthority.ts');
 const viewReads = sourceOf('lib/infra/canvas/canvasViewReads.ts');
@@ -462,6 +466,8 @@ describe('the padlets capability is wired to padlets surfaces only', () => {
       'mayContinue: canEditBoardContentProbe,',
       // CORRECTION_2: the revocation effect that closes Draw and Crop.
       'if (canEditBoardContent) return;',
+      // The sidebar's event-time PDF-ingestion probe.
+      'canAddBoardContentPdfNow={canEditBoardContentProbe}',
       // CORRECTION_3: the knowledge-drop routes, live rather than closed over.
       'if (!canEditBoardContentRef.current || !canvasId) return true;',
       // CORRECTION_2: the stale-flow surfaces review found.

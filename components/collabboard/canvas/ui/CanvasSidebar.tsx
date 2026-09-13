@@ -85,10 +85,21 @@ interface CanvasSidebarProps {
    * Withholding the element is what makes that impossible rather than merely
    * unreachable.
    *
-   * Defaults to FALSE so it fails closed: a host that forgets to say gets no
-   * uploader, rather than silently getting an unguarded one.
+   * Required rather than defaulted: a host that forgets to say must fail to
+   * compile, not silently get an unguarded uploader.
    */
-  canAddBoardContentPdf?: boolean;
+  canAddBoardContentPdf: boolean;
+  /**
+   * The SAME authority, asked at the moment an activation happens.
+   *
+   * The boolean above drives what is rendered; it cannot answer for an event
+   * fired from a tree that has not re-rendered yet. A label click, an
+   * Enter/Space key, or a programmatic activation all land in that interval,
+   * so each asks this instead of trusting the render they came from.
+   *
+   * Required, like the boolean: a host that forgets it must not compile.
+   */
+  canAddBoardContentPdfNow: () => boolean;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -118,7 +129,8 @@ export default function CanvasSidebar({
   onBack,
   onKnowledgePdfUploaded,
   onKnowledgePdfSettled,
-  canAddBoardContentPdf = false,
+  canAddBoardContentPdf,
+  canAddBoardContentPdfNow,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -245,8 +257,17 @@ export default function CanvasSidebar({
           className={chrome}
           title={tool.label}
           tabIndex={0}
+          onClick={(event) => {
+            // The label's whole purpose is to activate the input natively, so
+            // refusing means preventing that default -- no input click, no
+            // sidebar state change, and deliberately no toast.
+            if (!canAddBoardContentPdfNow()) event.preventDefault();
+          }}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
+            // Asked before the document lookup, so an unauthorised key press
+            // never reaches the input at all. Other keys are untouched.
+            if (!canAddBoardContentPdfNow()) return;
             event.preventDefault();
             document.getElementById(tool.activatesInputId!)?.click();
           }}
@@ -393,6 +414,8 @@ export default function CanvasSidebar({
           different surface and is deliberately untouched here. */}
       {canAddBoardContentPdf ? (
         <KnowledgePdfUploader
+          initiationPolicy="board-content"
+          canInitiateUploadNow={canAddBoardContentPdfNow}
           inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}
           onDocumentUploaded={onKnowledgePdfUploaded}
           onDocumentSettled={onKnowledgePdfSettled}

@@ -272,6 +272,10 @@ describe('PATCH 9V.2C: mounted resize behaviour [matrix 6, 7, 8, 9]', () => {
           isGraphConnectMode={false}
           handleToolClick={() => {}}
           onBack={() => {}}
+          // Overflow behaviour, not permission: authority granted so the
+          // toolbar renders its full complement.
+          canAddBoardContentPdf
+          canAddBoardContentPdfNow={() => true}
         />,
       );
     });

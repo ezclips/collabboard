@@ -70,7 +70,21 @@ export interface KnowledgePdfUploaderHandle {
   openPicker(): void;
 }
 
-export interface KnowledgePdfUploaderProps {
+/**
+ * Who decides whether an upload may START here.
+ *
+ * `board-content` is the Canvas toolbar route: ingestion writes a Knowledge
+ * document for a board, so it answers to that board's edit authority and the
+ * probe is REQUIRED -- omitting it is a type error, never an allow-by-default.
+ *
+ * `host-managed` is the pre-existing PDF workspace route, which owns its own
+ * policy. It does not acquire the board rule, and its behaviour is unchanged.
+ */
+export type KnowledgePdfUploaderInitiation =
+  | { initiationPolicy: 'board-content'; canInitiateUploadNow: () => boolean }
+  | { initiationPolicy?: 'host-managed'; canInitiateUploadNow?: never };
+
+export interface KnowledgePdfUploaderBaseProps {
   /** Fired whenever this uploader has learned that server state changed. */
   onKnowledgeChanged?: () => void;
   /**
@@ -92,6 +106,9 @@ export interface KnowledgePdfUploaderProps {
    */
   inputId?: string;
 }
+
+export type KnowledgePdfUploaderProps =
+  KnowledgePdfUploaderBaseProps & KnowledgePdfUploaderInitiation;
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -252,7 +269,21 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({ onKnowledgeChanged, onDocumentUploaded, onDocumentSettled, inputId = KNOWLEDGE_PDF_INPUT_ID }, ref) {
+const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({
+  onKnowledgeChanged, onDocumentUploaded, onDocumentSettled,
+  inputId = KNOWLEDGE_PDF_INPUT_ID, initiationPolicy, canInitiateUploadNow,
+}, ref) {
+  /**
+   * May an upload START, or a result be delivered, RIGHT NOW?
+   *
+   * One derivation, read at every boundary rather than captured once: the
+   * picker, the input's own click and change, the file handler and each
+   * awaited step all ask it again. A host-managed uploader keeps its own
+   * policy and always answers true here.
+   */
+  const mayInitiateNow = () => (
+    initiationPolicy === 'board-content' ? canInitiateUploadNow() : true
+  );
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -262,6 +293,8 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
 
   useImperativeHandle(ref, () => ({
     openPicker() {
+      // No DOM click and no state change for a host that may not ingest.
+      if (!mayInitiateNow()) return;
       if (!busy) inputRef.current?.click();
     },
   }), [busy]);
@@ -281,6 +314,9 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
   }, [notice]);
 
   const handleFile = async (file: File) => {
+    // Before busy/notice state, before the AbortController, before any
+    // FormData or request. Silent: a refusal is not an error to report.
+    if (!mayInitiateNow()) return;
     if (!boardId || busy) return;
 
     abortRef.current?.abort();
@@ -294,6 +330,10 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       // Unmounted mid-upload -- because the board authority went away, say --
       // means no document may be announced and no placement attempted.
       if (controller.signal.aborted) return;
+      // Independent of the abort: if the authority went away while the
+      // upload was in flight, the completed document is discarded rather
+      // than delivered. The server row is not ours to reverse.
+      if (!mayInitiateNow()) return;
       // The row exists server-side from here on, so any read surface should be
       // able to show it as `uploaded` before processing has finished. PDF-C1
       // places the canvas object HERE, on the same signal and for the same
@@ -311,6 +351,7 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       // nothing. `waitForKnowledgePdf` already throws on a cancelled request,
       // so this covers only the narrow window after it returned.
       if (controller.signal.aborted) return;
+      if (!mayInitiateNow()) return;
       // Terminal status, or polling gave up while the worker continues: either
       // way the last known server state is newer than what was fetched above.
       onKnowledgeChanged?.();
@@ -361,7 +402,18 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
         className="sr-only"
         aria-label="Choose PDF to add"
         disabled={busy}
+        onClick={(event) => {
+          // Stops the chooser opening at all -- the label guard above is not
+          // the only route to this element.
+          if (!mayInitiateNow()) event.preventDefault();
+        }}
         onChange={(event) => {
+          // Asked BEFORE the FileList is read, so a dispatched change event
+          // starts no upload and leaves no busy/notice state behind.
+          if (!mayInitiateNow()) {
+            event.currentTarget.value = '';
+            return;
+          }
           const file = event.currentTarget.files?.[0];
           if (file) void handleFile(file);
         }}

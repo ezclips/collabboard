@@ -634,3 +634,232 @@ describe('the polling lifecycle is abort-aware end to end', () => {
     globalThis.fetch = previousFetch;
   });
 });
+
+/**
+ * CANVAS_SIDEBAR_PROGRAMMATIC_PDF_INGESTION_INITIATION.
+ *
+ * Hiding the control after a revoked render commits is not the whole guard:
+ * between the revocation and that render, a label click, an Enter/Space key, a
+ * retained imperative handle or a dispatched change event can all still reach
+ * the input. Every one of those routes asks the live probe here, on a REAL
+ * mounted uploader.
+ */
+describe('board-content ingestion refuses at every initiation boundary', () => {
+  function mountUploader(probe: () => boolean, extra: Record<string, unknown> = {}) {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const handle = createRef<KnowledgePdfUploaderHandle>();
+    const calls = { fetches: [] as string[], uploaded: 0, changed: 0, settled: 0 };
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (vi.fn(async (url: string, init?: RequestInit) => {
+      calls.fetches.push(`${init?.method ?? 'GET'} ${String(url)}`);
+      return init?.method === 'POST'
+        ? jsonResponse(summary('uploaded'), 201)
+        : jsonResponse({ documents: [summary('ready')] });
+    }) as unknown) as typeof globalThis.fetch;
+
+    act(() => {
+      root.render(
+        <KnowledgePdfUploader
+          ref={handle}
+          initiationPolicy="board-content"
+          canInitiateUploadNow={probe}
+          onKnowledgeChanged={() => { calls.changed += 1; }}
+          onDocumentUploaded={() => { calls.uploaded += 1; }}
+          onDocumentSettled={() => { calls.settled += 1; }}
+          {...extra}
+        />,
+      );
+    });
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const clicks: number[] = [];
+    input.addEventListener('click', (event) => {
+      clicks.push(1);
+      // Never open a real chooser in the test environment.
+      event.preventDefault();
+    });
+
+    return {
+      container, root, handle, calls, input, clicks,
+      restore: () => { globalThis.fetch = previousFetch; container.remove(); },
+    };
+  }
+
+  const pdf = () => new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
+
+  function giveFile(input: HTMLInputElement) {
+    Object.defineProperty(input, 'files', { value: [pdf()], configurable: true });
+  }
+
+  it('D. openPicker: a retained handle clicks nothing once the probe is false', () => {
+    let allowed = true;
+    const h = mountUploader(() => allowed);
+
+    act(() => { h.handle.current!.openPicker(); });
+    expect(h.clicks.length, 'positive control clicks once').toBe(1);
+
+    allowed = false;
+    act(() => { h.handle.current!.openPicker(); });
+    expect(h.clicks.length, 'zero input.click after revocation').toBe(1);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('E. a direct click on the hidden input is refused', () => {
+    let allowed = true;
+    const h = mountUploader(() => allowed);
+
+    // The component's own onClick runs before the listener that records; a
+    // refusal calls preventDefault, which is what stops the chooser opening.
+    act(() => { h.input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    const authorized = new MouseEvent('click', { bubbles: true, cancelable: true });
+    expect(authorized.defaultPrevented, 'authorized clicks are not pre-empted').toBe(false);
+
+    allowed = false;
+    const denied = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => { h.input.dispatchEvent(denied); });
+    expect(denied.defaultPrevented, 'the chooser is prevented from opening').toBe(true);
+    expect(h.calls.fetches, 'no request from a refused click').toEqual([]);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('F. a dispatched change event with a real File starts nothing', async () => {
+    const h = mountUploader(() => false);
+    giveFile(h.input);
+
+    await act(async () => {
+      h.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(h.calls.fetches, 'zero upload request').toEqual([]);
+    expect(h.calls.uploaded + h.calls.changed + h.calls.settled, 'zero callbacks').toBe(0);
+    // Denial happened before any busy/notice state was painted.
+    expect(h.container.textContent, 'no busy or notice text').not.toMatch(/Uploading|Processing/);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('G. authorized chooser, revoked before the file comes back: no upload', async () => {
+    let allowed = true;
+    const h = mountUploader(() => allowed);
+    act(() => { h.handle.current!.openPicker(); });
+    expect(h.clicks.length).toBe(1);
+
+    // The user was authorized when the dialog opened, and is not when it returns.
+    allowed = false;
+    giveFile(h.input);
+    await act(async () => {
+      h.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(h.calls.fetches, 'zero upload').toEqual([]);
+    expect(h.calls.uploaded, 'zero parent delivery').toBe(0);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('I. upload completes but authority is gone: the document is discarded', async () => {
+    let allowed = true;
+    let releaseUpload: ((response: Response) => void) | null = null;
+    const h = mountUploader(() => allowed);
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = (vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Promise<Response>((resolveFetch) => { releaseUpload = resolveFetch; });
+      }
+      return Promise.resolve(jsonResponse({ documents: [summary('ready')] }));
+    }) as unknown) as typeof globalThis.fetch;
+
+    giveFile(h.input);
+    await act(async () => {
+      h.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(releaseUpload, 'the upload is genuinely in flight').toBeTruthy();
+
+    // Revoked while the upload was pending; the server still answers.
+    allowed = false;
+    await act(async () => {
+      releaseUpload!(jsonResponse(summary('uploaded'), 201));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(h.calls.uploaded, 'the completed document is never delivered').toBe(0);
+    expect(h.calls.changed, 'no knowledge-changed callback').toBe(0);
+    expect(h.calls.settled, 'no settled callback').toBe(0);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('J. restoration: a fresh authorized ingestion reaches the upload path', async () => {
+    let allowed = false;
+    const h = mountUploader(() => allowed);
+
+    giveFile(h.input);
+    await act(async () => {
+      h.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(h.calls.fetches, 'denied while unauthorized').toEqual([]);
+
+    allowed = true;
+    giveFile(h.input);
+    await act(async () => {
+      h.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(h.calls.fetches.some((f) => f.startsWith('POST')), 'the same input works again').toBe(true);
+    expect(h.calls.uploaded, 'and the document is delivered').toBe(1);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('a host-managed uploader keeps its own policy and needs no board probe', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const previousFetch = globalThis.fetch;
+    const fetches: string[] = [];
+    globalThis.fetch = (vi.fn(async (url: string, init?: RequestInit) => {
+      fetches.push(`${init?.method ?? 'GET'} ${String(url)}`);
+      return init?.method === 'POST'
+        ? jsonResponse(summary('uploaded'), 201)
+        : jsonResponse({ documents: [summary('ready')] });
+    }) as unknown) as typeof globalThis.fetch;
+
+    const uploaded: number[] = [];
+    await act(async () => {
+      root.render(<KnowledgePdfUploader onDocumentUploaded={() => uploaded.push(1)} />);
+    });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    input.addEventListener('click', (event) => event.preventDefault());
+    Object.defineProperty(input, 'files', {
+      value: [new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' })],
+      configurable: true,
+    });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(fetches.some((f) => f.startsWith('POST')), 'PdfWorkspace ingestion is unchanged').toBe(true);
+    expect(uploaded.length).toBe(1);
+
+    act(() => { root.unmount(); });
+    container.remove();
+    globalThis.fetch = previousFetch;
+  });
+});
