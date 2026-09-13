@@ -13,7 +13,7 @@ import { KnowledgeSourceMarker } from './PostCardContent';
 import { KnowledgeSourceReferenceProvider } from './KnowledgeSourceReferenceContext';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { KNOWLEDGE_PDF_INPUT_ID } from './KnowledgePdfUploader';
+import { KNOWLEDGE_PDF_INPUT_ID, KNOWLEDGE_PDF_TOOLBAR_INPUT_ID } from './KnowledgePdfUploader';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 
 /**
@@ -501,5 +501,56 @@ describe('the Add PDF control answers to live authority, not its last render', (
     expect(source).toContain('canInitiateUploadNow={canAddBoardContentPdfNow}');
     expect(source).toContain('if (!canAddBoardContentPdfNow()) event.preventDefault();');
     expect(source).toContain('if (!canAddBoardContentPdfNow()) return;');
+  });
+});
+
+/**
+ * CORRECTION_1: the authorized native route, proved through the DOM's own
+ * label association rather than by calling the React handler.
+ */
+describe('CORRECTION_1: the native PDF label activates its own input exactly once', () => {
+  it('authorized: one click, one activation, on the toolbar input only', () => {
+    let allowed = true;
+    const host = sidebar('freeform', {
+      canAddBoardContentPdf: true,
+      canAddBoardContentPdfNow: () => allowed,
+    } as never);
+
+    // Located by tool identity, and its target read from the real htmlFor.
+    const label = host.querySelector('[data-toolbar-tool="knowledge-pdf"]') as HTMLLabelElement;
+    expect(label, 'the label is rendered').not.toBeNull();
+    expect(label.tagName, 'it really is a <label>').toBe('LABEL');
+    const targetId = label.htmlFor;
+    expect(targetId, 'it names the toolbar input, not the workspace one')
+      .toBe(KNOWLEDGE_PDF_TOOLBAR_INPUT_ID);
+    expect(targetId).not.toBe(KNOWLEDGE_PDF_INPUT_ID);
+
+    const input = host.querySelector('input[type="file"][accept*="pdf"]') as HTMLInputElement;
+    expect(input, 'the associated hidden input exists').not.toBeNull();
+    expect(input.id, 'and it is the one the label names').toBe(targetId);
+
+    // Count activations on every file input in the tree, so a click that leaked
+    // to a different one would be caught rather than silently ignored.
+    const activations: string[] = [];
+    host.querySelectorAll('input[type="file"]').forEach((node) => {
+      node.addEventListener('click', () => { activations.push((node as HTMLInputElement).id); });
+    });
+
+    const authorized = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => { label.dispatchEvent(authorized); });
+
+    expect(authorized.defaultPrevented, 'authorized label activation is not prevented').toBe(false);
+    expect(activations, 'exactly one activation, on the toolbar input')
+      .toEqual([KNOWLEDGE_PDF_TOOLBAR_INPUT_ID]);
+
+    // The SAME retained label, after the probe goes false.
+    allowed = false;
+    const denied = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => { label.dispatchEvent(denied); });
+
+    expect(denied.defaultPrevented, 'native activation is prevented').toBe(true);
+    expect(activations, 'zero additional activation').toEqual([KNOWLEDGE_PDF_TOOLBAR_INPUT_ID]);
+    // Nothing was chosen, so nothing can have been uploaded.
+    expect(input.files?.length ?? 0, 'no file was selected').toBe(0);
   });
 });

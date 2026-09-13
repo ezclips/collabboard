@@ -638,10 +638,9 @@ describe('the polling lifecycle is abort-aware end to end', () => {
 /**
  * CANVAS_SIDEBAR_PROGRAMMATIC_PDF_INGESTION_INITIATION.
  *
- * Hiding the control after a revoked render commits is not the whole guard:
- * between the revocation and that render, a label click, an Enter/Space key, a
- * retained imperative handle or a dispatched change event can all still reach
- * the input. Every one of those routes asks the live probe here, on a REAL
+ * Between a revocation and the render that hides the control, a label click,
+ * an Enter/Space key, a retained imperative handle or a dispatched change
+ * event can all still reach the input. Each asks the live probe, on a REAL
  * mounted uploader.
  */
 describe('board-content ingestion refuses at every initiation boundary', () => {
@@ -676,11 +675,10 @@ describe('board-content ingestion refuses at every initiation boundary', () => {
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const clicks: number[] = [];
-    input.addEventListener('click', (event) => {
-      clicks.push(1);
-      // Never open a real chooser in the test environment.
-      event.preventDefault();
-    });
+    // Records only. Calling preventDefault here would mask whether PRODUCTION
+    // prevented the event, which is the whole assertion. jsdom opens no real
+    // chooser, so nothing needs suppressing.
+    input.addEventListener('click', () => { clicks.push(1); });
 
     return {
       container, root, handle, calls, input, clicks,
@@ -713,10 +711,10 @@ describe('board-content ingestion refuses at every initiation boundary', () => {
     let allowed = true;
     const h = mountUploader(() => allowed);
 
-    // The component's own onClick runs before the listener that records; a
-    // refusal calls preventDefault, which is what stops the chooser opening.
-    act(() => { h.input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    // Both branches inspect the SAME event that was actually dispatched to the
+    // real input -- a freshly constructed one proves nothing.
     const authorized = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => { h.input.dispatchEvent(authorized); });
     expect(authorized.defaultPrevented, 'authorized clicks are not pre-empted').toBe(false);
 
     allowed = false;
@@ -861,5 +859,145 @@ describe('board-content ingestion refuses at every initiation boundary', () => {
     act(() => { root.unmount(); });
     container.remove();
     globalThis.fetch = previousFetch;
+  });
+});
+
+/**
+ * CORRECTION_1: a genuine (non-Abort) failure could still publish a notice
+ * after the authority went away, and the imperative handle kept whichever
+ * probe it was built with until `busy` happened to change.
+ */
+describe('CORRECTION_1: late failures and replaced probes', () => {
+  function mountBoardContent(probe: () => boolean) {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const handle = createRef<KnowledgePdfUploaderHandle>();
+    const calls = { requests: [] as string[], uploaded: 0, changed: 0, settled: 0 };
+    const previousFetch = globalThis.fetch;
+
+    const render = (currentProbe: () => boolean) => {
+      act(() => {
+        root.render(
+          <KnowledgePdfUploader
+            ref={handle}
+            initiationPolicy="board-content"
+            canInitiateUploadNow={currentProbe}
+            onKnowledgeChanged={() => { calls.changed += 1; }}
+            onDocumentUploaded={() => { calls.uploaded += 1; }}
+            onDocumentSettled={() => { calls.settled += 1; }}
+          />,
+        );
+      });
+    };
+    render(probe);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const clicks: number[] = [];
+    input.addEventListener('click', () => { clicks.push(1); });
+
+    return {
+      container, root, handle, calls, input, clicks, render,
+      restore: () => { globalThis.fetch = previousFetch; container.remove(); },
+      setFetch: (impl: typeof globalThis.fetch) => { globalThis.fetch = impl; },
+    };
+  }
+
+  const givePdf = (input: HTMLInputElement) => {
+    Object.defineProperty(input, 'files', {
+      value: [new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' })],
+      configurable: true,
+    });
+  };
+
+  /**
+   * One upload whose request stays pending until released. Upload and polling
+   * share exactly one catch, and the live check sits at the top of it, so this
+   * covers the common boundary both routes reach.
+   */
+  async function startPendingUpload(h: ReturnType<typeof mountBoardContent>) {
+    let reject: ((reason: unknown) => void) | null = null;
+    h.setFetch((vi.fn((_url: string, init?: RequestInit) => {
+      h.calls.requests.push(`${init?.method ?? 'GET'}`);
+      if (init?.method === 'POST') {
+        return new Promise<Response>((_resolveFetch, rejectFetch) => { reject = rejectFetch; });
+      }
+      return Promise.resolve(jsonResponse({ documents: [summary('ready')] }));
+    }) as unknown) as typeof globalThis.fetch);
+
+    givePdf(h.input);
+    await act(async () => {
+      h.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(h.calls.requests.includes('POST'), 'the upload genuinely started').toBe(true);
+    expect(reject, 'the request is pending').toBeTruthy();
+    return () => reject!;
+  }
+
+  it('a non-Abort failure after revocation publishes nothing at all', async () => {
+    let allowed = true;
+    const h = mountBoardContent(() => allowed);
+    const release = await startPendingUpload(h);
+    const requestsBefore = h.calls.requests.length;
+
+    // Revoked while the upload was in flight; the request then fails for real.
+    allowed = false;
+    await act(async () => {
+      release()(new Error('network exploded'));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    // The "Uploading…" notice was published while still authorized; what must
+    // not appear is any FAILURE notice produced by the suppressed error.
+    expect(h.container.textContent, 'no error notice from the suppressed failure')
+      .not.toMatch(/temporarily unavailable|network exploded|failed/i);
+    expect(h.calls.changed, 'zero onKnowledgeChanged').toBe(0);
+    expect(h.calls.uploaded, 'zero onDocumentUploaded').toBe(0);
+    expect(h.calls.settled, 'zero onDocumentSettled').toBe(0);
+    expect(h.calls.requests.length, 'zero polling or later request').toBe(requestsBefore);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('positive control: the same failure while authorized still reports it', async () => {
+    const h = mountBoardContent(() => true);
+    const release = await startPendingUpload(h);
+
+    await act(async () => {
+      release()(new Error('network exploded'));
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+    expect(h.container.textContent, 'the established error notice still appears')
+      .toMatch(/network exploded|temporarily unavailable/i);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('openPicker uses the CURRENT probe, not the one it was built with', () => {
+    const probeA = () => true;
+    const probeB = () => false;
+    const probeC = () => true;
+    const h = mountBoardContent(probeA);
+
+    act(() => { h.handle.current!.openPicker(); });
+    expect(h.clicks.length, 'probe A authorizes one click').toBe(1);
+
+    // A genuinely different function, and `busy` is untouched -- which is
+    // exactly the case the old dependency list missed.
+    h.render(probeB);
+    act(() => { h.handle.current!.openPicker(); });
+    expect(h.clicks.length, 'the replaced probe refuses').toBe(1);
+
+    h.render(probeC);
+    act(() => { h.handle.current!.openPicker(); });
+    expect(h.clicks.length, 'restoring authority restores the picker').toBe(2);
+
+    act(() => { h.root.unmount(); });
+    h.restore();
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import React, {
+  useCallback,
   forwardRef,
   useEffect,
   useImperativeHandle,
@@ -281,8 +282,9 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
    * awaited step all ask it again. A host-managed uploader keeps its own
    * policy and always answers true here.
    */
-  const mayInitiateNow = () => (
-    initiationPolicy === 'board-content' ? canInitiateUploadNow() : true
+  const mayInitiateNow = useCallback(
+    () => (initiationPolicy === 'board-content' ? canInitiateUploadNow() : true),
+    [initiationPolicy, canInitiateUploadNow],
   );
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
@@ -297,7 +299,7 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       if (!mayInitiateNow()) return;
       if (!busy) inputRef.current?.click();
     },
-  }), [busy]);
+  }), [busy, mayInitiateNow]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -374,6 +376,12 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       }
     } catch (error) {
       if (!isAbortError(error)) {
+        // Every upload and poll failure converges here -- a rejected or
+        // non-2xx request, a parse failure, a terminal processing error.
+        // Asked live, because the failure can arrive after the board
+        // authority did: publish no notice, invoke nothing, and do not
+        // turn a suppressed error into an outage message.
+        if (!mayInitiateNow()) return;
         setNotice({
           tone: 'error',
           message: error instanceof Error
