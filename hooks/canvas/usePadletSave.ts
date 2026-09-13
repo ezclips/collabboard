@@ -539,8 +539,12 @@ export function usePadletSave(params: UsePadletSaveParams) {
       return { status: 'deferred-placement' };
     }
 
+    // THE DURABLE-PRIMARY BOUNDARY. Null until the database has handed
+    // back a committed Note row; non-null from then on, for the rest of
+    // this save INCLUDING the catch. Everything after the insert is a
+    // follow-up that cannot unwrite it.
+    let createdPadlet: any = null;
     try {
-      let createdPadlet: any = null;
       if (padletToEdit?.id === 'new') {
         // Create new padlet and get its ID
         const { x: position_x, y: position_y } = getNewPostPosition(280, 280);
@@ -705,7 +709,27 @@ export function usePadletSave(params: UsePadletSaveParams) {
     } catch (e: any) {
       // Reported as before, but no longer a silent success.
       console.error('Failed to save note:', e?.message || e?.details || JSON.stringify(e));
-      return { status: 'failed' };
+      // Nothing committed: a genuine failure, and the draft is the only
+      // copy of what the user wrote.
+      if (!createdPadlet) return { status: 'failed' };
+      // Past the boundary. The Note row EXISTS, and no later
+      // source-reference or container fault unwrites it. Reporting
+      // failure here would keep the editor open over content that is
+      // already saved, and the obvious retry would insert a SECOND
+      // Note. Nothing is reversed and no follow-up is re-attempted;
+      // the save is settled for what it is.
+      if (!canEditBoardContentNow()) {
+        settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false)); return { status: 'saved' };
+      }
+      // Reconciled from the row the server returned, then settled --
+      // the same order every other committed path uses.
+      setPadlets(prev => (prev.some(p => p.id === createdPadlet.id) ? prev : [...prev, createdPadlet]));
+      setIsNoteEditorOpen(false);
+      setPadletToEdit(null);
+      // Accurate, and not an outage message: the Note is saved. Only the
+      // work hung off it is not. `warning`, not `error`, for that reason.
+      toast.warning('Note saved, but some related updates could not be completed.');
+      return { status: 'saved' };
     }
   }, [
     canvasId,

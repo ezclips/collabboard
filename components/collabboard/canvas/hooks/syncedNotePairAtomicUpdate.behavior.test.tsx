@@ -24,7 +24,10 @@ import {
 
 vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
 const toastError = vi.fn();
-vi.mock('sonner', () => ({ toast: { error: (m: string) => toastError(m) } }));
+const toastWarning = vi.fn();
+vi.mock('sonner', () => ({ toast: {
+  error: (m: string) => toastError(m), warning: (m: string) => toastWarning(m),
+} }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,7 +64,14 @@ const gate = (): Gate => {
 
 type RpcReply = { data: unknown; error: { code?: string; message: string } | null };
 
-function installSupabase(effects: Effects, opts: { reply?: RpcReply; rpcGate?: Gate } = {}) {
+/** `fail` names the ONE operation that rejects, and which one decides whether
+ *  anything committed; `effects.inserts` records the attempt either way. */
+type Fail = 'insert' | 'select' | 'update';
+
+function installSupabase(
+  effects: Effects,
+  opts: { reply?: RpcReply; rpcGate?: Gate; fail?: Fail; insertGate?: Gate; updateGate?: Gate } = {},
+) {
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: 'u' } }, error: null }) },
     async rpc(fn: string, args: Record<string, unknown>) {
@@ -73,18 +83,37 @@ function installSupabase(effects: Effects, opts: { reply?: RpcReply; rpcGate?: G
     from() {
       return {
         insert(row: unknown) {
+          // Recorded BEFORE the outcome, so a rejection still proves an attempt.
           effects.inserts.push(row);
-          const created = { ...(row as object), id: 'persisted-1' };
+          if (opts.fail === 'insert') {
+            const boom = async () => { throw new Error('insert rejected'); };
+            return { select: () => ({ single: boom }), then: (_r: unknown, no: (e: unknown) => void) => no(new Error('insert rejected')) };
+          }
+          const created = { ...(row as object), id: NEW_NOTE_ID };
           return {
-            select: () => ({ single: async () => ({ data: created, error: null }) }),
+            // The insert's own await, held open so a test can revoke mid-commit.
+            select: () => ({ single: async () => {
+              if (opts.insertGate) await opts.insertGate.promise;
+              return { data: created, error: null };
+            } }),
             then: (resolve: (r: unknown) => void) => resolve({ data: created, error: null }),
           };
         },
-        update(fields: unknown) { effects.updates.push(fields); return { eq: async () => ({ data: null, error: null }) }; },
+        update(fields: unknown) {
+          effects.updates.push(fields);
+          return { eq: async () => {
+            if (opts.updateGate) await opts.updateGate.promise;
+            if (opts.fail === 'update') throw new Error('container update rejected');
+            return { data: null, error: null };
+          } };
+        },
         select() {
           return { eq: (_c: string, value: string) => {
             effects.selects.push(value);
-            const read = async () => ({ data: { metadata: {} }, error: null });
+            const read = async () => {
+              if (opts.fail === 'select') throw new Error('container read rejected');
+              return { data: { metadata: {} }, error: null };
+            };
             return { single: read, maybeSingle: read };
           } };
         },
@@ -104,6 +133,12 @@ let mounted: Array<{ root: Root; container: HTMLElement }> = [];
 
 let schedulerLayout = false;
 let seedRows: Padlet[] | null = null;
+/** What the editor opens on: the pair's first member, or a new draft; then
+ *  provenance for a source-created Note, and a callback that may throw. */
+let seedDraft: Padlet | null | undefined;
+let sourceRef: unknown = null;
+let sourceCallbackThrows = false;
+const NEW_NOTE_ID = 'd5000000-0000-4000-8000-0000000000e1';
 let onSaveSpy: ((d: never) => unknown) | null = null;
 let closes = 0;
 /** The order the hook CALLS its setters -- the only thing separating "reconcile
@@ -118,7 +153,8 @@ function Harness({ probe, effects, withEditor }: { probe: () => boolean; effects
     { id: NOTE_B, title: 'local b', content: 'local b body', type: 'text', metadata: { syncedWith: NOTE_A, parentId: 'pb' } } as unknown as Padlet,
     { id: OTHER, title: 'untouched', content: 'untouched body', type: 'text', metadata: {} } as unknown as Padlet,
   ]);
-  const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(withEditor ? padlets[0] : null);
+  const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(
+    withEditor ? (seedDraft !== undefined ? seedDraft : padlets[0]) : null);
   const [open, setOpen] = React.useState(true);
   setDraft = setPadletToEdit;
   currentPadlets = padlets;
@@ -145,7 +181,11 @@ function Harness({ probe, effects, withEditor }: { probe: () => boolean; effects
     padlets,
     setPadlets: ((next: never) => { callOrder.push('reconcile'); setPadlets(next); }) as never,
     getNewPostPosition: () => ({ x: 0, y: 0 }),
-    onSourceNoteCreated: (id: string) => { effects.sourceNotes.push(id); },
+    sourceNoteReference: sourceRef,
+    onSourceNoteCreated: (id: string) => {
+      effects.sourceNotes.push(id);
+      if (sourceCallbackThrows) throw new Error('source reference rejected');
+    },
   } as never);
   api = api2;
   if (!withEditor) return null;
@@ -181,9 +221,10 @@ const NOTE_PAYLOAD = {
 afterEach(() => {
   for (const m of mounted) { act(() => { m.root.unmount(); }); m.container.remove(); }
   mounted = []; api = null; setDraft = null; currentPadlets = [];
-  schedulerLayout = false; seedRows = null;
+  schedulerLayout = false; seedRows = null; seedDraft = undefined;
+  sourceRef = null; sourceCallbackThrows = false;
   onSaveSpy = null; closes = 0; callOrder = [];
-  toastError.mockReset(); vi.clearAllMocks();
+  toastError.mockReset(); toastWarning.mockReset(); vi.clearAllMocks();
 });
 
 // == 1. The adapter, on its own ==
@@ -716,5 +757,134 @@ describe('6. real saveNote + real NoteEditor, one lifecycle', () => {
     expect(rowById(NOTE_B).title).toBe('B');
     expect(effects.editorCloses, 'settled safely, once').toEqual(['note']);
     expect(closes).toBe(0);
+  });
+
+  // == The new-Note commit boundary ==
+  //
+  // A save has one irreversible moment: the insert coming back with a row.
+  // Before it a fault wrote nothing and the draft is the only copy, so the
+  // editor must stay open. After it the Note EXISTS -- reporting failure then
+  // holds the editor open over saved content, and the obvious retry inserts a
+  // SECOND Note. Every case reads `effects.inserts` to prove which side it is
+  // on rather than assume.
+  describe('the new-Note commit boundary', () => {
+    const committed = () => currentPadlets.filter((p) => p.id === NEW_NOTE_ID);
+    // Bound for a container, which is what makes the follow-ups run at all.
+    beforeEach(() => {
+      seedRows = [];
+      seedDraft = { id: 'new', metadata: { parentId: 'container-1' } } as unknown as Padlet;
+    });
+
+    it('A. the insert itself rejects: nothing committed, editor and draft retained', async () => {
+      const effects = newEffects();
+      installSupabase(effects, { fail: 'insert' });
+      open(() => true, effects);
+      await closeByBackdrop();
+      expect(effects.inserts.length, 'the insert was attempted once').toBe(1);
+      expect(committed(), 'nothing reconciled, because nothing committed').toEqual([]);
+      expect(effects.editorCloses, 'the editor is NOT settled').toEqual([]);
+      expect(closes).toBe(0);
+      expect(editorIsOpen(), 'it still holds the draft').toBe(true);
+      expect(effects.draftSets, 'which was never cleared').toEqual([]);
+      expect(effects.selects, 'and no follow-up began').toEqual([]);
+      // Retrying is CORRECT here: no row exists, so this creates the first.
+      await closeByBackdrop();
+      expect(effects.inserts.length, 'the retry is available').toBe(2);
+    });
+
+    it('B. the source-reference follow-up rejects AFTER the insert committed', async () => {
+      const effects = newEffects();
+      installSupabase(effects);
+      sourceRef = { documentId: 'doc-1', page: 1 }; sourceCallbackThrows = true;
+      open(() => true, effects);
+      await closeByBackdrop();
+      expect(effects.inserts.length, 'exactly one Note was inserted').toBe(1);
+      expect(effects.sourceNotes.length, 'the provenance follow-up ran and threw').toBe(1);
+      expect(committed().length, 'the committed Note IS reconciled').toBe(1);
+      expect(effects.editorCloses, 'and the editor settles once').toEqual(['note']);
+      expect(effects.draftSets.at(-1), 'the draft is cleared').toBeNull();
+      expect(editorIsOpen()).toBe(false);
+      // Everything downstream of the fault is abandoned, not retried.
+      expect(effects.selects, 'no container read begins afterward').toEqual([]);
+      expect(effects.updates, 'and no container update').toEqual([]);
+      expect(toastError, 'and never a "save failed" message').not.toHaveBeenCalled();
+      expect(toastWarning, 'one accurate partial notice').toHaveBeenCalledTimes(1);
+      expect(String(toastWarning.mock.calls[0][0])).toMatch(/saved/i);
+    });
+
+    for (const stage of ['select', 'update'] as const) {
+      it(`C/D. the container ${stage} rejects after the insert committed`, async () => {
+        const effects = newEffects();
+        installSupabase(effects, { fail: stage });
+        open(() => true, effects);
+        await closeByBackdrop();
+        expect(effects.inserts.length, 'exactly one Note, and no compensating row').toBe(1);
+        expect(effects.selects.length, 'the container read was attempted').toBe(1);
+        expect(effects.updates.length, 'the update ran only if the read got that far')
+          .toBe(stage === 'select' ? 0 : 1);
+        expect(committed().length, 'the Note stands, unreversed').toBe(1);
+        expect(effects.editorCloses, 'settled once, so no duplicate-producing retry').toEqual(['note']);
+        expect(editorIsOpen()).toBe(false);
+        expect(toastError).not.toHaveBeenCalled();
+      });
+    }
+
+    it('E. authority is revoked between the insert and a follow-up', async () => {
+      const effects = newEffects();
+      const insertGate = gate();
+      installSupabase(effects, { insertGate });
+      let allowed = true; sourceRef = { documentId: 'doc-1', page: 1 };
+      open(() => allowed, effects);
+      await closeByBackdrop();
+      expect(effects.inserts.length, 'the one insert that was authorized').toBe(1);
+      // Revoked while that insert is still committing: the window the live
+      // probes after it exist for.
+      allowed = false;
+      await act(async () => {
+        insertGate.release();
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+
+      expect(effects.sourceNotes, 'no provenance follow-up starts after revocation').toEqual([]);
+      expect(effects.selects, 'no container read either').toEqual([]);
+      expect(effects.updates, 'and no container update').toEqual([]);
+      expect(committed(), 'no optimistic state under revoked authority').toEqual([]);
+      expect(effects.editorCloses, 'but it settles, so no duplicate-producing retry').toEqual(['note']);
+      expect(effects.draftSets.at(-1)).toBeNull();
+    });
+
+    it('E2. revoked DURING the container update, which then rejects', async () => {
+      // The one route into the catch with authority already gone.
+      const effects = newEffects();
+      const updateGate = gate();
+      installSupabase(effects, { fail: 'update', updateGate });
+      let allowed = true; open(() => allowed, effects);
+      await closeByBackdrop();
+      expect(effects.updates.length, 'the update was authorized when it started').toBe(1);
+      allowed = false;
+      await act(async () => {
+        updateGate.release(); await Promise.resolve(); await Promise.resolve();
+      });
+      expect(effects.inserts.length, 'still exactly one Note').toBe(1);
+      expect(committed(), 'no optimistic state under revoked authority').toEqual([]);
+      expect(effects.editorCloses, 'settled safely').toEqual(['note']);
+      expect(toastWarning, 'silently, as every revoked path is').not.toHaveBeenCalled();
+    });
+
+    it('F. the ordinary new-Note success is unchanged', async () => {
+      const effects = newEffects();
+      installSupabase(effects);
+      sourceRef = { documentId: 'doc-1', page: 1 };
+      open(() => true, effects);
+      await closeByBackdrop();
+      expect(effects.inserts.length, 'exactly one insert').toBe(1);
+      expect(effects.sourceNotes, 'provenance recorded against the new row').toEqual([NEW_NOTE_ID]);
+      expect(effects.selects, 'the container was read').toEqual(['container-1']);
+      expect(effects.updates.length, 'and updated').toBe(1);
+      expect(committed().length, 'the Note is on the board').toBe(1);
+      expect(effects.editorCloses, 'closed exactly once').toEqual(['note']);
+      expect(toastWarning, 'nothing partial to report').not.toHaveBeenCalled();
+      expect(toastError).not.toHaveBeenCalled();
+    });
   });
 });
