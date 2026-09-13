@@ -73,8 +73,11 @@ describe('NoteEditor content initialization', () => {
 describe('NoteEditor current save-on-close lifecycle (characterized, not corrected)', () => {
   it('backdrop click saves then closes, in that order, and the save does persist', () => {
     const calls: string[] = [];
-    const onSave = vi.fn(() => calls.push('save'));
-    const onClose = vi.fn(() => calls.push('close'));
+    // SYNCED_NOTE_PAIR_ATOMIC_UPDATE_1: onSave may now report an outcome, so
+    // these mocks return void rather than a stray push() index. A synchronous
+    // caller still closes synchronously -- this order is unchanged.
+    const onSave = vi.fn(() => { calls.push('save'); });
+    const onClose = vi.fn(() => { calls.push('close'); });
     const container = mount(
       <NoteEditor isOpen initialContent="<p>Body</p>" onSave={onSave} onClose={onClose} />,
     );

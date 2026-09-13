@@ -37,6 +37,9 @@ const OWNER = '11111111-1111-4111-8111-111111111111';
 const EDITOR = '22222222-2222-4222-8222-222222222222';
 const VIEWER = '33333333-3333-4333-8333-333333333333';
 const BOARD = 'canvas-1';
+/** The two members of a reciprocal synced Note pair. */
+const NOTE_A = 'note-a';
+const NOTE_B = 'note-b';
 const board = { id: BOARD, user_id: OWNER };
 
 const collaborator = (
@@ -102,6 +105,17 @@ function installSupabase(
       effects.rpcs.push(fn);
       effects.rpcPadletIds.push(String(args.p_padlet_id));
       if (gates.rpc) await gates.rpc.promise;
+      // The synced-pair function returns the two committed rows; the
+      // image one returns its placement pair. Same double, by name.
+      if (fn === 'update_synced_note_pair') {
+        return {
+          data: [
+            { id: NOTE_A, title: 'server-a', content: 'server-body', metadata: { syncedWith: NOTE_B, parentId: 'pa' } },
+            { id: NOTE_B, title: 'server-a', content: 'server-body', metadata: { syncedWith: NOTE_A, parentId: 'pb' } },
+          ],
+          error: null,
+        };
+      }
       rows.set(args.p_padlet_id as string, { ...args, id: args.p_padlet_id, type: 'image' });
       return { data: [{ padlet_id: args.p_padlet_id }], error: null };
     },
@@ -544,16 +558,21 @@ describe('D. revocation during an awaited step stops the next mutation', () => {
     expect(effects.editorCloses, 'the Note editor is settled, so retry cannot duplicate').toEqual(['note']);
   });
 
-  it('Note: synced twin update never starts once authority is revoked', async () => {
+  // SYNCED_NOTE_PAIR_ATOMIC_UPDATE_1 replaces what this case used to
+  // characterize. There is no longer a first write and a second write to
+  // separate: the pair moves in ONE transaction, so revocation mid-flight
+  // can no longer split it. What still has to hold is that nothing else is
+  // started afterwards, and that no shared state is invented.
+  it('Note: a synced pair is one request, and revocation mid-flight starts no other', async () => {
     const effects = newEffects();
-    const updateGate = gate();
-    installSupabase(effects, { update: updateGate });
+    const rpcGate = gate();
+    installSupabase(effects, { rpc: rpcGate });
     let allowed = true;
     mount(() => allowed, effects);
     // A genuine EXISTING synced Note: production reads `syncedWith` from the
     // padlet being edited, and the id must not be 'new'.
     act(() => {
-      setDraft!({ id: 'note-1', metadata: { syncedWith: 'note-2' } } as unknown as Padlet);
+      setDraft!({ id: NOTE_A, metadata: { syncedWith: NOTE_B } } as unknown as Padlet);
     });
 
     let running!: Promise<unknown>;
@@ -562,15 +581,17 @@ describe('D. revocation during an awaited step stops the next mutation', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(effects.updates.length, 'the first update was issued while authorized').toBe(1);
+    expect(effects.rpcs, 'one atomic pair update, issued while authorized')
+      .toEqual(['update_synced_note_pair']);
+    expect(effects.updates, 'and no direct row write at all').toEqual([]);
 
     allowed = false;
-    await act(async () => { updateGate.release(); await running; });
+    await act(async () => { rpcGate.release(); await running; });
 
-    // The first record (note-1) is committed and is not reversed; the second
-    // (note-2, the synced twin) is never written. The two may therefore
-    // diverge -- the accepted partial-consistency limitation.
-    expect(effects.updates.length, 'the synced twin update never starts').toBe(1);
+    // The transaction had already started and is allowed to finish. What is
+    // withheld is everything that would follow it.
+    expect(effects.rpcs.length, 'no second request').toBe(1);
+    expect(effects.updates, 'no compensating write').toEqual([]);
     expect(effects.selects, 'no container/source-reference follow-up read').toEqual([]);
     expect(effects.padletSets, 'no new optimistic state').toBe(0);
     expect(effects.editorCloses, 'settled as a completed primary save').toEqual(['note']);

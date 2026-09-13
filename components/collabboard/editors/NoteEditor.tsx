@@ -17,6 +17,7 @@ import { knowledgeSourceEditorLabel } from '@/lib/domain/knowledge/knowledgeSour
 import { ColorPickerContent } from '../ColorPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { contrastIconColor } from '../shells/CardShell';
+import type { SaveNoteResult } from '@/hooks/canvas/usePadletSave';
 
 const BACKGROUND_COLORS = [
   "#ffffff", "#f3f4f6", "#fee2e2", "#ffedd5", "#fef3c7",
@@ -101,7 +102,10 @@ interface NoteEditorProps {
     titleStyle?: CaptionStyle;
     commentTitle?: string;
     commentTitleStyle?: CommentTitleStyle;
-  }) => void;
+    // SYNCED_NOTE_PAIR_ATOMIC_UPDATE_1: a synced pair is persisted by one
+    // transaction that can refuse. Reporting that back is what lets this
+    // editor keep the draft instead of closing over an unsaved edit.
+  }) => void | SaveNoteResult | Promise<SaveNoteResult | void>;
   onClose: () => void;
   isOpen: boolean;
   // PATCH 8P -- access mode for the normal/detached post-comment panel
@@ -730,10 +734,13 @@ export default function NoteEditor({
     }
   };
 
-  // Save and close
+  // Save and close -- in that order. onClose is what discards the draft, so it
+  // must never run ahead of, or despite, a refused write. A caller that answers
+  // synchronously still closes synchronously, exactly as before; only one that
+  // returns a promise is waited on, and only that caller can refuse.
   const handleSaveAndClose = () => {
     const content = editor?.getHTML() || '';
-    onSave({
+    const result = onSave({
       title: title.trim() || undefined,
       content,
       cardColor: cardColor !== '#FFFFFF' ? cardColor : undefined,
@@ -746,7 +753,13 @@ export default function NoteEditor({
       commentTitle,
       commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
     });
-    onClose();
+    // Anything other than an explicit failure keeps today's behaviour.
+    const settle = (outcome: SaveNoteResult | void) => {
+      if (outcome?.status === 'failed') return;
+      onClose();
+    };
+    if (result instanceof Promise) void result.then(settle);
+    else settle(result);
   };
 
   const handleCommentPopupOpenChange = (open: boolean) => {

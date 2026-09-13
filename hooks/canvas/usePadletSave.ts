@@ -30,6 +30,11 @@ import { useCallback, useEffect, useMemo, useRef, Dispatch, SetStateAction } fro
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
+import {
+  readSyncedTwinId,
+  updateSyncedNotePair,
+} from '@/lib/infra/canvas/syncedNotePairMutation';
+import { toast } from 'sonner';
 import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 // ============================================================================
@@ -172,6 +177,13 @@ export type SaveCardData = {
  * a message, and it is never confused with a server failure.
  */
 export const BOARD_EDIT_NOT_ALLOWED = 'board_edit_not_allowed' as const;
+
+/**
+ * saveNote reports a status ONLY where the caller must act on it: a synced
+ * pair whose one transaction did not commit. Every other branch returns
+ * undefined and keeps its existing close-on-save behaviour.
+ */
+export type SaveNoteResult = { status: 'failed' };
 
 export type SaveCardResult =
   | { status: 'saved' }
@@ -462,6 +474,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
     return false;
   };
 
+  /** The shape withSchedulerDefaults writes, narrowed for the synced-pair RPC. */
+  const asDateString = (value: unknown): string | undefined =>
+    (typeof value === 'string' && value.length > 0 ? value : undefined);
+
   const withSchedulerDefaults = (meta: Record<string, unknown>): Record<string, unknown> => {
     if (!isSchedulerLayout) return meta;
 
@@ -575,7 +591,79 @@ export function usePadletSave(params: UsePadletSaveParams) {
           }
         }
       } else if (padletToEdit) {
-        // Update existing padlet
+        const syncedWithId = readSyncedTwinId(padletToEdit.metadata);
+        if (syncedWithId) {
+          // The pair is board-scoped and the RPC proves authority over that
+          // board, so without one there is nothing to prove and nothing safe
+          // to write. Refusing keeps the draft; falling through would update
+          // this member alone and split the pair -- the very defect this
+          // replaces.
+          if (!canvasId) {
+            toast.error('Could not save this synced note. Please try again.');
+            return { status: 'failed' } as const;
+          }
+          // ONE request, and one database transaction. There is no second
+          // write here to be interrupted, so the pair cannot be left split:
+          // both members move together or neither does.
+          const pair = await updateSyncedNotePair(supabase, {
+            padletId: padletToEdit.id,
+            boardId: canvasId,
+            title: data.title || '',
+            content: data.content,
+            // Synchronized: the appearance this editor exclusively owns.
+            shared: {
+              cardColor: data.cardColor,
+              topStrip: data.topStrip,
+              textColor: data.textColor,
+              titleStyle: data.titleStyle,
+            },
+            // Per-record, never synchronized: reactions, the comment set and
+            // its badge/heading, and this Note's own scheduler dates -- all of
+            // which belong to the record they are on. The two dates are read
+            // back off `metadata`, which withSchedulerDefaults has already
+            // produced above: same helper, same condition, same values, so a
+            // scheduler Note still gets exactly the defaults it always got.
+            sourceOnly: {
+              reactions: data.reactions,
+              badgeColor: data.badgeColor,
+              detachedComments: data.detachedComments,
+              commentTitle: data.commentTitle,
+              commentTitleStyle: data.commentTitleStyle,
+              start_date: asDateString(metadata.start_date),
+              end_date: asDateString(metadata.end_date),
+            },
+          });
+          if (pair.status !== 'saved') {
+            // Nothing committed. No reconciliation, no false success: the
+            // editor and its draft stay exactly as they are so the same save
+            // can simply be retried.
+            toast.error('Could not save this synced note. Please try again.');
+            return { status: 'failed' } as const;
+          }
+          // The transaction had already started, so letting it finish was
+          // right. What is withheld is the optimistic shared state, which is
+          // no longer ours to add -- realtime/refetch will show the truth.
+          if (!canEditBoardContentNow()) {
+            return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
+          }
+          setIsNoteEditorOpen(false);
+          setPadletToEdit(null);
+          // Server truth for BOTH members, applied in the one pass that the
+          // atomic write earned -- not a client-computed guess about either.
+          const [first, second] = pair.rows;
+          setPadlets(prev => prev.map(p => {
+            const row = p.id === first.id ? first : (p.id === second.id ? second : null);
+            if (!row) return p;
+            return {
+              ...p,
+              title: row.title ?? '',
+              content: row.content ?? '',
+              metadata: (row.metadata ?? {}) as Padlet['metadata'],
+            };
+          }));
+          return;
+        }
+        // Unsynced Note: the existing single-row update, unchanged.
         const { error } = await supabase
           .from('padlets')
           .update({
@@ -585,29 +673,6 @@ export function usePadletSave(params: UsePadletSaveParams) {
           })
           .eq('id', padletToEdit.id);
         if (error) throw error;
-
-        // Propagate changes to synced posts
-        const syncedWithId = (padletToEdit.metadata as any)?.syncedWith;
-        // The first update is committed. The synced twin is a SECOND record
-        // and a second request: it must not start once the authority is gone.
-        // The two can therefore diverge -- an accepted partial consistency,
-        // and strictly better than writing a row the board refuses.
-        if (syncedWithId && !canEditBoardContentNow()) {
-          return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
-        }
-        if (syncedWithId) {
-          const { error: syncError } = await supabase
-            .from('padlets')
-            .update({
-              content: data.content,
-              metadata: {
-                ...metadata,
-                syncedWith: padletToEdit.id,
-              },
-            })
-            .eq('id', syncedWithId);
-          if (syncError) console.warn('Failed to sync changes to linked post:', syncError);
-        }
       }
 
       setIsNoteEditorOpen(false);
@@ -616,10 +681,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
         if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
         else fetchData();
       } else if (padletToEdit) {
-        const syncedWithId = (padletToEdit.metadata as any)?.syncedWith;
         setPadlets(prev => prev.map(p => {
           if (p.id === padletToEdit!.id) return { ...p, title: data.title || '', content: data.content, metadata };
-          if (syncedWithId && p.id === syncedWithId) return { ...p, content: data.content, metadata: { ...metadata, syncedWith: padletToEdit!.id } };
           return p;
         }));
       }
