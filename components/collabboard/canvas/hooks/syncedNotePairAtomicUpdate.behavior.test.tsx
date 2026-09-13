@@ -12,7 +12,8 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import NoteEditor from '@/components/collabboard/editors/NoteEditor';
 import type { Padlet } from '@/types/collabboard';
 import { usePadletSave } from '@/hooks/canvas/usePadletSave';
 import { supabaseBrowser } from '@/lib/supabase/browser';
@@ -27,10 +28,12 @@ vi.mock('sonner', () => ({ toast: { error: (m: string) => toastError(m) } }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const BOARD = 'board-1';
-const NOTE_A = 'note-a';
-const NOTE_B = 'note-b';
-const OTHER = 'note-unrelated';
+// Real UUIDs: the adapter refuses to reconcile a row whose id is not one,
+// because the database never returns anything else.
+const BOARD = 'd5000000-0000-4000-8000-0000000000b1';
+const NOTE_A = 'd5000000-0000-4000-8000-0000000000a1';
+const NOTE_B = 'd5000000-0000-4000-8000-0000000000a2';
+const OTHER = 'd5000000-0000-4000-8000-0000000000a3';
 
 const serverRows = () => [
   { id: NOTE_A, title: 'server title', content: 'server body', metadata: { syncedWith: NOTE_B, parentId: 'pa' } },
@@ -101,25 +104,37 @@ let mounted: Array<{ root: Root; container: HTMLElement }> = [];
 
 let schedulerLayout = false;
 let seedRows: Padlet[] | null = null;
+let onSaveSpy: ((d: never) => unknown) | null = null;
+let closes = 0;
+/** The order the hook CALLS its setters -- the only thing separating "reconcile
+ *  then settle" from its reverse, since batching makes the end state identical. */
+let callOrder: string[] = [];
 
-function Harness({ probe, effects }: { probe: () => boolean; effects: Effects }) {
+/** ONE harness for both halves of this file: `withEditor` also renders the REAL
+ *  NoteEditor against the REAL callback, which is all the lifecycle cases need. */
+function Harness({ probe, effects, withEditor }: { probe: () => boolean; effects: Effects; withEditor?: boolean }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>(seedRows ?? [
     { id: NOTE_A, title: 'local a', content: 'local a body', type: 'text', metadata: { syncedWith: NOTE_B, parentId: 'pa' } } as unknown as Padlet,
     { id: NOTE_B, title: 'local b', content: 'local b body', type: 'text', metadata: { syncedWith: NOTE_A, parentId: 'pb' } } as unknown as Padlet,
     { id: OTHER, title: 'untouched', content: 'untouched body', type: 'text', metadata: {} } as unknown as Padlet,
   ]);
-  const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(null);
+  const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(withEditor ? padlets[0] : null);
+  const [open, setOpen] = React.useState(true);
   setDraft = setPadletToEdit;
   currentPadlets = padlets;
 
-  api = usePadletSave({
+  const api2 = usePadletSave({
     canEditBoardContentNow: probe, canvasId: BOARD, padletToEdit,
     isWallLayout: false, isColumnsLayout: false, isGridLayout: false,
     isDrawingLayout: false, isTimelineLayout: false, isSchedulerLayout: schedulerLayout,
     isFreeformLayout: true, isMapLayout: false,
-    setPadletToEdit: (next: Padlet | null) => { effects.draftSets.push(next); setPadletToEdit(next); },
+    setPadletToEdit: (next: Padlet | null) => {
+      callOrder.push('clear-draft'); effects.draftSets.push(next); setPadletToEdit(next);
+    },
     fetchData: async () => {},
-    setIsNoteEditorOpen: () => { effects.editorCloses.push('note'); },
+    setIsNoteEditorOpen: (v: boolean) => {
+      callOrder.push('settle'); effects.editorCloses.push('note'); setOpen(Boolean(v));
+    },
     setIsLinkEditorOpen: () => {}, setIsTodoEditorOpen: () => {},
     setIsTableEditorOpen: () => {}, setIsContainerEditorOpen: () => {},
     setIsCommentEditorOpen: () => {}, setIsCardEditorOpen: () => {},
@@ -127,18 +142,32 @@ function Harness({ probe, effects }: { probe: () => boolean; effects: Effects })
     setIsDrawingEditorOpen: () => {}, setIsAIComponentEditorOpen: () => {},
     setPendingPostDraft: () => {}, setIsPlacementPromptOpen: () => {},
     setWallPendingPostDraft: () => {}, setWallPlacementPromptOpen: () => {},
-    padlets, setPadlets, getNewPostPosition: () => ({ x: 0, y: 0 }),
+    padlets,
+    setPadlets: ((next: never) => { callOrder.push('reconcile'); setPadlets(next); }) as never,
+    getNewPostPosition: () => ({ x: 0, y: 0 }),
     onSourceNoteCreated: (id: string) => { effects.sourceNotes.push(id); },
   } as never);
-  return null;
+  api = api2;
+  if (!withEditor) return null;
+  return (
+    <NoteEditor
+      isOpen={open}
+      initialTitle={padletToEdit?.title ?? ''}
+      initialContent={padletToEdit?.content ?? ''}
+      onSave={(onSaveSpy ?? api2.saveNote) as never}
+      // Exactly CanvasModals' wiring: onClose is what discards the draft.
+      onClose={() => { closes += 1; setOpen(false); setPadletToEdit(null); }}
+    />
+  );
 }
 
-function mount(probe: () => boolean, effects: Effects) {
+function mount(probe: () => boolean, effects: Effects, withEditor?: boolean) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  act(() => { root.render(<Harness probe={probe} effects={effects} />); });
+  act(() => { root.render(<Harness probe={probe} effects={effects} withEditor={withEditor} />); });
   mounted.push({ root, container });
+  return container;
 }
 
 const rowById = (id: string) => currentPadlets.find((p) => p.id === id)!;
@@ -153,6 +182,7 @@ afterEach(() => {
   for (const m of mounted) { act(() => { m.root.unmount(); }); m.container.remove(); }
   mounted = []; api = null; setDraft = null; currentPadlets = [];
   schedulerLayout = false; seedRows = null;
+  onSaveSpy = null; closes = 0; callOrder = [];
   toastError.mockReset(); vi.clearAllMocks();
 });
 
@@ -162,7 +192,7 @@ describe('1. the RPC adapter classifies, and never softens, an outcome', () => {
   const call = async (reply: RpcReply) => {
     const rpc = vi.fn(async () => reply);
     const result = await updateSyncedNotePair({ rpc } as never, { padletId: NOTE_A,
-      boardId: BOARD, title: 't', content: 'c',
+      twinId: NOTE_B, boardId: BOARD, title: 't', content: 'c',
       shared: { cardColor: '#111' }, sourceOnly: { reactions: ['a'] } });
     return { result, rpc };
   };
@@ -192,18 +222,52 @@ describe('1. the RPC adapter classifies, and never softens, an outcome', () => {
     }
   });
 
-  it('refuses to call a partial, empty, malformed or duplicated reply a success', async () => {
-    const shapes: unknown[] = [
-      [], [serverRows()[0]], null, 'rows',
-      [serverRows()[0], { title: 'no id' }],
-      [serverRows()[0], serverRows()[0]],
+  it('refuses every reply it cannot fully vouch for', async () => {
+    const [a, b] = serverRows();
+    const THIRD = 'd5000000-0000-4000-8000-0000000000ff';
+    const shapes: Array<[string, unknown]> = [
+      ['zero rows', []],
+      ['one row', [a]],
+      ['three rows', [a, b, { ...a, id: THIRD }]],
+      ['not an array', null],
+      ['a string', 'rows'],
+      ['duplicate ids', [a, a]],
+      // Records this save never asked about: a filtered, cached or simply
+      // wrong reply must not be reconciled into the board.
+      ['an unrelated id in place of the twin', [a, { ...b, id: THIRD }]],
+      ['a non-uuid id', [a, { ...b, id: 'note-b' }]],
+      // Shapes reconciliation would otherwise write straight into the canvas.
+      ['a missing id', [a, { title: 'x', content: 'y', metadata: {} }]],
+      ['a numeric title', [a, { ...b, title: 7 }]],
+      ['an object content', [a, { ...b, content: { html: 'x' } }]],
+      ['null metadata', [a, { ...b, metadata: null }]],
+      ['array metadata', [a, { ...b, metadata: [] }]],
+      ['primitive metadata', [a, { ...b, metadata: 'meta' }]],
+      // Two rows that no longer point at each other are not a committed pair.
+      ['a missing syncedWith', [a, { ...b, metadata: {} }]],
+      ['a non-reciprocal syncedWith', [a, { ...b, metadata: { syncedWith: THIRD } }]],
     ];
-    for (const data of shapes) {
+    for (const [name, data] of shapes) {
       const { result } = await call({ data, error: null });
-      expect(result.status, JSON.stringify(data)).toBe('failed');
+      expect(result.status, name).toBe('failed');
     }
     const { result } = await call({ data: serverRows(), error: null });
-    expect(result.status, 'and two distinct rows ARE a success').toBe('saved');
+    expect(result.status, 'and the genuine reciprocal pair IS a success').toBe('saved');
+    // Order is the server's to choose; both orders are the same pair.
+    expect((await call({ data: [b, a], error: null })).result.status, 'either order').toBe('saved');
+  });
+
+  it('reports a rejecting or empty-handed client as failed, and never throws', async () => {
+    const boom = { rpc: async () => { throw new Error('network down'); } };
+    const sync = { rpc: () => { throw new Error('client not ready'); } };
+    const nothing = { rpc: async () => undefined };
+    for (const [name, client] of [['rejects', boom], ['throws', sync], ['returns nothing', nothing]] as const) {
+      const result = await updateSyncedNotePair(client as never, {
+        padletId: NOTE_A, twinId: NOTE_B, boardId: BOARD, title: 't', content: 'c',
+        shared: {}, sourceOnly: {},
+      });
+      expect(result.status, name).toBe('failed');
+    }
   });
 
   it('treats only a non-empty string twin as a synced record', () => {
@@ -496,5 +560,161 @@ describe('5. a scheduler Note keeps its own dates, and gives the twin none', () 
     // And the allowlisted source keys really are limited to these.
     expect(Object.keys(sourcePatch(effects)).sort())
       .toEqual(['badgeColor', 'commentTitle', 'commentTitleStyle', 'detachedComments', 'reactions']);
+  });
+});
+
+// == 6. The real save callback, driven through the real NoteEditor ==
+//
+// Every defect corrected here lived in the SEAM between two files: a save that
+// reported nothing, an editor reading silence as success, a settlement done
+// twice, a rejection nobody caught. Stubbing either half reproduces none.
+describe('6. real saveNote + real NoteEditor, one lifecycle', () => {
+  let host: HTMLElement;
+  const open = (probe: () => boolean, effects: Effects) => { host = mount(probe, effects, true); };
+
+  /** Closing the Note is what saves it -- there is no separate Save button. */
+  const closeByBackdrop = async () => {
+    const overlay = host.firstElementChild as HTMLElement;
+    await act(async () => {
+      overlay.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+  };
+  const editorIsOpen = () => host.querySelector('.ProseMirror') !== null;
+  beforeEach(() => { seedRows = [
+    { id: NOTE_A, title: 'A', content: '<p>a</p>', type: 'text', metadata: { syncedWith: NOTE_B } },
+    { id: NOTE_B, title: 'B', content: '<p>b</p>', type: 'text', metadata: { syncedWith: NOTE_A } },
+  ] as unknown as Padlet[]; });
+
+  it('A+G. authorized: reconciles BOTH rows, THEN settles, closing exactly once', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    open(() => true, effects);
+    await closeByBackdrop();
+    expect(effects.rpcCalls.length, 'one transaction').toBe(1);
+    // Call order, not commit order: batching makes the end state identical
+    // either way, so the end state is not what is asserted here.
+    expect(callOrder).toEqual(['reconcile', 'settle', 'clear-draft']);
+    expect(effects.editorCloses, 'settled once, by the save itself').toEqual(['note']);
+    expect(closes, 'and NOT a second time by the editor').toBe(0);
+    expect(editorIsOpen()).toBe(false);
+    expect(rowById(NOTE_A).title, 'both rows carry server truth').toBe('server title');
+    expect(rowById(NOTE_B).title).toBe('server title');
+  });
+
+  it('B. denied from the start: no request, no close, draft intact, silent', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    open(() => false, effects);
+    await closeByBackdrop();
+    expect(effects.rpcCalls, 'zero requests').toEqual([]);
+    expect(effects.editorCloses, 'nothing settled').toEqual([]);
+    expect(closes).toBe(0);
+    expect(editorIsOpen(), 'still open, holding the draft').toBe(true);
+    expect(effects.draftSets, 'the draft was never cleared').toEqual([]);
+    expect(toastError, 'a permission never held is not announced').not.toHaveBeenCalled();
+    expect(rowById(NOTE_A).title, 'no reconciliation').toBe('A');
+  });
+
+  it('C. a retained callback after true->false: no request, editor stays open', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    let allowed = true;
+    open(() => allowed, effects);
+    allowed = false;
+    await closeByBackdrop();
+    expect(effects.rpcCalls).toEqual([]);
+    expect(editorIsOpen()).toBe(true);
+    expect(closes).toBe(0);
+  });
+
+  const refusals: Array<[string, RpcReply]> = [
+    ['denied', { data: null, error: { code: '42501', message: 'x' } }],
+    ['invalid_pair', { data: null, error: { code: '22023', message: 'x' } }],
+    ['conflict', { data: null, error: { code: '40001', message: 'x' } }],
+    ['failed', { data: null, error: { message: 'x' } }],
+  ];
+  for (const [name, reply] of refusals) {
+    it(`D. ${name}: the editor stays open with its draft, nothing reconciles`, async () => {
+      const effects = newEffects();
+      installSupabase(effects, { reply });
+      open(() => true, effects);
+      await closeByBackdrop();
+      expect(editorIsOpen(), 'still open').toBe(true);
+      expect(effects.editorCloses, 'nothing settled').toEqual([]);
+      expect(closes).toBe(0);
+      expect(effects.draftSets).toEqual([]);
+      expect(rowById(NOTE_A).title, 'no reconciliation').toBe('A');
+      expect(toastError, 'one message').toHaveBeenCalledTimes(1);
+      expect(String(toastError.mock.calls[0][0]), 'and it names no database detail')
+        .not.toMatch(/sql|postgres|4250|2202|4000/i);
+    });
+  }
+
+  /** Catches anything escaping as an unhandled promise rejection. */
+  const watchRejections = () => {
+    const seen: unknown[] = [];
+    const on = (e: Event) => { seen.push(e); };
+    window.addEventListener('unhandledrejection', on);
+    return { seen, stop: () => window.removeEventListener('unhandledrejection', on) };
+  };
+  const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  it('E. a genuinely rejecting RPC: no unhandled rejection, editor and draft survive', async () => {
+    const effects = newEffects();
+    const watch = watchRejections();
+    vi.mocked(supabaseBrowser).mockReturnValue({
+      auth: { getUser: async () => ({ data: { user: { id: 'u' } }, error: null }) },
+      rpc: async () => {
+        effects.rpcCalls.push({ fn: 'update_synced_note_pair', args: {} });
+        throw new Error('network down');
+      },
+      from: () => ({ update: () => ({ eq: async () => ({ data: null, error: null }) }) }),
+    } as never);
+    open(() => true, effects);
+    await closeByBackdrop(); await flush(); watch.stop();
+    expect(watch.seen, 'nothing escaped as an unhandled rejection').toEqual([]);
+    expect(editorIsOpen(), 'the editor still holds the draft').toBe(true);
+    expect(effects.editorCloses).toEqual([]);
+    expect(effects.rpcCalls.length, 'one attempt, no automatic retry').toBe(1);
+    expect(toastError, 'the intended handling, once').toHaveBeenCalledTimes(1);
+  });
+
+  it('F. a rejecting onSave: no unhandled rejection, no close, still retryable', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    const watch = watchRejections();
+    let attempts = 0;
+    onSaveSpy = (() => { attempts += 1; return Promise.reject(new Error('boom')); }) as never;
+    open(() => true, effects);
+    await closeByBackdrop();
+    await flush();
+    expect(watch.seen).toEqual([]);
+    expect(closes, 'the editor did not close over a rejected save').toBe(0);
+    expect(editorIsOpen()).toBe(true);
+    // And the editor is not wedged: the very next attempt is still accepted.
+    await closeByBackdrop();
+    await flush();
+    watch.stop();
+    expect(attempts, 'a retry is still possible').toBe(2);
+  });
+
+  it('H. success that arrives after revocation: settled, but nothing optimistic', async () => {
+    const effects = newEffects();
+    const rpcGate = gate();
+    installSupabase(effects, { rpcGate });
+    let allowed = true;
+    open(() => allowed, effects);
+    await closeByBackdrop();
+    expect(effects.rpcCalls.length, 'the one request left while authorized').toBe(1);
+
+    allowed = false;
+    await act(async () => { rpcGate.release(); await Promise.resolve(); await Promise.resolve(); });
+    expect(effects.rpcCalls.length, 'no second request').toBe(1);
+    expect(effects.updates, 'and no compensating write').toEqual([]);
+    expect(rowById(NOTE_A).title, 'no optimistic reconciliation').toBe('A');
+    expect(rowById(NOTE_B).title).toBe('B');
+    expect(effects.editorCloses, 'settled safely, once').toEqual(['note']);
+    expect(closes).toBe(0);
   });
 });

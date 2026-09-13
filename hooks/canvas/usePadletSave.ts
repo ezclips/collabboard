@@ -179,11 +179,15 @@ export type SaveCardData = {
 export const BOARD_EDIT_NOT_ALLOWED = 'board_edit_not_allowed' as const;
 
 /**
- * saveNote reports a status ONLY where the caller must act on it: a synced
- * pair whose one transaction did not commit. Every other branch returns
- * undefined and keeps its existing close-on-save behaviour.
+ * Every saveNote path reports one of these; none returns undefined, because an
+ * editor cannot tell a refusal from a success it was not told about, and the
+ * one it guesses wrong discards the draft. SETTLEMENT OWNERSHIP: `saved` means
+ * this hook ALREADY closed the editor and cleared the draft (it must -- it
+ * serves non-editor callers too), so closing again would settle one save
+ * twice; `failed` means nothing persisted; `deferred-placement` hands the
+ * draft to the placement prompt, the one case the editor closes itself.
  */
-export type SaveNoteResult = { status: 'failed' };
+export type SaveNoteResult = { status: 'saved' | 'deferred-placement' | 'failed' };
 
 export type SaveCardResult =
   | { status: 'saved' }
@@ -499,10 +503,13 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // ============================================================================
   // handleSaveNote
   // ============================================================================
-  const saveNote = useCallback(async (data: SaveNoteData) => {
+  const saveNote = useCallback(async (data: SaveNoteData): Promise<SaveNoteResult> => {
     // Board content: refused before metadata, ids, placement, editor state
     // or any request -- and asked live, so a retained handle refuses too.
-    if (!canEditBoardContentNow()) return;
+    // Failure, deliberately: returning nothing read as SUCCESS to the editor,
+    // which then closed over an edit never written. Missing, loading and
+    // revoked authority are one silent case.
+    if (!canEditBoardContentNow()) return { status: 'failed' };
     // Build metadata object - preserve existing metadata (especially parentId for container children)
     const metadata = withSchedulerDefaults({
       ...padletToEdit?.metadata,
@@ -528,7 +535,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
       () => setIsNoteEditorOpen(false)
     );
     if (placementNeeded) {
-      return;
+      // The draft belongs to the placement prompt now: not a failure, not a save.
+      return { status: 'deferred-placement' };
     }
 
     try {
@@ -557,7 +565,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
         // this stops is a SECOND mutation -- the source reference and the
         // container update below -- being STARTED after the authority went
         // away while the insert was in flight.
-        if (!canEditBoardContentNow()) return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
+        if (!canEditBoardContentNow()) {
+          settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false)); return { status: 'saved' };
+        }
         // P6J-F5: only now does a real target id exist. The row itself carries
         // no provenance -- source_references is its one durable home.
         if (sourceNoteReference && newPadlet?.id) {
@@ -575,7 +585,9 @@ export function usePadletSave(params: UsePadletSaveParams) {
           // The read is an await of its own: revocation can land while it is
           // pending, so the update it feeds is not authorised by the earlier
           // post-insert check.
-          if (!canEditBoardContentNow()) return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
+          if (!canEditBoardContentNow()) {
+            settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false)); return { status: 'saved' };
+          }
 
           if (container) {
             const existingIds = (container.metadata as any)?.childPadletIds || [];
@@ -600,13 +612,14 @@ export function usePadletSave(params: UsePadletSaveParams) {
           // replaces.
           if (!canvasId) {
             toast.error('Could not save this synced note. Please try again.');
-            return { status: 'failed' } as const;
+            return { status: 'failed' };
           }
           // ONE request, and one database transaction. There is no second
           // write here to be interrupted, so the pair cannot be left split:
           // both members move together or neither does.
           const pair = await updateSyncedNotePair(supabase, {
             padletId: padletToEdit.id,
+            twinId: syncedWithId,
             boardId: canvasId,
             title: data.title || '',
             content: data.content,
@@ -638,16 +651,14 @@ export function usePadletSave(params: UsePadletSaveParams) {
             // editor and its draft stay exactly as they are so the same save
             // can simply be retried.
             toast.error('Could not save this synced note. Please try again.');
-            return { status: 'failed' } as const;
+            return { status: 'failed' };
           }
           // The transaction had already started, so letting it finish was
           // right. What is withheld is the optimistic shared state, which is
           // no longer ours to add -- realtime/refetch will show the truth.
           if (!canEditBoardContentNow()) {
-            return settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false));
+            settleRevokedAfterPrimary(() => setIsNoteEditorOpen(false)); return { status: 'saved' };
           }
-          setIsNoteEditorOpen(false);
-          setPadletToEdit(null);
           // Server truth for BOTH members, applied in the one pass that the
           // atomic write earned -- not a client-computed guess about either.
           const [first, second] = pair.rows;
@@ -658,10 +669,14 @@ export function usePadletSave(params: UsePadletSaveParams) {
               ...p,
               title: row.title ?? '',
               content: row.content ?? '',
-              metadata: (row.metadata ?? {}) as Padlet['metadata'],
+              metadata: row.metadata as Padlet['metadata'],
             };
           }));
-          return;
+          // Settled only now: reconciled first, so the editor is never
+          // unmounted over rows that are still the stale ones.
+          setIsNoteEditorOpen(false);
+          setPadletToEdit(null);
+          return { status: 'saved' };
         }
         // Unsynced Note: the existing single-row update, unchanged.
         const { error } = await supabase
@@ -686,8 +701,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
           return p;
         }));
       }
+      return { status: 'saved' };
     } catch (e: any) {
+      // Reported as before, but no longer a silent success.
       console.error('Failed to save note:', e?.message || e?.details || JSON.stringify(e));
+      return { status: 'failed' };
     }
   }, [
     canvasId,

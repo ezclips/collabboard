@@ -37,9 +37,10 @@ const OWNER = '11111111-1111-4111-8111-111111111111';
 const EDITOR = '22222222-2222-4222-8222-222222222222';
 const VIEWER = '33333333-3333-4333-8333-333333333333';
 const BOARD = 'canvas-1';
-/** The two members of a reciprocal synced Note pair. */
-const NOTE_A = 'note-a';
-const NOTE_B = 'note-b';
+/** The two members of a reciprocal synced Note pair -- real UUIDs, because
+ *  the adapter refuses to reconcile a row whose id is not one. */
+const NOTE_A = 'd6000000-0000-4000-8000-0000000000a1';
+const NOTE_B = 'd6000000-0000-4000-8000-0000000000a2';
 const board = { id: BOARD, user_id: OWNER };
 
 const collaborator = (

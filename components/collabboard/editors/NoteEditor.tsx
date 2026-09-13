@@ -753,12 +753,17 @@ export default function NoteEditor({
       commentTitle,
       commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
     });
-    // Anything other than an explicit failure keeps today's behaviour.
+    // ONE settlement owner per outcome. `failed` keeps the draft; `saved` was
+    // already settled by the save itself. Everything else -- a deferred
+    // placement, or a caller reporting nothing, the synchronous legacy
+    // contract -- is this editor's to close.
     const settle = (outcome: SaveNoteResult | void) => {
-      if (outcome?.status === 'failed') return;
+      if (outcome?.status === 'failed' || outcome?.status === 'saved') return;
       onClose();
     };
-    if (result instanceof Promise) void result.then(settle);
+    // The second handler matters: a rejecting onSave is a failed save, which
+    // keeps the draft -- not an unhandled rejection escaping the editor.
+    if (result instanceof Promise) void result.then(settle, () => {});
     else settle(result);
   };
 

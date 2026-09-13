@@ -134,6 +134,16 @@ BEGIN
         RAISE EXCEPTION 'synced_note_pair_invalid' USING ERRCODE = '22023';
     END IF;
 
+    -- jsonb_each raises on anything that is not an object, which would leave a
+    -- database message standing in for this function's own refusal. An array or
+    -- a scalar is simply not a patch: reject it here, before either sanitizer
+    -- runs and long before any write.
+    IF jsonb_typeof(COALESCE(p_shared_appearance, '{}'::jsonb)) <> 'object'
+       OR jsonb_typeof(COALESCE(p_source_metadata, '{}'::jsonb)) <> 'object'
+    THEN
+        RAISE EXCEPTION 'synced_note_pair_invalid' USING ERRCODE = '22023';
+    END IF;
+
     SELECT COALESCE(jsonb_object_agg(e.key, e.value) FILTER (WHERE e.value <> 'null'::jsonb),
                     '{}'::jsonb),
            COALESCE(array_agg(e.key) FILTER (WHERE e.value = 'null'::jsonb), ARRAY[]::text[])

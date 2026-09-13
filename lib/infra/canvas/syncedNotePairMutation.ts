@@ -38,7 +38,7 @@ export type SyncedNotePairRow = {
   id: string;
   title: string | null;
   content: string | null;
-  metadata: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
 };
 
 export type UpdateSyncedNotePairResult =
@@ -55,6 +55,8 @@ export type UpdateSyncedNotePairResult =
 
 export type UpdateSyncedNotePairInput = {
   padletId: string;
+  /** The twin this save is FOR. A reply naming anything else is not it. */
+  twinId: string;
   boardId: string;
   title: string;
   content: string;
@@ -72,22 +74,45 @@ export function readSyncedTwinId(metadata: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-/** `undefined` means "unchanged"; the RPC needs an explicit null to clear. */
+/**
+ * The editor sends its WHOLE payload every save, using `undefined` for a field
+ * the user cleared: here undefined means "clear it" and must arrive as an
+ * explicit null, since JSON drops the key and the RPC reads omission as
+ * "unchanged".
+ */
 const explicit = <T,>(value: T | undefined): T | null => (value === undefined ? null : value);
 
-/** Omitted rather than nulled, so an absent value clears nothing. */
+/** The opposite rule, and the only fields on it: withSchedulerDefaults only
+ *  ADDS a missing default, so omission must mean "unchanged" here -- a null
+ *  would delete dates the editor was never asked to touch. */
 const present = (key: string, value: string | undefined) =>
   (typeof value === 'string' && value.length > 0 ? { [key]: value } : {});
 
-const isRow = (value: unknown): value is SyncedNotePairRow =>
-  typeof value === 'object' && value !== null
-  && typeof (value as { id?: unknown }).id === 'string';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A plain JSON object: not an array, not null, not a primitive. */
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** The complete shape reconciliation reads; a row failing ANY part of it is
+ *  never written into local state. */
+const isRow = (value: unknown): value is SyncedNotePairRow => {
+  if (!isJsonObject(value)) return false;
+  const { id, title, content, metadata } = value;
+  return typeof id === 'string' && UUID.test(id)
+    && (title === null || typeof title === 'string')
+    && (content === null || typeof content === 'string')
+    && isJsonObject(metadata);
+};
 
 export async function updateSyncedNotePair(
   supabase: SupabaseClient,
   input: UpdateSyncedNotePairInput,
 ): Promise<UpdateSyncedNotePairResult> {
-  const { data, error } = await supabase.rpc('update_synced_note_pair', {
+  // A transport fault or an offline client can reject, or return nothing at
+  // all: each is this adapter's failure to report, never an exception thrown
+  // back through saveNote.
+  const send = () => supabase.rpc('update_synced_note_pair', {
     p_padlet_id: input.padletId,
     p_board_id: input.boardId,
     p_title: input.title,
@@ -108,6 +133,9 @@ export async function updateSyncedNotePair(
       ...present('end_date', input.sourceOnly.end_date),
     },
   });
+  let data: unknown;
+  let error: { code?: string } | null;
+  try { ({ data, error } = await send()); } catch { return { status: 'failed' }; }
 
   if (error) {
     // The function's own typed refusals, by SQLSTATE. The message tokens it
@@ -118,13 +146,20 @@ export async function updateSyncedNotePair(
     return { status: 'failed' };
   }
 
-  // Anything but exactly two well-formed rows is a result this cannot vouch
-  // for -- a zero-row reply, a partial reply, or a filtered one. It is never
-  // reported as saved.
+  // Anything but exactly two well-formed rows naming the pair this call asked
+  // about is a result it cannot vouch for, and is never reported as saved.
   if (!Array.isArray(data) || data.length !== 2 || !data.every(isRow)) {
     return { status: 'failed' };
   }
   const [first, second] = data as SyncedNotePairRow[];
-  if (first.id === second.id) return { status: 'failed' };
+  // Exactly the two records this call named, once each and in either order.
+  const wanted = [input.padletId, input.twinId].sort().join('|');
+  if (first.id === second.id || [first.id, second.id].sort().join('|') !== wanted) {
+    return { status: 'failed' };
+  }
+  // Still a pair on arrival: rows no longer pointing at each other are not one.
+  if (first.metadata.syncedWith !== second.id || second.metadata.syncedWith !== first.id) {
+    return { status: 'failed' };
+  }
   return { status: 'saved', rows: [first, second] };
 }

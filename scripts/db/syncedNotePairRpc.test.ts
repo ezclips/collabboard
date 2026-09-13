@@ -306,6 +306,80 @@ describe('2. every malformed or foreign pair fails closed, changing nothing', ()
   }
 });
 
+describe('2b. what phase 1 enforces about a pair, and what it does not', () => {
+  // DELIBERATE AND DOCUMENTED SCOPE. This function enforces a LOCAL invariant:
+  // two distinct same-board Notes that point at each other. It does NOT enforce
+  // global uniqueness of syncedWith -- no unbounded scan, no uniqueness
+  // constraint -- so a stale third record still pointing at a member of a
+  // healthy pair neither breaks that pair nor is repaired here. Making
+  // syncedWith globally one-to-one belongs to atomic synced-copy creation,
+  // paste/import sanitation, and legacy diagnostics.
+  const claimA = () => db.query(`UPDATE public.padlets
+    SET metadata = jsonb_set(metadata, '{syncedWith}', to_jsonb($2::text))
+    WHERE id=$1::uuid`, [LONE, A]);
+
+  it('a stale C->A pointer neither blocks the A<->B save nor is touched by it', async () => {
+    await db.query('RESET ROLE');
+    // LONE claims A, which never claimed it back. A and B stay reciprocal.
+    await claimA();
+    expect((await call(db, OWNER, A, BOARD)).ok, 'the healthy pair still saves').toBe(true);
+    const rows = await snapshot();
+    expect(byId(rows, A).title, 'A moved').toBe('synced title');
+    expect(byId(rows, B).title, 'B moved with it').toBe('synced title');
+    // The squatter is not updated, not cleared, and not repaired.
+    expect(byId(rows, LONE).title, 'C is untouched').toBe('Lone');
+    expect(byId(rows, LONE).content).toBe('body lone');
+    expect(byId(rows, LONE).metadata.syncedWith, 'and keeps its stale claim').toBe(A);
+  });
+
+  it('editing C itself fails, because its claimed target does not point back', async () => {
+    await db.query('RESET ROLE');
+    await claimA();
+    const result = await call(db, OWNER, LONE, BOARD);
+    expect(!result.ok && result.code, 'refused as an invalid pair').toBe('22023');
+    const rows = await snapshot();
+    for (const id of [A, B, LONE]) {
+      expect(byId(rows, id).title, `${id} unchanged`).not.toBe('synced title');
+    }
+  });
+});
+
+describe('2c. a patch that is not an object is refused before anything is read', () => {
+  // jsonb_each raises on a non-object, which would put a database message where
+  // this function's own generic refusal belongs. The explicit guard runs first.
+  const rawCall = async (shared: string, source: string) => {
+    await db.query('RESET ROLE');
+    await db.query("SELECT set_config('request.jwt.claim.sub', $1, false)", [OWNER]);
+    await db.query('SET ROLE authenticated');
+    try {
+      await db.query(`SELECT * FROM public.update_synced_note_pair(
+        $1::uuid,$2::uuid,'t','c',$3::jsonb,$4::jsonb)`, [A, BOARD, shared, source]);
+      return null;
+    } catch (error) {
+      const e = error as { code?: string; message: string };
+      return { code: e.code ?? '', message: e.message };
+    } finally {
+      await db.query('RESET ROLE');
+    }
+  };
+
+  it('every non-object shared or source patch is refused, and writes nothing', async () => {
+    for (const raw of ['[1,2]', '"a string"', '7', 'true', 'null']) {
+      for (const slot of ['shared', 'source'] as const) {
+        const at = `${slot} ${raw}`;
+        const outcome = await rawCall(slot === 'shared' ? raw : '{}', slot === 'source' ? raw : '{}');
+        expect(outcome, `${at} was refused`).not.toBeNull();
+        expect(outcome!.code, at).toBe('22023');
+        // This function's own token, not PostgreSQL's "cannot call jsonb_each".
+        expect(outcome!.message, at).toBe('synced_note_pair_invalid');
+        const rows = await snapshot();
+        expect(byId(rows, A).title, `${at}: zero writes`).toBe('A');
+        expect(byId(rows, B).title).toBe('B');
+      }
+    }
+  });
+});
+
 describe('3. authority is the board, asked of auth.uid() alone', () => {
   it('the owner and a board editor may save; a viewer, a stranger and an anonymous caller may not',
     async () => {

@@ -24,8 +24,8 @@ WITH expected AS (
     SELECT
         to_regprocedure('public.update_synced_note_pair(uuid, uuid, text, text, jsonb, jsonb)')::oid
                                                                      AS fn,
-        ARRAY['456d4d8c3e7c8da9630bc7e45f75a508',
-              '9f1cf30aff67ec9e7593644f529232ec']::text[]            AS body_md5s,
+        ARRAY['b901b81ebcb4475b5f74ad3313b0ce79',
+              '460e5b476f4a9afdc8169d37d8b91839']::text[]            AS body_md5s,
         ARRAY['uuid','uuid','text','text','jsonb','jsonb']::text[]    AS argtypes,
         ARRAY['id:uuid','title:text','content:text','metadata:jsonb']::text[]
                                                                      AS out_columns,
@@ -151,6 +151,12 @@ invariants(ord, section, check_name, actual, pass) AS (
     UNION ALL SELECT 20, 'diagnostic', 'the write is verified to have touched exactly two rows',
            COALESCE((SELECT position('v_updated <> 2' IN src)::text FROM body), '(absent)'),
            COALESCE((SELECT position('v_updated <> 2' IN src) > 0 FROM body), false)
+    UNION ALL SELECT 22, 'diagnostic', 'a non-object patch is refused before either sanitizer runs',
+           COALESCE((SELECT position('jsonb_typeof' IN src)::text FROM body), '(absent)'),
+           -- Anchored on the CALL SITE, not the word: the comment explaining
+           -- the guard mentions jsonb_each above the guard itself.
+           COALESCE((SELECT position('jsonb_typeof' IN src) > 0
+                     AND position('jsonb_typeof' IN src) < position('FROM jsonb_each(' IN src) FROM body), false)
     UNION ALL SELECT 21, 'diagnostic', 'scheduler dates are source-only, never in the shared allowlist',
            COALESCE((SELECT position('start_date' IN src)::text FROM body), '(absent)'),
            COALESCE((SELECT position('start_date' IN src) > position('c_source' IN src)
