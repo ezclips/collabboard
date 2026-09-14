@@ -30,11 +30,9 @@ import {
   createDeletePostCommand,
   createUpdatePostContentBestEffortCommand,
   createUpdatePostFieldsCommand,
-  createUpdatePostMetadataBestEffortCommand,
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
 import { isPersistedCanvasPostVisible } from '@/lib/domain/canvas/postHydrationVisibility';
-import { createCreateSectionsCommand } from '@/lib/domain/canvas/sections';
 import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import {
   canvasLinePersistencePayload,
@@ -43,7 +41,6 @@ import {
   type DrawingViewport,
 } from '@/lib/infra/drawing/canvasLineCoordinates';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
-import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
   findBoardById,
   findLinesByBoardId,
@@ -53,12 +50,55 @@ import {
 import type { Canvas, Padlet, CanvasLine, BoardSection } from '@/types/collabboard';
 import { generateAndSaveThumbnail, updateLastVisited } from '@/lib/collabboard/thumbnailGenerator';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
-import { toast } from 'sonner';
 import type { CanvasAction } from '../store/actions';
 
 interface UseCanvasDataParams {
   canvasId?: string;
   dispatch: React.Dispatch<CanvasAction>;
+}
+
+/**
+ * fetchData is read-only: this never writes board_sections or padlets. A
+ * padlet whose metadata.sectionId has no matching row is rendered against a
+ * section synthesized here, keyed by that same referenced id, so nothing
+ * downstream needs to know the read came back short.
+ */
+function synthesizeLocallyMissingSections(
+  canvas: Canvas | null,
+  sections: BoardSection[],
+  padlets: Padlet[],
+  boardId: string,
+): BoardSection[] {
+  const shouldSynthesize =
+    (canvas?.layout === 'grid' || canvas?.layout === 'columns') && padlets.length > 0;
+  if (!shouldSynthesize) return sections;
+
+  const existingSectionIds = new Set(sections.map((section) => String(section.id)));
+  const missingSectionIds = Array.from(
+    new Set(
+      padlets
+        .map((padlet) => (padlet.metadata as any)?.sectionId)
+        .filter((sectionId): sectionId is string => !!sectionId && !existingSectionIds.has(String(sectionId)))
+    )
+  );
+  if (missingSectionIds.length === 0) return sections;
+
+  const maxPosition = sections.reduce(
+    (max, section) => Math.max(max, Number(section.position) || 0),
+    -1
+  );
+
+  const syntheticSections = missingSectionIds.map((sectionId, index) => ({
+    id: Number(sectionId) || -(index + 1),
+    board_id: boardId,
+    title: `Recovered Section ${index + 1}`,
+    description: '',
+    position: maxPosition + index + 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  })) as unknown as BoardSection[];
+
+  return [...sections, ...syntheticSections];
 }
 
 export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
@@ -119,110 +159,26 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       const canvasData = canvasResult.value as unknown as Canvas | null;
       const padletData = padletsResult.value as unknown as Padlet[];
       const lineData = linesResult.ok ? (linesResult.value as unknown as CanvasLine[]) : null;
-      const sectionData = sectionsResult.ok ? (sectionsResult.value as unknown as BoardSection[]) : null;
 
       setCanvas(canvasData);
 
-      let nextSections = sectionData || [];
-      let nextPadlets = padletData || [];
+      const nextPadlets = padletData || [];
 
-      const shouldRecoverMissingSections =
-        (canvasData?.layout === 'grid' || canvasData?.layout === 'columns') &&
-        nextPadlets.length > 0;
-
-      if (shouldRecoverMissingSections) {
-        const existingSectionIds = new Set(nextSections.map((section) => String(section.id)));
-        const missingSectionIds = Array.from(
-          new Set(
-            nextPadlets
-              .map((padlet) => (padlet.metadata as any)?.sectionId)
-              .filter((sectionId): sectionId is string => !!sectionId && !existingSectionIds.has(String(sectionId)))
-          )
+      // fetchData is read-only: a board missing a section a padlet still
+      // references gets that section synthesized LOCALLY, for rendering
+      // only, using the padlet's own referenced id -- never repaired on the
+      // server. A failed sections read is left as a load error and must
+      // never be reinterpreted as "every referenced section is missing",
+      // which would otherwise drive this same synthesis off a false
+      // absence and overwrite whatever sections state already exists.
+      if (sectionsResult.ok) {
+        const sectionData = sectionsResult.value as unknown as BoardSection[];
+        setSections(
+          synthesizeLocallyMissingSections(canvasData, sectionData, nextPadlets, canvasId),
         );
-
-        if (missingSectionIds.length > 0) {
-          const maxPosition = nextSections.reduce(
-            (max, section) => Math.max(max, Number(section.position) || 0),
-            -1
-          );
-
-          try {
-            const recoveryPayload = missingSectionIds.map((_, index) => ({
-              title: `Recovered Section ${index + 1}`,
-              description: '',
-              position: maxPosition + index + 1,
-            }));
-
-            const createSections = createCreateSectionsCommand(createSectionsRepository());
-            const insertResult = await createSections(
-              { boardId: canvasId, sections: recoveryPayload },
-              { userId: null },
-            );
-            if (!insertResult.ok) throw insertResult.error.cause ?? insertResult.error;
-            const recoveredSections = insertResult.value as unknown as BoardSection[] | null;
-
-            const remap = new Map<string, string>();
-            (recoveredSections || []).forEach((section, index) => {
-              const oldId = missingSectionIds[index];
-              if (oldId) remap.set(oldId, String(section.id));
-            });
-
-            const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
-            await Promise.all(
-              nextPadlets
-                .filter((padlet) => remap.has(String((padlet.metadata as any)?.sectionId)))
-                .map(async (padlet) => {
-                  const oldSectionId = String((padlet.metadata as any)?.sectionId);
-                  const nextSectionId = remap.get(oldSectionId);
-                  if (!nextSectionId) return;
-                  const result = await updatePostMetadataBestEffort(
-                    {
-                      postId: padlet.id,
-                      metadata: {
-                        ...(padlet.metadata as any),
-                        sectionId: nextSectionId,
-                      },
-                    },
-                    { userId: null },
-                  );
-                  if (!result.ok) throw result.error.cause ?? result.error;
-                })
-            );
-
-            nextSections = [...nextSections, ...((recoveredSections as BoardSection[]) || [])];
-            nextPadlets = nextPadlets.map((padlet) => {
-              const oldSectionId = String((padlet.metadata as any)?.sectionId || '');
-              const nextSectionId = remap.get(oldSectionId);
-              if (!nextSectionId) return padlet;
-              return {
-                ...padlet,
-                metadata: {
-                  ...(padlet.metadata as any),
-                  sectionId: nextSectionId,
-                },
-              };
-            });
-
-            toast.warning('Recovered missing row/grid sections for this canvas.');
-          } catch (recoveryError) {
-            console.error('Failed to recover missing sections:', recoveryError);
-
-            const syntheticSections = missingSectionIds.map((oldId, index) => ({
-              id: Number(oldId) || -(index + 1),
-              board_id: canvasId,
-              title: `Recovered Section ${index + 1}`,
-              description: '',
-              position: maxPosition + index + 1,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })) as unknown as BoardSection[];
-
-            nextSections = [...nextSections, ...syntheticSections];
-          }
-        }
+      } else {
+        console.error('Error fetching sections:', sectionsResult.error.cause ?? sectionsResult.error);
       }
-
-      setSections(nextSections);
       // ENG-CANVAS-HYDRATION-H1: ghost cleanup now asks the shared domain
       // policy, which keeps a note/text post whose TITLE is meaningful even
       // when its body is deliberately blank. The former inline content-only
