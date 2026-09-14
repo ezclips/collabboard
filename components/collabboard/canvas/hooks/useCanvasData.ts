@@ -138,6 +138,15 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     boardPadletSnapshotRef.current = { boardId: loadedBoardIdRef.current, padlets };
   }, [padlets]);
 
+  // Monotonic request counter. Every fetchData call -- the initial load, a
+  // board switch, or a realtime-reconnect reconciliation -- claims the next
+  // number; only the call still holding the CURRENT number when its reads
+  // land is allowed to publish canvas/padlets/sections/lines, an error, or
+  // clear loading. An older, now-superseded completion (a different board,
+  // or a same-board request a newer one has overtaken) is discarded
+  // entirely rather than overwriting state a newer request already owns.
+  const requestGenerationRef = useRef(0);
+
   // ── fetchData ───────────────────────────────────────────────────────────────
   // === BEGIN DATA REGION: SUPABASE + REALTIME ===
   const fetchData = useCallback(async (showLoading = false) => {
@@ -146,6 +155,8 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       if (showLoading) setLoading(false);
       return;
     }
+    const requestId = ++requestGenerationRef.current;
+    const isCurrentRequest = () => requestGenerationRef.current === requestId;
     if (showLoading) setLoading(true);
     try {
       const canvasResult = await findBoardById(canvasId);
@@ -170,6 +181,10 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       const canvasData = canvasResult.value as unknown as Canvas | null;
       const padletData = padletsResult.value as unknown as Padlet[];
       const lineData = linesResult.ok ? (linesResult.value as unknown as CanvasLine[]) : null;
+
+      // A newer request already superseded this one while the reads were
+      // in flight -- its results are stale and must not publish.
+      if (!isCurrentRequest()) return;
 
       setCanvas(canvasData);
 
@@ -203,10 +218,13 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
         layer_plane: l.layer_plane ?? 'front',
       })));
     } catch (e) {
+      // A stale request's failure must not clear a newer request's loading
+      // state or publish an error over its (possibly successful) result.
+      if (!isCurrentRequest()) return;
       console.error('fetchData failed:', e);
       setError('Failed to load canvas.');
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading && isCurrentRequest()) setLoading(false);
     }
   }, [canvasId]);
 
@@ -243,6 +261,12 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     // Update last visited timestamp
     updateLastVisited(canvasId);
 
+    // Scoped to THIS effect run only -- a board switch or unmount tears the
+    // whole closure down, so none of this needs to survive across renders.
+    let active = true;
+    let hasJoinedOnce = false;
+    let reconnectPending = false;
+
     const channel = supabase.channel(`canvas-${canvasId}`);
     channel
       .on(
@@ -255,9 +279,20 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
         },
         handleRealtimePadletChange
       )
-      .subscribe();
+      .subscribe((status: string) => {
+        if (!active) return; // cleanup already ran -- never refetch after that
+        if (status !== 'SUBSCRIBED') return; // CHANNEL_ERROR/TIMED_OUT/CLOSED: no refetch while disconnected
+        if (!hasJoinedOnce) {
+          hasJoinedOnce = true;
+          return; // the initial join -- fetchData(true) above already covers it
+        }
+        if (reconnectPending) return; // coalesce duplicate rejoin notifications
+        reconnectPending = true;
+        fetchData().finally(() => { reconnectPending = false; });
+      });
 
     return () => {
+      active = false;
       supabase.removeChannel(channel);
 
       // Generate and save thumbnail when leaving the canvas -- only when
