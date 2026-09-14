@@ -248,6 +248,11 @@ export default function PdfWorkspaceLibraryPanel({
   // other board edit (move, resize, recolor, an unrelated document's
   // creation) leaves this number, and therefore the effect below, untouched.
   const imageInvalidation = useKnowledgePdfAreaImageInvalidation(documentId);
+  // PDF_IMAGE_LIBRARY_REFRESH_ERROR_VISIBILITY_CORRECTION_1 -- the Retry
+  // button's own trigger. A local counter, not a context signal: a retry is
+  // this panel instance's own request, scoped to whatever `documentId` it
+  // closes over at click time, and must never notify any other mounted panel.
+  const [retryToken, setRetryToken] = useState(0);
   const [filter, setFilter] = useState<PdfWorkspaceLibraryFilter>('all');
   const [imageState, setImageState] = useState<ImageState>({
     documentId,
@@ -289,7 +294,13 @@ export default function PdfWorkspaceLibraryPanel({
     return () => {
       generationRef.current += 1;
     };
-  }, [documentId, loadLibraryItems, imageInvalidation]);
+  }, [documentId, loadLibraryItems, imageInvalidation, retryToken]);
+
+  // Runs the SAME effect above (loader, generation guard, same-document
+  // preservation) rather than a second fetch path -- the effect already
+  // closes over the CURRENT documentId, so a retry can only ever refresh
+  // whichever document is open at the moment it's clicked.
+  const retryImages = () => setRetryToken((token) => token + 1);
 
   const images = imageState.documentId === documentId ? imageState.images : [];
   const imagesLoading = imageState.documentId === documentId && imageState.loading;
@@ -379,16 +390,40 @@ export default function PdfWorkspaceLibraryPanel({
           ) : images.length === 0 ? (
             <p className="text-[11px] text-gray-500">No PDF-derived images for this PDF yet.</p>
           ) : (
-            <ul className="space-y-1.5">
-              {images.map((image) => (
-                <ImageRow
-                  key={image.libraryItemId}
-                  image={image}
-                  documentId={documentId}
-                  onNavigateToImagePage={onNavigateToImagePage}
-                />
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-1.5">
+                {images.map((image) => (
+                  <ImageRow
+                    key={image.libraryItemId}
+                    image={image}
+                    documentId={documentId}
+                    onNavigateToImagePage={onNavigateToImagePage}
+                  />
+                ))}
+              </ul>
+              {/* PDF_IMAGE_LIBRARY_REFRESH_ERROR_VISIBILITY_CORRECTION_1 -- a
+                  background refresh (the panel already open, a creation or a
+                  retry re-triggering the effect above) that fails must not
+                  silently leave a stale list with no indication it happened.
+                  The images stay visible either way; this only adds the
+                  missing signal beside them. */}
+              {imagesError ? (
+                <div
+                  data-pdf-workspace-library-images-refresh-error="true"
+                  className="mt-2 flex items-center justify-between gap-2 rounded border border-red-100 bg-red-50 px-2 py-1.5"
+                >
+                  <span className="text-[11px] text-red-600">Couldn&apos;t refresh images.</span>
+                  <button
+                    type="button"
+                    data-pdf-workspace-library-images-retry="true"
+                    onClick={retryImages}
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-red-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : null}
+            </>
           )}
         </section>
       ) : null}

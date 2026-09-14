@@ -19,6 +19,12 @@ const IMG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 let notesByDocument = new Map<string, readonly KnowledgeSourceNoteSummary[]>();
 let highlightsByDocument = new Map<string, readonly KnowledgeSourceHighlight[]>();
+// PDF_IMAGE_LIBRARY_REFRESH_ERROR_VISIBILITY_CORRECTION_1: mutable, unlike
+// the constant-0 stub this replaced -- the error-visibility tests below need
+// to force a SAME-instance background refresh (the real trigger, in
+// production, for the "populated list + failed refresh" case) without
+// remounting the panel, which would lose the very continuity under test.
+let imageInvalidationByDocument = new Map<string, number>();
 
 vi.mock('@/components/collabboard/KnowledgeSourceReferenceContext', () => ({
   useKnowledgeSourceNoteSummariesForDocument: (documentId: string | null | undefined) => (
@@ -29,13 +35,9 @@ vi.mock('@/components/collabboard/KnowledgeSourceReferenceContext', () => ({
   useKnowledgeStandaloneHighlights: (documentId: string | null | undefined) => (
     documentId ? highlightsByDocument.get(documentId) ?? [] : []
   ),
-  // PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: none of the tests in THIS
-  // file exercise the refresh signal itself -- that is
-  // pdfAreaImageLibraryRefresh.integration.test.tsx, against the real
-  // provider and hook. Stubbed at a constant 0 here purely so this file's
-  // existing document-switch/filter/navigation coverage keeps mounting the
-  // real component unchanged.
-  useKnowledgePdfAreaImageInvalidation: () => 0,
+  useKnowledgePdfAreaImageInvalidation: (documentId: string | null | undefined) => (
+    documentId ? imageInvalidationByDocument.get(documentId) ?? 0 : 0
+  ),
 }));
 
 vi.mock('@/lib/collabboard/library', () => ({
@@ -51,6 +53,7 @@ beforeAll(() => {
 beforeEach(() => {
   notesByDocument = new Map();
   highlightsByDocument = new Map();
+  imageInvalidationByDocument = new Map();
 });
 
 const highlight = (
@@ -341,6 +344,137 @@ describe('PdfWorkspaceLibraryPanel', () => {
     await flush();
     expect(noteIds(container)).toEqual(['note-a']);
     expect(imageIds(container)).toEqual([IMG_A1]);
+  });
+
+  describe('PDF_IMAGE_LIBRARY_REFRESH_ERROR_VISIBILITY_CORRECTION_1', () => {
+    const errorBanner = (container: HTMLElement) =>
+      container.querySelector('[data-pdf-workspace-library-images-refresh-error="true"]');
+    const retryButton = (container: HTMLElement) =>
+      container.querySelector<HTMLButtonElement>('[data-pdf-workspace-library-images-retry="true"]');
+
+    /**
+     * A tiny harness that can force a SAME-instance background refresh (the
+     * real trigger is the creation-invalidation signal from
+     * PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1, mocked at a constant 0
+     * for every other test in this file) without remounting the panel --
+     * remounting would lose exactly the continuity this correction is about.
+     */
+    function ErrorHarness({ loadLibraryItems, documentId: initialDocumentId = DOC_A }: {
+      loadLibraryItems: () => Promise<readonly LibraryItem[]>;
+      documentId?: string;
+    }) {
+      const [documentId, setDocumentId] = useState(initialDocumentId);
+      const [, forceRender] = useState(0);
+      return (
+        <div>
+          <button
+            type="button"
+            data-testid="bump-invalidation"
+            onClick={() => {
+              imageInvalidationByDocument.set(DOC_A, (imageInvalidationByDocument.get(DOC_A) ?? 0) + 1);
+              forceRender((n) => n + 1);
+            }}
+          >
+            bump
+          </button>
+          <button type="button" data-testid="switch-to-doc-b" onClick={() => setDocumentId(DOC_B)}>B</button>
+          <PdfWorkspaceLibraryPanel documentId={documentId} onOpenNote={() => {}} loadLibraryItems={loadLibraryItems} />
+        </div>
+      );
+    }
+
+    it('populated list + refresh failure: existing images remain, and the error + Retry appear', async () => {
+      const good = [libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')];
+      let rejectRefresh!: (error: unknown) => void;
+      const refresh = new Promise<readonly LibraryItem[]>((_resolve, reject) => { rejectRefresh = reject; });
+      const loadLibraryItems = vi.fn().mockResolvedValueOnce(good).mockReturnValueOnce(refresh);
+
+      const container = mount(<ErrorHarness loadLibraryItems={loadLibraryItems} />);
+      await flush();
+      expect(imageIds(container)).toEqual([IMG_A1]);
+      expect(errorBanner(container)).toBeNull();
+      expect(retryButton(container)).toBeNull();
+
+      click(container.querySelector('[data-testid="bump-invalidation"]'));
+      rejectRefresh(new Error('network'));
+      await flush();
+
+      // Existing images are still there -- never silently replaced by empty
+      // or by the stand-alone "Could not load Library images." state, which
+      // is reserved for a failure with nothing already shown.
+      expect(imageIds(container)).toEqual([IMG_A1]);
+      expect(container.querySelector('[data-pdf-workspace-library-images-error="true"]')).toBeNull();
+      const banner = errorBanner(container);
+      expect(banner).not.toBeNull();
+      expect(banner?.textContent).toContain("Couldn't refresh images.");
+      expect(retryButton(container)).not.toBeNull();
+    });
+
+    it('Retry succeeds: updated images appear and the error clears', async () => {
+      const good = [libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')];
+      let rejectRefresh!: (error: unknown) => void;
+      const refresh = new Promise<readonly LibraryItem[]>((_resolve, reject) => { rejectRefresh = reject; });
+      const updated = [
+        libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z'),
+        libraryImage(IMG_A2, DOC_A, 2, '2026-09-08T11:00:00.000Z'),
+      ];
+      const loadLibraryItems = vi.fn()
+        .mockResolvedValueOnce(good)
+        .mockReturnValueOnce(refresh)
+        .mockResolvedValueOnce(updated);
+
+      const container = mount(<ErrorHarness loadLibraryItems={loadLibraryItems} />);
+      await flush();
+      click(container.querySelector('[data-testid="bump-invalidation"]'));
+      rejectRefresh(new Error('network'));
+      await flush();
+      expect(errorBanner(container)).not.toBeNull();
+
+      click(retryButton(container));
+      await flush();
+
+      expect(loadLibraryItems).toHaveBeenCalledTimes(3);
+      expect(imageIds(container)).toEqual([IMG_A1, IMG_A2]);
+      expect(errorBanner(container)).toBeNull();
+    });
+
+    it('switching documents during a pending Retry cannot publish the old document\'s stale response', async () => {
+      const goodA = [libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')];
+      let rejectRefresh!: (error: unknown) => void;
+      const refresh = new Promise<readonly LibraryItem[]>((_resolve, reject) => { rejectRefresh = reject; });
+      let resolveStaleRetry!: (items: readonly LibraryItem[]) => void;
+      const staleRetry = new Promise<readonly LibraryItem[]>((resolve) => { resolveStaleRetry = resolve; });
+      const goodB = [libraryImage(IMG_B, DOC_B, 1, '2026-09-08T09:00:00.000Z')];
+
+      const loadLibraryItems = vi.fn()
+        .mockResolvedValueOnce(goodA)     // initial DOC_A load
+        .mockReturnValueOnce(refresh)     // background refresh -> fails
+        .mockReturnValueOnce(staleRetry)  // Retry click -> stays pending
+        .mockResolvedValueOnce(goodB);    // DOC_B's own load after the switch
+
+      const container = mount(<ErrorHarness loadLibraryItems={loadLibraryItems} />);
+      await flush();
+      click(container.querySelector('[data-testid="bump-invalidation"]'));
+      rejectRefresh(new Error('network'));
+      await flush();
+      expect(errorBanner(container)).not.toBeNull();
+
+      click(retryButton(container));
+      // Before the retry resolves, the user opens a different PDF.
+      click(container.querySelector('[data-testid="switch-to-doc-b"]'));
+      await flush();
+
+      expect(imageIds(container)).toEqual([IMG_B]);
+      expect(container.querySelector('[data-pdf-workspace-library-document]')
+        ?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_B);
+
+      // The stale DOC_A retry finally resolves, late.
+      resolveStaleRetry([libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')]);
+      await flush();
+
+      // DOC_B's list is untouched -- the stale response was never published.
+      expect(imageIds(container)).toEqual([IMG_B]);
+    });
   });
 
   it('filters All, Notes, and Images without ever clearing or widening active PDF scope', async () => {
