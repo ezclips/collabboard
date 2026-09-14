@@ -119,12 +119,23 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   const locallyModifiedPadletsRef = useRef<Set<string>>(new Set());
   // Track IDs of lines we've just modified locally
   const locallyModifiedLinesRef = useRef<Set<string>>(new Set());
-  // Track padlets for thumbnail generation on cleanup
+  // Track padlets for the optimistic-rollback lookup in updateDrawingLayoutPadlet
   const padletsRef = useRef<Padlet[]>([]);
+  // The board the CURRENT padlets state actually belongs to. Written only
+  // where fetchData sets padlets FOR a specific board, using that fetch's
+  // own closed-over canvasId -- a late/out-of-order resolution for a
+  // superseded board can never relabel this as the active one.
+  const loadedBoardIdRef = useRef<string>('');
+  // {boardId, padlets} paired atomically for thumbnail generation on
+  // cleanup, so a cleanup can never pair one board's id with another
+  // board's rows -- there is no separate, independently-read padlets ref
+  // the cleanup trusts alongside its own canvasId.
+  const boardPadletSnapshotRef = useRef<{ boardId: string; padlets: Padlet[] }>({ boardId: '', padlets: [] });
 
-  // Keep padletsRef in sync with padlets state
+  // Keep padletsRef and the paired snapshot in sync with padlets state.
   useEffect(() => {
     padletsRef.current = padlets;
+    boardPadletSnapshotRef.current = { boardId: loadedBoardIdRef.current, padlets };
   }, [padlets]);
 
   // ── fetchData ───────────────────────────────────────────────────────────────
@@ -183,6 +194,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       // policy, which keeps a note/text post whose TITLE is meaningful even
       // when its body is deliberately blank. The former inline content-only
       // predicate discarded such posts during hydration.
+      loadedBoardIdRef.current = canvasId;
       setPadlets(nextPadlets.filter(isPersistedCanvasPostVisible));
       // Normalize: rows written before the layer_plane column existed arrive as null.
       // Treat them as 'front' at runtime; the DB default handles new inserts.
@@ -248,11 +260,14 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     return () => {
       supabase.removeChannel(channel);
 
-      // Generate and save thumbnail when leaving the canvas
-      // Using the ref to get current padlets without causing re-runs
-      const currentPadlets = padletsRef.current;
-      if (canvasId && currentPadlets.length > 0) {
-        generateAndSaveThumbnail(canvasId, currentPadlets.map(p => ({
+      // Generate and save thumbnail when leaving the canvas -- only when
+      // the paired snapshot's own boardId still matches THIS effect's
+      // canvasId. A switch to a new board, or a pending/failed fetch for
+      // one, must never pair this cleanup's board id with another board's
+      // rows: it simply does not save rather than guess.
+      const snapshot = boardPadletSnapshotRef.current;
+      if (canvasId && snapshot.boardId === canvasId && snapshot.padlets.length > 0) {
+        generateAndSaveThumbnail(canvasId, snapshot.padlets.map(p => ({
           id: p.id,
           position_x: p.position_x || 0,
           position_y: p.position_y || 0,
