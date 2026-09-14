@@ -110,11 +110,24 @@ const KnowledgeStandaloneHighlightContext = createContext<KnowledgeStandaloneHig
 const KnowledgeHighlightDeleteContext =
   createContext<((highlightId: string) => void | Promise<void>) | null>(null);
 
+/**
+ * PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1 -- document id -> a counter
+ * bumped ONLY when a PDF rectangle-selection image is actually created for
+ * that document. Not derived from `padlets`: Notes/highlights above are, and
+ * that is exactly why they re-render on every unrelated move/resize/color
+ * edit those posts get. The PDF Images list must refresh on creation alone,
+ * so it needs a signal that changes for no other reason -- this is the
+ * smallest one, carried on the same provider as everything else here.
+ */
+const KnowledgePdfAreaImageInvalidationContext =
+  createContext<Readonly<Record<string, number>>>({});
+
 /** Stable empty result so a padlet with no references never re-renders on identity. */
 const NO_REFERENCES: readonly SourceReference[] = [];
 const NO_BACKLINKS: readonly KnowledgeSourceBacklink[] = [];
 const NO_NOTE_COLORS: KnowledgeSourceNoteColors = new Map();
 const NO_NOTE_SUMMARIES: readonly KnowledgeSourceNoteSummary[] = [];
+const NO_PDF_AREA_IMAGE_INVALIDATION: Readonly<Record<string, number>> = {};
 
 export function KnowledgeSourceReferenceProvider({
   index,
@@ -124,6 +137,7 @@ export function KnowledgeSourceReferenceProvider({
   onOpenSourceReference = null,
   highlights = EMPTY_KNOWLEDGE_STANDALONE_HIGHLIGHT_INDEX,
   onDeleteHighlight = null,
+  pdfAreaImageInvalidation = NO_PDF_AREA_IMAGE_INVALIDATION,
   children,
 }: {
   index: KnowledgeSourceReferenceIndex;
@@ -139,6 +153,8 @@ export function KnowledgeSourceReferenceProvider({
   highlights?: KnowledgeStandaloneHighlightIndex;
   /** Omitting it withholds every Trash action, offering read-only context. */
   onDeleteHighlight?: ((highlightId: string) => void | Promise<void>) | null;
+  /** Optional: omitting it leaves the PDF Images list refreshing only on document change. */
+  pdfAreaImageInvalidation?: Readonly<Record<string, number>>;
   children: React.ReactNode;
 }) {
   // All four are already new Maps only when they actually changed, so this
@@ -151,7 +167,9 @@ export function KnowledgeSourceReferenceProvider({
             <KnowledgeSourceOpenContext.Provider value={onOpenSourceReference}>
               <KnowledgeStandaloneHighlightContext.Provider value={highlights}>
                 <KnowledgeHighlightDeleteContext.Provider value={onDeleteHighlight}>
-                  {children}
+                  <KnowledgePdfAreaImageInvalidationContext.Provider value={pdfAreaImageInvalidation}>
+                    {children}
+                  </KnowledgePdfAreaImageInvalidationContext.Provider>
                 </KnowledgeHighlightDeleteContext.Provider>
               </KnowledgeStandaloneHighlightContext.Provider>
             </KnowledgeSourceOpenContext.Provider>
@@ -278,4 +296,18 @@ export function useKnowledgeStandaloneHighlights(
 export function useKnowledgeHighlightDelete():
 ((highlightId: string) => void | Promise<void>) | null {
   return useContext(KnowledgeHighlightDeleteContext);
+}
+
+/**
+ * PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1 -- the PDF Images refresh
+ * signal for one document. Changes ONLY when a rectangle-selection image was
+ * actually created for that document; a surface outside the provider, or a
+ * document with no creations yet, both read as 0, the same neutral starting
+ * point.
+ */
+export function useKnowledgePdfAreaImageInvalidation(
+  documentId: string | null | undefined,
+): number {
+  const invalidation = useContext(KnowledgePdfAreaImageInvalidationContext);
+  return documentId ? (invalidation[documentId] ?? 0) : 0;
 }

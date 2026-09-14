@@ -864,6 +864,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   /** Guards the create call, so a second Save cannot make a second card. */
   const [isPdfAreaDraftSaving, setIsPdfAreaDraftSaving] = useState(false);
   /**
+   * PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1 -- document id -> a counter
+   * bumped exactly once per confirmed area-image creation for that document,
+   * never on a failed create and never on any other board edit. This is the
+   * PDF Images panel's refresh signal; nothing reads the number itself.
+   */
+  const [pdfAreaImageInvalidation, setPdfAreaImageInvalidation] = useState<Record<string, number>>({});
+  /**
    * R6I-C1. The draft's own title.
    *
    * Kept here rather than on a stand-in padlet: the draft is not a card, and
@@ -7565,13 +7572,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           ))
         : [...prev, createdPadlet]
     ));
+    // PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1 -- confirmed creation only:
+    // this line and no other is what tells that PDF's Images panel to reload.
+    // A retry of the SAME idempotent draft (see the comment above) bumps this
+    // again, which is harmless -- the panel refetches the Library's own state
+    // and reconciles by id, not by counting invalidations.
+    const invalidatedDocumentId = pendingPdfAreaDraft.payload.sourceDocumentId;
+    setPdfAreaImageInvalidation((prev) => ({
+      ...prev,
+      [invalidatedDocumentId]: (prev[invalidatedDocumentId] ?? 0) + 1,
+    }));
     setPendingPdfAreaDraft(null);
     setPdfAreaDraftTitle('');
     clearKnowledgeAreaDraftPreview();
     toast.success('Image added from PDF area');
   }, [
     canvasId, pendingPdfAreaDraft, isPdfAreaDraftSaving, pdfAreaDraftTitle,
-    setPadlets,
+    setPadlets, setPdfAreaImageInvalidation,
   ]);
 
   const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
@@ -8654,6 +8671,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       noteSummaries={knowledgeSourceNoteSummaries}
       onOpenSourceReference={requestKnowledgeSourceOpen}
       highlights={knowledgeHighlightIndex}
+      pdfAreaImageInvalidation={pdfAreaImageInvalidation}
       /*
         PDF-R6K-H2B-C1. Withheld from a viewer, so no Trash is offered at all.
         An affordance, not the boundary: H2A's RLS refuses a viewer's delete

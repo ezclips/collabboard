@@ -5,6 +5,7 @@ import { Crosshair, RotateCcw } from 'lucide-react';
 import {
   useKnowledgeSourceNoteSummariesForDocument,
   useKnowledgeStandaloneHighlights,
+  useKnowledgePdfAreaImageInvalidation,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import {
   SOURCE_NOTE_PLACEMENT_MIME,
@@ -242,6 +243,11 @@ export default function PdfWorkspaceLibraryPanel({
   // The board's own highlight index, read in the same direction as the Notes
   // above: this panel issues no query of its own for either.
   const highlights = useKnowledgeStandaloneHighlights(documentId);
+  // PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1 -- bumps ONLY when a
+  // rectangle-selection image was confirmed created for THIS document. Every
+  // other board edit (move, resize, recolor, an unrelated document's
+  // creation) leaves this number, and therefore the effect below, untouched.
+  const imageInvalidation = useKnowledgePdfAreaImageInvalidation(documentId);
   const [filter, setFilter] = useState<PdfWorkspaceLibraryFilter>('all');
   const [imageState, setImageState] = useState<ImageState>({
     documentId,
@@ -253,7 +259,17 @@ export default function PdfWorkspaceLibraryPanel({
 
   useEffect(() => {
     const generation = ++generationRef.current;
-    setImageState({ documentId, loading: true, error: false, images: [] });
+    // A same-document run (the common case once `imageInvalidation` is what
+    // retriggered this effect) keeps the currently-rendered images in state
+    // while the refetch is in flight -- clearing them here would flash a
+    // populated list to empty for a background refresh nobody asked to see.
+    // A genuine document switch still resets to the loading/empty state, so
+    // a different PDF's images are never shown against the new document id.
+    setImageState((prev) => (
+      prev.documentId === documentId
+        ? { ...prev, loading: true, error: false }
+        : { documentId, loading: true, error: false, images: [] }
+    ));
 
     void loadLibraryItems()
       .then((items) => {
@@ -267,13 +283,13 @@ export default function PdfWorkspaceLibraryPanel({
       })
       .catch(() => {
         if (generation !== generationRef.current) return;
-        setImageState({ documentId, loading: false, error: true, images: [] });
+        setImageState((prev) => ({ ...prev, documentId, loading: false, error: true }));
       });
 
     return () => {
       generationRef.current += 1;
     };
-  }, [documentId, loadLibraryItems]);
+  }, [documentId, loadLibraryItems, imageInvalidation]);
 
   const images = imageState.documentId === documentId ? imageState.images : [];
   const imagesLoading = imageState.documentId === documentId && imageState.loading;
@@ -352,11 +368,11 @@ export default function PdfWorkspaceLibraryPanel({
       {showImages ? (
         <section data-pdf-workspace-library-images="true">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Images</p>
-          {imagesLoading ? (
+          {imagesLoading && images.length === 0 ? (
             <p data-pdf-workspace-library-images-loading="true" className="text-[11px] text-gray-500">
               Loading images…
             </p>
-          ) : imagesError ? (
+          ) : imagesError && images.length === 0 ? (
             <p data-pdf-workspace-library-images-error="true" className="text-[11px] text-red-500">
               Could not load Library images.
             </p>

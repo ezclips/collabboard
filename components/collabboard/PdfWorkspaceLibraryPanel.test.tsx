@@ -29,6 +29,13 @@ vi.mock('@/components/collabboard/KnowledgeSourceReferenceContext', () => ({
   useKnowledgeStandaloneHighlights: (documentId: string | null | undefined) => (
     documentId ? highlightsByDocument.get(documentId) ?? [] : []
   ),
+  // PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: none of the tests in THIS
+  // file exercise the refresh signal itself -- that is
+  // pdfAreaImageLibraryRefresh.integration.test.tsx, against the real
+  // provider and hook. Stubbed at a constant 0 here purely so this file's
+  // existing document-switch/filter/navigation coverage keeps mounting the
+  // real component unchanged.
+  useKnowledgePdfAreaImageInvalidation: () => 0,
 }));
 
 vi.mock('@/lib/collabboard/library', () => ({
