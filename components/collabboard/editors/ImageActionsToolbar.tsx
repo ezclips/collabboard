@@ -12,6 +12,7 @@ import {
     Italic,
     Strikethrough,
     Underline,
+    RotateCcw,
 } from 'lucide-react';
 
 export type ToolbarMode = 'image' | 'caption';
@@ -29,6 +30,15 @@ interface ImageActionsToolbarProps {
     onSelectColor: (color: string) => void;
     onSelectHighlight: (color: string) => void;
     onEditImage: () => void;
+    /**
+     * CROP_ORIGINAL_PRESERVATION_1. Restores the placement to its
+     * recoverable pre-crop original. Offered only via `canResetCrop` --
+     * omitted entirely (not merely disabled) once available, so an
+     * existing record with nothing to restore to never shows a false
+     * control.
+     */
+    onResetCrop?: () => void;
+    canResetCrop?: boolean;
     onDrawOnTop: () => void;
     onAddReaction: () => void;
     onComment: () => void;
@@ -107,6 +117,8 @@ export default function ImageActionsToolbar({
     onSelectColor,
     onSelectHighlight,
     onEditImage,
+    onResetCrop,
+    canResetCrop = false,
     onDrawOnTop,
     onAddReaction,
     onComment,
@@ -174,6 +186,12 @@ export default function ImageActionsToolbar({
     const imageModeTools = [
         { id: 'caption', icon: TextCursor, label: 'Caption', onClick: handleToggleMode, active: isCaptionMode },
         { id: 'edit', icon: Crop, label: 'Edit image', onClick: onEditImage, active: false },
+        // CROP_ORIGINAL_PRESERVATION_1. Present only when a recoverable
+        // original exists -- an absent tool, not a disabled one, so a
+        // record with nothing to restore never offers a false control.
+        ...(canResetCrop && onResetCrop
+            ? [{ id: 'reset-crop', icon: RotateCcw, label: 'Reset Crop', onClick: onResetCrop, active: false }]
+            : []),
         // R6G-C1. Visible label shortened to "Draw"; the tooltip keeps the
         // longer description. "Draw on top" was the widest label in the column
         // and was what made this toolbar wider than its caption-mode state.

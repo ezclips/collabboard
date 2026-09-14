@@ -26,6 +26,7 @@ import { usePadletSave } from '@/hooks/canvas';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import { deriveCropOriginalImageUrl } from '@/lib/infra/collabboard/imageDurableContent';
 
 vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
 
@@ -303,6 +304,9 @@ describe('CORRECTION_2: the direct draw and crop callbacks answer to live author
         log.helperCalls.push(payload);
         return outcome;
       },
+      // CROP_ORIGINAL_PRESERVATION_1: the real helper, so the extracted crop
+      // callback resolves the same free variable production code does.
+      deriveCropOriginalImageUrl,
       drawingPadlet: { id: PADLET_ID, library_item_id: LIBRARY_ID, title: 'Image', width: 300, height: 200, metadata: {} },
       cropPadlet: { id: PADLET_ID, library_item_id: LIBRARY_ID, title: 'Image', width: 300, height: 200, metadata: {} },
       setIsDrawingMode: (v: boolean) => { log.modeSets.push(`draw:${v}`); },

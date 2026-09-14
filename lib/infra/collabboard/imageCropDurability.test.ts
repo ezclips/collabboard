@@ -10,13 +10,18 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveImagePostDisplaySrc } from '../../domain/canvas/imagePostDisplaySource';
 import { resolveLibraryImagePreviewSrc } from '../../domain/canvas/libraryImagePreviewSource';
-import { persistDurableImageContent } from './imageDurableContent';
+import {
+  persistDurableImageContent,
+  deriveCropOriginalImageUrl,
+  hasRecoverableCropOriginal,
+  buildResetCropMetadata,
+} from './imageDurableContent';
 
 const BASE = 'data:image/png;base64,ORIGINALBASE';
 const ANNOTATED = 'data:image/png;base64,ANNOTATEDCOMPOSITE';
 const CROPPED = 'data:image/png;base64,CROPPEDCURRENT';
 
-function fakeClient() {
+function fakeClient(failOn?: string) {
   const writes: { table: string; values: Record<string, unknown>; id: string }[] = [];
   return {
     writes,
@@ -24,7 +29,12 @@ function fakeClient() {
       from(table: string) {
         return {
           update(values: Record<string, unknown>) {
-            return { eq: (_c: string, id: string) => { writes.push({ table, values, id }); return Promise.resolve({ error: null }); } };
+            return {
+              eq: (_c: string, id: string) => {
+                writes.push({ table, values, id });
+                return Promise.resolve({ error: table === failOn ? { message: 'denied' } : null });
+              },
+            };
           },
         };
       },
@@ -157,6 +167,252 @@ describe('crop writes durable Image content', () => {
   });
 });
 
+/**
+ * CANVAS_IMAGE_CROP_ORIGINAL_PRESERVATION_IMPLEMENTATION_1.
+ *
+ * Product decisions under test: crop is placement-local (never touches the
+ * linked Library row); the FIRST pre-crop durable image is preserved as an
+ * immutable reset source; repeated crops keep that same first original;
+ * Reset Crop restores it and clears crop/drawing-derived state.
+ *
+ * `simulateCrop`/`simulateReset` are exactly the composition
+ * CanvasClient.tsx's crop and Reset Crop arms use -- the same pure helpers,
+ * the same `persistDurableImageContent` call, the same `syncLibrary: false`
+ * -- so these are real production helpers under real control, not a mock of
+ * the behavior.
+ */
+async function simulateCrop(
+  client: ReturnType<typeof fakeClient>['client'],
+  padlet: { id: string; library_item_id: string | null; title: string; width: number; height: number; metadata: Record<string, unknown> },
+  croppedDataUrl: string,
+  mayContinue: () => boolean = () => true,
+) {
+  const originalImageUrl = deriveCropOriginalImageUrl(padlet.metadata);
+  const metadata: Record<string, unknown> = {
+    ...padlet.metadata,
+    imageUrl: croppedDataUrl,
+    drawing: null,
+    drawingPaths: null,
+    drawingText: null,
+    ...(originalImageUrl ? { originalImageUrl } : {}),
+  };
+  const outcome = await persistDurableImageContent(client, {
+    mayContinue,
+    padletId: padlet.id,
+    libraryItemId: padlet.library_item_id,
+    syncLibrary: false,
+    imageUrl: croppedDataUrl,
+    metadata,
+    title: padlet.title,
+    width: padlet.width,
+    height: padlet.height,
+  });
+  return { outcome, metadata };
+}
+
+async function simulateReset(
+  client: ReturnType<typeof fakeClient>['client'],
+  padlet: { id: string; library_item_id: string | null; title: string; width: number; height: number; metadata: Record<string, unknown> },
+  original: string,
+  mayContinue: () => boolean = () => true,
+) {
+  const metadata = buildResetCropMetadata(padlet.metadata, original);
+  const outcome = await persistDurableImageContent(client, {
+    mayContinue,
+    padletId: padlet.id,
+    libraryItemId: padlet.library_item_id,
+    syncLibrary: false,
+    imageUrl: original,
+    metadata,
+    title: padlet.title,
+    width: padlet.width,
+    height: padlet.height,
+  });
+  return { outcome, metadata };
+}
+
+describe('CROP_ORIGINAL_PRESERVATION_1: crop preserves the first original', () => {
+  it('A. the first crop stores the pre-crop original (the BASE, not the annotated composite) and persists the crop', async () => {
+    const p = annotatedPdfAreaPost();
+    const { client, writes } = fakeClient();
+
+    const { outcome, metadata } = await simulateCrop(client, p, CROPPED);
+
+    expect(outcome).toBe('complete');
+    expect(metadata.originalImageUrl).toBe(BASE);
+    expect(metadata.originalImageUrl).not.toBe(ANNOTATED);
+    expect(writes[0].values.file_url).toBe(CROPPED);
+    expect((writes[0].values.metadata as Record<string, unknown>).imageUrl).toBe(CROPPED);
+    expect((writes[0].values.metadata as Record<string, unknown>).originalImageUrl).toBe(BASE);
+  });
+
+  it('B. a second crop preserves the FIRST original, never the previous crop\'s own result', async () => {
+    const p = annotatedPdfAreaPost();
+    const { client: client1 } = fakeClient();
+    const { metadata: afterFirst } = await simulateCrop(client1, p, CROPPED);
+
+    const RECROPPED = 'data:image/png;base64,RECROPPED';
+    const afterFirstCropPost = { ...p, metadata: afterFirst };
+    const { client: client2, writes: writes2 } = fakeClient();
+    const { metadata: afterSecond } = await simulateCrop(client2, afterFirstCropPost, RECROPPED);
+
+    expect(afterSecond.originalImageUrl).toBe(BASE);
+    expect(afterSecond.originalImageUrl).not.toBe(CROPPED);
+    expect(writes2[0].values.file_url).toBe(RECROPPED);
+  });
+
+  it('C. cropping a Library-linked placement makes zero library_items updates', async () => {
+    const p = annotatedPdfAreaPost();
+    const { client, writes } = fakeClient();
+    await simulateCrop(client, p, CROPPED);
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+
+  it('D. a second placement sharing the same library_item_id is never named at all', async () => {
+    const p = annotatedPdfAreaPost();
+    const { client, writes } = fakeClient();
+    await simulateCrop(client, p, CROPPED);
+    // Every write targets post-1; post-2 (a hypothetical second placement
+    // reusing lib-1) and lib-1 itself are never addressed by any write.
+    expect(writes.every((w) => w.id === 'post-1')).toBe(true);
+    expect(writes.some((w) => w.id === 'post-2' || w.id === 'lib-1')).toBe(false);
+  });
+
+  it('G. initial authority denial for crop makes zero placement and Library writes', async () => {
+    const p = annotatedPdfAreaPost();
+    const { client, writes } = fakeClient();
+    const { outcome } = await simulateCrop(client, p, CROPPED, () => false);
+    expect(outcome).toBe('denied');
+    expect(writes).toEqual([]);
+  });
+
+  it('L. a rejected placement write is raised, never reported as a saved crop', async () => {
+    const p = annotatedPdfAreaPost();
+    const placementFails = fakeClient('padlets');
+    await expect(simulateCrop(placementFails.client, p, CROPPED)).rejects.toBeTruthy();
+    // The write was attempted (and recorded as failed) -- nothing beyond it.
+    expect(placementFails.writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+});
+
+describe('CROP_ORIGINAL_PRESERVATION_1: Reset Crop', () => {
+  /** A placement already cropped once, per the shape `simulateCrop` produces. */
+  const croppedPost = () => ({
+    ...annotatedPdfAreaPost(),
+    metadata: { ...annotatedPdfAreaPost().metadata, originalImageUrl: BASE, imageUrl: CROPPED, drawing: null, drawingPaths: null, drawingText: null },
+  });
+
+  it('E. reset restores the exact original and clears original/crop/drawing metadata', async () => {
+    const p = croppedPost();
+    const { client, writes } = fakeClient();
+
+    const { outcome, metadata } = await simulateReset(client, p, BASE);
+
+    expect(outcome).toBe('complete');
+    expect(metadata.imageUrl).toBe(BASE);
+    expect(metadata).not.toHaveProperty('originalImageUrl');
+    expect(metadata).not.toHaveProperty('drawing');
+    expect(metadata).not.toHaveProperty('drawingPaths');
+    expect(metadata).not.toHaveProperty('drawingText');
+    expect(writes[0].values.file_url).toBe(BASE);
+    expect((writes[0].values.metadata as Record<string, unknown>).imageUrl).toBe(BASE);
+  });
+
+  it('F. reset makes zero library_items updates', async () => {
+    const p = croppedPost();
+    const { client, writes } = fakeClient();
+    await simulateReset(client, p, BASE);
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+
+  it('G. initial authority denial for reset makes zero placement and Library writes', async () => {
+    const p = croppedPost();
+    const { client, writes } = fakeClient();
+    const { outcome } = await simulateReset(client, p, BASE, () => false);
+    expect(outcome).toBe('denied');
+    expect(writes).toEqual([]);
+  });
+
+  it('G. live (post-write) revocation is still reported truthfully, with zero Library writes', async () => {
+    const p = croppedPost();
+    const { client, writes } = fakeClient();
+    let calls = 0;
+    const { outcome } = await simulateReset(client, p, BASE, () => { calls += 1; return calls === 1; });
+    expect(outcome).toBe('placement-only');
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+
+  it('H. a record without a recoverable original does not offer a false reset', () => {
+    const neverCropped = annotatedPdfAreaPost();
+    expect(hasRecoverableCropOriginal(neverCropped.metadata)).toBe(false);
+  });
+
+  it('L. a rejected placement write is raised, and the reset source is not cleared', async () => {
+    const p = croppedPost();
+    const placementFails = fakeClient('padlets');
+    await expect(simulateReset(placementFails.client, p, BASE)).rejects.toBeTruthy();
+    expect(placementFails.writes.map((w) => w.table)).toEqual(['padlets']);
+    // Nothing else was attempted -- the row's own originalImageUrl, which
+    // only a successful write could have removed, was never touched.
+    expect(placementFails.writes).toHaveLength(1);
+  });
+});
+
+describe('CROP_ORIGINAL_PRESERVATION_1: compatibility', () => {
+  it('J. PDF-area provenance and source metadata remain intact through crop and reset', async () => {
+    const p = annotatedPdfAreaPost();
+    const before = JSON.parse(JSON.stringify(p.metadata.source));
+
+    const { client: client1 } = fakeClient();
+    const { metadata: afterCrop } = await simulateCrop(client1, p, CROPPED);
+    expect(afterCrop.source).toEqual(before);
+
+    const { client: client2 } = fakeClient();
+    const { metadata: afterReset } = await simulateReset(
+      client2, { ...p, metadata: afterCrop }, afterCrop.originalImageUrl as string,
+    );
+    expect(afterReset.source).toEqual(before);
+  });
+
+  it('K. duplicate/import metadata compatibility remains intact through crop and reset', async () => {
+    const p = {
+      ...annotatedPdfAreaPost(),
+      metadata: {
+        ...annotatedPdfAreaPost().metadata,
+        importProvider: 'google-drive',
+        importItemId: 'item-1',
+        importFileName: 'photo.png',
+      },
+    };
+
+    const { client: client1 } = fakeClient();
+    const { metadata: afterCrop } = await simulateCrop(client1, p, CROPPED);
+    expect(afterCrop.importProvider).toBe('google-drive');
+    expect(afterCrop.importItemId).toBe('item-1');
+    expect(afterCrop.importFileName).toBe('photo.png');
+
+    const { client: client2 } = fakeClient();
+    const { metadata: afterReset } = await simulateReset(
+      client2, { ...p, metadata: afterCrop }, afterCrop.originalImageUrl as string,
+    );
+    expect(afterReset.importProvider).toBe('google-drive');
+    expect(afterReset.importItemId).toBe('item-1');
+    expect(afterReset.importFileName).toBe('photo.png');
+  });
+
+  it('I. an ordinary (non-PDF, non-linked) Image crops and resets the same way', async () => {
+    const p = { id: 'post-legacy', library_item_id: null, title: 'Legacy', width: 300, height: 200, metadata: { imageUrl: BASE } };
+    const { client: client1 } = fakeClient();
+    const { metadata: afterCrop } = await simulateCrop(client1, p, CROPPED);
+    expect(afterCrop.originalImageUrl).toBe(BASE);
+
+    const { client: client2, writes: writes2 } = fakeClient();
+    const { metadata: afterReset } = await simulateReset(client2, { ...p, metadata: afterCrop }, BASE);
+    expect(afterReset.imageUrl).toBe(BASE);
+    expect(writes2.map((w) => w.table)).toEqual(['padlets']);
+  });
+});
+
 describe('the crop arm is wired to the durable authority', () => {
   const canvasClient = fs.readFileSync(
     path.join(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
@@ -191,6 +447,40 @@ describe('the crop arm is wired to the durable authority', () => {
       canvasClient.indexOf('\n', canvasClient.indexOf('imageUrl=', drawStart)));
     expect(drawImageUrlProp).toContain('drawingPadlet.metadata?.imageUrl');
     expect(drawImageUrlProp).not.toContain('resolveImagePostDisplaySrc');
+  });
+});
+
+/**
+ * CROP_ORIGINAL_PRESERVATION_1 wiring. Supplementary to the behavioral
+ * proofs above (which exercise the real helpers directly) -- this only
+ * confirms CanvasClient.tsx's crop and Reset Crop arms actually call
+ * through them, rather than reimplementing the logic inline.
+ */
+describe('the crop and Reset Crop arms are wired to placement-only persistence', () => {
+  const canvasClient = fs.readFileSync(
+    path.join(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+  const cropArm = canvasClient.slice(
+    canvasClient.indexOf('<ImageCropLayer'),
+    canvasClient.indexOf('/>', canvasClient.indexOf('Failed to save cropped image')));
+  const resetArm = canvasClient.slice(
+    canvasClient.indexOf('onResetCrop={async'),
+    canvasClient.indexOf('onDrawOnTop={() => {', canvasClient.indexOf('onResetCrop={async')));
+
+  it('crop derives the original via the shared helper and opts out of Library sync', () => {
+    expect(cropArm).toContain('deriveCropOriginalImageUrl(cropPadlet.metadata)');
+    expect(cropArm).toContain('syncLibrary: false');
+  });
+
+  it('Reset Crop exists, builds its metadata via the shared helper, and opts out of Library sync too', () => {
+    expect(resetArm).toContain('buildResetCropMetadata(');
+    expect(resetArm).toContain('syncLibrary: false');
+    expect(resetArm).toContain('persistDurableImageContent');
+    expect(resetArm).not.toContain('updatePostMetadataBestEffort');
+  });
+
+  it('the toolbar only offers Reset Crop when a recoverable original exists', () => {
+    expect(canvasClient).toContain('canResetCrop={Boolean(activeImageToolbarOriginalUrl)}');
+    expect(canvasClient).toContain('hasRecoverableCropOriginal(activeImageToolbarPadlet?.metadata)');
   });
 });
 

@@ -52,6 +52,14 @@ export interface DurableImageContentInput {
   readonly title?: string | null;
   readonly width?: number | null;
   readonly height?: number | null;
+  /**
+   * CROP_ORIGINAL_PRESERVATION_1: whether this edit should also sync the
+   * linked Library item. Defaults to true -- unchanged behavior for every
+   * existing caller (Draw, the Image editor's save). Crop and Reset Crop
+   * explicitly pass false: crop is placement-local, so it must never
+   * rewrite a Library object another placement may also reference.
+   */
+  readonly syncLibrary?: boolean;
 }
 
 /**
@@ -112,7 +120,7 @@ export async function persistDurableImageContent(
   // must not happen is the SECOND write starting without authority.
   if (!input.mayContinue()) return 'placement-only';
 
-  const linkedLibraryItemId = input.libraryItemId ?? null;
+  const linkedLibraryItemId = (input.syncLibrary ?? true) ? (input.libraryItemId ?? null) : null;
   if (!linkedLibraryItemId) return 'complete';
 
   const durable = await client
@@ -133,4 +141,51 @@ export async function persistDurableImageContent(
     .eq('id', linkedLibraryItemId);
   if (durable?.error) throw durable.error;
   return 'complete';
+}
+
+/**
+ * CROP_ORIGINAL_PRESERVATION_1: the reset source for a crop about to
+ * overwrite metadata.imageUrl. Whatever the placement already remembers (a
+ * prior crop's own original) is preserved unchanged; a new one is derived
+ * -- from the durable BASE image, never the current composite/drawing --
+ * only when none exists yet. This is what makes repeated crops keep
+ * resetting to the SAME first original rather than drifting to whatever
+ * the previous crop produced.
+ */
+export function deriveCropOriginalImageUrl(
+  metadata: Record<string, unknown> | null | undefined,
+): string | undefined {
+  const existing = metadata?.originalImageUrl;
+  if (typeof existing === 'string' && existing) return existing;
+  const base = metadata?.imageUrl;
+  return typeof base === 'string' && base ? base : undefined;
+}
+
+/** Whether a placement's metadata carries a recoverable pre-crop original. */
+export function hasRecoverableCropOriginal(
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  const original = metadata?.originalImageUrl;
+  return typeof original === 'string' && original.length > 0;
+}
+
+/**
+ * The metadata Reset Crop persists: imageUrl restored to the preserved
+ * original, and every field that no longer describes it removed --
+ * originalImageUrl itself (nothing left to reset to a second time) and the
+ * baked crop/drawing composite (it was pixels of the image just discarded).
+ * Everything else -- caption, card styling, PDF-area provenance, import
+ * identity -- is carried through untouched.
+ */
+export function buildResetCropMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+  originalImageUrl: string,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(metadata ?? {}) };
+  delete next.originalImageUrl;
+  delete next.drawing;
+  delete next.drawingPaths;
+  delete next.drawingText;
+  next.imageUrl = originalImageUrl;
+  return next;
 }

@@ -10,7 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveImagePostDisplaySrc } from '../../domain/canvas/imagePostDisplaySource';
-import { persistDurableImageContent } from './imageDurableContent';
+import {
+  persistDurableImageContent,
+  deriveCropOriginalImageUrl,
+  hasRecoverableCropOriginal,
+  buildResetCropMetadata,
+} from './imageDurableContent';
 
 interface RecordedWrite {
   readonly table: string;
@@ -324,5 +329,121 @@ describe('persistDurableImageContent authority lifecycle', () => {
     expect(entryGuardSaw, 'the caller was authorized when it decided to proceed').toBe(true);
     expect(outcome, 'the helper refuses independently').toBe('denied');
     expect(writes, 'zero primary write').toEqual([]);
+  });
+});
+
+/**
+ * CANVAS_IMAGE_CROP_ORIGINAL_PRESERVATION_IMPLEMENTATION_1.
+ *
+ * Product decision: crop is placement-local and must never rewrite the
+ * Library item a placement reuses. `syncLibrary` is the narrowly-typed,
+ * defaulted opt-out this helper gained for that -- every caller that
+ * omits it keeps writing the linked Library row exactly as before.
+ */
+describe('syncLibrary opt-out', () => {
+  const linkedInput = (overrides: Partial<Parameters<typeof persistDurableImageContent>[1]> = {}) => ({
+    mayContinue: () => true,
+    padletId: 'post-1',
+    libraryItemId: 'lib-1',
+    imageUrl: 'https://img/new.png',
+    metadata: { imageUrl: 'https://img/new.png' },
+    title: 'Image',
+    width: 300,
+    height: 200,
+    ...overrides,
+  });
+
+  it('I. omitted, the default preserves existing behavior: the Library item still syncs', async () => {
+    const { client, writes } = fakeClient();
+    const outcome = await persistDurableImageContent(client, linkedInput());
+    expect(outcome).toBe('complete');
+    expect(writes.map((w) => w.table)).toEqual(['padlets', 'library_items']);
+  });
+
+  it('C. syncLibrary: false makes zero library_items writes even when linked', async () => {
+    const { client, writes } = fakeClient();
+    const outcome = await persistDurableImageContent(client, linkedInput({ syncLibrary: false }));
+    expect(outcome).toBe('complete');
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+    expect(writes[0].values.file_url).toBe('https://img/new.png');
+  });
+
+  it('F. an unlinked placement with syncLibrary: false still just saves the placement', async () => {
+    const { client, writes } = fakeClient();
+    const outcome = await persistDurableImageContent(
+      client,
+      linkedInput({ libraryItemId: null, syncLibrary: false }),
+    );
+    expect(outcome).toBe('complete');
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+
+  it('does not weaken the post-write authority check: a live revocation with syncLibrary: false is still reported', async () => {
+    const { client, writes } = fakeClient();
+    let calls = 0;
+    const outcome = await persistDurableImageContent(
+      client,
+      linkedInput({ syncLibrary: false, mayContinue: () => { calls += 1; return calls === 1; } }),
+    );
+    // No Library write was ever going to happen (syncLibrary: false), but the
+    // helper's own second probe still ran and still reports the revocation
+    // truthfully rather than reporting 'complete' by omission.
+    expect(outcome).toBe('placement-only');
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+});
+
+describe('crop-original pure helpers', () => {
+  const BASE = '/api/boards/b/padlets/p/image';
+  const ANNOTATED = 'data:image/png;base64,ANNOTATED';
+  const FIRST_CROP = 'data:image/png;base64,FIRSTCROP';
+
+  it('A. derives the original from the durable BASE image, never drawing/composite pixels', () => {
+    const metadata = { imageUrl: BASE, drawing: ANNOTATED, drawingPaths: [{ strokeWidth: 2 }] };
+    expect(deriveCropOriginalImageUrl(metadata)).toBe(BASE);
+    expect(deriveCropOriginalImageUrl(metadata)).not.toBe(ANNOTATED);
+  });
+
+  it('B. once stored, a later crop preserves it -- never drifts to the previous crop\'s result', () => {
+    const afterFirstCrop = { originalImageUrl: BASE, imageUrl: FIRST_CROP };
+    expect(deriveCropOriginalImageUrl(afterFirstCrop)).toBe(BASE);
+    expect(deriveCropOriginalImageUrl(afterFirstCrop)).not.toBe(FIRST_CROP);
+  });
+
+  it('nothing to preserve when the base image itself is absent', () => {
+    expect(deriveCropOriginalImageUrl({})).toBeUndefined();
+    expect(deriveCropOriginalImageUrl(null)).toBeUndefined();
+    expect(deriveCropOriginalImageUrl(undefined)).toBeUndefined();
+  });
+
+  it('H. hasRecoverableCropOriginal is false with nothing stored -- never a false reset offer', () => {
+    expect(hasRecoverableCropOriginal({ imageUrl: BASE })).toBe(false);
+    expect(hasRecoverableCropOriginal({})).toBe(false);
+    expect(hasRecoverableCropOriginal(null)).toBe(false);
+    expect(hasRecoverableCropOriginal({ originalImageUrl: '' })).toBe(false);
+    expect(hasRecoverableCropOriginal({ originalImageUrl: BASE })).toBe(true);
+  });
+
+  it('E. buildResetCropMetadata restores imageUrl and clears original/crop/drawing fields, keeping the rest', () => {
+    const metadata = {
+      originalImageUrl: BASE,
+      imageUrl: 'data:image/png;base64,CROPPED',
+      drawing: ANNOTATED,
+      drawingPaths: [{ strokeWidth: 2 }],
+      drawingText: [{ text: 'hi' }],
+      caption: 'kept',
+      cardColor: '#ffffff',
+    };
+    const reset = buildResetCropMetadata(metadata, BASE);
+
+    expect(reset.imageUrl).toBe(BASE);
+    expect(reset).not.toHaveProperty('originalImageUrl');
+    expect(reset).not.toHaveProperty('drawing');
+    expect(reset).not.toHaveProperty('drawingPaths');
+    expect(reset).not.toHaveProperty('drawingText');
+    expect(reset.caption).toBe('kept');
+    expect(reset.cardColor).toBe('#ffffff');
+    // The caller's object is not mutated in place.
+    expect(metadata.imageUrl).toBe('data:image/png;base64,CROPPED');
   });
 });

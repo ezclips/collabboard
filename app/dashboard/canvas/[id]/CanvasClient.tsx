@@ -107,7 +107,12 @@ import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
 } from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
-import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
+import {
+  persistDurableImageContent,
+  deriveCropOriginalImageUrl,
+  hasRecoverableCropOriginal,
+  buildResetCropMetadata,
+} from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
@@ -1033,6 +1038,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
     : null;
   const activeImageToolbarSrc = getImageEditSource(activeImageToolbarPadlet);
+  // CROP_ORIGINAL_PRESERVATION_1: Reset Crop is offered only when this
+  // placement's own metadata carries a recoverable pre-crop original.
+  const activeImageToolbarOriginalUrl = hasRecoverableCropOriginal(activeImageToolbarPadlet?.metadata)
+    ? ((activeImageToolbarPadlet!.metadata as { originalImageUrl?: string }).originalImageUrl ?? null)
+    : null;
   // === END SELECTION REGION ===
 
   // === BEGIN LINE REGION ===
@@ -10575,18 +10585,28 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                        * provenance) and unrelated keys survive -- cropping the
                        * derived Image does not change which PDF page it came
                        * from.
+                       *
+                       * CROP_ORIGINAL_PRESERVATION_1: crop is placement-local
+                       * (product decision), so it never syncs the linked
+                       * Library item -- another placement may reuse the same
+                       * one. Before this FIRST overwrite of metadata.imageUrl,
+                       * the pre-crop/pre-draw original is captured as a reset
+                       * source; a later crop preserves it unchanged.
                        */
+                      const originalImageUrl = deriveCropOriginalImageUrl(cropPadlet.metadata);
                       const metadata = {
                         ...cropPadlet.metadata,
                         imageUrl: croppedDataUrl,
                         drawing: null,
                         drawingPaths: null,
                         drawingText: null,
+                        ...(originalImageUrl ? { originalImageUrl } : {}),
                       };
                       const outcome = await persistDurableImageContent(supabase as never, {
                         mayContinue: canEditBoardContentProbe,
                         padletId: cropPadlet.id,
                         libraryItemId: (cropPadlet as { library_item_id?: string | null }).library_item_id ?? null,
+                        syncLibrary: false,
                         imageUrl: croppedDataUrl,
                         metadata,
                         title: cropPadlet.title,
@@ -11279,6 +11299,38 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setImageToolbarPadletId(null);
                   setCropPadlet(activeImageToolbarPadlet);
                   setIsCropMode(true);
+                }}
+                canResetCrop={Boolean(activeImageToolbarOriginalUrl)}
+                onResetCrop={async () => {
+                  // Live, and first -- see the Crop arm above.
+                  if (!canEditBoardContentRef.current) return;
+                  const original = activeImageToolbarOriginalUrl;
+                  if (!original) return;
+                  try {
+                    /**
+                     * CROP_ORIGINAL_PRESERVATION_1: restores file_url and
+                     * metadata.imageUrl to the preserved original and drops
+                     * originalImageUrl plus the baked crop/drawing composite
+                     * -- they no longer describe it. Placement-local, like
+                     * Crop: the linked Library item is never touched.
+                     */
+                    const metadata = buildResetCropMetadata(activeImageToolbarPadlet.metadata, original);
+                    const outcome = await persistDurableImageContent(supabase as never, {
+                      mayContinue: canEditBoardContentProbe,
+                      padletId: activeImageToolbarPadlet.id,
+                      libraryItemId: (activeImageToolbarPadlet as { library_item_id?: string | null }).library_item_id ?? null,
+                      syncLibrary: false,
+                      imageUrl: original,
+                      metadata,
+                      title: activeImageToolbarPadlet.title,
+                      width: activeImageToolbarPadlet.width,
+                      height: activeImageToolbarPadlet.height,
+                    });
+                    if (outcome === 'denied') return;
+                    fetchData();
+                  } catch (err) {
+                    console.error('Failed to reset crop:', err);
+                  }
                 }}
                 onDrawOnTop={() => {
                   closeAllToolbars();
