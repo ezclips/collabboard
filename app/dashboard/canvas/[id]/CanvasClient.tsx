@@ -110,8 +110,8 @@ import {
 import {
   persistDurableImageContent,
   deriveCropOriginalImageUrl,
-  hasRecoverableCropOriginal,
   buildResetCropMetadata,
+  resolveCropResetSource,
 } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
@@ -549,6 +549,30 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * dependency churn.
    */
   const canEditBoardContentProbe = useCallback(() => canEditBoardContentRef.current, []);
+  // CROP_ORIGINAL_PRESERVATION_CORRECTION_1: the ONE reset operation both toolbars call.
+  const resetImageCrop = useCallback(async (padlet: Padlet) => {
+    if (!canEditBoardContentRef.current) return;
+    const original = resolveCropResetSource(padlet.metadata, padlet.board_id, padlet.id);
+    if (!original) return;
+    try {
+      const metadata = buildResetCropMetadata(padlet.metadata, original);
+      const outcome = await persistDurableImageContent(supabase as never, {
+        mayContinue: canEditBoardContentProbe,
+        padletId: padlet.id,
+        libraryItemId: (padlet as { library_item_id?: string | null }).library_item_id ?? null,
+        syncLibrary: false,
+        imageUrl: original,
+        metadata,
+        title: padlet.title,
+        width: padlet.width,
+        height: padlet.height,
+      });
+      if (outcome === 'denied') return;
+      fetchData();
+    } catch (err) {
+      console.error('Failed to reset crop:', err);
+    }
+  }, [supabase, canEditBoardContentProbe, fetchData]);
 
 
   /**
@@ -1038,10 +1062,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
     : null;
   const activeImageToolbarSrc = getImageEditSource(activeImageToolbarPadlet);
-  // CROP_ORIGINAL_PRESERVATION_1: Reset Crop is offered only when this
-  // placement's own metadata carries a recoverable pre-crop original.
-  const activeImageToolbarOriginalUrl = hasRecoverableCropOriginal(activeImageToolbarPadlet?.metadata)
-    ? ((activeImageToolbarPadlet!.metadata as { originalImageUrl?: string }).originalImageUrl ?? null)
+  // CROP_ORIGINAL_PRESERVATION_CORRECTION_1: the shared recoverable-source decision.
+  const activeImageToolbarOriginalUrl = activeImageToolbarPadlet
+    ? resolveCropResetSource(activeImageToolbarPadlet.metadata, activeImageToolbarPadlet.board_id, activeImageToolbarPadlet.id)
     : null;
   // === END SELECTION REGION ===
 
@@ -10149,6 +10172,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     commentAccessMode={commentAccessMode}
                     commentModeMutations={commentModeMutations}
                     onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
+                    onResetImageCrop={resetImageCrop}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
@@ -11301,37 +11325,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setIsCropMode(true);
                 }}
                 canResetCrop={Boolean(activeImageToolbarOriginalUrl)}
-                onResetCrop={async () => {
-                  // Live, and first -- see the Crop arm above.
-                  if (!canEditBoardContentRef.current) return;
-                  const original = activeImageToolbarOriginalUrl;
-                  if (!original) return;
-                  try {
-                    /**
-                     * CROP_ORIGINAL_PRESERVATION_1: restores file_url and
-                     * metadata.imageUrl to the preserved original and drops
-                     * originalImageUrl plus the baked crop/drawing composite
-                     * -- they no longer describe it. Placement-local, like
-                     * Crop: the linked Library item is never touched.
-                     */
-                    const metadata = buildResetCropMetadata(activeImageToolbarPadlet.metadata, original);
-                    const outcome = await persistDurableImageContent(supabase as never, {
-                      mayContinue: canEditBoardContentProbe,
-                      padletId: activeImageToolbarPadlet.id,
-                      libraryItemId: (activeImageToolbarPadlet as { library_item_id?: string | null }).library_item_id ?? null,
-                      syncLibrary: false,
-                      imageUrl: original,
-                      metadata,
-                      title: activeImageToolbarPadlet.title,
-                      width: activeImageToolbarPadlet.width,
-                      height: activeImageToolbarPadlet.height,
-                    });
-                    if (outcome === 'denied') return;
-                    fetchData();
-                  } catch (err) {
-                    console.error('Failed to reset crop:', err);
-                  }
-                }}
+                onResetCrop={() => resetImageCrop(activeImageToolbarPadlet)}
                 onDrawOnTop={() => {
                   closeAllToolbars();
                   setImageToolbarPadletId(null);

@@ -12,6 +12,7 @@ import { selectDocumentModalDestination, type DocumentModalDestination } from '@
 import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
 import { resizeImageOuterBoxToAspect } from '@/lib/domain/canvas/imageResizeGeometry';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
+import { resolveCropResetSource } from '@/lib/infra/collabboard/imageDurableContent';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -262,6 +263,8 @@ export interface FreeformPadletCardsProps {
   // component is an event adapter only -- it owns no parsing, validation or
   // persistence of its own, it just forwards the native drop event.
   onKnowledgeSourceClipDropOnNote?: (event: React.DragEvent, targetPadlet: Padlet) => boolean;
+  // CROP_ORIGINAL_PRESERVATION_CORRECTION_1: CanvasClient's one shared Reset Crop operation.
+  onResetImageCrop?: (padlet: Padlet) => void;
 }
 
 // PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
@@ -422,7 +425,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     requestOpenDocument,
     commentAccessMode = 'manage',
     commentModeMutations,
-    onKnowledgeSourceClipDropOnNote,
+    onKnowledgeSourceClipDropOnNote, onResetImageCrop,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -959,6 +962,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
    * visible on the card and invisible in the modal meant to preview it.
    */
   const activeImageToolbarSrc = resolveImagePostDisplaySrc(activeImageToolbarPadlet);
+  // CROP_ORIGINAL_PRESERVATION_CORRECTION_1: same shared decision CanvasClient uses.
+  const activeImageToolbarResetSource = activeImageToolbarPadlet
+    ? resolveCropResetSource(activeImageToolbarPadlet.metadata, activeImageToolbarPadlet.board_id, activeImageToolbarPadlet.id)
+    : null;
 
   const openFreeformImageEditModal = React.useCallback((padlet: Padlet) => {
     // imageToolbarPadletId drives a self-contained `fixed inset-0` overlay
@@ -5319,6 +5326,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   setCropPadlet(activeImageToolbarPadlet);
                   setIsCropMode(true);
                 }}
+                canResetCrop={Boolean(activeImageToolbarResetSource)}
+                onResetCrop={() => onResetImageCrop?.(activeImageToolbarPadlet)}
                 onDrawOnTop={() => {
                   // `imageToolbar: true` -- closeAllToolbars() would otherwise
                   // clear the very overlay being retained.

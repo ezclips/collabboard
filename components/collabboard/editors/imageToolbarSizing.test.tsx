@@ -132,6 +132,41 @@ describe('R6G-C1 label: "Draw on top" becomes "Draw"', () => {
   });
 });
 
+// --- CANVAS_IMAGE_CROP_ORIGINAL_PRESERVATION_CORRECTION_1: Reset Crop ----
+//
+// Both CanvasClient's non-freeform toolbar and FreeformPadletCards' live
+// toolbar render this SAME component, so a real mount+click here proves the
+// button's own display/hide and click-to-callback wiring for both callers
+// at once -- not a regex stand-in.
+describe('CORRECTION_1: Reset Crop is present only when offered, and clicking it reaches the caller', () => {
+  it('A. absent when canResetCrop is false (or omitted) -- not merely disabled', () => {
+    render(<ImageActionsToolbar {...toolbarProps} mode="image" onResetCrop={vi.fn()} />);
+    expect(screen.queryByText('Reset Crop')).toBeNull();
+    cleanup();
+    render(<ImageActionsToolbar {...toolbarProps} mode="image" canResetCrop={false} onResetCrop={vi.fn()} />);
+    expect(screen.queryByText('Reset Crop')).toBeNull();
+  });
+
+  it('A. present when canResetCrop is true', () => {
+    render(<ImageActionsToolbar {...toolbarProps} mode="image" canResetCrop onResetCrop={vi.fn()} />);
+    expect(screen.getByText('Reset Crop')).toBeTruthy();
+  });
+
+  it('B. clicking it invokes the caller\'s real handler -- exactly what both toolbars wire it to', () => {
+    const onResetCrop = vi.fn();
+    render(<ImageActionsToolbar {...toolbarProps} mode="image" canResetCrop onResetCrop={onResetCrop} />);
+    fireEvent.click(screen.getByTitle('Reset Crop'));
+    expect(onResetCrop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not disturb the other image-mode controls', () => {
+    render(<ImageActionsToolbar {...toolbarProps} mode="image" canResetCrop onResetCrop={vi.fn()} />);
+    for (const label of ['Caption', 'Edit image', 'Draw', 'Reaction', 'Comment', 'Color']) {
+      expect(screen.getByText(label), label).toBeTruthy();
+    }
+  });
+});
+
 // --- Bottom (horizontal) Draw toolbar ------------------------------------
 
 describe('R6G-C1 bottom toolbar: wide enough that nothing scrolls', () => {

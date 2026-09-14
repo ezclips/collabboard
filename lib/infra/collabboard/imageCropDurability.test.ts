@@ -15,7 +15,9 @@ import {
   deriveCropOriginalImageUrl,
   hasRecoverableCropOriginal,
   buildResetCropMetadata,
+  resolveCropResetSource,
 } from './imageDurableContent';
+import { knowledgePdfAreaImageUrl } from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
 
 const BASE = 'data:image/png;base64,ORIGINALBASE';
 const ANNOTATED = 'data:image/png;base64,ANNOTATEDCOMPOSITE';
@@ -358,6 +360,101 @@ describe('CROP_ORIGINAL_PRESERVATION_1: Reset Crop', () => {
   });
 });
 
+/**
+ * CANVAS_IMAGE_CROP_ORIGINAL_PRESERVATION_CORRECTION_1 -- M2: a pre-existing
+ * PDF-area crop (made before commit 4e0fb7d) has no originalImageUrl, but its
+ * provenance still proves the deterministic PDF-area URL as a reset source.
+ * `resolveCropResetSource` is the real function both toolbars call; every
+ * case here drives it directly, not a source-regex stand-in.
+ */
+describe('CORRECTION_1 M2: the PDF-area provenance fallback', () => {
+  const BOARD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const PADLET_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const DOC_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const DETERMINISTIC = knowledgePdfAreaImageUrl(BOARD_ID, PADLET_ID)!;
+
+  /** A PDF-area crop made before originalImageUrl existed: valid provenance,
+   *  current imageUrl already drifted from the deterministic capture. */
+  const preExistingPdfAreaCrop = () => ({
+    id: PADLET_ID, board_id: BOARD_ID, library_item_id: null as string | null,
+    title: 'Diagram', width: 320, height: 200,
+    metadata: {
+      imageUrl: CROPPED,
+      source: { kind: 'knowledge-pdf-area', knowledgeDocumentId: DOC_ID, pageNumber: 3, region: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } },
+    } as Record<string, unknown>,
+  });
+
+  it('D. a normal upload -- no originalImageUrl, no PDF-area provenance -- offers no reset source', () => {
+    expect(resolveCropResetSource({ imageUrl: 'https://cdn.example/photo.jpg' }, BOARD_ID, PADLET_ID)).toBeNull();
+  });
+
+  it('E. malformed or incomplete metadata.source offers no reset source and never throws', () => {
+    const cases: Record<string, unknown>[] = [
+      { imageUrl: CROPPED, source: { kind: 'knowledge-pdf-area' } },
+      { imageUrl: CROPPED, source: { kind: 'knowledge-pdf-area', knowledgeDocumentId: 'not-a-uuid', pageNumber: 1, region: { x: 0, y: 0, width: 1, height: 1 } } },
+      { imageUrl: CROPPED, source: { kind: 'knowledge-pdf-area', knowledgeDocumentId: DOC_ID, pageNumber: 0, region: { x: 0, y: 0, width: 1, height: 1 } } },
+      { imageUrl: CROPPED, source: 'not-an-object' },
+      { imageUrl: CROPPED, source: null },
+      { imageUrl: CROPPED },
+    ];
+    for (const metadata of cases) {
+      expect(() => resolveCropResetSource(metadata, BOARD_ID, PADLET_ID)).not.toThrow();
+      expect(resolveCropResetSource(metadata, BOARD_ID, PADLET_ID)).toBeNull();
+    }
+  });
+
+  it('F. a pre-existing PDF-area crop without originalImageUrl recovers the canonical deterministic URL', () => {
+    const p = preExistingPdfAreaCrop();
+    const source = resolveCropResetSource(p.metadata, p.board_id, p.id);
+    expect(source).toBe(DETERMINISTIC);
+    expect(source).not.toBe(CROPPED);
+  });
+
+  it('G. resetting it restores the deterministic URL, preserves provenance, clears derived fields, zero Library writes', async () => {
+    const p = { ...preExistingPdfAreaCrop(), library_item_id: 'lib-9' }; // linked or not: reset never syncs
+    const { client, writes } = fakeClient();
+    const source = resolveCropResetSource(p.metadata, p.board_id, p.id)!;
+
+    const { outcome, metadata } = await simulateReset(client, p, source);
+
+    expect(outcome).toBe('complete');
+    expect(metadata.imageUrl).toBe(DETERMINISTIC);
+    expect(metadata.source).toEqual(p.metadata.source);
+    expect(metadata).not.toHaveProperty('originalImageUrl');
+    expect(metadata).not.toHaveProperty('drawing');
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+  });
+
+  it('H. after a successful PDF-area reset, the reset source disappears -- current image already equals the recovered original', async () => {
+    const p = preExistingPdfAreaCrop();
+    const { client } = fakeClient();
+    const source = resolveCropResetSource(p.metadata, p.board_id, p.id)!;
+
+    const { metadata: afterReset } = await simulateReset(client, p, source);
+
+    expect(afterReset.imageUrl).toBe(DETERMINISTIC);
+    expect(resolveCropResetSource(afterReset, p.board_id, p.id)).toBeNull();
+  });
+
+  it('I. missing or invalid board/padlet identity never fabricates a reset source', () => {
+    const p = preExistingPdfAreaCrop();
+    expect(resolveCropResetSource(p.metadata, null, p.id)).toBeNull();
+    expect(resolveCropResetSource(p.metadata, undefined, p.id)).toBeNull();
+    expect(resolveCropResetSource(p.metadata, p.board_id, null)).toBeNull();
+    expect(resolveCropResetSource(p.metadata, 'not-a-uuid', p.id)).toBeNull();
+    expect(resolveCropResetSource(p.metadata, p.board_id, 'not-a-uuid')).toBeNull();
+  });
+
+  it('C/M/N. same operation, freeform context: writes only padlets, zero Library updates, syncLibrary default untouched elsewhere', async () => {
+    const p = { ...preExistingPdfAreaCrop(), library_item_id: 'lib-shared' };
+    const { client, writes } = fakeClient();
+    const source = resolveCropResetSource(p.metadata, p.board_id, p.id)!;
+    await simulateReset(client, p, source);
+    expect(writes.map((w) => w.table)).toEqual(['padlets']);
+    expect(writes.every((w) => w.id === PADLET_ID)).toBe(true);
+  });
+});
+
 describe('CROP_ORIGINAL_PRESERVATION_1: compatibility', () => {
   it('J. PDF-area provenance and source metadata remain intact through crop and reset', async () => {
     const p = annotatedPdfAreaPost();
@@ -451,36 +548,61 @@ describe('the crop arm is wired to the durable authority', () => {
 });
 
 /**
- * CROP_ORIGINAL_PRESERVATION_1 wiring. Supplementary to the behavioral
- * proofs above (which exercise the real helpers directly) -- this only
- * confirms CanvasClient.tsx's crop and Reset Crop arms actually call
- * through them, rather than reimplementing the logic inline.
+ * CROP_ORIGINAL_PRESERVATION_CORRECTION_1 wiring. Supplementary to the
+ * behavioral proofs above and below (which exercise the real helpers
+ * directly) -- this only confirms CanvasClient.tsx's crop arm, its ONE
+ * shared resetImageCrop operation, and FreeformPadletCards' live toolbar
+ * all call through the same real functions rather than reimplementing.
  */
-describe('the crop and Reset Crop arms are wired to placement-only persistence', () => {
+describe('the crop arm and the ONE shared Reset Crop operation are wired to placement-only persistence', () => {
   const canvasClient = fs.readFileSync(
     path.join(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+  const freeform = fs.readFileSync(
+    path.join(process.cwd(), 'components/collabboard/canvas/ui/FreeformPadletCards.tsx'), 'utf8');
   const cropArm = canvasClient.slice(
     canvasClient.indexOf('<ImageCropLayer'),
     canvasClient.indexOf('/>', canvasClient.indexOf('Failed to save cropped image')));
-  const resetArm = canvasClient.slice(
-    canvasClient.indexOf('onResetCrop={async'),
-    canvasClient.indexOf('onDrawOnTop={() => {', canvasClient.indexOf('onResetCrop={async')));
+  const resetImageCropFn = canvasClient.slice(
+    canvasClient.indexOf('const resetImageCrop = useCallback'),
+    canvasClient.indexOf('}, [supabase, canEditBoardContentProbe, fetchData]);'));
 
   it('crop derives the original via the shared helper and opts out of Library sync', () => {
     expect(cropArm).toContain('deriveCropOriginalImageUrl(cropPadlet.metadata)');
     expect(cropArm).toContain('syncLibrary: false');
   });
 
-  it('Reset Crop exists, builds its metadata via the shared helper, and opts out of Library sync too', () => {
-    expect(resetArm).toContain('buildResetCropMetadata(');
-    expect(resetArm).toContain('syncLibrary: false');
-    expect(resetArm).toContain('persistDurableImageContent');
-    expect(resetArm).not.toContain('updatePostMetadataBestEffort');
+  it('resetImageCrop -- the ONE shared operation -- resolves the shared source, builds via the shared helper, and opts out of Library sync', () => {
+    expect(resetImageCropFn).toContain('resolveCropResetSource(');
+    expect(resetImageCropFn).toContain('buildResetCropMetadata(');
+    expect(resetImageCropFn).toContain('syncLibrary: false');
+    expect(resetImageCropFn).toContain('persistDurableImageContent');
+    expect(resetImageCropFn).not.toContain('updatePostMetadataBestEffort');
   });
 
-  it('the toolbar only offers Reset Crop when a recoverable original exists', () => {
+  it('the non-freeform toolbar calls resetImageCrop -- no second inline reset implementation', () => {
     expect(canvasClient).toContain('canResetCrop={Boolean(activeImageToolbarOriginalUrl)}');
-    expect(canvasClient).toContain('hasRecoverableCropOriginal(activeImageToolbarPadlet?.metadata)');
+    expect(canvasClient).toContain("onResetCrop={() => resetImageCrop(activeImageToolbarPadlet)}");
+    // The old inline body -- a duplicate of resetImageCrop -- must be gone.
+    expect(canvasClient).not.toContain('onResetCrop={async () => {');
+  });
+
+  it('CanvasClient hands FreeformPadletCards the SAME resetImageCrop function', () => {
+    expect(canvasClient).toContain('onResetImageCrop={resetImageCrop}');
+  });
+
+  it('FreeformPadletCards\' live toolbar calls the passed-in operation -- no second implementation', () => {
+    expect(freeform).toContain('canResetCrop={Boolean(activeImageToolbarResetSource)}');
+    expect(freeform).toContain('onResetCrop={() => onResetImageCrop?.(activeImageToolbarPadlet)}');
+    expect(freeform).not.toContain('persistDurableImageContent');
+    // Wired into the LIVE toolbar (the portalled overlay), not the dead,
+    // permanently-disabled `{false && ...}` in-card branch -- the wiring
+    // above appears exactly once.
+    expect(freeform.match(/canResetCrop=\{Boolean\(activeImageToolbarResetSource\)\}/g) ?? []).toHaveLength(1);
+  });
+
+  it('both toolbars resolve the reset source through the same shared function', () => {
+    expect(canvasClient).toContain('resolveCropResetSource(activeImageToolbarPadlet.metadata, activeImageToolbarPadlet.board_id, activeImageToolbarPadlet.id)');
+    expect(freeform).toContain('resolveCropResetSource(activeImageToolbarPadlet.metadata, activeImageToolbarPadlet.board_id, activeImageToolbarPadlet.id)');
   });
 });
 

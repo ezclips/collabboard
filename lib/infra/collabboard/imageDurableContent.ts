@@ -13,6 +13,8 @@
  * the second arm drifted from the first in the first place.
  */
 
+import { parseKnowledgePdfAreaProvenance, knowledgePdfAreaImageUrl } from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
+
 export interface DurableImageContentClient {
   from(table: string): {
     update(values: Record<string, unknown>): {
@@ -188,4 +190,22 @@ export function buildResetCropMetadata(
   delete next.drawingText;
   next.imageUrl = originalImageUrl;
   return next;
+}
+
+// CROP_ORIGINAL_PRESERVATION_CORRECTION_1: the one recoverable-source decision both
+// toolbars share -- metadata.originalImageUrl, else (pre-existing PDF-area crops) the
+// canonical deterministic PDF-area URL its own provenance proves, no network/storage/DB
+// read, only while the current image has drifted from it (so a reset re-hides Reset Crop).
+export function resolveCropResetSource(
+  metadata: Record<string, unknown> | null | undefined,
+  boardId: string | null | undefined,
+  padletId: string | null | undefined,
+): string | null {
+  const explicit = metadata?.originalImageUrl;
+  if (typeof explicit === 'string' && explicit) return explicit;
+  const provenance = parseKnowledgePdfAreaProvenance(metadata ?? null);
+  const deterministic = provenance && typeof boardId === 'string' && typeof padletId === 'string'
+    ? knowledgePdfAreaImageUrl(boardId, padletId) : null;
+  const current = metadata?.imageUrl;
+  return deterministic && typeof current === 'string' && current !== deterministic ? deterministic : null;
 }
