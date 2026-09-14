@@ -14,6 +14,8 @@ import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canva
 import { Palette, PenTool, X, Strikethrough, Trash2, BookOpen } from 'lucide-react';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import { knowledgeSourceEditorLabel } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
+import { getKnowledgeSourceCardRegionCrop } from '@/lib/domain/knowledge/knowledgeSourceCardRegionCrop';
+import KnowledgeSourceRegionCrop from '../KnowledgeSourceRegionCrop';
 import { ColorPickerContent } from '../ColorPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { contrastIconColor } from '../shells/CardShell';
@@ -74,6 +76,17 @@ interface NoteEditorProps {
   initialDetachedComments?: DetachedCommentData[];
   initialBadgeColor?: string;
   initialTextColor?: string;
+  /**
+   * CANVAS_IMAGE_AND_PDF_NOTE_REGRESSION_TRIAGE_1: the Note's own stored
+   * background (metadata.cardColor). Previously absent from this interface,
+   * so `cardColor` below always started at the hardcoded white default no
+   * matter what the padlet actually had saved -- and every ordinary save
+   * (even a text-only edit) then wrote that default back as the new
+   * background, since the same field is spread into `saveNote`'s merged
+   * metadata unconditionally. Hydrating it here is what stops a save from
+   * silently discarding a background the user never touched.
+   */
+  initialCardColor?: string;
   /** Text Phase 1. Seeds the top-stripe control for a brand-new source Note. */
   initialTopStrip?: string;
   initialTitleStyle?: CaptionStyle;
@@ -141,6 +154,7 @@ export default function NoteEditor({
   initialDetachedComments = EMPTY_DETACHED_COMMENTS,
   initialBadgeColor = '#facc15',
   initialTextColor = '#1F2937',
+  initialCardColor = '#FFFFFF',
   initialTopStrip,
   initialTitleStyle,
   initialCommentTitle,
@@ -176,7 +190,7 @@ export default function NoteEditor({
   useEffect(() => {
     setCommentTitleStyle(initialCommentTitleStyle || {});
   }, [initialCommentTitleStyle]);
-  const [cardColor, setCardColor] = useState('#FFFFFF');
+  const [cardColor, setCardColor] = useState(initialCardColor);
   const [topStrip, setTopStrip] = useState<string | null>(initialTopStrip || null);
   const [textColor, setTextColor] = useState(initialTextColor);
   const [reactions, setReactions] = useState<string[]>([]);
@@ -945,6 +959,21 @@ export default function NoteEditor({
 
                     With no navigation authority the row is not a button at
                     all: a control that cannot act is worse than a label. */}
+                {/* CANVAS_IMAGE_AND_PDF_NOTE_REGRESSION_TRIAGE_1: the SAME
+                    eligibility rule and the SAME crop component the canvas
+                    card renders (PostCardContent's KnowledgeSourceMarker) --
+                    a PDF-area region Note has no OCR text, so this image IS
+                    its content, and the editor must show it too, not just
+                    the board. */}
+                {(() => {
+                  const regionCrop = getKnowledgeSourceCardRegionCrop(sourceReferences);
+                  return regionCrop && (
+                    <div className="border-t border-gray-100 px-3 pt-1.5">
+                      <KnowledgeSourceRegionCrop referenceId={regionCrop.referenceId} />
+                    </div>
+                  );
+                })()}
+
                 {sourceReferences.length > 0 && (
                   <div className="border-t border-gray-100 px-3 pt-1.5 pb-2">
                     <div className="flex flex-col gap-0.5">
