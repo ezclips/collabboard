@@ -8,7 +8,7 @@
  * remain in CanvasClient — they are session-scoped, not canvas-data-scoped.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import {
   readKnowledgePdfAreaLibraryPlacement,
@@ -146,6 +146,28 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   // or a same-board request a newer one has overtaken) is discarded
   // entirely rather than overwriting state a newer request already owns.
   const requestGenerationRef = useRef(0);
+  // The canvasId this instance is actually committed to right now, and
+  // whether it is mounted at all -- both updated at the LAYOUT boundary
+  // below, never inferred from a passive effect or from React quietly
+  // ignoring a setter after unmount.
+  const activeCanvasIdRef = useRef<string | undefined>(canvasId);
+  const mountedRef = useRef(false);
+
+  // Layout-phase lifecycle boundary: runs synchronously in the SAME commit
+  // as a canvasId change, strictly before every passive effect (including
+  // the one below that starts the new board's own fetch) and before the
+  // browser can process a microtask. Its cleanup -- which fires the instant
+  // canvasId is about to change, or on unmount -- invalidates the
+  // generation THEN, closing the window a stale in-flight request could
+  // otherwise use to publish into a board this instance no longer shows.
+  useLayoutEffect(() => {
+    activeCanvasIdRef.current = canvasId;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+    };
+  }, [canvasId]);
 
   // ── fetchData ───────────────────────────────────────────────────────────────
   // === BEGIN DATA REGION: SUPABASE + REALTIME ===
@@ -156,7 +178,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       return;
     }
     const requestId = ++requestGenerationRef.current;
-    const isCurrentRequest = () => requestGenerationRef.current === requestId;
+    const requestedCanvasId = canvasId;
+    const isCurrentRequest = () =>
+      mountedRef.current &&
+      activeCanvasIdRef.current === requestedCanvasId &&
+      requestGenerationRef.current === requestId;
     if (showLoading) setLoading(true);
     try {
       const canvasResult = await findBoardById(canvasId);

@@ -61,7 +61,12 @@ type PadletsCall = { boardId: string; resolve: (r: ReadReply<unknown>) => void }
  * lets a test hold two overlapping requests -- same board or different --
  * open at once and resolve them out of order.
  */
-function installSupabase(writes: Writes, padletsCalls: PadletsCall[], opts: { instantPadlets?: Record<string, ReadReply<unknown>> } = {}) {
+function installSupabase(
+  writes: Writes,
+  padletsCalls: PadletsCall[],
+  opts: { instantPadlets?: Record<string, ReadReply<unknown>> } = {},
+  sectionsCalls?: PadletsCall[], // when provided, board_sections reads are gated (per board) just like padlets; otherwise instant `[]` as before
+) {
   const channels = new Map<string, { realtime: RealtimeHandler | null; status: StatusHandler | null }>();
 
   const client = {
@@ -80,8 +85,13 @@ function installSupabase(writes: Writes, padletsCalls: PadletsCall[], opts: { in
         select: () => ({
           eq: (_col: string, boardId: string) => {
             if (table === 'boards') return { maybeSingle: async () => ({ data: { id: boardId, layout: 'freeform' }, error: null }) };
-            if (table === 'canvas_lines' || table === 'board_sections') {
-              return { then: (resolve: (r: unknown) => void) => resolve(okReply([])) };
+            if (table === 'canvas_lines') return { then: (resolve: (r: unknown) => void) => resolve(okReply([])) };
+            if (table === 'board_sections') {
+              if (!sectionsCalls) return { then: (resolve: (r: unknown) => void) => resolve(okReply([])) };
+              let resolveSection!: (r: ReadReply<unknown>) => void;
+              const sectionPromise = new Promise<ReadReply<unknown>>((res) => { resolveSection = res; });
+              sectionsCalls.push({ boardId, resolve: resolveSection });
+              return { then: (resolve: (r: unknown) => void) => sectionPromise.then(resolve) };
             }
             let resolveCall!: (r: ReadReply<unknown>) => void;
             const promise = new Promise<ReadReply<unknown>>((res) => { resolveCall = res; });
@@ -116,6 +126,7 @@ function Harness({ canvasId }: { canvasId: string }) {
   return (
     <div data-testid="probe">
       {JSON.stringify({
+        canvasId: data.canvas ? (data.canvas as unknown as { id: string }).id : null,
         padletIds: data.padlets.map((p) => p.id),
         loading: data.loading,
         error: data.error,
@@ -138,12 +149,13 @@ async function unmountCurrent() {
   await act(async () => { current!.unmount(); });
 }
 function probe() {
-  return JSON.parse(screen.getByTestId('probe').textContent ?? '{}') as { padletIds: string[]; loading: boolean; error: string | null };
+  return JSON.parse(screen.getByTestId('probe').textContent ?? '{}') as { canvasId: string | null; padletIds: string[]; loading: boolean; error: string | null };
 }
 const thumb = () => vi.mocked(generateAndSaveThumbnail);
 
+let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -336,5 +348,87 @@ describe('J. the board-bound thumbnail snapshot correction still holds', () => {
 
     await unmountCurrent(); // B's cleanup, B's fetch still unresolved
     expect(thumb(), 'B\'s cleanup must not save anything using A\'s rows').toHaveBeenCalledTimes(1);
+  });
+});
+
+// == K. layout-phase lifecycle boundary (CANVAS_REALTIME_RECONNECT_CONVERGENCE_CORRECTION_1) ==
+//
+// isCurrentRequest() now requires mountedRef + activeCanvasIdRef (both set
+// by a useLayoutEffect keyed on canvasId) in addition to the generation
+// counter. This settles A's read and commits the switch to B in the same
+// synchronous stretch, so A's continuation is merely QUEUED, not yet run,
+// at the moment B's render commits.
+//
+// KNOWN LIMITATION, stated plainly: under this project's test stack
+// (@testing-library/react's act(), in either its sync or async form, over
+// jsdom), React flushes layout and passive effects as one coupled unit --
+// there is no observable jsdom-reproducible instant where B's layout
+// effect has run but B's passive-effect-triggered fetchData(B) has not.
+// Because of that coupling, this test currently passes under c76de61 too
+// (verified empirically): c76de61's OWN lazy, fetchData()-internal
+// generation bump also happens to run before A's queued continuation in
+// this harness, since the passive effect that contains it gets flushed in
+// the same batch as the layout effect. It is kept here because it still
+// exercises the real hook through real, controlled promises and verifies
+// the CORRECT end state with the fix in place; it does not, however,
+// satisfy a "fails at c76de61, passes after" mutation-style proof for the
+// specific commit-to-passive-effect gap the review named -- see the
+// session report for the full investigation (raw createRoot, flushSync,
+// and sync/async act() were all tried).
+describe('K. the layout-phase lifecycle boundary invalidates synchronously', () => {
+  it('A-E: a resolved-but-not-yet-continued A request cannot publish once B is committed, and B\'s own failure does not fall back to it', async () => {
+    // A's own read sequence is canvas -> padlets -> lines -> sections; only
+    // sections is left pending here, so A is parked at the LAST await --
+    // one microtask hop from its isCurrentRequest() check and publish, the
+    // tightest possible version of "resolved but not yet continued."
+    const calls: PadletsCall[] = [];
+    const sectionsCalls: PadletsCall[] = [];
+    installSupabase([], calls, { instantPadlets: { [A]: okReply([row(A, 'p1'), row(A, 'p2')]) } }, sectionsCalls);
+    await mount(A); // padlets already resolved; sectionsCalls[0]: A, parked
+    expect(sectionsCalls.length, 'A is parked at its final await').toBe(1);
+
+    sectionsCalls[0].resolve(okReply([])); // releases A's LAST await; continuation only QUEUED
+    act(() => { current!.rerender(<Harness canvasId={B} />); }); // sync act(): fully flushes the commit incl. layout effects before returning
+    await act(async () => { await flush(); }); // let every remaining queued microtask run
+
+    expect(calls.length, 'B started its own fetch').toBe(2);
+    expect(probe().canvasId, 'A\'s canvas must not appear under B').toBeNull();
+    expect(probe().padletIds, 'A\'s resolved-but-raced rows must not publish into B').toEqual([]);
+    expect(probe().error).toBeNull();
+
+    // E. B's own fetch then fails -- there is nothing from A to fall back
+    // to, because it was never published in the first place. B's own reads
+    // are sequential (padlets, then lines, then sections), so its padlets
+    // failure has to travel through its own sections read too before the
+    // failure is actually reported.
+    await act(async () => { calls[1].resolve(failReply()); await flush(); }); // B's own padlets read fails
+    expect(sectionsCalls.length, 'B\'s own sections read is now parked').toBe(2);
+    await act(async () => { sectionsCalls[1].resolve(okReply([])); await flush(); });
+    expect(probe().error, 'B\'s own failure is reported').toBe('Failed to load canvas.');
+    expect(probe().canvasId, 'still nothing from A').toBeNull();
+    expect(probe().padletIds, 'still nothing from A').toEqual([]);
+  });
+
+  it('F: a request left pending across a full unmount cannot reach a setter afterward', async () => {
+    const calls: PadletsCall[] = [];
+    installSupabase([], calls, {});
+    await mount(A); // calls[0]: A, pending
+    expect(calls.length).toBe(1);
+
+    const seenRejections: unknown[] = [];
+    const onRejection = (e: Event) => { seenRejections.push(e); };
+    window.addEventListener('unhandledrejection', onRejection);
+
+    await unmountCurrent();
+
+    // mountedRef was already flipped false by the layout effect's cleanup,
+    // synchronously, at unmount -- isCurrentRequest() fails before ANY
+    // setter is reached, rather than this relying on React quietly
+    // dropping a state update aimed at a component that no longer exists.
+    await act(async () => { calls[0].resolve(okReply([row(A, 'p1')])); await flush(); });
+
+    window.removeEventListener('unhandledrejection', onRejection);
+    expect(seenRejections, 'no unhandled rejection from the post-unmount continuation').toEqual([]);
+    expect(consoleErrorSpy.mock.calls.some(([msg]) => String(msg).includes('fetchData failed')), 'no error path taken either').toBe(false);
   });
 });
