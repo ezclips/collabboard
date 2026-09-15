@@ -1458,15 +1458,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const enableGantt = process.env.NEXT_PUBLIC_ENABLE_GANTT === 'true';
   const enableScheduler = process.env.NEXT_PUBLIC_ENABLE_SCHEDULER === 'true';
   /**
-   * Board AI Chat reads and writes `board_ai_threads` / `board_ai_messages`,
-   * and that migration is NOT applied to production. Nothing here contacts the
-   * database until the drawer is opened -- every fetch in BoardAiChatDrawer is
-   * gated on `isOpen`, which starts false -- but its two entry points are one
-   * click away, and one of them lives in the PDF details panel that the Image
-   * validation run uses. Default OFF so the surface cannot be reached by
-   * accident; set NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT=true once the migration has
-   * been applied through a reviewed production rollout. No implementation is
-   * removed by this flag.
+   * Board AI Chat reads and writes `board_ai_threads` / `board_ai_messages`.
+   *
+   * That backend IS deployed: on 2026-09-15 the live project's catalog was
+   * verified read-only against 20260902120000_create_board_ai_chat.sql -- both
+   * tables, every column type/default/nullability, the constraints and named
+   * indexes, RLS enabled, all eight policies PERMISSIVE `TO authenticated`
+   * with the ownership plus board-read expressions intact, and the privilege
+   * shape the migration depends on (no table-level UPDATE; column UPDATE on
+   * exactly `title, updated_at`; nothing at all for anon/PUBLIC). The eight
+   * policies bind to `public.is_board_member(board_uuid uuid, user_uuid uuid)`.
+   * The earlier note here claiming the migration was unapplied was stale.
+   *
+   * The flag REMAINS the explicit release control -- deployment readiness and
+   * the decision to expose the surface are separate. Nothing contacts the
+   * database until the drawer is opened: every fetch in BoardAiChatDrawer is
+   * gated on `isOpen`, which starts false. No implementation is removed by
+   * this flag.
    */
   const enableBoardAiChat = process.env.NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT === 'true';
   const [isGanttVisible, setIsGanttVisible] = useState(true);
