@@ -277,7 +277,21 @@ export default function KnowledgeDocumentPageRegionSelector({
           onPointerCancel={abandonDrag}
           onLostPointerCapture={abandonDrag}
         >
-          {shown === null ? null : (
+          {shown === null ? (
+            // PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 -- armed, but nothing
+            // drawn on THIS page yet. Reuses this same hit-layer rather than
+            // a new page-covering overlay: it is already sized to exactly
+            // the page image's content box, and pointer-events stay off so
+            // the label itself can never absorb the drag it is describing.
+            <div
+              data-knowledge-region-instructions={pageNumber}
+              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            >
+              <span className="rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">
+                Drag to select an area
+              </span>
+            </div>
+          ) : (
             <div
               data-knowledge-region-rectangle={pageNumber}
               /**

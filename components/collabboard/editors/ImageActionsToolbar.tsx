@@ -77,6 +77,15 @@ interface ImageActionsToolbarProps {
     /** The label under that arrow while `onBack` is supplied. */
     backLabel?: string;
     backDisabled?: boolean;
+    /**
+     * PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1. The arrow's tooltip/aria-label
+     * while `onBack` is supplied, overriding the persisted-editor default
+     * below. The draft modal repurposed this arrow from "finish and publish"
+     * to "request close" (it is no longer the only save action, so it must
+     * not still claim to place the image); a caller that still means "place
+     * this image" -- there is none left -- keeps that wording by omitting it.
+     */
+    backTitle?: string;
 }
 
 const COLORS = [
@@ -136,6 +145,7 @@ export default function ImageActionsToolbar({
     onBack,
     backLabel = 'Done',
     backDisabled = false,
+    backTitle = 'Place this image on the board',
 }: ImageActionsToolbarProps) {
     const isToolDisabled = (id: string) => (disabledToolIds ?? []).includes(id);
     const [internalMode, setInternalMode] = useState<ToolbarMode>('image');
@@ -227,7 +237,7 @@ export default function ImageActionsToolbar({
                         onBack && backDisabled ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-600'
                     }`}
                     title={onBack
-                        ? 'Place this image on the board'
+                        ? backTitle
                         : (mode === 'image' ? 'Switch to Caption Styling' : 'Switch to Image Actions')}
                     data-ui={onBack ? 'image-editor-draft-complete' : 'image-editor-mode-toggle'}
                 >

@@ -588,3 +588,90 @@ describe('P6J-F9-D arrival overlay', () => {
     expect(layer(harness.container)).not.toBeNull();
   });
 });
+
+// ==========================================================================
+// PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 -- requirement 4, visible area-
+// selection mode. The active-state/aria-pressed styling on the "Select area"
+// button (KnowledgeDocumentDetails.tsx), the crosshair cursor, and the blue
+// outline/fill on both the in-progress and completed rectangle were ALL
+// already implemented before this correction -- confirmed by reading that
+// source and by the existing S2 (crosshair via `layer`'s own className),
+// S26b/S26c (draggable, blue classes) and B3-3 (redraws without re-arming)
+// tests above, none of which needed to change. The one missing piece was the
+// "Drag to select an area" instructional text while armed and before a
+// region is drawn, which is what this block covers -- plus proof that adding
+// it did not touch the drag handler it sits in front of.
+// ==========================================================================
+const instructions = (c: HTMLElement) => c.querySelector('[data-knowledge-region-instructions]');
+
+describe('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: the "Drag to select an area" hint', () => {
+  it('shows while armed with nothing drawn yet, reusing the existing hit-layer rather than a new overlay', () => {
+    const harness = mount();
+    const hint = instructions(harness.container);
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent).toBe('Drag to select an area');
+    // Same layer the crosshair/rectangle already live in -- not a second,
+    // page-covering element of its own.
+    expect(layer(harness.container)!.contains(hint)).toBe(true);
+    // Never a control, and never able to swallow the drag it is describing.
+    expect(hint!.className).toContain('pointer-events-none');
+    expect(rectangle(harness.container)).toBeNull();
+  });
+
+  it('is absent when Select-area mode is off', () => {
+    const harness = mount({ enabled: false });
+    expect(instructions(harness.container)).toBeNull();
+  });
+
+  it('disappears once the drag has moved (a real in-progress rectangle), replacing it', () => {
+    // A bare pointerdown with no movement yet is a zero-extent rectangle --
+    // normalizeDragRectangle refuses that (same rule the drop threshold
+    // elsewhere in this file relies on), so `shown` is still null and the
+    // hint correctly still shows for that single instant. It disappears at
+    // the same point a real rectangle first exists: after the first move.
+    const harness = mount();
+    const hit = layer(harness.container)!;
+    firePointer(hit, 'pointerdown', at(0.1, 0.1, PORTRAIT));
+    firePointer(hit, 'pointermove', at(0.5, 0.6, PORTRAIT));
+    expect(instructions(harness.container)).toBeNull();
+    expect(rectangle(harness.container)).not.toBeNull();
+    firePointer(hit, 'pointerup', at(0.5, 0.6, PORTRAIT));
+  });
+
+  it('stays gone once a region is armed and settled', () => {
+    const harness = mount();
+    drag(harness, PORTRAIT);
+    harness.render({ armedRegion: armedRegionOf(harness) });
+    expect(instructions(harness.container)).toBeNull();
+    expect(rectangle(harness.container)).not.toBeNull();
+  });
+
+  it('does not block the existing rectangle drag handler -- a full drag from a fresh mount still arms a region', () => {
+    // The hint is painted ONLY while shown === null, i.e. exactly the state
+    // a drag is about to leave; this proves it is not sitting in front of
+    // pointer events that matter to that same handler.
+    const harness = mount();
+    expect(instructions(harness.container)).not.toBeNull();
+    drag(harness, PORTRAIT);
+    expect(harness.onArm).toHaveBeenCalledTimes(1);
+    expectRegion(armedRegionOf(harness), { x: 0.1, y: 0.1, width: 0.4, height: 0.5 });
+  });
+
+  it('the completed rectangle keeps the existing blue outline and light transparent fill', () => {
+    const harness = mount();
+    drag(harness, PORTRAIT);
+    harness.render({ armedRegion: armedRegionOf(harness) });
+    const armed = rectangle(harness.container) as HTMLElement;
+    expect(armed.className).toContain('border-2 border-blue-500 bg-blue-500/20');
+  });
+
+  it('the in-progress rectangle (mid-drag) has the SAME blue outline and fill', () => {
+    const harness = mount();
+    const hit = layer(harness.container)!;
+    firePointer(hit, 'pointerdown', at(0.1, 0.1, PORTRAIT));
+    firePointer(hit, 'pointermove', at(0.5, 0.6, PORTRAIT));
+    const live = rectangle(harness.container) as HTMLElement;
+    expect(live.className).toContain('border-2 border-blue-500 bg-blue-500/20');
+    firePointer(hit, 'pointerup', at(0.5, 0.6, PORTRAIT));
+  });
+});

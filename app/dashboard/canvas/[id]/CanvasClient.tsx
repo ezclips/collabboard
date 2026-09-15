@@ -864,6 +864,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   /** Guards the create call, so a second Save cannot make a second card. */
   const [isPdfAreaDraftSaving, setIsPdfAreaDraftSaving] = useState(false);
   /**
+   * PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 -- the SAME guard as
+   * `isPdfAreaDraftSaving`, synchronous. Two clicks dispatched before this
+   * component re-renders both read `isPdfAreaDraftSaving` as its still-stale
+   * `false` closure value; this ref is set inside `savePdfAreaDraft` itself,
+   * in the same synchronous call, so the second invocation sees it flipped
+   * regardless of render timing.
+   */
+  const isPdfAreaDraftSavingRef = useRef(false);
+  /**
+   * PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 -- the most recent failed/denied
+   * attempt's message, shown inline in the draft modal (the toast alone is
+   * ephemeral and easy to miss). Cleared at the start of every new attempt
+   * and whenever the draft itself is replaced or discarded, so a stale error
+   * from a previous failure can never survive into an unrelated one.
+   */
+  const [pdfAreaDraftError, setPdfAreaDraftError] = useState<string | null>(null);
+  /**
    * PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1 -- document id -> a counter
    * bumped exactly once per confirmed area-image creation for that document,
    * never on a failed create and never on any other board edit. This is the
@@ -7512,6 +7529,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const preview = takeKnowledgeAreaDraftPreview();
     setPendingPdfAreaDraft({ payload, placement, preview });
     setPdfAreaDraftTitle(payload.originalFilename || '');
+    // A stale error from a PREVIOUS draft (dropped, failed, discarded) must
+    // never be shown against this unrelated new one.
+    setPdfAreaDraftError(null);
     return true;
   }, [
     canvasId, isDrawingLayout, isFreeformLayout,
@@ -7522,7 +7542,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const discardPdfAreaDraft = useCallback(() => {
     setPendingPdfAreaDraft(null);
     setIsPdfAreaDraftSaving(false);
+    isPdfAreaDraftSavingRef.current = false;
     setPdfAreaDraftTitle('');
+    setPdfAreaDraftError(null);
     // The slot is normally already empty -- the drop consumed it -- but a drag
     // that was abandoned before any drop would otherwise leave one behind.
     clearKnowledgeAreaDraftPreview();
@@ -7542,21 +7564,31 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * what they set up.
    */
   const savePdfAreaDraft = useCallback(async () => {
-    if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving) return;
+    // The ref check is the SAME re-entrancy guard as the state check beside
+    // it, just immune to render timing: two clicks dispatched before this
+    // closure's `isPdfAreaDraftSaving` value updates would otherwise both
+    // read it as the same stale `false`. Set synchronously, in this call,
+    // before anything async happens.
+    if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving || isPdfAreaDraftSavingRef.current) return;
+    isPdfAreaDraftSavingRef.current = true;
     setIsPdfAreaDraftSaving(true);
+    setPdfAreaDraftError(null);
     const created = await requestKnowledgePdfAreaImage(
       canvasId,
       pendingPdfAreaDraft.payload,
       { ...pendingPdfAreaDraft.placement, title: pdfAreaDraftTitle },
     );
+    isPdfAreaDraftSavingRef.current = false;
     setIsPdfAreaDraftSaving(false);
     if (!created.ok) {
       // A viewer, a revoked board, or a page with no rendered derivative all
       // end here. Nothing partial was placed, so there is nothing to undo --
       // and the draft is still on screen to retry from.
-      toast.error(created.status === 403
+      const message = created.status === 403
         ? 'You do not have permission to add cards to this board'
-        : 'Could not create the image from that area');
+        : 'Could not create the image from that area';
+      toast.error(message);
+      setPdfAreaDraftError(message);
       return;
     }
     // The RPC behind this route is idempotent: a repeated Done for the same
@@ -7588,7 +7620,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Image added from PDF area');
   }, [
     canvasId, pendingPdfAreaDraft, isPdfAreaDraftSaving, pdfAreaDraftTitle,
-    setPadlets, setPdfAreaImageInvalidation,
+    setPadlets, setPdfAreaImageInvalidation, setPdfAreaDraftError,
   ]);
 
   const handleKnowledgeSourceClipDrop = useCallback((event: React.DragEvent): boolean => {
@@ -10743,8 +10775,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               *
               * Portalled to <body> from inside the component like the accepted
               * persisted overlay, and at the same tier, so it clears the PDF
-              * reader instead of opening behind it. Only its Save button
-              * publishes -- Cancel, X, backdrop and Escape all discard.
+              * reader instead of opening behind it.
+              *
+              * PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: "Add image to canvas" is
+              * the one action that publishes. A backdrop click does nothing;
+              * Escape, the modal's own Cancel button and its toolbar arrow all
+              * ask for confirmation first, through the modal's own dialog --
+              * only that dialog's "Discard" reaches discardPdfAreaDraft below.
               */}
             <PdfAreaImageDraftModal
               isOpen={pendingPdfAreaDraft !== null}
@@ -10754,6 +10791,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onSave={() => { void savePdfAreaDraft(); }}
               onCancel={discardPdfAreaDraft}
               isSaving={isPdfAreaDraftSaving}
+              error={pdfAreaDraftError}
             />
 
             {/* Column Layout Placement Prompt */}

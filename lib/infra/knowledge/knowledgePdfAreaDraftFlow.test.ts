@@ -41,7 +41,12 @@ function after(source: string, anchor: string, count: number): string {
 }
 
 const dropHandler = () => after(canvasClient, 'const handleKnowledgePdfAreaClipDrop = useCallback(', 2600);
-const savePath = () => after(canvasClient, 'const savePdfAreaDraft = useCallback(', 2400);
+// PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 widened this window (2400 -> 3200):
+// the synchronous double-click ref guard and the inline error message it now
+// also sets pushed the tail of this function (the deps array) past the old
+// boundary, which is a window-size fact about this helper, not a claim about
+// the function's own length being pinned.
+const savePath = () => after(canvasClient, 'const savePdfAreaDraft = useCallback(', 3200);
 const discardPath = () => after(canvasClient, 'const discardPdfAreaDraft = useCallback(', 700);
 const draftModal = () => after(canvasClient, '<PdfAreaImageDraftModal', 700);
 
@@ -146,11 +151,33 @@ describe('R6I-8..17: Save is the only thing that writes', () => {
   it('R6I-11,17: a second Save cannot create a second card', () => {
     const save = savePath();
     // The in-flight guard is checked before anything is sent...
-    expect(save).toContain('if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving) return;');
+    expect(save).toContain(
+      'if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving || isPdfAreaDraftSavingRef.current) return;',
+    );
     expect(save.indexOf('setIsPdfAreaDraftSaving(true)'))
       .toBeLessThan(save.indexOf('await requestKnowledgePdfAreaImage'));
     // ...and the draft is cleared on success, so a late second press finds none.
     expect(save).toContain('setPendingPdfAreaDraft(null)');
+  });
+
+  it('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: the in-flight guard is ALSO a synchronous ref, immune to render timing', () => {
+    const save = savePath();
+    // The ref is set inside THIS call, strictly before the async gap (the
+    // await), so a second invocation reaches the guard with the ref already
+    // true even when both were dispatched before React re-rendered.
+    const setRef = save.indexOf('isPdfAreaDraftSavingRef.current = true;');
+    const guardCheck = save.indexOf('isPdfAreaDraftSavingRef.current) return;');
+    const awaitCall = save.indexOf('await requestKnowledgePdfAreaImage');
+    expect(guardCheck).toBeGreaterThan(-1);
+    expect(setRef).toBeGreaterThan(guardCheck);
+    expect(setRef).toBeLessThan(awaitCall);
+    // Released on both settlement paths -- success (implicitly, via the
+    // unconditional reset right after the await) and failure (same line,
+    // strictly before the failure branch's `return`).
+    const releaseRef = save.indexOf('isPdfAreaDraftSavingRef.current = false;');
+    const refusal = save.indexOf('if (!created.ok)');
+    expect(releaseRef).toBeGreaterThan(awaitCall);
+    expect(releaseRef).toBeLessThan(refusal);
   });
 
   it('R6I-16: a successful Save closes the modal and shows the created card', () => {
@@ -227,19 +254,46 @@ describe('R6I-18..21: Cancel writes nothing at all', () => {
     expect(draftModal()).toContain('onCancel={discardPdfAreaDraft}');
   });
 
-  it('R6I-C1/C3: EVERY dismissal discards -- only the deliberate finish publishes', () => {
-    // The clipart modal treats close as save. That contract must not reach a
-    // shared-board publication: an outside click must never place a card.
+  it('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: a backdrop click is wired to nothing -- not even a safe discard', () => {
+    // Superseded by the correction below: a backdrop click used to call
+    // onCancel() directly (a "safe discard"). It now does nothing at all --
+    // the draft stays open -- so there is no backdrop dismissal wiring left
+    // to find.
+    // code(), not the raw read: this file's own comments explaining the
+    // absence necessarily use the word "backdropProps" in prose.
+    const modal = code(read('components/collabboard/editors/PdfAreaImageDraftModal.tsx'));
+    expect(modal).not.toContain('useBackdropDismiss');
+    expect(modal).not.toContain('backdropProps');
+  });
+
+  it('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: publishing is reachable ONLY from the explicit save action, never from any close control', () => {
+    // R6I-C3's "only the toolbar's finish action publishes" is still true in
+    // spirit -- there is exactly one path to onSave -- but that action is no
+    // longer the toolbar arrow (which now closes, like everything else); it
+    // is the labelled save button's own click handler.
     const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
-    expect(modal).toContain('const backdropDismiss = useBackdropDismiss(');
-    expect(modal).toMatch(/useBackdropDismiss\(\(\) => \{[\s\S]{0,80}onCancel\(\);/);
-    expect(modal).toMatch(/event\.key === 'Escape'[\s\S]{0,40}onCancel\(\)/);
-    // R6I-C3: publishing is reachable ONLY from the toolbar's finish action.
-    expect(modal).toContain('onBack={onSave}');
-    // The only place onSave is USED: the prop declaration and destructure are
-    // the other two mentions, so there is exactly one way to publish.
-    expect((modal.match(/\{onSave\}/g) ?? [])).toHaveLength(1);
-    expect(modal).not.toMatch(/onDismiss[\s\S]{0,60}onSave/);
+    expect(modal).toContain('onClick={submit}');
+    expect(modal).toContain('onSave();');
+    // The only place onSave is CALLED: the prop declaration/destructure are
+    // the other two mentions of the bare identifier, so there is exactly one
+    // call site.
+    expect((modal.match(/\bonSave\(\)/g) ?? [])).toHaveLength(1);
+    // Escape, Cancel and the toolbar arrow all ask first -- none calls onSave.
+    expect(modal).not.toMatch(/onBack=\{onSave\}/);
+    expect(modal).toMatch(/event\.key === 'Escape'[\s\S]{0,40}requestClose\(\)/);
+    expect(modal).toContain('onClick={requestClose}');
+    expect(modal).toContain('onBack={requestClose}');
+  });
+
+  it('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: every close control funnels through the SAME confirmation, and only its own Discard writes nothing', () => {
+    const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
+    expect(modal).toContain('<DiscardChangesDialog');
+    expect(modal).toContain('title="Discard this image?"');
+    expect(modal).toContain('discardLabel="Discard"');
+    // onCancel (the real, writes-nothing discard CanvasClient wires to
+    // discardPdfAreaDraft) is reachable ONLY from the dialog's onDiscard.
+    expect((modal.match(/onCancel\(\)/g) ?? [])).toHaveLength(1);
+    expect(modal).toContain('onDiscard={discard}');
   });
 });
 
@@ -477,55 +531,88 @@ describe('R6I-C2: the draft IS the real Image post editor, not a preview dialog'
 });
 
 
-describe('R6I-C3: no Save/Cancel footer -- the editor is finished from its own toolbar', () => {
+// PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 -- R6I-C3 deliberately shipped no
+// Save/Cancel footer, reasoning that the toolbar's own arrow was enough. In
+// practice that arrow was unlabelled and ambiguous, and the confirmed defect
+// this correction fixes is exactly that: users could not tell the small
+// "Done" arrow was the one thing publishing a shared-board card, and a
+// backdrop click discarded a capture with no warning at all. This block
+// replaces R6I-C3's "no footer" contract with the opposite, deliberate one.
+describe('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: an explicit, labelled footer replaces the ambiguous arrow', () => {
   const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
   const toolbar = read('components/collabboard/editors/ImageActionsToolbar.tsx');
 
-  it('R6I-C3-1,2: the bottom Save and Cancel buttons are gone', () => {
-    // They recreated the confirmation dialog this flow exists to avoid, and
-    // the persisted Image editor has no such footer.
-    for (const gone of [
+  it('the labelled Save and Cancel actions, and the helper text, are present', () => {
+    for (const present of [
       'data-ui="pdf-area-image-draft-save"',
       'data-ui="pdf-area-image-draft-cancel"',
-      '>Cancel<',
       "'Adding…'",
+      'Add image to canvas',
+      'Adds this image to the canvas and PDF Library.',
     ]) {
-      expect(modal, gone).not.toContain(gone);
+      expect(modal, present).toContain(present);
     }
-    expect(code(modal)).not.toContain('button');
+    // The Cancel button's own text node -- checked as a pattern rather than
+    // a literal '>Cancel<' substring, since JSX text content is free to sit
+    // on its own indented line in the source without changing what renders.
+    expect(modal).toMatch(/data-ui="pdf-area-image-draft-cancel"[\s\S]{0,400}>\s*Cancel\s*</);
   });
 
-  it('R6I-C3-3: the real Image toolbar and card are still what is rendered', () => {
+  it('the real Image toolbar and card are still what is rendered', () => {
     expect(modal).toContain('<ImagePostEditorShell');
     expect(modal).toContain('<ImageActionsToolbar');
     expect(modal).toContain('<ImagePostEditorCard');
   });
 
-  it('R6I-C3-4: finishing goes through the toolbar arrow, and publishes', () => {
-    expect(modal).toContain('onBack={onSave}');
-    expect(modal).toContain('backLabel="Done"');
-    // The toolbar routes that arrow to the caller only in draft mode.
+  it('the toolbar arrow no longer finishes/publishes -- it asks to close, like Escape and Cancel', () => {
+    expect(modal).not.toContain('onBack={onSave}');
+    expect(modal).toContain('onBack={requestClose}');
+    expect(modal).toContain('backLabel="Cancel"');
+    // The toolbar itself is unchanged: still routes onBack to whatever the
+    // caller supplies, in draft mode only.
     expect(toolbar).toContain('onClick={onBack ?? handleToggleMode}');
     expect(toolbar).toContain("data-ui={onBack ? 'image-editor-draft-complete' : 'image-editor-mode-toggle'}");
   });
 
-  it('R6I-C3-7: a second finish while one is in flight is refused', () => {
-    expect(modal).toContain('backDisabled={isSaving}');
-    expect(toolbar).toContain('disabled={onBack ? backDisabled : false}');
-    // ...and the save path itself still guards, so the button is not the only
-    // thing standing between a double press and two cards.
-    expect(savePath()).toContain('if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving) return;');
+  it('the tooltip on that arrow no longer claims to place the image', () => {
+    // ImageActionsToolbar's own default (backTitle) keeps the ORIGINAL
+    // wording for any hypothetical other caller; this draft overrides it
+    // because its arrow no longer does that.
+    expect(toolbar).toContain('backTitle = ');
+    expect(toolbar).toContain("'Place this image on the board'");
+    expect(modal).not.toMatch(/onBack=\{requestClose\}[\s\S]{0,200}'Place this image on the board'/);
   });
 
-  it('R6I-C3-11: the PERSISTED editor keeps the arrow it always had', () => {
+  it('a second submission while one is in flight is refused, at both the button and the save path', () => {
+    expect(modal).toContain('disabled={isSaving}');
+    expect(modal).toContain('backDisabled={isSaving}');
+    expect(toolbar).toContain('disabled={onBack ? backDisabled : false}');
+    // ...and the save path itself still guards (state AND the synchronous
+    // ref), so the button is not the only thing standing between a double
+    // press and two cards.
+    expect(savePath()).toContain(
+      'if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving || isPdfAreaDraftSavingRef.current) return;',
+    );
+  });
+
+  it('the PERSISTED editor keeps the arrow it always had', () => {
     // Absent onBack means the Image/Text mode toggle, unchanged -- this was
     // never a back or exit control there.
-    expect(toolbar).toContain("'Place this image on the board'");
     expect(toolbar).toContain("(mode === 'image' ? 'Switch to Caption Styling' : 'Switch to Image Actions')");
     expect(toolbar).toContain("{onBack ? backLabel : (mode === 'image' ? 'Text' : 'Image')}");
     // FreeformPadletCards renders it without onBack.
     const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
     const persisted = after(freeform, '<ImageActionsToolbar', 1200);
     expect(persisted).not.toContain('onBack=');
+  });
+
+  it('a failed/denied save is shown inline, sourced from CanvasClient, never invented by the modal', () => {
+    expect(modal).toContain('data-ui="pdf-area-image-draft-error"');
+    expect(modal).toContain('{error}');
+    expect(canvasClient).toContain('setPdfAreaDraftError(message)');
+    expect(canvasClient).toContain('error={pdfAreaDraftError}');
+    // Cleared at the start of a new attempt and whenever the draft changes,
+    // so a stale error can never survive into an unrelated one.
+    expect(canvasClient).toContain('setPdfAreaDraftError(null)');
   });
 });
