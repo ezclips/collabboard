@@ -42,10 +42,10 @@ const click = (el: Element | null) => {
 // ImagePostEditorShell portals its whole subtree (overlay, toolbar, card,
 // this modal's footer) to document.body -- it is a SIBLING of the mount
 // container, not a descendant, so every one of these must search the body,
-// not the `container` handed back by mount(). DiscardChangesDialog is the
-// one part of this component that does NOT portal (it renders in the normal
-// tree position), but document.body still finds it, since `container` is
-// itself a child of body.
+// not the `container` handed back by mount(). Since
+// PDF_AREA_DISCARD_DIALOG_LAYER_CORRECTION_1 the discard confirmation portals
+// out too (it has to clear the portalled overlay), so body finds it either
+// way.
 const overlay = () => document.body.querySelector('[data-ui="pdf-area-image-draft-overlay"]');
 const saveButton = () => document.body.querySelector<HTMLButtonElement>('[data-ui="pdf-area-image-draft-save"]');
 const cancelButton = () => document.body.querySelector<HTMLButtonElement>('[data-ui="pdf-area-image-draft-cancel"]');
@@ -141,6 +141,49 @@ describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; 
     expect(titleInput()).toHaveProperty('value', 'Keep me');
     expect(saveButton()).not.toBeNull();
     expect(document.activeElement).toBe(saveButton());
+  });
+
+  // PDF_AREA_DISCARD_DIALOG_LAYER_CORRECTION_1
+  it('raises the confirmation out of the canvas subtree, above the editor tier', () => {
+    const { container } = mount(<PdfAreaImageDraftModal {...baseProps()} />);
+    click(cancelButton());
+    const surface = document.body.querySelector<HTMLElement>('[data-ui="discard-changes-dialog-raised"]');
+    expect(surface).not.toBeNull();
+    // Not left behind inside the caller's own (isolated) subtree.
+    expect(container.contains(surface)).toBe(false);
+    expect(Number(surface!.style.zIndex)).toBeGreaterThan(60000);
+    // And it is a sibling of the draft overlay, not a child of it.
+    expect(overlay()!.contains(surface)).toBe(false);
+  });
+
+  it('"Keep editing" returns focus to the control that asked to close', () => {
+    mount(<PdfAreaImageDraftModal {...baseProps()} />);
+    const cancel = cancelButton()!;
+    // A real pointer click focuses the button first; jsdom's dispatchEvent
+    // does not, so focus it explicitly to model the same starting state.
+    act(() => { cancel.focus(); });
+    click(cancel);
+    expect(confirmDialog()).not.toBeNull();
+    click(btnByText('Keep editing'));
+    expect(confirmDialog()).toBeNull();
+    expect(document.activeElement).toBe(cancel);
+  });
+
+  it('Escape while confirming keeps the draft: it does not discard, and does not re-open confirmation', () => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ onSave, onCancel, title: 'Keep me' })} />);
+    click(cancelButton());
+    const keep = btnByText('Keep editing')!;
+    act(() => {
+      keep.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    // Confirmation closed, draft intact -- not discarded, not re-confirmed.
+    expect(confirmDialog()).toBeNull();
+    expect(overlay()).not.toBeNull();
+    expect(titleInput()).toHaveProperty('value', 'Keep me');
   });
 
   it('"Discard" closes with zero creation requests -- onSave is never called', () => {

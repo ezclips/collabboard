@@ -25,6 +25,29 @@ import { createPortal } from 'react-dom';
 /** The tier every Image post editor paints at, above the docked reader. */
 export const IMAGE_POST_EDITOR_OVERLAY_Z_CLASS = 'z-[60000]';
 
+/**
+ * PDF_AREA_DISCARD_DIALOG_LAYER_CORRECTION_1 -- the tier a confirmation about
+ * an Image post editor paints at. It MUST sit above the overlay tier above:
+ * browser-confirmed, the discard confirmation rendered in place at `z-[1100]`
+ * and was both invisible and unhittable (`elementFromPoint` over its buttons
+ * returned the draft's own footer). Leaving the isolated canvas subtree is
+ * what actually raises it -- see the portal note above -- and this constant
+ * lives beside the overlay tier so the two cannot drift apart.
+ *
+ * A NUMBER APPLIED AS AN INLINE STYLE, NOT A TAILWIND CLASS, AND DELIBERATELY:
+ * this project runs Tailwind v4 against a v3-style `content` config, and an
+ * arbitrary utility named only inside a constant is not reliably emitted --
+ * the first attempt at this fix shipped `z-[60010]` that generated no CSS at
+ * all, so the portalled surface computed `z-index: auto` and STILL lost to the
+ * overlay (the neighbouring 60000/60100/60200 utilities exist only because
+ * other files write them as literal classNames). A stacking contract must not
+ * depend on scanner heuristics.
+ *
+ * 60010 clears the editor overlay without reaching the image sub-tool tiers
+ * (60100/60200); those belong to Draw and Edit image, which a draft disables.
+ */
+export const IMAGE_POST_EDITOR_CONFIRM_Z_INDEX = 60010;
+
 /** The backdrop's full class list. One declaration, both editors. */
 export const IMAGE_POST_EDITOR_BACKDROP_CLASS =
   `fixed inset-0 ${IMAGE_POST_EDITOR_OVERLAY_Z_CLASS} flex items-center justify-center bg-black/35 backdrop-blur-sm`;

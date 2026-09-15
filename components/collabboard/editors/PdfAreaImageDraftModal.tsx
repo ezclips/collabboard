@@ -84,6 +84,14 @@ export default function PdfAreaImageDraftModal({
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
   /**
+   * PDF_AREA_DISCARD_DIALOG_LAYER_CORRECTION_1: whichever control asked to
+   * close -- Cancel, the toolbar arrow, or whatever held focus when Escape was
+   * pressed -- so "Keep editing" can hand focus straight back to it instead of
+   * stranding the user. Falls back to the primary action when the invoker is
+   * gone or was never a real control (an Escape from the page body).
+   */
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  /**
    * Synchronous, unlike `isSaving`: that prop only updates after the parent's
    * state commits and this component re-renders, which is a real window for
    * two clicks dispatched before the browser paints between them to both pass
@@ -107,14 +115,20 @@ export default function PdfAreaImageDraftModal({
   /** Escape, Cancel and the toolbar arrow all funnel through here. */
   const requestClose = () => {
     if (isSaving || confirmingDiscard) return;
+    const active = document.activeElement;
+    returnFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
     setConfirmingDiscard(true);
   };
 
   const keepEditing = () => {
     setConfirmingDiscard(false);
-    // The draft is exactly as it was; hand focus back to the primary action
-    // rather than leaving it stranded on a dialog that just unmounted.
-    saveButtonRef.current?.focus();
+    // The draft is exactly as it was; hand focus back to the control that
+    // asked to close, rather than leaving it stranded on a dialog that just
+    // unmounted. The primary action is the fallback.
+    const invoker = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (invoker && invoker.isConnected) invoker.focus();
+    else saveButtonRef.current?.focus();
   };
 
   const discard = () => {
@@ -221,6 +235,10 @@ export default function PdfAreaImageDraftModal({
       </ImagePostEditorShell>
       {confirmingDiscard ? (
         <DiscardChangesDialog
+          // This draft opens over a PORTALLED editor from inside the canvas's
+          // isolated subtree, so the confirmation has to leave that subtree
+          // too or it paints underneath -- see the layer prop's own doc.
+          layer="above-image-editor"
           title="Discard this image?"
           message="This PDF-area image has not been added to the canvas yet. If you discard now, it will be lost."
           discardLabel="Discard"
