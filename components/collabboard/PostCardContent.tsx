@@ -856,6 +856,27 @@ export default function PostCardContent({
                         />
                     </div>
                 )}
+                {/* A PDF area crop is an Image post, and until now this branch
+                    returned before ever reaching the Text branch's marker -- so
+                    a crop showed no "Source . p. N", no click-back to the PDF,
+                    while a Note made from the very same region showed both.
+                    Rendered here, below the body, at the position the Text
+                    branch uses.
+
+                    hideRegionCrop: the card body above IS the crop, so the
+                    preview would be a second copy of the same picture.
+
+                    noteContent="" and NOT padlet.content: the excerpt rule is
+                    knowledgeSourceCardExcerpt(references, noteContent), and an
+                    image placement's `content` may hold a URL -- passing it
+                    could print that URL as a quoted source excerpt. An image
+                    placement has no note body, so empty is the honest input.
+
+                    No wrapper and no pointer-events of its own: the marker's
+                    own pointer/mouse/double-click swallow handlers are what
+                    keep this from stealing the card's drag gesture, and they
+                    exist for exactly this. */}
+                <KnowledgeSourceMarker padletId={padlet.id} noteContent="" hideRegionCrop />
             </div>
         );
     }
@@ -1170,7 +1191,20 @@ const SOURCE_EXCERPT_CLAMP: React.CSSProperties = {
  * post-R1 Note's editable body and this excerpt can never both render the
  * same passage.
  */
-export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {
+/**
+ * `hideRegionCrop` suppresses the region preview and NOTHING else -- the label,
+ * the excerpt, the open target and the swallow handlers are identical either
+ * way. It exists for the Image branch below: on an image placement the card
+ * body IS the crop, so the preview would render a second copy of the same
+ * picture directly above it.
+ *
+ * It defaults to false because this marker is also mounted by the freeform
+ * renderer and by the Text branch, where the preview is the whole point. Every
+ * existing caller therefore keeps today's rendering exactly.
+ */
+export function KnowledgeSourceMarker({ padletId, noteContent, hideRegionCrop = false }: {
+    padletId: string; noteContent: string; hideRegionCrop?: boolean;
+}) {
     const references = useKnowledgeSourceReferencesForPadlet(padletId);
     const openSource = useKnowledgeSourceOpen();
     const label = knowledgeSourceCardLabel(references);
@@ -1199,7 +1233,7 @@ export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: str
 
     return (
         <>
-            {crop && <KnowledgeSourceRegionCrop referenceId={crop.referenceId} />}
+            {!hideRegionCrop && crop && <KnowledgeSourceRegionCrop referenceId={crop.referenceId} />}
             {excerpt && (
                 <div
                     data-knowledge-source-excerpt="true"

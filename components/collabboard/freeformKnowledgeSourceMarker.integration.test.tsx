@@ -60,9 +60,20 @@ describe('P6J-F6-B2H freeform marker call site', () => {
     expect(freeform).toContain(
       "import PostCardContent, { KnowledgeSourceMarker } from '@/components/collabboard/PostCardContent';",
     );
+    // KNOWLEDGE_PDF_AREA_CROP_SOURCE_REFERENCE_1 added the OPTIONAL
+    // hideRegionCrop so the Image branch can mount this same marker without
+    // rendering a second copy of the crop it already shows as its body. It
+    // defaults to false, so THIS caller -- which never passes it -- renders
+    // exactly as it did before. That default is the invariant, so it is pinned
+    // here alongside the signature.
     expect(postCardContent).toContain(
-      'export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {',
+      'export function KnowledgeSourceMarker({ padletId, noteContent, hideRegionCrop = false }: {',
     );
+    expect(postCardContent).toContain(
+      '    padletId: string; noteContent: string; hideRegionCrop?: boolean;',
+    );
+    expect(freeform, 'the freeform call site must not opt out of the preview')
+      .not.toContain('hideRegionCrop');
   });
 
   it('B: the handwritten generic/Note branch mounts the marker with padlet.id', () => {

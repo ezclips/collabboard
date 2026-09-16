@@ -1134,3 +1134,87 @@ describe('F41-F48: durable Library Image reuse goes through the trusted server p
     expect([...digests], 'exactly one body digest may appear').toEqual([expected]);
   });
 });
+
+/**
+ * KNOWLEDGE_PDF_AREA_CROP_SOURCE_REFERENCE_1. The crop kept its provenance in
+ * padlet metadata while every consumer -- the "Source . p. N" chip, the region
+ * preview, the click-back and Board AI citation resolution -- reads
+ * source_references. These pin the producer side of the fix: BOTH crop creators
+ * write the region reference, and neither invents a text locator.
+ *
+ * Asserted against the FUNCTION BODIES, sliced out of the migration, never the
+ * whole file: the header comments name every table and column here, so a
+ * whole-file match would pass on prose alone.
+ */
+describe('F50-F55: both crop creators write their own source reference', () => {
+  const migration = sourceOf(
+    'supabase/migrations/20260916120000_knowledge_pdf_area_crop_source_reference.sql');
+  const rollout = sourceOf(
+    'supabase/production-rollouts/20260916120000_knowledge_pdf_area_crop_source_reference.sql');
+
+  /** The plpgsql body of one function, between its own AS $$ and the next $$. */
+  const bodyOf = (sql: string, name: string) => {
+    const at = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
+    expect(at, `function not found: ${name}`).toBeGreaterThan(-1);
+    const from = sql.indexOf('AS $$', at) + 'AS $$'.length;
+    return sql.slice(from, sql.indexOf('$$;', from));
+  };
+
+  const creator = bodyOf(migration, 'create_knowledge_pdf_area_image_post_with_library_item');
+  const reuse = bodyOf(migration, 'create_knowledge_pdf_area_image_reuse_placement');
+
+  it('F50: the creator writes a source reference before it returns', () => {
+    expect(creator).toContain('INSERT INTO public.source_references (');
+    // Before the final RETURN QUERY, so it runs on the path that really creates
+    // a padlet -- not after it, where it would never run at all.
+    expect(creator.indexOf('INSERT INTO public.source_references ('))
+      .toBeLessThan(creator.indexOf('RETURN QUERY SELECT p_padlet_id, v_library_item_id;'));
+  });
+
+  it('F51: the reuse placement writes one too -- a re-placed crop is still a crop', () => {
+    expect(reuse).toContain('INSERT INTO public.source_references (');
+    // After the placement rows exist, before the function returns.
+    expect(reuse.indexOf('INSERT INTO public.knowledge_pdf_area_image_placements'))
+      .toBeLessThan(reuse.indexOf('INSERT INTO public.source_references ('));
+    expect(reuse.indexOf('INSERT INTO public.source_references ('))
+      .toBeLessThan(reuse.indexOf('RETURN QUERY SELECT p_padlet_id, p_library_item_id, p_board_id;'));
+  });
+
+  it('F52: both supply all four region columns -- three quarters is not a rectangle', () => {
+    for (const [name, body] of [['creator', creator], ['reuse', reuse]] as const) {
+      for (const column of ['region_x', 'region_y', 'region_width', 'region_height']) {
+        expect(body, `${name} must supply ${column}`).toContain(column);
+      }
+      // And reads each from the crop's own metadata, not from a parameter.
+      expect(body, name).toContain("(p_metadata -> 'source' -> 'region' ->> 'x')::double precision");
+      expect(body, name).toContain("(p_metadata -> 'source' -> 'region' ->> 'height')::double precision");
+    }
+  });
+
+  it('F53: neither writes a quote or a char span -- a region reference has no text locator', () => {
+    for (const [name, body] of [['creator', creator], ['reuse', reuse]] as const) {
+      expect(body, name).toContain('quote_text, quote_hash, char_start, char_end, locator');
+      expect(body, name).toContain('NULL, NULL, NULL, NULL, NULL');
+      // source_references_region_text_exclusion_check would reject the row at
+      // runtime; catching it here means it never reaches a user.
+      expect(body, name).not.toMatch(/quote_text\s*=/);
+      expect(body, name).not.toMatch(/char_start\s*,\s*char_end\s*\)\s*VALUES/);
+    }
+  });
+
+  it('F54: both guard the write, because no unique constraint does', () => {
+    for (const [name, body] of [['creator', creator], ['reuse', reuse]] as const) {
+      const guard = body.indexOf('IF NOT EXISTS (\n        SELECT 1\n          FROM public.source_references r');
+      expect(guard, `${name} must guard the reference write`).toBeGreaterThan(-1);
+      expect(guard).toBeLessThan(body.indexOf('INSERT INTO public.source_references ('));
+      expect(body, name).toContain('r.target_padlet_id = p_padlet_id');
+    }
+  });
+
+  it('F55: the rollout ships the same two bodies as the reviewed migration', () => {
+    expect(bodyOf(rollout, 'create_knowledge_pdf_area_image_post_with_library_item')).toBe(creator);
+    expect(bodyOf(rollout, 'create_knowledge_pdf_area_image_reuse_placement')).toBe(reuse);
+    expect(rollout, 'the rollout must name its source migration')
+      .toContain('supabase/migrations/20260916120000_knowledge_pdf_area_crop_source_reference.sql');
+  });
+});

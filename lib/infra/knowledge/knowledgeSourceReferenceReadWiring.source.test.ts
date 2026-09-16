@@ -409,8 +409,9 @@ describe('P6J-F6-B2 source marker and navigation wiring', () => {
    */
   it('D: the card marker opens its source safely, and still navigates nowhere itself', () => {
     // A scan bound, not an invariant: the excerpt block pushed the marker
-    // roughly 1750 characters past the anchor.
-    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 2400);
+    // roughly 1750 characters past the anchor, and the hideRegionCrop prop
+    // (KNOWLEDGE_PDF_AREA_CROP_SOURCE_REFERENCE_1) another ~50 on top of that.
+    const marker = after(postCardContent, 'function KnowledgeSourceMarker(', 2600);
 
     expect(marker).toContain('data-knowledge-source-marker="true"');
     // The interactive form is a real, named control -- not a div wearing a
@@ -944,10 +945,17 @@ describe('P6J-F6-B3 used-in-notes wiring', () => {
     for (const forbidden of ['setPadlets(', 'updatePadletById', 'metadata:']) {
       expect(derivation).not.toContain(forbidden);
     }
-    // B2's forward marker and its single call site are unchanged in shape;
-    // KNI-R1 widened the signature to also receive the caller's Note body.
+    // B2's forward marker is unchanged in shape; KNI-R1 widened the signature
+    // to also receive the caller's Note body, and
+    // KNOWLEDGE_PDF_AREA_CROP_SOURCE_REFERENCE_1 added the OPTIONAL
+    // hideRegionCrop so the Image branch can mount the same marker without a
+    // second copy of the crop. It defaults to false, so every pre-existing
+    // caller renders exactly as before -- which is what this pins.
     expect(postCardContent).toContain(
-      'export function KnowledgeSourceMarker({ padletId, noteContent }: { padletId: string; noteContent: string }) {',
+      'export function KnowledgeSourceMarker({ padletId, noteContent, hideRegionCrop = false }: {',
+    );
+    expect(postCardContent).toContain(
+      '    padletId: string; noteContent: string; hideRegionCrop?: boolean;',
     );
     expect((canvasClient.match(/setSourceReferencesByPadletId\(/g) ?? []).length).toBe(6);
   });
@@ -1167,5 +1175,54 @@ describe('P6J-F8-B2 source excerpt boundaries', () => {
     }
     // CanvasClient remains the one owner that loads them.
     expect(canvasClient).toContain('new SupabaseKnowledgeSourceReferenceReader(');
+  });
+});
+
+/**
+ * KNOWLEDGE_PDF_AREA_CROP_SOURCE_REFERENCE_1 -- the RENDER SITE.
+ *
+ * PostCardContent is a chain of early returns by type, and the marker lived in
+ * the last one. An Image post returned from the Image branch and never reached
+ * it, so a PDF area crop showed no "Source . p. N" and no click-back while a
+ * Note built from the identical region showed both.
+ *
+ * Asserted on whole element strings, not on fragments: this file does not strip
+ * JSX block comments, and the comment beside the new call site names every
+ * prop it passes.
+ */
+describe('KNOWLEDGE_PDF_AREA_CROP_SOURCE_REFERENCE_1: the Image branch carries the marker', () => {
+  const IMAGE_CALL = '<KnowledgeSourceMarker padletId={padlet.id} noteContent="" hideRegionCrop />';
+  const TEXT_CALL = '<KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />';
+
+  it('T6a: the Image branch mounts the marker with an empty note body', () => {
+    expect(postCardContent).toContain(IMAGE_CALL);
+    // noteContent MUST be empty, never padlet.content: an image placement's
+    // content may be a URL, and knowledgeSourceCardExcerpt would print it as a
+    // quoted source excerpt.
+    expect(postCardContent).not.toContain(
+      '<KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} hideRegionCrop />');
+  });
+
+  it('T6b: it suppresses the region preview, because the card body IS the crop', () => {
+    expect(IMAGE_CALL).toContain('hideRegionCrop');
+    // The prop is additive: optional, defaulting to today's behaviour.
+    expect(postCardContent).toContain('hideRegionCrop = false');
+    expect(postCardContent).toContain('hideRegionCrop?: boolean;');
+    expect(postCardContent).toContain('{!hideRegionCrop && crop && <KnowledgeSourceRegionCrop');
+  });
+
+  it('T6c: the Text branch call site is unchanged, and still gets the preview', () => {
+    expect(postCardContent).toContain(TEXT_CALL);
+    // Exactly two mount points -- the Text branch and the Image branch.
+    expect(postCardContent.match(/<KnowledgeSourceMarker\s/g)).toHaveLength(2);
+  });
+
+  it('T6d: the marker itself is unchanged apart from the new prop', () => {
+    // The label, the open target and the swallow handlers that protect the
+    // card's drag gesture are shared by both call sites, not duplicated.
+    expect(postCardContent).toContain('const label = knowledgeSourceCardLabel(references);');
+    expect(postCardContent).toContain('if (label === null) return null;');
+    expect(postCardContent).toContain('onPointerDown={swallow}');
+    expect(postCardContent.match(/data-knowledge-source-marker="true"/g)).toHaveLength(2);
   });
 });

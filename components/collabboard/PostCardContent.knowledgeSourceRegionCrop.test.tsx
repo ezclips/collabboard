@@ -26,6 +26,17 @@ const padlet = {
   id: PADLET_ID, title: 'Note', content: 'Hello world', type: 'text', metadata: {},
 } as unknown as Padlet;
 
+/**
+ * A PDF area crop as it actually reaches the board: an Image post whose body is
+ * the cropped picture. `content` deliberately holds a URL, which is what an
+ * image placement's content can be -- the marker must not turn it into a quoted
+ * source excerpt.
+ */
+const imagePadlet = {
+  id: PADLET_ID, title: 'Image', content: 'https://example.test/crop.webp',
+  type: 'image', metadata: { imageUrl: 'https://example.test/crop.webp' },
+} as unknown as Padlet;
+
 function pageRegionReference(id: string): SourceReference {
   return {
     id, targetPadletId: PADLET_ID, sourceDocumentId: 'doc-1', pageStart: 3, pageEnd: 3,
@@ -45,14 +56,14 @@ afterEach(() => {
   host = null;
 });
 
-function mount(references: readonly SourceReference[]) {
+function mount(references: readonly SourceReference[], subject: Padlet = padlet) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => {
     root!.render(
       <KnowledgeSourceReferenceProvider index={buildKnowledgeSourceReferenceIndex(references)}>
-        <PostCardContent padlet={padlet} />
+        <PostCardContent padlet={subject} />
       </KnowledgeSourceReferenceProvider>,
     );
   });
@@ -85,5 +96,51 @@ describe('P6J-F9-C2 PostCardContent + region crop', () => {
     expect(body.innerHTML).toBe('Hello world');
     expect(body.querySelector('img')).toBeNull();
     expect(body.textContent).not.toContain('/crop');
+  });
+
+  /**
+   * T5. The guard that the new `hideRegionCrop` prop is ADDITIVE. The Text
+   * branch never passes it, so a text card carrying the same region reference
+   * must still render the preview exactly as it did before. If this goes red,
+   * the default flipped and every existing caller -- the freeform renderer
+   * included -- changed behaviour.
+   */
+  it('T5: the default is unchanged -- a text card still renders the region preview', () => {
+    const container = mount([pageRegionReference('ref-1')]);
+    expect(container.querySelector('[data-knowledge-source-region-crop]')).not.toBeNull();
+    expect(container.querySelector('[data-knowledge-source-marker]')).not.toBeNull();
+  });
+});
+
+/**
+ * T3. The Image branch returns long before the Text branch's marker, so a PDF
+ * area crop used to show nothing at all while a Note made from the very same
+ * region showed its page and its preview. These pin the render site.
+ */
+describe('T3: a PDF area crop is an Image post, and carries its own marker', () => {
+  it('renders the marker with the page label, and no second copy of the picture', () => {
+    const container = mount([pageRegionReference('ref-1')], imagePadlet);
+
+    const marker = container.querySelector('[data-knowledge-source-marker]');
+    expect(marker, 'the Image branch reaches the marker').not.toBeNull();
+    expect(marker!.textContent).toContain('p. 3');
+
+    // The card body IS the crop, so the preview would be the same picture twice.
+    expect(container.querySelector('[data-knowledge-source-region-crop]')).toBeNull();
+    // And the placement's content is a URL -- it must never become an excerpt.
+    expect(container.querySelector('[data-knowledge-source-excerpt]')).toBeNull();
+    expect(marker!.textContent).not.toContain('https://');
+  });
+
+  it('renders nothing at all when the crop has no references, leaving the image intact', () => {
+    const container = mount([], imagePadlet);
+
+    expect(container.querySelector('[data-knowledge-source-marker]')).toBeNull();
+    expect(container.querySelector('[data-knowledge-source-region-crop]')).toBeNull();
+    expect(container.querySelector('[data-knowledge-source-excerpt]')).toBeNull();
+
+    const img = container.querySelector('img');
+    expect(img, 'the image body is untouched').not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://example.test/crop.webp');
   });
 });
