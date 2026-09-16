@@ -20,12 +20,14 @@ const ROOT = process.cwd();
 const MIGRATION = 'supabase/migrations/20260916120000_knowledge_pdf_area_crop_source_reference.sql';
 const ROLLOUT = 'supabase/production-rollouts/20260916120000_knowledge_pdf_area_crop_source_reference.sql';
 const VERIFY = 'supabase/production-rollouts/20260916120000_knowledge_pdf_area_crop_source_reference_verify.sql';
+const ROLLBACK = 'supabase/production-rollouts/20260916120000_knowledge_pdf_area_crop_source_reference_rollback.sql';
 
 const read = (relativePath: string) => readFileSync(resolve(ROOT, relativePath), 'utf8');
 
 const migration = read(MIGRATION);
 const rollout = read(ROLLOUT);
 const verifier = read(VERIFY);
+const rollbackScript = read(ROLLBACK);
 
 /** Statements only. Prose about a verb is not the verb. */
 const verifierStatements = verifier.replace(/^\s*--.*$/gm, '');
@@ -139,5 +141,83 @@ describe('the verifier contract', () => {
     expect(verifierStatements).not.toContain('RETURNING');
     expect(verifierStatements).not.toMatch(/\bUPDATE\s+public\./);
     expect(verifierStatements).not.toMatch(/\bDELETE\s+FROM\b/);
+  });
+});
+
+/**
+ * The plan has no point-in-time recovery, so the undo path is not a
+ * convenience -- it is the only one that exists. It must be in the repository
+ * and it must stay narrow.
+ */
+describe('the rollback artifact', () => {
+  /** Statements only, so prose naming a verb is not read as the verb. */
+  const rollbackStatements = rollbackScript.replace(/^\s*--.*$/gm, '');
+
+  it('12. ships beside the rollout it reverses, and says why it must exist', () => {
+    expect(rollbackScript.length).toBeGreaterThan(0);
+    expect(ROLLBACK.slice(0, ROLLBACK.lastIndexOf('/')))
+      .toBe(ROLLOUT.slice(0, ROLLOUT.lastIndexOf('/')));
+    expect(rollbackScript).toContain(ROLLOUT);
+    expect(rollbackScript, 'the reason it is version-controlled')
+      .toContain('NO POINT-IN-TIME RECOVERY');
+  });
+
+  it('13. Part 1 restores both pre-change bodies verbatim, with their grants', () => {
+    const bodyOf = (sql: string, name: string) => {
+      const at = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
+      expect(at, `function not found: ${name}`).toBeGreaterThan(-1);
+      const from = sql.indexOf('AS $$', at) + 'AS $$'.length;
+      return sql.slice(from, sql.indexOf('$$;', from));
+    };
+    const previous: ReadonlyArray<readonly [string, string]> = [
+      ['create_knowledge_pdf_area_image_post_with_library_item',
+       'supabase/migrations/20260907120000_library_durable_image_preview.sql'],
+      ['create_knowledge_pdf_area_image_reuse_placement',
+       'supabase/migrations/20260908090000_add_knowledge_pdf_area_image_placement_mapping.sql'],
+    ];
+    for (const [name, source] of previous) {
+      // A rollback that ships a retyped or "tidied" body is not a rollback --
+      // it is a third version of the function, written under pressure.
+      expect(bodyOf(rollbackScript, name), `${name} must be verbatim`)
+        .toBe(bodyOf(read(source), name));
+      // And it must NOT carry the very write it exists to remove.
+      expect(bodyOf(rollbackScript, name), `${name} must not write a reference`)
+        .not.toContain('source_references');
+    }
+    expect(rollbackStatements.match(/^REVOKE ALL ON FUNCTION/gm)).toHaveLength(2);
+    expect(rollbackStatements.match(/^GRANT EXECUTE ON FUNCTION/gm)).toHaveLength(2);
+    expect(rollbackStatements.match(/^COMMENT ON FUNCTION/gm)).toHaveLength(2);
+  });
+
+  it('14. Part 2 deletes by id only -- no broad predicate, present or possible', () => {
+    const deletes = rollbackStatements.match(/DELETE\s+FROM/g) ?? [];
+    expect(deletes, 'exactly one delete').toHaveLength(1);
+    // The ONLY acceptable discriminator. After the rollout the creators write
+    // rows identical in shape to the backfilled ones, so a row a user made by
+    // cropping a PDF is indistinguishable from a backfilled row by every
+    // column except its id. A predicate wide enough to catch all six is wide
+    // enough to destroy real user work, with nothing to restore it from.
+    expect(rollbackStatements)
+      .toMatch(/DELETE FROM public\.source_references\s*\n\s*WHERE id IN \(/);
+    for (const forbidden of [
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?source_document_id/,
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?page_start/,
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?region_x/,
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?target_padlet_id/,
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?created_at/,
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?quote_text/,
+      /DELETE FROM[\s\S]*?WHERE[\s\S]*?USING/,
+    ]) {
+      expect(rollbackStatements, `broad predicate: ${forbidden}`).not.toMatch(forbidden);
+    }
+    // It reports what it actually removed, to be checked against the list.
+    expect(rollbackStatements).toContain('RETURNING id;');
+  });
+
+  it('15. the id list ships empty, so an accidental run cannot delete anything', () => {
+    // `IN ()` is a syntax error: the file fails loudly rather than quietly
+    // matching every row. No uuid literal may be committed here.
+    expect(rollbackStatements).not.toMatch(/'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/i);
+    expect(rollbackScript).toContain('ships EMPTY on purpose');
   });
 });
