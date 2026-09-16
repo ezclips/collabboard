@@ -1,4 +1,6 @@
 import { createHash } from 'crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
@@ -22,15 +24,23 @@ const OTHER_PADLET_ID = 'padlet-2';
 const BOARD_ID = 'board-1';
 const PASSWORD = 'correct-horse-battery-staple';
 
+/**
+ * The columns `padlets` ACTUALLY has. There is deliberately no `image_url`:
+ * the route used to select one, PostgREST failed the whole query with 42703,
+ * and every post type -- not only images -- came back 404. The route now
+ * composes image_url in the response instead, which is what these rows prove.
+ */
 const padletRow = {
     id: PADLET_ID,
     title: 'Secret post',
     content: 'confidential body',
     type: 'note',
-    image_url: null,
-    metadata: {},
-    file_url: null,
+    metadata: {} as Record<string, unknown>,
+    file_url: null as string | null,
 };
+
+/** What the route returns for `padletRow`: the row plus the composed field. */
+const padletResponse = { ...padletRow, image_url: null };
 
 interface ShareLinkRow {
     id: string;
@@ -45,9 +55,14 @@ interface ShareLinkRow {
 
 const updates: Array<Record<string, unknown>> = [];
 
-let fixture: { link: ShareLinkRow | null; padletBoards: Record<string, string> } = {
+let fixture: {
+    link: ShareLinkRow | null;
+    padletBoards: Record<string, string>;
+    padlet: typeof padletRow;
+} = {
     link: null,
     padletBoards: {},
+    padlet: padletRow,
 };
 
 /**
@@ -55,8 +70,12 @@ let fixture: { link: ShareLinkRow | null; padletBoards: Record<string, string> }
  * be a stable object that reads a mutable fixture rather than a new client per
  * test. `padlets` rows are keyed by board so the board-scope check is real.
  */
-function installFakeSupabase(link: ShareLinkRow | null, padletBoards: Record<string, string>) {
-    fixture = { link, padletBoards };
+function installFakeSupabase(
+    link: ShareLinkRow | null,
+    padletBoards: Record<string, string>,
+    padlet: typeof padletRow = padletRow,
+) {
+    fixture = { link, padletBoards, padlet };
 }
 
 const fakeClient = {
@@ -70,7 +89,7 @@ const fakeClient = {
                             return chain;
                         },
                         async single() {
-                            const { link, padletBoards } = fixture;
+                            const { link, padletBoards, padlet } = fixture;
                             if (table === 'share_links') {
                                 return link && filters.token === link.token
                                     ? { data: link, error: null }
@@ -84,8 +103,14 @@ const fakeClient = {
                                     : { data: null, error: { code: 'PGRST116' } };
                             }
 
-                            return filters.id === padletRow.id
-                                ? { data: padletRow, error: null }
+                            // A real PostgREST select of a column the table does
+                            // not have fails the WHOLE query, which is exactly
+                            // how image_url turned every post into a 404.
+                            if (columns.split(',').map((c) => c.trim()).includes('image_url')) {
+                                return { data: null, error: { code: '42703', message: 'column padlets.image_url does not exist' } };
+                            }
+                            return filters.id === padlet.id
+                                ? { data: padlet, error: null }
                                 : { data: null, error: { code: 'PGRST116' } };
                         },
                     };
@@ -178,7 +203,7 @@ describe('share-link password gate', () => {
             padletRequest({ token: TOKEN, padletId: PADLET_ID, grant }),
         );
         expect(granted.status).toBe(200);
-        await expect(granted.json()).resolves.toEqual({ padlet: padletRow });
+        await expect(granted.json()).resolves.toEqual({ padlet: padletResponse });
 
         // The same grant must not unlock a different padlet.
         const reused = await padletRoute.GET(
@@ -247,7 +272,7 @@ describe('share-link password gate', () => {
         );
 
         expect(response.status).toBe(200);
-        await expect(response.json()).resolves.toEqual({ padlet: padletRow });
+        await expect(response.json()).resolves.toEqual({ padlet: padletResponse });
     });
 
     it('T-A: rejects a grant minted for a different token', async () => {
@@ -346,5 +371,108 @@ describe('share-link password gate', () => {
 
         await expect(res.json()).resolves.toMatchObject({ valid: true });
         expect(updates).toHaveLength(0);
+    });
+});
+
+/**
+ * The standalone share view selected `padlets.image_url`, a column the table
+ * does not have. PostgREST fails the WHOLE query on an unknown column, so the
+ * route's `padletError` branch fired for EVERY post type and the share page
+ * showed "Could not load post" -- a 404 that looked like a missing row.
+ *
+ * The route now selects real columns and composes image_url from the same
+ * display authority every other surface uses: metadata.imageUrl, falling back
+ * to file_url. SharePageClient is unchanged; it already reads image_url.
+ */
+describe('the standalone share view composes image_url instead of selecting it', () => {
+    const openLink = (): ShareLinkRow => ({
+        id: 'link-1', token: TOKEN, board_id: null, padlet_id: PADLET_ID,
+        password_hash: null, expires_at: null,
+    });
+
+    it('a note post returns 200, and its image_url is null', async () => {
+        installFakeSupabase(openLink(), { [PADLET_ID]: BOARD_ID });
+
+        const response = await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID }),
+        );
+
+        expect(response.status).toBe(200);
+        const { padlet } = await response.json();
+        expect(padlet.type).toBe('note');
+        expect(padlet.image_url).toBeNull();
+        // The body the page actually renders still arrives intact.
+        expect(padlet.title).toBe('Secret post');
+        expect(padlet.content).toBe('confidential body');
+    });
+
+    it('an image post with metadata.imageUrl returns THAT value', async () => {
+        installFakeSupabase(openLink(), { [PADLET_ID]: BOARD_ID }, {
+            ...padletRow,
+            type: 'image',
+            metadata: { imageUrl: 'https://cdn.test/edited-crop.webp' },
+            // file_url is the creation-time snapshot and must LOSE: an edit
+            // such as a crop only ever updates metadata.imageUrl.
+            file_url: 'https://cdn.test/original.webp',
+        });
+
+        const response = await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID }),
+        );
+
+        expect(response.status).toBe(200);
+        const { padlet } = await response.json();
+        expect(padlet.image_url).toBe('https://cdn.test/edited-crop.webp');
+    });
+
+    it('an image post with only file_url falls back to it', async () => {
+        installFakeSupabase(openLink(), { [PADLET_ID]: BOARD_ID }, {
+            ...padletRow, type: 'image', metadata: {}, file_url: 'https://cdn.test/original.webp',
+        });
+
+        const response = await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID }),
+        );
+
+        const { padlet } = await response.json();
+        expect(padlet.image_url).toBe('https://cdn.test/original.webp');
+    });
+
+    it('an empty metadata.imageUrl is not treated as an image', async () => {
+        // '' would render a broken <img>, so it must fall through like absence.
+        installFakeSupabase(openLink(), { [PADLET_ID]: BOARD_ID }, {
+            ...padletRow, type: 'image', metadata: { imageUrl: '' }, file_url: null,
+        });
+
+        const { padlet } = await (await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID }),
+        )).json();
+        expect(padlet.image_url).toBeNull();
+    });
+
+    it('the response carries exactly the keys the client needs, and no more', async () => {
+        // This endpoint is reachable by an unauthenticated visitor holding a
+        // token, so the column list is a disclosure boundary: no board_id, no
+        // user_id, no created_at, no position, no library_item_id.
+        installFakeSupabase(openLink(), { [PADLET_ID]: BOARD_ID });
+
+        const { padlet } = await (await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID }),
+        )).json();
+
+        expect(Object.keys(padlet).sort()).toEqual(
+            ['content', 'file_url', 'id', 'image_url', 'metadata', 'title', 'type'],
+        );
+    });
+
+    it('selecting image_url from the database would 404 every post -- the defect itself', async () => {
+        // The fake refuses an image_url select exactly as PostgREST did. If the
+        // route ever reintroduces that column, this goes red instead of every
+        // shared post silently becoming "Could not load post".
+        installFakeSupabase(openLink(), { [PADLET_ID]: BOARD_ID });
+        const source = readFileSync(
+            resolve(process.cwd(), 'app/api/share-link/padlet/route.ts'), 'utf8');
+        expect(source).toContain("select('id, title, content, type, metadata, file_url')");
+        expect(source).not.toContain('image_url, metadata');
     });
 });

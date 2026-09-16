@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
     // Fetch the padlet
     const { data: padlet, error: padletError } = await supabase
         .from('padlets')
-        .select('id, title, content, type, image_url, metadata, file_url')
+        .select('id, title, content, type, metadata, file_url')
         .eq('id', padletId)
         .single();
 
@@ -73,5 +73,21 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Post not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ padlet });
+    // The share page's card reads image_url; `padlets` has no such column.
+    // Selecting it made PostgREST fail the whole query with 42703, so EVERY
+    // post type -- not just images -- came back as 404 here.
+    //
+    // The display authority is metadata.imageUrl, which wins over file_url on
+    // every surface -- file_url is only a snapshot copy taken at creation (see
+    // the IMAGE branch in PostCardContent).
+    const row = padlet as Record<string, unknown> & {
+        metadata?: { imageUrl?: unknown } | null;
+        file_url?: unknown;
+    };
+    const metadataImageUrl = typeof row.metadata?.imageUrl === 'string'
+        && row.metadata.imageUrl.length > 0 ? row.metadata.imageUrl : null;
+    const fileUrl = typeof row.file_url === 'string' && row.file_url.length > 0
+        ? row.file_url : null;
+
+    return NextResponse.json({ padlet: { ...padlet, image_url: metadataImageUrl ?? fileUrl } });
 }
