@@ -249,4 +249,102 @@ describe('share-link password gate', () => {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toEqual({ padlet: padletRow });
     });
+
+    it('T-A: rejects a grant minted for a different token', async () => {
+        const hash = await sharePassword.hashSharePassword(PASSWORD);
+        installFakeSupabase(protectedLink(hash), { [PADLET_ID]: BOARD_ID });
+
+        // Correct padlet, WRONG token: the binding covers both.
+        const foreignGrant = sharePassword.issueShareGrant({
+            token: 'a-different-share-token',
+            padletId: PADLET_ID,
+        });
+
+        const response = await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID, grant: foreignGrant }),
+        );
+
+        expect(response.status).toBe(403);
+    });
+
+    it('T-B: rejects a grant whose signature has been tampered with', async () => {
+        const hash = await sharePassword.hashSharePassword(PASSWORD);
+        installFakeSupabase(protectedLink(hash), { [PADLET_ID]: BOARD_ID });
+
+        const grant = sharePassword.issueShareGrant({ token: TOKEN, padletId: PADLET_ID });
+        const [version, payload, signature] = grant.split('.');
+        const flipped = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1);
+
+        const response = await padletRoute.GET(
+            padletRequest({
+                token: TOKEN,
+                padletId: PADLET_ID,
+                grant: `${version}.${payload}.${flipped}`,
+            }),
+        );
+
+        expect(response.status).toBe(403);
+    });
+
+    it('T-C: discloses the target only on success', async () => {
+        const hash = await sharePassword.hashSharePassword(PASSWORD);
+        installFakeSupabase(
+            protectedLink(hash, { board_id: BOARD_ID, permission: 'comment' }),
+            { [PADLET_ID]: BOARD_ID },
+        );
+
+        const wrong = await verifyRoute.POST(
+            verifyRequest({ token: TOKEN, password: 'not-the-password' }),
+        );
+        // Exactly this shape: no ids, no grant, nothing about the target.
+        await expect(wrong.json()).resolves.toEqual({ valid: false });
+
+        const ok = await verifyRoute.POST(
+            verifyRequest({ token: TOKEN, password: PASSWORD }),
+        );
+        const body = await ok.json();
+        expect(body.valid).toBe(true);
+        expect(body.boardId).toBe(BOARD_ID);
+        expect(body.padletId).toBe(PADLET_ID);
+        expect(body.permission).toBe('comment');
+        expect(typeof body.grant).toBe('string');
+    });
+
+    it('T-D: the request body cannot nominate which padlet the grant unlocks', async () => {
+        const hash = await sharePassword.hashSharePassword(PASSWORD);
+        installFakeSupabase(protectedLink(hash), {
+            [PADLET_ID]: BOARD_ID,
+            [OTHER_PADLET_ID]: BOARD_ID,
+        });
+
+        const res = await verifyRoute.POST(
+            verifyRequest({ token: TOKEN, password: PASSWORD, padletId: OTHER_PADLET_ID }),
+        );
+        const { valid, grant, padletId } = await res.json();
+        expect(valid).toBe(true);
+        // The LINK's padlet, not the one the body named.
+        expect(padletId).toBe(PADLET_ID);
+
+        const own = await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: PADLET_ID, grant }),
+        );
+        expect(own.status).toBe(200);
+
+        const nominated = await padletRoute.GET(
+            padletRequest({ token: TOKEN, padletId: OTHER_PADLET_ID, grant }),
+        );
+        expect(nominated.status).toBe(403);
+    });
+
+    it('T-E: a scrypt hash triggers no rehash', async () => {
+        const hash = await sharePassword.hashSharePassword(PASSWORD);
+        installFakeSupabase(protectedLink(hash), { [PADLET_ID]: BOARD_ID });
+
+        const res = await verifyRoute.POST(
+            verifyRequest({ token: TOKEN, password: PASSWORD }),
+        );
+
+        await expect(res.json()).resolves.toMatchObject({ valid: true });
+        expect(updates).toHaveLength(0);
+    });
 });

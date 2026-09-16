@@ -61,13 +61,20 @@ export default async function SharePage({
 
     // For password-protected board/post-in-board links, or option 1 (post only):
     // render the client component which handles password check + content display
+    //
+    // A password-protected link discloses only that it is protected. The target
+    // ids and the granted permission arrive from verify-password once the
+    // password has proven itself, so they never sit in this payload for a
+    // visitor who has not unlocked the link.
+    const withholdsTarget = isPasswordProtected;
+
     return (
         <SharePageClient
             token={token}
             shareTarget={shareTarget}
-            boardId={boardId}
-            padletId={padletId}
-            permission={permission}
+            boardId={withholdsTarget ? null : boardId}
+            padletId={withholdsTarget ? null : padletId}
+            permission={withholdsTarget ? '' : permission}
             isPasswordProtected={isPasswordProtected}
         />
     );

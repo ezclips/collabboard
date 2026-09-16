@@ -7,7 +7,9 @@ import { Lock, CheckSquare, StickyNote, Link2, Image, Table2, ExternalLink, Chec
 interface SharePageClientProps {
     token: string;
     shareTarget: string;
+    /** Null for a password-protected link until the password is proven. */
     boardId: string | null;
+    /** Null for a password-protected link until the password is proven. */
     padletId: string | null;
     permission: string;
     isPasswordProtected: boolean;
@@ -37,6 +39,12 @@ export default function SharePageClient({
     // Server-signed proof that the password was supplied; required by the
     // padlet endpoint for protected links. Null for unprotected ones.
     const [grant, setGrant] = useState<string | null>(null);
+    // The target identity. For an unprotected link this is the prop and never
+    // changes; for a protected one it is null until the unlock response
+    // supplies it, which is what keeps it out of the pre-unlock payload.
+    const [targetBoardId, setTargetBoardId] = useState<string | null>(boardId);
+    const [targetPadletId, setTargetPadletId] = useState<string | null>(padletId);
+    const [targetPermission, setTargetPermission] = useState(permission);
     const [isCheckingPassword, setIsCheckingPassword] = useState(false);
     const [padlet, setPadlet] = useState<PadletData | null>(null);
     const [isLoadingPadlet, setIsLoadingPadlet] = useState(false);
@@ -44,10 +52,10 @@ export default function SharePageClient({
 
     // After unlock, fetch padlet data for 'post' target
     useEffect(() => {
-        if (!isUnlocked || shareTarget !== 'post' || !padletId) return;
+        if (!isUnlocked || shareTarget !== 'post' || !targetPadletId) return;
         if (isPasswordProtected && !grant) return;
 
-        const query = new URLSearchParams({ token, padletId });
+        const query = new URLSearchParams({ token, padletId: targetPadletId });
         if (grant) query.set('grant', grant);
 
         setIsLoadingPadlet(true);
@@ -62,24 +70,24 @@ export default function SharePageClient({
             })
             .catch(() => setPadletError('Failed to load post.'))
             .finally(() => setIsLoadingPadlet(false));
-    }, [isUnlocked, shareTarget, padletId, token, grant, isPasswordProtected]);
+    }, [isUnlocked, shareTarget, targetPadletId, token, grant, isPasswordProtected]);
 
     // After unlock, redirect for board/post-in-board targets
     useEffect(() => {
         if (!isUnlocked) return;
 
-        if (shareTarget === 'board' && boardId) {
-            router.replace(`/dashboard/canvas/${boardId}`);
+        if (shareTarget === 'board' && targetBoardId) {
+            router.replace(`/dashboard/canvas/${targetBoardId}`);
             return;
         }
-        if (shareTarget === 'post-in-board' && boardId) {
-            const url = padletId
-                ? `/dashboard/canvas/${boardId}?openPadlet=${padletId}`
-                : `/dashboard/canvas/${boardId}`;
+        if (shareTarget === 'post-in-board' && targetBoardId) {
+            const url = targetPadletId
+                ? `/dashboard/canvas/${targetBoardId}?openPadlet=${targetPadletId}`
+                : `/dashboard/canvas/${targetBoardId}`;
             router.replace(url);
             return;
         }
-    }, [isUnlocked, shareTarget, boardId, padletId, router]);
+    }, [isUnlocked, shareTarget, targetBoardId, targetPadletId, router]);
 
     const handlePasswordSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -90,11 +98,16 @@ export default function SharePageClient({
             const res = await fetch(`/api/share-link/verify-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token, password: passwordInput, padletId }),
+                body: JSON.stringify({ token, password: passwordInput }),
             });
             const data = await res.json();
             if (data.valid) {
                 setGrant(data.grant ?? null);
+                setTargetBoardId(typeof data.boardId === 'string' ? data.boardId : null);
+                setTargetPadletId(typeof data.padletId === 'string' ? data.padletId : null);
+                setTargetPermission(
+                    typeof data.permission === 'string' && data.permission ? data.permission : 'view',
+                );
                 setIsUnlocked(true);
             } else {
                 setPasswordError('Incorrect password. Please try again.');
@@ -179,13 +192,13 @@ export default function SharePageClient({
                         Shared post
                     </span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        permission === 'edit'
+                        targetPermission === 'edit'
                             ? 'bg-green-100 text-green-700'
-                            : permission === 'comment'
+                            : targetPermission === 'comment'
                                 ? 'bg-blue-100 text-blue-700'
                                 : 'bg-gray-100 text-gray-600'
                     }`}>
-                        {permission === 'edit' ? 'Can edit' : permission === 'comment' ? 'Can comment' : 'View only'}
+                        {targetPermission === 'edit' ? 'Can edit' : targetPermission === 'comment' ? 'Can comment' : 'View only'}
                     </span>
                 </div>
                 <PostCard padlet={padlet} />

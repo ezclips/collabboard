@@ -13,7 +13,7 @@ const supabase = createClient(
 
 export async function POST(request: NextRequest) {
     try {
-        const { token, password, padletId } = await request.json();
+        const { token, password } = await request.json();
 
         if (!token || !password) {
             return NextResponse.json({ error: 'token and password are required' }, { status: 400 });
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
         const { data: link, error } = await supabase
             .from('share_links')
-            .select('id, password_hash, expires_at')
+            .select('id, board_id, padlet_id, permission, password_hash, expires_at')
             .eq('token', token)
             .single();
 
@@ -51,14 +51,33 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Only a padlet-scoped grant is issued: board targets redirect to the
-        // canvas, which is behind its own authenticated RLS boundary.
-        const grant =
-            typeof padletId === 'string' && padletId
-                ? issueShareGrant({ token, padletId })
+        // The grant's binding comes from the LINK, never from the request: a
+        // caller must not nominate which padlet their grant unlocks.
+        //
+        // A link with no padlet_id issues no grant. A link that HAS one mints a
+        // grant even when its shareTarget redirects into the canvas and will
+        // never call the padlet endpoint; such a grant is inert, and minting it
+        // keeps the rule simple -- the binding follows the row, not the caller
+        // and not the target.
+        const grantedPadletId =
+            typeof link.padlet_id === 'string' && link.padlet_id.length > 0
+                ? link.padlet_id
                 : null;
+        const grant = grantedPadletId
+            ? issueShareGrant({ token, padletId: grantedPadletId })
+            : null;
 
-        return NextResponse.json({ valid: true, grant });
+        // The target identity is disclosed only now that the password has proven
+        // itself. Before this point the response carries nothing about the target.
+        return NextResponse.json({
+            valid: true,
+            grant,
+            boardId: typeof link.board_id === 'string' ? link.board_id : null,
+            padletId: grantedPadletId,
+            permission: typeof link.permission === 'string' && link.permission
+                ? link.permission
+                : 'view',
+        });
     } catch {
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
