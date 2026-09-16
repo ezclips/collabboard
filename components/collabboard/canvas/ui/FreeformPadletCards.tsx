@@ -1963,6 +1963,27 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 )}
               </div>
 
+              {/* P6J-F6-B2H parity: the freeform Image card is hand-written
+                  and never reaches PostCardContent, so -- exactly like the
+                  generic/Note branch below -- it mounts the shared marker
+                  itself. Until now a PDF-area crop showed no "Source . p. N"
+                  and no click-back to the PDF, while a Note made from the very
+                  same region showed both.
+
+                  A SIBLING of the image container above, never a child: that
+                  container is `flex items-center justify-center`, so a marker
+                  inside it would disturb the image's centring.
+
+                  hideRegionCrop: the card body above IS the crop, so the
+                  preview would be a second copy of the same picture.
+
+                  noteContent="" and NOT padlet.content: the excerpt rule is
+                  knowledgeSourceCardExcerpt(references, noteContent), and an
+                  image placement's content may hold a URL -- passing it could
+                  print that URL as a quoted source excerpt. */}
+
+              <KnowledgeSourceMarker padletId={padlet.id} noteContent="" hideRegionCrop />
+
               {/* Reactions Row - Lower left, above caption.
                   PATCH FULLVIEW-FRAME-R1: with zero actual reactions, this
                   row exists only to host the add-reaction control, which is

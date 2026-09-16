@@ -72,8 +72,12 @@ describe('P6J-F6-B2H freeform marker call site', () => {
     expect(postCardContent).toContain(
       '    padletId: string; noteContent: string; hideRegionCrop?: boolean;',
     );
-    expect(freeform, 'the freeform call site must not opt out of the preview')
-      .not.toContain('hideRegionCrop');
+    // The generic/Note mount must not opt out of the preview -- that is the
+    // branch the preview exists for. Asserted on the exact call site rather
+    // than on the file, because UNIT A2 added a SECOND mount (the image
+    // branch) which deliberately does pass hideRegionCrop.
+    expect(freeform).toContain(CALL_SITE);
+    expect(CALL_SITE).not.toContain('hideRegionCrop');
   });
 
   it('B: the handwritten generic/Note branch mounts the marker with padlet.id', () => {
@@ -92,8 +96,12 @@ describe('P6J-F6-B2H freeform marker call site', () => {
   });
 
   it('C: the marker sits inside the branch that bypasses PostCardContent, not around every card', () => {
-    // Exactly one direct marker call in the whole freeform renderer.
-    expect((freeform.match(/<KnowledgeSourceMarker/g) ?? []).length).toBe(1);
+    // TWO direct marker calls in the whole freeform renderer, and only two.
+    // It was one until UNIT A2: the hand-written Image card never reaches
+    // PostCardContent either, so a PDF-area crop showed no "Source . p. N"
+    // and no click-back while a Note from the same region showed both. The
+    // count is still pinned -- a THIRD mount would mean some card renders two.
+    expect((freeform.match(/<KnowledgeSourceMarker/g) ?? []).length).toBe(2);
 
     // That call must be inside the generic/Note conditional, which is closed by
     // the fragment terminator immediately after it.
@@ -436,5 +444,69 @@ describe('P6J-F9-C2 card region crop (shared marker mount)', () => {
     // No separate/duplicate mount: freeform never references the crop
     // component directly, only through the shared marker above.
     expect(freeform).not.toContain('KnowledgeSourceRegionCrop');
+  });
+});
+
+/**
+ * UNIT A2 -- the freeform IMAGE branch mounts the marker too.
+ *
+ * The freeform renderer hand-writes its own Image card and never delegates to
+ * PostCardContent, so the marker PostCardContent's own image branch gained in
+ * a7c2ef4 never reached a freeform board. Every PDF-area crop on one therefore
+ * showed nothing, while a Note built from the identical region showed its page
+ * and its preview.
+ *
+ * This file does not strip JSX block comments, and the comment beside the new
+ * mount names every prop it passes -- so these assert whole element strings,
+ * never fragments.
+ */
+describe('UNIT A2 freeform image marker call site', () => {
+  const IMAGE_CALL_SITE = '<KnowledgeSourceMarker padletId={padlet.id} noteContent="" hideRegionCrop />';
+
+  it('A2a: the image branch mounts the shared marker with an empty note body', () => {
+    expect(freeform).toContain(IMAGE_CALL_SITE);
+    // noteContent MUST be empty, never padlet.content: an image placement's
+    // content may be a URL, and knowledgeSourceCardExcerpt would render it as
+    // a quoted source excerpt.
+    expect(freeform).not.toContain(
+      '<KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} hideRegionCrop />');
+  });
+
+  it('A2b: it suppresses the region preview -- the card body IS the crop', () => {
+    expect(IMAGE_CALL_SITE).toContain('hideRegionCrop');
+    // Additive by construction: the prop is optional and defaults to today's
+    // behaviour, which is what keeps the Note mount below unchanged.
+    expect(postCardContent).toContain('hideRegionCrop = false');
+    expect(postCardContent).toContain('{!hideRegionCrop && crop && <KnowledgeSourceRegionCrop');
+  });
+
+  it('A2c: the generic/Note mount is unchanged, and the two are distinct', () => {
+    expect(freeform).toContain(CALL_SITE);
+    expect(IMAGE_CALL_SITE).not.toBe(CALL_SITE);
+    // Exactly one of each -- never two markers on one card.
+    expect((freeform.match(/<KnowledgeSourceMarker/g) ?? []).length).toBe(2);
+    expect(freeform.split(IMAGE_CALL_SITE).length - 1).toBe(1);
+    expect(freeform.split(CALL_SITE).length - 1).toBe(1);
+  });
+
+  it('A2d: it is a SIBLING of the image container, and adds no wrapper', () => {
+    // FreeformPadletCards' DOM structure is behaviour-critical: drag, zoom,
+    // positioning and popup anchoring all depend on the ancestor chain. This
+    // change may add one sibling element and nothing else -- no wrapper div,
+    // no className, no pointer-events of its own. The marker's own
+    // pointer/mouse/double-click swallow handlers protect the drag gesture.
+    const at = freeform.indexOf(IMAGE_CALL_SITE);
+    expect(at).toBeGreaterThan(-1);
+    const before = freeform.slice(0, at);
+    // The image container closes immediately above the mount (only the JSX
+    // comment sits between), so the marker is its sibling, not its child.
+    expect(before.trimEnd().endsWith('*/}')).toBe(true);
+    // No wrapper was introduced around the call itself: the mount is the whole
+    // line. trimEnd because this file is stored CRLF -- the assertion is about
+    // the element, not the line ending.
+    const line = freeform.slice(at, freeform.indexOf('\n', at)).trimEnd();
+    expect(line).toBe(IMAGE_CALL_SITE);
+    // And the import was reused, not duplicated.
+    expect((freeform.match(/import PostCardContent, \{ KnowledgeSourceMarker \}/g) ?? []).length).toBe(1);
   });
 });
