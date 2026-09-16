@@ -69,7 +69,6 @@ export default async function SharePage({
             padletId={padletId}
             permission={permission}
             isPasswordProtected={isPasswordProtected}
-            passwordHash={data.password_hash || null}
         />
     );
 }

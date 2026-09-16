@@ -4,6 +4,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
 import { getBoardPermission, boardPermissionSatisfies, mapLegacyToBoardPermission } from '@/lib/auth/permissions';
+import { hashSharePassword } from '@/lib/server/share/sharePassword';
 
 // Create a Supabase client for server-side operations
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -13,11 +14,6 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 // Generate a short, URL-safe token
 function generateToken(): string {
     return crypto.randomBytes(16).toString('base64url');
-}
-
-// Simple hash for password (in production, use bcrypt)
-function hashPassword(password: string): string {
-    return crypto.createHash('sha256').update(password).digest('hex');
 }
 
 export async function POST(request: NextRequest) {
@@ -88,7 +84,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Hash password if provided
-        const passwordHash = password ? hashPassword(password) : null;
+        const passwordHash = password ? await hashSharePassword(password) : null;
 
         const { data, error } = await supabase
             .from('share_links')
@@ -161,13 +157,21 @@ export async function GET(request: NextRequest) {
             })
             .eq('id', data.id);
 
+        // A password-protected link reveals only that it is protected: the
+        // target ids and granted permission are behind the password.
+        const isPasswordProtected = !!data.password_hash;
+
         return NextResponse.json({
             valid: true,
-            boardId: data.board_id,
-            padletId: data.padlet_id,
-            permission: data.permission,
+            ...(isPasswordProtected
+                ? {}
+                : {
+                      boardId: data.board_id,
+                      padletId: data.padlet_id,
+                      permission: data.permission,
+                  }),
             shareTarget: data.share_target || 'post-in-board',
-            isPasswordProtected: !!data.password_hash,
+            isPasswordProtected,
             expiresAt: data.expires_at,
         });
 

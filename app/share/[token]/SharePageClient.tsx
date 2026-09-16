@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, CheckSquare, StickyNote, Link2, Image, Table2, ExternalLink, Check } from 'lucide-react';
-import crypto from 'crypto';
 
 interface SharePageClientProps {
     token: string;
@@ -12,7 +11,6 @@ interface SharePageClientProps {
     padletId: string | null;
     permission: string;
     isPasswordProtected: boolean;
-    passwordHash: string | null;
 }
 
 interface PadletData {
@@ -24,13 +22,6 @@ interface PadletData {
     metadata?: Record<string, any>;
 }
 
-function hashPassword(password: string): string {
-    // Mirror the server-side SHA-256 hash
-    // Note: crypto is available in browsers via the Web Crypto API,
-    // but we use the subtle API here
-    return password; // placeholder — we validate via API below
-}
-
 export default function SharePageClient({
     token,
     shareTarget,
@@ -38,12 +29,14 @@ export default function SharePageClient({
     padletId,
     permission,
     isPasswordProtected,
-    passwordHash,
 }: SharePageClientProps) {
     const router = useRouter();
     const [passwordInput, setPasswordInput] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [isUnlocked, setIsUnlocked] = useState(!isPasswordProtected);
+    // Server-signed proof that the password was supplied; required by the
+    // padlet endpoint for protected links. Null for unprotected ones.
+    const [grant, setGrant] = useState<string | null>(null);
     const [isCheckingPassword, setIsCheckingPassword] = useState(false);
     const [padlet, setPadlet] = useState<PadletData | null>(null);
     const [isLoadingPadlet, setIsLoadingPadlet] = useState(false);
@@ -52,9 +45,13 @@ export default function SharePageClient({
     // After unlock, fetch padlet data for 'post' target
     useEffect(() => {
         if (!isUnlocked || shareTarget !== 'post' || !padletId) return;
+        if (isPasswordProtected && !grant) return;
+
+        const query = new URLSearchParams({ token, padletId });
+        if (grant) query.set('grant', grant);
 
         setIsLoadingPadlet(true);
-        fetch(`/api/share-link/padlet?token=${token}&padletId=${padletId}`)
+        fetch(`/api/share-link/padlet?${query.toString()}`)
             .then((res) => res.json())
             .then((data) => {
                 if (data.error) {
@@ -65,7 +62,7 @@ export default function SharePageClient({
             })
             .catch(() => setPadletError('Failed to load post.'))
             .finally(() => setIsLoadingPadlet(false));
-    }, [isUnlocked, shareTarget, padletId, token]);
+    }, [isUnlocked, shareTarget, padletId, token, grant, isPasswordProtected]);
 
     // After unlock, redirect for board/post-in-board targets
     useEffect(() => {
@@ -93,10 +90,11 @@ export default function SharePageClient({
             const res = await fetch(`/api/share-link/verify-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token, password: passwordInput }),
+                body: JSON.stringify({ token, password: passwordInput, padletId }),
             });
             const data = await res.json();
             if (data.valid) {
+                setGrant(data.grant ?? null);
                 setIsUnlocked(true);
             } else {
                 setPasswordError('Incorrect password. Please try again.');

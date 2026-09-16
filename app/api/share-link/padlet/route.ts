@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { verifyShareGrant } from '@/lib/server/share/sharePassword';
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
+/** One answer for every authorization failure: no probing the difference. */
+const unauthorized = () => NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
 export async function GET(request: NextRequest) {
     const token = request.nextUrl.searchParams.get('token');
     const padletId = request.nextUrl.searchParams.get('padletId');
+    const grant = request.nextUrl.searchParams.get('grant');
 
     if (!token || !padletId) {
         return NextResponse.json({ error: 'token and padletId are required' }, { status: 400 });
@@ -29,11 +34,18 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Share link has expired' }, { status: 410 });
     }
 
+    // A password-protected link yields nothing without a grant this server
+    // signed for exactly this token and padlet. Checked BEFORE any content
+    // query: the token alone used to be enough to read the post.
+    if (link.password_hash && !verifyShareGrant({ grant, token, padletId })) {
+        return unauthorized();
+    }
+
     // Ensure the token is scoped to this padlet or to the board that owns this padlet
     if (link.padlet_id) {
         // Padlet-scoped token: must match exactly
         if (link.padlet_id !== padletId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+            return unauthorized();
         }
     } else if (link.board_id) {
         // Board-scoped token: verify the requested padlet belongs to this board
@@ -44,10 +56,10 @@ export async function GET(request: NextRequest) {
             .eq('board_id', link.board_id)
             .single();
         if (ownerError || !ownerCheck) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+            return unauthorized();
         }
     } else {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        return unauthorized();
     }
 
     // Fetch the padlet
