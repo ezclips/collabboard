@@ -83,16 +83,23 @@ describe('Anthropic adapter', () => {
     expect(body.messages).toHaveLength(1);
   });
 
-  it('includes temperature only when supplied', async () => {
-    const withTemp = mockFetch(jsonResponse(OK_BODY));
-    await anthropicAdapter.generateText({ ...BASE_INPUT, temperature: 0.4 });
-    expect(JSON.parse(String((withTemp.mock.calls[0] as unknown as [string, RequestInit])[1].body)).temperature).toBe(0.4);
+  it('never sends temperature, even when the caller supplies one', async () => {
+    // Not an implementation detail: current Anthropic models reject a
+    // non-default temperature with a 400 on every request, thinking or not,
+    // and the Board AI path always passes 0.3. The previous fixture asserted
+    // the forwarded value and passed while the live API refused every turn.
+    // https://platform.claude.com/docs/en/models/sonnet-5/whats-new-sonnet-5
+    for (const input of [BASE_INPUT, { ...BASE_INPUT, temperature: 0.4 }]) {
+      vi.unstubAllGlobals();
+      const fetchMock = mockFetch(jsonResponse(OK_BODY));
 
-    vi.unstubAllGlobals();
-    const withoutTemp = mockFetch(jsonResponse(OK_BODY));
-    await anthropicAdapter.generateText(BASE_INPUT);
-    expect(JSON.parse(String((withoutTemp.mock.calls[0] as unknown as [string, RequestInit])[1].body)))
-      .not.toHaveProperty('temperature');
+      await anthropicAdapter.generateText(input);
+
+      const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+      expect(body).not.toHaveProperty('temperature');
+      expect(body).not.toHaveProperty('top_p');
+      expect(body).not.toHaveProperty('top_k');
+    }
   });
 
   it('forwards the AbortSignal', async () => {

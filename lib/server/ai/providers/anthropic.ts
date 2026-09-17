@@ -94,7 +94,18 @@ export const anthropicAdapter: AIProviderAdapter = {
           system: input.system,
           max_tokens: input.maxTokens,
           messages: [{ role: 'user', content: messagesUserContent(input) }],
-          ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+          // `temperature` is DELIBERATELY NOT FORWARDED, even though the caller
+          // always supplies one. Current Anthropic models -- Claude Sonnet 5,
+          // Opus 5, Opus 4.8, Opus 4.7, Fable 5, Mythos 5 -- reject a
+          // non-default temperature, top_p or top_k with a 400 on EVERY
+          // request, whether or not thinking is active. Omitting it is the
+          // documented migration: the default value is accepted.
+          //
+          // A 400 is not a status errors.ts classifies, so this surfaced as
+          // `request_failed`: the Board AI image turn answered "could not
+          // answer" while the text-only connection test -- which passes no
+          // temperature -- went green.
+          // https://platform.claude.com/docs/en/models/sonnet-5/whats-new-sonnet-5
         }),
       });
     } catch (cause) {
