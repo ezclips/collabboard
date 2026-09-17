@@ -21,6 +21,7 @@ export const BOARD_AI_CONTEXT_TYPES = [
   'knowledge-page',
   'knowledge-selection',
   'padlet',
+  'padlet-image',
 ] as const;
 
 export type BoardAiContextType = (typeof BOARD_AI_CONTEXT_TYPES)[number];
@@ -90,11 +91,30 @@ export interface PadletContextRequest {
   readonly padletId: string;
 }
 
+/**
+ * A PDF-area crop, attached as an IMAGE rather than as text.
+ *
+ * Identity only, exactly like every other request: the browser names a padlet
+ * and nothing else. It never sends bytes, a storage path, a URL or a content
+ * type -- the server derives all four from ids it has already validated. That
+ * is what keeps this from becoming a way to ask the server to fetch an
+ * arbitrary object and hand it to a model.
+ *
+ * The type is distinct from `padlet` on purpose. `padlet` promises text from
+ * `content`; this promises pixels from a private derivative, and only the
+ * server can tell whether a given card really is one.
+ */
+export interface PadletImageContextRequest {
+  readonly type: 'padlet-image';
+  readonly padletId: string;
+}
+
 export type BoardAiContextRequestItem =
   | KnowledgeDocumentContextRequest
   | KnowledgePageContextRequest
   | KnowledgeSelectionContextRequest
-  | PadletContextRequest;
+  | PadletContextRequest
+  | PadletImageContextRequest;
 
 /* ------------------------------------------------------------------ */
 /* Persisted: identity + server-authored display metadata             */
@@ -134,6 +154,31 @@ export interface BoardAiContextEnvelope {
  * identity fields travel beside it so a later citation slice can say which
  * page an answer leaned on without re-deriving anything.
  */
+/**
+ * Image bytes for ONE provider call. Transient by construction.
+ *
+ * This shape exists only between resolution and the provider request. It is
+ * never persisted, never put in the stored envelope, never returned to a
+ * browser and never logged: the source is a private object in the Knowledge
+ * bucket, and the whole reason the crop has no public URL is that a durable
+ * address would outlive the authorisation that produced it. Base64 rather than
+ * a URL for the same reason -- the provider cannot be sent somewhere to fetch.
+ */
+export interface BoardAiResolvedImage {
+  readonly mediaType: string;
+  readonly base64: string;
+}
+
+/**
+ * The text a padlet-image block contributes. A fixed marker, never the bytes.
+ *
+ * The image travels as a separate part of the provider request; what goes into
+ * the JSON payload -- and therefore into the stored envelope's excerpt -- is
+ * this literal. That is what makes "bytes never reach `text`" a property of the
+ * type rather than a rule someone has to remember.
+ */
+export const BOARD_AI_CONTEXT_IMAGE_MARKER = '[image attached]';
+
 export interface ResolvedBoardAiContextBlock {
   readonly type: BoardAiContextType;
   readonly label: string;
@@ -143,6 +188,13 @@ export interface ResolvedBoardAiContextBlock {
   readonly charStart?: number;
   readonly charEnd?: number;
   readonly text: string;
+  /**
+   * Present ONLY on a padlet-image block. `text` stays the marker above, so
+   * nothing that serializes this block can accidentally carry the payload:
+   * buildBoardAiContextEnvelope and serializeBoardAiChatPayload both read
+   * `text`, and neither reads this field.
+   */
+  readonly image?: BoardAiResolvedImage;
 }
 
 const clamp = (value: string, max: number): string =>
@@ -242,6 +294,11 @@ export function boardAiContextItemsFromStored(value: unknown): readonly ParsedBo
       }
     } else if (item.type === 'padlet' && padletId) {
       request = { type: 'padlet', padletId };
+    } else if (item.type === 'padlet-image' && padletId) {
+      // Identity only, exactly as stored. Nothing about the image survives a
+      // round trip: the stored item carries a label and the marker excerpt, and
+      // the bytes are re-derived or -- for history -- deliberately not.
+      request = { type: 'padlet-image', padletId };
     }
     if (request === null) continue;
 
@@ -280,6 +337,11 @@ export function boardAiContextIdentityKey(item: BoardAiContextRequestItem): stri
       return `knowledge-selection:${item.knowledgeDocumentId}:${item.pageNumber}:${item.charStart}:${item.charEnd}`;
     case 'padlet':
       return `padlet:${item.padletId}`;
+    // Distinct from `padlet:` on purpose: the same card attached as text and as
+    // an image are two different sources, and collapsing them would silently
+    // drop one of the two.
+    case 'padlet-image':
+      return `padlet-image:${item.padletId}`;
   }
 }
 
@@ -326,12 +388,28 @@ export function boundResolvedContext(
 ): readonly ResolvedBoardAiContextBlock[] {
   const kept: ResolvedBoardAiContextBlock[] = [];
   let characters = 0;
+  // Once the character budget is spent, no further TEXT block is admitted --
+  // identical to the `break` this replaces for a request with no image in it.
+  // An image is still admitted after that point, which is the one difference
+  // and the reason this is a flag rather than a break: a block ahead of the
+  // image can exhaust the budget on its own, and ending the loop there would
+  // discard the very thing the user attached this turn. An image costs ONE
+  // item slot and the sixteen characters of its marker; its payload is not
+  // text, is never measured as text, and does not compete for a budget that
+  // exists to leave room for an answer.
+  let textBudgetSpent = false;
   for (const block of blocks) {
     if (kept.length >= BOARD_AI_CONTEXT_MAX_ITEMS) break;
+    const isImage = block.image !== undefined;
+    if (textBudgetSpent && !isImage) continue;
     const text = block.text.length > BOARD_AI_CONTEXT_MAX_SINGLE_CHARS
       ? `${block.text.slice(0, BOARD_AI_CONTEXT_MAX_SINGLE_CHARS - 1)}…`
       : block.text;
-    if (kept.length > 0 && characters + text.length > BOARD_AI_CONTEXT_MAX_TOTAL_CHARS) break;
+    if (!isImage && kept.length > 0
+      && characters + text.length > BOARD_AI_CONTEXT_MAX_TOTAL_CHARS) {
+      textBudgetSpent = true;
+      continue;
+    }
     kept.push({ ...block, text });
     characters += text.length;
   }

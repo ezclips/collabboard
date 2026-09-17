@@ -18,12 +18,18 @@ import type { DomainError } from '../../domain/core/errors';
 import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
 import {
+  BOARD_AI_CONTEXT_IMAGE_MARKER,
   BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES,
   BOARD_AI_CONTEXT_MAX_SINGLE_CHARS,
   boardAiContextLabel,
   type BoardAiContextRequestItem,
   type ResolvedBoardAiContextBlock,
 } from '../../domain/ai/boardAiChatContext';
+import {
+  KNOWLEDGE_PDF_AREA_IMAGE_CONTENT_TYPE,
+  knowledgePdfAreaImagePath,
+  parseKnowledgePdfAreaProvenance,
+} from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
 
 /**
  * The reads this resolver performs, and nothing more. Supplied as the CALLER'S
@@ -65,6 +71,36 @@ interface ContextQuery extends PromiseLike<{ data: ContextRow[] | null; error: u
  * set. Nothing here may be added without a defined text authority.
  */
 const SUPPORTED_PADLET_TYPES = new Set(['text', 'note']);
+
+/**
+ * The raw size an attached crop may reach, in BYTES.
+ *
+ * Applied to the bytes rather than to the base64, because base64 inflates by
+ * ~4/3 and the meaningful limit is what the object actually is. Five megabytes
+ * of WebP is far larger than any page-region crop this product produces, so
+ * this is a backstop against a pathological object rather than a working
+ * budget.
+ *
+ * REFUSE, never truncate. Half an image is not a smaller image -- it is a
+ * corrupt one, and a model handed corrupt bytes either errors or, worse,
+ * describes whatever it made of the fragment.
+ */
+export const BOARD_AI_CONTEXT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The privileged byte read, and ONLY the byte read.
+ *
+ * Authorisation never comes from here. By the time this is called the caller's
+ * OWN client has already proved the padlet exists on the route board and that
+ * its metadata really is PDF-area provenance; this only fetches an object at a
+ * path the server derived itself. Keeping the two apart is what preserves this
+ * module's standing rule -- "no admin client is accepted", because reading
+ * around RLS to answer "may I read this" would make the answer meaningless.
+ * Reading bytes AFTER the answer is yes is a different question.
+ */
+export interface BoardAiContextByteReader {
+  download(path: string): Promise<Result<{ bytes: Uint8Array }, DomainError>>;
+}
 
 /**
  * TipTap bodies are HTML. Tags are stripped and entities decoded so the model
@@ -149,7 +185,68 @@ async function resolveOne(
   client: BoardAiContextSupabaseClient,
   boardId: string,
   item: BoardAiContextRequestItem,
+  byteReader: BoardAiContextByteReader,
 ): Promise<Result<ResolvedBoardAiContextBlock, DomainError>> {
+  if (item.type === 'padlet-image') {
+    // Step 1. The CALLER'S client, board-scoped. Nothing privileged has run
+    // yet: if this row is not visible to this user on this board, the answer is
+    // `not_found` and no byte is fetched.
+    const { data, error } = await client
+      .from('padlets')
+      .select('id, type, title, metadata')
+      .eq('id', item.padletId)
+      .eq('board_id', boardId)
+      .maybeSingle();
+    if (error) return err(domainError('unavailable', 'Could not read the post'));
+    if (!data) return err(domainError('not_found', 'Context is not available on this board'));
+
+    // Step 2. A crop is the ONLY thing this type may resolve. The same parser
+    // the image route uses as its authorisation gate: a card whose metadata
+    // does not parse here is not an area image, so naming an ordinary image
+    // post as `padlet-image` cannot make it attachable. Without this, the type
+    // would be a request to fetch any object the path formula can address.
+    const provenance = parseKnowledgePdfAreaProvenance(data.metadata);
+    if (provenance === null) {
+      return err(domainError('validation', 'This post type cannot be used as context'));
+    }
+
+    // Step 3. The path is DERIVED from two validated ids and is never read from
+    // metadata -- mirroring knowledgePdfAreaImageRoute exactly. A hostile
+    // `storagePath` or `imageUrl` on the card is simply never consulted, which
+    // is why it cannot point this read anywhere.
+    const path = knowledgePdfAreaImagePath(boardId, item.padletId);
+    if (path === null) return err(domainError('validation', 'This post cannot be used as context'));
+
+    // Step 4. Only now, and only bytes.
+    const download = await byteReader.download(path);
+    if (!download.ok) return err(domainError('unavailable', 'Could not read the attached image'));
+
+    // Step 5. Budget on the raw bytes, and refuse rather than truncate.
+    const { bytes } = download.value;
+    if (bytes.byteLength > BOARD_AI_CONTEXT_MAX_IMAGE_BYTES) {
+      return err(domainError('validation', 'This image is too large to attach'));
+    }
+
+    const title = typeof data.title === 'string' ? data.title.trim() : '';
+    return ok({
+      type: 'padlet-image',
+      padletId: item.padletId,
+      // The document and page the crop came from travel with it, so a citation
+      // can say which page an answer leaned on -- the same identity every other
+      // block carries, read from provenance rather than re-derived.
+      knowledgeDocumentId: provenance.knowledgeDocumentId,
+      pageNumber: provenance.pageNumber,
+      label: boardAiContextLabel(title.length > 0 ? title : 'PDF area'),
+      // The marker, never the bytes. Everything that serializes a block reads
+      // `text`; the payload below is read only by the execution layer.
+      text: BOARD_AI_CONTEXT_IMAGE_MARKER,
+      image: {
+        mediaType: KNOWLEDGE_PDF_AREA_IMAGE_CONTENT_TYPE,
+        base64: Buffer.from(bytes).toString('base64'),
+      },
+    });
+  }
+
   if (item.type === 'padlet') {
     const { data, error } = await client
       .from('padlets')
@@ -253,15 +350,26 @@ export async function resolveBoardAiChatContext(
   client: BoardAiContextSupabaseClient,
   boardId: string,
   items: readonly BoardAiContextRequestItem[],
+  byteReader: BoardAiContextByteReader,
 ): Promise<Result<readonly ResolvedBoardAiContextBlock[], DomainError>> {
   const blocks: ResolvedBoardAiContextBlock[] = [];
   for (const item of items) {
-    const resolved = await resolveOne(client, boardId, item);
+    const resolved = await resolveOne(client, boardId, item, byteReader);
     if (!resolved.ok) return err(resolved.error);
     blocks.push(resolved.value);
   }
   return ok(blocks);
 }
+
+/**
+ * A byte reader for paths that are never reached. Historical resolution drops
+ * image items before resolveOne sees them, so this stands in the one place a
+ * reader is structurally required but semantically absent -- calling it would
+ * be the bug, so it fails rather than returning empty bytes.
+ */
+const NEVER_READS_BYTES: BoardAiContextByteReader = {
+  download: async () => err(domainError('unavailable', 'Images are not re-read from history')),
+};
 
 /**
  * Context carried in earlier messages, re-proved on this turn.
@@ -279,7 +387,17 @@ export async function resolveHistoricalBoardAiChatContext(
 ): Promise<readonly ResolvedBoardAiContextBlock[]> {
   const blocks: ResolvedBoardAiContextBlock[] = [];
   for (const item of items) {
-    const resolved = await resolveOne(client, boardId, item);
+    // Images are current-message-only. Re-resolving a stored image would
+    // re-read private bytes on a later turn, and the provider rejects images
+    // outside the user message -- replaying one is a 400, not a courtesy.
+    // The stored block survives for the chip; the bytes are never re-sent.
+    //
+    // The filter lives HERE, at the historical boundary, rather than inside
+    // resolveOne: resolveOne's job is "resolve this identity", and it is the
+    // same function the current path depends on. The rule is about WHEN a
+    // reference may be resolved, so it belongs where that distinction exists.
+    if (item.type === 'padlet-image') continue;
+    const resolved = await resolveOne(client, boardId, item, NEVER_READS_BYTES);
     if (resolved.ok) blocks.push(resolved.value);
   }
   return blocks;

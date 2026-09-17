@@ -106,6 +106,33 @@ export function readKnowledgePdfAreaLibraryPlacement(
 }
 
 /**
+ * Is this board post a PDF-area crop?
+ *
+ * A DIFFERENT question from the classifier above, and deliberately separate.
+ * That one asks "should the server place this Library drop", so it also
+ * requires a durable library identity and a board. This one asks only "is the
+ * card already on the board a crop of a private PDF", which is what a surface
+ * needs when it is deciding what to OFFER for an existing post -- Board AI
+ * context being the first such caller.
+ *
+ * It lives here, beside the classifier, because this module is the single home
+ * for that rule on the client: a source guard asserts that neither the canvas
+ * nor its data hook calls `parseKnowledgePdfAreaProvenance` itself, precisely
+ * so a second, slightly different notion of "is a crop" cannot drift into
+ * existence. Callers import this; they do not re-derive it.
+ *
+ * Pure: no fetch, no DOM, no mutation of its argument.
+ */
+export function isKnowledgePdfAreaCropPost(row: unknown): boolean {
+  const record = asRecord(row);
+  if (record === null) return false;
+  // Provenance alone decides. Not a title, not a file extension, not a URL
+  // shape -- the same parser the image route uses as its authorisation gate,
+  // reading `metadata.source` where a crop's provenance actually lives.
+  return parseKnowledgePdfAreaProvenance(record.metadata) !== null;
+}
+
+/**
  * What a surface must re-apply after the server has created the placement.
  *
  * The trusted endpoint takes a POSITION and nothing else -- it cannot be told

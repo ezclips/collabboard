@@ -109,6 +109,8 @@ export function boardAiDraftContextPayload(
           };
         case 'padlet':
           return { type: request.type, padletId: request.padletId };
+        case 'padlet-image':
+          return { type: request.type, padletId: request.padletId };
       }
     }),
   };
@@ -133,6 +135,20 @@ export interface BoardAiAttachableBoardItem {
   /** Present only on a PDF placement, read by the canvas's own helper. */
   readonly knowledgeDocumentId?: string | null;
   readonly knowledgeOriginalFilename?: string | null;
+  /**
+   * True only for a validated PDF-area crop, computed by the caller.
+   *
+   * A boolean rather than the metadata itself, because this module may not
+   * reach into canvas components or re-implement a parser. The caller runs
+   * `parseKnowledgePdfAreaProvenance` -- the same function the image route uses
+   * as its authorisation gate -- so client and server agree on what a crop is
+   * by sharing the parser, not by both guessing from a type string.
+   *
+   * It is only a HINT about what to offer. The server re-parses the card's real
+   * metadata on every turn and refuses anything that is not genuinely a crop,
+   * so a browser setting this on an ordinary image buys nothing.
+   */
+  readonly isKnowledgePdfArea?: boolean;
 }
 
 /**
@@ -155,6 +171,19 @@ export function boardAiDraftFromBoardItem(
       request: { type: 'knowledge-document', knowledgeDocumentId: documentId },
       label: filename && filename.length > 0 ? filename : 'PDF',
       detail: 'Document',
+    };
+  }
+  // A PDF-area crop attaches as an IMAGE, and is checked BEFORE the text-type
+  // gate below. Its padlet type is 'image', which that gate rejects -- which is
+  // exactly why a crop used to fall through to "nothing Board AI can use". The
+  // crop is not an exception to that rule; it is a different kind of source,
+  // whose substance is pixels rather than `content`.
+  if (item.isKnowledgePdfArea) {
+    const cropTitle = item.title?.trim();
+    return {
+      request: { type: 'padlet-image', padletId: item.id },
+      label: cropTitle && cropTitle.length > 0 ? cropTitle : 'PDF area',
+      detail: 'Image',
     };
   }
   if (!ATTACHABLE_POST_TYPES.has(item.type)) return null;

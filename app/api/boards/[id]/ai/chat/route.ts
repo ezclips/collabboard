@@ -30,6 +30,11 @@ import {
   resolveHistoricalBoardAiChatContext,
   type BoardAiContextSupabaseClient,
 } from '@/lib/server/ai/boardAiChatContext';
+// The ONE privileged read on this path, and deliberately not built here: this
+// route carries a standing guard that it holds no admin client. The adapter
+// takes a server-derived path and returns bytes; it answers no question about
+// access, and every authorisation below still runs on the caller's own client.
+import { createBoardAiContextImageReader } from '@/lib/infra/ai/boardAiContextImageReader';
 import {
   BOARD_AI_CONTEXT_MAX_ITEMS,
   boardAiContextViewFromStored,
@@ -126,6 +131,15 @@ const contextItemSchema = z.discriminatedUnion('type', [
     type: z.literal('padlet'),
     padletId: z.string().uuid(),
   }).strict(),
+  // Identity only, and `.strict()` is what enforces it: without it a caller
+  // could smuggle `imageUrl`, `base64` or `storagePath` into the persisted
+  // column and the server would have accepted content from a browser -- the
+  // one thing this whole contract exists to prevent. The server derives the
+  // path and fetches the bytes itself.
+  z.object({
+    type: z.literal('padlet-image'),
+    padletId: z.string().uuid(),
+  }).strict(),
 ]);
 
 const chatRequestSchema = z.object({
@@ -203,6 +217,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         sessionClient as unknown as BoardAiContextSupabaseClient,
         boardId,
         contextRequest.items as readonly BoardAiContextRequestItem[],
+        createBoardAiContextImageReader(),
       );
       if (!resolved.ok) {
         // The same shape the Knowledge routes use: a source on another board,

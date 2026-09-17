@@ -155,6 +155,7 @@ import BoardAiChatDrawer, {
   type BoardAiAssistantNoteSaveRequest,
 } from '@/components/collabboard/BoardAiChatDrawer';
 import { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdfCanvasSurface';
+import { isKnowledgePdfAreaCropPost } from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
 import {
   boardAiDraftFromBoardItem,
   type BoardAiDraftContextItem,
@@ -2200,6 +2201,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       title: post.title ?? null,
       knowledgeDocumentId: placement?.documentId ?? null,
       knowledgeOriginalFilename: placement?.originalFilename ?? null,
+      // The shared client rule, imported rather than restated -- a source guard
+      // keeps this file from calling the provenance parser directly, so that one
+      // notion of "is a crop" cannot drift into two. It reads `metadata.source`,
+      // where a crop's provenance actually lives; readKnowledgePdfPlacement
+      // above is the PDF-CARD reader and looks at TOP-LEVEL metadata, which a
+      // crop does not have. Using that one for both is exactly why a crop read
+      // as an ordinary image and was offered nothing.
+      isKnowledgePdfArea: isKnowledgePdfAreaCropPost(post),
     });
   }, [padlets, selectedPadletId, selectedPadletIds]);
 

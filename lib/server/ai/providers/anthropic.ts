@@ -9,6 +9,7 @@
 
 import {
   aiProviderHttpError,
+  aiProviderInvalidConfiguration,
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
@@ -41,6 +42,15 @@ function extractMessagesText(payload: MessagesPayload | null): string | null {
 export const anthropicAdapter: AIProviderAdapter = {
   provider: 'anthropic',
   async generateText(input: AIGenerateTextInput): Promise<string> {
+    // This adapter carries no image part. Refusing is deliberate: dropping the
+    // image and answering from text alone would tell the user their picture was
+    // looked at when it was not. Anthropic's Messages API does support image
+    // blocks -- wiring them is a separate, declared decision, and until it is
+    // made this pair is not in DECLARED_VISION_MODELS and must not be reached.
+    if (input.images && input.images.length > 0) {
+      throw aiProviderInvalidConfiguration('anthropic');
+    }
+
     let response: Response;
     try {
       response = await fetch(ANTHROPIC_ENDPOINT, {

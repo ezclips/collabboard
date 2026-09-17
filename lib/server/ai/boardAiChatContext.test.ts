@@ -6,6 +6,19 @@ import {
   type BoardAiContextSupabaseClient,
 } from './boardAiChatContext';
 
+import { err } from '../../domain/core/result';
+import { domainError } from '../../domain/core/errors';
+
+/**
+ * Every case in THIS file resolves a text source, so no byte read may happen.
+ * A reader that fails on contact proves that rather than assuming it: if any of
+ * these ever reached the image branch, the result would change and the test
+ * would say so.
+ */
+const neverReads = {
+  download: async () => err(domainError('unavailable', 'no byte read expected in this file')),
+};
+
 const BOARD = '11111111-1111-4111-8111-111111111111';
 const DOC = '22222222-2222-4222-8222-222222222222';
 const PAD = '33333333-3333-4333-8333-333333333333';
@@ -56,14 +69,14 @@ const page = (n: number, text = PAGE) => ({ page_number: n, text });
 describe('7,15. board scope is part of every lookup', () => {
   it('a document is only ever read WITH the route board', async () => {
     const { client: c, filters } = client({ document: readyDoc, pages: [page(1)] });
-    await resolveBoardAiChatContext(c, BOARD, [{ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1 }]);
+    await resolveBoardAiChatContext(c, BOARD, [{ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1 }], neverReads);
     // The row simply is not there for a document on another board.
     expect(filters.knowledge_documents).toEqual({ id: DOC, board_id: BOARD });
   });
 
   it('a post is only ever read WITH the route board', async () => {
     const { client: c, filters } = client({ padlet: { id: PAD, type: 'text', title: 'T', content: '<p>body</p>' } });
-    await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]);
+    await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }], neverReads);
     expect(filters.padlets).toEqual({ id: PAD, board_id: BOARD });
   });
 
@@ -71,7 +84,7 @@ describe('7,15. board scope is part of every lookup', () => {
     const { client: c } = client({ document: null });
     const result = await resolveBoardAiChatContext(c, BOARD, [
       { type: 'knowledge-document', knowledgeDocumentId: DOC },
-    ]);
+    ], neverReads);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe('not_found');
@@ -86,7 +99,7 @@ describe('9,10,11. document context is bounded and keeps its provenance', () => 
     const { client: c } = client({ document: { ...readyDoc, processing_status: 'processing' } });
     const result = await resolveBoardAiChatContext(c, BOARD, [
       { type: 'knowledge-document', knowledgeDocumentId: DOC },
-    ]);
+    ], neverReads);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('conflict');
   });
@@ -95,7 +108,7 @@ describe('9,10,11. document context is bounded and keeps its provenance', () => 
     const { client: c } = client({ document: readyDoc, pages: [page(1, 'first'), page(2, 'second')] });
     const result = await resolveBoardAiChatContext(c, BOARD, [
       { type: 'knowledge-document', knowledgeDocumentId: DOC },
-    ]);
+    ], neverReads);
     expect(result.ok).toBe(true);
     if (result.ok) {
       // Never one provenance-less blob: a later citation must be able to say
@@ -110,7 +123,7 @@ describe('9,10,11. document context is bounded and keeps its provenance', () => 
     const { client: c } = client({ document: readyDoc, pages: [page(1, 'x'.repeat(50_000))] });
     const result = await resolveBoardAiChatContext(c, BOARD, [
       { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1 },
-    ]);
+    ], neverReads);
     expect(result.ok && result.value[0].text.length).toBeLessThanOrEqual(6_000);
   });
 });
@@ -123,7 +136,7 @@ describe('3-6,12. exact selection is verified against the stored page', () => {
 
   it('3,12. an honest selection resolves and keeps its provenance', async () => {
     const { client: c } = client({ document: readyDoc, pages: [page(1)] });
-    const result = await resolveBoardAiChatContext(c, BOARD, [selection()]);
+    const result = await resolveBoardAiChatContext(c, BOARD, [selection()], neverReads);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value[0]).toMatchObject({
@@ -136,20 +149,20 @@ describe('3-6,12. exact selection is verified against the stored page', () => {
 
   it('4. tampered text is refused even with honest offsets', async () => {
     const { client: c } = client({ document: readyDoc, pages: [page(1)] });
-    const result = await resolveBoardAiChatContext(c, BOARD, [selection({ selectedText: 'not this' })]);
+    const result = await resolveBoardAiChatContext(c, BOARD, [selection({ selectedText: 'not this' })], neverReads);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('validation');
   });
 
   it('5. a range past the end of the page is refused', async () => {
     const { client: c } = client({ document: readyDoc, pages: [page(1)] });
-    const result = await resolveBoardAiChatContext(c, BOARD, [selection({ charEnd: 99_999 })]);
+    const result = await resolveBoardAiChatContext(c, BOARD, [selection({ charEnd: 99_999 })], neverReads);
     expect(result.ok).toBe(false);
   });
 
   it('a selection never quietly widens into the whole document', async () => {
     const { client: c } = client({ document: readyDoc, pages: [page(1)] });
-    const result = await resolveBoardAiChatContext(c, BOARD, [selection()]);
+    const result = await resolveBoardAiChatContext(c, BOARD, [selection()], neverReads);
     expect(result.ok && result.value[0].text).not.toContain('persisted');
   });
 
@@ -157,7 +170,7 @@ describe('3-6,12. exact selection is verified against the stored page', () => {
     const { client: c } = client({ document: readyDoc, pages: [] });
     const result = await resolveBoardAiChatContext(c, BOARD, [
       { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 9 },
-    ]);
+    ], neverReads);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('not_found');
   });
@@ -168,7 +181,7 @@ describe('13,17,18,19. posts resolve to safe plain text', () => {
     const { client: c } = client({
       padlet: { id: PAD, type: 'text', title: 'My note', content: '<p>Hello <b>bold</b></p><script>alert(1)</script>' },
     });
-    const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]);
+    const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }], neverReads);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value[0].text).toContain('Hello bold');
@@ -181,7 +194,7 @@ describe('13,17,18,19. posts resolve to safe plain text', () => {
   it('1,2. the two types with a real text authority are accepted', async () => {
     for (const type of ['text', 'note']) {
       const { client: c } = client({ padlet: { id: PAD, type, title: 'T', content: '<p>body</p>' } });
-      const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]);
+      const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }], neverReads);
       expect(result.ok, type).toBe(true);
       if (result.ok) expect(result.value[0].text).toContain('body');
     }
@@ -198,7 +211,7 @@ describe('13,17,18,19. posts resolve to safe plain text', () => {
       const { client: c } = client({
         padlet: { id: PAD, type, title: 'Sprint list', content: '<p>x</p>' },
       });
-      const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }]);
+      const result = await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }], neverReads);
       expect(result.ok, type).toBe(false);
       if (!result.ok) expect(result.error.code, type).toBe('validation');
     }
@@ -215,7 +228,7 @@ describe('13,17,18,19. posts resolve to safe plain text', () => {
 
   it('an empty post carries nothing worth attaching', async () => {
     const { client: c } = client({ padlet: { id: PAD, type: 'text', title: '', content: '<p></p>' } });
-    expect((await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }])).ok).toBe(false);
+    expect((await resolveBoardAiChatContext(c, BOARD, [{ type: 'padlet', padletId: PAD }], neverReads)).ok).toBe(false);
   });
 });
 
@@ -225,7 +238,7 @@ describe('21,24,25. current fails closed; historical is dropped', () => {
     const result = await resolveBoardAiChatContext(c, BOARD, [
       { type: 'padlet', padletId: PAD },
       { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1 },
-    ]);
+    ], neverReads);
     // Nothing partial: the caller gets a refusal, not a half-honoured request.
     expect(result.ok).toBe(false);
   });

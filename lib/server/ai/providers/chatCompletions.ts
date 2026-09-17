@@ -7,6 +7,11 @@
 // NOT use this helper: it targets the Responses API, and forcing it through
 // here to save a file would misrepresent that API. Anthropic and Gemini are
 // not chat-completions shaped at all.
+//
+// This is also the ONLY adapter path that carries inline images, which is why
+// the two providers that share it are the two that can serve them. The other
+// three refuse an image rather than drop it -- the guard in each is what keeps
+// "this model cannot see your picture" an error instead of a quiet omission.
 
 import {
   aiProviderHttpError,
@@ -30,6 +35,31 @@ export async function chatCompletionsGenerateText(
   endpoint: string,
   input: AIGenerateTextInput,
 ): Promise<string> {
+  // A plain string when there is no image, so every existing text-only request
+  // goes out byte-identical to before. The parts array is used ONLY when the
+  // caller supplied images: both forms are valid Chat Completions, and keeping
+  // the simple one for the common case means this change cannot alter a text
+  // request that was already working.
+  //
+  // The images sit in the USER message and nowhere else. A provider rejects
+  // image parts in a system message, and the system prompt is the one thing in
+  // this call that is not user-supplied -- keeping them apart is the same
+  // separation the payload's conversation/explicitContext split makes.
+  const userContent = input.images && input.images.length > 0
+    ? [
+      { type: 'text', text: input.user },
+      ...input.images.map((image) => ({
+        type: 'image_url',
+        image_url: {
+          // A data: URL, so the bytes are IN the request. Nothing is hosted,
+          // nothing is signed, and the provider is never sent to fetch from us.
+          url: `data:${image.mediaType};base64,${image.base64}`,
+          detail: 'original',
+        },
+      })),
+    ]
+    : input.user;
+
   let response: Response;
   try {
     response = await fetch(endpoint, {
@@ -43,7 +73,7 @@ export async function chatCompletionsGenerateText(
         model: input.model,
         messages: [
           { role: 'system', content: input.system },
-          { role: 'user', content: input.user },
+          { role: 'user', content: userContent },
         ],
         max_tokens: input.maxTokens,
         ...(input.temperature === undefined ? {} : { temperature: input.temperature }),

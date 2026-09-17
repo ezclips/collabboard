@@ -16,6 +16,17 @@ export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
 /** The model the CollabBoard default resolves to today. */
 export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-chat';
 
+/**
+ * The ONLY DeepSeek model that accepts image input. EXPERIMENTAL.
+ *
+ * `deepseek-chat` is text-only, so a request carrying an image part has to go
+ * somewhere else. This is pinned as a single constant precisely because it is
+ * experimental: when DeepSeek ships vision on the stable model, or withdraws
+ * this one, the switch is this line and nothing else. Nothing in the codebase
+ * may infer vision support from a model name -- see visionCapability.ts.
+ */
+export const DEEPSEEK_VISION_MODEL = 'deepseek-v4-flash-vision-exp';
+
 export const deepSeekAdapter: AIProviderAdapter = {
   provider: 'deepseek',
   generateText(input: AIGenerateTextInput): Promise<string> {

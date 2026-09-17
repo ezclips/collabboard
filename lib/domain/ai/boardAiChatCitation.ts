@@ -131,6 +131,11 @@ export function boardAiCitationIdentityKey(item: BoardAiCitationItem): string {
       return `knowledge-selection:${item.knowledgeDocumentId}:${item.pageNumber}:${item.charStart}:${item.charEnd}`;
     case 'padlet':
       return `padlet:${item.padletId}`;
+    // Keyed by the card, matching the context identity key. A crop cited twice
+    // in one answer is one citation, and a crop is never the same source as the
+    // same card attached as text.
+    case 'padlet-image':
+      return `padlet-image:${item.padletId}`;
   }
 }
 
@@ -165,6 +170,20 @@ function citationItemFromBlock(block: ResolvedBoardAiContextBlock): BoardAiCitat
         : null;
     case 'padlet':
       return block.padletId ? { type: block.type, padletId: block.padletId, label } : null;
+    case 'padlet-image':
+      // The CARD is what the reader navigates to -- it is the thing on the
+      // board. The document and page come along when the crop's provenance
+      // carried them, so "which page was this cut from" is answerable from the
+      // citation itself; both are omitted rather than invented when absent.
+      return block.padletId
+        ? {
+          type: block.type,
+          padletId: block.padletId,
+          ...(block.knowledgeDocumentId ? { knowledgeDocumentId: block.knowledgeDocumentId } : {}),
+          ...(page !== undefined ? { pageNumber: page } : {}),
+          label,
+        }
+        : null;
   }
 }
 

@@ -13,6 +13,7 @@
 
 import {
   aiProviderHttpError,
+  aiProviderInvalidConfiguration,
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
@@ -57,6 +58,13 @@ function extractInteractionsText(payload: InteractionsPayload | null): string | 
 export const geminiAdapter: AIProviderAdapter = {
   provider: 'gemini',
   async generateText(input: AIGenerateTextInput): Promise<string> {
+    // This adapter carries no image part. Refusing is deliberate: dropping the
+    // image and answering from text alone would tell the user their picture was
+    // looked at when it was not. See AIGenerateTextInput.images.
+    if (input.images && input.images.length > 0) {
+      throw aiProviderInvalidConfiguration('gemini');
+    }
+
     let response: Response;
     try {
       response = await fetch(GEMINI_ENDPOINT, {

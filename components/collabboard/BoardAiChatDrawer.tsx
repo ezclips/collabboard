@@ -1108,6 +1108,27 @@ export default function BoardAiChatDrawer({
               <p className="mt-0.5 border-t border-gray-100 px-2 pb-0.5 pt-1 text-[10px] text-gray-400">
                 Only attached items are shared with Board AI.
               </p>
+              {/* Per-use visibility for the one attachment that sends PIXELS of a
+                  private PDF rather than text the user can already see. It is
+                  stated at the moment of attaching, not buried in a policy page.
+
+                  "the AI provider" and not a model name on purpose: the model
+                  that will actually run is decided server-side per request, and
+                  the constant naming it lives under lib/server/ai/providers,
+                  which is SERVER ONLY and must not be imported by a 'use client'
+                  module. Naming a model here would mean either breaking that
+                  boundary or printing a guess -- and the assistant's last
+                  message reports the TEXT model, which is not the one that would
+                  see this image. A vaguer true sentence beats a precise wrong
+                  one. */}
+              {selectedBoardItem?.detail === 'Image' ? (
+                <p
+                  data-board-ai-context-image-notice="true"
+                  className="px-2 pb-0.5 text-[10px] text-gray-400"
+                >
+                  The image is sent to the AI provider.
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>

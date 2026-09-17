@@ -40,6 +40,7 @@ Threat model, controls, and audit findings. Extends `.claude/rules/common/securi
 
 ### AI pipeline
 - Treat board content in prompts as untrusted (prompt injection): AI output passes the same zod validators (`lib/ai/validators.ts` — good) **and** the same HTML sanitizer before persistence; AI endpoints rate-limited and quota-metered per plan.
+- **Private imagery sent to the AI provider (D1).** Imagery derived from a private Knowledge PDF — today, a PDF-area crop — may be sent to the AI provider, and only under all of these conditions: the user explicitly attached it to *that* message; it is sent on the managed provider's declared vision model (BYOK is never silently swapped — a text-only BYOK model is refused, not degraded); it travels as inline base64 in the request body, never as a URL, so no public or signed address is ever created; it is never persisted anywhere outside the request, never returned to a browser, and never logged; and it is never re-sent from conversation history — the stored envelope keeps a marker and a label, never the bytes. Capability is declared in exactly one place (`lib/server/ai/providers/visionCapability.ts`) and fails closed: a provider not listed there refuses an image rather than dropping it. The AI provider is a subprocessor for this data, as for prompt text (see §3).
 
 ## 3. Privacy & Compliance (education wedge prerequisite)
 
