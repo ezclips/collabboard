@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
 export async function POST(req: NextRequest) {
     try {
@@ -174,10 +175,15 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // 3. Generate invite code and insert invitation
-        const inviteCode =
-            Math.random().toString(36).substring(2, 10) +
-            Math.random().toString(36).substring(2, 10);
+        // 3. Generate invite code and insert invitation.
+        // The code is a BEARER CREDENTIAL -- possession of it is the grant -- so
+        // it comes from a cryptographic source, matching the share-link token in
+        // app/api/share-link/route.ts. It was previously two concatenated
+        // Math.random() calls, which is a non-cryptographic PRNG. Existing codes
+        // stay valid; only newly issued ones change, so there is nothing to
+        // migrate. 16 bytes of base64url is 22 characters, well inside
+        // `link_code text` and its unique index.
+        const inviteCode = crypto.randomBytes(16).toString('base64url');
 
         const invitePayload: Record<string, unknown> = {
             workspace_id: wsId,

@@ -6,17 +6,22 @@ import { Loader2, CheckCircle, XCircle, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSupabase } from '@/lib/supabase';
 
+/**
+ * Exactly what /api/invitations/preview returns -- no more. The invitation row
+ * itself carries `link_code` and a plaintext `password`, which is why this page
+ * no longer reads the table: it asks the server whether a password is REQUIRED
+ * and is never told what it is. `password` is absent from this type on purpose,
+ * so it cannot come back by accident; the fields the row has but the preview
+ * withholds (id, workspace_id, created_by, canvas_ids) are absent for the same
+ * reason -- declaring them would type a value that is always undefined.
+ */
 interface WorkspaceInvitation {
-    id: string;
-    workspace_id: string;
-    created_by: string | null;
     role: string;
-    uses: number | null;
-    max_uses: number | null;
-    email_domain?: string | null;
-    expires_at?: string | null;
-    password?: string | null;
-    canvas_ids?: string[] | null;
+    requiresPassword: boolean;
+    emailDomain: string | null;
+    expiresAt: string | null;
+    maxUses: number | null;
+    uses: number;
 }
 
 export default function InvitePage() {
@@ -46,40 +51,35 @@ export default function InvitePage() {
             const { data: { user: currentUser } } = await supabase.auth.getUser();
             setUser(currentUser);
 
-            // Look up the invitation
-            const { data: inv, error: invError } = await supabase
-                .from('workspace_invitations')
-                .select('*')
-                .eq('link_code', inviteCode)
-                .single();
+            // Look up the invitation through the server. This page must not read
+            // workspace_invitations directly: that row carries link_code and the
+            // plaintext password, and anon no longer holds the table at all.
+            // Expiry and max_uses are decided server-side now, which is why the
+            // two checks that used to live here are gone rather than duplicated.
+            const response = await fetch(`/api/invitations/preview?code=${encodeURIComponent(inviteCode)}`);
+            const preview = await response.json().catch(() => null);
 
-            if (invError || !inv) {
-                setError('This invite link is invalid or has expired.');
-                return;
-            }
-
-            // Check if expired
-            if (inv.expires_at && new Date(inv.expires_at) < new Date()) {
-                setError('This invite link has expired.');
-                return;
-            }
-
-            // Check if max uses reached
-            if (inv.max_uses && inv.uses >= inv.max_uses) {
-                setError('This invite link has reached its maximum number of uses.');
+            if (!response.ok || !preview?.valid) {
+                if (preview?.reason === 'expired') {
+                    setError('This invite link has expired.');
+                } else if (preview?.reason === 'exhausted') {
+                    setError('This invite link has reached its maximum number of uses.');
+                } else {
+                    setError('This invite link is invalid or has expired.');
+                }
                 return;
             }
 
             // Check email domain restriction
-            if (inv.email_domain && currentUser?.email) {
+            if (preview.emailDomain && currentUser?.email) {
                 const userDomain = currentUser.email.split('@')[1];
-                if (userDomain !== inv.email_domain) {
-                    setError(`This invite is restricted to @${inv.email_domain} email addresses.`);
+                if (userDomain !== preview.emailDomain) {
+                    setError(`This invite is restricted to @${preview.emailDomain} email addresses.`);
                     return;
                 }
             }
 
-            setInvitation(inv as WorkspaceInvitation);
+            setInvitation(preview as WorkspaceInvitation);
         } catch (err) {
             console.error('Error checking invitation:', err);
             setError('Failed to verify invitation.');
@@ -101,11 +101,9 @@ export default function InvitePage() {
             setAccepting(true);
             setPasswordError('');
 
-            if (invitation.password && passwordInput !== invitation.password) {
-                setPasswordError('Incorrect password');
-                toast.error('Incorrect password');
-                return;
-            }
+            // No client-side password comparison: this page never holds the
+            // password. /api/invitations/accept compares it and returns
+            // "Incorrect password", which the error branch below surfaces.
 
             const { data: { session } } = await supabase.auth.getSession();
             const headers: Record<string, string> = {
@@ -213,7 +211,7 @@ export default function InvitePage() {
                 )}
 
                 <div className="space-y-3">
-                    {invitation.password && (
+                    {invitation.requiresPassword && (
                         <div className="text-left">
                             <label className="mb-2 block text-sm font-medium text-gray-700">Password</label>
                             <input
