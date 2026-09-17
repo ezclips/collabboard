@@ -92,6 +92,8 @@ function persistedText(item: BoardAiContextItem): { title: string; detail: strin
     const page = item.pageNumber === undefined ? 'Page' : `p. ${item.pageNumber}`;
     return { title, detail: `${page} · text only` };
   }
+  if (item.type === 'knowledge-document') return { title, detail: 'text only' };
+  if (item.type === 'padlet-image') return { title, detail: 'Image' };
   if (item.type === 'padlet') return { title, detail: 'Note' };
   return { title, detail: 'Document' };
 }

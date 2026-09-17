@@ -55,6 +55,12 @@ describe('3,4,5,6. only board items with a real text authority become drafts', (
     expect(boardAiDraftFromPage(DOC, 'A2.pdf', 6).request)
       .toEqual({ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 6 });
   });
+
+  it('a document draft says on its chip that only text travels', () => {
+    // A whole PDF attaches as bounded TEXT, never its images -- only an area
+    // crop carries pixels. Same claim the page chip makes.
+    expect(boardAiDraftFromDocument(DOC, 'A2.pdf').detail).toBe('text only');
+  });
 });
 
 describe('9,10. identity decides what is a duplicate', () => {

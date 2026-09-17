@@ -170,7 +170,7 @@ export function boardAiDraftFromBoardItem(
     return {
       request: { type: 'knowledge-document', knowledgeDocumentId: documentId },
       label: filename && filename.length > 0 ? filename : 'PDF',
-      detail: 'Document',
+      detail: 'text only',
     };
   }
   // A PDF-area crop attaches as an IMAGE, and is checked BEFORE the text-type
@@ -202,7 +202,7 @@ export function boardAiDraftFromDocument(
   return {
     request: { type: 'knowledge-document', knowledgeDocumentId },
     label: originalFilename.trim().length > 0 ? originalFilename : 'PDF',
-    detail: 'Document',
+    detail: 'text only',
   };
 }
 
