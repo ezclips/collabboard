@@ -214,7 +214,11 @@ export function boardAiDraftFromPage(
   return {
     request: { type: 'knowledge-page', knowledgeDocumentId, pageNumber },
     label: originalFilename.trim().length > 0 ? originalFilename : 'PDF',
-    detail: `p. ${pageNumber}`,
+    // A page attaches as TEXT. Its pictures do not travel -- only an area crop
+    // does, through the `padlet-image` request above. Said on the chip because
+    // a user who asks about a figure on the page otherwise reads the model's
+    // honest "I have no image" as a failure.
+    detail: `p. ${pageNumber} · text only`,
   };
 }
 

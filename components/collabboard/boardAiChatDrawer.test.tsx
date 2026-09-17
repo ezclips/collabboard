@@ -738,6 +738,8 @@ describe('PDF workspace document-scoped mode', () => {
     expect(q('[data-board-ai-chat-thread=""]')).toBeNull();
     expect(q('[data-board-ai-context-mandatory="knowledge-page"]')?.textContent).toContain('Alpha.pdf');
     expect(q('[data-board-ai-context-mandatory="knowledge-page"]')?.textContent).toContain('p. 1');
+    // The mandatory page chip carries the same disclosure a draft chip does.
+    expect(q('[data-board-ai-context-mandatory="knowledge-page"]')?.textContent).toContain('text only');
     expect(q('[data-board-ai-context-mandatory="knowledge-page"] button')).toBeNull();
 
     await type('first');

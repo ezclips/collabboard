@@ -46,6 +46,15 @@ describe('3,4,5,6. only board items with a real text authority become drafts', (
   it('an untitled post still has something to show on its chip', () => {
     expect(boardAiDraftFromBoardItem({ id: PAD, type: 'note', title: '  ' })!.label).toBe('Note');
   });
+
+  it('a page draft says on its chip that only text travels', () => {
+    // A page's images do NOT travel; only an area crop carries pixels. Without
+    // this the honest "I have no image" reads as a broken attachment.
+    expect(boardAiDraftFromPage(DOC, 'A2.pdf', 6).detail).toBe('p. 6 · text only');
+    // The request itself is unchanged: this is a label, not a payload.
+    expect(boardAiDraftFromPage(DOC, 'A2.pdf', 6).request)
+      .toEqual({ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 6 });
+  });
 });
 
 describe('9,10. identity decides what is a duplicate', () => {

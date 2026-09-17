@@ -87,7 +87,10 @@ function persistedText(item: BoardAiContextItem): { title: string; detail: strin
     };
   }
   if (item.type === 'knowledge-page') {
-    return { title, detail: item.pageNumber === undefined ? 'Page' : `p. ${item.pageNumber}` };
+    // The same claim the draft chip makes: a page's TEXT travelled, its
+    // pictures did not. Two chips, one message -- they must not disagree.
+    const page = item.pageNumber === undefined ? 'Page' : `p. ${item.pageNumber}`;
+    return { title, detail: `${page} · text only` };
   }
   if (item.type === 'padlet') return { title, detail: 'Note' };
   return { title, detail: 'Document' };
