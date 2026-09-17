@@ -24,9 +24,10 @@ import type { AIProviderConnection } from '@/lib/domain/settings/aiProviderConne
  * that sent its selection with the message would be a second, weaker authority
  * over execution -- one a browser could set to anything.
  *
- * The list is the connection summaries the settings API already returns: a
- * display name, a provider type and a masked key hint. No key, ciphertext or
- * endpoint exists in that payload to expose.
+ * The list is the connection summaries the settings API already returns, and
+ * this component renders the display name alone. The payload does carry a
+ * provider type and a masked key hint; neither is rendered here. No key,
+ * ciphertext or endpoint exists in that payload to expose.
  */
 
 export interface BoardAiChatModelChooserProps {
