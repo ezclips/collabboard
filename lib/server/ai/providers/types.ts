@@ -76,6 +76,18 @@ export interface AIGenerateTextInput {
 
 export interface AIProviderAdapter {
   readonly provider: AIExecutionProvider;
+  /**
+   * Whether this adapter can carry an inline image AT ALL.
+   *
+   * A property of the WIRE FORMAT this adapter speaks, and nothing else: it
+   * says the adapter knows how to put an image part in its request, not that
+   * any particular model can read one. Those are two independent conditions and
+   * BOTH must hold before an image is sent -- the adapter must be able to carry
+   * it, and the resolved model must have been DECLARED able to read it. An
+   * adapter that says false here must still throw on a non-empty `images`
+   * rather than drop them; declaring false is what keeps it from being reached.
+   */
+  readonly carriesImages: boolean;
   /** Resolves to the model's plain text, trimmed. Throws AIProviderError otherwise. */
   generateText(input: AIGenerateTextInput): Promise<string>;
 }

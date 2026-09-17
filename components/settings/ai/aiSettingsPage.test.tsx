@@ -274,7 +274,23 @@ describe('AI settings: add provider', () => {
       displayName: 'Work OpenAI',
       apiKey: 'sk-test-abcdefgh',
       defaultModel: 'gpt-4.1-mini',
+      // Untouched checkbox means a FALSE that is actually sent, not an omitted
+      // field: the create contract states the text-only posture explicitly.
+      supportsImages: false,
     });
+  });
+
+  // T3. The declaration reaches the wire only because the user ticked it.
+  it('9b. sends supportsImages true once the box is ticked', async () => {
+    await render();
+    await click(buttonWithText('Add provider'));
+    await setValue(findByLabel('Display name'), 'Work OpenAI');
+    await setValue(findByLabel('API key'), 'sk-test-abcdefgh');
+    await click(findByLabel('This model accepts images'));
+    await click(dialogButton('Save'));
+
+    expect(requestFor('/api/settings/ai-providers', 'POST')?.body)
+      .toMatchObject({ supportsImages: true });
   });
 
   it('10. clears the key, closes, and reloads the list after a successful create', async () => {
@@ -301,7 +317,11 @@ describe('AI settings: edit', () => {
     await click(dialogButton('Save'));
 
     const patch = calls.find((call) => call.method === 'PATCH');
-    expect(Object.keys(patch?.body as object).sort()).toEqual(['defaultModel', 'displayName']);
+    // The closed key set gained supportsImages: it is the owner's declaration
+    // about their own model, so it is deliberately client-writable. The fields
+    // that are NOT client-writable are pinned individually below and unchanged.
+    expect(Object.keys(patch?.body as object).sort())
+      .toEqual(['defaultModel', 'displayName', 'supportsImages']);
     expect(patch?.body).not.toHaveProperty('verifiedAt');
     expect(patch?.body).not.toHaveProperty('keyHint');
     expect(patch?.body).not.toHaveProperty('providerType');
@@ -451,7 +471,7 @@ describe('AI settings: roles', () => {
     await render();
     const model = findByLabel('Model for Source AI') as HTMLInputElement;
     expect(model.disabled).toBe(true);
-    expect(model.value).toBe('deepseek-chat');
+    expect(model.value).toBe('deepseek-flash');
   });
 
   it('24. a blank override on a provider with a default saves null and shows the default', async () => {

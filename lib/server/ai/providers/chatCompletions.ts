@@ -8,10 +8,13 @@
 // here to save a file would misrepresent that API. Anthropic and Gemini are
 // not chat-completions shaped at all.
 //
-// This is also the ONLY adapter path that carries inline images, which is why
-// the two providers that share it are the two that can serve them. The other
-// three refuse an image rather than drop it -- the guard in each is what keeps
-// "this model cannot see your picture" an error instead of a quiet omission.
+// This was once the ONLY adapter path that carried inline images, and the other
+// three adapters threw rather than drop one. That is no longer true: OpenAI,
+// Anthropic and Gemini now carry images in their own native shapes, each
+// verified against the provider's published request format. Every adapter
+// declares `carriesImages` on itself, and whether an image may actually be sent
+// is decided in visionCapability.ts from that declaration PLUS the model
+// declaration -- not from which helper an adapter happens to use.
 
 import {
   aiProviderHttpError,

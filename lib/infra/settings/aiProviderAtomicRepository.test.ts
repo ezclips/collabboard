@@ -27,6 +27,7 @@ describe('createConnectionWithCredential', () => {
     displayName: 'My OpenAI',
     keyHint: '1234',
     defaultModel: 'gpt-4o-mini',
+    supportsImages: false,
     apiKeyEncrypted: CIPHERTEXT,
   };
 

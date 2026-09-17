@@ -26,6 +26,33 @@ export function isAIProviderType(value: unknown): value is AIProviderType {
   return typeof value === 'string' && (AI_PROVIDER_TYPES as readonly string[]).includes(value);
 }
 
+/**
+ * Which provider types have an adapter that can carry an inline image AT ALL.
+ *
+ * CLIENT-SAFE MIRROR, NOT THE AUTHORITY. The authority is the `carriesImages`
+ * property each adapter declares under lib/server/ai/providers, which this
+ * module must not import: everything there handles a plaintext API key, and the
+ * BYOK Settings UI is a 'use client' bundle. So the fact is restated here for
+ * the one thing the UI needs it for -- deciding whether to OFFER the
+ * declaration checkbox at all -- and a test pins the two together, so a
+ * provider wired on one side and not the other fails rather than drifts.
+ *
+ * This is a statement about the ADAPTER's wire format, never about a model.
+ * Whether a particular model can read an image is the user's declaration
+ * (`supportsImages`), and the two are independent: an image is sent only when
+ * BOTH hold.
+ */
+export const IMAGE_CAPABLE_PROVIDER_TYPES: readonly AIProviderType[] = [
+  'openai',
+  'anthropic',
+  'gemini',
+  'openrouter',
+];
+
+export function aiProviderTypeCarriesImages(providerType: AIProviderType): boolean {
+  return IMAGE_CAPABLE_PROVIDER_TYPES.includes(providerType);
+}
+
 /** Client-safe provider metadata. Never widen this with credential material. */
 export interface AIProviderConnection {
   readonly id: string;
@@ -34,6 +61,19 @@ export interface AIProviderConnection {
   /** Masked suffix of the stored key, for recognition only. */
   readonly keyHint: string;
   readonly defaultModel: string | null;
+  /**
+   * The OWNER's declaration that this connection's model accepts image input.
+   *
+   * A boolean about a model is not secret material, so it belongs on this type
+   * -- the rule this file states is that no apiKey, ciphertext, IV or auth tag
+   * may ever appear here, and a capability flag is none of those.
+   *
+   * NEVER inferred from `defaultModel`: the provider contract calls a model id
+   * opaque and never inspected, and guessing here is the one place where being
+   * wrong either leaks private imagery to a model that cannot read it or
+   * silently drops an attachment the user deliberately made.
+   */
+  readonly supportsImages: boolean;
   readonly verifiedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -44,6 +84,7 @@ export interface AIProviderConnectionInput {
   readonly providerType: AIProviderType;
   readonly displayName: string;
   readonly defaultModel: string | null;
+  readonly supportsImages: boolean;
 }
 
 /** A role's resolved configuration. A null connectionId means CollabBoard Default. */
@@ -63,6 +104,10 @@ export const aiProviderConnectionInputSchema = z.object({
   providerType: z.enum(AI_PROVIDER_TYPES),
   displayName: z.string().trim().min(1).max(DISPLAY_NAME_MAX),
   defaultModel: z.string().trim().min(1).max(MODEL_ID_MAX).nullable(),
+  // Absent means false, never "unknown". A caller that omits the field is
+  // declaring nothing, and declaring nothing is the text-only posture -- the
+  // same default the column carries, so the two halves cannot disagree.
+  supportsImages: z.boolean().default(false),
 });
 
 /**

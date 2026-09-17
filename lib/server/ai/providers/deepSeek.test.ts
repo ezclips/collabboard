@@ -158,7 +158,17 @@ describe('DeepSeek adapter', () => {
   });
 
   it('exposes the CollabBoard default model id used by the resolver', () => {
-    expect(DEEPSEEK_DEFAULT_MODEL).toBe('deepseek-chat');
+    expect(DEEPSEEK_DEFAULT_MODEL).toBe('deepseek-flash');
     expect(deepSeekAdapter.provider).toBe('deepseek');
+  });
+
+  // T8. The retired ids, pinned as a NEGATIVE so the default can be changed
+  // again without editing this test, but cannot be changed BACK to a name
+  // DeepSeek has withdrawn. `deepseek-chat` and `deepseek-reasoner` were
+  // retired on 2026-07-24; `deepseek-v4-flash` on 2026-09-10.
+  it('T8. the default is not a retired model id', () => {
+    for (const retired of ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash']) {
+      expect(DEEPSEEK_DEFAULT_MODEL, retired).not.toBe(retired);
+    }
   });
 });

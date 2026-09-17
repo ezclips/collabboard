@@ -2,7 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AI_PROVIDER_TYPES, type AIProviderConnection, type AIProviderType } from '@/lib/domain/settings/aiProviderConnection';
+import {
+  AI_PROVIDER_TYPES,
+  aiProviderTypeCarriesImages,
+  type AIProviderConnection,
+  type AIProviderType,
+} from '@/lib/domain/settings/aiProviderConnection';
 import { AI_PROVIDER_LABELS, DISPLAY_NAME_LIMIT, MODEL_ID_LIMIT } from './aiSettingsClient';
 
 /**
@@ -22,6 +27,7 @@ export interface AIProviderDialogSubmit {
   readonly apiKey: string;
   readonly defaultModel: string | null;
   readonly model: string | null;
+  readonly supportsImages: boolean;
 }
 
 export interface AIProviderDialogProps {
@@ -47,6 +53,10 @@ export default function AIProviderDialog({ mode, connection, busy, onSubmit, onC
   const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState(connection?.defaultModel ?? '');
   const [model, setModel] = useState('');
+  // The owner's declaration about THEIR model. Defaults to whatever the
+  // connection already says, and to false for a new one -- text-only until
+  // someone deliberately says otherwise.
+  const [supportsImages, setSupportsImages] = useState(connection?.supportsImages ?? false);
   // A display name the user typed must survive re-renders; only an untouched
   // one follows the provider dropdown.
   const [nameTouched, setNameTouched] = useState(false);
@@ -66,6 +76,9 @@ export default function AIProviderDialog({ mode, connection, busy, onSubmit, onC
       apiKey,
       defaultModel: defaultModel.trim() || null,
       model: model.trim() || null,
+      // A provider whose adapter cannot carry an image can never have a true
+      // here, whatever the checkbox last held before the provider was changed.
+      supportsImages: aiProviderTypeCarriesImages(providerType) && supportsImages,
     });
     if (mode === 'create' || mode === 'replace-key') setApiKey('');
   };
@@ -159,6 +172,46 @@ export default function AIProviderDialog({ mode, connection, busy, onSubmit, onC
                 />
               </label>
             )}
+
+            {/*
+              THE OWNER'S DECLARATION, not a capability this app detected.
+
+              Nothing here inspects the model id: the provider contract calls it
+              opaque and never guessed at, so the only honest source for "can
+              this model read a picture" is the person who chose it and pays for
+              it. Default false, so a connection stays text-only until someone
+              deliberately ticks this.
+
+              Disabled -- not hidden -- when the provider's adapter has no way to
+              put an image on the wire at all. Hiding it would leave the user
+              wondering why the option exists for one provider and not another;
+              showing it with the reason answers that.
+            */}
+            {(mode === 'create' || mode === 'edit') && (() => {
+              const carries = aiProviderTypeCarriesImages(providerType);
+              return (
+                <div>
+                  <label className="flex items-start gap-2">
+                    <input
+                      aria-label="This model accepts images"
+                      type="checkbox"
+                      checked={carries && supportsImages}
+                      disabled={!carries}
+                      onChange={(event) => setSupportsImages(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-400 disabled:opacity-50"
+                    />
+                    <span className="text-xs font-medium text-gray-700">
+                      This model accepts images
+                    </span>
+                  </label>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    {carries
+                      ? 'Used only for attachments you add in Board AI. If it is wrong, an image turn fails; nothing is sent to the model otherwise.'
+                      : 'Image attachments are not available for this provider yet, so this cannot be turned on.'}
+                  </span>
+                </div>
+              );
+            })()}
 
             {mode === 'test-model' && (
               <label className="block">

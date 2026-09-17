@@ -9,11 +9,16 @@ import type { UserId } from '@/lib/domain/core/ids';
 /**
  * One BYOK provider connection -- safe metadata update and delete.
  *
- * PATCH accepts only displayName and defaultModel. providerType is immutable
- * (changing it would leave a credential minted for a different service behind
- * the same row -- delete and recreate instead), and keyHint / verifiedAt /
- * userId are server-owned: the schema below simply has no field for them, so
- * an extra body property is dropped rather than trusted.
+ * PATCH accepts only displayName, defaultModel and supportsImages.
+ * providerType is immutable (changing it would leave a credential minted for a
+ * different service behind the same row -- delete and recreate instead), and
+ * keyHint / verifiedAt / userId are server-owned: the schema below simply has
+ * no field for them, so an extra body property is dropped rather than trusted.
+ *
+ * supportsImages is client-writable BECAUSE it is the owner's own declaration
+ * about their own model -- that is the whole point of it. It carries no
+ * privilege: a wrong `true` produces a failed image turn, never access to
+ * anything.
  */
 
 export const runtime = 'nodejs';
@@ -22,9 +27,13 @@ const patchSchema = z
   .object({
     displayName: z.string().trim().min(1).max(DISPLAY_NAME_MAX).optional(),
     defaultModel: z.string().trim().min(1).max(MODEL_ID_MAX).nullable().optional(),
+    supportsImages: z.boolean().optional(),
   })
   .refine(
-    (value) => value.displayName !== undefined || value.defaultModel !== undefined,
+    (value) =>
+      value.displayName !== undefined
+      || value.defaultModel !== undefined
+      || value.supportsImages !== undefined,
     { message: 'No supported field to update.' },
   );
 

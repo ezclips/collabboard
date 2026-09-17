@@ -44,6 +44,7 @@ interface ConnectionRow {
   readonly display_name: string;
   readonly key_hint: string;
   readonly default_model: string | null;
+  readonly supports_images: boolean | null;
   readonly verified_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
@@ -94,7 +95,7 @@ export interface AIProviderSupabaseClient {
  * explicit rather than relying on `select('*')` never drifting.
  */
 export const SAFE_CONNECTION_COLUMNS =
-  'id, provider_type, display_name, key_hint, default_model, verified_at, created_at, updated_at';
+  'id, provider_type, display_name, key_hint, default_model, supports_images, verified_at, created_at, updated_at';
 
 const UNIQUE_VIOLATION = '23505';
 
@@ -105,6 +106,9 @@ function toConnection(row: ConnectionRow): AIProviderConnection {
     displayName: row.display_name,
     keyHint: row.key_hint,
     defaultModel: row.default_model,
+    // The column is NOT NULL DEFAULT false, so null here means a row read
+    // before the migration landed -- which is the text-only posture anyway.
+    supportsImages: row.supports_images === true,
     verifiedAt: row.verified_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -166,6 +170,7 @@ export class SupabaseAIProviderCredentialRepository {
         display_name: input.displayName,
         key_hint: keyHint,
         default_model: input.defaultModel,
+        supports_images: input.supportsImages,
         created_at: now,
         updated_at: now,
       })
@@ -260,14 +265,24 @@ export class SupabaseAIProviderCredentialRepository {
    *
    * Changing the default model clears verified_at: what Test Connection
    * verified was a provider/model pair, and the model half just changed.
+   *
+   * Changing supports_images does NOT clear verified_at. Test Connection
+   * exercises a text call, so what it verified -- that this key reaches this
+   * model -- is exactly as true afterwards; the flag is a claim about what the
+   * model can read, which that test never checked either way.
    */
   async updateConnectionMetadata(
     userId: UserId,
     connectionId: string,
-    changes: { readonly displayName?: string; readonly defaultModel?: string | null },
+    changes: {
+      readonly displayName?: string;
+      readonly defaultModel?: string | null;
+      readonly supportsImages?: boolean;
+    },
   ): Promise<Result<AIProviderConnection | null, DomainError>> {
     const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (changes.displayName !== undefined) values.display_name = changes.displayName;
+    if (changes.supportsImages !== undefined) values.supports_images = changes.supportsImages;
     if (changes.defaultModel !== undefined) {
       values.default_model = changes.defaultModel;
       values.verified_at = null;

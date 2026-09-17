@@ -182,6 +182,9 @@ describe('SupabaseAIProviderCredentialRepository', () => {
       'id',
       'keyHint',
       'providerType',
+      // A boolean about what a model can READ. Not credential material: it is
+      // not a key, a ciphertext, an IV or an auth tag, and it grants nothing.
+      'supportsImages',
       'updatedAt',
       'verifiedAt',
     ]);
@@ -293,7 +296,7 @@ describe('SupabaseAIProviderCredentialRepository', () => {
 
     const result = await repository.insertConnectionMetadata(
       OWNER,
-      { providerType: 'anthropic', displayName: 'My Anthropic', defaultModel: null },
+      { providerType: 'anthropic', displayName: 'My Anthropic', defaultModel: null, supportsImages: false },
       aiCredentialKeyHint(RAW_KEY),
     );
 

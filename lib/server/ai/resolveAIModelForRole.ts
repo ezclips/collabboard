@@ -37,6 +37,18 @@ export interface ResolvedAIModel {
   readonly provider: AIExecutionProvider;
   readonly model: string;
   readonly apiKey: string;
+  /**
+   * Whether the CONNECTION OWNER declared this model able to read images.
+   *
+   * This field answers exactly one question -- "did the owner say so?" -- and
+   * is therefore false on the CollabBoard-default path, which has no connection
+   * row and no owner to have said anything. That is not a claim that the
+   * managed default cannot see images; that half is decided by CollabBoard's
+   * own declaration about its own model, in visionCapability.ts. Keeping the
+   * two apart is what stops a managed-path default from ever being read as a
+   * user's consent.
+   */
+  readonly supportsImages: boolean;
   /** Null on the CollabBoard-default path, which has no connection row. */
   readonly connectionId: string | null;
 }
@@ -80,6 +92,8 @@ function resolveCollabBoardDefault(): ResolvedAIModel {
     provider: 'deepseek',
     model: DEEPSEEK_DEFAULT_MODEL,
     apiKey,
+    // No connection row, so nobody declared anything. See the field's note.
+    supportsImages: false,
     connectionId: null,
   };
 }
@@ -122,5 +136,13 @@ export async function resolveAIModelForRole(
   const apiKey = trimmedOrNull(credential.value);
   if (apiKey === null) throw aiProviderInvalidConfiguration(provider);
 
-  return { source: 'byok', provider, model, apiKey, connectionId };
+  return {
+    source: 'byok',
+    provider,
+    model,
+    apiKey,
+    // Straight from the row the owner controls. Never derived from `model`.
+    supportsImages: connection.value.supportsImages === true,
+    connectionId,
+  };
 }

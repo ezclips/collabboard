@@ -19,7 +19,11 @@ import {
 import type { ResolvedBoardAiContextBlock } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
 import { aiProviderInvalidConfiguration } from './providers/errors';
-import { defaultVisionModelFor, supportsImages } from './providers/visionCapability';
+import {
+  adapterCarriesImages,
+  defaultVisionModelFor,
+  modelDeclaredForImages,
+} from './providers/visionCapability';
 import { resolveAIModelForRole, type AIModelResolverDeps } from './resolveAIModelForRole';
 import type { UserId } from '../../domain/core/ids';
 
@@ -215,13 +219,30 @@ export async function executeBoardAiChat(
   // not a different model quietly answering in its place. Swapping theirs would
   // send their private imagery to a model they did not pick, on a key they did
   // not intend to use for it.
+  //
+  // TWO INDEPENDENT CONDITIONS, BOTH REQUIRED. The adapter must be able to put
+  // an image on the wire, AND the model must have been declared able to read
+  // one. Neither implies the other: an adapter that speaks image parts says
+  // nothing about the model behind it, and an owner's declaration cannot
+  // conjure a wire format the adapter does not have. Either false REFUSES.
+  //
+  // With a user declaration the substitution below normally does not trigger at
+  // all -- the user's own model is used, which is the entire point of letting
+  // them declare it.
   let model = resolved.model;
-  if (images.length > 0 && !supportsImages(resolved.provider, model)) {
-    const visionModel = resolved.source === 'collabboard-default'
-      ? defaultVisionModelFor(resolved.provider)
-      : null;
-    if (visionModel === null) throw aiProviderInvalidConfiguration(resolved.provider);
-    model = visionModel;
+  if (images.length > 0) {
+    if (!adapterCarriesImages(resolved.provider)) {
+      throw aiProviderInvalidConfiguration(resolved.provider);
+    }
+    if (!modelDeclaredForImages(resolved)) {
+      // Undeclared. The managed default may fall back to the vision model it
+      // defines for itself; a BYOK model may not, and gets the refusal.
+      const visionModel = resolved.source === 'collabboard-default'
+        ? defaultVisionModelFor(resolved.provider)
+        : null;
+      if (visionModel === null) throw aiProviderInvalidConfiguration(resolved.provider);
+      model = visionModel;
+    }
   }
 
   const controller = new AbortController();

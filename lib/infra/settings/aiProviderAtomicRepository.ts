@@ -51,6 +51,7 @@ export class SupabaseAIProviderAtomicRepository {
       readonly displayName: string;
       readonly keyHint: string;
       readonly defaultModel: string | null;
+      readonly supportsImages: boolean;
       readonly apiKeyEncrypted: string;
     },
   ): Promise<Result<string, DomainError>> {
@@ -61,6 +62,10 @@ export class SupabaseAIProviderAtomicRepository {
       p_key_hint: input.keyHint,
       p_default_model: input.defaultModel,
       p_api_key_encrypted: input.apiKeyEncrypted,
+      // Always sent, never omitted. The function takes this argument without a
+      // DEFAULT precisely so a caller that forgot it fails loudly rather than
+      // silently storing a connection the owner believes accepts images.
+      p_supports_images: input.supportsImages,
     });
 
     if (error) {

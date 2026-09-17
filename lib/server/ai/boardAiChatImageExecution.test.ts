@@ -18,13 +18,19 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   resolveAIModelForRole: vi.fn(),
   generateText: vi.fn(async () => 'an answer'),
+  /** Condition one, controlled per test: can the adapter carry an image at all? */
+  carriesImages: { value: true },
 }));
 
 vi.mock('./resolveAIModelForRole', () => ({
   resolveAIModelForRole: mocks.resolveAIModelForRole,
 }));
 vi.mock('./providers/registry', () => ({
-  getAIProviderAdapter: () => ({ provider: 'deepseek', generateText: mocks.generateText }),
+  getAIProviderAdapter: () => ({
+    provider: 'deepseek',
+    get carriesImages() { return mocks.carriesImages.value; },
+    generateText: mocks.generateText,
+  }),
 }));
 
 const { executeBoardAiChat, BOARD_AI_CHAT_SYSTEM_PROMPT, BOARD_AI_CHAT_MAX_IMAGES } =
@@ -50,15 +56,27 @@ const textBlock: ResolvedBoardAiContextBlock = {
   type: 'padlet', padletId: 'pad9', label: 'Note', text: 'some words',
 };
 
-function resolvesTo(source: 'collabboard-default' | 'byok', model: string, provider = 'deepseek') {
+/**
+ * `supportsImages` is condition two: the CONNECTION OWNER's declaration. It is
+ * false unless a test says otherwise, which is the production default -- a
+ * connection is text-only until someone deliberately ticks the box.
+ */
+function resolvesTo(
+  source: 'collabboard-default' | 'byok',
+  model: string,
+  provider = 'deepseek',
+  supportsImages = false,
+) {
   mocks.resolveAIModelForRole.mockResolvedValue({
-    source, provider, model, apiKey: 'secret-key', connectionId: source === 'byok' ? 'c1' : null,
+    source, provider, model, apiKey: 'secret-key', supportsImages,
+    connectionId: source === 'byok' ? 'c1' : null,
   });
 }
 
 beforeEach(() => {
   mocks.generateText.mockClear();
   mocks.resolveAIModelForRole.mockReset();
+  mocks.carriesImages.value = true;
 });
 
 const lastCall = () => (mocks.generateText.mock.calls[0] as unknown as [{
@@ -96,13 +114,47 @@ describe('T7. the model rule', () => {
     expect(mocks.generateText, 'and nothing reached the provider').not.toHaveBeenCalled();
   });
 
-  it('4. a BYOK model that DOES declare vision is used as chosen', async () => {
-    // Refusal is about capability, not about BYOK. A user whose own model can
-    // see images keeps their model.
-    resolvesTo('byok', DEEPSEEK_VISION_MODEL);
+  it('4. a BYOK model the OWNER declared is used as chosen, with no substitution', async () => {
+    // The point of user-declared capability. Refusal is about capability, not
+    // about BYOK: a user whose own model can see images keeps THEIR model, on
+    // THEIR key -- the managed vision model must not appear anywhere here.
+    resolvesTo('byok', 'gpt-5-vision', 'openai', true);
     const result = await executeBoardAiChat(USER, TURNS, {} as never, [imageBlock()]);
+    expect(lastCall().model).toBe('gpt-5-vision');
+    expect(result.model).toBe('gpt-5-vision');
+    expect(result.model).not.toBe(DEEPSEEK_VISION_MODEL);
+    expect(result.provider).toBe('openai');
+  });
+
+  it('4b. a declaration cannot conjure a wire format the adapter lacks', async () => {
+    // Condition one fails while condition two holds. BOTH are required, so this
+    // refuses -- and it refuses rather than substituting, because a BYOK model
+    // is never swapped whatever the reason.
+    mocks.carriesImages.value = false;
+    resolvesTo('byok', 'some-vision-model', 'openai', true);
+    await expect(executeBoardAiChat(USER, TURNS, {} as never, [imageBlock()]))
+      .rejects.toBeInstanceOf(AIProviderError);
+    expect(mocks.generateText, 'nothing reached the provider').not.toHaveBeenCalled();
+  });
+
+  it('4c. an adapter that cannot carry blocks the MANAGED default too', async () => {
+    // The managed path may substitute a model, but it cannot substitute a wire
+    // format. No adapter, no image, no exceptions.
+    mocks.carriesImages.value = false;
+    resolvesTo('collabboard-default', DEEPSEEK_DEFAULT_MODEL);
+    await expect(executeBoardAiChat(USER, TURNS, {} as never, [imageBlock()]))
+      .rejects.toBeInstanceOf(AIProviderError);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('4d. an owner declaration does NOT leak across to the managed default', async () => {
+    // supportsImages is a property of a CONNECTION, and the managed default has
+    // no connection row. Resolution sets it false there; this pins that a true
+    // arriving on that path still only works because the model is CollabBoard's
+    // own declared vision model -- never because a flag said so.
+    resolvesTo('collabboard-default', DEEPSEEK_DEFAULT_MODEL, 'deepseek', false);
+    await executeBoardAiChat(USER, TURNS, {} as never, [imageBlock()]);
     expect(lastCall().model).toBe(DEEPSEEK_VISION_MODEL);
-    expect(result.model).toBe(DEEPSEEK_VISION_MODEL);
   });
 
   it('5. a BYOK text model with NO image is untouched', async () => {

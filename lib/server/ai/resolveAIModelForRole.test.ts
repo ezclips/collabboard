@@ -20,6 +20,7 @@ function connection(overrides: Partial<AIProviderConnection> = {}): AIProviderCo
     displayName: 'My Claude',
     keyHint: '1234',
     defaultModel: 'claude-opus-5',
+    supportsImages: false,
     verifiedAt: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -66,8 +67,9 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
     await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).resolves.toEqual({
       source: 'collabboard-default',
       provider: 'deepseek',
-      model: 'deepseek-chat',
+      model: 'deepseek-flash',
       apiKey: DEFAULT_KEY,
+      supportsImages: false,
       connectionId: null,
     });
   });
@@ -80,7 +82,9 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
     const resolved = await resolveAIModelForRole(USER, AI_ROLE_EDIT, d.value);
 
     expect(resolved.source).toBe('collabboard-default');
-    expect(resolved.model).toBe('deepseek-chat');
+    expect(resolved.model).toBe('deepseek-flash');
+    // No connection row, so nobody declared anything about images.
+    expect(resolved.supportsImages).toBe(false);
   });
 
   it('never touches the credential table on the default path', async () => {
@@ -125,8 +129,26 @@ describe('resolveAIModelForRole -- BYOK', () => {
       provider: 'anthropic',
       model: 'claude-opus-5',
       apiKey: BYOK_KEY,
+      supportsImages: false,
       connectionId: CONNECTION_ID,
     });
+  });
+
+  // T1 (the resolver half). The owner's declaration reaches the execution
+  // layer, which is the only place it does anything. A flag the UI can write
+  // and the resolver drops would refuse every image turn with no way to tell
+  // why -- the same class of defect as a column the read never returns.
+  it('carries the connection owner\'s image declaration through', async () => {
+    const d = deps({
+      preference: byokPreference,
+      connectionResult: ok(connection({ supportsImages: true })),
+    });
+
+    const resolved = await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value);
+
+    expect(resolved.supportsImages).toBe(true);
+    // Still never inferred from the model id itself.
+    expect(resolved.model).toBe('claude-opus-5');
   });
 
   it('passes the caller userId to every ownership-sensitive lookup', async () => {

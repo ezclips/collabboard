@@ -51,8 +51,17 @@ export const AI_ROLE_DESCRIPTIONS: Record<AISettingsRole, string> = {
   [AI_ROLE_CHAT]: 'Your private Board AI conversation.',
 };
 
-/** What CollabBoard Default resolves to, shown read-only. */
-export const COLLABBOARD_DEFAULT_MODEL = 'deepseek-chat';
+/**
+ * What CollabBoard Default resolves to, shown read-only.
+ *
+ * MUST track the DEEPSEEK_DEFAULT_MODEL constant the DeepSeek adapter exports.
+ * It is restated rather than imported because that module is server-only --
+ * every adapter there handles a plaintext key -- and this file is part of a
+ * 'use client' bundle, which is why this file may not name that path even in a
+ * comment. A test pins the two together so they cannot drift: a UI that names a
+ * different model than the one actually called is a lie about which answered.
+ */
+export const COLLABBOARD_DEFAULT_MODEL = 'deepseek-flash';
 
 /** Input bounds, mirrored from the domain contract the routes validate against. */
 export const DISPLAY_NAME_LIMIT = DISPLAY_NAME_MAX;
@@ -132,6 +141,7 @@ export interface CreateAIProviderInput {
   readonly displayName: string;
   readonly apiKey: string;
   readonly defaultModel: string | null;
+  readonly supportsImages: boolean;
 }
 
 export async function createAIProvider(input: CreateAIProviderInput): Promise<AIProviderConnection> {
@@ -145,6 +155,7 @@ export async function createAIProvider(input: CreateAIProviderInput): Promise<AI
 export interface UpdateAIProviderInput {
   readonly displayName?: string;
   readonly defaultModel?: string | null;
+  readonly supportsImages?: boolean;
 }
 
 export async function updateAIProvider(

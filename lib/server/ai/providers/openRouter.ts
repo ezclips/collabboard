@@ -16,6 +16,8 @@ export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completion
 
 export const openRouterAdapter: AIProviderAdapter = {
   provider: 'openrouter',
+  // Chat Completions carries image_url parts, and the shared helper builds them.
+  carriesImages: true,
   generateText(input: AIGenerateTextInput): Promise<string> {
     return chatCompletionsGenerateText('openrouter', OPENROUTER_ENDPOINT, input);
   },

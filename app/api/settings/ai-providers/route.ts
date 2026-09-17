@@ -29,6 +29,9 @@ const createSchema = z.object({
   displayName: z.string().trim().min(1).max(DISPLAY_NAME_MAX),
   apiKey: aiProviderApiKeySchema,
   defaultModel: z.string().trim().min(1).max(MODEL_ID_MAX).nullish(),
+  // Absent means false, never "unknown": a caller that declares nothing gets
+  // the text-only posture, matching the column's own default.
+  supportsImages: z.boolean().default(false),
 });
 
 export async function GET(request: Request) {
@@ -55,7 +58,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid provider configuration.' }, { status: 400 });
   }
 
-  const { providerType, displayName, apiKey, defaultModel } = parsed.data;
+  const { providerType, displayName, apiKey, defaultModel, supportsImages } = parsed.data;
 
   // Encrypt BEFORE any database call: a misconfigured master key must fail
   // here, with nothing written, rather than after a row exists.
@@ -73,6 +76,7 @@ export async function POST(request: Request) {
     displayName,
     keyHint: aiCredentialKeyHint(apiKey),
     defaultModel: defaultModel ?? null,
+    supportsImages,
     apiKeyEncrypted,
   });
 

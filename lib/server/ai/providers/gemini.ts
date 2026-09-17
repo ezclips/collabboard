@@ -13,7 +13,6 @@
 
 import {
   aiProviderHttpError,
-  aiProviderInvalidConfiguration,
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
@@ -55,16 +54,43 @@ function extractInteractionsText(payload: InteractionsPayload | null): string | 
   return chunks.length > 0 ? chunks.join('') : null;
 }
 
+/**
+ * A plain STRING when there is no image, so every existing text-only request
+ * goes out byte-identical to what it was before images existed. The part-list
+ * form is used ONLY when the caller supplied images.
+ *
+ * THIS IS THE INTERACTIONS API, NOT generateContent, and the two differ exactly
+ * here. generateContent nests `inline_data` inside `contents[].parts[]`;
+ * Interactions takes a FLAT `input` array of typed parts, and an image is
+ * `{ type: 'image', data, mime_type }` -- no `inline_data` wrapper, no `parts`.
+ * Using the generateContent spelling against this endpoint is a 400 that reads
+ * like a provider outage, which is why this shape was verified rather than
+ * assumed:
+ * https://ai.google.dev/gemini-api/docs/interactions/image-understanding
+ *
+ * Text precedes the image here, matching the documented example's ordering.
+ */
+function interactionsInput(input: AIGenerateTextInput): unknown {
+  const images = input.images ?? [];
+  if (images.length === 0) return input.user;
+
+  return [
+    { type: 'text', text: input.user },
+    ...images.map((image) => ({
+      type: 'image',
+      // Raw base64 with a sibling mime_type -- NOT a data: URL. The data: form
+      // is what the Chat Completions adapters use; this API takes the bytes and
+      // the type as separate fields.
+      data: image.base64,
+      mime_type: image.mediaType,
+    })),
+  ];
+}
+
 export const geminiAdapter: AIProviderAdapter = {
   provider: 'gemini',
+  carriesImages: true,
   async generateText(input: AIGenerateTextInput): Promise<string> {
-    // This adapter carries no image part. Refusing is deliberate: dropping the
-    // image and answering from text alone would tell the user their picture was
-    // looked at when it was not. See AIGenerateTextInput.images.
-    if (input.images && input.images.length > 0) {
-      throw aiProviderInvalidConfiguration('gemini');
-    }
-
     let response: Response;
     try {
       response = await fetch(GEMINI_ENDPOINT, {
@@ -76,7 +102,7 @@ export const geminiAdapter: AIProviderAdapter = {
         signal: input.signal,
         body: JSON.stringify({
           model: input.model,
-          input: input.user,
+          input: interactionsInput(input),
           system_instruction: input.system,
           store: false,
           generation_config: {

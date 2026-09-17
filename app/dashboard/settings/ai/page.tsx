@@ -138,12 +138,14 @@ export default function AISettingsPage() {
           displayName: values.displayName,
           apiKey: values.apiKey,
           defaultModel: values.defaultModel,
+          supportsImages: values.supportsImages,
         });
         toast.success('Provider added');
       } else if (mode === 'edit' && connection) {
         await updateAIProvider(connection.id, {
           displayName: values.displayName,
           defaultModel: values.defaultModel,
+          supportsImages: values.supportsImages,
         });
         toast.success('Provider updated');
       } else if (mode === 'replace-key' && connection) {

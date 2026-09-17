@@ -9,7 +9,6 @@
 
 import {
   aiProviderHttpError,
-  aiProviderInvalidConfiguration,
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
@@ -39,18 +38,47 @@ function extractMessagesText(payload: MessagesPayload | null): string | null {
   return chunks.length > 0 ? chunks.join('') : null;
 }
 
+/**
+ * A plain STRING when there is no image, so every existing text-only request
+ * goes out byte-identical to what it was before images existed. The block-list
+ * form is used ONLY when the caller supplied images; both are valid content for
+ * a Messages user turn.
+ *
+ * Shape verified against Anthropic's current Messages API documentation:
+ * https://platform.claude.com/docs/en/docs/build-with-claude/vision
+ * -- an image is `{ type: 'image', source: { type: 'base64', media_type, data } }`,
+ * and the supported formats are JPEG, PNG, GIF and WebP, so the WebP crops this
+ * feature produces need no conversion.
+ *
+ * IMAGES COME FIRST, and that ordering is deliberate. The same documentation
+ * states Claude works best when images precede text ("Images placed after text
+ * or interpolated with text still perform well, but if your use case allows it,
+ * prefer an image-then-text structure"). Our text half is a large JSON payload
+ * carrying the whole conversation, which is exactly the case that recommendation
+ * is about. The bytes never leave the request body: these are crops of private
+ * Knowledge PDFs, so no URL or file_id source is used even though both exist.
+ */
+function messagesUserContent(input: AIGenerateTextInput): unknown {
+  const images = input.images ?? [];
+  if (images.length === 0) return input.user;
+
+  return [
+    ...images.map((image) => ({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: image.mediaType,
+        data: image.base64,
+      },
+    })),
+    { type: 'text', text: input.user },
+  ];
+}
+
 export const anthropicAdapter: AIProviderAdapter = {
   provider: 'anthropic',
+  carriesImages: true,
   async generateText(input: AIGenerateTextInput): Promise<string> {
-    // This adapter carries no image part. Refusing is deliberate: dropping the
-    // image and answering from text alone would tell the user their picture was
-    // looked at when it was not. Anthropic's Messages API does support image
-    // blocks -- wiring them is a separate, declared decision, and until it is
-    // made this pair is not in DECLARED_VISION_MODELS and must not be reached.
-    if (input.images && input.images.length > 0) {
-      throw aiProviderInvalidConfiguration('anthropic');
-    }
-
     let response: Response;
     try {
       response = await fetch(ANTHROPIC_ENDPOINT, {
@@ -65,7 +93,7 @@ export const anthropicAdapter: AIProviderAdapter = {
           model: input.model,
           system: input.system,
           max_tokens: input.maxTokens,
-          messages: [{ role: 'user', content: input.user }],
+          messages: [{ role: 'user', content: messagesUserContent(input) }],
           ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
         }),
       });

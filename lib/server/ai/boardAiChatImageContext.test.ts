@@ -21,7 +21,11 @@ import {
 } from '../../domain/ai/boardAiChatContext';
 import { boardAiDraftFromBoardItem, boardAiDraftContextPayload }
   from '../../domain/ai/boardAiChatDraftContext';
-import { supportsImages, defaultVisionModelFor } from './providers/visionCapability';
+import {
+  adapterCarriesImages,
+  defaultVisionModelFor,
+  modelDeclaredForImages,
+} from './providers/visionCapability';
 import { DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_VISION_MODEL } from './providers/deepSeek';
 import { anthropicAdapter } from './providers/anthropic';
 import { geminiAdapter } from './providers/gemini';
@@ -294,19 +298,47 @@ describe('T5. history never re-reads an image', () => {
 });
 
 describe('T6. capability is declared, never inferred', () => {
-  it('15. exactly one provider/model pair supports images', () => {
-    expect(supportsImages('deepseek', DEEPSEEK_VISION_MODEL)).toBe(true);
-    // The default model is text-only, which is the whole reason for the swap.
-    expect(supportsImages('deepseek', DEEPSEEK_DEFAULT_MODEL)).toBe(false);
-    // Nothing is inferred from a name: the same id under another provider is
-    // not the same model, and a vision-sounding id buys nothing.
+  // UPDATED for USER-DECLARED CAPABILITY. This used to assert a whitelist of
+  // provider:model pairs kept in this repository, which meant the answer for
+  // every model a user actually owns was "no", permanently. The whitelist is
+  // gone; what replaces it is still a DECLARATION, just the connection owner's
+  // rather than ours. The property being defended is unchanged and is the only
+  // one that ever mattered: NOTHING IS INFERRED FROM A MODEL ID.
+  it('15. the declaration decides, and a model id never does', () => {
+    // A vision-sounding name buys nothing without a declaration...
+    for (const model of ['gpt-4o', 'claude-3-5-sonnet', 'gemini-1.5-pro-vision',
+      'some-vision-model', DEEPSEEK_VISION_MODEL, DEEPSEEK_DEFAULT_MODEL]) {
+      expect(modelDeclaredForImages({ source: 'byok', model, supportsImages: false }), model)
+        .toBe(false);
+    }
+    // ...and a plain-sounding one is honoured WITH one. The id is never read.
+    for (const model of ['some-internal-name', 'text-only-sounding', 'x']) {
+      expect(modelDeclaredForImages({ source: 'byok', model, supportsImages: true }), model)
+        .toBe(true);
+    }
+    // The managed default is CollabBoard's own declaration about its own model,
+    // and is the ONLY thing that grants images without an owner's flag.
+    expect(modelDeclaredForImages({
+      source: 'collabboard-default', model: DEEPSEEK_VISION_MODEL, supportsImages: false,
+    })).toBe(true);
+    expect(modelDeclaredForImages({
+      source: 'collabboard-default', model: DEEPSEEK_DEFAULT_MODEL, supportsImages: false,
+    })).toBe(false);
+    // And that declaration does NOT transfer to a BYOK connection that happens
+    // to name the same model: the managed key and the user's key are not the
+    // same grant.
+    expect(modelDeclaredForImages({
+      source: 'byok', model: DEEPSEEK_VISION_MODEL, supportsImages: false,
+    })).toBe(false);
+  });
+
+  it('15b. every adapter declares whether it can carry an image at all', () => {
+    // Condition one, independent of any model. All five carry images today;
+    // what is pinned is that each one STATES it, so a provider added without
+    // an image path cannot inherit a yes by silence.
     for (const provider of AI_EXECUTION_PROVIDERS) {
-      for (const model of [DEEPSEEK_DEFAULT_MODEL, 'gpt-4o', 'claude-3-5-sonnet',
-        'gemini-1.5-pro-vision', 'some-vision-model', DEEPSEEK_VISION_MODEL]) {
-        const expected = provider === 'deepseek' && model === DEEPSEEK_VISION_MODEL;
-        expect(supportsImages(provider as AIExecutionProvider, model), `${provider}:${model}`)
-          .toBe(expected);
-      }
+      expect(typeof adapterCarriesImages(provider as AIExecutionProvider), provider)
+        .toBe('boolean');
     }
   });
 
@@ -318,22 +350,37 @@ describe('T6. capability is declared, never inferred', () => {
   });
 });
 
-describe('T8/T9. adapters refuse rather than drop', () => {
+describe('T8/T9. adapters carry rather than drop', () => {
   const image = { mediaType: 'image/webp', base64: 'AAAA' };
   const input = {
     model: 'm', apiKey: 'k', system: 's', user: 'u', maxTokens: 10, images: [image],
   };
 
+  // UPDATED. These three used to THROW on a non-empty images array, because
+  // they had no way to put one on the wire and dropping it would have answered
+  // from text while the user believed the model looked at their picture. They
+  // now genuinely carry the image, so the guard is gone -- which is the only
+  // condition under which it was ever allowed to go.
+  //
+  // The refusal did not disappear; it MOVED to the one place that knows both
+  // the adapter's capability and the model's declaration. See test 7 of
+  // boardAiChatImageExecution, where an undeclared BYOK model still throws.
   it.each([
     ['anthropic', anthropicAdapter],
     ['gemini', geminiAdapter],
     ['openai', openAIAdapter],
-  ])('17. the %s adapter throws on a non-empty images array', async (_name, adapter) => {
-    // The difference between a refusal and a lie: dropping the part would
-    // answer from text while the user believes the model looked at the image.
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  ])('17. the %s adapter carries the image onto the wire', async (name, adapter) => {
+    expect(adapter.carriesImages, `${name} declares it`).toBe(true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 500 }));
     await expect(adapter.generateText(input)).rejects.toThrow();
-    expect(fetchSpy, 'and it refuses BEFORE reaching the network').not.toHaveBeenCalled();
+    // The request was actually made, and the image bytes are IN it -- not
+    // silently omitted on the way past.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = String((fetchSpy.mock.calls[0][1] as { body: string }).body);
+    expect(body, `${name} sends the bytes`).toContain('AAAA');
+    // Never a link: the source is a private crop with no public address.
+    expect(body).not.toContain('http');
     fetchSpy.mockRestore();
   });
 

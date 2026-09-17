@@ -58,8 +58,18 @@ describe('BYOK settings UI safety', () => {
     expect(dialog).toContain('type="password"');
     const inputTypes = [...dialog.matchAll(/<input[\s\S]*?type="(\w+)"/g)].map((match) => match[1]);
     expect(inputTypes).toContain('password');
+    // THE ASSERTION THAT PROTECTS THE KEY, and it is unchanged: exactly one
+    // password input exists, so a second key field cannot appear beside it and
+    // the one that does exist cannot have been switched to type="text".
     expect(inputTypes.filter((type) => type === 'password')).toHaveLength(1);
-    expect(new Set(inputTypes)).toEqual(new Set(['password', 'text']));
+    // The closed set gained `checkbox` when the user-declared image capability
+    // shipped. It stays a CLOSED set on purpose: this is what catches a new
+    // input type nobody reviewed -- a file picker, a hidden field, a second
+    // credential box -- so it is extended by the one member deliberately added
+    // and never loosened to a subset check.
+    expect(new Set(inputTypes)).toEqual(new Set(['password', 'text', 'checkbox']));
+    // And the checkbox is not a credential affordance: its own type is fixed.
+    expect(dialog).toContain('type="checkbox"');
   });
 
   it('5. the replaced mockup leaves no fake-settings behaviour behind', () => {

@@ -31,6 +31,7 @@ describe('AI provider domain contract', () => {
       displayName: 'Work key',
       keyHint: '9876',
       defaultModel: null,
+      supportsImages: false,
       verifiedAt: null,
       createdAt: '2026-08-31T10:00:00.000Z',
       updatedAt: '2026-08-31T10:00:00.000Z',
