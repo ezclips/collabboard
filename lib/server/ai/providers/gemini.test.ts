@@ -3,6 +3,29 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIProviderError } from './errors';
 import { GEMINI_ENDPOINT, geminiAdapter } from './gemini';
 
+/**
+ * WHY THE SUCCESS FIXTURE IS A REAL RESPONSE AND NOT A SHAPE.
+ *
+ * The previous fixture was `{ model_output: [...] }` -- a top-level array that
+ * the Interactions API never returns. It was invented from the same wrong
+ * assumption as the adapter it tested, so the two agreed with each other and
+ * disagreed with Google. Every test passed while the adapter could not extract
+ * a single answer in production: it read a key that is never present, found
+ * nothing on every reply, and requireProviderText turned that into a
+ * `request_failed` indistinguishable from the provider rejecting the request.
+ *
+ * A fixture an author invents can only ever test that the code matches the
+ * author's belief. So OK_BODY below is the VERBATIM body of a live call to
+ * https://generativelanguage.googleapis.com/v1beta/interactions
+ * (model gemini-3.5-flash, input "Say the single word: hello", HTTP 200),
+ * captured 2026-09-17, with only the opaque `signature` blob truncated -- it is
+ * several hundred bytes of encrypted thought state and contributes nothing.
+ *
+ * Test 3 is the guard that keeps the old spelling out: a payload whose text
+ * sits under a top-level `model_output` must FAIL, because reading that key
+ * again would be the original defect returning.
+ */
+
 const FAKE_KEY = 'FAKE-KEY-DO-NOT-LEAK-1234';
 const SECRET_BODY = 'SECRET_PROVIDER_BODY_123';
 
@@ -22,11 +45,31 @@ function mockFetch(response: Response | Error) {
   return fn;
 }
 
+/** VERBATIM live response. See the header for why this is not hand-written. */
 const OK_BODY = {
-  model_output: [
-    { type: 'thought', text: 'ignored reasoning' },
-    { type: 'text', text: 'the answer' },
+  id: 'v1_ChZTZEtyYXFXVUJlYUJ4czBQdzhfZEdREhZTZEtyYXFXVUJlYUJ4czBQdzhfZEdR',
+  status: 'completed',
+  usage: {
+    total_tokens: 97,
+    total_input_tokens: 7,
+    input_tokens_by_modality: [{ modality: 'text', tokens: 7 }],
+    total_cached_tokens: 0,
+    total_output_tokens: 1,
+    total_tool_use_tokens: 0,
+    total_thought_tokens: 89,
+    raw_prompt_token: 38,
+  },
+  created: '2026-09-17T11:43:05Z',
+  updated: '2026-09-17T11:43:05Z',
+  service_tier: 'standard',
+  steps: [
+    // A thought step carries an opaque signature and NO text at all.
+    { signature: 'EuMDCuADARFNMg8WNSjDPHDbby5bM/N2iBebmRBvSlQYC+MRZqY7xDVod1aZ5XK5…', type: 'thought' },
+    // The answer. `model_output` is a step TYPE here, never a top-level key.
+    { content: [{ text: 'hello', type: 'text' }], type: 'model_output' },
   ],
+  object: 'interaction',
+  model: 'gemini-3.5-flash',
 };
 
 const BASE_INPUT = {
@@ -103,24 +146,53 @@ describe('Gemini adapter', () => {
     expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].signal).toBe(controller.signal);
   });
 
-  it('extracts text only from model_output, ignoring thought and tool steps', async () => {
+  // 1. THE REAL RESPONSE. This is the assertion the old fixture could never
+  //    make: the verbatim live body, extracted correctly.
+  it('1. extracts the answer from a VERBATIM live response body', async () => {
+    mockFetch(jsonResponse(OK_BODY));
+    await expect(geminiAdapter.generateText(BASE_INPUT)).resolves.toBe('hello');
+  });
+
+  it('2. reads text from steps, ignoring thought and tool traffic', async () => {
     mockFetch(jsonResponse({
       candidates: [{ content: { parts: [{ text: 'must be ignored' }] } }],
-      model_output: [
-        { type: 'thought', text: 'ignored reasoning' },
+      steps: [
+        { type: 'thought', signature: 'opaque' },
+        { type: 'thinking', text: 'ignored reasoning' },
         { type: 'tool_call', text: 'ignored tool' },
-        { type: 'text', content: [{ type: 'text', text: 'first ' }] },
-        { type: 'text', text: 'second' },
+        { type: 'model_output', content: [{ type: 'text', text: 'first ' }] },
+        { type: 'model_output', text: 'second' },
       ],
     }));
 
     await expect(geminiAdapter.generateText(BASE_INPUT)).resolves.toBe('first second');
   });
 
-  it('fails when model_output carries no usable text', async () => {
+  // 3. THE GUARD. The defect was reading a TOP-LEVEL `model_output`, a key the
+  //    API never sends. If anyone restores that spelling, this body starts
+  //    succeeding -- so its continued failure is what proves the extractor is
+  //    reading `steps` and nothing else.
+  it('3. does NOT read a top-level model_output -- the original defect', async () => {
+    mockFetch(jsonResponse({
+      model_output: [
+        { type: 'text', text: 'this must never become the answer' },
+        { type: 'model_output', content: [{ type: 'text', text: 'nor this' }] },
+      ],
+    }));
+
+    await expect(geminiAdapter.generateText(BASE_INPUT)).rejects.toMatchObject({
+      category: 'request_failed',
+    });
+  });
+
+  it('4. fails when steps carry no usable text', async () => {
     for (const body of [
-      { model_output: [{ type: 'thought', text: 'only reasoning' }] },
-      { model_output: [] },
+      // A thought-only reply: exactly what a live call returns when the model
+      // spends its whole budget thinking. It is a failed request, not an
+      // empty answer.
+      { steps: [{ type: 'thought', signature: 'opaque' }] },
+      { steps: [{ type: 'thinking', text: 'only reasoning' }] },
+      { steps: [] },
       { candidates: [{ content: { parts: [{ text: 'wrong field' }] } }] },
       {},
     ]) {

@@ -27,20 +27,42 @@ interface InteractionsStep {
 }
 
 interface InteractionsPayload {
-  readonly model_output?: readonly InteractionsStep[];
+  /**
+   * The answer arrives in `steps`, and `model_output` is a step TYPE inside it
+   * -- NOT a top-level array.
+   *
+   * This declared a top-level `model_output` until it was checked against a
+   * live response, which is the whole reason this adapter never once returned
+   * an answer: the extractor read a key that is never present, found nothing on
+   * every single reply, and requireProviderText turned that into a
+   * `request_failed` that looked exactly like a provider rejecting the request.
+   * It survived because its own test fixture was written from the same wrong
+   * assumption, and because every AI call in this project resolves to the
+   * managed default, so nothing ever executed this path for real.
+   *
+   * The live body is:
+   *   { "steps": [ { "type": "thought", "signature": "…" },
+   *                { "type": "model_output",
+   *                  "content": [ { "text": "hello", "type": "text" } ] } ] }
+   */
+  readonly steps?: readonly InteractionsStep[];
 }
 
 /** Step kinds that are never part of the answer, whatever text they carry. */
 const NON_ANSWER_STEPS = new Set(['thought', 'thinking', 'tool_call', 'tool_result']);
 
 /**
- * Text comes ONLY from `model_output`, and only from steps that are not
- * reasoning or tool traffic. A step may carry its text directly or as content
- * parts; anything else in the payload is ignored entirely.
+ * Text comes from `steps`, skipping reasoning and tool traffic. A step may
+ * carry its text directly or as content parts; anything else in the payload is
+ * ignored entirely.
+ *
+ * Note the asymmetry that matters: `thought` steps carry a `signature` and no
+ * text, so skipping them is belt-and-braces -- but a `thinking` step that DOES
+ * carry text must never reach the answer, which is what the skip list is for.
  */
 function extractInteractionsText(payload: InteractionsPayload | null): string | null {
   const chunks: string[] = [];
-  for (const step of payload?.model_output ?? []) {
+  for (const step of payload?.steps ?? []) {
     if (typeof step?.type === 'string' && NON_ANSWER_STEPS.has(step.type)) continue;
     if (typeof step?.text === 'string') {
       chunks.push(step.text);
