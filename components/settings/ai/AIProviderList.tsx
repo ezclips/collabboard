@@ -117,7 +117,6 @@ export default function AIProviderList({
                       {AI_PROVIDER_LABELS[provider.providerType]}
                     </span>
                   </div>
-                  <div className="mt-1 font-mono text-sm text-gray-500">••••{provider.keyHint}</div>
                   <div className="mt-1 text-xs text-gray-500">
                     {provider.defaultModel ? provider.defaultModel : 'No default model'}
                   </div>

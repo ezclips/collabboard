@@ -87,9 +87,10 @@ describe('36-42. the provider/model chooser is the existing role preference', ()
     await mountChooser();
     const options = Array.from(host.querySelectorAll('option')).map((o) => o.textContent ?? '');
     expect(options.some((text) => text.includes('Work key'))).toBe(true);
-    // Enough to tell two keys apart -- the masked hint the settings API already
-    // publishes -- and nothing that could be used as a credential.
-    expect(options.join(' ')).toContain('••7f3a');
+    // The display name identifies the connection; the masked hint answered
+    // "which KEY", which is not the question, so it must not appear at all.
+    expect(options.join(' ')).not.toContain('7f3a');
+    expect(options.join(' ')).not.toContain('••');
     expect(options.join(' ')).not.toMatch(/sk-|apiKey|secret|Bearer/);
   });
 

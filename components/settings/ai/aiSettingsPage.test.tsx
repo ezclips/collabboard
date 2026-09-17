@@ -185,9 +185,12 @@ describe('AI settings: initial load', () => {
     expect(text()).toContain('OpenAI');
   });
 
-  it('3. renders the masked key hint and never a raw or encrypted key', async () => {
+  it('3. renders no key hint at all, and never a raw or encrypted key', async () => {
     await render();
-    expect(text()).toContain('••••aB3d');
+    // The card is identified by name and provider; the masked suffix told the
+    // user which KEY, which is not the question it should answer.
+    expect(text()).not.toContain('aB3d');
+    expect(text()).not.toContain('••••');
     expect(text()).not.toContain('apiKey');
     expect(text()).not.toContain('api_key_encrypted');
     expect(text()).not.toContain('ciphertext');

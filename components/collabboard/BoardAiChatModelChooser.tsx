@@ -5,8 +5,6 @@ import { Loader2 } from 'lucide-react';
 
 import { AI_ROLE_CHAT } from '@/lib/ai/aiRoles';
 import {
-  AI_PROVIDER_LABELS,
-  COLLABBOARD_DEFAULT_MODEL,
   fetchAIProviders,
   fetchAIRoles,
   saveAIRole,
@@ -98,12 +96,14 @@ export default function BoardAiChatModelChooser({ disabled = false, onError }: B
         disabled={busy}
         onChange={(event) => { void choose(event.target.value); }}
       >
-        <option value={DEFAULT_VALUE}>{`CollabBoard Default (${COLLABBOARD_DEFAULT_MODEL})`}</option>
+        <option value={DEFAULT_VALUE}>CollabBoard Default</option>
         {connections.map((connection) => (
-          // Name, provider and the masked hint the API already publishes --
-          // enough to tell two OpenAI keys apart, and nothing more.
+          // The display name alone. It is what tells two connections apart; a
+          // masked key suffix told the user which KEY, which is not the
+          // question, and it put credential-adjacent material in the chat UI
+          // for no reason.
           <option key={connection.id} value={connection.id}>
-            {`${connection.displayName} — ${AI_PROVIDER_LABELS[connection.providerType]} ••${connection.keyHint}`}
+            {connection.displayName}
           </option>
         ))}
       </select>
