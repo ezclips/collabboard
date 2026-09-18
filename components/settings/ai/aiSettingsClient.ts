@@ -3,7 +3,7 @@
 import { getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 import type { AIProviderConnection, AIProviderType } from '@/lib/domain/settings/aiProviderConnection';
 import { DISPLAY_NAME_MAX, MODEL_ID_MAX } from '@/lib/domain/settings/aiProviderConnection';
-import { AI_ROLE_CHAT, AI_ROLE_EDIT, AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
+import { AI_ROLE_CHAT, AI_ROLE_COMPONENT, AI_ROLE_EDIT, AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
 
 /**
  * Client-side access to the BYOK Settings API.
@@ -19,8 +19,14 @@ import { AI_ROLE_CHAT, AI_ROLE_EDIT, AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
  * which is what lets its provider/model be chosen at all -- the chat route
  * resolves AI_ROLE_CHAT through the same per-user preference every other role
  * uses, so this list is the whole of the chooser's authority.
+ *
+ * THIS LIST IS NOT DERIVED FROM lib/ai/aiRoles. AIRoleSettings renders from
+ * here, so a role added there and not here exists on the server and is
+ * invisible in Settings -- which is exactly how a user ends up unable to
+ * configure something the product is already spending calls on. The two are
+ * kept identical by hand, and a test compares them.
  */
-export const AI_ROLES = [AI_ROLE_SOURCE, AI_ROLE_EDIT, AI_ROLE_CHAT] as const;
+export const AI_ROLES = [AI_ROLE_SOURCE, AI_ROLE_EDIT, AI_ROLE_CHAT, AI_ROLE_COMPONENT] as const;
 
 export type AISettingsRole = (typeof AI_ROLES)[number];
 
@@ -43,12 +49,14 @@ export const AI_ROLE_LABELS: Record<AISettingsRole, string> = {
   [AI_ROLE_SOURCE]: 'Source AI',
   [AI_ROLE_EDIT]: 'Edit & Rewrite',
   [AI_ROLE_CHAT]: 'Board Chat',
+  [AI_ROLE_COMPONENT]: 'Component Generation',
 };
 
 export const AI_ROLE_DESCRIPTIONS: Record<AISettingsRole, string> = {
   [AI_ROLE_SOURCE]: 'AI actions on selected source text and research material.',
   [AI_ROLE_EDIT]: 'Improve, shorten, fix grammar, and other selected-text editing actions.',
   [AI_ROLE_CHAT]: 'Your private Board AI conversation.',
+  [AI_ROLE_COMPONENT]: 'Generating and converting AI cards, including the Auto mode classifier.',
 };
 
 /**

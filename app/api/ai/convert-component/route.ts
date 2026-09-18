@@ -21,6 +21,12 @@ import {
 } from '@/lib/ai/validators';
 import { isConversionAllowed } from '@/lib/ai/conversion-matrix';
 import { MODE_REGISTRY } from '@/lib/ai/mode-registry';
+import type { AIGenerationAttribution } from '@/lib/ai/contracts';
+import { COMPONENT_MAX_TOKENS } from '@/lib/server/ai/componentGeneration';
+import { generateComponentText } from '@/lib/server/ai/componentGeneration';
+import { AIProviderError } from '@/lib/server/ai/providers/errors';
+import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
+import type { UserId } from '@/lib/domain/core/ids';
 
 // Share the same rate-limit store as generate-component (in-memory per process)
 const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
@@ -62,46 +68,15 @@ function isStoredAIContent(value: unknown): value is StoredAIContent {
   );
 }
 
-async function callDeepSeek(prompt: string): Promise<string> {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) throw new Error('DEEPSEEK_API_KEY not configured');
+/** Unchanged from when this route spoke to DeepSeek directly. */
+const JSON_ONLY_SYSTEM = 'Return only valid JSON with no markdown, code fences, or surrounding prose.';
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25_000);
-
-  const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    signal: controller.signal,
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: 'Return only valid JSON with no markdown, code fences, or surrounding prose.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 1200,
-    }),
-  }).finally(() => clearTimeout(timer));
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`DeepSeek error: ${err}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('DeepSeek returned an empty response.');
-  }
-  return content;
-}
+/**
+ * Imported rather than restated: a conversion builds the same kind of answer a
+ * generation does, and two copies of this number would drift. See the constant
+ * itself for why 1200 does not survive a reasoning model.
+ */
+const CONVERT_MAX_TOKENS = COMPONENT_MAX_TOKENS;
 
 function parseModelJson(raw: string): unknown {
   const trimmed = raw.trim()
@@ -297,16 +272,34 @@ export async function POST(req: NextRequest) {
     );
 
     let raw: string;
+    let generatedBy: AIGenerationAttribution;
     try {
-      raw = await callDeepSeek(finalPrompt);
+      const generation = await generateComponentText({
+        userId: user.id as UserId,
+        system: JSON_ONLY_SYSTEM,
+        user: finalPrompt,
+        maxTokens: CONVERT_MAX_TOKENS,
+        temperature: 0.3,
+        timeoutMs: 25_000,
+      });
+      raw = generation.text;
+      generatedBy = generation.generatedBy;
     } catch (error) {
       trackAIConversionFailed({
         sourceMode: sourceEnvelope.mode,
         sourceSubtype,
         targetMode,
         targetSubtype: resolvedTargetSubtype,
-        reason: error instanceof Error ? error.message : 'DeepSeek call failed.',
+        reason: error instanceof Error ? error.message : 'AI provider call failed.',
       });
+      // See the same seam in generate-component: a broken BYOK configuration is
+      // a 400 the user fixes, never a quiet fall back to the CollabBoard key.
+      if (error instanceof AIProviderError) {
+        return NextResponse.json(
+          { error: error.message, category: error.category },
+          { status: aiProviderErrorStatus(error.category) },
+        );
+      }
       return NextResponse.json(
         { error: 'AI provider failed to return usable output.' },
         { status: 502 },
@@ -373,6 +366,9 @@ export async function POST(req: NextRequest) {
         subtype: resolvedTargetSubtype,
         prompt: sourceEnvelope.meta?.prompt,
         createdAt: new Date().toISOString(),
+        // The CONVERTING model, not whatever produced the source envelope --
+        // this is a new generation and its attribution is its own.
+        generatedBy,
       },
     };
 

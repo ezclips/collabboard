@@ -10,6 +10,11 @@ export default defineConfig({
   },
   test: {
     include: [
+      // Client-safe AI contracts and helpers (attribution, roles). Same trap as
+      // components/ai below: without this line a test file here is silently NOT
+      // RUN, which is worse than a failing one -- it reports nothing and looks
+      // green. lib/ai held no test files at all until this was added.
+      'lib/ai/*.test.ts',
       'lib/domain/**/*.test.ts',
       'lib/infra/**/*.test.ts',
       'lib/server/**/*.test.ts',

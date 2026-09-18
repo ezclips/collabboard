@@ -6,6 +6,8 @@ import type { AIMode, DiagramSubtype } from '@/lib/ai/contracts';
 import { MODE_REGISTRY } from '@/lib/ai/mode-registry';
 import { DIAGRAM_SUBTYPE_SCHEMAS } from '@/lib/ai/validators';
 import { trackAIAutoModeSelected } from '@/lib/ai/telemetry';
+import { generateComponentText } from '@/lib/server/ai/componentGeneration';
+import type { UserId } from '@/lib/domain/core/ids';
 
 export interface ClassifyIntentResult {
   mode: AIMode;
@@ -64,49 +66,32 @@ Only include "subtype" when mode is "diagram".
 Use "low" confidence when the prompt is ambiguous or could match multiple types equally.
 `.trim();
 
-async function callDeepSeek(prompt: string): Promise<string> {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) throw new Error('DEEPSEEK_API_KEY not configured');
+/** Unchanged from when this route spoke to DeepSeek directly. */
+const JSON_ONLY_SYSTEM = 'Return only valid JSON with no markdown, code fences, or surrounding prose.';
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
-
-  const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    signal: controller.signal,
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: 'Return only valid JSON with no markdown, code fences, or surrounding prose.',
-        },
-        {
-          role: 'user',
-          content: `${CLASSIFY_SYSTEM_PROMPT}\n\nUser prompt:\n${prompt}`,
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 80,
-    }),
-  }).finally(() => clearTimeout(timer));
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`DeepSeek error: ${err}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('DeepSeek returned an empty response.');
-  }
-  return content;
-}
+/**
+ * WAS 80, AND 80 IS BROKEN ON A REASONING MODEL.
+ *
+ * The answer is about 25 tokens -- `{"mode":"diagram","subtype":"flowchart",
+ * "confidence":"high"}` -- so 80 was generous for `deepseek-chat`, which
+ * emitted it and stopped. The managed default is now `deepseek-flash`, which
+ * REASONS FIRST: it spends completion tokens on `reasoning_content` before any
+ * `content`, and `max_tokens` caps the two together. At 80 the reasoning eats
+ * the whole budget, the response comes back `finish_reason: "length"` with
+ * `content: ""`, and the adapter correctly rejects an empty completion.
+ *
+ * MEASURED, not guessed. Across 20 calls with this exact prompt the reasoning
+ * alone ran 29-153 tokens, and the real route failed 2 of 5 realistic prompts
+ * at 80 -- INTERMITTENTLY, which is the worst shape: the client treats a failed
+ * classify as "keep the current mode", so Auto silently picked the wrong format
+ * rather than showing an error.
+ *
+ * 400 is ~2.5x the worst reasoning burst observed plus the answer. A call that
+ * finishes early is billed for what it generated, so the higher cap costs
+ * nothing on those -- and the calls it rescues were previously billed for 80
+ * tokens of nothing at all.
+ */
+const CLASSIFY_MAX_TOKENS = 400;
 
 function parseClassifyResponse(raw: string): ClassifyIntentResult {
   const trimmed = raw.trim()
@@ -175,14 +160,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'prompt is required.' }, { status: 400 });
     }
 
+    // The classifier runs on EVERY Auto generation, so it is the
+    // highest-frequency AI call in the product. It resolves the same component
+    // role the generation itself will: a user who has chosen a provider for
+    // their cards has chosen it for the step that decides which card to build,
+    // and no invisible second provider keeps running beside it.
+    //
+    // The classifier's own answer is never attributed in the response -- it
+    // picks a mode, it does not produce content anyone is shown.
     let raw: string;
     try {
-      raw = await callDeepSeek(prompt.trim());
-    } catch (error) {
-      return NextResponse.json(
-        { error: 'Classifier failed.', details: error instanceof Error ? error.message : 'Unknown error.' },
-        { status: 502 },
-      );
+      const generation = await generateComponentText({
+        userId: user.id as UserId,
+        system: JSON_ONLY_SYSTEM,
+        user: `${CLASSIFY_SYSTEM_PROMPT}\n\nUser prompt:\n${prompt.trim()}`,
+        maxTokens: CLASSIFY_MAX_TOKENS,
+        temperature: 0.1,
+        timeoutMs: 10_000,
+      });
+      raw = generation.text;
+    } catch {
+      // No `details`: it used to echo the provider's raw response body.
+      // The client already treats any non-OK classify as "stay on the current
+      // mode", so the fixed message costs it nothing.
+      return NextResponse.json({ error: 'Classifier failed.' }, { status: 502 });
     }
 
     let result: ClassifyIntentResult;

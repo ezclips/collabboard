@@ -23,6 +23,11 @@ import {
   createValidationError,
   safeValidateAIContentWithSubtypeCheck,
 } from '@/lib/ai/validators';
+import type { AIGenerationAttribution } from '@/lib/ai/contracts';
+import { COMPONENT_MAX_TOKENS, generateComponentText } from '@/lib/server/ai/componentGeneration';
+import { AIProviderError } from '@/lib/server/ai/providers/errors';
+import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
+import type { UserId } from '@/lib/domain/core/ids';
 
 // In-memory rate limiter: max 5 requests per IP per minute
 const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
@@ -207,51 +212,11 @@ function parseModelJson(raw: string): unknown {
   }
 }
 
-async function callDeepSeek(prompt: string): Promise<string> {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-
-  if (!apiKey) {
-    throw new Error('DEEPSEEK_API_KEY not configured');
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25_000);
-
-  const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    signal: controller.signal,
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: 'Return only valid JSON with no markdown, code fences, or surrounding prose.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.5,
-      max_tokens: 1200,
-    }),
-  }).finally(() => clearTimeout(timer));
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`DeepSeek error: ${err}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('DeepSeek returned an empty response.');
-  }
-
-  return content;
-}
+/**
+ * The JSON-only instruction, unchanged from when this route spoke to DeepSeek
+ * directly. It is the system message; the built prompt is the user message.
+ */
+const JSON_ONLY_SYSTEM = 'Return only valid JSON with no markdown, code fences, or surrounding prose.';
 
 export async function POST(req: NextRequest) {
   let capturedMode: AIMode | undefined;
@@ -294,20 +259,40 @@ export async function POST(req: NextRequest) {
     const finalPrompt = buildGenerationPrompt(promptConfig.systemPrompt, prompt);
 
     let raw: string;
+    let generatedBy: AIGenerationAttribution;
     try {
-      raw = await callDeepSeek(finalPrompt);
+      const generation = await generateComponentText({
+        userId: user.id as UserId,
+        system: JSON_ONLY_SYSTEM,
+        user: finalPrompt,
+        maxTokens: COMPONENT_MAX_TOKENS,
+        temperature: 0.5,
+        timeoutMs: 25_000,
+      });
+      raw = generation.text;
+      generatedBy = generation.generatedBy;
     } catch (error) {
       trackAIGenerationFailed({
         mode,
         subtype,
         stage: 'provider',
-        reason: error instanceof Error ? error.message : 'DeepSeek call failed.',
+        reason: error instanceof Error ? error.message : 'AI provider call failed.',
       });
+      // A normalized failure carries a category, never a provider response
+      // body, a key or a cause -- so its fixed message is safe to return
+      // verbatim. This is also why `details` is gone: it used to echo the raw
+      // DeepSeek response text, which can contain the request we sent.
+      //
+      // A broken BYOK configuration is a 400 the user must fix, deliberately
+      // NOT a silent fall back to the CollabBoard key.
+      if (error instanceof AIProviderError) {
+        return NextResponse.json(
+          { error: error.message, category: error.category },
+          { status: aiProviderErrorStatus(error.category) },
+        );
+      }
       return NextResponse.json(
-        {
-          error: 'AI provider failed to return usable output.',
-          details: error instanceof Error ? error.message : 'DeepSeek call failed.',
-        },
+        { error: 'AI provider failed to return usable output.' },
         { status: 502 },
       );
     }
@@ -389,6 +374,10 @@ export async function POST(req: NextRequest) {
         subtype,
         prompt,
         createdAt: new Date().toISOString(),
+        // What actually answered, so the editor's attribution line names the
+        // model that ran rather than a constant compiled in months ago. It
+        // travels with the envelope, so a saved card keeps its own record.
+        generatedBy,
       },
     };
 

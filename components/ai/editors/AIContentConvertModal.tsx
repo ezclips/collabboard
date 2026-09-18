@@ -18,6 +18,9 @@ import {
   trackAIConversionStarted,
   trackAIConversionSucceeded,
 } from '@/lib/ai/telemetry';
+import { AI_ROLE_COMPONENT } from '@/lib/ai/aiRoles';
+import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
+import { formatAIGenerationAttribution, readAIGenerationAttribution } from '@/lib/ai/attribution';
 
 export interface AIContentConvertModalProps {
   isOpen: boolean;
@@ -61,6 +64,9 @@ export default function AIContentConvertModal({
   const [phase, setPhase] = useState<ConvertPhase>({ kind: 'select' });
   const [selectedTarget, setSelectedTarget] = useState<ConversionTarget | null>(null);
   const [instruction, setInstruction] = useState('');
+  /** Its own line: a failed model change and a failed conversion are different
+   *  failures, and neither may overwrite the other's message. */
+  const [modelError, setModelError] = useState<string | null>(null);
 
   const sourceSubtype = getSourceSubtype(envelope);
   const allowedTargets = getConversionTargets(envelope.mode, sourceSubtype);
@@ -70,6 +76,7 @@ export default function AIContentConvertModal({
     if (isOpen) {
       setPhase({ kind: 'select' });
       setInstruction('');
+      setModelError(null);
       setSelectedTarget(allowedTargets.length === 1 ? allowedTargets[0] : null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,6 +162,9 @@ export default function AIContentConvertModal({
   const hasPreview = phase.kind === 'preview';
   const hasError = phase.kind === 'error';
   const canConvert = !!selectedTarget && !isConverting;
+  const convertedAttribution = phase.kind === 'preview'
+    ? readAIGenerationAttribution(phase.result)
+    : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -240,6 +250,30 @@ export default function AIContentConvertModal({
                 rows={3}
                 className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-xs outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300 disabled:bg-gray-50 disabled:text-gray-400"
               />
+            </div>
+
+            {/* Model choice. Conversion is a generation like any other, and it
+                resolves the same Component Generation role the AI card editor
+                does -- one preference, not a second one hidden in a modal. */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Model</p>
+              <AIRoleModelChooser
+                role={AI_ROLE_COMPONENT}
+                label="Component model"
+                attributePrefix="ai-convert"
+                saveErrorMessage="Could not change the model."
+                disabled={isConverting}
+                onError={setModelError}
+              />
+              {modelError && (
+                <p role="alert" className="text-xs text-red-600">{modelError}</p>
+              )}
+              {/* Only ever after a conversion has actually run. */}
+              {hasPreview && convertedAttribution && (
+                <p className="text-[11px] italic text-gray-400" data-ai-convert-attribution="">
+                  {formatAIGenerationAttribution(convertedAttribution)}
+                </p>
+              )}
             </div>
 
             {/* Error message */}

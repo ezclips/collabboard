@@ -98,8 +98,11 @@ describe('GET /api/settings/ai-roles', () => {
     // its answer from AI_ROLES, so adding a role there (board-chat did exactly
     // this) must not need an edit here to stay honest.
     expect(Object.keys(body.roles).sort()).toEqual([...AI_ROLES].sort());
-    // Naming them once, so the registry itself cannot silently lose one.
-    expect(Object.keys(body.roles).sort()).toEqual(['board-chat', 'edit', 'source-ai']);
+    // Naming them once, so the registry itself cannot silently lose one -- or
+    // gain one. `component` was added when generate-component,
+    // convert-component and classify-intent stopped calling DeepSeek directly;
+    // this line is the deliberate record of that, and it failed first.
+    expect(Object.keys(body.roles).sort()).toEqual(['board-chat', 'component', 'edit', 'source-ai']);
   });
 
   it('3. an absent row reads as CollabBoard Default', async () => {
