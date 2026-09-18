@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, SendHorizontal, X } from 'lucide-react';
+import { Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, SendHorizontal, Upload, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import {
@@ -18,7 +18,9 @@ import {
   boardAiDraftFromPage,
   boardAiDraftContextPayload,
   boardAiDraftKey,
+  blockingBoardAiDraftContext,
   removeBoardAiDraftContext,
+  withBoardAiDraftReadiness,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
 import type {
@@ -46,6 +48,16 @@ import type {
  */
 
 const CHAT_PATH = (boardId: string) => `/api/boards/${encodeURIComponent(boardId)}/ai/chat`;
+/** The EXISTING knowledge endpoint: POST uploads a PDF, GET lists with status. */
+const KNOWLEDGE_PATH = (boardId: string) => `/api/boards/${encodeURIComponent(boardId)}/knowledge`;
+/**
+ * How often to ask whether a freshly uploaded PDF is readable yet.
+ *
+ * Slow enough that a composer sitting open is not a load source, fast enough
+ * that a small PDF does not appear stuck. Polling runs ONLY while something is
+ * pending, which is a few seconds after an upload and never otherwise.
+ */
+const KNOWLEDGE_POLL_MS = 2500;
 
 export interface BoardAiChatDrawerProps {
   readonly boardId: string;
@@ -287,6 +299,8 @@ export default function BoardAiChatDrawer({
   const [internalDocumentSessions, setInternalDocumentSessions] =
     useState<Record<string, BoardAiDocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
   /**
    * The board-search toggle. OFF BY DEFAULT, and off is what an absent stored
@@ -615,7 +629,19 @@ export default function BoardAiChatDrawer({
     setError(null);
   }, [setActiveThreadId, setDraft, setError, setLoadingMessages, setMessages]);
 
-  const canSend = draft.trim().length > 0 && !sending;
+  /**
+   * Attachments that are not readable yet, or never will be.
+   *
+   * THE SEND GATE. A pending document has no extracted text, and every reader
+   * filters on `processing_status = 'ready'` -- so sending one would attach a
+   * source the server resolves to nothing. The model would answer honestly from
+   * what it was given, and the user would read a confident reply about a file
+   * that was never opened. Blocking the send is the only place that can be
+   * prevented: nothing downstream can tell an empty attachment from an absent
+   * one.
+   */
+  const blockingContext = blockingBoardAiDraftContext(draftContext);
+  const canSend = draft.trim().length > 0 && !sending && !uploading && blockingContext.length === 0;
 
   const saveAssistantAsNote = useCallback(async (
     message: BoardAiChatMessageView,
@@ -683,9 +709,124 @@ export default function BoardAiChatDrawer({
       : `Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
   }, [draftContext, mandatoryDocumentContext, setDraftContext]);
 
+  /* ---------------------------------------------------------------- */
+  /* Uploading a PDF straight into the conversation                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * One upload, on the rails that already exist.
+   *
+   * It posts to the SAME endpoint the PDF uploader uses, with the same
+   * multipart field, and attaches the id that endpoint returns. No new
+   * ingestion path, no new context type: the returned id is exactly what
+   * `knowledge-document` already accepts, which is why this unit adds no server
+   * code at all.
+   *
+   * PDF only, because that is what the ingestion pipeline supports. The picker
+   * says so and the server refuses anything else.
+   */
+  const uploadPdf = useCallback(async (file: File) => {
+    if (mandatoryDocumentContext && draftContext.length >= BOARD_AI_DRAFT_CONTEXT_MAX - 1) {
+      setContextNotice(`Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX - 1} optional context items with this PDF.`);
+      return;
+    }
+    if (draftContext.length >= BOARD_AI_DRAFT_CONTEXT_MAX) {
+      setContextNotice(`Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
+      return;
+    }
+    setContextNotice(null);
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const response = await fetch(KNOWLEDGE_PATH(boardId), { method: 'POST', body });
+      if (!response.ok) {
+        // The endpoint's own messages are written for a user and carry no
+        // provider or storage detail, so the fallback is only for a body that
+        // did not parse.
+        const payload = await response.json().catch(() => null);
+        setContextNotice(typeof payload?.error === 'string' ? payload.error : 'Could not upload that file.');
+        return;
+      }
+      const payload = await response.json().catch(() => null);
+      const documentId = typeof payload?.id === 'string' ? payload.id : '';
+      if (documentId.length === 0) {
+        setContextNotice('Could not upload that file.');
+        return;
+      }
+      // The SERVER's status, relayed rather than assumed. A fresh upload is
+      // normally 'uploaded', but reading it means the chip is right even if
+      // ingestion is instant or already failed.
+      const item = boardAiDraftFromDocument(
+        documentId,
+        typeof payload?.originalFilename === 'string' ? payload.originalFilename : file.name,
+        typeof payload?.processingStatus === 'string' ? payload.processingStatus : 'uploaded',
+      );
+      const result = addBoardAiDraftContext(draftContext, item);
+      if (result.outcome !== 'added') {
+        setContextNotice(result.outcome === 'duplicate'
+          ? 'That is already attached.'
+          : `Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
+        return;
+      }
+      setDraftContext(result.items);
+    } catch {
+      setContextNotice('Could not upload that file.');
+    } finally {
+      setUploading(false);
+    }
+  }, [boardId, draftContext, mandatoryDocumentContext, setDraftContext]);
+
+  /**
+   * Watches a pending attachment until ingestion settles.
+   *
+   * It reads the board's existing knowledge list rather than a new status
+   * endpoint -- that list already carries `processingStatus` per document and
+   * is already authorized for this board. Polling stops the moment nothing is
+   * pending, so a composer with no upload in it makes no requests at all.
+   */
+  useEffect(() => {
+    const pendingIds = draftContext
+      .filter((item) => item.readiness === 'pending')
+      .map((item) => ('knowledgeDocumentId' in item.request ? item.request.knowledgeDocumentId : ''))
+      .filter((id) => id.length > 0);
+    if (pendingIds.length === 0) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(KNOWLEDGE_PATH(boardId));
+        if (!response.ok || cancelled) return;
+        const payload = await response.json().catch(() => null);
+        const documents: readonly { id?: unknown; processingStatus?: unknown }[] =
+          Array.isArray(payload?.documents) ? payload.documents : [];
+        if (cancelled) return;
+        let next = draftContext;
+        for (const id of pendingIds) {
+          const found = documents.find((document) => document.id === id);
+          if (!found || typeof found.processingStatus !== 'string') continue;
+          next = withBoardAiDraftReadiness(next, id, found.processingStatus);
+        }
+        // Only when something actually moved, so an unchanged poll does not
+        // re-render the composer every few seconds.
+        if (next !== draftContext) setDraftContext(next);
+      } catch {
+        // A failed poll is not a failed upload. The next tick tries again, and
+        // the chip keeps saying "Processing…" rather than inventing a failure.
+      }
+    };
+
+    const timer = setInterval(() => { void poll(); }, KNOWLEDGE_POLL_MS);
+    void poll();
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [boardId, draftContext, setDraftContext]);
+
   const send = useCallback(async () => {
     const content = draft.trim();
     if (content.length === 0 || sending) return;
+    // The same rule as the disabled button, enforced again here: a keyboard
+    // path, a race with a poll, or a future caller must not get past it.
+    if (blockingBoardAiDraftContext(draftContext).length > 0) return;
     const requestDocumentScopeId = documentScopeId;
     setSending(true);
     setError(null);
@@ -1113,6 +1254,35 @@ export default function BoardAiChatDrawer({
           </p>
         ) : null}
 
+        {/* WHY THE SEND BUTTON IS OFF. A disabled button with no explanation is
+            the same silent failure in a different costume: the user would see a
+            chip, a typed question, and a dead control. */}
+        {blockingContext.length > 0 ? (
+          <p data-board-ai-context-blocked="true" className="mb-1.5 text-[10px] text-gray-500">
+            {blockingContext.some((item) => item.readiness === 'pending')
+              ? 'Still reading your PDF. You can send as soon as it is ready.'
+              : 'That PDF could not be read. Remove it to send your message.'}
+          </p>
+        ) : null}
+
+        {/* Outside the menu so a click that closes the menu does not unmount
+            the input mid-dialog. `accept` is a hint to the picker; the server
+            is what actually refuses a non-PDF. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          data-board-ai-context-file-input="true"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // Cleared immediately so choosing the SAME file twice still fires a
+            // change event -- otherwise a retry after a failure does nothing.
+            event.target.value = '';
+            if (file) void uploadPdf(file);
+          }}
+        />
+
         <div className="relative mb-1.5">
           <button
             type="button"
@@ -1161,6 +1331,31 @@ export default function BoardAiChatDrawer({
                   Select a Note or PDF on the board, or add a page from the PDF reader.
                 </p>
               )}
+              {/* UPLOAD A FILE. The one genuinely new affordance in this unit,
+                  and it rides entirely on the existing knowledge endpoint --
+                  same multipart field, same returned id, which is exactly what
+                  `knowledge-document` already accepts.
+
+                  It says PDF, because that is what the ingestion pipeline can
+                  read. A generic "Upload a file" would promise a Word document
+                  this product cannot open. */}
+              <button
+                type="button"
+                role="menuitem"
+                data-board-ai-context-upload="true"
+                disabled={uploading}
+                className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => {
+                  setContextNotice(null);
+                  setContextMenuOpen(false);
+                  fileInputRef.current?.click();
+                }}
+              >
+                <Upload className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 truncate">
+                  {uploading ? 'Uploading…' : 'Upload a PDF…'}
+                </span>
+              </button>
               {/* THE SEARCH TOGGLE. Board scope only -- a PDF conversation is
                   about that PDF, and searching the rest of the board there
                   would answer a question the user did not ask.

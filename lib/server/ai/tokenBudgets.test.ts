@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { BOARD_AI_CHAT_MAX_TOKENS } from './boardAiChatExecution';
+import { BOARD_AI_CHAT_MAX_TOKENS, BOARD_AI_CHAT_TIMEOUT_MS } from './boardAiChatExecution';
 import { COMPONENT_MAX_TOKENS } from './componentGeneration';
 import { DEEPSEEK_DEFAULT_MODEL } from './providers/deepSeek';
 
@@ -54,6 +54,23 @@ describe('the budgets, and the model they were measured against', () => {
     // finish_reason "length". At 4000, eight of eight completed across two
     // runs, worst completion 2,613 tokens.
     expect(BOARD_AI_CHAT_MAX_TOKENS).toBeGreaterThanOrEqual(4000);
+  });
+
+  it('records that the chat timeout has NOT been re-measured against the new cap', () => {
+    // The unfinished half of the pairing, pinned so it cannot be forgotten.
+    // Slowest measured completed answer: 15.7s of a 20s timeout, on 2,634
+    // tokens -- the worst OBSERVED, not the worst PERMITTED. At ~6ms/token a
+    // completion near the cap needs ~25s and would be aborted first.
+    //
+    // If BOARD_AI_CHAT_TIMEOUT_MS is raised, re-run the instrument and update
+    // this expectation; if the budget is raised further without it, this fails
+    // and says why.
+    expect(BOARD_AI_CHAT_TIMEOUT_MS).toBe(20_000);
+    const perTokenMs = 6;
+    const needed = BOARD_AI_CHAT_MAX_TOKENS * perTokenMs;
+    // Deliberately asserting the UNCOMFORTABLE fact rather than hiding it: the
+    // top of the budget does not fit inside the timeout today.
+    expect(needed).toBeGreaterThan(BOARD_AI_CHAT_TIMEOUT_MS);
   });
 
   it('component generation holds a whole card -- 1200 truncated it into invalid JSON', () => {

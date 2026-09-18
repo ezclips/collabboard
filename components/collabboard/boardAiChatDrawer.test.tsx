@@ -391,9 +391,17 @@ describe('46-48. no context is sent, and none is offered', () => {
     ]) {
       expect(code, `${forbidden} is not this surface's to read`).not.toContain(forbidden);
     }
-    // Its only endpoint is the chat route.
+    // Two endpoints, and the second one does not weaken the rule above.
+    // Uploading a PDF (POST) and asking whether ingestion has finished (GET,
+    // which returns ids and processing status) is not reading a source: no
+    // page text, no selection, no rendered page ever enters this component.
+    // The sibling assertion below is what holds that line.
     const urls = code.match(/\/api\/[^`'"]*/g) ?? [];
-    expect(urls.every((url) => url.includes('/ai/chat'))).toBe(true);
+    expect(urls.every((url) => url.includes('/ai/chat') || url.endsWith('/knowledge'))).toBe(true);
+    // Specifically NOT the endpoints that would hand it content.
+    for (const contentRoute of ['/pages', '/original', '/render-pages', '/knowledge/search', '/highlights']) {
+      expect(code, `${contentRoute} would make this surface a reader`).not.toContain(contentRoute);
+    }
   });
 
   it('50. no admin or service-role client is reachable from a browser component', async () => {

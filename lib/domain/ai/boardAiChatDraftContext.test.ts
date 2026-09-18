@@ -9,7 +9,9 @@ import {
   boardAiDraftFromPage,
   boardAiDraftFromSelection,
   boardAiDraftKey,
+  blockingBoardAiDraftContext,
   removeBoardAiDraftContext,
+  withBoardAiDraftReadiness,
   type BoardAiDraftContextItem,
 } from './boardAiChatDraftContext';
 
@@ -206,5 +208,95 @@ describe('36. an incomplete selection offers no handoff', () => {
     expect(draft.detail!.length).toBeLessThan(120);
     const item = boardAiDraftContextPayload([draft])!.items[0] as { selectedText: string };
     expect(item.selectedText).toBe(long);
+  });
+});
+
+/**
+ * A FRESHLY UPLOADED PDF IS NOT A READABLE SOURCE YET.
+ *
+ * Ingestion is asynchronous, and every reader filters on
+ * `processing_status = 'ready'`. A pending document therefore resolves to no
+ * text at all -- so sending one would hand the model an attachment containing
+ * nothing, and the model would answer honestly from nothing while the user read
+ * a confident reply about the file they just uploaded.
+ *
+ * That is the same silent shape as the truncated chat answer and the
+ * intermittent classifier: a real response, drawn from less than the user
+ * believes it had. The difference is that this one can be prevented outright,
+ * because the composer knows the document is not ready.
+ */
+describe('37. readiness: an attachment that cannot be read yet says so', () => {
+  it('a fresh upload is pending, and a ready one carries no readiness at all', () => {
+    expect(boardAiDraftFromDocument(DOC, 'A2.pdf', 'uploaded').readiness).toBe('pending');
+    expect(boardAiDraftFromDocument(DOC, 'A2.pdf', 'processing').readiness).toBe('pending');
+    expect(boardAiDraftFromDocument(DOC, 'A2.pdf', 'failed').readiness).toBe('failed');
+    expect(boardAiDraftFromDocument(DOC, 'A2.pdf', 'ready').readiness).toBeUndefined();
+  });
+
+  it('every other caller is untouched -- they attach sources that were ready long ago', () => {
+    // Omitting the status must not mean "pending": the PDF reader and the board
+    // selection attach documents the user was already reading.
+    expect(boardAiDraftFromDocument(DOC, 'A2.pdf').readiness).toBeUndefined();
+    expect(boardAiDraftFromPage(DOC, 'A2.pdf', 3).readiness).toBeUndefined();
+    expect(boardAiDraftFromBoardItem({
+      id: PAD, type: 'note', title: 'A note',
+    })!.readiness).toBeUndefined();
+  });
+
+  it('blocking is decided in ONE place, and both unusable states block', () => {
+    const pending = boardAiDraftFromDocument(DOC, 'A2.pdf', 'processing');
+    const failed = boardAiDraftFromDocument(PAD, 'B.pdf', 'failed');
+    const ready = boardAiDraftFromDocument('cccccccc-3333-4333-8333-333333333333', 'C.pdf', 'ready');
+
+    expect(blockingBoardAiDraftContext([ready])).toEqual([]);
+    expect(blockingBoardAiDraftContext([ready, pending])).toEqual([pending]);
+    // 'failed' never resolves itself, so it blocks until the user removes it.
+    expect(blockingBoardAiDraftContext([ready, failed])).toEqual([failed]);
+  });
+
+  it('READINESS IS NEVER SENT -- the payload is identical either way', () => {
+    // The whole reason this field is safe to add: the payload builder rebuilds
+    // each item field by field rather than spreading it.
+    const pending = boardAiDraftFromDocument(DOC, 'A2.pdf', 'uploaded');
+    const ready = boardAiDraftFromDocument(DOC, 'A2.pdf', 'ready');
+    expect(boardAiDraftContextPayload([pending])).toEqual(boardAiDraftContextPayload([ready]));
+    expect(JSON.stringify(boardAiDraftContextPayload([pending]))).not.toContain('readiness');
+    expect(JSON.stringify(boardAiDraftContextPayload([pending]))).not.toContain('pending');
+  });
+
+  it('the status update clears readiness entirely rather than leaving a stale flag', () => {
+    const items = [boardAiDraftFromDocument(DOC, 'A2.pdf', 'uploaded')];
+    const ready = withBoardAiDraftReadiness(items, DOC, 'ready');
+    expect(ready[0].readiness).toBeUndefined();
+    expect('readiness' in ready[0]).toBe(false);
+    // Identity is preserved: the same document, still attached.
+    expect(boardAiDraftKey(ready[0])).toBe(boardAiDraftKey(items[0]));
+  });
+
+  it('a status update touches only the document it names', () => {
+    const other = 'cccccccc-3333-4333-8333-333333333333';
+    const items = [
+      boardAiDraftFromDocument(DOC, 'A2.pdf', 'uploaded'),
+      boardAiDraftFromDocument(other, 'C.pdf', 'uploaded'),
+      boardAiDraftFromBoardItem({ id: PAD, type: 'note', title: 'A note' })!,
+    ];
+    const updated = withBoardAiDraftReadiness(items, DOC, 'ready');
+    expect(updated[0].readiness).toBeUndefined();
+    expect(updated[1].readiness).toBe('pending');
+    // A card attachment names no document, so it can never be matched by one.
+    expect(updated[2]).toBe(items[2]);
+  });
+
+  it('pending becomes failed when ingestion gives up', () => {
+    const items = [boardAiDraftFromDocument(DOC, 'A2.pdf', 'uploaded')];
+    expect(withBoardAiDraftReadiness(items, DOC, 'failed')[0].readiness).toBe('failed');
+  });
+
+  it('an unrecognised status does not strand a chip as pending forever', () => {
+    const items = [boardAiDraftFromDocument(DOC, 'A2.pdf', 'uploaded')];
+    // Better to let the send through and have the server refuse an empty
+    // document than to leave the composer permanently blocked on a status
+    // this build does not know about.
+    expect(withBoardAiDraftReadiness(items, DOC, 'something-new')[0].readiness).toBeUndefined();
   });
 });

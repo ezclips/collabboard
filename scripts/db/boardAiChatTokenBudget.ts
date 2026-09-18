@@ -38,6 +38,7 @@ import path from 'node:path';
 import {
   BOARD_AI_CHAT_MAX_TOKENS,
   BOARD_AI_CHAT_TEMPERATURE,
+  BOARD_AI_CHAT_TIMEOUT_MS,
   boardAiChatSystemPrompt,
   serializeBoardAiChatPayload,
   type BoardAiChatTurn,
@@ -103,6 +104,15 @@ interface Measurement {
   readonly completion: number;
   readonly answerChars: number;
   readonly usable: boolean;
+  /**
+   * Wall clock for the provider call alone.
+   *
+   * Reported because a raised budget meets an UNCHANGED timeout: the route
+   * aborts at BOARD_AI_CHAT_TIMEOUT_MS, and a cap that now permits a much
+   * longer completion permits a much longer wait for it. A budget measured
+   * only in tokens leaves that pairing unchecked.
+   */
+  readonly ms: number;
 }
 
 async function measure(
@@ -110,6 +120,7 @@ async function measure(
   budget: number,
   entry: (typeof CASES)[number],
 ): Promise<Measurement> {
+  const started = performance.now();
   const response = await fetch(DEEPSEEK_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -127,6 +138,8 @@ async function measure(
 
   if (!response.ok) throw new Error(`provider returned ${response.status}`);
   const data = await response.json();
+  // After the body is read: that is what the route waits for too.
+  const ms = performance.now() - started;
   const choice = data.choices?.[0];
   const answer = typeof choice?.message?.content === 'string' ? choice.message.content.trim() : '';
 
@@ -139,6 +152,7 @@ async function measure(
     // Truncated mid-sentence still "has content", so `length` is not the test:
     // finish_reason is what says the model was cut off.
     usable: answer.length > 0 && choice?.finish_reason === 'stop',
+    ms,
   };
 }
 
@@ -158,6 +172,7 @@ async function main(): Promise<void> {
       + `reasoning=${String(result.reasoning).padStart(5)} `
       + `completion=${String(result.completion).padStart(5)} `
       + `answer=${String(result.answerChars).padStart(6)} chars  `
+      + `${String(Math.round(result.ms)).padStart(6)}ms  `
       + `${result.usable ? 'usable' : 'TRUNCATED'}`,
     );
   }
@@ -165,6 +180,18 @@ async function main(): Promise<void> {
   const worst = Math.max(...results.map((r) => r.completion));
   const headroom = budget - worst;
   console.log(`\nworst completion ${worst} of ${budget} -- headroom ${headroom} tokens`);
+
+  // The other half of the pairing: a raised cap permits a longer wait, and the
+  // route's timeout did not move.
+  const slowest = Math.max(...results.map((r) => r.ms));
+  const share = (slowest / BOARD_AI_CHAT_TIMEOUT_MS) * 100;
+  console.log(
+    `slowest call ${(slowest / 1000).toFixed(1)}s against the route's `
+    + `${BOARD_AI_CHAT_TIMEOUT_MS / 1000}s timeout -- ${share.toFixed(0)}% of it`,
+  );
+  if (share > 60) {
+    console.log('THE TIMEOUT IS THE NEXT BOUND TO WATCH: raise it, or the budget is theoretical.');
+  }
   if (results.some((r) => !r.usable)) {
     console.log('AT LEAST ONE ANSWER WAS CUT OFF. The budget is too small for this model.');
     process.exitCode = 1;

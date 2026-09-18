@@ -36,6 +36,20 @@ export const BOARD_AI_DRAFT_PREVIEW_MAX = 60;
  */
 export type BoardAiDraftContextRequest = Exclude<BoardAiContextRequestItem, { type: 'board-search' }>;
 
+/**
+ * Why an attachment cannot be used YET, or ever.
+ *
+ * Absent means usable -- which is every attachment that comes from a source the
+ * user was already reading, because those were ready long before they were
+ * picked. Only a freshly uploaded document arrives unusable.
+ *
+ * It is a STATE, not a boolean, because ingestion has two ways of not being
+ * ready and they need different words: 'pending' resolves itself, 'failed'
+ * never will. A boolean would have made a permanently broken upload look like
+ * it was still working.
+ */
+export type BoardAiDraftReadiness = 'pending' | 'failed';
+
 export interface BoardAiDraftContextItem {
   /** Exactly what gets posted. Identity and provenance, nothing else. */
   readonly request: BoardAiDraftContextRequest;
@@ -43,6 +57,19 @@ export interface BoardAiDraftContextItem {
   readonly label: string;
   /** Local display only: a page number, or a short quote from a selection. */
   readonly detail?: string;
+  /**
+   * Local display and SEND GATING only. Never posted -- see the payload
+   * builder, which rebuilds each item field by field.
+   *
+   * This exists because a just-uploaded PDF has no extracted text yet, and
+   * every reader filters on `processing_status = 'ready'`. Sending it would
+   * attach a source with nothing in it: the server would honestly answer from
+   * an empty document, and the user would read a confident answer about a file
+   * the model never saw. That is the failure this field prevents, and it is the
+   * same shape as the other silent ones found this week -- a real reply, drawn
+   * from less than the user believes it had.
+   */
+  readonly readiness?: BoardAiDraftReadiness;
 }
 
 /** Two drafts are the same attachment when they name the same source. */
@@ -76,6 +103,68 @@ export function addBoardAiDraftContext(
     return { items: current, outcome: 'full' };
   }
   return { items: [...current, next], outcome: 'added' };
+}
+
+/**
+ * The attachments that are not usable yet, or never will be.
+ *
+ * The composer asks this rather than reading `readiness` itself, so "what
+ * blocks a send" has exactly one definition. An empty result is the normal
+ * case: nothing blocks unless something was uploaded moments ago.
+ */
+export function blockingBoardAiDraftContext(
+  items: readonly BoardAiDraftContextItem[],
+): readonly BoardAiDraftContextItem[] {
+  return items.filter((item) => item.readiness !== undefined);
+}
+
+/**
+ * Records what the server now says about an uploaded document.
+ *
+ * Takes the processing status verbatim rather than a boolean, because the
+ * caller is relaying the server's word and must not be in the business of
+ * interpreting it twice. Anything that is not a recognised in-progress or
+ * failed state is treated as usable, which matches every reader: 'ready' is the
+ * only status they accept, and an unknown one is not a reason to keep a chip
+ * spinning forever.
+ */
+export function withBoardAiDraftReadiness(
+  items: readonly BoardAiDraftContextItem[],
+  knowledgeDocumentId: string,
+  processingStatus: string,
+): readonly BoardAiDraftContextItem[] {
+  const readiness = boardAiDraftReadinessFor(processingStatus);
+  let changed = false;
+  const next = items.map((item) => {
+    const request = item.request;
+    // `padlet` and `padlet-image` name a card, not a document, so they never
+    // match -- the narrowing is what says so rather than a type assertion.
+    if (!('knowledgeDocumentId' in request) || request.knowledgeDocumentId !== knowledgeDocumentId) {
+      return item;
+    }
+    if (item.readiness === readiness) return item;
+    changed = true;
+    // Rebuilt rather than mutated, and `readiness` is dropped entirely when the
+    // document is usable so the common case carries no field at all.
+    const { readiness: _previous, ...rest } = item;
+    return readiness === undefined ? rest : { ...rest, readiness };
+  });
+  // THE SAME ARRAY WHEN NOTHING MOVED, and that is load-bearing rather than
+  // tidy. A poller asks this on a timer and re-renders when the answer differs;
+  // a map() that always allocates would differ every time, and the composer
+  // would re-render -- and re-poll -- in a loop for as long as a document was
+  // pending. Identity IS the "did anything change" signal.
+  return changed ? next : items;
+}
+
+/** 'ready' is the only usable status; 'failed' is terminal; the rest are waiting. */
+export function boardAiDraftReadinessFor(processingStatus: string): BoardAiDraftReadiness | undefined {
+  if (processingStatus === 'ready') return undefined;
+  if (processingStatus === 'failed') return 'failed';
+  if (processingStatus === 'uploaded' || processingStatus === 'processing') return 'pending';
+  // An unrecognised status is not a reason to block forever. The send will be
+  // refused by the server if the document genuinely has no text.
+  return undefined;
 }
 
 export function removeBoardAiDraftContext(
@@ -207,14 +296,24 @@ export function boardAiDraftFromBoardItem(
   };
 }
 
+/**
+ * `processingStatus` is optional because most callers attach a document the
+ * user was already reading, which was ready long before they picked it. Only
+ * the upload path knows otherwise, and it passes what the server just said.
+ */
 export function boardAiDraftFromDocument(
   knowledgeDocumentId: string,
   originalFilename: string,
+  processingStatus?: string,
 ): BoardAiDraftContextItem {
+  const readiness = processingStatus === undefined
+    ? undefined
+    : boardAiDraftReadinessFor(processingStatus);
   return {
     request: { type: 'knowledge-document', knowledgeDocumentId },
     label: originalFilename.trim().length > 0 ? originalFilename : 'PDF',
     detail: 'text only',
+    ...(readiness === undefined ? {} : { readiness }),
   };
 }
 

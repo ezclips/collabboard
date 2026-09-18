@@ -85,6 +85,20 @@ export const BOARD_AI_CHAT_MAX_IMAGES = 1;
  *
  * A token budget is part of the MODEL CONTRACT. Re-measure this when the
  * managed default changes.
+ *
+ * THE TIMEOUT IS NOW THE BINDING CONSTRAINT, AND IT DID NOT MOVE. The same run
+ * timed the provider calls: the slowest completed answer took 15.7s against
+ * BOARD_AI_CHAT_TIMEOUT_MS of 20s -- 79% of the budget -- and that was a 2,634
+ * token completion, the worst OBSERVED rather than the worst PERMITTED. At
+ * roughly 6ms per token, a completion near the 4000 cap would need about 25s
+ * and be aborted before it arrived.
+ *
+ * So the upper part of this budget is not currently reachable: raising the cap
+ * converted the longest answers from silently truncated into possibly aborted.
+ * An abort is at least visible, which is why this is an improvement rather than
+ * a trade -- but the pairing is unfinished until the timeout follows, and that
+ * is a separate decision with its own blast radius (nothing else bounds this
+ * request: there is no client-side timeout and no platform maxDuration).
  */
 export const BOARD_AI_CHAT_MAX_TOKENS = 4000;
 export const BOARD_AI_CHAT_TEMPERATURE = 0.3;

@@ -43,23 +43,48 @@ export function BoardAiChatDraftChips({ items, onRemove, disabled = false }: Boa
       {items.map((item) => {
         const key = boardAiDraftKey(item);
         const Icon = iconFor(item.request.type);
+        const readiness = item.readiness;
+        // A chip that cannot be used must not LOOK like one that can. Blue is
+        // this composer's "attached and usable"; an unusable attachment gets
+        // its own colour and says which of the two states it is in, because
+        // "still working" and "never will" call for different actions.
+        const tone = readiness === undefined
+          ? 'border-blue-200 bg-blue-50 text-blue-900'
+          : readiness === 'pending'
+            ? 'border-amber-200 bg-amber-50 text-amber-900'
+            : 'border-red-200 bg-red-50 text-red-900';
         return (
           <li
             key={key}
             data-board-ai-context-draft={item.request.type}
-            className="flex max-w-full items-center gap-1 rounded border border-blue-200 bg-blue-50 py-0.5 pl-1.5 pr-0.5 text-[11px] text-blue-900"
+            {...(readiness ? { 'data-board-ai-context-readiness': readiness } : {})}
+            className={`flex max-w-full items-center gap-1 rounded border py-0.5 pl-1.5 pr-0.5 text-[11px] ${tone}`}
           >
-            <Icon className="h-3 w-3 shrink-0 text-blue-500" aria-hidden="true" />
+            <Icon
+              className={`h-3 w-3 shrink-0 ${
+                readiness === undefined ? 'text-blue-500'
+                  : readiness === 'pending' ? 'animate-pulse text-amber-500' : 'text-red-500'
+              }`}
+              aria-hidden="true"
+            />
             <span className="min-w-0 truncate">{item.label}</span>
-            {item.detail ? (
+            {readiness ? (
+              /* Replaces the detail rather than sitting beside it: "text only"
+                 describes a source that HAS text, and this one does not yet. */
+              <span className="min-w-0 shrink truncate font-medium">
+                · {readiness === 'pending' ? 'Processing…' : 'Could not be read'}
+              </span>
+            ) : item.detail ? (
               <span className="min-w-0 shrink truncate text-blue-500">· {item.detail}</span>
             ) : null}
             <button
               type="button"
               data-board-ai-context-remove={key}
               aria-label={`Remove ${item.label} from context`}
+              // Removable in EVERY state, deliberately. A failed upload that
+              // could not be removed would block the composer with no way out.
               disabled={disabled}
-              className="shrink-0 rounded p-0.5 text-blue-400 hover:bg-blue-100 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="shrink-0 rounded p-0.5 text-current opacity-60 hover:bg-black/5 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={() => onRemove(key)}
             >
               <X className="h-3 w-3" aria-hidden="true" />
