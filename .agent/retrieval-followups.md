@@ -66,6 +66,13 @@ shows rather than pre-emptively. It is also entangled with item 4: if the chunks
 are small because the CHUNKER fragments text, expansion is a workaround for a
 defect rather than a feature.
 
+**EXPANSION IS ONLY AS GOOD AS THE NEIGHBOURS, and on this corpus they are thin
+too.** The page-4 Iran hit is 158 characters and the chunks around it are the
+same order of size, so `± 1` here buys a few hundred characters rather than a
+paragraph. That is precisely why item 4's instrument is **one prose-heavy real
+document** and not this slideshow: measuring expansion against a corpus that has
+no long chunks anywhere cannot tell you whether expansion works.
+
 **The prediction on record, to be tested by the first live run:** if the PDF
 source contributes roughly 224 characters and the answer reads as though nothing
 was found, the honest conclusion is **not** that K is wrong — it is that
@@ -126,3 +133,36 @@ length distribution: median, p10, p90, and the count under 100 characters.
 
 Run this **before** committing to item 2, because the answer decides whether
 item 2 is a feature or a workaround.
+
+---
+
+## 5. The search timeout stops us waiting, it does not stop the query
+
+**What.** `BOARD_AI_SEARCH_TIMEOUT_MS = 3_000` bounds how long the chat waits for
+the two search RPCs. It does **not** cancel them. PostgREST offers no
+cancellation handle for a call made this way, so when the bound fires the
+statement may still be running on the database to completion.
+
+**Why it is written down rather than left implied.** "Timeout" normally means the
+work stopped. Here it means we stopped listening. Anyone reasoning about database
+load from this constant will get the wrong answer: a board that times out
+repeatedly is still paying for every one of those queries, and a slow query that
+is retried is two queries, not one.
+
+**Why it is acceptable today.** The searches are bounded reads — two GIN probes
+on one board, each capped at ten rows — so an abandoned one finishes on its own
+shortly after. The cost is real but small, and it is strictly better than the
+alternative the bound replaced, which was an unbounded wait ahead of a generation
+timer that had not started.
+
+**When it stops being acceptable, and what to do then.** If the indexes are ever
+NOT used — which no test can prove, since it needs `EXPLAIN` against real rows —
+an abandoned search becomes a sequential scan over `padlets` and
+`knowledge_chunks` running a regex chain per row, with nobody waiting for the
+result. At that point the fix is a server-side bound the database enforces:
+`SET LOCAL statement_timeout` inside the functions, or a wrapper that sets it.
+That is a real cancellation and it makes the constant mean what it appears to
+mean.
+
+**The signal to watch for:** search latency near the 3-second bound in normal use,
+or database CPU that does not fall when chat traffic does.
