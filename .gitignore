@@ -45,8 +45,14 @@ supabase/.temp/
 tmp-line-debug/
 devserver.out.log
 
-.agent/
+# .agent/ holds local notes, with one deliberate exception: the verification
+# baselines are a GATE CRITERION, not a note. The failing-test-file set is what a
+# commit is judged against, so it has to travel with the code instead of living
+# on one machine. `.agent/*` rather than `.agent/` is what makes a negation
+# possible at all -- git will not descend into an ignored directory.
+.agent/*
 .claude/
+!.agent/verification-baselines.md
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/

@@ -1,0 +1,106 @@
+# Verification baselines
+
+Load-bearing gate criteria for this repository. They lived only in one agent's
+session history until 2026-09-18, which is not a criterion — a gate nobody can
+look up is re-derived, and re-derived wrong.
+
+Recorded on branch `feature/board-retrieval`, at `5ddfec7` (the text-search
+foundation), from the gate run that produced the reading below.
+
+---
+
+## 1. Unit suite — `npx vitest run`
+
+**THE GATE IS THE SET OF FAILING TEST FILES, NOT THE COUNTS.** Test and file
+totals move whenever a test is added, and the suite is timing-sensitive. Compare
+the *file set* against the list below; a run passes when the set is identical.
+
+Reference reading (2026-09-18, clean machine):
+`27 failed | 429 passed | 9 skipped (465)` files,
+`58 failed | 9003 passed | 94 skipped (9155)` tests — where the 27th file is the
+known flake in section 3, not a real member of this set.
+
+### The 26 baseline failing files
+
+```
+components/collabboard/KnowledgeExistingPdfPicker.test.tsx
+components/collabboard/KnowledgePdfCanvasSurface.test.tsx
+components/collabboard/KnowledgePdfUploader.test.tsx
+components/collabboard/KnowledgeSourceRegionCrop.test.tsx
+components/collabboard/containerResizeB3.characterization.test.tsx
+components/collabboard/documentReadRoutingAllHosts.architecture.test.tsx
+components/collabboard/editors/DocumentEditor.readonly.test.tsx
+components/collabboard/editors/DocumentEditor.test.tsx
+components/collabboard/editors/NoteEditor.characterization.test.tsx
+components/collabboard/freeformFullViewFrame.test.tsx
+components/collabboard/freeformPdfInteractions.test.tsx
+components/collabboard/freeformPostSelectionBatch1.characterization.test.tsx
+components/collabboard/freeformTableSelection.characterization.test.tsx
+components/collabboard/knowledgePdfCard.test.tsx
+components/collabboard/knowledgeUsedInNotes.integration.test.tsx
+components/collabboard/libraryReuseLinkLayouts.test.tsx
+components/collabboard/postResizeB2.integration.test.tsx
+lib/domain/canvas/documentSaveLifecycle.source.test.ts
+lib/domain/canvas/documentSwitchGuard.source.test.ts
+lib/infra/canvas/boardEditAuthorityWiring.source.test.ts
+lib/infra/knowledge/knowledgeEmbeddingDeploy.source.test.ts
+lib/infra/knowledge/knowledgeExtractionScope.source.test.ts
+lib/infra/knowledge/knowledgePdfAreaImageWiring.source.test.ts
+lib/infra/knowledge/knowledgeSourceNoteWiring.source.test.ts
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts
+scripts/harness/worktreeLifecycle.test.ts
+```
+
+One of these is not an assertion failure and should not be read as one:
+`knowledgeUsedInNotes.integration.test.tsx` fails at **suite load** with
+`either NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY env variables
+or supabaseUrl and supabaseKey are required`. It is environment-dependent, not a
+code failure.
+
+---
+
+## 2. `npm run check:boundaries`
+
+Exits **1** with exactly these two pre-existing `no-restricted-imports` errors
+under `lib/domain/CONVENTIONS.md` rule 1. Exit 1 with this pair is a pass.
+
+```
+lib/domain/canvas/boardObjectReveal.test.ts
+  9:1  error  '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry' import is restricted from being used by a pattern
+lib/domain/canvas/boardObjectReveal.ts
+  1:1  error  '@/components/collabboard/canvas/minimap/freeformMinimapGeometry' import is restricted from being used by a pattern
+```
+
+---
+
+## 3. KNOWN FLAKE — `scripts/check-react-hooks.test.ts`
+
+**Not a baseline member, and not a regression when it appears.** It fails under
+machine load and passes on a quiet machine, so it will drift in and out of any
+run-to-run comparison.
+
+Observed 2026-09-18:
+
+| Condition | Result |
+|---|---|
+| Full suite, concurrent `next dev` cold compile | FAIL — `Test timed out in 5000ms`, file total **30,171ms** |
+| Full suite, dev idle | PASS |
+| Full suite, dev idle + browser attached | FAIL — same timeout, file total **7,527ms** |
+| Alone, twice | PASS — **1,558ms** and **1,542ms** |
+
+**Cause.** The failing test is the *first* in the file, and it is the first thing
+in the run to invoke ESLint programmatically
+(`checkHookOrderForText(VALID, PROBE, eslint)`). That first call pays the whole
+config-and-plugin graph load, which exceeds the 5,000ms per-test default under
+load. The other seven tests in the file pass every time.
+
+`lib/infra/settings/serverOnlyImportBoundary.source.test.ts` is the same shape —
+it spawns ESLint too, timed out at 9,200ms in the contended run, and passed at
+1,099ms when quiet. Treat both as load-sensitive.
+
+**How to tell a flake from a regression here:** run the file alone. If it passes
+in about 1.5 seconds, the full-suite failure was contention. Both files would
+stop flaking if their first test carried an explicit timeout.
+
+**Run the gate with nothing else heavy in flight.** A concurrent `next dev`
+compile manufactured two false failures in one run and cost a round trip.
