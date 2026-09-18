@@ -10,6 +10,7 @@ import {
   type TextAction,
 } from '@/lib/ai/textActions';
 import { AI_ROLE_EDIT } from '@/lib/ai/aiRoles';
+import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
 
 interface SelectedTextAIPanelProps {
   /** Shared by Note and Document -- this component never reads a live TipTap
@@ -42,6 +43,9 @@ export default function SelectedTextAIPanel({ editor, range, capturedText, onClo
   const [action, setAction] = useState<TextAction | null>(null);
   const [instruction, setInstruction] = useState('');
   const [applyError, setApplyError] = useState<string | null>(null);
+  /** Separate from applyError: changing the model and applying a result fail
+   *  independently, and one must not overwrite the other's message. */
+  const [modelError, setModelError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
 
@@ -144,8 +148,23 @@ export default function SelectedTextAIPanel({ editor, range, capturedText, onClo
         <X className="h-3.5 w-3.5" />
       </button>
       <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4">
-        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Ask AI</div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Ask AI</div>
+          {/* The model this surface uses, changeable here rather than only in
+              Settings. It writes the Edit & Rewrite role preference the server
+              already resolves per request, so nothing about the request
+              changes: no provider, model or key travels with it. */}
+          <AIRoleModelChooser
+            role={AI_ROLE_EDIT}
+            label="Edit & Rewrite model"
+            attributePrefix="selected-text-ai"
+            saveErrorMessage="Could not change the model."
+            disabled={isLoading}
+            onError={setModelError}
+          />
+        </div>
         <p className="text-xs text-gray-400 mb-3">Only the selected text is sent to AI.</p>
+        {modelError && <div role="alert" className="mb-2 text-xs text-red-600">{modelError}</div>}
 
         {phase.kind !== 'preview' && (
           <div className="flex flex-col gap-1">

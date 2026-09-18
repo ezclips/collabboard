@@ -29,6 +29,10 @@ export default defineConfig({
       'components/collabboard/canvas/hooks/*.test.tsx',
       'components/settings/ai/*.test.ts',
       'components/settings/ai/*.test.tsx',
+      // Shared AI components used by several surfaces (the role model chooser).
+      // Without this line a test file here is silently NOT RUN, which is worse
+      // than a failing one -- it reports nothing and looks green.
+      'components/ai/*.test.tsx',
       'components/ui/*.test.tsx',
       'components/canvas/*.test.tsx',
       'components/map/*.test.tsx',

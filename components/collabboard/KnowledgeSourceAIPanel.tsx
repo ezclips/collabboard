@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TEXT_ACTION_INSTRUCTION_MAX, TEXT_ACTION_SELECTED_TEXT_MAX } from '@/lib/ai/textActions';
 import { AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
+import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
 
 /**
  * PDF Source AI Phase 1. The right-pane AI surface for one exact PDF text
@@ -40,6 +41,9 @@ export default function KnowledgeSourceAIPanel({ selectedText, onNotePost, onClo
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [customInstruction, setCustomInstruction] = useState('');
   const [lastInstruction, setLastInstruction] = useState<string | null>(null);
+  /** Its own line: a failed model change and a failed action are different
+   *  failures, and neither may overwrite the other's message. */
+  const [modelError, setModelError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
 
@@ -114,9 +118,24 @@ export default function KnowledgeSourceAIPanel({ selectedText, onNotePost, onClo
         </button>
         <span className="text-gray-300" aria-hidden="true">|</span>
         <span className="text-gray-800">AI</span>
+        {/* The model this surface uses, changeable here rather than only in
+            Settings. It writes the Source AI role preference the server already
+            resolves per request, so the request itself is unchanged: no
+            provider, model or key travels with it. */}
+        <span className="ml-auto normal-case tracking-normal">
+          <AIRoleModelChooser
+            role={AI_ROLE_SOURCE}
+            label="Source AI model"
+            attributePrefix="knowledge-source-ai"
+            saveErrorMessage="Could not change the model."
+            disabled={isLoading}
+            onError={setModelError}
+          />
+        </span>
       </div>
 
       <p className="mb-2 text-xs text-gray-400">Only the selected text is sent to AI.</p>
+      {modelError && <div role="alert" className="mb-2 text-xs text-red-600">{modelError}</div>}
       <div className="mb-3 whitespace-pre-wrap rounded border border-gray-100 bg-gray-50 p-2 text-xs text-gray-600">
         {excerpt}
       </div>
