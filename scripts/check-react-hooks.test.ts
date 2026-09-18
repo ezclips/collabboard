@@ -35,12 +35,17 @@ export default function Broken({ items, loading }: { items: string[]; loading: b
 `;
 
 describe('A: valid source', () => {
+  // This is the first ESLint call in the file, so it pays the whole
+  // config-and-plugin graph load: 1,571ms on a quiet machine, 30,171ms when the
+  // machine is busy, against vitest's 5,000ms default. That produced a false
+  // gate failure on 2026-09-18. The timeout is explicit here rather than raised
+  // globally, so every other test keeps the default.
   it('reports no hook violations for an unconditional hook', async () => {
     const result = await checkHookOrderForText(VALID, PROBE, eslint);
     expect(result.reason).toBeUndefined();
     expect(result.findings).toEqual([]);
     expect(result.ok).toBe(true);
-  });
+  }, 20_000);
 });
 
 describe('B: conditional hook', () => {
