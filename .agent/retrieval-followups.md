@@ -31,15 +31,35 @@ user's question ranks no higher than one that mentions the words in passing
 halfway down its body. The title is the most deliberate text a user writes on a
 post, and it is currently worth the same as an aside.
 
-**Why deferred.** It changes the INDEX EXPRESSION, so it needs a rebuild of
-`padlets_search_gin`. That rebuild is already owed to language detection, and
-`CREATE INDEX` holds a lock that blocks writes for its duration. Paying that cost
-once, for all three changes together, is the entire reason these are batched.
+**~~Why deferred.~~ THE PREMISE WAS WRONG, and this is the correction.** It was
+deferred because it "changes the INDEX EXPRESSION, so it needs a rebuild". **It
+does not have to.** Matching and ranking need not use the same vector: `@@` runs
+against the indexed, unweighted vector, and `ts_rank` can be handed a different,
+`setweight`-ed vector built on the fly for the handful of rows that already
+matched. Both hold the same lexemes, so nothing matchable becomes unrankable, and
+the weighted vector is built for at most ten rows per search.
 
-**Goes with:** the index rebuild — alongside R2's type widening (which needs a
-fixture) and `E'<br\\s*/?>'` (removes a dependency on
-`standard_conforming_strings`), plus the double evaluation of the projection in
-the padlets index expression.
+So **title weights are a function-body change with no rebuild**, and they were
+taken OUT of the rebuild batch rather than shipped inside it. The same argument
+applies with more force to the chunk side: `original_filename` lives on
+`knowledge_documents`, and an index expression may only reference its own table,
+so a document-title weight could **never** have been indexed at all.
+
+**Why still deferred, on the honest reason:** it has been measured on **one
+question**. The 6× separation on q02 is the same instrument failure this document
+keeps recording — a rule promoted on the question it was found on, which is the
+question it cannot fail.
+
+**What unblocks it:** `scripts/db/boardSearchTitleWeightVariants.sql`, which
+scores it across all eleven questions **against the expressions `20260918160000`
+actually ships** — three configurations, `GREATEST` of the three, posts flag 0
+and chunks flag 1. Scoring it against the old single-`simple` expression would
+measure a vector that no longer exists.
+
+**When reading that run:** on the POSTS side a reordering cannot drop anything
+(item 7), so the bar is passed vacuously there; on the CHUNKS side the per-source
+limit does bite, so chunk reordering is real evidence. Weigh the halves
+differently.
 
 ---
 
@@ -432,6 +452,14 @@ end, with the elapsed time and the assembled character count recorded here. That
 answers the question the gate actually existed to answer: **does passage volume
 couple to generation latency?** It is one live call, not an investigation.
 
+**What a pass there does and does not prove.** The confirm is bounded by what
+this board can return — K slots from each source, roughly **4–5k characters
+against a 14,000 ceiling** — so a green result shows that count-coupling does not
+bite at the **reachable** maximum, not at the budget's theoretical one. A board
+with longer passages could still reach 14,000 and behave differently. Record the
+character count alongside the timing so the next reader can see which maximum was
+actually tested.
+
 - If it does not couple: `K = 4` stays a character-budget decision, and this item
   closes with the number written down.
 - If it does couple: `K` becomes a **latency-driven** decision, and the ceiling or
@@ -483,3 +511,92 @@ options, so the decision starts from a list rather than from scratch:
 **What would make the trigger fire wrongly:** adoption measured on a cohort whose
 boards hold nothing worth searching. Check that the boards in the sample actually
 have posts or PDFs before reading a zero as a verdict.
+
+---
+
+## 10. Design C is shipped — what it bought, what it did not, and what is now owed
+
+**Shipped as `20260918160000_board_search_language_vectors.sql`.** Every
+searchable row is indexed under `simple`, `english` **and** `german`; a query is
+parsed under all three and matched against all three; rank is the `GREATEST` of
+the three.
+
+**The property that decided it:** `simple` is retained unchanged, so **no match
+that exists today can disappear**. `simple` stems nothing and drops nothing, so
+the two new vectors can only add rows. That is what makes the acceptance criteria
+all of the form *strictly more* rather than *differently*.
+
+### The probe, which is the evidence the design rests on
+
+| token | `simple` | `english` | `german` |
+|---|---|---|---|
+| `Stoßstange` | stoßstange | stoßstang | **stossstang** |
+| `löse` / `lösen` | löse / lösen | löse / lösen | **los / los** |
+| `knitting` / `ribbed` / `Ribbing` | as-is | **knit / rib / rib** | as-is |
+| `will` | will | ∅ | ∅ |
+
+q10's answering chunk goes **0.00778 → 0.01413** under `german` at flag 1, and
+its lead over the next passage widens **1.10× → 1.29×**. The ß→ss fold also means
+`Stossstange` and `Stoßstange` land on the same rows — unavailable under any
+single configuration.
+
+### Two claims that were wrong, corrected before anything was built on them
+
+**The `will` collision is NOT recovered.** An earlier draft claimed design C would
+fix it. `to_tsvector('german', 'will')` is **empty** — the German dictionary
+carries `will` in its own stopword list, as it does `wollen`. Only the `simple`
+vector holds the lexeme, and the application drops the term before any
+configuration sees it. **`will` stays lost, exactly as documented.** If it is ever
+wanted, the fix is a query-side policy — retain the term for the `simple` query
+alone — and not a vector. The six-word set (`am, an, in, so, was, will`) is
+restated here so it is not rediscovered a third time.
+
+**q08 does not flip, and no design flips it.** Under `english` the answering
+paragraph finally **matches** — `ribbed` and `Ribbing` both stem to `rib` — and
+the gap narrows **3.07× → 1.35×**. The introduction still leads. Coverage favours
+the introduction under `english` too (the query's three terms stem to two, which
+the intro also has), so no lexical rule separates them. What is left is the
+ranking-versus-semantics problem the flag family already failed to solve. **The
+achievement is that the answer's vocabulary now enters the query at all; the
+ordering remains inverted, and its tripwire still asserts the defect** — now with
+the 1.35× ratio recorded beside it.
+
+### Design B, rejected on measurement — and the theory against it was also wrong
+
+The objection offered was that a word all three configurations agree on appears
+three times and inflates rank ~3×. Merged/simple ratios came back **mixed**:
+answer 1.26×, intro 0.94×, lubricant 0.85×, slideshow 0.79×, title-only post
+0.91×. Normalization by query-term count and by length swamps the occurrence
+tripling, in both directions. **B does not inflate rank uniformly; it perturbs it
+unpredictably** — a worse property, and the actual reason it lost. Recorded
+because a rejection that keeps a false reason gets re-argued from the false
+reason.
+
+### R2's widening, with the fixture that changed the answer
+
+Surveyed live across 1,000 rows against R2's criterion — *prose in `content`*:
+
+- **`card` PASSES** and is added. TipTap HTML prose, the same shape as `text` and
+  `note`.
+- **`comment` FAILS, and this is the finding.** It looks like the strongest
+  candidate — 42 of 44 rows are HTML — but `content` holds a rendered **summary**
+  of a thread that lives elsewhere, truncation markers included:
+  `"<p>one bug left</p>..." (+2 more)`. Indexing it would index truncated text
+  plus the literal token `more`. **It confirms R3's ceiling with evidence rather
+  than by assertion: the conversation really is not in `padlets.content`.**
+- `column`, `image`, `link`, `todo`, `table`, `drawing`, `container`, `date`,
+  `file` all fail — placeholder scaffolding, inconsistent substance, URLs, or
+  structured JSON.
+
+### What is now owed
+
+1. **`GREATEST()` across three configurations is a scale mix** and is not yet
+   scored. The passage *set* should be unchanged (because `simple` is retained),
+   so what moves is **ordering** — which is exactly what the battery measures.
+   Re-run it after the migration is applied.
+2. **Title weights**, scored on the shipping expressions — item 1.
+3. **Write amplification is the standing cost.** Three GIN indexes maintained on
+   every post edit and every ingestion instead of one. The build itself is
+   trivial at this size (2,126 padlets, 86 chunks); the write path is the price,
+   and the rollback header says how to buy back half of it by keeping only the
+   `german` pair.

@@ -102,6 +102,77 @@ const VARIANTS = {
   },
 } as const;
 
+/**
+ * THE LANGUAGE PROBE, measured 2026-09-18 against this board, which decided
+ * design C and is recorded here because two of these numbers exist nowhere else.
+ *
+ * Every searchable row is indexed under `simple`, `english` AND `german`
+ * (20260918160000). `simple` is retained unchanged, so no match that exists
+ * today can disappear -- the two new vectors can only ADD rows.
+ */
+const LANGUAGE = {
+  /** What each configuration does to the tokens that matter on this board. */
+  tokens: {
+    'Stoßstange': { simple: 'stoßstange', english: 'stoßstang', german: 'stossstang' },
+    'lösen': { simple: 'lösen', english: 'lösen', german: 'los' },
+    'ribbed': { simple: 'ribbed', english: 'rib', german: 'ribbed' },
+    'Ribbing': { simple: 'ribbing', english: 'rib', german: 'ribbing' },
+    /** Empty under BOTH stemming configurations: a stopword in each dictionary. */
+    'will': { simple: 'will', english: '', german: '' },
+  },
+  /** q10's answering chunk, at flag 1, under simple versus german. */
+  q10Answer: { simple: 0.00778, german: 0.01413, leadSimple: 1.10, leadGerman: 1.29 },
+  /** q08 under english: the answer finally matches, and still loses. */
+  q08UnderEnglish: { ratioBefore: 3.07, ratioAfter: 1.35 },
+  /**
+   * DESIGN B, measured and rejected. Merged-vector rank divided by simple rank.
+   * The prediction was uniform ~3x inflation; the measurement is MIXED, in both
+   * directions, because normalization by query-term count and length swamps the
+   * occurrence tripling.
+   */
+  mergedOverSimple: {
+    answer: 1.26, intro: 0.94, lubricant: 0.85, slideshow: 0.79, titleOnlyPost: 0.91,
+  },
+} as const;
+
+describe('the language probe — what three configurations bought, and what they did not', () => {
+  it('german folds ß to ss, which is why a bilingual board needs it', () => {
+    // `Stossstange` and `Stoßstange` become the same token only here. Neither
+    // simple nor english folds it, so neither lets the two spellings meet.
+    expect(LANGUAGE.tokens['Stoßstange'].german).toBe('stossstang');
+    expect(LANGUAGE.tokens['Stoßstange'].german).not.toBe(LANGUAGE.tokens['Stoßstange'].simple);
+    expect(LANGUAGE.tokens['Stoßstange'].english).not.toBe(LANGUAGE.tokens['Stoßstange'].german);
+  });
+
+  it('the measured German gain is an ordering gain, not just a rank gain', () => {
+    // A bigger rank alone proves nothing -- everything could rise together. The
+    // number that matters is the LEAD over the next passage.
+    expect(LANGUAGE.q10Answer.german).toBeGreaterThan(LANGUAGE.q10Answer.simple);
+    expect(LANGUAGE.q10Answer.leadGerman).toBeGreaterThan(LANGUAGE.q10Answer.leadSimple);
+  });
+
+  it('`will` is NOT recovered by any configuration — the collision stands', () => {
+    // An earlier draft of the design claimed german would recover it. It does
+    // not: `will` is in the German dictionary's own stopword list, as is
+    // `wollen`. Only the simple vector holds the lexeme, and the application
+    // drops the term before any configuration sees it. If it is ever wanted
+    // back, the fix is a query-side policy, not a vector.
+    expect(LANGUAGE.tokens['will'].english).toBe('');
+    expect(LANGUAGE.tokens['will'].german).toBe('');
+    expect(LANGUAGE.tokens['will'].simple).toBe('will');
+  });
+
+  it('design B was rejected on measurement, and the theory against it was wrong too', () => {
+    const ratios = Object.values(LANGUAGE.mergedOverSimple);
+    // The prediction was uniform inflation near 3x. Nothing is near 3x, and the
+    // ratios fall on BOTH sides of 1 -- so B perturbs rank rather than inflating
+    // it, which is the worse property and the actual reason it lost.
+    expect(Math.max(...ratios)).toBeLessThan(2);
+    expect(Math.min(...ratios)).toBeLessThan(1);
+    expect(Math.max(...ratios)).toBeGreaterThan(1);
+  });
+});
+
 describe('ranking pair q08 — the answer must outrank its own document intro', () => {
   it('TRIPWIRE: today the INTRO outranks the ANSWER by 3.07x (defect — flip this when fixed)', () => {
     expect(MEASURED.q08.intro.rank).toBeGreaterThan(MEASURED.q08.answer.rank);
@@ -128,6 +199,25 @@ describe('ranking pair q08 — the answer must outrank its own document intro', 
     for (const [variant, ratio] of Object.entries(VARIANTS.q08Ratios)) {
       expect(ratio, `${variant} unexpectedly fixed q08 — re-read the stemming check`).toBeGreaterThan(1);
     }
+  });
+
+  it('STILL A TRIPWIRE after design C: english makes the answer MATCH, and it still loses', () => {
+    // This is the honest form of the acceptance criterion. The language unit was
+    // expected to flip this pair and it does not. What it achieves is that the
+    // answer's vocabulary ENTERS the query at all -- `ribbed` and `Ribbing` both
+    // stem to `rib` -- which narrows the gap from 3.07x to 1.35x.
+    //
+    // The ORDERING REMAINS INVERTED, so this assertion stays as it is. Coverage
+    // favours the introduction under `english` too (the query's three terms stem
+    // to two, which the intro also has), so no lexical rule separates them. What
+    // is left is the ranking-versus-semantics problem the flag family already
+    // failed to solve -- it is not a stemming problem and never was a ranking
+    // one either.
+    expect(LANGUAGE.q08UnderEnglish.ratioAfter).toBeGreaterThan(1);
+    expect(LANGUAGE.q08UnderEnglish.ratioAfter).toBeLessThan(LANGUAGE.q08UnderEnglish.ratioBefore);
+    // The answer now matches under english, which it never did under simple.
+    expect(VARIANTS.q08Stemming.answer.english).toBe(true);
+    expect(VARIANTS.q08Stemming.answer.simple).toBe(false);
   });
 
   it('and the stemming check names the cause on the exact pair', () => {
