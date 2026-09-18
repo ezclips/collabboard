@@ -104,3 +104,10 @@ stop flaking if their first test carried an explicit timeout.
 
 **Run the gate with nothing else heavy in flight.** A concurrent `next dev`
 compile manufactured two false failures in one run and cost a round trip.
+
+**A control read while it is disabled is not a reading.** Same shape as the
+flake, in the browser rather than the suite: the Board AI provider chooser
+rendered "CollabBoard Default" for 8.4 seconds while `GET /api/settings/ai-roles`
+cold-compiled, and a probe taken at 4.5s reported that as the live provider while
+the stored role was the OpenAI connection. Wait for `disabled === false` before
+reading any control's value, and prefer no value to a definite wrong one.

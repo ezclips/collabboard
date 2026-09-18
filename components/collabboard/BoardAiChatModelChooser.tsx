@@ -28,6 +28,12 @@ import type { AIProviderConnection } from '@/lib/domain/settings/aiProviderConne
  * this component renders the display name alone. The payload does carry a
  * provider type and a masked key hint; neither is rendered here. No key,
  * ciphertext or endpoint exists in that payload to expose.
+ *
+ * It must never NAME a provider it has not read. Until both fetches resolve it
+ * knows nothing, so it shows an indeterminate label rather than the first
+ * option's -- a cold route took 8.4 seconds on 2026-09-18 and a reading taken
+ * during it reported the managed default while the stored role was a BYOK
+ * connection. A definite wrong value is worse than no value.
  */
 
 export interface BoardAiChatModelChooserProps {
@@ -39,10 +45,15 @@ export interface BoardAiChatModelChooserProps {
 
 const DEFAULT_VALUE = '';
 
+/** Three states, because "could not load" is not "loaded, and there is nothing". */
+type ChooserStatus = 'loading' | 'ready' | 'unavailable';
+
+const UNAVAILABLE_TITLE = 'Could not load your AI connections. Open Settings → AI to check them.';
+
 export default function BoardAiChatModelChooser({ disabled = false, onError }: BoardAiChatModelChooserProps) {
   const [connections, setConnections] = useState<readonly AIProviderConnection[]>([]);
   const [selected, setSelected] = useState<string>(DEFAULT_VALUE);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<ChooserStatus>('loading');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -54,13 +65,15 @@ export default function BoardAiChatModelChooser({ disabled = false, onError }: B
         if (cancelled) return;
         setConnections(providers);
         setSelected(roles[AI_ROLE_CHAT]?.connectionId ?? DEFAULT_VALUE);
+        setStatus('ready');
       } catch {
-        // A chooser that cannot load leaves chat on whatever the server
-        // resolves, which is the managed default -- not a reason to block the
-        // conversation, so this is silent here and simply shows Default.
-        if (!cancelled) setConnections([]);
-      } finally {
-        if (!cancelled) setLoading(false);
+        // A chooser that cannot load does NOT leave chat on the managed
+        // default: the route resolves AI_ROLE_CHAT per request and finds the
+        // STORED preference, whatever this component failed to read. So it
+        // cannot claim a provider, and it must not offer to change one --
+        // its value never changed, so picking the option it is already showing
+        // fires no change event and would persist nothing.
+        if (!cancelled) { setConnections([]); setStatus('unavailable'); }
       }
     })();
     return () => { cancelled = true; };
@@ -84,7 +97,7 @@ export default function BoardAiChatModelChooser({ disabled = false, onError }: B
     }
   }, [selected, onError]);
 
-  const busy = loading || saving || disabled;
+  const busy = status !== 'ready' || saving || disabled;
 
   return (
     <label className="flex min-w-0 items-center gap-1" data-board-ai-chat-chooser="true">
@@ -92,21 +105,33 @@ export default function BoardAiChatModelChooser({ disabled = false, onError }: B
       <select
         aria-label="Board Chat model"
         data-board-ai-chat-model=""
+        data-board-ai-chat-model-status={status}
+        title={status === 'unavailable' ? UNAVAILABLE_TITLE : undefined}
         className="min-w-0 max-w-[150px] truncate rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] text-gray-700 disabled:opacity-60"
         value={selected}
         disabled={busy}
         onChange={(event) => { void choose(event.target.value); }}
       >
-        <option value={DEFAULT_VALUE}>CollabBoard Default</option>
-        {connections.map((connection) => (
-          // The display name alone. It is what tells two connections apart; a
-          // masked key suffix told the user which KEY, which is not the
-          // question, and it put credential-adjacent material in the chat UI
-          // for no reason.
-          <option key={connection.id} value={connection.id}>
-            {connection.displayName}
+        {status === 'ready' ? (
+          <>
+            <option value={DEFAULT_VALUE}>CollabBoard Default</option>
+            {connections.map((connection) => (
+              // The display name alone. It is what tells two connections apart;
+              // a masked key suffix told the user which KEY, which is not the
+              // question, and it put credential-adjacent material in the chat
+              // UI for no reason.
+              <option key={connection.id} value={connection.id}>
+                {connection.displayName}
+              </option>
+            ))}
+          </>
+        ) : (
+          // One option, carrying the CURRENT value so the control is still
+          // controlled, and saying only what is actually known.
+          <option value={selected}>
+            {status === 'loading' ? 'Loading…' : 'Model unavailable'}
           </option>
-        ))}
+        )}
       </select>
       {saving ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-gray-400" aria-hidden="true" /> : null}
     </label>

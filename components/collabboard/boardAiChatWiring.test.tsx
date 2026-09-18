@@ -94,6 +94,53 @@ describe('36-42. the provider/model chooser is the existing role preference', ()
     expect(options.join(' ')).not.toMatch(/sk-|apiKey|secret|Bearer/);
   });
 
+  it('names no provider while it is still reading which one is stored', async () => {
+    // The defect this pins: `selected` starts at DEFAULT_VALUE, so rendering
+    // the full option list during the fetch displayed "CollabBoard Default" as
+    // a fact. A cold /api/settings/ai-roles took 8,435ms on 2026-09-18 and a
+    // reading at 4.5s reported Default while the stored role was a BYOK
+    // connection. Mounted with both fetches PENDING, never resolving.
+    mocks.fetchAIProviders.mockReturnValue(new Promise(() => {}));
+    mocks.fetchAIRoles.mockReturnValue(new Promise(() => {}));
+    await mountChooser();
+    const select = host.querySelector('[data-board-ai-chat-model=""]') as HTMLSelectElement;
+
+    expect(select.getAttribute('data-board-ai-chat-model-status')).toBe('loading');
+    expect(select.textContent).not.toMatch(/CollabBoard Default|Work key/);
+    // Not just the selected label -- no option anywhere may name a provider.
+    for (const option of Array.from(select.options)) {
+      expect(option.textContent ?? '').not.toMatch(/CollabBoard|Work key/);
+    }
+    expect(select.disabled).toBe(true);
+  });
+
+  it('a chooser that could not load says so and refuses to pretend it can change anything', async () => {
+    // The permanent form of the same wrong screen. The route resolves
+    // AI_ROLE_CHAT per request and finds the STORED preference, so a failed
+    // load does NOT mean the managed default is in force -- and because the
+    // value never changed, picking the shown option fires no change event and
+    // would persist nothing. Disabled is the honest control.
+    mocks.fetchAIRoles.mockRejectedValue(new Error('offline'));
+    await mountChooser();
+    const select = host.querySelector('[data-board-ai-chat-model=""]') as HTMLSelectElement;
+
+    expect(select.getAttribute('data-board-ai-chat-model-status')).toBe('unavailable');
+    expect(select.textContent).not.toMatch(/CollabBoard Default|Work key/);
+    for (const option of Array.from(select.options)) {
+      expect(option.textContent ?? '').not.toMatch(/CollabBoard|Work key/);
+    }
+    expect(select.disabled).toBe(true);
+    expect(select.title).toMatch(/Settings/);
+    expect(mocks.saveAIRole).not.toHaveBeenCalled();
+  });
+
+  it('the source no longer claims a failed load leaves chat on the managed default', () => {
+    // The comment stated the wrong premise out loud, which is how the wrong
+    // behaviour survived review.
+    expect(CHOOSER).not.toMatch(/which is the managed default/);
+    expect(CHOOSER).toContain('STORED preference');
+  });
+
   it('39. choosing writes through the existing role authority, not a new API', async () => {
     await mountChooser();
     const select = host.querySelector('[data-board-ai-chat-model=""]') as HTMLSelectElement;
