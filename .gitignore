@@ -62,3 +62,10 @@ e2e/.auth/
 e2e/.artifacts/
 .fable5/worktrees/
 .fable5/evidence/
+
+# Live browser profiles and capture output. These sit inside the project but
+# hold RUNTIME state, not source: the persistent Playwright Chromium writes its
+# cache here continuously. They are excluded from the dev watcher in
+# next.config.ts for the same reason -- see the comment there.
+.runtime-fixtures/
+.playwright-mcp/

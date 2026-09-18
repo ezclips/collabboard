@@ -23,7 +23,39 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  webpack: (config, { isServer, webpack }) => {
+  webpack: (config, { dev, isServer, webpack }) => {
+    // DEV WATCHER SCOPE.
+    //
+    // Next only ignores node_modules and .next by default, so ANY tool that
+    // writes inside the project feeds the watcher. The persistent Playwright
+    // Chromium keeps its profile at .runtime-fixtures/playwright-profile and
+    // rewrites Cache/Code Cache/sqldb-wal files continuously, which put dev
+    // into a permanent recompile loop -- observed rewriting the root layout
+    // chunk every ~6 seconds with the editor closed and no requests in flight.
+    //
+    // That loop is not merely wasted CPU. A request arriving mid-rewrite is
+    // served a gzip stream of a file webpack is still writing, so the browser
+    // receives a TRUNCATED script and throws "Invalid or unexpected token".
+    // The root layout chunk then never executes, React never hydrates, and
+    // every onClick on the page is silently dead while the markup looks fine.
+    //
+    // These directories hold runtime artifacts, never source, so nothing here
+    // should ever trigger a rebuild.
+    if (dev) {
+      config.watchOptions = {
+        ...(config.watchOptions ?? {}),
+        ignored: [
+          '**/node_modules/**',
+          '**/.next/**',
+          '**/.git/**',
+          '**/.runtime-fixtures/**',
+          '**/.playwright-mcp/**',
+          '**/test-results/**',
+          '**/playwright-report/**',
+        ],
+      };
+    }
+
     if (!isServer) {
       // Step 1: strip the "node:" URI scheme prefix so webpack can resolve
       // the module normally. pptxgenjs (and jspdf) use "node:fs" etc. which
