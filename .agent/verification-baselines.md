@@ -83,8 +83,16 @@ run-to-run comparison.
 2026-09-18 that produced the reading below, this file took **4,924ms against the
 5,000ms default — 76ms of headroom.** It was not waiting for a busy machine; it
 was already at the line, which is why it tipped so easily. Both ESLint-spawning
-files now carry an explicit 20,000ms timeout on their first test (`6cea975`), and
-the quiet run after that returned exactly the 26 baseline files with no flake.
+files now carry an explicit timeout on their first test (`6cea975`), and the
+quiet run after that returned exactly the 26 baseline files with no flake.
+
+**THE FIRST NUMBER WAS TOO LOW, AND THAT IS THE LESSON.** `6cea975` set that
+timeout to 20,000ms and called it ample. A later full-suite run on a busier
+machine took **26,095ms** and failed again — inside the very fix meant to stop
+it. Both files now carry **60,000ms**. Pick such a number against the observed
+WORST case (30,171ms here), not against a comfortable multiple of the typical
+one: a limit anywhere near the worst case moves a flake rather than removing it.
+It is a hang detector, not a performance budget.
 
 Observed 2026-09-18:
 

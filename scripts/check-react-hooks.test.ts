@@ -40,12 +40,19 @@ describe('A: valid source', () => {
   // machine is busy, against vitest's 5,000ms default. That produced a false
   // gate failure on 2026-09-18. The timeout is explicit here rather than raised
   // globally, so every other test keeps the default.
+  //
+  // SIXTY SECONDS, NOT TWENTY. Twenty was tried first and was not enough: a
+  // later full-suite run on a busier machine took 26,095ms and failed again.
+  // The observed worst case is 30,171ms, so a limit anywhere near it just moves
+  // the flake rather than removing it. This number is not a performance budget
+  // -- it exists to catch a HANG, and 60s is far below any hang while being far
+  // above the slowest honest run seen.
   it('reports no hook violations for an unconditional hook', async () => {
     const result = await checkHookOrderForText(VALID, PROBE, eslint);
     expect(result.reason).toBeUndefined();
     expect(result.findings).toEqual([]);
     expect(result.ok).toBe(true);
-  }, 20_000);
+  }, 60_000);
 });
 
 describe('B: conditional hook', () => {

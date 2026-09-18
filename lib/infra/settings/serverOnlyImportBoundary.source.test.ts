@@ -49,10 +49,14 @@ describe('server-only import boundary', () => {
   // First ESLint call in the file, so it pays the whole config-and-plugin graph
   // load: 1,099ms quiet, 9,200ms contended, against vitest's 5,000ms default.
   // Explicit here rather than a global raise -- the other six keep the default.
+  //
+  // Raised from 20,000ms to match its sibling in scripts/check-react-hooks.test.ts,
+  // which exceeded 20,000ms on a busy full-suite run. See that file for why the
+  // number is a hang detector rather than a performance budget.
   it('1. a component importing lib/server by alias is rejected', async () => {
     const messages = await lint(resolve(ROOT, 'components/Probe.tsx'), SERVER_IMPORT_ALIAS);
     expect(messages.join('\n')).toMatch(/lib\/server/);
-  }, 20_000);
+  }, 60_000);
 
   it('2. a relative-path import of lib/server is rejected too', async () => {
     const messages = await lint(resolve(ROOT, 'components/Probe.tsx'), SERVER_IMPORT_RELATIVE);
