@@ -36,6 +36,18 @@ export interface BoardAiSearchPassage {
   /** The chunk's own page span, which the de-duplication rule compares. */
   readonly pageStart?: number;
   readonly pageEnd?: number;
+  /**
+   * A post that matched on its TITLE and has no body at all.
+   *
+   * It is a result, not noise: for "what does the Trump note post say?", the
+   * true answer is that a post called Trump Note Post exists and is empty. The
+   * title IS that post's content.
+   *
+   * It can only have matched on its title, and that is a property of the index
+   * rather than a guess: the indexed vector is title-then-body, so with an empty
+   * body there is nothing else in it that could have matched.
+   */
+  readonly titleOnly?: boolean;
 }
 
 /**
@@ -256,7 +268,15 @@ export function boardAiSearchContextBlock(
     // had read the board. Saying "nothing matched" is a result.
     ? 'No passages on this board matched this search.'
     : passages
-      .map((passage) => `[${passage.source === 'post' ? 'board post' : 'PDF text'}: ${passage.label}]\n${passage.text}`)
+      .map((passage) => {
+        // THE ORIGIN LINE MUST NOT LET THE MODEL IMPLY IT READ A BODY THAT DOES
+        // NOT EXIST. A title-only post is a real result, and saying so in the
+        // line is what keeps it from reading as a source whose text went
+        // missing -- the difference between "this post is empty" and "I was
+        // given this post" is the whole reason the row is worth keeping.
+        if (passage.titleOnly) return `[board post, title only and no body: ${passage.label}]`;
+        return `[${passage.source === 'post' ? 'board post' : 'PDF text'}: ${passage.label}]\n${passage.text}`;
+      })
       .join('\n\n');
   return {
     type: 'board-search',

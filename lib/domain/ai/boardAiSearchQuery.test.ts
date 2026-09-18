@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BOARD_SEARCH_CONTEXT_STOPWORDS,
   BOARD_SEARCH_MAX_TERMS,
   buildBoardAiSearchQuery,
 } from './boardAiSearchQuery';
@@ -40,14 +41,64 @@ describe('board search query construction', () => {
     expect(query.expression).toBe('');
   });
 
-  it('the stopword list is conservative, and this pins where it stops', () => {
-    // "tell" is NOT dropped, and that is the documented policy rather than an
-    // oversight: the list is function words and question openers only. An
-    // aggressive linguistic list drops terms that carry meaning in a product
-    // corpus, and this runs against a `simple` configuration that does no
-    // stemming and strips no stopwords of its own. If a term like this should
-    // go, it is a deliberate addition with a reason, not a silent widening.
-    expect(buildBoardAiSearchQuery('Can you tell me about it?').terms).toEqual(['tell']);
+  it('every context stopword is dropped', () => {
+    // This list is a DELIBERATE CHANGE OF POLICY, not a widening of the
+    // linguistic one. An earlier version of this test pinned `tell` as a term
+    // that survives, on the reasoning that the list should stay conservative.
+    // Measurement overruled it: "What do the Iran oil headlines on this board
+    // say?" produced 3,018 characters of context of which ~212 answered it,
+    // and `board` alone accounted for 2,132 noise characters by matching a
+    // chess board. `say` and `tell` describe the request, not its subject.
+    for (const word of BOARD_SEARCH_CONTEXT_STOPWORDS) {
+      expect(buildBoardAiSearchQuery(`Iran ${word} headlines`).terms)
+        .toEqual(['iran', 'headlines']);
+    }
+  });
+
+  it('CONTENT-TYPE words are deliberately NOT members, so a widening must be deliberate', () => {
+    // "what does the note about X say" must not lose its noun. A user may
+    // genuinely be distinguishing a note from a PDF, and a post titled "Release
+    // note" is a real match for someone searching for it.
+    for (const keeper of ['note', 'post', 'page', 'pdf', 'document']) {
+      expect(BOARD_SEARCH_CONTEXT_STOPWORDS.has(keeper)).toBe(false);
+      expect(buildBoardAiSearchQuery(`what does the ${keeper} about oil say`).terms)
+        .toEqual([keeper, 'oil']);
+    }
+  });
+
+  it('the real measured question loses only the generic terms', () => {
+    // The exact question from the live run. `board` and `say` go; everything
+    // that names the subject stays, and the chip will show the user precisely
+    // this list.
+    expect(buildBoardAiSearchQuery('What do the Iran oil headlines on this board say?').terms)
+      .toEqual(['iran', 'oil', 'headlines']);
+  });
+
+  it('the CONTEXT list does not apply to German, and every content term survives', () => {
+    // The real question from the live run's second check, in its original
+    // language. Nothing that names the subject is lost.
+    const terms = buildBoardAiSearchQuery('Wie demontiere ich die Stoßstange am Audi A2?').terms;
+    for (const content of ['demontiere', 'stoßstange', 'audi', 'a2']) {
+      expect(terms).toContain(content);
+    }
+    for (const word of BOARD_SEARCH_CONTEXT_STOPWORDS) {
+      expect(terms).not.toContain(word);
+    }
+  });
+
+  it('pins the ENGLISH/GERMAN collision honestly rather than claiming there is none', () => {
+    // `am` here is German for "an dem" and is dropped because English spells its
+    // first-person copula the same way. That is the LINGUISTIC list colliding,
+    // not the context list -- and it is recorded rather than glossed, because
+    // "the list is English only" is easily misread as "German is unaffected".
+    expect(buildBoardAiSearchQuery('Wie demontiere ich die Stoßstange am Audi A2?').terms)
+      .toEqual(['wie', 'demontiere', 'ich', 'die', 'stoßstange', 'audi', 'a2']);
+    // The measured collision set. Five are function words in German too; `will`
+    // -- German for "wants" -- is the one real verb lost.
+    for (const collision of ['am', 'an', 'in', 'so', 'was', 'will']) {
+      expect(buildBoardAiSearchQuery(`Stoßstange ${collision} Audi`).terms)
+        .toEqual(['stoßstange', 'audi']);
+    }
   });
 
   it('operator punctuation cannot reach to_tsquery, because nothing but letters and digits does', () => {

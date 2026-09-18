@@ -78,6 +78,61 @@ const STOPWORDS = new Set([
 ]);
 
 /**
+ * Words that carry no content BECAUSE THE CORPUS IS A BOARD.
+ *
+ * WHY THIS EXISTS AS A SEPARATE LIST. Measured on 2026-09-18: the question
+ * "What do the Iran oil headlines on this board say?" assembled 3,018 characters
+ * of context of which roughly 212 answered it — about 7% signal. The rest was
+ * *Chess Opening Theory* and *bicycle chain lubricant*, pulled in because `board`
+ * matched a chess board and `oil` matched chain oil. The term `board` alone
+ * accounted for 2,132 of those noise characters.
+ *
+ * WHY A DOCUMENT-FREQUENCY FLOOR CANNOT FIND THESE, which is the obvious
+ * alternative and the reason it was rejected: `board` is RARE inside any one
+ * board's text while being generic to the product. A corpus-relative measure
+ * looks at the text being searched, finds `board` in two documents out of
+ * eighty, concludes it is highly selective — and keeps precisely the term that
+ * caused most of the damage. The problem is not statistical, it is contextual:
+ * the user is typing to a thing called a board, so they say "board" the way they
+ * say "the".
+ *
+ * TWO GROUPS, AND THE LINE BETWEEN THEM IS THE POINT.
+ *
+ *   * PRODUCT NOUNS -- `board`, `canvas`, `padlet`. The name of the surface the
+ *     user is looking at. Naming it says nothing about what they want from it.
+ *   * ASKING VERBS -- `say`, `tell`, `show`, `find`. These describe the REQUEST,
+ *     not its subject: "find the note about X" is a request about X.
+ *
+ * WHAT IS DELIBERATELY NOT HERE: `note`, `post`, `page`, `pdf`, `document`.
+ * Those are CONTENT-TYPE words and they stay searchable, because "what does the
+ * note about X say" must not lose its noun — the user may genuinely be
+ * distinguishing a note from a PDF, and a post titled "Release note" is a real
+ * match for someone searching for it.
+ *
+ * THE LIMIT: this list is English only. It does not apply to the German
+ * questions this board already receives, so no German term is dropped BY IT.
+ *
+ * That is not the same as "German is unaffected", and the difference is worth
+ * stating rather than glossing. The LINGUISTIC list above does collide with
+ * German, on six words measured against a sample of German board questions:
+ * `am`, `an`, `in`, `so`, `was` and `will`. Five of those are function words in
+ * German too, so dropping them is right for the wrong reason. The sixth,
+ * `will` — German for "wants" — is a real verb being dropped because English
+ * spells its future auxiliary the same way.
+ *
+ * Today that costs almost nothing: it is a recall question on one modal verb,
+ * not a precision one, and the surrounding content terms carry the query. A
+ * German list is worth building when German questions become common enough to
+ * measure; guessing at one now would be inventing rules for traffic nobody has
+ * counted, and the collision above is the honest reason it is a real item
+ * rather than a theoretical one.
+ */
+export const BOARD_SEARCH_CONTEXT_STOPWORDS: ReadonlySet<string> = new Set([
+  'board', 'canvas', 'padlet',
+  'say', 'tell', 'show', 'find',
+]);
+
+/**
  * Everything that is not a letter or a digit is a separator.
  *
  * Unicode-aware on purpose: a board is not necessarily English, and splitting on
@@ -115,6 +170,9 @@ export function buildBoardAiSearchQuery(message: string): BoardAiSearchQuery {
     if (terms.length >= BOARD_SEARCH_MAX_TERMS) break;
     if (raw.length < BOARD_SEARCH_MIN_TERM_LENGTH) continue;
     if (STOPWORDS.has(raw)) continue;
+    // Generic to the PRODUCT rather than to language. See the list's own note
+    // for why a document-frequency measure cannot find these.
+    if (BOARD_SEARCH_CONTEXT_STOPWORDS.has(raw)) continue;
     // De-duplicate AFTER the stopword drop and BEFORE the cap, so a message
     // that repeats one word twenty times does not spend the whole budget on it.
     if (seen.has(raw)) continue;

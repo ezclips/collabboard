@@ -333,6 +333,66 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
   });
 });
 
+describe('a title-only post that matched is a result, not noise', () => {
+  it('the Trump-note query keeps Trump Note Post', async () => {
+    // MEASURED: six of the nine text posts on the reference board have empty
+    // bodies, and the rank normalization correctly puts a short exact title
+    // match FIRST -- 0.0228 here, against 0.0032 for the best chunk. The rule
+    // this replaces deleted exactly that row.
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      reader([], [post('ea370926', 'Trump Note Post', '', 0.0228)], [chunk('c1', 'Iran live updates: Trump threatens…')]),
+      BOARD, USER, 'What does the Trump note post say?', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.block.text).toContain('Trump Note Post');
+    expect(result.value.result.used).toBe(2);
+  });
+
+  it('its origin line says it is title-only, so no body can be implied', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true), reader([], [post('p1', 'Trump Note Post', '', 0.0228)]),
+      BOARD, USER, 'What does the Trump note post say?', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The true answer is that the post exists and is empty. The line must let
+    // the model say that rather than read as a source whose text went missing.
+    expect(result.value.block.text).toBe('[board post, title only and no body: Trump Note Post]');
+    expect(result.value.block.text).not.toMatch(/\[board post: /);
+  });
+
+  it('a post WITH a body is unaffected', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      reader([], [post('p1', 'Audi A2 Stoßstange demontieren neu.pdf', 'Möchte man nur die Hupe wechseln…', 0.0034)]),
+      BOARD, USER, 'bumper horn', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.block.text).toContain('[board post: Audi A2 Stoßstange demontieren neu.pdf]');
+    expect(result.value.block.text).toContain('Möchte man nur die Hupe wechseln');
+    expect(result.value.block.text).not.toContain('title only');
+  });
+
+  it('an empty CHUNK is still dropped, because a chunk IS its text', async () => {
+    // A chunk has no title of its own, so an empty one contributes nothing and
+    // could not have matched in the first place.
+    const result = await searchBoardAiContext(
+      authClient([], true), reader([], [], [chunk('c1', '')]),
+      BOARD, USER, 'anything relevant', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.result.used).toBe(0);
+  });
+});
+
 describe('the search clock is bounded and separate from the generation clock', () => {
   it('is three seconds, so the total stays about 23 rather than unbounded', () => {
     // One clock must not eat the other: executeBoardAiChat starts its own 20s

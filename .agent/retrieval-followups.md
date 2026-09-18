@@ -136,7 +136,50 @@ item 2 is a feature or a workaround.
 
 ---
 
-## 5. The search timeout stops us waiting, it does not stop the query
+## 5. `p_min_rank` — the tuning lever, deferred until there is data to set it
+
+**What.** A minimum-rank parameter on both search functions, mirroring the vector
+RPC's `p_min_similarity` exactly: an optional argument, `NULL` by default,
+applied before `LIMIT`.
+
+**Why it looked necessary.** The live run of 2026-09-18 assembled 3,018
+characters of context for the Iran question, of which roughly 212 answered it —
+about 7% signal. A rank floor is the obvious way to cut the rest.
+
+**THE ARITHMETIC THAT DEFERS IT.** The ranks in that result were:
+
+| passage | rank |
+|---|---|
+| page 4 — the Iran headline (relevant) | **0.00253** |
+| Chess Opening Theory ×2 (noise) | 0.00205 |
+| chain lubricant (noise) | 0.00188 |
+
+The noise sits at **76–81% of the top hit**. A floor tight enough to separate
+them is a floor tight enough to start discarding legitimate SECOND and THIRD
+matches on any query where the best answer is spread over several passages —
+which is the normal case, not the exception. With no corpus of real queries to
+tune against, any threshold chosen now would be fitted to one question.
+
+**What was done instead**, and why it was the better first move: the noise here
+came from the QUERY, not the ranking. `board` matched a chess board and `oil`
+matched chain oil, so the context stopword list
+(`BOARD_SEARCH_CONTEXT_STOPWORDS`) removes the generic terms at source. That is
+free, it is explainable to a user — the chip shows the terms actually searched —
+and it does not risk dropping real matches.
+
+**When to build it.** When there are real queries to measure: a set of questions
+with known-correct answers, ranked, so a threshold can be chosen from the
+distribution rather than from one example. Mirror `p_min_similarity` —
+`NULL`-defaulted, so shipping the parameter changes nothing until a caller passes
+it, and the migration can land ahead of the decision.
+
+**Note that a NULL-default parameter costs a migration and changes no behaviour,**
+which is exactly why it is not worth landing speculatively: it would look like
+progress while deciding nothing.
+
+---
+
+## 6. The search timeout stops us waiting, it does not stop the query
 
 **What.** `BOARD_AI_SEARCH_TIMEOUT_MS = 3_000` bounds how long the chat waits for
 the two search RPCs. It does **not** cancel them. PostgREST offers no

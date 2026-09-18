@@ -199,13 +199,20 @@ export async function searchBoardAiContext(
   // One source failing does not lose the other: a board with no PDFs and a
   // broken chunk search should still find its own notes.
   const postPassages: readonly BoardAiSearchPassage[] = posts.ok
-    ? posts.value.map((row) => ({
-      source: 'post' as const,
-      label: postLabel(row),
-      text: (row.text ?? '').trim(),
-      rank: row.rank,
-      padletId: row.padlet_id,
-    }))
+    ? posts.value.map((row) => {
+      const text = (row.text ?? '').trim();
+      return {
+        source: 'post' as const,
+        label: postLabel(row),
+        text,
+        // With an empty body the indexed vector holds only the title, so a row
+        // that came back matched on it. That is a result worth keeping, and the
+        // origin line will say what kind of result it is.
+        ...(text.length === 0 ? { titleOnly: true } : {}),
+        rank: row.rank,
+        padletId: row.padlet_id,
+      };
+    })
     : [];
   const chunkPassages: readonly BoardAiSearchPassage[] = chunks.ok
     ? chunks.value.map((row) => ({
@@ -222,15 +229,26 @@ export async function searchBoardAiContext(
     return err(domainError('unavailable', 'Could not search this board'));
   }
 
-  // A passage with no text is not a passage. The database can return one for a
-  // post whose title matched and whose body is empty; its title is already the
-  // label, so the row would contribute a heading and nothing else.
+  // A passage the user ALREADY ATTACHED is not new material. It is dropped by
+  // SPAN, not by id: a chunk from a page a document attachment never reached is
+  // the only evidence in the request, and must survive.
   //
-  // And a passage the user ALREADY ATTACHED is not new material. It is dropped
-  // by SPAN, not by id: a chunk from a page a document attachment never reached
-  // is the only evidence in the request, and must survive.
-  const usable = (passage: BoardAiSearchPassage) =>
-    passage.text.length > 0 && !isBoardAiSearchPassageCovered(passage, coverage);
+  // AN EMPTY BODY IS NOT AN EMPTY RESULT, for a post. An earlier version of this
+  // dropped every passage with no text, reasoning that it "contributes a heading
+  // and nothing else". That was wrong in the one case it mattered: a post's
+  // TITLE is its content, and the rank normalization correctly puts a short
+  // exact title match FIRST -- so the rule deleted the best-ranked row. For
+  // "what does the Trump note post say?" the true answer is that such a post
+  // exists and is empty, and six of the nine text posts on the reference board
+  // are shaped that way.
+  //
+  // A CHUNK IS DIFFERENT and still guarded: a chunk IS its text, it has no title
+  // of its own, and an empty one could not have matched in the first place.
+  const usable = (passage: BoardAiSearchPassage) => {
+    if (isBoardAiSearchPassageCovered(passage, coverage)) return false;
+    if (passage.source === 'pdf') return passage.text.length > 0;
+    return passage.text.length > 0 || passage.label.length > 0;
+  };
   const merged = mergeBoardAiSearchPassages(
     postPassages.filter(usable),
     chunkPassages.filter(usable),
