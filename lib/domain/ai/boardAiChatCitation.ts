@@ -136,6 +136,12 @@ export function boardAiCitationIdentityKey(item: BoardAiCitationItem): string {
     // same card attached as text.
     case 'padlet-image':
       return `padlet-image:${item.padletId}`;
+    // Unreachable in practice -- citationItemFromBlock refuses a search block,
+    // because a search is not a place a reader can be taken to. Present so the
+    // switch stays exhaustive over BoardAiContextType, and keyed by nothing
+    // finer than the type: two searches in one answer are one non-citation.
+    case 'board-search':
+      return 'board-search';
   }
 }
 
@@ -184,6 +190,17 @@ function citationItemFromBlock(block: ResolvedBoardAiContextBlock): BoardAiCitat
           label,
         }
         : null;
+    case 'board-search':
+      // A SEARCH IS NOT A PLACE. The block holds passages from several posts and
+      // pages, so "open the citation" has no single destination, and inventing
+      // one -- the first passage, say -- would take the reader somewhere the
+      // answer may not have leaned on. The passages carry their own origin lines
+      // inside the block, so the model can still name a source in prose.
+      //
+      // Giving search results navigable citations is a real improvement and a
+      // separate unit: it needs one block per passage, which collides with the
+      // four-slot rule the search deliberately does not spend.
+      return null;
   }
 }
 

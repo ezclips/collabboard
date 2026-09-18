@@ -253,6 +253,13 @@ function mergeMandatoryDocumentContext(
  * chips below, which carry no proof and confer no authority.
  */
 
+/**
+ * Per-browser, not per-board: someone who wants board search generally wants it
+ * on every board they open, and a per-board key would silently reset the
+ * preference every time they moved.
+ */
+const BOARD_AI_SEARCH_PREFERENCE_KEY = 'collabboard.boardAi.searchBoard';
+
 export default function BoardAiChatDrawer({
   boardId,
   isOpen,
@@ -281,6 +288,18 @@ export default function BoardAiChatDrawer({
     useState<Record<string, BoardAiDocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
+  /**
+   * The board-search toggle. OFF BY DEFAULT, and off is what an absent stored
+   * value means -- a browser with no preference, a private window, or a reader
+   * that threw must all land on "do not search", never on "search because we
+   * could not tell".
+   *
+   * Client-side only. This is a per-browser convenience, not a setting the
+   * server needs to know between requests: every turn sends its own flag, so
+   * there is no schema change and no way for a stale preference row to turn the
+   * feature on for someone.
+   */
+  const [searchBoard, setSearchBoard] = useState(false);
   const [assistantNoteSaveStateByMessageId, setAssistantNoteSaveStateByMessageId] =
     useState<Record<string, AssistantNoteSaveState>>({});
   const assistantNoteSaveStateRef = useRef<Record<string, AssistantNoteSaveState>>({});
@@ -292,6 +311,25 @@ export default function BoardAiChatDrawer({
   const pendingNoteSaveMessageIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const activeDocumentScopeRef = useRef<string | null>(null);
+
+  // Read once on mount, not during render: localStorage is unavailable in a
+  // private window and throws rather than returning null, so every access is
+  // guarded and a failure simply leaves the toggle off.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(BOARD_AI_SEARCH_PREFERENCE_KEY) === 'on') setSearchBoard(true);
+    } catch { /* No preference is a preference: off. */ }
+  }, []);
+
+  const toggleSearchBoard = useCallback(() => {
+    setSearchBoard((on) => {
+      const next = !on;
+      try {
+        window.localStorage.setItem(BOARD_AI_SEARCH_PREFERENCE_KEY, next ? 'on' : 'off');
+      } catch { /* The toggle still works this session; only the memory is lost. */ }
+      return next;
+    });
+  }, []);
 
   const yieldsToEditor = blockingEditorOpen;
   const isEmbedded = presentation === 'embedded';
@@ -656,6 +694,11 @@ export default function BoardAiChatDrawer({
     // next question starts empty unless the user attaches again.
     const outgoingContext = mergeMandatoryDocumentContext(mandatoryDocumentContext, draftContext);
     const contextPayload = boardAiDraftContextPayload(outgoingContext);
+    // NEVER IN A DOCUMENT-SCOPED SESSION. A PDF conversation is deliberately
+    // about the one PDF in front of the user; pulling in passages from unrelated
+    // notes would answer a question they did not ask, in a panel whose whole
+    // premise is the document. The toggle is not offered there either.
+    const shouldSearchBoard = searchBoard && !documentScopeId;
     // Shown immediately because the server persists the user turn BEFORE it
     // generates: this is what was really stored, not an optimistic guess.
     const pending: BoardAiChatMessageView = {
@@ -684,6 +727,14 @@ export default function BoardAiChatDrawer({
           ...(activeThreadId === null ? {} : { threadId: activeThreadId }),
           message: content,
           ...(contextPayload ? { context: contextPayload } : {}),
+          // Omitted entirely when off, so a turn with the toggle down is
+          // byte-identical to one sent before this feature existed. The server
+          // treats absent as off, so nothing is lost by not sending `false`.
+          //
+          // The QUERY is not sent: the server searches the message it has
+          // already validated above. A client that could name the query could
+          // make the board search for something the user never typed.
+          ...(shouldSearchBoard ? { searchBoard: true } : {}),
         }),
       });
       const payload = await response.json().catch(() => null) as
@@ -743,9 +794,14 @@ export default function BoardAiChatDrawer({
       if (payload?.message) {
         setMessages((current) => [...current, payload.message as BoardAiChatMessageView]);
       }
-      // Only when something was attached: a plain turn has no chips to fetch,
-      // and the optimistic row is already exactly what was stored.
-      if (contextPayload && payload?.threadId) await reloadThread(payload.threadId);
+      // Only when the server had something to record: a plain turn has no chips
+      // to fetch, and the optimistic row is already exactly what was stored.
+      // A search counts even with nothing attached -- the server writes its own
+      // board-search item, and that item IS the chip that says what was searched
+      // and what was dropped.
+      if ((contextPayload || shouldSearchBoard) && payload?.threadId) {
+        await reloadThread(payload.threadId);
+      }
       if (!mandatoryDocumentContext && payload?.threadId) await refreshThreads();
     } catch {
       if (requestDocumentScopeId !== activeDocumentScopeRef.current && requestDocumentScopeId) {
@@ -1105,6 +1161,44 @@ export default function BoardAiChatDrawer({
                   Select a Note or PDF on the board, or add a page from the PDF reader.
                 </p>
               )}
+              {/* THE SEARCH TOGGLE. Board scope only -- a PDF conversation is
+                  about that PDF, and searching the rest of the board there
+                  would answer a question the user did not ask.
+
+                  It sits in the Context menu because that is where a user
+                  already goes to decide what Board AI may see, and it is
+                  exactly that kind of decision. It is OFF by default and the
+                  label says what it searches, in the same terms the model is
+                  told: text, and only text. */}
+              {!mandatoryDocumentContext ? (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={searchBoard}
+                  data-board-ai-search-toggle="true"
+                  className="mt-0.5 flex w-full items-center gap-1.5 border-t border-gray-100 px-2 py-1.5 text-left text-[11px] text-gray-700 hover:bg-gray-50"
+                  onClick={toggleSearchBoard}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border text-[8px] ${
+                      searchBoard ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300'
+                    }`}
+                  >
+                    {searchBoard ? '✓' : ''}
+                  </span>
+                  <span className="min-w-0 truncate">Search this board</span>
+                  <span className="ml-auto shrink-0 text-gray-400">{searchBoard ? 'On' : 'Off'}</span>
+                </button>
+              ) : null}
+              {!mandatoryDocumentContext ? (
+                <p
+                  data-board-ai-search-notice="true"
+                  className="px-2 pb-0.5 text-[10px] text-gray-400"
+                >
+                  Searches Notes, text posts and PDF text. Images, links, drawings, tables and comments are not searched.
+                </p>
+              ) : null}
               <p className="mt-0.5 border-t border-gray-100 px-2 pb-0.5 pt-1 text-[10px] text-gray-400">
                 Only attached items are shared with Board AI.
               </p>

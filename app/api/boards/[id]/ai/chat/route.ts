@@ -35,8 +35,27 @@ import {
 // takes a server-derived path and returns bytes; it answers no question about
 // access, and every authorisation below still runs on the caller's own client.
 import { createBoardAiContextImageReader } from '@/lib/infra/ai/boardAiContextImageReader';
+// The SECOND privileged read, and the same rule applies: the two search
+// functions are granted to the server role alone, so the call is made through an
+// adapter built outside this file. `searchBoardAiContext` re-checks readability
+// with the caller's own client BEFORE it touches this reader, and a test pins
+// that order.
+//
+// This file names neither the admin client nor that role, deliberately: an
+// existing guard asserts on the raw source, comments included, and it is right
+// to. A route that merely TALKS about privileged access is one edit away from
+// holding some.
+import { createBoardAiSearchReader } from '@/lib/infra/ai/boardAiSearchReader';
+import { searchBoardAiContext } from '@/lib/server/ai/boardAiChatSearch';
+import {
+  boardAiSearchHasRoom,
+  boardAiSearchPromptState,
+  boardAiSearchSkippedBlock,
+  type BoardAiSearchResult,
+} from '@/lib/domain/ai/boardAiSearchContext';
 import {
   BOARD_AI_CONTEXT_MAX_ITEMS,
+  BOARD_AI_CONTEXT_MAX_TOTAL_CHARS,
   boardAiContextViewFromStored,
   boundResolvedContext,
   buildBoardAiContextEnvelope,
@@ -148,6 +167,17 @@ const chatRequestSchema = z.object({
   context: z.object({
     items: z.array(contextItemSchema).min(1).max(BOARD_AI_CONTEXT_MAX_ITEMS),
   }).strict().optional(),
+  /**
+   * The board-search toggle. ABSENT MEANS OFF, which is the safe default and
+   * the reason this is `optional()` rather than defaulted true anywhere: a
+   * stale client, a replayed body or a hand-written request cannot turn on an
+   * automatic read of the board's text by omitting a field.
+   *
+   * It is a BOOLEAN and never a query string. The thing searched for is the
+   * message this same request already validated, so a caller cannot ask the
+   * server to search for something the user never typed.
+   */
+  searchBoard: z.boolean().optional(),
 }).strict();
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -177,7 +207,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Invalid chat request.' }, { status: 400 });
     }
     // Renamed: the route handler already binds `context` to Next.js params.
-    const { threadId, message, context: contextRequest } = parsed.data;
+    const { threadId, message, context: contextRequest, searchBoard } = parsed.data;
 
     const { id: boardId } = await context.params;
 
@@ -231,6 +261,52 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       currentContext = resolved.value;
     }
 
+    // BOARD SEARCH. After the user's own attachments, because it must yield to
+    // them, and before anything is persisted, so the chip is part of the same
+    // record as the question.
+    //
+    // R4: EXPLICIT USER INTENT OUTRANKS AUTOMATIC ENRICHMENT. The attachments
+    // are measured first and the search only gets what is left. The skip
+    // decision is made HERE, before the database round trip -- running a search
+    // that can only report "used 0 of 6" costs a query to produce a worse
+    // answer than not searching.
+    let searchBlock: ResolvedBoardAiContextBlock | null = null;
+    let searchResult: BoardAiSearchResult | null = null;
+    if (searchBoard === true) {
+      const attachmentChars = currentContext.reduce((total, block) => total + block.text.length, 0);
+      if (!boardAiSearchHasRoom(attachmentChars, BOARD_AI_CONTEXT_MAX_TOTAL_CHARS)) {
+        searchResult = {
+          outcome: 'skipped-no-room',
+          returned: 0,
+          used: 0,
+          dropped: 0,
+          query: '',
+        };
+      } else {
+        const searched = await searchBoardAiContext(
+          sessionClient as unknown as KnowledgeBoardReadAuthorizationClient,
+          createBoardAiSearchReader(),
+          boardId,
+          user.id,
+          message,
+          BOARD_AI_CONTEXT_MAX_TOTAL_CHARS - attachmentChars,
+        );
+        // A SEARCH THAT FAILED IS NOT A CHAT THAT FAILED. The user asked a
+        // question; an enrichment they toggled on being unavailable is not a
+        // reason to refuse it. The turn proceeds as though the toggle were off,
+        // which is exactly what the prompt will then say.
+        if (searched.ok) {
+          searchBlock = searched.value.block;
+          searchResult = searched.value.result;
+        } else {
+          // But NOT silently. The user asked for a search; if one could not run
+          // they are told so, because "nothing was searched" and "the board
+          // holds nothing" are different answers and only one of them is true.
+          searchResult = { outcome: 'failed', returned: 0, used: 0, dropped: 0, query: '' };
+        }
+      }
+    }
+
     // Resolve or create, always through the three-part scope. A thread id
     // belonging to another user or another board is simply not found: the
     // response does not distinguish the two, so it discloses nothing about
@@ -262,7 +338,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // The envelope is plain JSON by construction; the cast only crosses the
       // repository's structural JSON type, which an interface cannot satisfy
       // nominally.
-      context: buildBoardAiContextEnvelope(currentContext) as unknown as BoardAiJsonValue | null,
+      // The search's own record travels in the SAME envelope, so the chip that
+      // says what was searched and what was dropped survives a reload instead
+      // of living only in this one response. For a skipped search that record
+      // is the only trace there is -- it is deliberately not sent to the model.
+      context: buildBoardAiContextEnvelope(
+        searchResult === null
+          ? currentContext
+          : [...currentContext, searchBlock ?? boardAiSearchSkippedBlock(
+            searchResult.outcome === 'failed' ? 'failed' : 'skipped-no-room',
+          )],
+      ) as unknown as BoardAiJsonValue | null,
     });
     if (!stored.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
 
@@ -307,14 +393,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     // ONE budget across the whole request, so twenty historical attachments
     // cannot multiply it.
-    const modelContext = boundResolvedContext([...currentContext, ...historicalContext]);
+    //
+    // ORDER IS THE BUDGET RULE. The user's own attachments lead, so they can
+    // never be squeezed out; the search block follows, already trimmed to
+    // whatever they left; history goes last and is what actually yields. A
+    // SKIPPED search contributes nothing here -- the prompt says it instead.
+    const modelContext = boundResolvedContext([
+      ...currentContext,
+      ...(searchBlock ? [searchBlock] : []),
+      ...historicalContext,
+    ]);
 
     let result;
     try {
       result = await executeBoardAiChat(scopedUser, turns, {
         preferences: createAIRolePreferenceRepository(),
         credentials: createAIProviderCredentialRepository(),
-      }, modelContext);
+      }, modelContext, boardAiSearchPromptState(searchResult?.outcome ?? 'off'));
     } catch (error) {
       // The user's message stays. No assistant row is written, because there
       // is no assistant answer -- inventing one would be a lie in their

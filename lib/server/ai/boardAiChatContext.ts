@@ -247,6 +247,17 @@ async function resolveOne(
     });
   }
 
+  if (item.type === 'board-search') {
+    // NOT RESOLVABLE FROM AN IDENTITY, and that is the point. A search is
+    // performed once, by boardAiChatSearch, on the turn the user asked for it.
+    // Reaching here means a stored search item was fed back into resolution --
+    // which would re-run a days-old query against today's board and drop
+    // passages nobody asked for into an unrelated answer. The historical path
+    // filters these out before this point; this refuses, so a future caller
+    // that forgets cannot silently get a second search instead of an error.
+    return err(domainError('validation', 'A board search cannot be resolved as a source'));
+  }
+
   if (item.type === 'padlet') {
     const { data, error } = await client
       .from('padlets')
@@ -397,6 +408,12 @@ export async function resolveHistoricalBoardAiChatContext(
     // same function the current path depends on. The rule is about WHEN a
     // reference may be resolved, so it belongs where that distinction exists.
     if (item.type === 'padlet-image') continue;
+    // A stored search is a RECORD of one, never a standing instruction. Its
+    // query was built from a message asked on some earlier turn; re-running it
+    // now would answer a question nobody is asking, and would make the database
+    // work grow with thread length -- the very thing the identity cap prevents.
+    // The stored item survives for its chip, which is all it was ever for.
+    if (item.type === 'board-search') continue;
     const resolved = await resolveOne(client, boardId, item, NEVER_READS_BYTES);
     if (resolved.ok) blocks.push(resolved.value);
   }

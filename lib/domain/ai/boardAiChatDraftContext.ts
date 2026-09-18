@@ -24,9 +24,21 @@ export const BOARD_AI_DRAFT_CONTEXT_MAX = BOARD_AI_CONTEXT_MAX_ITEMS;
 /** How much of a selection a chip may quote. Display only, never authority. */
 export const BOARD_AI_DRAFT_PREVIEW_MAX = 60;
 
+/**
+ * Everything a user can ATTACH -- which is every context type except a board
+ * search.
+ *
+ * A search is not an attachment: the user does not pick a source, they turn on
+ * a toggle, and the server decides what it finds. Excluding it here is what
+ * keeps the composer's four slots meaning "things you chose", and it makes the
+ * payload switch below exhaustive by construction rather than by a default case
+ * that would silently accept a shape this path cannot send.
+ */
+export type BoardAiDraftContextRequest = Exclude<BoardAiContextRequestItem, { type: 'board-search' }>;
+
 export interface BoardAiDraftContextItem {
   /** Exactly what gets posted. Identity and provenance, nothing else. */
-  readonly request: BoardAiContextRequestItem;
+  readonly request: BoardAiDraftContextRequest;
   /** Local display only: the source's name as this browser already knew it. */
   readonly label: string;
   /** Local display only: a page number, or a short quote from a selection. */

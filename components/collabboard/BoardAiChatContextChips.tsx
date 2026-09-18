@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FileText, StickyNote, TextQuote, X } from 'lucide-react';
+import { FileText, Search, StickyNote, TextQuote, X } from 'lucide-react';
 
 import {
   boardAiDraftKey,
@@ -23,6 +23,7 @@ import type { BoardAiContextItem, BoardAiContextView } from '@/lib/domain/ai/boa
 function iconFor(type: string) {
   if (type === 'padlet') return StickyNote;
   if (type === 'knowledge-selection') return TextQuote;
+  if (type === 'board-search') return Search;
   return FileText;
 }
 
@@ -91,6 +92,18 @@ function persistedText(item: BoardAiContextItem): { title: string; detail: strin
     // pictures did not. Two chips, one message -- they must not disagree.
     const page = item.pageNumber === undefined ? 'Page' : `p. ${item.pageNumber}`;
     return { title, detail: `${page} · text only` };
+  }
+  if (item.type === 'board-search') {
+    // The TITLE already carries the outcome -- the server wrote the counts, the
+    // dropped count and the not-run reason into the label, so this chip states
+    // all three without the browser computing anything. The detail is what was
+    // searched for, which is the other half of "what did this message do".
+    //
+    // Nothing here may imply an image travelled: a search returns text from
+    // posts and PDF text, never pixels, and the label says "text passages" for
+    // exactly that reason.
+    const terms = item.query && item.query.trim().length > 0 ? item.query.trim() : null;
+    return { title, detail: terms ? `“${terms}”` : null };
   }
   if (item.type === 'knowledge-document') return { title, detail: 'text only' };
   if (item.type === 'padlet-image') return { title, detail: 'Image' };

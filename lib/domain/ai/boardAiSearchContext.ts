@@ -1,0 +1,256 @@
+/**
+ * Board search results, from two sources, inside one budget.
+ *
+ * Pure shaping: no database, no client, no I/O. The server reads the passages
+ * and calls in here to decide which survive and what the user is told.
+ *
+ * THE RULE THAT SHAPES EVERYTHING BELOW (R4): explicit user intent outranks
+ * automatic enrichment. Search yields, and it yields LOUDLY -- a passage is
+ * dropped whole and counted, never halved, and the count reaches the chip and
+ * the model rather than disappearing.
+ */
+
+import {
+  BOARD_AI_CONTEXT_MAX_SINGLE_CHARS,
+  type ResolvedBoardAiContextBlock,
+} from './boardAiChatContext';
+
+/** Which index a passage came from. Never merged away; every passage keeps it. */
+export type BoardAiSearchSource = 'post' | 'pdf';
+
+/**
+ * One passage, already read and already authorized, with its origin attached.
+ *
+ * `rank` is the `ts_rank` of its own source and is NOT comparable across
+ * sources -- see mergeBoardAiSearchPassages for why that matters.
+ */
+export interface BoardAiSearchPassage {
+  readonly source: BoardAiSearchSource;
+  /** Human label: the post's title, or the filename and page. */
+  readonly label: string;
+  readonly text: string;
+  readonly rank: number;
+  readonly padletId?: string;
+  readonly knowledgeDocumentId?: string;
+  readonly pageNumber?: number;
+}
+
+/**
+ * The room a request must still have before a search is worth running.
+ *
+ * THE SKIP RULE. A user with four attachments has spent the budget, and running
+ * the search anyway buys a database round trip to report "used 0 of 6", which
+ * reads worse than not searching and costs more. So if fewer than this many
+ * characters remain, the search does not run and the chip says why.
+ *
+ * FOUR HUNDRED, and the number is smaller than it looks. Passages on this
+ * corpus are small -- the observed median PDF chunk is 56 characters -- so this
+ * is room for several of them plus their origin lines, not room for one. A
+ * larger threshold would skip searches that would comfortably have fitted.
+ */
+export const BOARD_AI_SEARCH_MIN_ROOM_CHARS = 400;
+
+/** What became of the search on this turn. The prompt branches on exactly this. */
+export type BoardAiSearchOutcome =
+  /** The toggle was off. No search, and the prompt says nothing about one. */
+  | 'off'
+  /** It ran. It may still have matched nothing -- that is a result, not a failure. */
+  | 'ran'
+  /** Not run: the user's own attachments left no room. */
+  | 'skipped-no-room'
+  /**
+   * It was attempted and could not run -- the database refused, or the two
+   * functions are not deployed yet.
+   *
+   * R4 SAYS SEARCH YIELDS LOUDLY, AND THAT INCLUDES YIELDING TO A FAILURE. The
+   * first cut of this feature reported nothing at all here: the user turned the
+   * toggle on, nothing happened, and no chip said so. Silence is the one
+   * outcome the rule forbids, because it is indistinguishable from "searched
+   * and found nothing" -- which would let a user conclude their board holds no
+   * answer when in fact nothing was ever looked at.
+   *
+   * It maps to the OFF prompt, not to a fourth prompt state: no search ran, so
+   * the model must claim none. The user is the one who needs to know why.
+   */
+  | 'failed';
+
+export interface BoardAiSearchResult {
+  readonly outcome: BoardAiSearchOutcome;
+  /** How many passages the database returned, before the budget was applied. */
+  readonly returned: number;
+  /** How many reached the model. */
+  readonly used: number;
+  /** returned - used. Stated, never silent. */
+  readonly dropped: number;
+  /** The terms searched for, joined for display. Empty when nothing was searched. */
+  readonly query: string;
+}
+
+/**
+ * Is there room to bother searching?
+ *
+ * Called BEFORE the database round trip, which is the whole point of it.
+ */
+export function boardAiSearchHasRoom(attachmentChars: number, totalBudget: number): boolean {
+  return totalBudget - attachmentChars >= BOARD_AI_SEARCH_MIN_ROOM_CHARS;
+}
+
+/**
+ * Top-K from each source independently, then concatenated.
+ *
+ * THERE IS NO CROSS-SOURCE RANKING, AND THAT IS THE DECISION. `ts_rank` over a
+ * short post title and `ts_rank` over a PDF fragment are different scales, so
+ * sorting the two together would present an arithmetic coincidence as a
+ * judgement about relevance. Each source is ordered within itself -- the
+ * database already did that -- and the caller's K bounds each.
+ *
+ * NO RATIO IS BAKED IN. K is the caller's, one value per source, because six
+ * fragments do not equal one post today and will not after segmentation is
+ * revisited. Posts lead only because a board's own notes are the thing a user
+ * is least likely to have attached by hand.
+ */
+export function mergeBoardAiSearchPassages(
+  posts: readonly BoardAiSearchPassage[],
+  chunks: readonly BoardAiSearchPassage[],
+  limitPerSource: number,
+): readonly BoardAiSearchPassage[] {
+  return [...posts.slice(0, limitPerSource), ...chunks.slice(0, limitPerSource)];
+}
+
+/**
+ * Admit whole passages until the budget is spent, and count what was dropped.
+ *
+ * NEVER HALF A PASSAGE. A split passage that is still cited claims a source the
+ * model never fully saw, and the citation would point at a page whose relevant
+ * sentence was the part that got cut. Truncating is the failure mode that looks
+ * like it worked.
+ *
+ * A single passage longer than the per-block ceiling is bounded by that ceiling
+ * rather than dropped -- that is the same rule every other context block lives
+ * under, and dropping the one passage that matched would be worse.
+ */
+/** The separator and origin line each passage costs beyond its own characters. */
+const BOARD_AI_SEARCH_PASSAGE_OVERHEAD = 16;
+
+export function boundBoardAiSearchPassages(
+  passages: readonly BoardAiSearchPassage[],
+  availableChars: number,
+): { readonly kept: readonly BoardAiSearchPassage[]; readonly dropped: number } {
+  const kept: BoardAiSearchPassage[] = [];
+  let spent = 0;
+  for (const passage of passages) {
+    const text = passage.text.length > BOARD_AI_CONTEXT_MAX_SINGLE_CHARS
+      ? `${passage.text.slice(0, BOARD_AI_CONTEXT_MAX_SINGLE_CHARS - 1)}…`
+      : passage.text;
+    // The label travels into the block too, so it is measured with the text.
+    const cost = text.length + passage.label.length + BOARD_AI_SEARCH_PASSAGE_OVERHEAD;
+    if (spent + cost > availableChars) continue;
+    kept.push({ ...passage, text });
+    spent += cost;
+  }
+  return { kept, dropped: passages.length - kept.length };
+}
+
+/** The label the chip and the payload both use for the one search block. */
+export const BOARD_AI_SEARCH_BLOCK_LABEL = 'Board search';
+
+/**
+ * The single context block a search contributes.
+ *
+ * ONE BLOCK, not one per passage. Every passage keeps its own origin line
+ * inside, so a citation still resolves, but the four-slot rule stays a rule
+ * about what the USER attached -- a search that matched six things must not
+ * evict two of their four attachments by occupying six slots.
+ *
+ * The block's label says it is a search result, and the prompt's claim depends
+ * on that being true: the model is told these came from a search of the board,
+ * so a block that did not would make the prompt a lie.
+ */
+export function boardAiSearchContextBlock(
+  passages: readonly BoardAiSearchPassage[],
+  query: string,
+  result: BoardAiSearchResult,
+): ResolvedBoardAiContextBlock {
+  const body = passages.length === 0
+    // LOAD-BEARING. Without this the model sees an empty block and infers the
+    // search failed, or worse, that it was never run -- and answers as if it
+    // had read the board. Saying "nothing matched" is a result.
+    ? 'No passages on this board matched this search.'
+    : passages
+      .map((passage) => `[${passage.source === 'post' ? 'board post' : 'PDF text'}: ${passage.label}]\n${passage.text}`)
+      .join('\n\n');
+  return {
+    type: 'board-search',
+    // THE COUNTS TRAVEL IN THE LABEL, and that is one decision serving two
+    // requirements. The persisted envelope keeps a block's label, so the chip
+    // can say what was found and dropped after a reload without a second stored
+    // shape; and the label is in the payload, so the model can honestly answer
+    // "I searched and used two of six" rather than implying it saw all six.
+    label: boardAiSearchChipText(result),
+    query,
+    text: body,
+  };
+}
+
+/**
+ * The record of a search that was NOT run, for the stored envelope only.
+ *
+ * NEVER SENT TO THE MODEL. The prompt's third branch already tells it that the
+ * attachments took the room, and adding a block to say so again would spend the
+ * very budget the skip existed to protect -- while occupying one of the four
+ * slots the user's own attachments just filled.
+ *
+ * It exists because the chip has to survive a reload: without a stored item the
+ * user sees "search on" and no explanation the next time they open the thread.
+ */
+export function boardAiSearchSkippedBlock(
+  outcome: 'skipped-no-room' | 'failed' = 'skipped-no-room',
+): ResolvedBoardAiContextBlock {
+  return {
+    type: 'board-search',
+    label: boardAiSearchChipText({ outcome, returned: 0, used: 0, dropped: 0, query: '' }),
+    query: '',
+    text: outcome === 'failed'
+      ? 'Board search could not run, so nothing on this board was searched.'
+      : 'Board search was not run: the attachments on this message took all the available room.',
+  };
+}
+
+/**
+ * Which prompt branch an outcome selects.
+ *
+ * THERE ARE THREE PROMPT STATES AND FOUR OUTCOMES, and the collapse is the
+ * point: a search that could not run and a search that was never asked for are
+ * the same thing TO THE MODEL -- no passages, no claim. They differ only to the
+ * user, who is told which happened by the chip.
+ */
+export function boardAiSearchPromptState(
+  outcome: BoardAiSearchOutcome,
+): 'off' | 'ran' | 'skipped-no-room' {
+  if (outcome === 'ran') return 'ran';
+  if (outcome === 'skipped-no-room') return 'skipped-no-room';
+  return 'off';
+}
+
+/**
+ * What the chip says. Server-authored, and it must never imply an image
+ * travelled -- a search returns text from posts and PDF text, and nothing on
+ * this path carries pixels.
+ */
+export function boardAiSearchChipText(result: BoardAiSearchResult): string {
+  const prefix = BOARD_AI_SEARCH_BLOCK_LABEL;
+  if (result.outcome === 'skipped-no-room') {
+    return `${prefix} — not run, your attachments took the room`;
+  }
+  // Distinct from "no text matched", deliberately. Telling a user their board
+  // holds nothing when nothing was looked at is the worse of the two errors.
+  if (result.outcome === 'failed') return `${prefix} — could not run, nothing was searched`;
+  // "text" in every branch, deliberately: this path carries words from posts and
+  // from PDF text and never pixels, and a chip that read "3 results" beside the
+  // image chip would invite exactly the wrong inference.
+  if (result.returned === 0) return `${prefix} — no text matched`;
+  if (result.dropped > 0) {
+    return `${prefix} — ${result.returned} text passages found, ${result.used} used, ${result.dropped} dropped for room`;
+  }
+  return `${prefix} — ${result.used} text passages used`;
+}

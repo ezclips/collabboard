@@ -22,6 +22,11 @@ export const BOARD_AI_CONTEXT_TYPES = [
   'knowledge-selection',
   'padlet',
   'padlet-image',
+  // ADDITIVE, which is why BOARD_AI_CONTEXT_VERSION stays 1: an older client
+  // reading a thread that contains one sees an item type it does not know and
+  // drops it, exactly as it already drops anything malformed. Nothing about the
+  // five existing shapes changes.
+  'board-search',
 ] as const;
 
 export type BoardAiContextType = (typeof BOARD_AI_CONTEXT_TYPES)[number];
@@ -109,12 +114,31 @@ export interface PadletImageContextRequest {
   readonly padletId: string;
 }
 
+/**
+ * A board search, carrying WHAT TO SEARCH FOR and never what was found.
+ *
+ * The browser's whole contribution is a toggle; the server fills `query` from
+ * the message it has already validated. That asymmetry is the same rule every
+ * other variant follows -- identity in, content read by the server -- and it is
+ * why a client cannot ask this to search a string the user never typed.
+ *
+ * CURRENT-TURN ONLY, like `padlet-image`. A stored one is not re-run on a later
+ * turn: re-searching a three-day-old question against today's board would put
+ * passages nobody asked for into an unrelated answer, and would make the
+ * database work grow with thread length. The stored item survives for its chip.
+ */
+export interface BoardSearchContextRequest {
+  readonly type: 'board-search';
+  readonly query: string;
+}
+
 export type BoardAiContextRequestItem =
   | KnowledgeDocumentContextRequest
   | KnowledgePageContextRequest
   | KnowledgeSelectionContextRequest
   | PadletContextRequest
-  | PadletImageContextRequest;
+  | PadletImageContextRequest
+  | BoardSearchContextRequest;
 
 /* ------------------------------------------------------------------ */
 /* Persisted: identity + server-authored display metadata             */
@@ -136,6 +160,8 @@ export interface BoardAiContextItem {
   readonly charEnd?: number;
   /** The server's own verified slice for a selection; absent otherwise. */
   readonly selectedText?: string;
+  /** The tsquery-source terms for a board-search item; absent otherwise. */
+  readonly query?: string;
   readonly label?: string;
   readonly excerpt?: string;
 }
@@ -187,6 +213,8 @@ export interface ResolvedBoardAiContextBlock {
   readonly padletId?: string;
   readonly charStart?: number;
   readonly charEnd?: number;
+  /** Present only on a board-search block: the terms that were searched for. */
+  readonly query?: string;
   readonly text: string;
   /**
    * Present ONLY on a padlet-image block. `text` stays the marker above, so
@@ -223,6 +251,7 @@ export function buildBoardAiContextEnvelope(
       ...(block.charStart !== undefined ? { charStart: block.charStart } : {}),
       ...(block.charEnd !== undefined ? { charEnd: block.charEnd } : {}),
       ...(block.type === 'knowledge-selection' ? { selectedText: block.text } : {}),
+      ...(block.query !== undefined ? { query: boardAiContextExcerpt(block.query) } : {}),
       label: boardAiContextLabel(block.label),
       excerpt: boardAiContextExcerpt(block.text),
     })),
@@ -294,6 +323,12 @@ export function boardAiContextItemsFromStored(value: unknown): readonly ParsedBo
       }
     } else if (item.type === 'padlet' && padletId) {
       request = { type: 'padlet', padletId };
+    } else if (item.type === 'board-search') {
+      // A stored search keeps its query so the chip can say what was searched
+      // for. It is never re-run -- resolveHistorical drops it -- so this is a
+      // display record, not a standing instruction.
+      const query = typeof item.query === 'string' ? item.query : '';
+      request = { type: 'board-search', query };
     } else if (item.type === 'padlet-image' && padletId) {
       // Identity only, exactly as stored. Nothing about the image survives a
       // round trip: the stored item carries a label and the marker excerpt, and
@@ -342,6 +377,8 @@ export function boardAiContextIdentityKey(item: BoardAiContextRequestItem): stri
     // drop one of the two.
     case 'padlet-image':
       return `padlet-image:${item.padletId}`;
+    case 'board-search':
+      return `board-search:${item.query}`;
   }
 }
 
@@ -442,6 +479,7 @@ export function boardAiContextViewFromStored(value: unknown): BoardAiContextView
       ...('charStart' in request ? { charStart: request.charStart } : {}),
       ...('charEnd' in request ? { charEnd: request.charEnd } : {}),
       ...('selectedText' in request ? { selectedText: boardAiContextExcerpt(request.selectedText) } : {}),
+      ...('query' in request ? { query: boardAiContextExcerpt(request.query) } : {}),
       ...(label ? { label } : {}),
       ...(excerpt ? { excerpt } : {}),
     };
