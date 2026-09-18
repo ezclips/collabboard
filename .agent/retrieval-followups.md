@@ -1007,6 +1007,23 @@ came out of doing it, and they are the ones whoever builds this needs:
    is a true statement about the past — but it needs the reader to have a
    not-found state for a citation, which it does not have today.
 
+**The precedent to start from, so this does not begin on a blank page.**
+`app/api/boards/[id]/knowledge/highlights/[highlightId]/route.ts` already ships a
+per-item, board-scoped `DELETE` — the same shape a document route needs. Two
+things about it are worth copying rather than just its existence:
+
+- It binds the **same session factory as its collection route**
+  (`getKnowledgeHighlightSession`), deliberately, so both paths act under one
+  authenticated authority instead of two that can drift apart.
+- Its doc comment reasons about **what the bound command cannot write** — no
+  citation, padlet or Note write is available to it, so Notes, `source_reference`
+  rows, "Used in Notes" and the Library backlink survive *by construction* rather
+  than by the handler remembering not to touch them.
+
+That second habit is the one this route needs most, because it is the route that
+has to hold the blob and the citation decisions above without acquiring the
+ability to quietly rewrite signed messages.
+
 **Why deferred.** Nothing is in flight, and this is docs-only work today: the
 delete path is a small API route and a list control, but item 3 above is a
 product decision about what a citation means after its source is gone, and that
