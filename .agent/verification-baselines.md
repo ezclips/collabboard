@@ -73,11 +73,18 @@ lib/domain/canvas/boardObjectReveal.ts
 
 ---
 
-## 3. KNOWN FLAKE — `scripts/check-react-hooks.test.ts`
+## 3. KNOWN FLAKE — `scripts/check-react-hooks.test.ts` (FIXED at `6cea975`)
 
 **Not a baseline member, and not a regression when it appears.** It fails under
 machine load and passes on a quiet machine, so it will drift in and out of any
 run-to-run comparison.
+
+**It was closer to failing than "load" suggests.** In the quiet full-suite run of
+2026-09-18 that produced the reading below, this file took **4,924ms against the
+5,000ms default — 76ms of headroom.** It was not waiting for a busy machine; it
+was already at the line, which is why it tipped so easily. Both ESLint-spawning
+files now carry an explicit 20,000ms timeout on their first test (`6cea975`), and
+the quiet run after that returned exactly the 26 baseline files with no flake.
 
 Observed 2026-09-18:
 
@@ -99,8 +106,9 @@ it spawns ESLint too, timed out at 9,200ms in the contended run, and passed at
 1,099ms when quiet. Treat both as load-sensitive.
 
 **How to tell a flake from a regression here:** run the file alone. If it passes
-in about 1.5 seconds, the full-suite failure was contention. Both files would
-stop flaking if their first test carried an explicit timeout.
+in about 1.5 seconds, the full-suite failure was contention. Both files now carry
+that timeout, so this is history rather than a live hazard — but the discriminator
+still holds if a new ESLint-spawning test appears.
 
 **Run the gate with nothing else heavy in flight.** A concurrent `next dev`
 compile manufactured two false failures in one run and cost a round trip.
