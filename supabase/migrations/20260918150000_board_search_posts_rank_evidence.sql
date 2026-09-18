@@ -89,18 +89,23 @@
 -- ------------------------------------------------------------------------
 -- WHAT THIS IS NOT MEASURED AGAINST, STATED PLAINLY.
 -- ------------------------------------------------------------------------
--- THE TUNING BATTERY CONTAINS FOUR TEXT/NOTE POSTS IN TOTAL, across two questions
--- that return any post at all. Every question returns fewer posts than the
--- per-source limit, so no post is ever dropped by ranking in the battery, and the
+-- NO QUESTION IN THE BATTERY RETURNS MORE POSTS THAN THE PER-SOURCE LIMIT. The
+-- board holds NINE text/note posts, but the battery's eleven questions only ever
+-- surface FOUR distinct ones, and never more than three at once -- against a
+-- limit of four. A ranking change can only lose a passage by pushing it past
+-- that limit or past the character budget, and neither is ever reached. So the
 -- bar the battery enforces -- never drop a human-judged relevant passage --
 -- CANNOT DISCRIMINATE BETWEEN THESE TWO FLAGS. It is passed, vacuously.
 --
+-- FIVE OF THE NINE POSTS ARE NEVER RETURNED BY ANY QUESTION, which is the sharper
+-- version of the same point: the corpus is not small, the QUESTIONS are narrow.
+--
 -- The specific risk flag 0 carries within posts is therefore UNMEASURED: a long
 -- rambling post that repeats one query term eight times accumulates rank, and
--- will outrank a short exact answer that mentions it once. No post on the test
--- board does that. On a real board with long posts it is the expected failure
--- mode, and the instrument that would catch it is a battery with a posts corpus,
--- which is followups item 7.
+-- will outrank a short exact answer that mentions it once. No post the battery
+-- returns does that. On a real board with long posts it is the expected failure
+-- mode, and the instrument that would catch it is a battery whose questions
+-- actually exercise the posts corpus, which is followups item 7.
 --
 -- ------------------------------------------------------------------------
 -- NO INDEX REBUILD. The indexed expression is untouched: same 'simple'

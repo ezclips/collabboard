@@ -90,7 +90,14 @@ invariants AS (
     UNION ALL SELECT 4, 'hardening', 'both set an EMPTY search_path',
            COALESCE((SELECT string_agg(proname || '=' || COALESCE(array_to_string(proconfig, ','), '(none)'),
                                        ' ' ORDER BY proname) FROM fns), '(absent)'),
-           (SELECT count(*) = 2 AND bool_and('search_path=' = ANY(COALESCE(proconfig, ARRAY['(none)']))) FROM fns)
+           -- BOTH SPELLINGS, because proconfig stores what was parsed rather
+           -- than what was typed: `SET search_path = ''` comes back as
+           -- search_path="" on a live database, and as search_path= elsewhere.
+           -- The single-spelling test this replaces reported a FALSE FAILURE on
+           -- functions that were correctly hardened.
+           (SELECT count(*) = 2 AND bool_and(
+                EXISTS (SELECT 1 FROM unnest(COALESCE(proconfig, ARRAY['(none)'])) AS setting
+                         WHERE setting IN ('search_path=', 'search_path=""'))) FROM fns)
     -- Everything below is what a careless CREATE OR REPLACE could have dropped.
     UNION ALL SELECT 5, 'authorization', 'both are still SECURITY INVOKER',
            COALESCE((SELECT string_agg(proname || '=' || CASE WHEN prosecdef THEN 'definer' ELSE 'invoker' END,

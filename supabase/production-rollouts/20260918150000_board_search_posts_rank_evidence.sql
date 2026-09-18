@@ -19,12 +19,13 @@
 --     two ranks are never compared -- the caller takes top-K per source -- and
 --     chunks need the length normalization that posts do not.
 --
--- WHAT IT IS NOT MEASURED AGAINST. The battery holds four text/note posts in
--- total and never returns more posts than the per-source limit, so no post is
--- ever dropped by ranking there and the battery's bar cannot tell these two flags
--- apart. The unmeasured risk flag 0 carries is a long post that repeats one term
--- many times outranking a short exact answer; no post on the test board does
--- that. Followups item 7.
+-- WHAT IT IS NOT MEASURED AGAINST. No question in the battery returns more posts
+-- than the per-source limit -- the board holds nine text/note posts, but the
+-- questions only ever surface four of them and never more than three at once,
+-- against a limit of four. So no post is ever dropped by ranking there and the
+-- battery's bar cannot tell these two flags apart. The unmeasured risk flag 0
+-- carries is a long post that repeats one term many times outranking a short
+-- exact answer; no post the battery returns does that. Followups item 7.
 --
 -- WHY A NEW MIGRATION RATHER THAN AN EDIT. 20260918140000 is released, and this
 -- repository does not rewrite released migrations: a database that already ran

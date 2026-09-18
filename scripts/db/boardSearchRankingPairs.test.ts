@@ -248,27 +248,39 @@ describe('what the ratings bar could and could not decide', () => {
    *
    * The battery's bar is "never drop a human-judged relevant passage". A ranking
    * change can only drop something by pushing it past the per-source limit, or
-   * past the character budget. NEITHER HAPPENS ANYWHERE IN THIS BATTERY: the
-   * board holds four text/note posts in total, only two questions return any
-   * post at all, and both return fewer than the per-source limit of four.
+   * past the character budget. NEITHER HAPPENS ANYWHERE IN THIS BATTERY: no
+   * question returns more posts than the per-source limit of four, and the three
+   * that return any post at all return three, one and three.
+   *
+   * THE CORPUS IS NOT THE SMALL THING -- THE QUESTIONS ARE. The board holds NINE
+   * text/note posts. The eleven questions surface FOUR distinct ones between
+   * them, so five posts are never returned by anything and no question ever
+   * forces a choice. An earlier version of this file said the board held four
+   * posts, which was simply wrong, and it made the corpus look like the limit
+   * when the questions are.
    *
    * So the posts flag change PASSES THE BAR VACUOUSLY. It is not endorsed by the
    * ratings; it is merely not contradicted by them. The argument for it is the
    * mechanism recorded above, and the argument against it -- a long post that
    * repeats one term outranking a short exact answer, which flag 0 permits and
-   * flag 1 did not -- is UNMEASURABLE on this corpus. Followups item 7.
+   * flag 1 did not -- is UNMEASURABLE against these questions. Followups item 7.
    */
-  const POSTS_ON_THE_BOARD = 4;
+  const POSTS_ON_THE_BOARD = 9;
   const POSTS_PER_SOURCE_LIMIT = 4;
+  /** Distinct posts any battery question actually returns. Counted, 2026-09-18. */
+  const POSTS_THE_QUESTIONS_REACH = 4;
 
   it('no question in the battery returns more posts than the per-source limit', () => {
     const postsReturned = { q02: 3, q03: 1, q10: 3 } as const;
     for (const [question, count] of Object.entries(postsReturned)) {
-      expect(count, `${question} would have exercised the limit`).toBeLessThanOrEqual(POSTS_PER_SOURCE_LIMIT);
+      expect(count, `${question} would have exercised the limit`).toBeLessThan(POSTS_PER_SOURCE_LIMIT);
     }
   });
 
-  it('the posts corpus is four posts, which is why the bar cannot discriminate', () => {
-    expect(POSTS_ON_THE_BOARD).toBeLessThanOrEqual(POSTS_PER_SOURCE_LIMIT);
+  it('the questions reach under half the posts, which is why the bar cannot discriminate', () => {
+    // The board is big enough to have exercised the limit. The questions never
+    // ask it to, and that is the limit of the instrument -- not the corpus size.
+    expect(POSTS_ON_THE_BOARD).toBeGreaterThan(POSTS_PER_SOURCE_LIMIT);
+    expect(POSTS_THE_QUESTIONS_REACH).toBeLessThan(POSTS_ON_THE_BOARD);
   });
 });

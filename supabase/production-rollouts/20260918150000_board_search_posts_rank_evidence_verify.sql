@@ -41,7 +41,8 @@
 --   * It does not mean the posts ranking is GOOD, only that the flag and the
 --     tie-break that were chosen are the ones in force. Whether flag 0 orders a
 --     real posts corpus sensibly is a live question against real data -- and one
---     the tuning battery cannot answer, because it holds four posts in total.
+--     the tuning battery cannot answer, because no question it asks returns more
+--     posts than the per-source limit.
 --   * It does not mean the planner uses the index. That needs EXPLAIN against
 --     real rows. Row 9 proves the predicate that makes it possible survived.
 --   * It does not re-verify what the two verifiers before it cover. Run those
@@ -112,7 +113,12 @@ invariants AS (
     -- Everything below is what a careless CREATE OR REPLACE could have dropped.
     UNION ALL SELECT 6, 'hardening', 'posts still set an EMPTY search_path',
            COALESCE((SELECT COALESCE(array_to_string(proconfig, ','), '(none)') FROM posts), '(absent)'),
-           COALESCE((SELECT 'search_path=' = ANY(COALESCE(proconfig, ARRAY['(none)'])) FROM posts), false)
+           -- BOTH SPELLINGS, because proconfig stores what was parsed rather
+           -- than what was typed: `SET search_path = ''` comes back as
+           -- search_path="" on a live database, and as search_path= elsewhere.
+           COALESCE((SELECT EXISTS (
+                SELECT 1 FROM unnest(COALESCE(proconfig, ARRAY['(none)'])) AS setting
+                 WHERE setting IN ('search_path=', 'search_path=""')) FROM posts), false)
     UNION ALL SELECT 7, 'authorization', 'posts are still SECURITY INVOKER',
            COALESCE((SELECT CASE WHEN prosecdef THEN 'definer' ELSE 'invoker' END FROM posts), '(absent)'),
            COALESCE((SELECT NOT prosecdef FROM posts), false)

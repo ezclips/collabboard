@@ -282,12 +282,16 @@ unrelated-document noise by **6×** (0.0331706 vs 0.0055352) where flag 1 manage
 **What the ratings could NOT decide, stated because it matters more than the
 table.** The bar is "never drop a human-judged relevant passage", and a ranking
 change can only drop something by pushing it past the per-source limit or past
-the character budget. **Neither happens anywhere in this battery**: the board
-holds four `text`/`note` posts in total, only q02, q03 and q10 return any post at
-all, and all three return fewer than the per-source limit of four. The posts flag
-change therefore **passes the bar vacuously** — not endorsed by the ratings,
-merely not contradicted. The argument for it is the mechanism above; the argument
-against it is item 7.
+the character budget. **Neither happens anywhere in this battery**: only q02, q03
+and q10 return any post at all, and they return three, one and three — every one
+below the per-source limit of four.
+
+**The corpus is not the small thing; the questions are.** The board holds **nine**
+`text`/`note` posts. The eleven questions surface **four** distinct ones between
+them, so five posts are never returned by anything and no question ever forces a
+choice. The posts flag change therefore **passes the bar vacuously** — not
+endorsed by the ratings, merely not contradicted. The argument for it is the
+mechanism above; the argument against it is item 7.
 
 The three pairs are named gate assertions in
 `scripts/db/boardSearchRankingPairs.test.ts`. q02's is now **flipped** — it
@@ -341,36 +345,141 @@ or database CPU that does not fall when chat traffic does.
 
 ---
 
-## 7. The posts corpus is four posts — the instrument that would judge flag 0
+## 7. The questions never exercise the posts limit — the instrument that would judge flag 0
 
 **What.** `20260918150000` moved `search_board_posts_text` to `ts_rank`
 normalization flag 0 on the strength of one question, q02, whose evidence is a
 three-way tie. The tuning battery cannot judge that change, and this item exists
 so nobody later mistakes "the battery was green" for "the flag was validated".
 
-**Why the battery cannot judge it.** The test board holds **four** `text`/`note`
-posts. Only three questions return a post at all (q02: 3, q03: 1, q10: 3), and
-every one of those counts is **below the per-source limit of four**. A ranking
-change can only lose a passage by pushing it past that limit or past the
-character budget, and neither is ever reached — so no post ordering, however
-wrong, can fail the bar. The change passes vacuously.
+**Why the battery cannot judge it.** Only three questions return a post at all
+(q02: 3, q03: 1, q10: 3), and every one of those counts is **below the per-source
+limit of four**. A ranking change can only lose a passage by pushing it past that
+limit or past the character budget, and neither is ever reached — so no post
+ordering, however wrong, can fail the bar. The change passes vacuously.
+
+**And the corpus is not what is small — the questions are.** The board holds
+**nine** `text`/`note` posts; the eleven questions surface **four** distinct ones
+between them. Five posts are never returned by anything. Counted 2026-09-18,
+after an earlier version of this item wrongly said the board held four — the
+board was always big enough to exercise the limit, and the questions never ask it
+to. That is a sharper problem than a thin corpus, because adding documents would
+not fix it.
 
 **The specific risk flag 0 carries, which flag 1 did not.** Flag 0 ignores
 document length, so rank accumulates with every extra occurrence. A long rambling
 post that mentions one query term eight times will outrank a short exact answer
-that mentions it once. **No post on the test board does that**, which is why this
-is an open risk rather than a ruled-out one. It is the mirror image of the defect
+that mentions it once. **No post the battery returns does that**, which is why
+this is an open risk rather than a ruled-out one. It is the mirror image of the defect
 that was fixed, and the revert is ready:
 `20260918150000_board_search_posts_rank_evidence_rollback.sql`, whose header says
 when running it is the right call.
 
-**What would settle it.** A battery whose posts corpus contains, at minimum: one
-long post repeating a query term several times beside a short exact answer; more
-matching posts than the per-source limit, so the limit is actually exercised; and
-a title-only post competing with a body post at *unequal* coverage in both
-directions. That is a corpus-building job, not a code change, and it is the same
-instrument item 4 wants for chunk size.
+**What would settle it.** Questions — and where necessary posts — that reach, at
+minimum: one long post repeating a query term several times beside a short exact
+answer; **more matching posts than the per-source limit, so the limit is actually
+exercised**; and a title-only post competing with a body post at *unequal*
+coverage in both directions. The first job is to write questions that reach the
+five posts nothing currently returns; only then is it clear whether new posts are
+needed at all. That is question-writing plus possibly corpus-building, not a code
+change, and it is the same kind of instrument item 4 wants for chunk size.
 
 **The signal to watch for before it is built:** a user reporting that board search
 surfaces a long post they did not want ahead of the short one that answered them.
 That is this item, and it is a revert away.
+
+---
+
+## 8. The `8ebbe969` diagnosis — the gate the reader was built through
+
+**What the gate was.** Plan rev. 4 made one thing a precondition on the whole
+reader: diagnose thread `8ebbe969`, a whole-PDF attachment that answered *"Board
+AI could not answer. Your message was saved."* on the managed default. The plan's
+words: the diagnosis comes **"before any reader is built"**, and its outcome is
+**"a reader parameter, not a document quirk"**.
+
+**Why it was a gate, which is the part worth keeping.** If the failure was our own
+`BOARD_AI_CHAT_TIMEOUT_MS = 20_000` aborting generation, then **passage count is
+bounded by latency, not by characters** — more input means a slower first byte, so
+search makes generation slower on every turn it fires. Neither
+`BOARD_AI_CONTEXT_MAX_SINGLE_CHARS` nor the four-slot rule expresses that. The
+plan's conclusion was that the ceiling or the default passage count had to move
+*before* anything was built on it.
+
+**What actually happened: the reader was built and `K = 4` was set without it.**
+`BOARD_AI_SEARCH_LIMIT_PER_SOURCE = 4` is today **a character-budget decision** —
+it was chosen against the 14,000-character total and the four-slot rule, and
+latency was not an input to it. That is stated here so it can be checked rather
+than assumed.
+
+**The source record is gone.** `8ebbe969` matches nothing anywhere in this
+repository — no test, no doc, no comment. The thread id came from a chat session
+and the investigation was never written down. **Do not go looking for it**; that
+is the cost of the gap, not a task.
+
+**What the live runs have shown since — and this is INFERENCE, not the
+diagnosis.** Search is bounded separately at `BOARD_AI_SEARCH_TIMEOUT_MS = 3_000`
+and does not consume the generation clock. q04 completed end to end in **4.5s**.
+q01 and q02 assembled **2,272** and **~3,800** characters of context and returned
+substantive answers. **No 20-second abort has been observed on any searched
+turn.** That is evidence *against* the coupling the plan feared. It is not the
+diagnosis the plan asked for: none of those turns was loaded to the worst case,
+and none of them is `8ebbe969`.
+
+**The cheap confirm that closes this item.** ONE searched turn loaded to the worst
+case — a question that fills the passage budget on **both** sources — timed end to
+end, with the elapsed time and the assembled character count recorded here. That
+answers the question the gate actually existed to answer: **does passage volume
+couple to generation latency?** It is one live call, not an investigation.
+
+- If it does not couple: `K = 4` stays a character-budget decision, and this item
+  closes with the number written down.
+- If it does couple: `K` becomes a **latency-driven** decision, and the ceiling or
+  the default passage count moves — which is exactly what the plan said, one unit
+  later than it said it.
+
+**Triggers to revisit:** the first 20-second abort on a searched turn, or any
+change to `K` or to the context budgets. Either one invalidates the reasoning
+above and the confirm has to be re-run.
+
+---
+
+## 9. Discoverability — decided, with a review trigger
+
+**Not an open question.** It was left open by plan rev. 4 and is being closed here
+deliberately, because "open" is how a question becomes memory-only and then
+becomes nobody's.
+
+**The decision, for this branch:** board search stays **off by default**,
+**board-scoped**, with **the toggle as the only discovery surface**. No in-product
+prompting, no nudge, no empty-state suggestion, no model-driven invocation.
+
+**The rationale, stated so it can be argued with.** A conservative default
+protects cost and noise on a feature that spends a database round trip and up to
+four passages of budget on every turn it fires. And **discovery is a launch
+decision, not a retrieval one** — it belongs with whoever decides how the feature
+is introduced, not with the people tuning `ts_rank`. Shipping a nudge from this
+branch would settle a product question by accident.
+
+**What the plan feared, recorded because it is the thing to watch for:** off by
+default, board-scoped, one slot of four, no model-driven invocation — *"a user
+must know it exists to ever benefit… may go unused and be misread as unwanted."*
+**Zero adoption is ambiguous evidence**: it looks identical to rejection, and it
+will be read as rejection unless this item is here to say otherwise.
+
+**The review trigger.** If adoption is near zero after real traffic on the first
+cohort, add a discovery surface before concluding anything about demand. The
+options, so the decision starts from a list rather than from scratch:
+
+- an **empty-state nudge** in the chat drawer when a board has posts or PDFs the
+  user has not attached — cheapest, and it fires exactly when search would help;
+- a **one-time prompt** on first use of the drawer on a board with knowledge;
+- **on by default** for boards above some content threshold — the strongest
+  option and the one that spends budget without being asked, so it needs the
+  latency answer from item 8 first;
+- **model-driven invocation** (Stage B, tool calling) — a different feature, not
+  a discovery surface, and deferred for its own reasons.
+
+**What would make the trigger fire wrongly:** adoption measured on a cohort whose
+boards hold nothing worth searching. Check that the boards in the sample actually
+have posts or PDFs before reading a zero as a verdict.

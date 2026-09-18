@@ -30,8 +30,9 @@
 -- WHEN RUNNING IT IS NEVERTHELESS RIGHT. Flag 0 carries an unmeasured risk in the
 -- other direction: it ignores length entirely, so a long post that repeats one
 -- query term many times accumulates rank and can outrank a short exact answer.
--- The tuning battery holds four text/note posts in total and cannot see that, so
--- it is a real possibility rather than a ruled-out one. If a real board shows
+-- The tuning battery cannot see that -- no question it asks returns more posts
+-- than the per-source limit, so ranking never decides anything there -- so it is
+-- a real possibility rather than a ruled-out one. If a real board shows
 -- long rambling posts crowding out short exact ones, this file is the way back
 -- while the proper instrument -- a battery with a posts corpus, followups item 7
 -- -- is built.
