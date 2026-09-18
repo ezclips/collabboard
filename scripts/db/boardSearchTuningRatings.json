@@ -22,11 +22,6 @@
     }
   },
   "q02-audi-horn": {
-    "post:2845135a-9f8f-4f58-9a35-807bdb339f33:0": {
-      "relevant": false,
-      "note": "post | Audi A2 Stoßstange Titel bild (title only) | 0 chars | ",
-      "why": "Title-only post naming the topic. Points at the right material but contains no procedure, so it cannot answer \"how do I\"."
-    },
     "post:6d7044fe-a2b7-45b9-9a4d-16c729caa500:0": {
       "relevant": true,
       "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 341 chars | Möchte man nur die Hupe wechseln, kann man auch nur eine Seite der Sto",
@@ -36,6 +31,11 @@
       "relevant": true,
       "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 406 chars | Das Stecker abziehen bereitet vielen Leuten immer Schwierigkeiten, da ",
       "why": "The connector-removal step, part of the procedure asked about."
+    },
+    "post:2845135a-9f8f-4f58-9a35-807bdb339f33:0": {
+      "relevant": false,
+      "note": "post | Audi A2 Stoßstange Titel bild (title only) | 0 chars | ",
+      "why": "Title-only post naming the topic. Points at the right material but contains no procedure, so it cannot answer \"how do I\"."
     },
     "pdf:a8f356ae-0084-4427-b74a-211713aa7464:5": {
       "relevant": true,
@@ -51,6 +51,11 @@
       "relevant": false,
       "note": "pdf | Sammelmappe1.pdf — page 1 | 1064 chars | Bicycle Drivetrain Maintenance Understanding the Drivetrain The bicycl",
       "why": "Same bicycle text in a second document."
+    },
+    "pdf:8d7b70e3-9939-4385-8cc1-b60bfe076f2f:0": {
+      "relevant": false,
+      "note": "pdf | knitting_stitch_patterns.pdf — page 1 | 1018 chars | Knitting Stitch Patterns The Binary Foundation of Knitting At its core",
+      "why": "Knitting stitches. CROSS-LANGUAGE COLLISION: the German stemmer treats the English \"-er\" as a German suffix, so `bumper` becomes `bump`, which matches \"creating a horizontal bump\". Nothing to do with an Audi."
     }
   },
   "q03-trump-note": {
@@ -63,6 +68,16 @@
       "relevant": false,
       "note": "pdf | My fancy padlet-slideshow.pdf — page 4 | 158 chars | �ran live updates: Trump threatens to blow up �ranian energy sites, W.",
       "why": "Mentions Trump but is a slideshow page, not the note post. Context, not an answer to what was asked."
+    },
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:1": {
+      "relevant": false,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 2 | 882 chars | can inhibit the useless muscular atrophy caused by some non-neuropathy",
+      "why": "TENS device specifications. COLLISION: German stems `note` to `not` by dropping the final -e, so it matches the English word \"not\" (\"can not only\", \"not more than\"). Says nothing about any post."
+    },
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:0": {
+      "relevant": false,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 1 | 1093 chars | Single Channel tenS stimulator ●this module is not programmable; ●prov",
+      "why": "TENS product introduction. Same `note` -> `not` collision (\"this module is not programmable\"). Not the Trump note post."
     }
   },
   "q04-bike-chain": {
@@ -88,16 +103,6 @@
     }
   },
   "q05-hypermodern": {
-    "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:1": {
-      "relevant": true,
-      "note": "pdf | chess_opening_theory.pdf — page 1 | 478 chars | In the 1920s, a new school of thought known as Hypermodernism challeng",
-      "why": "Defines Hypermodernism explicitly. The answer."
-    },
-    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:3": {
-      "relevant": true,
-      "note": "pdf | Sammelmappe1.pdf — page 2 | 478 chars | In the 1920s, a new school of thought known as Hypermodernism challeng",
-      "why": "Identical text in a second document."
-    },
     "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:0": {
       "relevant": false,
       "note": "pdf | chess_opening_theory.pdf — page 1 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
@@ -107,9 +112,25 @@
       "relevant": false,
       "note": "pdf | Sammelmappe1.pdf — page 2 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
       "why": "Identical intro in a second document."
+    },
+    "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:1": {
+      "relevant": true,
+      "note": "pdf | chess_opening_theory.pdf — page 1 | 478 chars | In the 1920s, a new school of thought known as Hypermodernism challeng",
+      "why": "Defines Hypermodernism explicitly. The answer."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:3": {
+      "relevant": true,
+      "note": "pdf | Sammelmappe1.pdf — page 2 | 478 chars | In the 1920s, a new school of thought known as Hypermodernism challeng",
+      "why": "Identical text in a second document."
     }
   },
-  "q06-absent": {},
+  "q06-absent": {
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:0": {
+      "relevant": false,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 1 | 1093 chars | Single Channel tenS stimulator ●this module is not programmable; ●prov",
+      "why": "TENS product introduction. Nothing on this board is about roofs or sheds. English stemming matches `fix` to \"5 fixed stimulation gears\". THIS IS THE CONTROL QUESTION AND IT IS NO LONGER EMPTY, which is the most serious of the ten."
+    }
+  },
   "q11-noise-only": {
     "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:0": {
       "relevant": false,
@@ -120,6 +141,11 @@
       "relevant": false,
       "note": "pdf | Sammelmappe1.pdf — page 2 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
       "why": "Identical chess text in a second document."
+    },
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:1": {
+      "relevant": false,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 2 | 882 chars | can inhibit the useless muscular atrophy caused by some non-neuropathy",
+      "why": "TENS specifications. English stemming matches `year` to \"In recent years\". No tournament, no Berlin, no winner — q11 is the noise-only control and stays all-irrelevant."
     }
   },
   "q07-tens": {
@@ -133,15 +159,15 @@
       "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 3 | 440 chars | ① power Switch ② lithium battery connector ③ M icro USB charging inter",
       "why": "Numbered component list. Same device, not its purpose."
     },
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:1": {
+      "relevant": true,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 2 | 882 chars | can inhibit the useless muscular atrophy caused by some non-neuropathy",
+      "why": "Continues the purpose discussion — inhibiting muscular atrophy, and household use improving patients' independent operability — before the specifications. That answers \"what is it for\". A GENUINE GAIN: English stemming matches `stimulator` to \"stimulators\", which `simple` could not."
+    },
     "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:1": {
       "relevant": false,
       "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
       "why": "Chain lubricant. Unrelated."
-    },
-    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:1": {
-      "relevant": false,
-      "note": "pdf | Sammelmappe1.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
-      "why": "Same lubricant text in a second document."
     }
   },
   "q08-knitting": {
@@ -157,10 +183,20 @@
     }
   },
   "q09-watson": {
+    "post:6d7044fe-a2b7-45b9-9a4d-16c729caa500:0": {
+      "relevant": false,
+      "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 341 chars | Möchte man nur die Hupe wechseln, kann man auch nur eine Seite der Sto",
+      "why": "German post about unbolting an Audi bumper. COLLISION: English stems `linked` to `link`, German stems \"links\" (= left) to `link`, so a question about a linked website matches a sentence about the left-hand side of a car. It arrives as the TOP of the block at 0.018998."
+    },
     "pdf:cd308c08-39f9-46ca-a78a-bc8f91f791a3:2": {
       "relevant": true,
       "note": "pdf | My fancy padlet-slideshow.pdf — page 5 | 75 chars | watson � News ohne Bla Bla watson � Nachrichten und Unterhaltun… watso",
       "why": "Names watson.ch. The answer, in 75 characters."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:0": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 1 | 546 chars | Hupe wechseln bzw. Stoßstange demontieren Möchte man nur die Hupe wech",
+      "why": "The same Audi text as a PDF page, matched by the same `linked`/\"links\" collision. No website."
     }
   },
   "q10-spreizniete": {
@@ -184,20 +220,20 @@
       "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 2 | 452 chars | Wie funktionieren die Spreizniete? Die Stifte ca. 4 mm reindrücken und",
       "why": "Explains how the Spreizniete work and how to release them. The answer."
     },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:3": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 4 | 115 chars | 7. Stoßstange lösen Oben Mitte Unten Mitte Mir hat auch folgendes Bild",
+      "why": "Bumper-loosening positions (\"7. Stoßstange lösen\", Oben/Unten/Mitte). Matched by genuine German stemming of lösen/löse, but it never mentions the Spreizniete. Same standard as pages 5 and 6."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:2": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 3 | 250 chars | Hier sitzt die 6-Kantschraube 6. Nun die Radhausschale lösen. Es reich",
+      "why": "Wheel-arch liner removal. It does say \"Dazu 2 Spreizniete und eine Torx lösen\" — but that LISTS them as a step rather than explaining how they release, which is what was asked. Page 1 is already rated irrelevant on exactly this standard despite saying \"6 Spreizniete ausbauen\"; chunk 1 is the passage that answers."
+    },
     "pdf:a8f356ae-0084-4427-b74a-211713aa7464:0": {
       "relevant": false,
       "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 1 | 546 chars | Hupe wechseln bzw. Stoßstange demontieren Möchte man nur die Hupe wech",
       "why": "Bumper-removal overview. Same topic, does not cover the Spreizniete."
-    },
-    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:5": {
-      "relevant": false,
-      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 6 | 966 chars | 10.Zusammenbau 11. (Mein) Problem Hupe So wie auf dem Bild ist die Ein",
-      "why": "Reassembly and the horn. Not the Spreizniete."
-    },
-    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:4": {
-      "relevant": false,
-      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 5 | 469 chars | 8. Stoßstange abnehmen 9. Stecker abziehen (1) (2) (4) (3) Das Stecker",
-      "why": "Removing the bumper and the connector. Not the Spreizniete."
     }
   }
 }

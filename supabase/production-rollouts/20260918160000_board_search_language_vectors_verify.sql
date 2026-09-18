@@ -136,15 +136,30 @@ invariants AS (
            EXISTS (SELECT 1 FROM idx WHERE index_name = 'knowledge_chunks_search_de_gin')
     -- THE THREE PADLETS INDEXES MUST CARRY THE WIDENED PREDICATE TOO. An index
     -- whose predicate is narrower than the function's qual cannot be used for it.
+    -- MATCHED LITERAL BY LITERAL, NOT AS ONE RENDERED PHRASE, and that is a fix
+    -- for a FALSE FAILURE this row produced on its first run. pg_get_indexdef
+    -- renders the predicate in whatever type the column actually is: this
+    -- database prints
+    --     'text'::character varying, 'note'::character varying, 'card'::character varying
+    -- because padlets.type is varchar, while the same index on a `text` column
+    -- prints ::text, and some versions print neither. The earlier pattern
+    -- hard-coded one of those renderings and reported NOT WIDENED on three
+    -- indexes that were correctly widened -- verified by direct test.
+    --
+    -- Checking for the three LITERALS instead is rendering-independent and
+    -- contains no backslash, so it also survives any transport that mangles
+    -- escapes. It is safe from false PASSES because 'card' appears nowhere else
+    -- in these definitions: the indexed expression is title and body only.
     UNION ALL SELECT 14, 'index', 'all three padlets indexes are partial on text, note, card',
            COALESCE((SELECT string_agg(index_name || '=' ||
-                       CASE WHEN definition LIKE '%''text''::text, ''note''::text, ''card''::text%'
-                              OR definition LIKE '%(''text'', ''note'', ''card'')%' THEN 'widened'
-                            ELSE 'NOT WIDENED' END, ' ' ORDER BY index_name)
+                       CASE WHEN definition LIKE '%''text''%' AND definition LIKE '%''note''%'
+                             AND definition LIKE '%''card''%' THEN 'widened'
+                            WHEN definition LIKE '%''card''%' THEN 'card only -- predicate malformed'
+                            ELSE 'NOT WIDENED -- card missing' END, ' ' ORDER BY index_name)
                        FROM idx WHERE index_name LIKE 'padlets_search%'), '(absent)'),
            COALESCE((SELECT count(*) = 3 AND bool_and(
-                       definition LIKE '%''text''::text, ''note''::text, ''card''::text%'
-                    OR definition LIKE '%(''text'', ''note'', ''card'')%')
+                       definition LIKE '%''text''%' AND definition LIKE '%''note''%'
+                   AND definition LIKE '%''card''%')
                        FROM idx WHERE index_name LIKE 'padlets_search%'), false)
     -- The double evaluation is the write-path cost this batch removed. Two calls
     -- in one index expression is the shape that regressed.

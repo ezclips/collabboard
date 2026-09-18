@@ -332,6 +332,48 @@ describe('ranking pair q03 — the title-only post must STAY first', () => {
   });
 });
 
+/**
+ * q05, MEASURED AFTER DESIGN C. This pair is different from the other three:
+ * WE CAUSED IT.
+ *
+ * Before the configurations were added, q05's answer led its document's
+ * introduction, 0.006487 to 0.006154 -- it was explicitly recorded as "not
+ * inverted at all", correcting an earlier claim that it was. GREATEST inverted
+ * it: 0.011075 for the intro against 0.009579 for the answer.
+ *
+ * BOTH PASSAGES MATCHED UNDER `simple` BOTH TIMES, and chunks never touch the
+ * HTML projection, so nothing about the corpus or the query changed. The whole
+ * difference is that GREATEST let a rank from one configuration be compared with
+ * a rank from another -- two quantities that are not the same quantity.
+ *
+ * 20260918170000 is the fix: a row that matches `simple` is ranked by `simple`.
+ * This block asserts the REGRESSION, because that migration is not applied here
+ * -- the numbers below are what the shipped functions do today.
+ */
+const Q05_AFTER_GREATEST = {
+  beforeC: { answer: 0.006487, intro: 0.006154 },
+  afterC: { answer: 0.009579, intro: 0.011075 },
+} as const;
+
+describe('ranking pair q05 — an inversion WE introduced, and then fixed', () => {
+  it('before the configurations, the answer led — this pair was correct', () => {
+    expect(Q05_AFTER_GREATEST.beforeC.answer).toBeGreaterThan(Q05_AFTER_GREATEST.beforeC.intro);
+  });
+
+  it('TRIPWIRE: under GREATEST the INTRO leads (regression — flip when 20260918170000 lands)', () => {
+    expect(Q05_AFTER_GREATEST.afterC.intro).toBeGreaterThan(Q05_AFTER_GREATEST.afterC.answer);
+  });
+
+  it('the cause is the SCALE MIX, not the corpus and not the query', () => {
+    // Both passages rose -- they matched under more configurations than before --
+    // but the irrelevant one rose further. A rank from `english` and a rank from
+    // `simple` are not the same quantity, and GREATEST compared them as if they
+    // were.
+    expect(Q05_AFTER_GREATEST.afterC.answer).toBeGreaterThan(Q05_AFTER_GREATEST.beforeC.answer);
+    expect(Q05_AFTER_GREATEST.afterC.intro).toBeGreaterThan(Q05_AFTER_GREATEST.beforeC.intro);
+  });
+});
+
 describe('what the ratings bar could and could not decide', () => {
   /**
    * THE HONEST LIMIT ON ALL OF THE ABOVE.

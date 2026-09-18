@@ -600,3 +600,90 @@ Surveyed live across 1,000 rows against R2's criterion — *prose in `content`*:
    trivial at this size (2,126 padlets, 86 chunks); the write path is the price,
    and the rollback header says how to buy back half of it by keeping only the
    `german` pair.
+
+---
+
+## 11. What design C actually cost, measured — and the rule it forced
+
+**The battery, before and after C**, with all ten additions rated:
+
+| | before C | after C |
+|---|---|---|
+| characters retrieved | 22,008 | **27,150** (+23%) |
+| signal | 36.8% | **33.1%** |
+
+**C added 5,142 characters and lowered signal.** Of the ten passages it added
+across six questions, **nine are irrelevant**.
+
+### The additions, rated
+
+| question | addition | verdict |
+|---|---|---|
+| q02 | knitting chunk 0 | irrelevant — `bumper` → de `bump` matches "a horizontal bump" |
+| q03 | TENS chunks 1, 0 | irrelevant — `note` → de `not` matches every English "not" |
+| q06 | TENS chunk 0 | irrelevant — `fix` → "5 **fixed** stimulation gears" |
+| q07 | TENS chunk 1 | **RELEVANT** — `stimulator` → "stimulators"; states what the device is for |
+| q09 | Audi post 341, Audi chunk 0 | irrelevant — `linked` → en `link`, German "links" (= left) → de `link` |
+| q10 | Audi chunks 3, 2 | irrelevant — genuine German stemming, but neither passage covers the Spreizniete |
+| q11 | TENS chunk 1 | irrelevant — `year` → "In recent **years**" |
+
+**Five of the nine are cross-language collisions** — the German stemmer treating
+an English `-er` as a German suffix, or an English stem colliding with a German
+word. This is the structural cost of running two stemmers over a corpus that is
+not reliably in either language, and it is not a tuning parameter.
+
+**The most serious single result is q06.** It is the CONTROL question — nothing
+on this board is about roofs or garden sheds — and its whole purpose is to return
+nothing. It no longer does, because `fix` stems to match "fixed stimulation
+gears". A control that no longer controls is worse than a missing test.
+
+### The one genuine gain
+
+q07's page-2 chunk, surfaced because `english` stems `stimulator` and
+`stimulators` together. It does state what the device is for. **That is the
+recall design C was built for**, and it is one passage out of ten.
+
+### The rank rule this forced — `20260918170000`
+
+C was adopted on "strictly more, never differently". **`GREATEST` voided the
+second half**: it let a configuration re-rank a row it did not add. That cost a
+rated inversion on q05 — see the tripwire, which now names it as a fourth pair
+and the only one **we caused**.
+
+The rule is now: **a row that matches under `simple` is ranked by `simple`; only
+rows admitted solely by `english`/`german` are ranked by the better of those
+two.** Function-body change, no index work.
+
+**What it does not fix.** A solely-added row still enters at its own scale.
+q09's Audi post — admitted only by the `linked`/"links" collision, rated
+irrelevant — is still the top of its block at 0.018998.
+
+### The correction to C's own words
+
+"Retention prevents losses, **not additions**." `simple` being retained
+guarantees nothing disappears; it never implied the sets would stay the same
+size. They were always going to grow, and the growth is where the harm landed.
+That sentence was wrong in the design text and is corrected here.
+
+### Open, in order
+
+1. **Should the two stemming vectors be constrained at all**, rather than merely
+   re-ordered? With 9 of 10 additions irrelevant, the honest question is not
+   where to sort them but whether to admit them. Options not yet scored: require
+   a solely-added row to match **two** query terms; restrict `german` to rows
+   with a non-ASCII character; drop `english` stemming for terms under 5
+   characters (`fix`, `note`, `year` are all short).
+2. **Sort solely-added rows below every `simple`-matched row** — strictly a tail.
+   Bigger claim than 170000, needs scoring, would fix q09.
+3. **Title weights: not adopted.** No adoption signal across eleven questions;
+   orders preserved on q01/q03/q04/q07/q09/q11, q02's post tie still decided by
+   the tie-break, and it fixes none of the known inversions (q08 stays 1.35×,
+   q05 1.16×). q02's "6×" is amplification of an order that was **already
+   correct**. And it introduces a candidate harm: on q10 it lifts chunk 2 above
+   the rated answer chunk 1 (0.0838 against 0.0776). **Chunk 2 is now rated
+   irrelevant**, so that is a real inversion, not a reordering among equals. The
+   mechanism is structural — a fixed-size title boost is a larger share of a
+   short chunk's vector — so expect it to recur. Do not adopt.
+4. **The title-weight numbers need one re-run** against `20260918170000`'s rank
+   expression. The comparison above was internally valid, but only for the
+   expression that shipped in `20260918160000`.
