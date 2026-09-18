@@ -353,6 +353,22 @@ describe('ranking pair q03 — the title-only post must STAY first', () => {
 const Q05_AFTER_GREATEST = {
   beforeC: { answer: 0.006487, intro: 0.006154 },
   afterC: { answer: 0.009579, intro: 0.011075 },
+  /**
+   * THE HYPOTHESIS THAT WAS WRONG, kept because it shaped two rejected designs.
+   *
+   * It was assumed the intro was boosted at EQUAL term count, which would have
+   * meant any "more terms wins" rule left it on `simple` and restored the order.
+   * Measured, it is not equal: the intro matches 2 terms under `simple` and 3
+   * under `english`. So both scored options boosted it AND demoted the answer to
+   * `simple`, giving a 1.71x inversion -- worse than GREATEST's 1.16x.
+   *
+   * The two-term rule survives this because BOTH rows match two terms under
+   * `simple`, so `simple` governs both and neither is boosted.
+   */
+  introTerms: { simple: 2, english: 3, german: 2 },
+  answerTerms: { simple: 2 },
+  optionsInversion: 1.71,
+  maxInversion: 1.16,
 } as const;
 
 describe('ranking pair q05 — an inversion WE introduced, and then fixed', () => {
@@ -371,6 +387,73 @@ describe('ranking pair q05 — an inversion WE introduced, and then fixed', () =
     // were.
     expect(Q05_AFTER_GREATEST.afterC.answer).toBeGreaterThan(Q05_AFTER_GREATEST.beforeC.answer);
     expect(Q05_AFTER_GREATEST.afterC.intro).toBeGreaterThan(Q05_AFTER_GREATEST.beforeC.intro);
+  });
+
+  it('the equal-term-count hypothesis was FALSE, and it cost two designs', () => {
+    // Both scored ranking options rested on it. The intro genuinely matches more
+    // of the query under english, so "more terms wins" boosts exactly the wrong
+    // passage -- and demotes the answer to simple at the same time, which is why
+    // the options came out WORSE than the expression they replaced.
+    expect(Q05_AFTER_GREATEST.introTerms.english)
+      .toBeGreaterThan(Q05_AFTER_GREATEST.introTerms.simple);
+    expect(Q05_AFTER_GREATEST.optionsInversion)
+      .toBeGreaterThan(Q05_AFTER_GREATEST.maxInversion);
+  });
+
+  it('the two-term rule leaves this pair alone, which is the whole point', () => {
+    // Both rows match two terms under simple, so simple governs both and neither
+    // is boosted. The rule speaks only where simple's view was too thin to be a
+    // ranking at all.
+    expect(Q05_AFTER_GREATEST.introTerms.simple).toBeGreaterThanOrEqual(2);
+    expect(Q05_AFTER_GREATEST.answerTerms.simple).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * q07's PROMOTED PASSAGE — the row every rank expression so far has failed.
+ *
+ * TENS page 2 is rated RELEVANT. It contains "a single pulse" and "stimulators",
+ * so `simple` sees ONE query term while `english` and `german` each see TWO.
+ * That single fact has defeated four expressions in turn, and it is the reason
+ * this is a scored pair rather than a note.
+ */
+const Q07_PROMOTED = {
+  terms: { simple: 1, english: 2, german: 2 },
+  /** Per expression: the rank it gets, and its position in the four-slot block. */
+  simpleOnly: { admitted: false },
+  max: { admitted: true, inTopK: true },
+  additive: { rank: 0.001710, position: 5, inTopK: false },
+  twoTerm: { rank: 0.004145, position: 3, inTopK: true },
+} as const;
+
+describe('q07 promoted passage — the relevant row must stay returned', () => {
+  it('every earlier expression failed it, each for a different reason', () => {
+    // `simple` alone never admitted it: `stimulator` does not match
+    // "stimulators" without a stemmer.
+    expect(Q07_PROMOTED.simpleOnly.admitted).toBe(false);
+    // GREATEST admitted AND kept it -- but cost the q05 inversion elsewhere.
+    expect(Q07_PROMOTED.max.inTopK).toBe(true);
+    // Additive admits it, then ranks it by its WEAKEST view and drops it out of
+    // the four-slot block. That is the disqualification.
+    expect(Q07_PROMOTED.additive.inTopK).toBe(false);
+    expect(Q07_PROMOTED.additive.position).toBeGreaterThan(4);
+  });
+
+  it('the two-term rule returns it, and the term counts are why', () => {
+    expect(Q07_PROMOTED.twoTerm.inTopK).toBe(true);
+    expect(Q07_PROMOTED.twoTerm.position).toBeLessThanOrEqual(4);
+    // `simple` saw one term, so it does not govern; the stemmed view sees
+    // strictly more and supersedes.
+    expect(Q07_PROMOTED.terms.simple).toBeLessThan(2);
+    expect(Math.max(Q07_PROMOTED.terms.english, Q07_PROMOTED.terms.german))
+      .toBeGreaterThan(Q07_PROMOTED.terms.simple);
+  });
+
+  it('it is a PROMOTED row, not a solely-added one — no admission rule reaches it', () => {
+    // `simple` matches it, so it is admitted with or without the stemming
+    // vectors. Every admission candidate governs solely-added rows only, so none
+    // of them could ever have restored this passage. Ranking was upstream.
+    expect(Q07_PROMOTED.terms.simple).toBeGreaterThan(0);
   });
 });
 

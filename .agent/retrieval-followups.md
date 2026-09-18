@@ -838,3 +838,78 @@ additive admits it then ranks it by its weakest view and drops it. The live
 database stays on additive until the winner lands — not because additive is
 right, but because the alternatives are disqualified differently and reverting
 buys nothing.
+
+---
+
+## 14. "One term is not a ranking" — the rule that shipped, and the two that did not
+
+`20260918180000`. Rank by `simple` where `simple` matched **two or more** query
+terms; where it matched one or none, a stemmed configuration that **strictly**
+sees more supersedes.
+
+### Both scored options failed, on the hypothesis that justified them
+
+They rested on q05's introduction being boosted at **equal** term count. It is
+not: the intro matches **2 terms under `simple`, 3 under `english`**. So both
+options boost it to 0.011075 *and* demote the answer to its `simple` rank of
+0.006487 at position 3 of 4 — a **1.71×** inversion against `GREATEST`'s 1.16×.
+**Worse than the expression they were meant to replace, on the pair they were
+designed for.**
+
+`options_disagree` is false on **every row in the corpus** — english and german
+never match different numbers of terms on this board — so nothing in this data
+could have chosen between option 1 and option 2 anyway. That is a property of the
+corpus, not of the options, and it is worth knowing before either is revived.
+
+### What the shipped rule changes: three rows, all of them
+
+| row | rank | position |
+|---|---|---|
+| q07 page 2 (**relevant**) | 0.001710 → 0.004145 | 5 → **3** |
+| q07 page 3 (irrelevant) | 0.002012 → 0.004287 | 2, unchanged |
+| q08 answer (**relevant**) | 0.003145 → 0.008635 | 2, gap 3.07× → **1.12×** |
+
+Everything else is untouched, because `simple` had two or more terms and governs.
+**The narrowness is the design** — the rule speaks only where `simple`'s view was
+too thin to be a ranking at all.
+
+All four bar items pass, including q05's answer leading again.
+
+### The caveats, on the record
+
+**"Two" is a boundary, and a boundary is a number.** Minimal evidence rather than
+a tuned constant — one term cannot order anything, two is the smallest count that
+can — but it was not derived from first principles and **has not been tested
+against 3**.
+
+**It fixes the promoted-row case, not the class.** q05's and q08's introductions
+are "mentions everything" passages: they genuinely match more of the query than
+the answer does, under every configuration. **No term-count rule separates them
+from q07**, because the difference is not how many terms matched but whether the
+passage is *about* the question. That is semantic. **The embeddings already in
+this database are the eventual lever; another lexical clause is not.**
+
+### Proven at last: the indexes are used
+
+EXPLAIN on both quals shows Bitmap Heap Scan → BitmapOr across
+`knowledge_chunks_search_{gin,en_gin,de_gin}` and
+`padlets_search_{gin,en_gin,de_gin}`, with the projection expression matching the
+index exactly — so the HTML extraction runs **per matched row, not over every
+post per search**. The "only EXPLAIN against real rows proves it" caveat that has
+ridden in every verifier header since `160000` is discharged.
+
+**And immediately owed again.** `20260918180000` adds `LATERAL` joins for the
+vectors and the counts. The qual is deliberately unchanged and the laterals are
+kept out of it, so the bitmap scans *should* still match — but that is an
+argument, and the proof has to be retaken. The failure mode is silent: same rows,
+sequential scan, latency the only symptom. The verifier says outright that its
+own row 6 checks the text and not the plan.
+
+### Cost still on the watch list
+
+The rank counts terms per configuration, O(terms × configs) per matching row. The
+shipped shape computes each document's three tsvectors **once** per row and tests
+terms against those, rather than rebuilding a tsvector per term — and it also
+drops the projection from six evaluations per row to one. If it still shows up,
+the fallback is intersecting `tsvector_to_array(document)` with the query's
+lexemes once per configuration.
