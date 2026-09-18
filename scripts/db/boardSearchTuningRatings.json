@@ -1,0 +1,203 @@
+{
+  "q01-iran": {
+    "pdf:cd308c08-39f9-46ca-a78a-bc8f91f791a3:1": {
+      "relevant": true,
+      "note": "pdf | My fancy padlet-slideshow.pdf — page 4 | 158 chars | �ran live updates: Trump threatens to blow up �ranian energy sites, W.",
+      "why": "The Iran headline and the oil-prices line. This is the answer."
+    },
+    "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:1": {
+      "relevant": false,
+      "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Chain lubricant. Matched \"oil\"; says nothing about Iran or oil prices."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:1": {
+      "relevant": false,
+      "note": "pdf | Sammelmappe1.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Same lubricant text in a second document."
+    },
+    "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:0": {
+      "relevant": false,
+      "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 1064 chars | Bicycle Drivetrain Maintenance Understanding the Drivetrain The bicycl",
+      "why": "Bicycle drivetrain overview. Matched \"oil\" only."
+    }
+  },
+  "q02-audi-horn": {
+    "post:2845135a-9f8f-4f58-9a35-807bdb339f33:0": {
+      "relevant": false,
+      "note": "post | Audi A2 Stoßstange Titel bild (title only) | 0 chars | ",
+      "why": "Title-only post naming the topic. Points at the right material but contains no procedure, so it cannot answer \"how do I\"."
+    },
+    "post:6d7044fe-a2b7-45b9-9a4d-16c729caa500:0": {
+      "relevant": true,
+      "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 341 chars | Möchte man nur die Hupe wechseln, kann man auch nur eine Seite der Sto",
+      "why": "States you can unbolt only one side of the bumper to change the horn. Directly answers."
+    },
+    "post:bbcbd1b2-3ccd-4907-bed0-9f204e9a212e:0": {
+      "relevant": true,
+      "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 406 chars | Das Stecker abziehen bereitet vielen Leuten immer Schwierigkeiten, da ",
+      "why": "The connector-removal step, part of the procedure asked about."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:5": {
+      "relevant": true,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 6 | 966 chars | 10.Zusammenbau 11. (Mein) Problem Hupe So wie auf dem Bild ist die Ein",
+      "why": "Reassembly and the horn position. Part of the same procedure."
+    },
+    "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:0": {
+      "relevant": false,
+      "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 1064 chars | Bicycle Drivetrain Maintenance Understanding the Drivetrain The bicycl",
+      "why": "Bicycle drivetrain. Unrelated."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:0": {
+      "relevant": false,
+      "note": "pdf | Sammelmappe1.pdf — page 1 | 1064 chars | Bicycle Drivetrain Maintenance Understanding the Drivetrain The bicycl",
+      "why": "Same bicycle text in a second document."
+    }
+  },
+  "q03-trump-note": {
+    "post:ea370926-7ae7-453c-892a-788ed07eb7a5:0": {
+      "relevant": true,
+      "note": "post | Trump Note Post (title only) | 0 chars | ",
+      "why": "The post the question asks about. Title-only, and \"it exists and is empty\" is the true answer."
+    },
+    "pdf:cd308c08-39f9-46ca-a78a-bc8f91f791a3:1": {
+      "relevant": false,
+      "note": "pdf | My fancy padlet-slideshow.pdf — page 4 | 158 chars | �ran live updates: Trump threatens to blow up �ranian energy sites, W.",
+      "why": "Mentions Trump but is a slideshow page, not the note post. Context, not an answer to what was asked."
+    }
+  },
+  "q04-bike-chain": {
+    "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:1": {
+      "relevant": true,
+      "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Lubricant choice and application. Half the answer."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:1": {
+      "relevant": true,
+      "note": "pdf | Sammelmappe1.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Identical lubricant text in a second document."
+    },
+    "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:0": {
+      "relevant": true,
+      "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 1064 chars | Bicycle Drivetrain Maintenance Understanding the Drivetrain The bicycl",
+      "why": "Drivetrain maintenance overview including the chain. The other half."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:0": {
+      "relevant": true,
+      "note": "pdf | Sammelmappe1.pdf — page 1 | 1064 chars | Bicycle Drivetrain Maintenance Understanding the Drivetrain The bicycl",
+      "why": "Identical drivetrain text in a second document."
+    }
+  },
+  "q05-hypermodern": {
+    "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:1": {
+      "relevant": true,
+      "note": "pdf | chess_opening_theory.pdf — page 1 | 478 chars | In the 1920s, a new school of thought known as Hypermodernism challeng",
+      "why": "Defines Hypermodernism explicitly. The answer."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:3": {
+      "relevant": true,
+      "note": "pdf | Sammelmappe1.pdf — page 2 | 478 chars | In the 1920s, a new school of thought known as Hypermodernism challeng",
+      "why": "Identical text in a second document."
+    },
+    "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:0": {
+      "relevant": false,
+      "note": "pdf | chess_opening_theory.pdf — page 1 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
+      "why": "General opening-theory intro. Background; does not define hypermodernism."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:2": {
+      "relevant": false,
+      "note": "pdf | Sammelmappe1.pdf — page 2 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
+      "why": "Identical intro in a second document."
+    }
+  },
+  "q06-absent": {},
+  "q11-noise-only": {
+    "pdf:16c65278-eab3-4763-86d6-a0c2c95d78fd:0": {
+      "relevant": false,
+      "note": "pdf | chess_opening_theory.pdf — page 1 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
+      "why": "Chess opening theory. Matched \"chess\"; nothing about any tournament, Berlin, or a winner."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:2": {
+      "relevant": false,
+      "note": "pdf | Sammelmappe1.pdf — page 2 | 1066 chars | Chess Opening Theory Foundational Opening Principles Chess opening the",
+      "why": "Identical chess text in a second document."
+    }
+  },
+  "q07-tens": {
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:0": {
+      "relevant": true,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 1 | 1093 chars | Single Channel tenS stimulator ●this module is not programmable; ●prov",
+      "why": "Describes what the module is and is not. Answers \"what is it for\"."
+    },
+    "pdf:134e063e-ee63-4366-a726-0991e7eec339:2": {
+      "relevant": false,
+      "note": "pdf | 1.Single Channel tenS stimulator.pdf — page 3 | 440 chars | ① power Switch ② lithium battery connector ③ M icro USB charging inter",
+      "why": "Numbered component list. Same device, not its purpose."
+    },
+    "pdf:a968dba0-f13a-437e-b72d-bfed56838d37:1": {
+      "relevant": false,
+      "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Chain lubricant. Unrelated."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:1": {
+      "relevant": false,
+      "note": "pdf | Sammelmappe1.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Same lubricant text in a second document."
+    }
+  },
+  "q08-knitting": {
+    "pdf:8d7b70e3-9939-4385-8cc1-b60bfe076f2f:0": {
+      "relevant": false,
+      "note": "pdf | knitting_stitch_patterns.pdf — page 1 | 1018 chars | Knitting Stitch Patterns The Binary Foundation of Knitting At its core",
+      "why": "Intro on knitting as a binary craft. Background, not the ribbing method."
+    },
+    "pdf:8d7b70e3-9939-4385-8cc1-b60bfe076f2f:1": {
+      "relevant": true,
+      "note": "pdf | knitting_stitch_patterns.pdf — page 1 | 483 chars | By alternating knits and purls in the same row, knitters can create Ri",
+      "why": "Explains ribbing as alternating knits and purls. The answer."
+    }
+  },
+  "q09-watson": {
+    "pdf:cd308c08-39f9-46ca-a78a-bc8f91f791a3:2": {
+      "relevant": true,
+      "note": "pdf | My fancy padlet-slideshow.pdf — page 5 | 75 chars | watson � News ohne Bla Bla watson � Nachrichten und Unterhaltun… watso",
+      "why": "Names watson.ch. The answer, in 75 characters."
+    }
+  },
+  "q10-spreizniete": {
+    "post:6d7044fe-a2b7-45b9-9a4d-16c729caa500:0": {
+      "relevant": false,
+      "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 341 chars | Möchte man nur die Hupe wechseln, kann man auch nur eine Seite der Sto",
+      "why": "Post about changing the horn. Not the Spreizniete."
+    },
+    "post:bbcbd1b2-3ccd-4907-bed0-9f204e9a212e:0": {
+      "relevant": false,
+      "note": "post | Audi A2 Stoßstange demontieren neu.pdf | 406 chars | Das Stecker abziehen bereitet vielen Leuten immer Schwierigkeiten, da ",
+      "why": "Post about the connector. Not the Spreizniete."
+    },
+    "post:2845135a-9f8f-4f58-9a35-807bdb339f33:0": {
+      "relevant": false,
+      "note": "post | Audi A2 Stoßstange Titel bild (title only) | 0 chars | ",
+      "why": "Title-only post. No procedure at all."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:1": {
+      "relevant": true,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 2 | 452 chars | Wie funktionieren die Spreizniete? Die Stifte ca. 4 mm reindrücken und",
+      "why": "Explains how the Spreizniete work and how to release them. The answer."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:0": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 1 | 546 chars | Hupe wechseln bzw. Stoßstange demontieren Möchte man nur die Hupe wech",
+      "why": "Bumper-removal overview. Same topic, does not cover the Spreizniete."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:5": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 6 | 966 chars | 10.Zusammenbau 11. (Mein) Problem Hupe So wie auf dem Bild ist die Ein",
+      "why": "Reassembly and the horn. Not the Spreizniete."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:4": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 5 | 469 chars | 8. Stoßstange abnehmen 9. Stecker abziehen (1) (2) (4) (3) Das Stecker",
+      "why": "Removing the bumper and the connector. Not the Spreizniete."
+    }
+  }
+}

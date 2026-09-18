@@ -167,15 +167,45 @@ matched chain oil, so the context stopword list
 free, it is explainable to a user — the chip shows the terms actually searched —
 and it does not risk dropping real matches.
 
-**When to build it.** When there are real queries to measure: a set of questions
-with known-correct answers, ranked, so a threshold can be chosen from the
-distribution rather than from one example. Mirror `p_min_similarity` —
-`NULL`-defaulted, so shipping the parameter changes nothing until a caller passes
-it, and the migration can land ahead of the decision.
+**THE BATTERY WAS BUILT AND THE ANSWER IS NO** — see
+`scripts/db/boardSearchTuningBattery.ts` and its ratings file. Eleven questions
+through the real query builder, 36 passages rated by hand. No rank floor
+separates signal from noise without dropping a human-judged relevant passage:
 
-**Note that a NULL-default parameter costs a migration and changes no behaviour,**
-which is exactly why it is not worth landing speculatively: it would look like
-progress while deciding nothing.
+| floor | relevant text lost | characters kept |
+|---|---|---|
+| relative 0.3 of top-per-source | none | 93% — buys almost nothing |
+| relative 0.4 | 1 (q08) | 63% |
+| relative 0.5 and above | 4 | 78% and below |
+| absolute 0.002 / 0.003 / 0.005 | 1 / 2 / 7 | 71% / 55% / 41% |
+
+**Why no floor can work here: the ranking is INVERTED on real questions.** For
+"How do I knit a ribbed pattern?" the relevant passage ranks **0.00315** and the
+irrelevant document intro ranks **0.00965** — the wrong passage outranks the
+right one by 3×. For "How do I remove the bumper… to change the horn?" a
+title-only post ranks 0.00784 while the three passages that actually answer rank
+0.00134–0.00337. A floor is defined relative to the top hit, so when the top hit
+is the wrong passage the floor protects the noise and cuts the answer.
+
+**The lever that DOES work is not a floor and not a constant:** dropping
+duplicate passage text removes 29% of retrieved characters and loses nothing,
+because this board carries identical text in more than one document. That is
+structural, corpus-independent, and needs no tuning.
+
+**Reopen this only with the ranking fixed**, not with a different threshold. Item
+1 (title weights) is the likeliest cause of the inversion: with title and body
+weighted identically, a document intro whose every sentence repeats the topic
+outranks the one paragraph that answers the question.
+
+**THE LIMIT OF THE BATTERY, which governs how much any of this is worth.** THE
+QUESTIONS ARE OURS, NOT USERS'. They were written by people who already knew what
+was on the board, so they are unrepresentatively well-aimed: the battery's
+baseline signal is **36.8%**, against the **7.0%** measured live on the one
+question that also appears in it. That gap is the measure of our own bias. It is
+why the bar is **"never drops a relevant passage"** rather than "best average" —
+an average optimised against questions we wrote would be fitted to our own
+phrasing, whereas a rule that drops a relevant passage even on a question we
+aimed ourselves is disqualified on evidence that our bias only makes stronger.
 
 ---
 
