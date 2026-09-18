@@ -18,6 +18,12 @@
  * model rating its own retrieval would be grading its own homework, and the bar
  * below is a human judgement about whether an answer was reachable.
  *
+ * THE SIGNAL RATIO UNDERCOUNTS A CORRECT ANSWER THAT IS A TITLE. It is a
+ * CHARACTER ratio, and a title-only post contributes zero characters. q03 is
+ * answered correctly by exactly such a post and therefore reads as 0.0% signal.
+ * Do not optimise against this number without excluding that case: a rule that
+ * "improved" q03's signal would be one that dropped the right answer.
+ *
  * THE BAR IS "NEVER DROPS A RELEVANT PASSAGE", NOT "BEST AVERAGE", and the
  * reason is a limit of this battery rather than a preference: THESE QUESTIONS
  * ARE OURS, NOT USERS'. They were written by the people who know what is on the
@@ -104,6 +110,37 @@ export interface BatteryPassage {
   readonly rank: number;
   readonly textHash: string;
   readonly preview: string;
+  /** How many DISTINCT query terms occur in this passage. */
+  readonly coverage: number;
+  /** Total occurrences of any query term. The term-frequency mechanism. */
+  readonly occurrences: number;
+  /** The searchable text this passage's rank was computed from. */
+  readonly ranked: string;
+}
+
+/**
+ * Coverage and term frequency, counted the way `simple` tokenises.
+ *
+ * AN APPROXIMATION, AND IT IS FLAGGED RATHER THAN HIDDEN. `to_tsvector('simple')`
+ * has its own tokeniser with special handling for URLs, emails, file paths and
+ * hyphenated words, so a split on non-alphanumerics can disagree with it on
+ * exotic input. For the plain alphanumeric terms this battery produces the two
+ * agree, and this is used ONLY to explain mechanisms and to score a candidate
+ * ORDERING -- never to reproduce a rank. Anything that needs a real rank needs
+ * Postgres.
+ */
+function termStats(text: string, terms: readonly string[]): { coverage: number; occurrences: number } {
+  const tokens = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const counts = new Map<string, number>();
+  for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+  let coverage = 0;
+  let occurrences = 0;
+  for (const term of terms) {
+    const n = counts.get(term) ?? 0;
+    if (n > 0) coverage += 1;
+    occurrences += n;
+  }
+  return { coverage, occurrences };
 }
 
 export interface BatteryResult {
@@ -164,6 +201,9 @@ async function runBattery(): Promise<readonly BatteryResult[]> {
       for (const row of (posts.data ?? []) as PostRow[]) {
         const text = (row.text ?? '').trim();
         const label = (row.title ?? '').trim() || 'Untitled note';
+        // A post's rank is computed over TITLE THEN BODY, so that is what the
+        // mechanism columns must be counted against.
+        const ranked = text.length === 0 ? label : `${label} ${text}`;
         passages.push({
           key: passageKey('post', row.padlet_id, 0),
           source: 'post',
@@ -172,10 +212,15 @@ async function runBattery(): Promise<readonly BatteryResult[]> {
           rank: row.rank,
           textHash: textHash(text),
           preview: text.replace(/\s+/g, ' ').slice(0, 70),
+          ranked,
+          ...termStats(ranked, query.terms),
         });
       }
       for (const row of (chunks.data ?? []) as ChunkRow[]) {
         const text = (row.text ?? '').trim();
+        // A chunk's rank is computed over c.text ALONE -- no filename, no title.
+        // That is why post title weighting cannot touch a chunk-vs-chunk
+        // inversion.
         passages.push({
           key: passageKey('pdf', row.document_id, row.chunk_index),
           source: 'pdf',
@@ -184,6 +229,8 @@ async function runBattery(): Promise<readonly BatteryResult[]> {
           rank: row.rank,
           textHash: textHash(text),
           preview: text.replace(/\s+/g, ' ').slice(0, 70),
+          ranked: text,
+          ...termStats(text, query.terms),
         });
       }
     }
@@ -245,7 +292,10 @@ export function candidateRules(): readonly Rule[] {
   // RELATIVE FLOOR: keep a passage only if its rank is at least f of the best in
   // its OWN source. Scales with the corpus, because it is defined against the
   // result rather than against an absolute number.
-  for (const fraction of [0.3, 0.5, 0.7, 0.8, 0.9]) {
+  // 0.4 is in the list because the doc quotes it: it is the first step that
+  // loses a relevant passage, which is what makes 0.3 a tuned constant wearing a
+  // relative name rather than a safe default.
+  for (const fraction of [0.3, 0.4, 0.5, 0.7, 0.8, 0.9]) {
     rules.push({
       name: `relative floor ${fraction} of top-per-source`,
       scales: true,
@@ -421,9 +471,108 @@ function report(results: readonly BatteryResult[]): void {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* B. The ranking diagnosis                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every place a passage rated IRRELEVANT outranks one rated RELEVANT.
+ *
+ * These are the pairs the floor died on: a floor is defined against the top hit,
+ * so wherever one of these exists, the floor protects the noise and cuts the
+ * answer.
+ */
+function invertedPairs(results: readonly BatteryResult[], ratings: Ratings) {
+  const pairs: Array<{
+    query: string; relevant: BatteryPassage; irrelevant: BatteryPassage; ratio: number;
+  }> = [];
+  for (const result of results) {
+    const rel = result.passages.filter((p) => ratings[result.id]?.[p.key]?.relevant === true);
+    const irr = result.passages.filter((p) => ratings[result.id]?.[p.key]?.relevant === false);
+    for (const bad of irr) {
+      for (const good of rel) {
+        if (bad.rank > good.rank) {
+          pairs.push({ query: result.id, relevant: good, irrelevant: bad, ratio: bad.rank / good.rank });
+        }
+      }
+    }
+  }
+  return pairs.sort((a, b) => b.ratio - a.ratio);
+}
+
+/**
+ * Which mechanism explains one inversion.
+ *
+ * Reported as evidence rather than a verdict: the columns are the inputs
+ * `ts_rank` actually uses, so a reader can check the attribution instead of
+ * taking it.
+ */
+function mechanismOf(pair: { relevant: BatteryPassage; irrelevant: BatteryPassage }): string {
+  const { relevant, irrelevant } = pair;
+  const reasons: string[] = [];
+  if (irrelevant.coverage > relevant.coverage) reasons.push('coverage (irrelevant matches MORE distinct terms)');
+  if (irrelevant.coverage === relevant.coverage && irrelevant.occurrences > relevant.occurrences) {
+    reasons.push('term frequency (same coverage, more occurrences)');
+  }
+  if (irrelevant.source === 'post' && irrelevant.chars === 0) {
+    reasons.push('title-only shortness (length normalization rewards a very short document)');
+  }
+  if (irrelevant.source === 'pdf' && relevant.source === 'pdf'
+    && irrelevant.ranked.length > relevant.ranked.length && irrelevant.occurrences > relevant.occurrences) {
+    reasons.push('chunk-vs-chunk: a longer intro repeats the topic more often than the answering paragraph');
+  }
+  if (reasons.length === 0) reasons.push('unexplained by coverage, frequency or length -- needs a real rank comparison');
+  return reasons.join('; ');
+}
+
+/** Coverage-first ordering: sort by distinct terms matched, then by rank. */
+const coverageFirst = (passages: readonly BatteryPassage[]): readonly BatteryPassage[] =>
+  [...passages].sort((a, b) => (b.coverage - a.coverage) || (b.rank - a.rank));
+
+function diagnose(results: readonly BatteryResult[]): void {
+  const ratings = loadRatings();
+  const pairs = invertedPairs(results, ratings);
+
+  console.log('\n# B. Ranking diagnosis\n');
+  console.log(`${pairs.length} inverted pair(s): an irrelevant passage outranking a relevant one.\n`);
+  console.log('| query | ratio | irrelevant (rank, cov, occ, len) | relevant (rank, cov, occ, len) | mechanism |');
+  console.log('|---|---|---|---|---|');
+  for (const pair of pairs) {
+    const f = (p: BatteryPassage) =>
+      `${p.rank.toFixed(6)}, ${p.coverage}, ${p.occurrences}, ${p.ranked.length}`;
+    console.log(`| ${pair.query} | ${pair.ratio.toFixed(2)}x | ${pair.irrelevant.label} (${f(pair.irrelevant)}) `
+      + `| ${pair.relevant.label} (${f(pair.relevant)}) | ${mechanismOf(pair)} |`);
+  }
+
+  console.log('\n## Candidate: coverage-first ordering\n');
+  console.log('Scored against the SAME 36 ratings. It reorders; it discards nothing, so it cannot');
+  console.log('lose a relevant passage. What it can do is fix or fail to fix each pair.\n');
+  let fixed = 0;
+  let broken = 0;
+  console.log('| query | pair | coverage-first fixes it? |');
+  console.log('|---|---|---|');
+  for (const pair of pairs) {
+    const ordered = coverageFirst([pair.relevant, pair.irrelevant]);
+    const ok = ordered[0].key === pair.relevant.key;
+    if (ok) fixed += 1; else broken += 1;
+    console.log(`| ${pair.query} | ${pair.irrelevant.label} over ${pair.relevant.label} | ${ok ? 'YES' : 'no'} |`);
+  }
+  console.log(`\ncoverage-first fixes ${fixed} of ${pairs.length} inverted pairs; ${broken} remain.`);
+
+  console.log('\n## Candidates that CANNOT be scored from here\n');
+  console.log('normalization 0 and 2, ts_rank_cd, setweight A/B, and a document-title term in the');
+  console.log('chunk rank all need ts_rank evaluated by Postgres over alternative vectors. There is');
+  console.log('no DATABASE_URL in this environment and the two shipped functions are fixed at');
+  console.log('flag 1, so they cannot be measured here. Reimplementing ts_rank in TypeScript to');
+  console.log('score them would encode a different assumption than the code -- exactly the error');
+  console.log('this battery exists to prevent.');
+  console.log('\nRun scripts/db/boardSearchRankingVariants.sql (read-only) to produce them.');
+}
+
 async function main(): Promise<void> {
   const results = await runBattery();
   if (process.argv.includes('--collect')) collect(results);
+  else if (process.argv.includes('--diagnose')) diagnose(results);
   else report(results);
 }
 

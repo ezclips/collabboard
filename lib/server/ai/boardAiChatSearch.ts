@@ -28,6 +28,7 @@ import { buildBoardAiSearchQuery } from '../../domain/ai/boardAiSearchQuery';
 import {
   boardAiSearchContextBlock,
   boundBoardAiSearchPassages,
+  dropDuplicateBoardAiSearchPassages,
   isBoardAiSearchPassageCovered,
   mergeBoardAiSearchPassages,
   type BoardAiSearchCoverage,
@@ -249,11 +250,20 @@ export async function searchBoardAiContext(
     if (passage.source === 'pdf') return passage.text.length > 0;
     return passage.text.length > 0 || passage.label.length > 0;
   };
-  const merged = mergeBoardAiSearchPassages(
+  // DE-DUPLICATE AFTER THE MERGE, WHICH IS WHERE THE BATTERY MEASURED IT.
+  //
+  // The reader asks each source for BOARD_AI_SEARCH_LIMIT_PER_SOURCE rows, so a
+  // duplicate has already spent one of those slots by the time this runs. That
+  // is deliberate: the stronger variant -- fetch to the database clamp, drop
+  // duplicates, then cut to K -- would return MORE distinct material, and it is
+  // not what the battery measured. Shipping the measured rule and noting the
+  // stronger one is the honest order; it goes in the followups rather than in
+  // this commit.
+  const merged = dropDuplicateBoardAiSearchPassages(mergeBoardAiSearchPassages(
     postPassages.filter(usable),
     chunkPassages.filter(usable),
     BOARD_AI_SEARCH_LIMIT_PER_SOURCE,
-  );
+  ));
 
   // STEP 4. Whole passages only, and the dropped count is kept.
   const { kept, dropped } = boundBoardAiSearchPassages(merged, availableChars);

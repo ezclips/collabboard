@@ -73,10 +73,27 @@ paragraph. That is precisely why item 4's instrument is **one prose-heavy real
 document** and not this slideshow: measuring expansion against a corpus that has
 no long chunks anywhere cannot tell you whether expansion works.
 
-**The prediction on record, to be tested by the first live run:** if the PDF
-source contributes roughly 224 characters and the answer reads as though nothing
-was found, the honest conclusion is **not** that K is wrong — it is that
-56-character chunks are not passages.
+**The prediction on record, and WHAT THE FIRST LIVE RUN ACTUALLY SHOWED.** The
+prediction was: the PDF source contributes roughly 224 characters, the answer
+reads as though nothing was found, and the conclusion is segmentation rather
+than K.
+
+**The top-passage figure was exact and the rest was wrong.** q01 returned
+**2,272 characters** from the PDF source, not ~224. One of them was the answer
+(the 158-character page-4 passage); the rest were a 525-character lubricant
+passage twice and a 1,064-character drivetrain intro. The answer did not read as
+empty — it was substantive and correct.
+
+**The 56-character median never appeared in the results at all.** Nothing
+returned by any battery query was near it. The median is dominated by synthetic
+probe documents (`PAGE 1 ALPHA`, `CACHE PROBE PAGE ONE` and similar) that no real
+question retrieves. So the corpus statistic that motivated this item does not
+describe the passages the feature actually returns.
+
+That does not retire the item — a 158-character answer is still thin, and q09's
+correct answer is 75 characters — but it does retire the reasoning. **Re-derive
+the median over passages that real queries return**, not over all chunks, before
+sizing any expansion.
 
 ---
 
@@ -175,9 +192,12 @@ separates signal from noise without dropping a human-judged relevant passage:
 | floor | relevant text lost | characters kept |
 |---|---|---|
 | relative 0.3 of top-per-source | none | 93% — buys almost nothing |
-| relative 0.4 | 1 (q08) | 63% |
+| relative 0.4 | 1 (q08) | 91% |
 | relative 0.5 and above | 4 | 78% and below |
 | absolute 0.002 / 0.003 / 0.005 | 1 / 2 / 7 | 71% / 55% / 41% |
+
+0.3 is one step from 0.4, which loses q08. **It is a tuned constant wearing a
+relative name**, and the 7% it buys is not worth pretending otherwise.
 
 **Why no floor can work here: the ranking is INVERTED on real questions.** For
 "How do I knit a ribbed pattern?" the relevant passage ranks **0.00315** and the
@@ -189,13 +209,47 @@ is the wrong passage the floor protects the noise and cuts the answer.
 
 **The lever that DOES work is not a floor and not a constant:** dropping
 duplicate passage text removes 29% of retrieved characters and loses nothing,
-because this board carries identical text in more than one document. That is
-structural, corpus-independent, and needs no tuning.
+because this board carries identical text in more than one document. **Shipped.**
+It is structural, corpus-independent, and needs no tuning.
 
-**Reopen this only with the ranking fixed**, not with a different threshold. Item
-1 (title weights) is the likeliest cause of the inversion: with title and body
-weighted identically, a document intro whose every sentence repeats the topic
-outranks the one paragraph that answers the question.
+### What the four inversions are actually caused by — measured, and it is neither of our first guesses
+
+Diagnosed with `--diagnose`, which records coverage, term frequency and ranked
+length per passage. Three attributions are now evidence rather than hypothesis:
+
+- **q08 is NOT a ranking defect.** The query says `ribbed`; the answering
+  paragraph says **"Ribbing"**. `simple` does no stemming, so they never match —
+  the paragraph matches only `knit`, once, while the introduction genuinely
+  contains all three query terms five times. **The ranking is correct given what
+  matched.** No normalization flag, no weighting and no coverage rule can fix
+  this pair. It belongs to the language/stemming item.
+- **q08 and q05 are chunk-vs-chunk, so item 1 cannot touch them.** The chunk rank
+  is `ts_rank(to_tsvector('simple', c.text), q.query, 1)` — `c.text` alone, no
+  filename, no title. An earlier attribution of the inversion to post title
+  weights was wrong. (And q05 is not inverted at all: its answer outranks the
+  intro, 0.006487 vs 0.006154.)
+- **q02 is LENGTH NORMALIZATION, not coverage.** Two of its three answering
+  passages match exactly as many distinct terms, exactly as often, as the
+  title-only post that beats them — coverage 2, occurrences 2 for both. What
+  differs is length: 29 ranked characters against 380. Flag 1 divides by
+  `1 + log(length)`, so the short document wins. **Coverage-first ordering was
+  scored against the same 36 ratings and fixes 0 of 4 inverted pairs.**
+- **Title weighting would make q02 worse.** The title-only post's only signal is
+  its title, so `setweight` A/B raises the passage that is already wrongly on
+  top. Item 1 stays valid for posts in general; it is not the fix for this.
+
+**The open tension:** flag 1 was adopted because flag 0 let long chunks win by
+being long — live-proven. The same normalization is what rewards a 29-character
+title-only post in q02. Whether any single flag serves both cases is the question
+`scripts/db/boardSearchRankingVariants.sql` exists to answer; it could not be
+measured from TypeScript, because the shipped functions are fixed at flag 1 and
+re-implementing `ts_rank` to score alternatives would encode a different
+assumption than the code.
+
+The three pairs are named gate assertions in
+`scripts/db/boardSearchRankingPairs.test.ts`, encoded as tripwires: they assert
+today's wrong ordering, so they break the moment a ranking change fixes it and
+force a human to confirm the fix was intended.
 
 **THE LIMIT OF THE BATTERY, which governs how much any of this is worth.** THE
 QUESTIONS ARE OURS, NOT USERS'. They were written by people who already knew what

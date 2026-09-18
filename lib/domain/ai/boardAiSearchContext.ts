@@ -220,6 +220,45 @@ export function mergeBoardAiSearchPassages(
  * rather than dropped -- that is the same rule every other context block lives
  * under, and dropping the one passage that matched would be worse.
  */
+/**
+ * The same passage text, returned more than once, is one passage.
+ *
+ * MEASURED, NOT GUESSED: the tuning battery
+ * (scripts/db/boardSearchTuningBattery.ts) found this removes **29% of all
+ * retrieved characters** across eleven questions while losing no
+ * human-rated-relevant text — the only candidate rule that separated volume from
+ * value without a tuned constant. This board carries identical text in more than
+ * one document (a bicycle guide and a chess guide each also live inside a
+ * combined PDF; one test document appears three times), so on some questions
+ * half of everything retrieved is a second copy.
+ *
+ * FIRST COPY IN LIST ORDER WINS, which is rank order within each source, posts
+ * ahead of chunks. That is exactly what the battery measured; picking a
+ * different survivor would be shipping something the table does not cover.
+ *
+ * EMPTY TEXT IS EXCLUDED, AND THAT IS A REAL BUG THIS AVOIDS RATHER THAN A
+ * TIDINESS RULE. Every title-only post has the same empty body, so keying on
+ * text alone would collapse two DIFFERENT title-only posts — different titles,
+ * different sources, both genuine results — into one. No battery question
+ * returns two title-only posts, so the battery could never have caught it; in
+ * production it would silently delete a result.
+ */
+export function dropDuplicateBoardAiSearchPassages(
+  passages: readonly BoardAiSearchPassage[],
+): readonly BoardAiSearchPassage[] {
+  const seen = new Set<string>();
+  const kept: BoardAiSearchPassage[] = [];
+  for (const passage of passages) {
+    // A title-only post carries its content in its LABEL, so it is identified by
+    // nothing this rule can compare. It is never a duplicate here.
+    if (passage.text.length === 0) { kept.push(passage); continue; }
+    if (seen.has(passage.text)) continue;
+    seen.add(passage.text);
+    kept.push(passage);
+  }
+  return kept;
+}
+
 /** The separator and origin line each passage costs beyond its own characters. */
 const BOARD_AI_SEARCH_PASSAGE_OVERHEAD = 16;
 

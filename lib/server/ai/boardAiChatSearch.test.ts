@@ -17,6 +17,7 @@ import {
   boardAiSearchPromptState,
   boardAiSearchSkippedBlock,
   boundBoardAiSearchPassages,
+  dropDuplicateBoardAiSearchPassages,
   mergeBoardAiSearchPassages,
   type BoardAiSearchPassage,
 } from '../../domain/ai/boardAiSearchContext';
@@ -330,6 +331,70 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
     expect(result.value.block.text).not.toContain('board post');
     expect(result.value.block.text).toContain('PDF text');
     expect(result.value.result.used).toBe(1);
+  });
+});
+
+describe('the same passage text returned twice is one passage', () => {
+  it('identical chunk text in two documents keeps the higher-ranked copy only', async () => {
+    // Measured by the tuning battery: this removes 29% of all retrieved
+    // characters across eleven questions and loses no relevant text, because
+    // this board carries the same guide inside two different PDFs.
+    const shared = 'Applying lubricant correctly is a precise process.';
+    const first = { ...chunk('c1', shared), original_filename: 'bicycle.pdf', rank: 0.0061 };
+    const second = { ...chunk('c2', shared), original_filename: 'Sammelmappe1.pdf', rank: 0.0061 };
+    const result = await searchBoardAiContext(
+      authClient([], true), reader([], [], [first, second]),
+      BOARD, USER, 'bike chain lube', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.result.used).toBe(1);
+    // FIRST IN LIST ORDER WINS -- rank order within each source. Keeping a
+    // different survivor would ship something the battery did not measure.
+    expect(result.value.block.text).toContain('bicycle.pdf');
+    expect(result.value.block.text).not.toContain('Sammelmappe1.pdf');
+  });
+
+  it('TWO DIFFERENT TITLE-ONLY POSTS ARE BOTH KEPT', async () => {
+    // The bug this avoids, and the battery could never have caught it: every
+    // title-only post has the same empty body, so keying on text alone would
+    // collapse two genuine and DIFFERENT results into one. No battery question
+    // returns two of them.
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      reader([], [post('p1', 'Trump Note Post', '', 0.030), post('p2', 'Audi A2 Stoßstange Titel bild', '', 0.007)]),
+      BOARD, USER, 'trump note audi', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.result.used).toBe(2);
+    expect(result.value.block.text).toContain('Trump Note Post');
+    expect(result.value.block.text).toContain('Audi A2 Stoßstange Titel bild');
+  });
+
+  it('de-duplicates across BOTH sources, not within one', () => {
+    const shared = 'the very same words';
+    const kept = dropDuplicateBoardAiSearchPassages([
+      { source: 'post', label: 'A note', text: shared, rank: 0.9 },
+      { source: 'pdf', label: 'doc.pdf — page 1', text: shared, rank: 0.8 },
+      { source: 'pdf', label: 'doc.pdf — page 2', text: 'different words', rank: 0.7 },
+    ]);
+    expect(kept).toHaveLength(2);
+    expect(kept[0].source).toBe('post');
+    expect(kept[1].text).toBe('different words');
+  });
+
+  it('near-identical text is NOT collapsed, because the rule is exact', () => {
+    // Exact-match only. A rule that collapsed similar passages would be a
+    // similarity threshold -- a tuned constant -- which is the thing the battery
+    // disqualified.
+    const kept = dropDuplicateBoardAiSearchPassages([
+      { source: 'pdf', label: 'a', text: 'Applying lubricant correctly.', rank: 0.9 },
+      { source: 'pdf', label: 'b', text: 'Applying lubricant correctly!', rank: 0.8 },
+    ]);
+    expect(kept).toHaveLength(2);
   });
 });
 
