@@ -14,6 +14,7 @@ import {
   BOARD_AI_CONTEXT_MAX_SINGLE_CHARS,
   type ResolvedBoardAiContextBlock,
 } from './boardAiChatContext';
+import { boardAiCitationSourceToken } from './boardAiChatCitation';
 
 /** Which index a passage came from. Never merged away; every passage keeps it. */
 export type BoardAiSearchSource = 'post' | 'pdf';
@@ -260,7 +261,16 @@ export function dropDuplicateBoardAiSearchPassages(
 }
 
 /** The separator and origin line each passage costs beyond its own characters. */
-const BOARD_AI_SEARCH_PASSAGE_OVERHEAD = 16;
+/**
+ * The characters an origin line costs beyond the text and the label.
+ *
+ * WAS 16, for `[board post: ]` plus the newlines. The citation sub-token added
+ * up to about nine more -- `S10.12 | ` -- so the budget would have under-counted
+ * every passage and let the block overrun the room it was given. Raised to 25,
+ * which covers the widest token this can produce at the four-slot and
+ * ten-passage ceilings.
+ */
+const BOARD_AI_SEARCH_PASSAGE_OVERHEAD = 25;
 
 export function boundBoardAiSearchPassages(
   passages: readonly BoardAiSearchPassage[],
@@ -300,6 +310,22 @@ export function boardAiSearchContextBlock(
   passages: readonly BoardAiSearchPassage[],
   query: string,
   result: BoardAiSearchResult,
+  /**
+   * This block's own position in the array the model will be given, so the
+   * origin lines can carry the sub-token the citation layer parses back.
+   *
+   * THE CALLER KNOWS THIS AND THIS FUNCTION CANNOT. The route appends the
+   * search block after the user's attachments, so the index is
+   * `currentContext.length` -- and it stays correct through bounding because
+   * `boundResolvedContext` only ever drops a SUFFIX: once the character budget
+   * is spent every later text block is skipped, so a surviving search block
+   * still has every predecessor in front of it. That is an invariant of the
+   * bounder, not of this block, so a route test pins it.
+   *
+   * Defaults to 0 only so the "nothing matched" and skipped blocks -- which
+   * have no passages and therefore no sub-tokens -- need not supply one.
+   */
+  blockIndex = 0,
 ): ResolvedBoardAiContextBlock {
   const body = passages.length === 0
     // LOAD-BEARING. Without this the model sees an empty block and infers the
@@ -307,14 +333,19 @@ export function boardAiSearchContextBlock(
     // had read the board. Saying "nothing matched" is a result.
     ? 'No passages on this board matched this search.'
     : passages
-      .map((passage) => {
+      .map((passage, index) => {
+        // The sub-token this passage is known by. Position is the only mapping,
+        // exactly as it is for a block: the server reads the returned token
+        // back against this same array, so a model can only ever name a passage
+        // it was actually given.
+        const token = `${boardAiCitationSourceToken(blockIndex)}.${index + 1}`;
         // THE ORIGIN LINE MUST NOT LET THE MODEL IMPLY IT READ A BODY THAT DOES
         // NOT EXIST. A title-only post is a real result, and saying so in the
         // line is what keeps it from reading as a source whose text went
         // missing -- the difference between "this post is empty" and "I was
         // given this post" is the whole reason the row is worth keeping.
-        if (passage.titleOnly) return `[board post, title only and no body: ${passage.label}]`;
-        return `[${passage.source === 'post' ? 'board post' : 'PDF text'}: ${passage.label}]\n${passage.text}`;
+        if (passage.titleOnly) return `[${token} | board post, title only and no body: ${passage.label}]`;
+        return `[${token} | ${passage.source === 'post' ? 'board post' : 'PDF text'}: ${passage.label}]\n${passage.text}`;
       })
       .join('\n\n');
   return {
@@ -326,6 +357,19 @@ export function boardAiSearchContextBlock(
     // "I searched and used two of six" rather than implying it saw all six.
     label: boardAiSearchChipText(result),
     query,
+    // Identity only, in the SAME ORDER as the origin lines above, because the
+    // sub-token's number is an index into this array.
+    ...(passages.length === 0 ? {} : {
+      passages: passages.map((passage) => ({
+        source: passage.source,
+        label: passage.label,
+        ...(passage.padletId ? { padletId: passage.padletId } : {}),
+        ...(passage.knowledgeDocumentId ? { knowledgeDocumentId: passage.knowledgeDocumentId } : {}),
+        // A chunk may span pages; the page it BEGINS on is located, not
+        // invented. `pageNumber` is the post-side field and is absent here.
+        ...(passage.pageStart !== undefined ? { pageStart: passage.pageStart } : {}),
+      })),
+    }),
     text: body,
   };
 }

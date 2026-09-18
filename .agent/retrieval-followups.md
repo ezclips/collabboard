@@ -140,6 +140,46 @@ separate envelope of its own. Both are real design work, not a patch.
 line inside the block (`[board post: <title>]`, `[PDF text: <file> — page N]`),
 so the model can name a source in prose. The user just cannot click it.
 
+### CLOSED — shipped as sub-tokens, and the obstacle was avoided rather than paid
+
+**What was actually wrong.** The diagnosis above is right about the collapse and
+wrong about the cost. Passages were never short of identity: the RPCs already
+return `chunk_id`, `document_id`, `page_start/end`, `chunk_index` and
+`padlet_id`, and `BoardAiSearchPassage` already carried them. They were simply
+**discarded** when `boardAiSearchContextBlock` folded the passages into one
+block, so the citation layer — one block per `S` token — had nothing to address.
+
+**The resolution.** Neither of the two designs this note proposed was needed. The
+block stays ONE block, so the four-slot rule is untouched. The passages' identity
+now travels beside it (`ResolvedBoardAiContextBlock.passages`, transient like
+`image` and `pageNumbers`), the origin lines carry a positional sub-token
+(`[S3.2 | PDF text: …]`), and the token grammar gained one optional dot:
+`^S([1-9][0-9]*)(?:\.([1-9][0-9]*))?$`.
+
+**Why it was small.** A search passage is not a new kind of source. A post
+passage IS the board post; a PDF passage IS a page of the document. So a cited
+passage emits the ordinary `padlet` / `knowledge-page` item everything already
+understands — which is why the citation item shape, the identity keys, the
+stored envelope, `boardAiCitationsFromStored`, the provenance canonicalization
+and the reader's navigation all needed **no change at all**, and why footers
+written before this still parse unchanged.
+
+**The refusal was NARROWED, not lifted.** A bare `S3` on a search block still
+cites nothing: a search is still not a place. Only a named passage resolves.
+
+**The load-bearing invariant, now pinned.** The sub-token's block number is baked
+at build time from `currentContext.length`, before bounding runs. That is only
+correct because `boundResolvedContext` drops a SUFFIX — so a surviving search
+block still has every attachment in front of it. That is a property of the
+bounder, not of the block: a future reordering would silently misattribute every
+citation. `lib/server/ai/boardAiCitationPassageIndex.test.ts` asserts the baked
+token equals the block's real position, and that a dropped search is never sent.
+
+**Evidence kept:** a PDF chunk may span pages and cites `pageStart` — located,
+not invented, the same standard `knowledge-document` applies when it refuses to
+guess a page at all. The passage-line overhead in the character budget rose
+16 → 25 to cover the token, so the block still fits the room it was given.
+
 ---
 
 ## 4. The chunk-size question — and its instrument

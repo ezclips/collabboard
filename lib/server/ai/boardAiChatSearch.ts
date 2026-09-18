@@ -162,6 +162,13 @@ export async function searchBoardAiContext(
   availableChars: number,
   /** What the user's own attachments already sent, for the span rule. */
   coverage: BoardAiSearchCoverage = { padletIds: new Set(), documentPages: new Set() },
+  /**
+   * Where the search block will sit in the array the model is given, so its
+   * passages can carry the sub-token a citation resolves against. The route
+   * appends the block after the attachments, so this is `currentContext.length`.
+   * Passed through untouched -- this module decides nothing about it.
+   */
+  blockIndex = 0,
 ): Promise<Result<{ block: ResolvedBoardAiContextBlock; result: BoardAiSearchResult }, DomainError>> {
   // STEP 1. The caller's own client, before anything privileged exists. Owner
   // or is_board_member, re-checked on this turn and never cached.
@@ -181,7 +188,8 @@ export async function searchBoardAiContext(
     const result: BoardAiSearchResult = {
       outcome: 'ran', returned: 0, used: 0, dropped: 0, query: '',
     };
-    return ok({ block: boardAiSearchContextBlock([], '', result), result });
+    // No passages, so no sub-tokens; the index is passed anyway for one shape.
+    return ok({ block: boardAiSearchContextBlock([], '', result, blockIndex), result });
   }
 
   // STEP 3. Only now, and only reads. Both sources, independently, under one
@@ -275,5 +283,5 @@ export async function searchBoardAiContext(
     dropped,
     query: terms,
   };
-  return ok({ block: boardAiSearchContextBlock(kept, terms, result), result });
+  return ok({ block: boardAiSearchContextBlock(kept, terms, result, blockIndex), result });
 }

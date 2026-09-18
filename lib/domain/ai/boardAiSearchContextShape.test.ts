@@ -95,3 +95,67 @@ describe('the budget order: attachments win, search yields', () => {
     expect(block.text).not.toContain('[PDF text:');
   });
 });
+
+/**
+ * PASSAGE IDENTITY: present for the citation layer, absent from everything that
+ * leaves the server.
+ *
+ * `passages` is the third field on a resolved block that is deliberately
+ * transient, alongside `image` and `pageNumbers`. It works because the envelope
+ * builder copies fields one at a time rather than spreading the block -- which
+ * is exactly the kind of thing a later tidy-up would change without noticing,
+ * so it is asserted rather than trusted.
+ */
+describe('the search block carries its passages, and only for this turn', () => {
+  const PADLET = 'pppppppp-1111-4111-8111-111111111111';
+  const DOC = 'cd308c08-39f9-46ca-a78a-bc8f91f791a3';
+  const passages = [
+    { source: 'post' as const, label: 'Weekly plan', text: 'plan body', rank: 0.9, padletId: PADLET },
+    {
+      source: 'pdf' as const, label: 'slides.pdf — page 3', text: 'slide text', rank: 0.8,
+      knowledgeDocumentId: DOC, pageStart: 3, pageEnd: 3,
+    },
+  ];
+
+  it('identity travels beside the block, in the order the origin lines number them', () => {
+    const block = boardAiSearchContextBlock(passages, 'plan', RESULT, 0);
+    expect(block.passages).toEqual([
+      { source: 'post', label: 'Weekly plan', padletId: PADLET },
+      { source: 'pdf', label: 'slides.pdf — page 3', knowledgeDocumentId: DOC, pageStart: 3 },
+    ]);
+    expect(block.text).toContain('[S1.1 | board post: Weekly plan]');
+    expect(block.text).toContain('[S1.2 | PDF text: slides.pdf — page 3]');
+  });
+
+  it('the block index is the caller\'s, because only the caller knows it', () => {
+    const block = boardAiSearchContextBlock(passages, 'plan', RESULT, 2);
+    expect(block.text).toContain('[S3.1 |');
+    expect(block.text).toContain('[S3.2 |');
+  });
+
+  it('NO PASSAGE TEXT rides along with the identity', () => {
+    const block = boardAiSearchContextBlock(passages, 'plan', RESULT, 0);
+    expect(JSON.stringify(block.passages)).not.toContain('plan body');
+    expect(JSON.stringify(block.passages)).not.toContain('slide text');
+  });
+
+  it('passages do NOT persist: the stored envelope never learns of them', () => {
+    const block = boardAiSearchContextBlock(passages, 'plan', RESULT, 0);
+    const envelope = buildBoardAiContextEnvelope([block]);
+    expect(JSON.stringify(envelope)).not.toContain('"passages"');
+    expect(JSON.stringify(envelope)).not.toContain('padletId');
+  });
+
+  it('a block with no passages carries no field at all', () => {
+    // "Nothing matched" and the skipped block are both board-search blocks with
+    // nothing to cite; an empty array would invite a sub-token to look valid.
+    expect(boardAiSearchContextBlock([], '', { ...RESULT, returned: 0, used: 0 }, 0).passages).toBeUndefined();
+    expect(boardAiSearchSkippedBlock().passages).toBeUndefined();
+  });
+
+  it('bounding preserves the identity of a block that survives', () => {
+    const block = boardAiSearchContextBlock(passages, 'plan', RESULT, 0);
+    const bounded = boundResolvedContext([block]);
+    expect(bounded[0].passages).toHaveLength(2);
+  });
+});

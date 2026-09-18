@@ -205,6 +205,25 @@ export interface BoardAiResolvedImage {
  */
 export const BOARD_AI_CONTEXT_IMAGE_MARKER = '[image attached]';
 
+/**
+ * One passage inside a board-search block, reduced to what a citation may
+ * carry: where it came from, and what to call it.
+ *
+ * Deliberately no text. A citation says WHERE, never WHAT -- the same rule the
+ * citation item itself keeps -- and a passage's text is already in the block's
+ * `text`, where the model can read it and the envelope never stores it.
+ *
+ * `pageStart` rather than a single page number: a PDF chunk may span pages, and
+ * the page it BEGINS on is located rather than invented.
+ */
+export interface BoardAiCitablePassage {
+  readonly source: 'post' | 'pdf';
+  readonly label: string;
+  readonly padletId?: string;
+  readonly knowledgeDocumentId?: string;
+  readonly pageStart?: number;
+}
+
 export interface ResolvedBoardAiContextBlock {
   readonly type: BoardAiContextType;
   readonly label: string;
@@ -229,6 +248,22 @@ export interface ResolvedBoardAiContextBlock {
    * page is covered by it and a passage from that page is not a duplicate.
    */
   readonly pageNumbers?: readonly number[];
+  /**
+   * Present ONLY on a board-search block: the identity of each passage inside
+   * it, in the order they appear in `text`.
+   *
+   * WHY IT EXISTS. A search block is one block holding several sources, so the
+   * citation model -- one block per S-token -- had nothing to point at and
+   * refused to cite a search at all. This is what a sub-token resolves against:
+   * `S3.2` is `blocks[2].passages[1]`. Identity and label only, never text, so
+   * a citation still says WHERE and never WHAT.
+   *
+   * SERVER-AUTHORED AND TRANSIENT, like `image` and `pageNumbers` above. The
+   * envelope builder and the payload serializer both copy fields one at a time,
+   * so this neither persists nor reaches a model; a test pins that, because a
+   * later refactor to a spread would quietly change it.
+   */
+  readonly passages?: readonly BoardAiCitablePassage[];
   readonly text: string;
   /**
    * Present ONLY on a padlet-image block. `text` stays the marker above, so

@@ -33,15 +33,33 @@ export function boardAiCitationSourceToken(index: number): string {
   return `S${index + 1}`;
 }
 
-/** The block a token names, or null. Position is the only mapping. */
-function blockForToken(
+/**
+ * The token grammar, in one place because two readers must agree on it: the
+ * footer's shape check and the resolver below.
+ *
+ * `S3` names a block. `S3.2` names the second passage inside the block at S3 --
+ * which only a board search has. The plain form is unchanged, so every footer
+ * written before sub-tokens existed still parses exactly as it did.
+ */
+export const BOARD_AI_CITATION_TOKEN_PATTERN = /^S([1-9][0-9]*)(?:\.([1-9][0-9]*))?$/;
+
+/**
+ * The citation a token names, or null. Position is the only mapping, at both
+ * levels: a block by its index in the array the model was given, and a passage
+ * by its index within that block's own passage list.
+ */
+function citationForToken(
   token: string,
   blocks: readonly ResolvedBoardAiContextBlock[],
-): ResolvedBoardAiContextBlock | null {
-  const match = /^S([1-9][0-9]*)$/.exec(token);
+): BoardAiCitationItem | null {
+  const match = BOARD_AI_CITATION_TOKEN_PATTERN.exec(token);
   if (!match) return null;
-  const index = Number(match[1]) - 1;
-  return blocks[index] ?? null;
+  const block = blocks[Number(match[1]) - 1];
+  if (!block) return null;
+  // A sub-token is a claim about a passage; an absent one falls to null rather
+  // than silently citing the block it was written against.
+  if (match[2] !== undefined) return citationItemFromPassage(block, Number(match[2]) - 1);
+  return citationItemFromBlock(block);
 }
 
 /**
@@ -54,6 +72,7 @@ function blockForToken(
 export const BOARD_AI_CITATION_INSTRUCTIONS: readonly string[] = [
   'Each entry in `explicitContext` carries a `sourceId` such as "S1". Those ids exist only so you can say which of the sources you were given you actually used.',
   `When your answer relies on one or more of them, end your reply with exactly one final line of the form ${BOARD_AI_CITATION_FOOTER_PREFIX}S1,S3]] naming those ids, newest first is not required.`,
+  'A board search result contains several passages, and each is introduced by an id of the form "S3.2". When your answer relies on a search, name the passages you actually used rather than the search as a whole.',
   `If your answer uses none of them, end with ${BOARD_AI_CITATION_FOOTER_PREFIX}${BOARD_AI_CITATION_NONE}]] instead.`,
   'That line is machine-read and removed before the user sees your reply, so write nothing else on it, and never mention source ids, document identifiers or page numbers as a way of citing anything in your prose.',
 ];
@@ -89,7 +108,7 @@ export function parseBoardAiCitationFooter(text: string): BoardAiCitationParseRe
     const token = raw.trim().toUpperCase();
     // Shape only. Whether it names a real block is decided against the
     // server's own array, never here.
-    if (!/^S[1-9][0-9]*$/.test(token)) continue;
+    if (!BOARD_AI_CITATION_TOKEN_PATTERN.test(token)) continue;
     if (tokens.includes(token)) continue;
     tokens.push(token);
   }
@@ -191,17 +210,61 @@ function citationItemFromBlock(block: ResolvedBoardAiContextBlock): BoardAiCitat
         }
         : null;
     case 'board-search':
-      // A SEARCH IS NOT A PLACE. The block holds passages from several posts and
-      // pages, so "open the citation" has no single destination, and inventing
-      // one -- the first passage, say -- would take the reader somewhere the
-      // answer may not have leaned on. The passages carry their own origin lines
-      // inside the block, so the model can still name a source in prose.
+      // A SEARCH IS STILL NOT A PLACE, and this refusal is NARROWED, not
+      // lifted. The block holds passages from several posts and pages, so
+      // "open the citation" has no single destination, and inventing one --
+      // the first passage, say -- would take the reader somewhere the answer
+      // may not have leaned on. A bare S-token on a search block therefore
+      // still cites nothing.
       //
-      // Giving search results navigable citations is a real improvement and a
-      // separate unit: it needs one block per passage, which collides with the
-      // four-slot rule the search deliberately does not spend.
+      // What changed is that a passage can now be named individually, as
+      // `S3.2`, and THAT resolves -- through citationItemFromPassage below,
+      // which is reached only with an in-range passage index. The obstacle the
+      // earlier note described (one block per passage, colliding with the
+      // four-slot rule) was avoided rather than paid: the block stays one
+      // block, and the passage identity travels beside it.
       return null;
   }
+}
+
+/**
+ * One passage inside a board-search block, as a citation.
+ *
+ * A SEARCH PASSAGE IS NOT A NEW KIND OF SOURCE. A post passage IS the board
+ * post; a PDF passage IS a page of the document. So this emits the ordinary
+ * `padlet` and `knowledge-page` items the rest of the system already knows,
+ * which is why nothing downstream needed changing: the identity keys already
+ * de-duplicate them against the same source attached explicitly, the stored
+ * envelope needs no new field, the provenance canonicalization is unchanged,
+ * and the reader already knows how to open both.
+ */
+function citationItemFromPassage(
+  block: ResolvedBoardAiContextBlock,
+  passageIndex: number,
+): BoardAiCitationItem | null {
+  // Only a search block has passages, so a sub-token on anything else is
+  // refused here rather than being quietly read as its parent.
+  if (block.type !== 'board-search') return null;
+  const passage = block.passages?.[passageIndex];
+  if (!passage) return null;
+  const label = boardAiContextLabel(passage.label);
+  if (!label) return null;
+
+  if (passage.source === 'post') {
+    return passage.padletId ? { type: 'padlet', padletId: passage.padletId, label } : null;
+  }
+  // A chunk may span pages. `pageStart` is where this passage actually begins,
+  // so it is located rather than invented -- the same standard the
+  // knowledge-document arm applies when it refuses to guess a page at all.
+  const page = passage.pageStart;
+  if (!passage.knowledgeDocumentId) return null;
+  if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) return null;
+  return {
+    type: 'knowledge-page',
+    knowledgeDocumentId: passage.knowledgeDocumentId,
+    pageNumber: page,
+    label,
+  };
 }
 
 /**
@@ -219,9 +282,7 @@ export function buildBoardAiCitationEnvelope(
   const seen = new Set<string>();
   for (const token of tokens) {
     if (items.length >= BOARD_AI_CITATION_MAX_ITEMS) break;
-    const block = blockForToken(token, blocks);
-    if (!block) continue;
-    const item = citationItemFromBlock(block);
+    const item = citationForToken(token, blocks);
     if (!item) continue;
     const key = boardAiCitationIdentityKey(item);
     if (seen.has(key)) continue;

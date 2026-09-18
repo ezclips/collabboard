@@ -426,8 +426,11 @@ describe('a title-only post that matched is a result, not noise', () => {
     if (!result.ok) return;
     // The true answer is that the post exists and is empty. The line must let
     // the model say that rather than read as a source whose text went missing.
-    expect(result.value.block.text).toBe('[board post, title only and no body: Trump Note Post]');
-    expect(result.value.block.text).not.toMatch(/\[board post: /);
+    // The wording is unchanged; the citation sub-token is prefixed to it, so a
+    // cited passage can be named individually. The default block index is 0,
+    // hence S1.
+    expect(result.value.block.text).toBe('[S1.1 | board post, title only and no body: Trump Note Post]');
+    expect(result.value.block.text).not.toMatch(/\| board post: /);
   });
 
   it('a post WITH a body is unaffected', async () => {
@@ -439,7 +442,7 @@ describe('a title-only post that matched is a result, not noise', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.block.text).toContain('[board post: Audi A2 Stoßstange demontieren neu.pdf]');
+    expect(result.value.block.text).toContain('[S1.1 | board post: Audi A2 Stoßstange demontieren neu.pdf]');
     expect(result.value.block.text).toContain('Möchte man nur die Hupe wechseln');
     expect(result.value.block.text).not.toContain('title only');
   });
@@ -511,8 +514,9 @@ describe('the search block itself', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.block.type).toBe('board-search');
-    expect(result.value.block.text).toContain('[board post: Weekly plan]');
-    expect(result.value.block.text).toContain('[PDF text: slides.pdf — page 3]');
+    // Numbered in order, which is what makes the sub-token an index.
+    expect(result.value.block.text).toContain('[S1.1 | board post: Weekly plan]');
+    expect(result.value.block.text).toContain('[S1.2 | PDF text: slides.pdf — page 3]');
     // The counts reach the model through the label, so it can answer honestly.
     expect(result.value.block.label).toContain('2 text passages used');
   });

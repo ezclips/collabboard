@@ -167,3 +167,116 @@ describe('H: a stored envelope is read back strictly', () => {
       .toBe(boardAiCitationIdentityKey({ type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 4, label: 'DIFFERENT' }));
   });
 });
+
+/**
+ * CITABLE SEARCH PASSAGES.
+ *
+ * A search block holds passages from several sources, so a bare S-token on it
+ * still has no single destination and still cites nothing. What is new is that
+ * a passage can be named individually -- `S3.2` -- and that resolves, because
+ * the block now carries each passage's identity beside it.
+ *
+ * A search passage is NOT a new kind of source: a post passage IS the board
+ * post, a PDF passage IS a page of the document. That is why nothing
+ * downstream changed -- the items below are the ordinary `padlet` and
+ * `knowledge-page` the reader already knows how to open.
+ */
+const searchBlock = (
+  passages: readonly {
+    source: 'post' | 'pdf'; label: string;
+    padletId?: string; knowledgeDocumentId?: string; pageStart?: number;
+  }[],
+): ResolvedBoardAiContextBlock => ({
+  type: 'board-search',
+  label: 'Board search · 2 text passages used',
+  query: 'weekly plan',
+  passages,
+  text: '[S1.1 | board post: Weekly plan]\nbody',
+});
+
+const POST_PASSAGE = { source: 'post' as const, label: 'Weekly plan', padletId: PADLET };
+const PDF_PASSAGE = { source: 'pdf' as const, label: 'slides.pdf — page 3', knowledgeDocumentId: DOC_A, pageStart: 3 };
+
+describe('search passages become ordinary, navigable citations', () => {
+  it('a post passage cites the board post itself', () => {
+    const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([POST_PASSAGE])]);
+    expect(envelope?.items).toEqual([{ type: 'padlet', padletId: PADLET, label: 'Weekly plan' }]);
+  });
+
+  it('a PDF passage cites the document and the page it BEGINS on', () => {
+    const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([PDF_PASSAGE])]);
+    expect(envelope?.items).toEqual([
+      { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 3, label: 'slides.pdf — page 3' },
+    ]);
+  });
+
+  it('the index is positional, and the second passage is the second one', () => {
+    const block = searchBlock([POST_PASSAGE, PDF_PASSAGE]);
+    expect(buildBoardAiCitationEnvelope(['S1.2'], [block])?.items[0].type).toBe('knowledge-page');
+    expect(buildBoardAiCitationEnvelope(['S1.1'], [block])?.items[0].type).toBe('padlet');
+  });
+
+  it('NARROWED, NOT LIFTED: a bare token on a search block still cites nothing', () => {
+    // The refusal that predates this change is intact. A search is still not a
+    // place; only a named passage is.
+    expect(buildBoardAiCitationEnvelope(['S1'], [searchBlock([POST_PASSAGE])])).toBeNull();
+  });
+
+  it('a passage index out of range cites nothing, and the answer still stands', () => {
+    expect(buildBoardAiCitationEnvelope(['S1.9'], [searchBlock([POST_PASSAGE])])).toBeNull();
+  });
+
+  it('a sub-token on a block that is not a search cites nothing', () => {
+    // A page block has no passages. Reading the sub-token as its parent would
+    // let a model cite a source it was not pointed at.
+    expect(buildBoardAiCitationEnvelope(['S1.1'], [page(DOC_A, 4)])).toBeNull();
+  });
+
+  it('the SKIPPED search block has no passages, so no sub-token reaches it', () => {
+    // Stored for the chip, never sent to the model. It is a board-search block
+    // with no passages at all.
+    const skipped: ResolvedBoardAiContextBlock = {
+      type: 'board-search', label: 'Board search · not run', query: '',
+      text: 'Board search was not run: the attachments on this message took all the available room.',
+    };
+    expect(buildBoardAiCitationEnvelope(['S1.1'], [skipped])).toBeNull();
+    expect(buildBoardAiCitationEnvelope(['S1'], [skipped])).toBeNull();
+  });
+
+  it('a passage and the same page attached explicitly are ONE citation', () => {
+    // boardAiCitationIdentityKey already collapses these; the passage arm emits
+    // the very same item, which is what makes that work without a new rule.
+    const envelope = buildBoardAiCitationEnvelope(
+      ['S1', 'S2.1'],
+      [page(DOC_A, 3, 'slides.pdf — page 3'), searchBlock([PDF_PASSAGE])],
+    );
+    expect(envelope?.items).toHaveLength(1);
+  });
+
+  it('no passage text can reach a citation', () => {
+    const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([POST_PASSAGE])]);
+    expect(JSON.stringify(envelope)).not.toContain('body');
+    expect(Object.keys(envelope!.items[0]).sort()).toEqual(['label', 'padletId', 'type']);
+  });
+});
+
+describe('the token grammar widened without breaking what was written before it', () => {
+  it('a footer written before sub-tokens existed parses exactly as it did', () => {
+    const parsed = parseBoardAiCitationFooter('Answer.\n\n[[COLLABBOARD_CITATIONS:S1,S3]]');
+    expect(parsed.tokens).toEqual(['S1', 'S3']);
+  });
+
+  it('a sub-token survives the footer shape check', () => {
+    const parsed = parseBoardAiCitationFooter('Answer.\n\n[[COLLABBOARD_CITATIONS:S3.2,S1]]');
+    expect(parsed.tokens).toEqual(['S3.2', 'S1']);
+  });
+
+  it('malformed sub-tokens are dropped as shapes, before any block is consulted', () => {
+    const parsed = parseBoardAiCitationFooter('A.\n\n[[COLLABBOARD_CITATIONS:S1.,S.2,S1.0,S0.1,S1.2.3,S1.2]]');
+    expect(parsed.tokens).toEqual(['S1.2']);
+  });
+
+  it('the instructions tell the model the passage form exists', () => {
+    expect(BOARD_AI_CITATION_INSTRUCTIONS.join(' ')).toContain('S3.2');
+  });
+});

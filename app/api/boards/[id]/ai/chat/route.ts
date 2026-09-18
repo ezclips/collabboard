@@ -295,6 +295,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           // A chunk from a page a document attachment never reached is not a
           // duplicate -- it is the only evidence in the request.
           boardAiSearchCoverageOf(currentContext),
+          // WHERE THE BLOCK WILL LAND, so its passages can carry the sub-token
+          // a citation resolves against. The block is appended right after the
+          // attachments below, and `boundResolvedContext` only ever drops a
+          // SUFFIX -- once the character budget is spent every later text block
+          // is skipped -- so a search block that survives still has all of
+          // `currentContext` in front of it, and this index is its real
+          // position. A route test pins that, because it is an invariant of the
+          // bounder rather than a property of the block.
+          currentContext.length,
         );
         // A SEARCH THAT FAILED IS NOT A CHAT THAT FAILED. The user asked a
         // question; an enrichment they toggled on being unavailable is not a
