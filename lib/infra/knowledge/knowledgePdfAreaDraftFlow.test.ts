@@ -254,34 +254,41 @@ describe('R6I-18..21: Cancel writes nothing at all', () => {
     expect(draftModal()).toContain('onCancel={discardPdfAreaDraft}');
   });
 
-  it('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: a backdrop click is wired to nothing -- not even a safe discard', () => {
-    // Superseded by the correction below: a backdrop click used to call
-    // onCancel() directly (a "safe discard"). It now does nothing at all --
-    // the draft stays open -- so there is no backdrop dismissal wiring left
-    // to find.
-    // code(), not the raw read: this file's own comments explaining the
-    // absence necessarily use the word "backdropProps" in prose.
+  it('PDF_AREA_CAPTURE_CLICK_OUTSIDE_SAVES_1: a backdrop click is wired to SAVE, and never to a discard', () => {
+    // The history of this one line, because it has now been three things:
+    //   1. onCancel() directly -- a "safe discard" that silently lost captures;
+    //   2. nothing at all -- the draft stayed open, and a footer carried save;
+    //   3. submit -- clicking outside keeps the work, matching every other
+    //      post editor in the app.
+    // Only (1) could lose work, and this assertion is what keeps it gone: the
+    // backdrop must reach submit, and must not reach any close path.
+    // code(), not the raw read: this file's own comments necessarily use these
+    // identifiers in prose.
     const modal = code(read('components/collabboard/editors/PdfAreaImageDraftModal.tsx'));
-    expect(modal).not.toContain('useBackdropDismiss');
-    expect(modal).not.toContain('backdropProps');
+    expect(modal).toContain('useBackdropDismiss(submit)');
+    expect(modal).toContain('backdropProps={backdropSaves}');
+    expect(modal).not.toContain('useBackdropDismiss(requestClose)');
+    expect(modal).not.toContain('useBackdropDismiss(onCancel)');
+    expect(modal).not.toContain('backdropProps={{ onClick: onCancel }}');
   });
 
-  it('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: publishing is reachable ONLY from the explicit save action, never from any close control', () => {
-    // R6I-C3's "only the toolbar's finish action publishes" is still true in
-    // spirit -- there is exactly one path to onSave -- but that action is no
-    // longer the toolbar arrow (which now closes, like everything else); it
-    // is the labelled save button's own click handler.
+  it('PDF_AREA_CAPTURE_CLICK_OUTSIDE_SAVES_1: publishing still has exactly ONE call site, now reached by clicking outside or Enter', () => {
+    // The property that has held across all three exit models: there is
+    // exactly one place onSave is called, and no CLOSE control reaches it.
+    // What changed is only which gestures route into `submit`.
     const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
-    expect(modal).toContain('onClick={submit}');
     expect(modal).toContain('onSave();');
-    // The only place onSave is CALLED: the prop declaration/destructure are
-    // the other two mentions of the bare identifier, so there is exactly one
-    // call site.
+    // The prop declaration/destructure are the other two mentions of the bare
+    // identifier, so this is exactly one call site.
     expect((modal.match(/\bonSave\(\)/g) ?? [])).toHaveLength(1);
-    // Escape, Cancel and the toolbar arrow all ask first -- none calls onSave.
+    // The two gestures that publish, both routed through the single `submit`.
+    expect(modal).toContain('useBackdropDismiss(submit)');
+    expect(modal).toContain('submit()');
+    // Escape and the toolbar arrow ask first -- neither calls onSave, and the
+    // save button that used to be the third publisher no longer exists.
     expect(modal).not.toMatch(/onBack=\{onSave\}/);
+    expect(modal).not.toContain('onClick={submit}');
     expect(modal).toMatch(/event\.key === 'Escape'[\s\S]{0,40}requestClose\(\)/);
-    expect(modal).toContain('onClick={requestClose}');
     expect(modal).toContain('onBack={requestClose}');
   });
 
@@ -531,31 +538,56 @@ describe('R6I-C2: the draft IS the real Image post editor, not a preview dialog'
 });
 
 
-// PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1 -- R6I-C3 deliberately shipped no
-// Save/Cancel footer, reasoning that the toolbar's own arrow was enough. In
-// practice that arrow was unlabelled and ambiguous, and the confirmed defect
-// this correction fixes is exactly that: users could not tell the small
-// "Done" arrow was the one thing publishing a shared-board card, and a
-// backdrop click discarded a capture with no warning at all. This block
-// replaces R6I-C3's "no footer" contract with the opposite, deliberate one.
-describe('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: an explicit, labelled footer replaces the ambiguous arrow', () => {
+// PDF_AREA_CAPTURE_CLICK_OUTSIDE_SAVES_1 -- the footer is gone again, but NOT
+// back to R6I-C3's contract. R6I-C3 had no footer AND a backdrop that discarded
+// silently; that combination is what lost captures. This one has no footer and
+// a backdrop that SAVES, so the failure mode is closed by construction rather
+// than by a control the user had to find. The draft's exit model now matches
+// every other post editor: you click away and what you made is kept.
+describe('PDF_AREA_CAPTURE_CLICK_OUTSIDE_SAVES_1: no footer, and clicking outside saves', () => {
   const modal = read('components/collabboard/editors/PdfAreaImageDraftModal.tsx');
   const toolbar = read('components/collabboard/editors/ImageActionsToolbar.tsx');
 
-  it('the labelled Save and Cancel actions, and the helper text, are present', () => {
-    for (const present of [
+  it('the footer buttons are gone, and the caption carries the in-flight state', () => {
+    for (const absent of [
       'data-ui="pdf-area-image-draft-save"',
       'data-ui="pdf-area-image-draft-cancel"',
-      "'Adding…'",
       'Add image to canvas',
-      'Adds this image to the canvas and PDF Library.',
+      'saveButtonRef',
     ]) {
-      expect(modal, present).toContain(present);
+      expect(modal, absent).not.toContain(absent);
     }
-    // The Cancel button's own text node -- checked as a pattern rather than
-    // a literal '>Cancel<' substring, since JSX text content is free to sit
-    // on its own indented line in the source without changing what renders.
-    expect(modal).toMatch(/data-ui="pdf-area-image-draft-cancel"[\s\S]{0,400}>\s*Cancel\s*</);
+    // The copy the save button used to own now lives on the caption -- without
+    // it an in-flight save would be entirely silent.
+    expect(modal).toContain('data-ui="pdf-area-image-draft-caption"');
+    expect(modal).toMatch(
+      /data-ui="pdf-area-image-draft-caption"[\s\S]{0,300}isSaving \? 'Adding…' : 'Adds this image to the canvas and PDF Library\.'/,
+    );
+    // The actions region and the error line both survive.
+    expect(modal).toContain('data-ui="pdf-area-image-draft-actions"');
+    expect(modal).toContain('data-ui="pdf-area-image-draft-error"');
+    expect(modal).toContain('role="alert"');
+  });
+
+  it('the backdrop is bound to the SAVE path, through the shared dismiss authority', () => {
+    // The previous contract omitted backdropProps entirely so a backdrop click
+    // did nothing. It is now wired -- and wired to submit, never to a discard,
+    // which is the behaviour that lost captures in the first place.
+    expect(modal).toContain('backdropProps={backdropSaves}');
+    expect(modal).toContain('useBackdropDismiss(submit)');
+    expect(modal).not.toContain('useBackdropDismiss(requestClose)');
+    expect(modal).not.toContain('useBackdropDismiss(onCancel)');
+  });
+
+  it('Enter publishes from the modal wrapper, without changing the shared card', () => {
+    const card = read('components/collabboard/editors/ImagePostEditorCard.tsx');
+    expect(modal).toContain('onKeyDown={onWrapperKeyDown}');
+    expect(modal).toMatch(/event\.key !== 'Enter'/);
+    expect(modal).toContain('submit()');
+    // IME safety: Enter commits a candidate mid-word in Japanese/Chinese input.
+    expect(modal).toContain('isComposing');
+    // The shared card's own Enter still means "blur", for the persisted editor.
+    expect(card).toContain("if (e.key === 'Enter') e.currentTarget.blur();");
   });
 
   it('the real Image toolbar and card are still what is rendered', () => {
@@ -564,7 +596,7 @@ describe('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: an explicit, labelled footer re
     expect(modal).toContain('<ImagePostEditorCard');
   });
 
-  it('the toolbar arrow no longer finishes/publishes -- it asks to close, like Escape and Cancel', () => {
+  it('the toolbar arrow no longer finishes/publishes -- it asks to close, like Escape', () => {
     expect(modal).not.toContain('onBack={onSave}');
     expect(modal).toContain('onBack={requestClose}');
     expect(modal).toContain('backLabel="Cancel"');
@@ -583,12 +615,20 @@ describe('PDF_AREA_CAPTURE_SAVE_UX_CORRECTION_1: an explicit, labelled footer re
     expect(modal).not.toMatch(/onBack=\{requestClose\}[\s\S]{0,200}'Place this image on the board'/);
   });
 
-  it('a second submission while one is in flight is refused, at both the button and the save path', () => {
-    expect(modal).toContain('disabled={isSaving}');
+  it('a second submission while one is in flight is refused, with no button left to carry the guard', () => {
+    // The save button's `disabled={isSaving}` is gone with the button, and a
+    // backdrop cannot be disabled -- so the guards that remain are the only
+    // ones there are, and each is asserted here rather than assumed.
     expect(modal).toContain('backDisabled={isSaving}');
     expect(toolbar).toContain('disabled={onBack ? backDisabled : false}');
+    // The synchronous ref, now the ONLY lock on the submit path.
+    expect(modal).toContain('if (isSaving || submitLockRef.current) return;');
+    // The close path carries its own isSaving check -- this is what used to be
+    // the Cancel button's `disabled={isSaving}`, and it must not be lost with
+    // it, or Escape could discard a capture mid-write.
+    expect(modal).toContain('if (isSaving || confirmingDiscard) return;');
     // ...and the save path itself still guards (state AND the synchronous
-    // ref), so the button is not the only thing standing between a double
+    // ref), so the modal is not the only thing standing between a double
     // press and two cards.
     expect(savePath()).toContain(
       'if (!canvasId || !pendingPdfAreaDraft || isPdfAreaDraftSaving || isPdfAreaDraftSavingRef.current) return;',

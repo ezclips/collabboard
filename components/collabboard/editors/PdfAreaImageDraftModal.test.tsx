@@ -47,9 +47,29 @@ const click = (el: Element | null) => {
 // out too (it has to clear the portalled overlay), so body finds it either
 // way.
 const overlay = () => document.body.querySelector('[data-ui="pdf-area-image-draft-overlay"]');
-const saveButton = () => document.body.querySelector<HTMLButtonElement>('[data-ui="pdf-area-image-draft-save"]');
-const cancelButton = () => document.body.querySelector<HTMLButtonElement>('[data-ui="pdf-area-image-draft-cancel"]');
+const caption = () => document.body.querySelector('[data-ui="pdf-area-image-draft-caption"]');
+const actions = () => document.body.querySelector('[data-ui="pdf-area-image-draft-actions"]');
 const backArrow = () => document.body.querySelector<HTMLButtonElement>('[data-ui="image-editor-draft-complete"]');
+
+/**
+ * A REAL backdrop click, which is pointerdown THEN click, both on the backdrop
+ * itself. useBackdropDismiss records the press origin on pointerdown and
+ * refuses a click whose press began anywhere else -- so dispatching `click`
+ * alone proves nothing and would pass even if the binding were broken.
+ */
+const backdropClick = (el: Element | null) => {
+  act(() => {
+    el!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    el!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+};
+
+/** Enter from inside the card, which is how the keyboard publishes. */
+const pressEnter = (el: Element | null) => {
+  act(() => {
+    el!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  });
+};
 const errorText = () => document.body.querySelector('[data-ui="pdf-area-image-draft-error"]');
 const confirmDialog = () => document.body.querySelector('[role="alertdialog"]');
 const titleInput = () => document.body.querySelector<HTMLInputElement>('[data-ui="image-post-editor-title"]');
@@ -70,40 +90,93 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof PdfAreaImageDr
   } satisfies React.ComponentProps<typeof PdfAreaImageDraftModal>;
 }
 
-describe('A: the draft visibly offers "Add image to canvas" and Cancel', () => {
-  it('renders a prominent labelled save action, a separate Cancel, and the helper text', () => {
+// PDF_AREA_CAPTURE_CLICK_OUTSIDE_SAVES_1. This suite previously asserted a
+// labelled Save and a Cancel button. Those are gone on purpose: the draft's
+// exit model now matches every other post editor -- you click away and what you
+// made is kept -- so a suite describing a footer no longer describes the
+// product.
+describe('A: the draft has NO footer buttons, only the caption', () => {
+  it('renders no save and no cancel control at all', () => {
     mount(<PdfAreaImageDraftModal {...baseProps()} />);
-    const save = saveButton();
-    expect(save).not.toBeNull();
-    expect(save!.textContent).toBe('Add image to canvas');
-    const cancel = cancelButton();
-    expect(cancel).not.toBeNull();
-    expect(cancel!.textContent).toBe('Cancel');
-    expect(document.body.textContent).toContain('Adds this image to the canvas and PDF Library.');
-    // The image preview is still there -- the footer sits below it, not over it.
+    expect(document.body.querySelector('[data-ui="pdf-area-image-draft-save"]')).toBeNull();
+    expect(document.body.querySelector('[data-ui="pdf-area-image-draft-cancel"]')).toBeNull();
+    // Nothing inside the actions region is a button any more.
+    expect(actions()!.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('keeps the actions region, the caption, and the preview', () => {
+    mount(<PdfAreaImageDraftModal {...baseProps()} />);
+    expect(actions()).not.toBeNull();
+    expect(caption()!.textContent).toBe('Adds this image to the canvas and PDF Library.');
     expect(document.body.querySelector('img[alt="Selected PDF area"]')).not.toBeNull();
+  });
+
+  it('the title input remains -- the draft is never left with nothing focusable', () => {
+    mount(<PdfAreaImageDraftModal {...baseProps()} />);
+    const input = titleInput();
+    expect(input).not.toBeNull();
+    act(() => { input!.focus(); });
+    expect(document.activeElement).toBe(input);
   });
 });
 
-describe('B: backdrop click preserves the draft and triggers no save', () => {
-  it('a click on the backdrop does nothing at all -- no save, no cancel, no confirmation', () => {
+describe('B: clicking outside SAVES', () => {
+  it('a backdrop click calls onSave, and never onCancel or the confirmation', () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onSave, onCancel })} />);
-    click(overlay());
-    expect(onSave).not.toHaveBeenCalled();
+    backdropClick(overlay());
+    expect(onSave).toHaveBeenCalledTimes(1);
     expect(onCancel).not.toHaveBeenCalled();
     expect(confirmDialog()).toBeNull();
-    // The draft is still fully present and interactive.
-    expect(saveButton()).not.toBeNull();
+  });
+
+  // The property that makes a saving backdrop safe rather than trigger-happy.
+  it('a press that BEGAN inside the card does not publish when it drifts out', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ onSave })} />);
+    act(() => {
+      // Press starts on the title input (dragging to select it), releases over
+      // the backdrop -- the browser then retargets the click to the overlay.
+      titleInput()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      overlay()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('a click on the CARD does not publish -- only the backdrop does', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ onSave })} />);
+    backdropClick(document.body.querySelector('[data-ui="image-post-editor-card"]'));
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
 
-describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; Discard closes without saving', () => {
-  it('Cancel opens the confirmation with the exact required copy, never calling onCancel directly', () => {
+describe('B2: Enter saves from the keyboard', () => {
+  it('Enter from the title input calls onSave', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ onSave })} />);
+    pressEnter(titleInput());
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('a non-Enter key does not', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ onSave })} />);
+    act(() => {
+      titleInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+    });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+// The discard confirmation is UNCHANGED. Only its triggers are: Escape and the
+// toolbar arrow, since Cancel no longer exists.
+describe('C: Escape/toolbar arrow opens confirmation; Keep editing retains draft data; Discard closes without saving', () => {
+  it('the toolbar arrow opens the confirmation with the exact required copy, never calling onCancel directly', () => {
     const onCancel = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onCancel })} />);
-    click(cancelButton());
+    click(backArrow());
     expect(onCancel).not.toHaveBeenCalled();
     const dialog = confirmDialog();
     expect(dialog).not.toBeNull();
@@ -130,23 +203,25 @@ describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; 
     expect(confirmDialog()).not.toBeNull();
   });
 
-  it('"Keep editing" retains the complete draft and returns focus to the primary action', () => {
+  it('"Keep editing" retains the complete draft and returns focus to the TITLE INPUT', () => {
     const onCancel = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onCancel, title: 'Keep me' })} />);
-    click(cancelButton());
+    // Escape from the page body: no real invoker, so the fallback is exercised.
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     click(btnByText('Keep editing'));
     expect(onCancel).not.toHaveBeenCalled();
     expect(confirmDialog()).toBeNull();
-    // Still open, still the same draft -- title/preview untouched, save still offered.
+    // Still open, still the same draft.
     expect(titleInput()).toHaveProperty('value', 'Keep me');
-    expect(saveButton()).not.toBeNull();
-    expect(document.activeElement).toBe(saveButton());
+    // The fallback is the title input because it is now the ONLY focusable
+    // control the draft owns -- the save button it used to fall back to is gone.
+    expect(document.activeElement).toBe(titleInput());
   });
 
   // PDF_AREA_DISCARD_DIALOG_LAYER_CORRECTION_1
   it('raises the confirmation out of the canvas subtree, above the editor tier', () => {
     const { container } = mount(<PdfAreaImageDraftModal {...baseProps()} />);
-    click(cancelButton());
+    click(backArrow());
     const surface = document.body.querySelector<HTMLElement>('[data-ui="discard-changes-dialog-raised"]');
     expect(surface).not.toBeNull();
     // Not left behind inside the caller's own (isolated) subtree.
@@ -158,7 +233,7 @@ describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; 
 
   it('"Keep editing" returns focus to the control that asked to close', () => {
     mount(<PdfAreaImageDraftModal {...baseProps()} />);
-    const cancel = cancelButton()!;
+    const cancel = backArrow()!;
     // A real pointer click focuses the button first; jsdom's dispatchEvent
     // does not, so focus it explicitly to model the same starting state.
     act(() => { cancel.focus(); });
@@ -173,7 +248,7 @@ describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; 
     const onSave = vi.fn();
     const onCancel = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onSave, onCancel, title: 'Keep me' })} />);
-    click(cancelButton());
+    click(backArrow());
     const keep = btnByText('Keep editing')!;
     act(() => {
       keep.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -190,7 +265,7 @@ describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; 
     const onSave = vi.fn();
     const onCancel = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onSave, onCancel })} />);
-    click(cancelButton());
+    click(backArrow());
     click(btnByText('Discard'));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSave).not.toHaveBeenCalled();
@@ -198,49 +273,81 @@ describe('C: Escape/Cancel opens confirmation; Keep editing retains draft data; 
 });
 
 describe('D: submission calls the real wired save callback once, including rapid double clicks', () => {
-  it('a single click calls onSave exactly once', () => {
+  it('a single backdrop click calls onSave exactly once', () => {
     const onSave = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onSave })} />);
-    click(saveButton());
+    backdropClick(overlay());
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
-  it('two clicks dispatched before any prop update (the real double-click race) still call onSave once', () => {
+  // submitLockRef is now the ONLY lock: there is no disabled attribute on a
+  // backdrop, so this is the sole thing standing between a fast double click
+  // and two creation requests.
+  it('two backdrop clicks before any prop update (the real double-click race) still call onSave once', () => {
     const onSave = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ onSave, isSaving: false })} />);
-    const button = saveButton()!;
+    const back = overlay()!;
     // Both dispatches happen inside ONE act(), synchronously, with no
     // re-render (and therefore no updated `isSaving` prop) between them --
     // exactly the window a React-state-only guard would miss.
     act(() => {
-      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      back.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      back.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter twice in the same window also calls onSave once', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ onSave })} />);
+    const input = titleInput()!;
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('E: pending save cannot be dismissed; successful save closes normally', () => {
-  it('while isSaving, the save/cancel buttons and the toolbar arrow are disabled, and Escape does not open confirmation', () => {
+  // THE GUARD THAT SURVIVED THE BUTTONS. Cancel's `disabled={isSaving}` used to
+  // stop a discard racing a write; with the button gone, requestClose's own
+  // `if (isSaving ...) return` is what does it. These assertions are what prove
+  // that guard was re-established on the close path rather than lost with the
+  // control that used to carry it.
+  it('while isSaving, the caption says so, the toolbar arrow is disabled, and Escape does not open confirmation', () => {
     const onCancel = vi.fn();
     mount(<PdfAreaImageDraftModal {...baseProps({ isSaving: true, onCancel })} />);
-    expect(saveButton()!.disabled).toBe(true);
-    expect(saveButton()!.textContent).toBe('Adding…');
-    expect(cancelButton()!.disabled).toBe(true);
+    expect(caption()!.textContent).toBe('Adding…');
     expect(backArrow()!.disabled).toBe(true);
 
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     expect(confirmDialog()).toBeNull();
     expect(onCancel).not.toHaveBeenCalled();
 
-    click(cancelButton());
     click(backArrow());
     expect(confirmDialog()).toBeNull();
   });
 
+  it('a backdrop click mid-save does not submit a second time', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ isSaving: true, onSave })} />);
+    backdropClick(overlay());
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('Enter mid-save does not submit a second time', () => {
+    const onSave = vi.fn();
+    mount(<PdfAreaImageDraftModal {...baseProps({ isSaving: true, onSave })} />);
+    pressEnter(titleInput());
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('a successful save is the caller clearing the draft -- isOpen becoming false closes the modal normally', () => {
     const { root } = mount(<PdfAreaImageDraftModal {...baseProps({ isSaving: true })} />);
-    expect(saveButton()).not.toBeNull();
+    expect(overlay()).not.toBeNull();
     // The real success path: CanvasClient sets isPdfAreaDraftSaving(false)
     // AND clears pendingPdfAreaDraft (isOpen -> false) in the same commit.
     act(() => { root.render(<PdfAreaImageDraftModal {...baseProps({ isOpen: false, isSaving: false })} />); });
@@ -249,7 +356,7 @@ describe('E: pending save cannot be dismissed; successful save closes normally',
 });
 
 describe('F: failed/denied save keeps the preview and draft fields, displays an error, and permits a subsequent attempt', () => {
-  it('isSaving returning to false with the draft still open and an error prop shows it, keeps the preview, and re-enables Add image to canvas', () => {
+  it('isSaving returning to false with the draft still open and an error prop shows it, keeps the preview, and allows a retry', () => {
     const onSave = vi.fn();
     const { root } = mount(
       <PdfAreaImageDraftModal {...baseProps({ onSave, isSaving: true, previewSrc: 'data:image/png;base64,KEEP', title: 'Still here' })} />,
@@ -271,12 +378,24 @@ describe('F: failed/denied save keeps the preview and draft fields, displays an 
     expect(error).not.toBeNull();
     expect(error!.textContent).toBe('Could not create the image from that area');
 
-    const save = saveButton()!;
-    expect(save.disabled).toBe(false);
-    expect(save.textContent).toBe('Add image to canvas');
+    // The caption is back to its resting copy -- the failure is reported by the
+    // error line, not by the caption.
+    expect(caption()!.textContent).toBe('Adds this image to the canvas and PDF Library.');
 
-    // The double-click guard was released by the failure, so a genuine retry works.
-    click(save);
+    // RETRY. With no button, clicking outside again is the retry path, and the
+    // submitLockRef released when isSaving went false -- so this is the
+    // assertion that proves a failed save is not a dead end.
+    backdropClick(overlay());
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter is also a retry path after a failure', () => {
+    const onSave = vi.fn();
+    const { root } = mount(<PdfAreaImageDraftModal {...baseProps({ onSave, isSaving: true })} />);
+    act(() => {
+      root.render(<PdfAreaImageDraftModal {...baseProps({ onSave, isSaving: false, error: 'nope' })} />);
+    });
+    pressEnter(titleInput());
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
