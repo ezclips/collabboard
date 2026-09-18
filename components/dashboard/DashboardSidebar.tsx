@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
     Search,
     LayoutDashboard,
@@ -70,7 +71,6 @@ export default function DashboardSidebar({
     onLogout,
     canvasUsage,
 }: DashboardSidebarProps) {
-    const router = useRouter();
     const pathname = usePathname();
     const [searchQuery, setSearchQuery] = useState('');
     const [isCollectionsExpanded, setIsCollectionsExpanded] = useState(true);
@@ -128,20 +128,42 @@ export default function DashboardSidebar({
                 </div>
             </div>
 
-            {/* Navigation */}
-            <nav className="px-3 py-2">
+            {/*
+              Navigation -- real anchors, not buttons.
+
+              These are NAVIGATION, so they are links: `<button onClick={router.push}>`
+              renders an element with no href, which means it only works while the
+              client bundle is alive and hydrated. That is exactly how these three
+              came to be silently dead on a page whose layout chunk failed to parse,
+              while the header's <Link> kept working.
+
+              A real href also restores what users expect of a link and a button can
+              never offer: middle-click and ctrl/cmd-click to open in a new tab,
+              "copy link address", a visible target in the status bar, and an
+              announcement as a link rather than a button to assistive technology.
+
+              `aria-current="page"` -- not colour alone -- is what tells a screen
+              reader which entry is the current one.
+            */}
+            <nav className="px-3 py-2" aria-label="Main">
                 {navItems.map((item) => {
                     const isActive = pathname === item.href;
                     return (
-                        <button
+                        <Link
                             key={item.id}
+                            href={item.href}
+                            aria-current={isActive ? 'page' : undefined}
                             onClick={() => {
-                                // If clicking Dashboard, also reset filters to show all canvases
+                                // Dashboard additionally clears the active filter, so
+                                // returning to it shows every canvas rather than the
+                                // slice the user last narrowed to. This is a state
+                                // reset ALONGSIDE the navigation, never instead of it:
+                                // the href does the navigating, so a middle-click or a
+                                // dead bundle still lands on the right page.
                                 if (item.id === 'dashboard') {
                                     onFilterChange?.('all');
                                     onFolderSelect?.(null);
                                 }
-                                router.push(item.href);
                             }}
                             className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                                 isActive
@@ -149,9 +171,9 @@ export default function DashboardSidebar({
                                     : 'text-gray-700 hover:bg-gray-50'
                             }`}
                         >
-                            <item.icon className="w-4 h-4" />
+                            <item.icon className="w-4 h-4" aria-hidden="true" />
                             {item.label}
-                        </button>
+                        </Link>
                     );
                 })}
             </nav>
@@ -264,12 +286,13 @@ export default function DashboardSidebar({
                                 />
                             </div>
                         )}
-                        <button
-                            onClick={() => router.push('/dashboard/settings/billing')}
-                            className="text-blue-600 text-xs mt-2 hover:underline"
+                        {/* Navigation, so a link -- same reasoning as the nav above. */}
+                        <Link
+                            href="/dashboard/settings/billing"
+                            className="inline-block text-blue-600 text-xs mt-2 hover:underline"
                         >
                             View plans
-                        </button>
+                        </Link>
                     </div>
                 )}
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
     Edit2,
@@ -126,9 +127,18 @@ export default function CanvasCard({
     const LayoutIcon = layoutIcons[layout?.toLowerCase()] || LayoutGrid;
     const placeholderBg = layoutColors[layout?.toLowerCase()] || 'bg-gray-50';
 
+    const canvasHref = `/dashboard/canvas/${id}`;
+
+    /**
+     * Programmatic open, for the MENU ITEM only.
+     *
+     * The card itself navigates through a real href (see the overlay link in
+     * the markup). This exists because "Open" in the dropdown is a menu
+     * command, not a link, and Radix owns that element.
+     */
     const handleOpen = () => {
         setIsLoading(true);
-        router.push(`/dashboard/canvas/${id}`);
+        router.push(canvasHref);
     };
 
     const handleFavoriteClick = (e: React.MouseEvent) => {
@@ -152,11 +162,50 @@ export default function CanvasCard({
         <ContextMenu>
             <ContextMenuTrigger asChild>
                 <div
-                    className="group relative bg-white rounded-xl border border-gray-200 overflow-hidden transition-all duration-200 hover:shadow-lg hover:border-gray-300 cursor-pointer"
+                    className="group relative bg-white rounded-xl border border-gray-200 overflow-hidden transition-all duration-200 hover:shadow-lg hover:border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2"
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
-                    onClick={handleOpen}
                 >
+            {/*
+              THE CARD IS A LINK -- an overlay anchor, not an onClick on the wrapper.
+
+              This div used to carry `onClick={handleOpen}` and `cursor-pointer`.
+              A div with a click handler is invisible to the keyboard: it takes no
+              focus, responds to no Enter or Space, and is announced as nothing. A
+              keyboard or screen-reader user could not open a canvas AT ALL, which
+              is the primary action of this screen (WCAG 2.1.1, Level A). It also
+              meant no ctrl/middle-click to open a board in a new tab, and no
+              status-bar target on hover.
+
+              It is an OVERLAY sibling rather than a wrapper because this card
+              CONTAINS buttons -- the ⋯ menu and the favourite toggle. Nesting a
+              button inside an anchor is invalid HTML and behaves unpredictably
+              across browsers, so the anchor covers the card from alongside them
+              and the controls sit above it on z-index instead:
+
+                  link overlay      z-20
+                  loading spinner   z-30   (must stay visible during navigation)
+                  ⋯ menu, favourite z-40   (must stay clickable)
+
+              Focus is shown with `focus-within:ring` on the card above, because
+              the anchor itself is transparent and has no shape of its own -- the
+              ring has to be drawn by something the user can actually see.
+            */}
+            <Link
+                href={canvasHref}
+                aria-label={`Open ${title}`}
+                onClick={(e) => {
+                    // Spinner ONLY for a plain left-click, because only a plain
+                    // left-click navigates THIS tab. Ctrl/cmd/shift-click and
+                    // middle-click open a new tab and leave this page exactly
+                    // where it is -- showing a loading overlay there would spin
+                    // forever on a card that was never going anywhere.
+                    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    setIsLoading(true);
+                }}
+                className="absolute inset-0 z-20 rounded-xl focus:outline-none"
+            />
+
             {/* Thumbnail Area */}
             <div className={`relative aspect-[4/3] ${placeholderBg} overflow-hidden`}>
                 {thumbnailUrl && !imageError ? (
@@ -180,7 +229,7 @@ export default function CanvasCard({
 
                 {/* Loading overlay */}
                 {isLoading && (
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-30">
                         <Loader2 className="w-8 h-8 text-white animate-spin" />
                     </div>
                 )}
@@ -188,10 +237,19 @@ export default function CanvasCard({
                 {/* Hover overlay with actions */}
                 <div className={`absolute inset-0 bg-black/0 transition-all duration-200 ${isHovered ? 'bg-black/10' : ''}`}>
                     {/* Top-right menu button */}
-                    <div className={`absolute top-1 right-1 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+                    {/*
+                      z-40: above the card's overlay link, so it stays clickable.
+                      focus-within:opacity-100: the button is hidden until hover,
+                      and an opacity-0 element is still FOCUSABLE -- without this a
+                      keyboard user tabs to a control they cannot see.
+                    */}
+                    <div className={`absolute top-1 right-1 z-40 transition-opacity duration-200 focus-within:opacity-100 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                <button className="p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 transition-all">
+                                <button
+                                    aria-label={`Actions for ${title}`}
+                                    className="p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 transition-all"
+                                >
                                     <Edit2 className="w-4 h-4" />
                                 </button>
                             </DropdownMenuTrigger>
@@ -236,12 +294,16 @@ export default function CanvasCard({
                     {onToggleFavorite && (
                         <button
                             onClick={handleFavoriteClick}
-                            className={`absolute bottom-2 left-2 p-1.5 rounded-lg transition-all duration-200 ${
+                            aria-label={isFavorite ? `Remove ${title} from favorites` : `Add ${title} to favorites`}
+                            aria-pressed={isFavorite}
+                            className={`absolute bottom-2 left-2 z-40 p-1.5 rounded-lg transition-all duration-200 ${
                                 isFavorite
                                     ? 'bg-yellow-100 text-yellow-500'
                                     : isHovered
                                     ? 'bg-white/90 text-gray-400 opacity-100'
-                                    : 'opacity-0'
+                                    // Hidden until hover, but still focusable -- so it
+                                    // reveals itself on keyboard focus as well.
+                                    : 'opacity-0 focus-visible:opacity-100 focus-visible:bg-white/90'
                             }`}
                         >
                             <Star className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
