@@ -776,3 +776,65 @@ deserves the suspicion: a fixed-size title boost is a **length artifact** — it
 relative effect grows as the passage shortens, and q10's weighted c2/c1 ratio
 rose 0.46 → 0.74, under the threshold this time only. If it is ever pursued it
 needs a same-document length probe first.
+
+---
+
+## 13. The ranking probe — both options, one run
+
+`scripts/db/boardSearchRankOptionVariants.sql`. Read-only. Scores four rank
+expressions over the same rows and the same builder-generated tsqueries:
+`rank_max` (what `20260918160000` did), `rank_additive` (live today), and the two
+candidates.
+
+**Option 2** — rank by the configuration that matched the most query terms, ties
+to `simple`, an english/german tie taking the greater of those two.
+
+**Option 1** (fallback) — take the greater of english/german only when the better
+of them matched **strictly more** terms than `simple`.
+
+They agree everywhere except where english and german match **different** numbers
+of terms: option 1 takes the greater *rank* of the two, option 2 takes the rank
+of whichever matched more *terms*, which can be the lower number. The probe emits
+`options_disagree` so those rows can be read on their own.
+
+**Why either should work, as a hypothesis to be tested rather than assumed:**
+q07's row is 1 term under `simple` against 2 under english/german, so the stemmed
+view wins on evidence and the passage returns; q05's intro was boosted at **equal**
+term count, so both options leave it on `simple` and the pre-C order comes back.
+
+### The bar for this run
+
+1. q07's TENS page 2 back inside the top-K (`pos_opt* <= 4`).
+2. q05's answer leading its document introduction.
+3. No rated-relevant passage leaving the top-K anywhere.
+4. No new rated inversion within a question and source.
+5. No rule-table regression.
+
+The probe reports **top-K position**, not just rank, because the bar is about
+position — `pos_additive`, `pos_max`, `pos_opt1`, `pos_opt2` side by side.
+
+### Two constraints on whatever ships
+
+**Matching must stay the indexed three-way OR.** The per-configuration term
+counts belong in the rank side only. A term count in the `WHERE` clause stops the
+qual being the expression the six GIN indexes were built on, the planner cannot
+match them, and every search becomes a sequential scan running the HTML
+projection over every post on the board. The only symptom is latency. The probe's
+own qual is unmodified, and a test asserts that.
+
+**The per-row cost needs measuring before shipping, not after.** The rank
+expression is evaluated for *every* row matching the qual, not just the ten that
+survive the `LIMIT`. Counting terms per configuration is O(terms × configs) per
+matching row — up to 20 × 3 `@@` tests against an in-memory tsvector. Cheap per
+row, not free per query, and a common term matches a lot of rows. If it shows up,
+the cheaper form to try is intersecting `tsvector_to_array(document)` with the
+query's lexemes once per configuration instead of testing each term separately.
+
+### Why there is nothing to revert to
+
+q07's page is rated relevant, so **every state we have is disqualified**: `simple`
+alone never admitted it, `GREATEST` admitted it but cost the q05 inversion, and
+additive admits it then ranks it by its weakest view and drops it. The live
+database stays on additive until the winner lands — not because additive is
+right, but because the alternatives are disqualified differently and reverting
+buys nothing.
