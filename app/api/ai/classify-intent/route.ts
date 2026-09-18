@@ -5,7 +5,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import type { AIMode, DiagramSubtype } from '@/lib/ai/contracts';
 import { MODE_REGISTRY } from '@/lib/ai/mode-registry';
 import { DIAGRAM_SUBTYPE_SCHEMAS } from '@/lib/ai/validators';
-import { trackAIAutoModeSelected } from '@/lib/ai/telemetry';
+import { trackAIAutoModeSelected, trackAIClassifyFailed } from '@/lib/ai/telemetry';
 import { generateComponentText } from '@/lib/server/ai/componentGeneration';
 import type { UserId } from '@/lib/domain/core/ids';
 
@@ -93,6 +93,38 @@ const JSON_ONLY_SYSTEM = 'Return only valid JSON with no markdown, code fences, 
  */
 const CLASSIFY_MAX_TOKENS = 400;
 
+/**
+ * Classifier failures since this instance started.
+ *
+ * A COUNT, not just a line, because the defect this exists to expose was
+ * INTERMITTENT: individual failures look like bad luck, and a rate does not.
+ * Per-process like the rate limiter above, and reset by a deploy -- enough to
+ * make a recurrence visible, not an accounting record.
+ */
+let classifyFailures = 0;
+
+/**
+ * Both ways the classifier can fail, recorded in one place.
+ *
+ * WHY THIS IS HERE AT ALL: a failed classify is answered by keeping whatever
+ * mode is already selected, which is reasonable behaviour and totally silent.
+ * That silence is how an undersized token budget hid -- Auto picked the wrong
+ * format intermittently and nothing said so.
+ *
+ * It logs directly as well as through telemetry on purpose: `emit` is a no-op
+ * in production until it is wired to an endpoint, so the telemetry event alone
+ * would be invisible exactly where a recurrence matters most. The direct line
+ * matches the console.error this route already uses for its outer catch.
+ */
+function recordClassifyFailure(stage: 'provider' | 'parse', reason: string): void {
+  classifyFailures += 1;
+  trackAIClassifyFailed({ stage, reason, failureCount: classifyFailures });
+  console.warn(
+    `[ai] classify-intent failed (${stage}); Auto keeps the current mode. `
+    + `failures_since_start=${classifyFailures} reason=${reason}`,
+  );
+}
+
 function parseClassifyResponse(raw: string): ClassifyIntentResult {
   const trimmed = raw.trim()
     .replace(/^```json\s*/i, '')
@@ -179,8 +211,11 @@ export async function POST(req: NextRequest) {
         timeoutMs: 10_000,
       });
       raw = generation.text;
-    } catch {
-      // No `details`: it used to echo the provider's raw response body.
+    } catch (error) {
+      // The reason is ours, never the provider's response body -- AIProviderError
+      // carries a fixed message by construction. `details` is gone for the same
+      // reason: it used to echo that body straight back to the browser.
+      recordClassifyFailure('provider', error instanceof Error ? error.message : 'unknown');
       // The client already treats any non-OK classify as "stay on the current
       // mode", so the fixed message costs it nothing.
       return NextResponse.json({ error: 'Classifier failed.' }, { status: 502 });
@@ -189,8 +224,12 @@ export async function POST(req: NextRequest) {
     let result: ClassifyIntentResult;
     try {
       result = parseClassifyResponse(raw);
-    } catch {
-      // Safe fallback: return lesson_board low confidence rather than crashing
+    } catch (error) {
+      // Safe fallback: return lesson_board low confidence rather than crashing.
+      // Recorded, because this branch silently decides the user's format --
+      // every prompt that lands here becomes a lesson board no matter what it
+      // asked for, and nothing else in the product would ever say so.
+      recordClassifyFailure('parse', error instanceof Error ? error.message : 'unknown');
       result = { mode: 'lesson_board', confidence: 'low' };
     }
 

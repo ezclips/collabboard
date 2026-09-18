@@ -52,13 +52,41 @@ export const BOARD_AI_CHAT_TIMEOUT_MS = 20_000;
  * How many images one request may carry. One, deliberately.
  *
  * Each is megabytes of base64 inside a single call that still has to leave room
- * for a 1500-token answer, and the feature this serves is "look at this crop",
+ * for the answer (see BOARD_AI_CHAT_MAX_TOKENS), and the feature this serves is
+ * "look at this crop",
  * not "compare these six". More than one is refused rather than trimmed, so a
  * user who attached two never has to guess which one the model actually saw.
  */
 export const BOARD_AI_CHAT_MAX_IMAGES = 1;
 
-export const BOARD_AI_CHAT_MAX_TOKENS = 1500;
+/**
+ * WAS 1500, AND 1500 TRUNCATED THE LONG ANSWERS THIS SURFACE EXISTS FOR.
+ *
+ * MEASURED with the real system prompt and the real serialized payload -- see
+ * scripts/db/boardAiChatTokenBudget.ts, which imports the two functions the
+ * route itself calls rather than paraphrasing them. At 1500, three of four
+ * realistic long-answer prompts came back `finish_reason: "length"`, cut off
+ * mid-sentence after 4,700-5,900 characters. At 4000, eight of eight completed
+ * across two runs, with the worst completion at 2,613 tokens -- about 35%
+ * headroom on the worst case observed.
+ *
+ * HONEST ABOUT THE CAUSE, because it differs from the component routes: this
+ * one is NOT a regression from the managed default moving to `deepseek-flash`.
+ * Reasoning cost only 132-429 tokens on the truncated runs, so the answers
+ * would have overrun 1500 without any reasoning at all. `deepseek-chat`
+ * truncated them too; nobody had measured it. Reasoning makes a long-standing
+ * limit worse rather than creating it.
+ *
+ * ALSO DIFFERENT FROM THE OTHERS IN HOW IT FAILED, which is why it hid for so
+ * long: classify-intent returned nothing and generate-component returned
+ * unparseable JSON, both of which surface as errors. A truncated chat answer
+ * renders as an answer -- a plausible one that simply stops. There is no error
+ * anywhere, and no test can tell the difference.
+ *
+ * A token budget is part of the MODEL CONTRACT. Re-measure this when the
+ * managed default changes.
+ */
+export const BOARD_AI_CHAT_MAX_TOKENS = 4000;
 export const BOARD_AI_CHAT_TEMPERATURE = 0.3;
 
 /**

@@ -6,6 +6,8 @@ type AITelemetryFields = {
   version?: number | null;
   renderer?: string;
   contentType?: string;
+  /** A running total for this process, where a rate matters more than an incident. */
+  count?: number;
 };
 
 type AITelemetryEvent = AITelemetryFields & {
@@ -190,6 +192,33 @@ export function trackAIConversionFailed(fields: {
     contentType: `${fields.targetMode}${fields.targetSubtype ? ':' + fields.targetSubtype : ''}`,
     reason: fields.reason,
     stage: 'conversion',
+  }));
+}
+
+/**
+ * Auto mode could not classify the prompt.
+ *
+ * THIS EVENT EXISTS BECAUSE ITS ABSENCE HID A REAL DEFECT. A failed classify is
+ * handled by keeping whatever mode is already selected -- defensible
+ * resilience, and completely silent. When the managed default moved to a
+ * reasoning model, an 80-token budget left no room for an answer and the
+ * classifier failed intermittently; Auto quietly produced the wrong format and
+ * nothing anywhere said so. Only a live prompt found it.
+ *
+ * `stage` separates the two failures, which have different fixes: `provider`
+ * means no usable completion came back, `parse` means one did and it was not
+ * the expected shape.
+ */
+export function trackAIClassifyFailed(fields: {
+  stage: 'provider' | 'parse';
+  reason: string;
+  /** Failures since this instance started -- a rate, not just an incident. */
+  failureCount: number;
+}): void {
+  emit('error', build('ai_classify_failed', {
+    stage: fields.stage,
+    reason: fields.reason,
+    count: fields.failureCount,
   }));
 }
 

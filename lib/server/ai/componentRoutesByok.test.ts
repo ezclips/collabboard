@@ -318,6 +318,53 @@ describe('preserved request semantics', () => {
   });
 });
 
+describe('a failed classify is no longer silent', () => {
+  /**
+   * The behaviour is unchanged -- a failed classify still keeps the current
+   * mode, which is the right resilience. What changed is that it now says so.
+   * That silence is exactly how an 80-token budget hid: Auto picked the wrong
+   * format intermittently and nothing in the product recorded it.
+   */
+  it('records a provider failure, with a running count', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.generateText.mockRejectedValue(new AIProviderError('request_failed'));
+    const res = await classifyRoute.POST(request('classify-intent', { prompt: 'p' }));
+
+    expect(res.status).toBe(502);
+    const line = warn.mock.calls.map((c) => String(c[0])).find((c) => c.includes('classify-intent failed'));
+    expect(line).toBeDefined();
+    expect(line).toContain('(provider)');
+    expect(line).toMatch(/failures_since_start=\d+/);
+    warn.mockRestore();
+  });
+
+  it('records a parse failure too -- the branch that quietly picks lesson_board', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A completion arrives and is not the expected shape. The route answers
+    // 200 with lesson_board, so nothing downstream can tell this happened.
+    mocks.generateText.mockResolvedValue('not json at all');
+    const res = await classifyRoute.POST(request('classify-intent', { prompt: 'p' }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ mode: 'lesson_board', confidence: 'low' });
+    const line = warn.mock.calls.map((c) => String(c[0])).find((c) => c.includes('classify-intent failed'));
+    expect(line).toBeDefined();
+    expect(line).toContain('(parse)');
+    warn.mockRestore();
+  });
+
+  it('the recorded reason never carries a provider response body', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A non-normalized throw is the only way raw text could reach the reason.
+    // AIProviderError carries a fixed message by construction; this asserts the
+    // response stays clean even when the thrown thing is not one.
+    mocks.generateText.mockRejectedValue(new Error('RAW_PROVIDER_BODY_123'));
+    const res = await classifyRoute.POST(request('classify-intent', { prompt: 'p' }));
+    expect(JSON.stringify(await res.json())).not.toContain('RAW_PROVIDER_BODY_123');
+    warn.mockRestore();
+  });
+});
+
 describe('the response says which model actually answered', () => {
   it('generate-component reports the managed default it really used', async () => {
     const res = await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board' }));

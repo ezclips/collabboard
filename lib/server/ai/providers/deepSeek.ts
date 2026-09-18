@@ -29,6 +29,27 @@ export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
  * and is now merely an accepted alias served by V4.1-Flash. Moving onto a
  * second alias would repeat the defect this change exists to remove.
  * https://api-docs.deepseek.com/quick_start/pricing
+ *
+ * ------------------------------------------------------------------
+ * CHANGING THIS LINE INVALIDATES EVERY TOKEN BUDGET IN THE PRODUCT.
+ *
+ * A budget is part of the MODEL CONTRACT, not a constant. `deepseek-flash`
+ * REASONS: it spends completion tokens on `reasoning_content` before emitting
+ * any `content`, and `max_tokens` fences the two together. Every budget in the
+ * codebase had been sized against `deepseek-chat`, which did not, and three of
+ * the four were wrong the moment this line changed -- in three different and
+ * individually invisible ways:
+ *
+ *   classify-intent   empty completion -> Auto silently kept the wrong format
+ *   generate/convert  truncated mid-object -> unparseable JSON -> 502
+ *   board chat        truncated mid-sentence -> RENDERED AS A COMPLETE ANSWER
+ *
+ * No test caught any of them; the first live prompts caught all three. So when
+ * this id changes, re-run the instruments before shipping:
+ *   scripts/db/boardAiChatTokenBudget.ts
+ * and re-read lib/server/ai/tokenBudgets.test.ts, which names each budget with
+ * the numbers behind it and fails if this model id moves.
+ * ------------------------------------------------------------------
  */
 export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-flash';
 
