@@ -253,24 +253,57 @@ function loadRatings(): Ratings {
   return JSON.parse(fs.readFileSync(RATINGS_PATH, 'utf8')) as Ratings;
 }
 
+/**
+ * Merge this run's passages into the ratings file. NEVER DELETE A RATING.
+ *
+ * THE BUG THIS REPLACES, because it is the worst kind an instrument can have.
+ * The first version rebuilt the file from the CURRENT result set: any passage a
+ * change had pushed out of the top-K silently vanished, taking its human rating
+ * with it. It cost two real ratings (q10's pages 5 and 6, recovered from git),
+ * and the file header claimed "Existing ratings are preserved" the whole time.
+ *
+ * IT ALSO MADE THE BAR UNSOUND, which is the part that matters more than the
+ * lost work. The bar is "never drops a human-rated-relevant passage". If a rule
+ * drops one and `--collect` then runs, the rating for the dropped passage
+ * disappears -- so the rule can no longer be disqualified by it. The instrument
+ * would quietly erase the evidence against the very change being measured, and
+ * every table printed afterwards would look cleaner than the truth.
+ *
+ * So ratings are now permanent. A passage that stops being returned is KEPT and
+ * reported as carried, because "this used to come back and no longer does" is a
+ * finding, not garbage to collect.
+ */
 function collect(results: readonly BatteryResult[]): void {
   const existing = loadRatings();
-  const next: Ratings = {};
+  const next: Ratings = JSON.parse(JSON.stringify(existing)) as Ratings;
+  const returnedNow = new Set<string>();
   let added = 0;
   for (const result of results) {
-    next[result.id] = {};
+    next[result.id] ??= {};
     for (const passage of result.passages) {
-      const prior = existing[result.id]?.[passage.key];
-      if (prior === undefined) added += 1;
-      next[result.id][passage.key] = prior ?? {
+      returnedNow.add(`${result.id} / ${passage.key}`);
+      if (next[result.id][passage.key] !== undefined) continue;
+      added += 1;
+      next[result.id][passage.key] = {
         relevant: null,
         note: `${passage.source} | ${passage.label} | ${passage.chars} chars | ${passage.preview}`,
       };
     }
   }
+  const carried = Object.entries(next)
+    .flatMap(([question, passages]) => Object.keys(passages)
+      .map((key) => `${question} / ${key}`)
+      .filter((id) => !returnedNow.has(id)));
+
   fs.writeFileSync(RATINGS_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   console.log(`Wrote ${RATINGS_PATH}`);
   console.log(`${added} passage(s) need a rating. Set "relevant" to true or false for each.`);
+  if (carried.length > 0) {
+    // Not a warning about the file -- a report about the SEARCH. Each of these
+    // was returned once and is not returned now.
+    console.log(`\n${carried.length} rated passage(s) are NO LONGER RETURNED, and were kept:`);
+    for (const id of carried) console.log(`  ${id}`);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -429,6 +462,39 @@ function report(results: readonly BatteryResult[]): void {
     console.log(`\n!! ${unrated.length} passage(s) are UNRATED. The rule evaluation below is incomplete.`);
     for (const entry of unrated.slice(0, 20)) console.log(`   ${entry}`);
     return;
+  }
+
+  /*
+   * RECALL AGAINST THE RATING CORPUS -- the check the rule table CANNOT make.
+   *
+   * Every rule below is scored over the passages the search RETURNED, so a
+   * change that stops returning a passage is invisible to it: the row simply is
+   * not there to be dropped. That blind spot is not hypothetical. The additive
+   * rank (20260918170000) pushed q07's rated-relevant TENS page out of the
+   * top-K, and the rule table showed nothing at all -- every rule still read
+   * "drops relevant: none", because they all operated on a set that no longer
+   * contained it.
+   *
+   * The ratings file is the only record of what the search has EVER returned, so
+   * it is the only thing a regression can be measured against. This is that
+   * measurement, and it belongs above the rule table rather than below it.
+   */
+  const returned = new Set(results.flatMap((r) => r.passages.map((p) => `${r.id} / ${p.key}`)));
+  const missingRelevant = Object.entries(ratings).flatMap(([question, passages]) =>
+    Object.entries(passages)
+      .filter(([key, value]) => value.relevant === true && !returned.has(`${question} / ${key}`))
+      .map(([key, value]) => ({ question, key, note: value.note ?? '' })));
+
+  console.log('\n\n# Recall against the rating corpus\n');
+  if (missingRelevant.length === 0) {
+    console.log('Every passage ever rated RELEVANT is still returned.');
+  } else {
+    console.log(`!! ${missingRelevant.length} passage(s) rated RELEVANT are NO LONGER RETURNED.`);
+    console.log('   The rule table below cannot see this: it scores only what came back.\n');
+    for (const entry of missingRelevant) {
+      console.log(`   ${entry.question} / ${entry.key}`);
+      console.log(`     ${entry.note}`);
+    }
   }
 
   console.log('\n\n# Rule evaluation\n');

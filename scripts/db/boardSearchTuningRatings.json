@@ -168,6 +168,11 @@
       "relevant": false,
       "note": "pdf | bicycle_drivetrain_maintenance.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
       "why": "Chain lubricant. Unrelated."
+    },
+    "pdf:e297f0a8-0ef7-46dc-b628-e5201a469b28:1": {
+      "relevant": false,
+      "note": "pdf | Sammelmappe1.pdf — page 1 | 525 chars | Applying lubricant correctly is a precise process. Riders must choose ",
+      "why": "Chain lubricant, in the Sammelmappe copy. Byte-identical text to bicycle_drivetrain_maintenance page 1, already rated irrelevant here for the same reason: it is about bikes, not a TENS module."
     }
   },
   "q08-knitting": {
@@ -234,6 +239,16 @@
       "relevant": false,
       "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 1 | 546 chars | Hupe wechseln bzw. Stoßstange demontieren Möchte man nur die Hupe wech",
       "why": "Bumper-removal overview. Same topic, does not cover the Spreizniete."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:5": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 6 | 966 chars | 10.Zusammenbau 11. (Mein) Problem Hupe So wie auf dem Bild ist die Ein",
+      "why": "Reassembly and the horn. Not the Spreizniete."
+    },
+    "pdf:a8f356ae-0084-4427-b74a-211713aa7464:4": {
+      "relevant": false,
+      "note": "pdf | Audi A2 Stoßstange demontieren neu.pdf — page 5 | 469 chars | 8. Stoßstange abnehmen 9. Stecker abziehen (1) (2) (4) (3) Das Stecker",
+      "why": "Removing the bumper and the connector. Not the Spreizniete."
     }
   }
 }

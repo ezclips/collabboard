@@ -687,3 +687,92 @@ That sentence was wrong in the design text and is corrected here.
 4. **The title-weight numbers need one re-run** against `20260918170000`'s rank
    expression. The comparison above was internally valid, but only for the
    expression that shipped in `20260918160000`.
+
+---
+
+## 12. The additive rank drops a rated-relevant passage — and the instrument that found it
+
+**`20260918170000` is disqualified by this project's own bar.** It drops q07's
+rated-relevant TENS page 2 out of the returned set.
+
+### The mechanism, confirmed on the text
+
+The passage contains **"a single pulse"** and **"stimulators"**.
+
+| configuration | terms matched of `single \| channel \| tens \| stimulator \| module` |
+|---|---|
+| `simple` | 1 — `single` only |
+| `english` | 2 — `single`, plus `stimulator` stemmed together with "stimulators" |
+
+Under `GREATEST` it was ranked by `english` and entered the top-K. Under the
+additive rank it is ranked by `simple` **because `simple` matched at all**, at
+one weak term, and falls below the two bicycle-lubricant chunks at 0.001878.
+
+**So the additive rule's premise is too coarse.** "A row that matches `simple` is
+ranked by `simple`" is right about not letting a configuration *inflate* a row it
+did not add — and wrong in that it also **discards genuine extra evidence within
+a row**. q07's page really does match two query terms; only `english` can see the
+second one.
+
+### Why no rule table caught it
+
+**Every rule is scored over the passages the search RETURNED.** A change that
+stops returning a passage is invisible: the row is not there to be dropped, so
+every rule still reports "drops relevant: none". The table was clean and the
+regression was real.
+
+`--collect` made this worse than blind — it was **destructive**. It rebuilt the
+ratings file from the current result set, so a passage pushed out of the top-K
+had its human rating silently deleted. It cost two real ratings (q10 pages 5 and
+6, recovered from git), and it meant **a rule that dropped a relevant passage
+would erase the evidence that disqualified it**. Fixed: ratings are now
+permanent, and passages that stop being returned are reported as carried.
+
+**New instrument: "Recall against the rating corpus"**, printed above the rule
+table. The ratings file is the only record of what the search has ever returned,
+so it is the only thing a regression can be measured against.
+
+### The taxonomy this corrects
+
+The ten "additions" were not one kind of thing:
+
+- **Solely-added rows** — matched only by `english`/`german`. All nine irrelevant
+  ones are here. An *admission* rule governs them.
+- **Promoted rows** — already matched `simple`, lifted into the top-K by a better
+  rank elsewhere. **q07's gain is the only one, and it is the only relevant one.**
+  A *ranking* rule governs it.
+
+So "the two-term rule keeps q07's gain" does not hold: q07's row is not
+solely-added, no admission rule reaches it, and the additive rank has already
+removed it. **The ranking question is upstream of the admission question.**
+
+### What to decide, in order
+
+1. **How should a row that matches `simple` weakly and `english` strongly be
+   ranked?** Options: take the greatest **only when the better configuration
+   matches strictly more terms** (which fixes q07 and still blocks q05, where the
+   intro's boost came from the same term count); or rank by the configuration
+   that matched the most terms, breaking ties toward `simple`. Neither is scored.
+2. **Then** the admission rule — `scripts/db/boardSearchAdmissionVariants.sql`
+   scores candidate (a), the two-term rule, with stemmed per-configuration term
+   counts that cannot be computed outside the database. Its cost is stated in the
+   file: it sacrifices single-term inflection recall, and it does not reach
+   q10's two German additions, which are legitimate same-language matches that
+   merely miss the question.
+3. Candidates (b) non-ASCII gate and (c) minimum stem length are recorded as
+   fallbacks with their known weaknesses — (b) keeps q09's post because "Möchte"
+   is non-ASCII; (c) kills `year`/`years` to catch `fix`.
+
+### Title weights — cleared, still unadopted
+
+The q10 harm that killed them was an artifact of the max expression: under
+additive, chunk 2 ranks in the `simple` branch and the answer stays first
+(0.0419 against 0.0308). Across eleven questions there is now **no rated
+inversion caused by weighting**, and several correct leads amplify (q02's page-6
+chunk 1.003× → 6×).
+
+**That clears the objection without creating a case.** The mechanism still
+deserves the suspicion: a fixed-size title boost is a **length artifact** — its
+relative effect grows as the passage shortens, and q10's weighted c2/c1 ratio
+rose 0.46 → 0.74, under the threshold this time only. If it is ever pursued it
+needs a same-document length probe first.
