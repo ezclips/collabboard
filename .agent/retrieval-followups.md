@@ -953,3 +953,65 @@ terms against those, rather than rebuilding a tsvector per term — and it also
 drops the projection from six evaluations per row to one. If it still shows up,
 the fallback is intersecting `tsvector_to_array(document)` with the query's
 lexemes once per configuration.
+
+---
+
+## 15. There is no way to delete ONE knowledge document
+
+**What.** A knowledge document can be created by any user who can upload to a
+board, and removed by nobody. `knowledgeDeletion` is reachable from exactly one
+place — board deletion, `app/api/boards/[id]/route.ts` — so the only supported way
+to remove one PDF is to delete the board it lives on.
+
+**The evidence, as of 2026-09-19.** `app/api/boards/[id]/knowledge/route.ts`
+exports `GET` and `POST` and no `DELETE`. There is no `route.ts` under
+`knowledge/[documentId]/` at all — the only children are `original`, `pages` and
+`render-pages`, all reads. `KnowledgeDocumentsList.tsx` renders no delete
+control. So the gap is in the API and the UI at once; neither is waiting on the
+other.
+
+**Why Unit 3 made it worse rather than merely exposing it.** Before the chat file
+upload, a knowledge document arrived with a canvas card, so a user at least had
+the document in front of them. A PDF uploaded through the chat drawer has **no
+canvas card and no board affordance of any kind** — it exists, it is searchable,
+it is citable, and nothing on the board refers to it. The four `simple-text.pdf`
+files from the Unit 3 live check sat in exactly that state, and removing them
+needed database and Storage API access.
+
+### What the cleanup proved, which is the specification for the delete path
+
+The four were removed by hand on 2026-09-19 — four storage objects through the
+Storage API, then the four `knowledge_documents` rows — and verified zero on both
+layers (`docs_remaining 0`, `blobs_remaining 0`, `orphaned_pages 0`). Three facts
+came out of doing it, and they are the ones whoever builds this needs:
+
+1. **The row cascade is complete and the blob is not.** Deleting a
+   `knowledge_documents` row cascades pages, chunks, references and highlights,
+   and embeddings via chunks. It leaves the object at
+   `knowledge/<boardId>/<documentId>/original.pdf` in the private
+   `knowledge-documents` bucket untouched. **A delete path that only deletes the
+   row leaks a blob every time**, silently and unbilled to anything visible. The
+   cleanup called the Storage API explicitly; the product path must too.
+2. **Citations do not cascade, because they cannot.**
+   `board_ai_messages.citations` is `jsonb` with **no foreign key**
+   (`20260902120000_create_board_ai_chat.sql`), by design — the citation envelope
+   is a signed snapshot of what was handed to the model on that turn, not a live
+   join. So deleting a document leaves stored assistant messages citing it. The
+   cleanup left exactly two such messages, deliberately and on the record.
+3. **That dangling state is a decision, not an oversight to fix in passing.** The
+   options are: scrub matching citations out of stored messages, which **breaks
+   every provenance HMAC** on those rows because the citation items are part of
+   the canonical serialization; or leave them and make the reader render a cited
+   source that no longer exists as gone rather than as broken. **The second is
+   almost certainly right** — an answer citing a document that was later deleted
+   is a true statement about the past — but it needs the reader to have a
+   not-found state for a citation, which it does not have today.
+
+**Why deferred.** Nothing is in flight, and this is docs-only work today: the
+delete path is a small API route and a list control, but item 3 above is a
+product decision about what a citation means after its source is gone, and that
+should be decided once rather than implied by whoever writes the route.
+
+**The signal that makes it urgent:** the first user who uploads a PDF to the chat
+drawer by mistake — a wrong file, a private one — and asks how to remove it. The
+honest answer today is "delete the board".
