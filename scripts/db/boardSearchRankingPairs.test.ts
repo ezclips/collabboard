@@ -16,6 +16,18 @@ import { describe, expect, it } from 'vitest';
  * assertion to the target, and confirm the fix was intended rather than
  * incidental. `it.fails` would go green either way and announce nothing.
  *
+ * q02 HAS NOW BEEN FLIPPED, and what "flipped" means here is worth stating
+ * exactly, because it is not "the numbers were edited to the ones we wanted".
+ * The variants run below is a REAL MEASUREMENT of the alternative rank
+ * expressions over the same rows and the same tsqueries. q02's block therefore
+ * carries two measurements: what flag 1 did (the defect, kept, because
+ * 20260918150000 has to be applied before it stops being true) and what flag 0
+ * does (the fix, measured). The assertions state the mechanism that connects
+ * them. NOTHING HERE IS PREDICTED.
+ *
+ * q08 IS NOT FLIPPED and must not be until the language work lands. No variant
+ * moves it, which the variants run confirmed rather than assumed.
+ *
  * THE LIMIT, STATED PLAINLY: these numbers are a RECORDED MEASUREMENT, not a
  * live query. They cannot detect a ranking change on their own -- they detect
  * one when the fixture is regenerated, which is a step a person takes. The
@@ -56,6 +68,40 @@ const MEASURED = {
   },
 } as const;
 
+/**
+ * THE RANK VARIANTS, measured 2026-09-18 by running
+ * scripts/db/boardSearchRankingVariants.sql against the same board.
+ *
+ * Same rows, same tsqueries from the same query builder, five rank expressions
+ * side by side. This is the table that decided 20260918150000; it is recorded
+ * here so the decision can be re-checked without a database.
+ *
+ * n1 is the shipped flag 1; n0 ignores length; n2 divides by raw length; cd is
+ * ts_rank_cd (proximity); title_a is setweight A on the title, B on the body.
+ */
+const VARIANTS = {
+  q02: {
+    titleOnly: { n1: 0.0078393, n0: 0.0202642, n2: 0.0040529, cd: 0.111622, title_a: 0.0783928 },
+    post341: { n1: 0.0033648, n0: 0.0202642, n2: 0.0003166, cd: 0.0479112, title_a: 0.0336483 },
+    post406: { n1: 0.0033526, n0: 0.0202642, n2: 0.0003118, cd: 0.0477366, title_a: 0.0335257 },
+    // Chunks, for the other half of the decision -- they are never ranked
+    // against the posts above, only against each other.
+    chunkPage6: { n1: 0.0013907, n0: 0.0101321, n2: 0.0000654, cd: 0.0198025, title_a: 0.0331706 },
+    chunkNoise: { n1: 0.0013855, n0: 0.0101321, n2: 0.0000641, cd: 0.0197281, title_a: 0.0055352 },
+  },
+  q03: {
+    titleOnly: { n1: 0.0303964, n0: 0.0607927, n2: 0.0202642, cd: 0.216404, title_a: 0.303964 },
+    slideshowPage4: { n1: 0.0042153, n0: 0.0202642, n2: 0.0007505, cd: 0.0300102, title_a: 0.0163613 },
+  },
+  /** intro / answer, as a RATIO. Above 1 means the defect stands. */
+  q08Ratios: { n1: 3.07, n0: 3.50, n2: 1.86, cd: 4.38, title_a: 3.07 },
+  /** The stemming check, on the exact pair that inverted. */
+  q08Stemming: {
+    intro: { simple: true, english: true },
+    answer: { simple: false, english: true },
+  },
+} as const;
+
 describe('ranking pair q08 — the answer must outrank its own document intro', () => {
   it('TRIPWIRE: today the INTRO outranks the ANSWER by 3.07x (defect — flip this when fixed)', () => {
     expect(MEASURED.q08.intro.rank).toBeGreaterThan(MEASURED.q08.answer.rank);
@@ -75,13 +121,74 @@ describe('ranking pair q08 — the answer must outrank its own document intro', 
     expect(MEASURED.q08.intro.coverage).toBe(3);
     expect(MEASURED.q08.intro.occurrences).toBeGreaterThan(MEASURED.q08.answer.occurrences);
   });
+
+  it('CONFIRMED BY THE VARIANTS RUN: every rank expression keeps the intro ahead', () => {
+    // Five expressions, measured, not predicted. The best of them (n2) still has
+    // the intro at 1.86x. There is no ranking answer to this pair.
+    for (const [variant, ratio] of Object.entries(VARIANTS.q08Ratios)) {
+      expect(ratio, `${variant} unexpectedly fixed q08 — re-read the stemming check`).toBeGreaterThan(1);
+    }
+  });
+
+  it('and the stemming check names the cause on the exact pair', () => {
+    // The answering chunk does not match `ribbed` under `simple` and does under
+    // `english`. The intro matches under both. That single row is the whole
+    // diagnosis: this is a text-search CONFIGURATION question.
+    expect(VARIANTS.q08Stemming.answer.simple).toBe(false);
+    expect(VARIANTS.q08Stemming.answer.english).toBe(true);
+    expect(VARIANTS.q08Stemming.intro.simple).toBe(true);
+  });
 });
 
 describe('ranking pair q02 — the answering passages must outrank the title-only post', () => {
-  it('TRIPWIRE: today the TITLE-ONLY post outranks all three answers (defect — flip when fixed)', () => {
+  it('FLIPPED: under flag 1 the TITLE-ONLY post outranked all three answers', () => {
+    // Kept, not deleted. It is what the shipped function does until
+    // 20260918150000 is applied, and it is the measurement the fix is argued
+    // against. Deleting it would leave the fix looking like a preference.
     for (const answer of MEASURED.q02.answers) {
       expect(MEASURED.q02.titleOnly.rank).toBeGreaterThan(answer.rank);
     }
+  });
+
+  it('THE FIX: flag 0 ranks the three POSTS exactly equal, because their evidence is equal', () => {
+    // Not "close". Identical, to seven places, measured by the variants run.
+    // That is the whole argument for flag 0 on posts: with length out of the
+    // expression, rank says what matched and nothing else, and these three
+    // passages matched the same two terms twice each.
+    expect(VARIANTS.q02.post341.n0).toBe(VARIANTS.q02.titleOnly.n0);
+    expect(VARIANTS.q02.post406.n0).toBe(VARIANTS.q02.titleOnly.n0);
+  });
+
+  it('THE FIX IS THE TIE-BREAK, NOT THE FLAG — a tie decides nothing on its own', () => {
+    // Flag 0 alone would leave the order to padlet_id: deterministic, arbitrary,
+    // and right or wrong by accident. 20260918150000 therefore adds
+    //     ORDER BY rank DESC, (matched.text <> '') DESC, matched.padlet_id ASC
+    // so the preference is stated where it can be argued with. Both answering
+    // posts have a body; the title-only post does not.
+    expect(MEASURED.q02.answers[0].chars).toBeGreaterThan(0);
+    expect(MEASURED.q02.answers[1].chars).toBeGreaterThan(0);
+    expect(MEASURED.q02.titleOnly.chars).toBe(0);
+  });
+
+  it('no OTHER variant fixes it — that is why the flag moved rather than the expression', () => {
+    const { titleOnly, post341 } = VARIANTS.q02;
+    // n2 (divide by raw length) makes it far worse: 12.8x instead of 2.33x.
+    expect(titleOnly.n2 / post341.n2).toBeGreaterThan(12);
+    // ts_rank_cd and setweight A/B leave it essentially where flag 1 had it.
+    expect(titleOnly.cd / post341.cd).toBeCloseTo(2.33, 1);
+    expect(titleOnly.title_a / post341.title_a).toBeCloseTo(2.33, 1);
+  });
+
+  it('flag 0 is NOT promoted to the chunks function, and this is the number that says why', () => {
+    // Under flag 0 the answering page-6 chunk and a bicycle-maintenance chunk
+    // with nothing to do with the question rank IDENTICALLY. Ranking by evidence
+    // alone works where documents are short and evenly sized; chunks are neither.
+    // The two functions may differ because their ranks are never compared -- the
+    // caller takes top-K per source.
+    expect(VARIANTS.q02.chunkNoise.n0).toBe(VARIANTS.q02.chunkPage6.n0);
+    // Flag 1, which chunks keep, does separate them -- barely, but in the right
+    // direction, and it is the only column here that does at all.
+    expect(VARIANTS.q02.chunkPage6.n1).toBeGreaterThan(VARIANTS.q02.chunkNoise.n1);
   });
 
   it('the cause is LENGTH NORMALIZATION on a 29-character document, not coverage', () => {
@@ -120,5 +227,48 @@ describe('ranking pair q03 — the title-only post must STAY first', () => {
     // answers, which match 2 of 6 as well. A candidate has to beat BOTH facts.
     expect(MEASURED.q03.titleOnly.chars).toBe(0);
     expect(MEASURED.q02.titleOnly.coverage).toBe(2);
+  });
+
+  it('flag 0 PRESERVES it, and the tie-break never fires here', () => {
+    // q03's title-only post matches 3 of 3 terms where nothing else matches more
+    // than one, so under flag 0 it wins on rank outright -- 0.0607927 against a
+    // tie at 0.0202642. The body-over-title-only tie-break fires only at EQUAL
+    // rank, so it never touches this pair. That is the whole reason it is a
+    // tie-break and not a demotion.
+    expect(VARIANTS.q03.titleOnly.n0).toBeGreaterThan(VARIANTS.q03.slideshowPage4.n0);
+    // And it is the only post that matched at all, so nothing could tie it here
+    // even if the ranks had been equal.
+    expect(VARIANTS.q03.titleOnly.n0 / VARIANTS.q03.slideshowPage4.n0).toBeCloseTo(3, 1);
+  });
+});
+
+describe('what the ratings bar could and could not decide', () => {
+  /**
+   * THE HONEST LIMIT ON ALL OF THE ABOVE.
+   *
+   * The battery's bar is "never drop a human-judged relevant passage". A ranking
+   * change can only drop something by pushing it past the per-source limit, or
+   * past the character budget. NEITHER HAPPENS ANYWHERE IN THIS BATTERY: the
+   * board holds four text/note posts in total, only two questions return any
+   * post at all, and both return fewer than the per-source limit of four.
+   *
+   * So the posts flag change PASSES THE BAR VACUOUSLY. It is not endorsed by the
+   * ratings; it is merely not contradicted by them. The argument for it is the
+   * mechanism recorded above, and the argument against it -- a long post that
+   * repeats one term outranking a short exact answer, which flag 0 permits and
+   * flag 1 did not -- is UNMEASURABLE on this corpus. Followups item 7.
+   */
+  const POSTS_ON_THE_BOARD = 4;
+  const POSTS_PER_SOURCE_LIMIT = 4;
+
+  it('no question in the battery returns more posts than the per-source limit', () => {
+    const postsReturned = { q02: 3, q03: 1, q10: 3 } as const;
+    for (const [question, count] of Object.entries(postsReturned)) {
+      expect(count, `${question} would have exercised the limit`).toBeLessThanOrEqual(POSTS_PER_SOURCE_LIMIT);
+    }
+  });
+
+  it('the posts corpus is four posts, which is why the bar cannot discriminate', () => {
+    expect(POSTS_ON_THE_BOARD).toBeLessThanOrEqual(POSTS_PER_SOURCE_LIMIT);
   });
 });

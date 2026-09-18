@@ -222,7 +222,9 @@ length per passage. Three attributions are now evidence rather than hypothesis:
   the paragraph matches only `knit`, once, while the introduction genuinely
   contains all three query terms five times. **The ranking is correct given what
   matched.** No normalization flag, no weighting and no coverage rule can fix
-  this pair. It belongs to the language/stemming item.
+  this pair. It belongs to the language/stemming item. **Confirmed in the
+  database on the exact pair:** the answering chunk does not match `ribbed` under
+  `simple` and does under `english`; the intro matches under both.
 - **q08 and q05 are chunk-vs-chunk, so item 1 cannot touch them.** The chunk rank
   is `ts_rank(to_tsvector('simple', c.text), q.query, 1)` — `c.text` alone, no
   filename, no title. An earlier attribution of the inversion to post title
@@ -238,18 +240,61 @@ length per passage. Three attributions are now evidence rather than hypothesis:
   its title, so `setweight` A/B raises the passage that is already wrongly on
   top. Item 1 stays valid for posts in general; it is not the fix for this.
 
-**The open tension:** flag 1 was adopted because flag 0 let long chunks win by
-being long — live-proven. The same normalization is what rewards a 29-character
-title-only post in q02. Whether any single flag serves both cases is the question
-`scripts/db/boardSearchRankingVariants.sql` exists to answer; it could not be
-measured from TypeScript, because the shipped functions are fixed at flag 1 and
-re-implementing `ts_rank` to score alternatives would encode a different
-assumption than the code.
+**The open tension, and how it was closed.** Flag 1 was adopted because flag 0 let
+long chunks win by being long — live-proven. The same normalization is what
+rewarded a 29-character title-only post in q02. **No single flag serves both**,
+and `scripts/db/boardSearchRankingVariants.sql` was run against the real database
+to establish it rather than argue it:
+
+| variant | q02 title-only | post 341 | post 406 | chunk p6 | noise chunk |
+|---|---|---|---|---|---|
+| n1 (shipped) | 0.0078393 | 0.0033648 | 0.0033526 | 0.0013907 | 0.0013855 |
+| n0 | 0.0202642 | 0.0202642 | 0.0202642 | 0.0101321 | 0.0101321 |
+| n2 | 0.0040529 | 0.0003166 | 0.0003118 | 0.0000654 | 0.0000641 |
+| `ts_rank_cd` | 0.111622 | 0.0479112 | 0.0477366 | 0.0198025 | 0.0197281 |
+| `setweight` A/B | 0.0783928 | 0.0336483 | 0.0335257 | 0.0331706 | 0.0055352 |
+
+**The resolution is a SPLIT, shipped as `20260918150000`.** Posts move to flag 0,
+chunks stay on flag 1. Legitimate because the two ranks are never compared —
+`mergeBoardAiSearchPassages` takes top-K per source precisely because they are
+different scales — so the corpus-length argument that justified flag 1 was never
+operative for posts in the first place.
+
+- **n0 is the only column that fixes q02**, and it fixes it by making the three
+  posts rank *identically* (0.0202642 three ways) on genuinely identical evidence
+   — same two terms, twice each. A tie is not an order, so the migration adds one
+  tie-break: **at equal rank, a post with a body beats a post without one.** That
+  states the preference where it can be argued with, instead of letting a
+  logarithm imply the opposite.
+- **n0 is unsafe for chunks**: it ties the answering page-6 chunk to a
+  bicycle-maintenance chunk with nothing to do with the question, both 0.0101321.
+- **n2 makes q02 worse** (12.8× instead of 2.33×); **`ts_rank_cd` and `setweight`
+  A/B leave it at 2.33×**, i.e. unfixed.
+- **q03 survives**, which was the constraint on any fix: its title-only post
+  matches 3 of 3 terms and wins on rank outright under flag 0 (0.0607927 against
+  a tie at 0.0202642), so the tie-break never fires on it.
+
+**`setweight` A/B is the one unused column with a signal, and it is not for q02.**
+On the chunk side it separates the answering Audi page-6 chunk from
+unrelated-document noise by **6×** (0.0331706 vs 0.0055352) where flag 1 manages
+0.4%. That goes to the stemming round for full-battery scoring, not here.
+
+**What the ratings could NOT decide, stated because it matters more than the
+table.** The bar is "never drop a human-judged relevant passage", and a ranking
+change can only drop something by pushing it past the per-source limit or past
+the character budget. **Neither happens anywhere in this battery**: the board
+holds four `text`/`note` posts in total, only q02, q03 and q10 return any post at
+all, and all three return fewer than the per-source limit of four. The posts flag
+change therefore **passes the bar vacuously** — not endorsed by the ratings,
+merely not contradicted. The argument for it is the mechanism above; the argument
+against it is item 7.
 
 The three pairs are named gate assertions in
-`scripts/db/boardSearchRankingPairs.test.ts`, encoded as tripwires: they assert
-today's wrong ordering, so they break the moment a ranking change fixes it and
-force a human to confirm the fix was intended.
+`scripts/db/boardSearchRankingPairs.test.ts`. q02's is now **flipped** — it
+carries both measurements, the flag-1 defect and the flag-0 fix, with the
+tie-break as the stated mechanism between them. q08's still asserts the defect,
+and must until the language work lands: the variants run confirmed that every one
+of the five expressions keeps the intro ahead, the best of them still at 1.86×.
 
 **THE LIMIT OF THE BATTERY, which governs how much any of this is worth.** THE
 QUESTIONS ARE OURS, NOT USERS'. They were written by people who already knew what
@@ -293,3 +338,39 @@ mean.
 
 **The signal to watch for:** search latency near the 3-second bound in normal use,
 or database CPU that does not fall when chat traffic does.
+
+---
+
+## 7. The posts corpus is four posts — the instrument that would judge flag 0
+
+**What.** `20260918150000` moved `search_board_posts_text` to `ts_rank`
+normalization flag 0 on the strength of one question, q02, whose evidence is a
+three-way tie. The tuning battery cannot judge that change, and this item exists
+so nobody later mistakes "the battery was green" for "the flag was validated".
+
+**Why the battery cannot judge it.** The test board holds **four** `text`/`note`
+posts. Only three questions return a post at all (q02: 3, q03: 1, q10: 3), and
+every one of those counts is **below the per-source limit of four**. A ranking
+change can only lose a passage by pushing it past that limit or past the
+character budget, and neither is ever reached — so no post ordering, however
+wrong, can fail the bar. The change passes vacuously.
+
+**The specific risk flag 0 carries, which flag 1 did not.** Flag 0 ignores
+document length, so rank accumulates with every extra occurrence. A long rambling
+post that mentions one query term eight times will outrank a short exact answer
+that mentions it once. **No post on the test board does that**, which is why this
+is an open risk rather than a ruled-out one. It is the mirror image of the defect
+that was fixed, and the revert is ready:
+`20260918150000_board_search_posts_rank_evidence_rollback.sql`, whose header says
+when running it is the right call.
+
+**What would settle it.** A battery whose posts corpus contains, at minimum: one
+long post repeating a query term several times beside a short exact answer; more
+matching posts than the per-source limit, so the limit is actually exercised; and
+a title-only post competing with a body post at *unequal* coverage in both
+directions. That is a corpus-building job, not a code change, and it is the same
+instrument item 4 wants for chunk size.
+
+**The signal to watch for before it is built:** a user reporting that board search
+surfaces a long post they did not want ahead of the short one that answered them.
+That is this item, and it is a revert away.
