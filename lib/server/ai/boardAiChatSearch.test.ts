@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   BOARD_AI_SEARCH_LIMIT_PER_SOURCE,
+  BOARD_AI_SEARCH_TIMEOUT_MS,
   searchBoardAiContext,
   type BoardAiSearchChunkRow,
   type BoardAiSearchPostRow,
@@ -10,14 +11,20 @@ import {
 import {
   BOARD_AI_SEARCH_MIN_ROOM_CHARS,
   boardAiSearchChipText,
+  boardAiSearchCoverageOf,
   boardAiSearchHasRoom,
+  isBoardAiSearchPassageCovered,
   boardAiSearchPromptState,
   boardAiSearchSkippedBlock,
   boundBoardAiSearchPassages,
   mergeBoardAiSearchPassages,
   type BoardAiSearchPassage,
 } from '../../domain/ai/boardAiSearchContext';
-import { BOARD_AI_CONTEXT_MAX_TOTAL_CHARS } from '../../domain/ai/boardAiChatContext';
+import {
+  BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES,
+  BOARD_AI_CONTEXT_MAX_TOTAL_CHARS,
+} from '../../domain/ai/boardAiChatContext';
+import { BOARD_AI_CHAT_TIMEOUT_MS } from './boardAiChatExecution';
 import { ok } from '../../domain/core/result';
 import type { KnowledgeBoardReadAuthorizationClient } from '../knowledge/knowledgeBoardReadAuthorization';
 
@@ -223,6 +230,147 @@ describe('the budget yields whole passages, loudly', () => {
     expect(boardAiSearchHasRoom(full, BOARD_AI_CONTEXT_MAX_TOTAL_CHARS)).toBe(false);
     const roomy = BOARD_AI_CONTEXT_MAX_TOTAL_CHARS - BOARD_AI_SEARCH_MIN_ROOM_CHARS;
     expect(boardAiSearchHasRoom(roomy, BOARD_AI_CONTEXT_MAX_TOTAL_CHARS)).toBe(true);
+  });
+});
+
+describe('a passage the user already attached is dropped BY SPAN, not by id', () => {
+  const coverageOf = (blocks: Parameters<typeof boardAiSearchCoverageOf>[0]) => boardAiSearchCoverageOf(blocks);
+
+  it('a post that is already attached is skipped', () => {
+    const coverage = coverageOf([
+      { type: 'padlet', padletId: 'p1', label: 'Weekly plan', text: 'the note body' },
+    ]);
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'post', label: 'Weekly plan', text: 'the note body', rank: 0.5, padletId: 'p1' },
+      coverage,
+    )).toBe(true);
+    // A different post is not covered by it.
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'post', label: 'Other', text: 'x', rank: 0.5, padletId: 'p2' },
+      coverage,
+    )).toBe(false);
+  });
+
+  it('a chunk INSIDE the pages a document attachment sent is skipped', () => {
+    const coverage = coverageOf([{
+      type: 'knowledge-document', knowledgeDocumentId: 'd1', label: 'slides.pdf',
+      pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8], text: '…',
+    }]);
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'pdf', label: 'slides.pdf — page 3', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 3, pageEnd: 3 },
+      coverage,
+    )).toBe(true);
+  });
+
+  it('A CHUNK BEYOND THE DOCUMENT PAGE CAP IS NOT SKIPPED', () => {
+    // THE CASE THE ID-ONLY VERSION GETS WRONG. A document attachment reads a
+    // bounded PREFIX -- BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES pages -- so page 9
+    // of a forty-page PDF was never sent. Dropping it because the document id
+    // matched would silently delete the only evidence in the request.
+    expect(BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES).toBe(8);
+    const coverage = coverageOf([{
+      type: 'knowledge-document', knowledgeDocumentId: 'd1', label: 'slides.pdf',
+      pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8], text: '…',
+    }]);
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'pdf', label: 'slides.pdf — page 9', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 9, pageEnd: 9 },
+      coverage,
+    )).toBe(false);
+  });
+
+  it('a chunk STRADDLING the cap is kept, because half of it is new', () => {
+    const coverage = coverageOf([{
+      type: 'knowledge-document', knowledgeDocumentId: 'd1', label: 'slides.pdf',
+      pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8], text: '…',
+    }]);
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'pdf', label: 'slides.pdf — pages 8–9', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 8, pageEnd: 9 },
+      coverage,
+    )).toBe(false);
+  });
+
+  it('a SELECTION covers nothing, because it sent part of a page', () => {
+    // The unselected remainder of that page may be exactly what answers the
+    // question, so a passage from it is new material.
+    const coverage = coverageOf([{
+      type: 'knowledge-selection', knowledgeDocumentId: 'd1', pageNumber: 3,
+      charStart: 0, charEnd: 20, label: 'slides.pdf — page 3', text: 'a short quote',
+    }]);
+    expect(coverage.documentPages.size).toBe(0);
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'pdf', label: 'slides.pdf — page 3', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 3, pageEnd: 3 },
+      coverage,
+    )).toBe(false);
+  });
+
+  it('a passage with no page span is kept rather than guessed at', () => {
+    const coverage = coverageOf([{
+      type: 'knowledge-page', knowledgeDocumentId: 'd1', pageNumber: 3,
+      pageNumbers: [3], label: 'slides.pdf — page 3', text: 'the page',
+    }]);
+    // Keeping a possible duplicate costs characters; dropping possible evidence
+    // costs the answer.
+    expect(isBoardAiSearchPassageCovered(
+      { source: 'pdf', label: 'slides.pdf', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1' },
+      coverage,
+    )).toBe(false);
+  });
+
+  it('the duplicate never reaches the model, end to end', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      reader([], [post('p1', 'Weekly plan', 'the oil headlines note')], [chunk('c1', 'the pdf body')]),
+      BOARD, USER, 'oil headlines body', 5000,
+      boardAiSearchCoverageOf([
+        { type: 'padlet', padletId: 'p1', label: 'Weekly plan', text: 'the oil headlines note' },
+      ]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.block.text).not.toContain('board post');
+    expect(result.value.block.text).toContain('PDF text');
+    expect(result.value.result.used).toBe(1);
+  });
+});
+
+describe('the search clock is bounded and separate from the generation clock', () => {
+  it('is three seconds, so the total stays about 23 rather than unbounded', () => {
+    // One clock must not eat the other: executeBoardAiChat starts its own 20s
+    // timer only AFTER the search returns.
+    expect(BOARD_AI_SEARCH_TIMEOUT_MS).toBe(3_000);
+    expect(BOARD_AI_SEARCH_TIMEOUT_MS + BOARD_AI_CHAT_TIMEOUT_MS).toBe(23_000);
+  });
+
+  it('a search that exceeds it produces the failed outcome, not an error and not an empty result', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = searchBoardAiContext(
+        authClient([], true),
+        {
+          // Never resolves. The real shape of a seq scan on a large board.
+          searchPosts: () => new Promise(() => {}),
+          searchChunks: () => new Promise(() => {}),
+        },
+        BOARD, USER, 'oil headlines', 5000,
+      );
+      await vi.advanceTimersByTimeAsync(BOARD_AI_SEARCH_TIMEOUT_MS + 10);
+      const result = await pending;
+
+      // Refused, so the route maps it to `failed` and the user is TOLD. An
+      // empty result here would say "your board holds nothing", which is a
+      // different and false claim.
+      expect(result.ok).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a search that finishes inside the budget is unaffected', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true), reader([], [post('p1', 'Note', 'oil headlines')]),
+      BOARD, USER, 'oil headlines', 5000,
+    );
+    expect(result.ok).toBe(true);
   });
 });
 

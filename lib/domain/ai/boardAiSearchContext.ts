@@ -33,6 +33,85 @@ export interface BoardAiSearchPassage {
   readonly padletId?: string;
   readonly knowledgeDocumentId?: string;
   readonly pageNumber?: number;
+  /** The chunk's own page span, which the de-duplication rule compares. */
+  readonly pageStart?: number;
+  readonly pageEnd?: number;
+}
+
+/**
+ * What the user's own attachments already put in front of the model.
+ *
+ * Built from the RESOLVED blocks, so it describes what was actually sent rather
+ * than what was asked for.
+ */
+export interface BoardAiSearchCoverage {
+  /** Posts sent as text. */
+  readonly padletIds: ReadonlySet<string>;
+  /** `${documentId}:${pageNumber}` for every page sent WHOLE. */
+  readonly documentPages: ReadonlySet<string>;
+}
+
+const documentPageKey = (documentId: string, pageNumber: number): string =>
+  `${documentId}:${pageNumber}`;
+
+/**
+ * What the attachments cover, by SPAN rather than by id.
+ *
+ * THE DISTINCTION IS THE WHOLE POINT. "This document is attached" and "this page
+ * was sent" are different claims: a `knowledge-document` attachment reads a
+ * bounded PREFIX -- BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES pages -- so a chunk from
+ * page nine of a forty-page PDF is not a duplicate of anything, it is the only
+ * evidence in the request. Skipping it because the document id matched would
+ * silently delete real material, which is a worse bug than the duplicate it set
+ * out to fix.
+ *
+ * A SELECTION COVERS NOTHING. It sent part of a page deliberately; a passage
+ * from that page may hold exactly the part the user did not select.
+ *
+ * An IMAGE covers nothing either: it carries pixels, and a text passage about
+ * the same card is not the same material.
+ */
+export function boardAiSearchCoverageOf(
+  blocks: readonly ResolvedBoardAiContextBlock[],
+): BoardAiSearchCoverage {
+  const padletIds = new Set<string>();
+  const documentPages = new Set<string>();
+  for (const block of blocks) {
+    if (block.type === 'padlet' && block.padletId) padletIds.add(block.padletId);
+    if (!block.knowledgeDocumentId) continue;
+    for (const pageNumber of block.pageNumbers ?? []) {
+      documentPages.add(documentPageKey(block.knowledgeDocumentId, pageNumber));
+    }
+  }
+  return { padletIds, documentPages };
+}
+
+/**
+ * Is this passage already in front of the model?
+ *
+ * A chunk counts as covered only when EVERY page it spans was sent. A chunk
+ * straddling pages 8 and 9, with a document attachment that stopped at 8, is
+ * kept -- half of it is new, and dropping it would lose that half.
+ */
+export function isBoardAiSearchPassageCovered(
+  passage: BoardAiSearchPassage,
+  coverage: BoardAiSearchCoverage,
+): boolean {
+  if (passage.source === 'post') {
+    return passage.padletId !== undefined && coverage.padletIds.has(passage.padletId);
+  }
+  const documentId = passage.knowledgeDocumentId;
+  if (documentId === undefined) return false;
+  const start = passage.pageStart;
+  const end = passage.pageEnd ?? start;
+  // A passage with no page span cannot be proved covered, so it is kept. Keeping
+  // a possible duplicate costs characters; dropping possible evidence costs the
+  // answer.
+  if (start === undefined || end === undefined) return false;
+  for (let page = start; page <= end; page += 1) {
+    if (!coverage.documentPages.has(documentPageKey(documentId, page))) return false;
+  }
+  return true;
 }
 
 /**

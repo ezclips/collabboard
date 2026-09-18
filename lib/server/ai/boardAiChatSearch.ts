@@ -28,7 +28,9 @@ import { buildBoardAiSearchQuery } from '../../domain/ai/boardAiSearchQuery';
 import {
   boardAiSearchContextBlock,
   boundBoardAiSearchPassages,
+  isBoardAiSearchPassageCovered,
   mergeBoardAiSearchPassages,
+  type BoardAiSearchCoverage,
   type BoardAiSearchPassage,
   type BoardAiSearchResult,
 } from '../../domain/ai/boardAiSearchContext';
@@ -77,6 +79,44 @@ export interface BoardAiSearchChunkRow {
  */
 export const BOARD_AI_SEARCH_LIMIT_PER_SOURCE = 4;
 
+/**
+ * How long the two searches together may take.
+ *
+ * SEPARATE FROM THE GENERATION CLOCK, AND DELIBERATELY SO. `executeBoardAiChat`
+ * starts its own 20,000ms timer AFTER this returns, so without a bound here the
+ * total request time was unbounded: a slow or seq-scanning search added however
+ * long it took and only then did the generation budget begin. One clock must not
+ * eat the other, so this is three seconds and the total is bounded at about 23.
+ *
+ * THREE SECONDS IS GENEROUS FOR WHAT THIS IS. Two GIN index probes on one board,
+ * each capped at ten rows. If they take longer than this the index is not being
+ * used, and the right outcome is a reported failure rather than a chat that
+ * hangs while a sequential scan finishes.
+ *
+ * WHAT IT DOES AND DOES NOT DO: it stops US WAITING. The statement may continue
+ * on the database, because PostgREST gives no cancellation handle here. That is
+ * acceptable -- the query is a bounded read -- and it is stated rather than
+ * implied, because "timeout" usually suggests the work stopped.
+ */
+export const BOARD_AI_SEARCH_TIMEOUT_MS = 3_000;
+
+/** A sentinel distinct from any result, so a slow search cannot be read as an empty one. */
+const TIMED_OUT = Symbol('board-ai-search-timeout');
+
+async function withinSearchBudget<T>(work: Promise<T>): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), BOARD_AI_SEARCH_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /** The post's own title, or an honest stand-in. Never the body's first line. */
 function postLabel(row: BoardAiSearchPostRow): string {
   const title = (row.title ?? '').trim();
@@ -119,6 +159,8 @@ export async function searchBoardAiContext(
   userId: string,
   message: string,
   availableChars: number,
+  /** What the user's own attachments already sent, for the span rule. */
+  coverage: BoardAiSearchCoverage = { padletIds: new Set(), documentPages: new Set() },
 ): Promise<Result<{ block: ResolvedBoardAiContextBlock; result: BoardAiSearchResult }, DomainError>> {
   // STEP 1. The caller's own client, before anything privileged exists. Owner
   // or is_board_member, re-checked on this turn and never cached.
@@ -141,11 +183,19 @@ export async function searchBoardAiContext(
     return ok({ block: boardAiSearchContextBlock([], '', result), result });
   }
 
-  // STEP 3. Only now, and only reads. Both sources, independently.
-  const [posts, chunks] = await Promise.all([
+  // STEP 3. Only now, and only reads. Both sources, independently, under one
+  // bounded clock that is NOT the generation clock.
+  const searched = await withinSearchBudget(Promise.all([
     reader.searchPosts(boardId, query.expression, BOARD_AI_SEARCH_LIMIT_PER_SOURCE),
     reader.searchChunks(boardId, query.expression, BOARD_AI_SEARCH_LIMIT_PER_SOURCE),
-  ]);
+  ]));
+  if (searched === TIMED_OUT) {
+    // Refused, not treated as empty: "the search was too slow" and "the board
+    // holds nothing" are different answers, and the caller turns this one into
+    // the `failed` outcome the user is actually shown.
+    return err(domainError('unavailable', 'Could not search this board'));
+  }
+  const [posts, chunks] = searched;
   // One source failing does not lose the other: a board with no PDFs and a
   // broken chunk search should still find its own notes.
   const postPassages: readonly BoardAiSearchPassage[] = posts.ok
@@ -164,7 +214,8 @@ export async function searchBoardAiContext(
       text: (row.text ?? '').trim(),
       rank: row.rank,
       knowledgeDocumentId: row.document_id,
-      ...(row.page_start !== null ? { pageNumber: row.page_start } : {}),
+      ...(row.page_start !== null ? { pageNumber: row.page_start, pageStart: row.page_start } : {}),
+      ...(row.page_end !== null ? { pageEnd: row.page_end } : {}),
     }))
     : [];
   if (!posts.ok && !chunks.ok) {
@@ -174,9 +225,15 @@ export async function searchBoardAiContext(
   // A passage with no text is not a passage. The database can return one for a
   // post whose title matched and whose body is empty; its title is already the
   // label, so the row would contribute a heading and nothing else.
+  //
+  // And a passage the user ALREADY ATTACHED is not new material. It is dropped
+  // by SPAN, not by id: a chunk from a page a document attachment never reached
+  // is the only evidence in the request, and must survive.
+  const usable = (passage: BoardAiSearchPassage) =>
+    passage.text.length > 0 && !isBoardAiSearchPassageCovered(passage, coverage);
   const merged = mergeBoardAiSearchPassages(
-    postPassages.filter((passage) => passage.text.length > 0),
-    chunkPassages.filter((passage) => passage.text.length > 0),
+    postPassages.filter(usable),
+    chunkPassages.filter(usable),
     BOARD_AI_SEARCH_LIMIT_PER_SOURCE,
   );
 

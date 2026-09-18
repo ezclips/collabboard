@@ -215,6 +215,20 @@ export interface ResolvedBoardAiContextBlock {
   readonly charEnd?: number;
   /** Present only on a board-search block: the terms that were searched for. */
   readonly query?: string;
+  /**
+   * The page numbers this block ACTUALLY sent, when it sent whole pages.
+   *
+   * Server-authored and transient: it is not persisted, because nothing reads it
+   * on a later turn. It exists so board search can tell a genuine duplicate from
+   * a passage it must keep. A `knowledge-document` attachment is capped at
+   * BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES, so "this document is attached" is NOT
+   * the same claim as "this page was sent", and conflating the two would drop
+   * real evidence from page nine onwards.
+   *
+   * Absent on a selection, deliberately: a selection sent PART of a page, so no
+   * page is covered by it and a passage from that page is not a duplicate.
+   */
+  readonly pageNumbers?: readonly number[];
   readonly text: string;
   /**
    * Present ONLY on a padlet-image block. `text` stays the marker above, so

@@ -48,6 +48,7 @@ import { createBoardAiContextImageReader } from '@/lib/infra/ai/boardAiContextIm
 import { createBoardAiSearchReader } from '@/lib/infra/ai/boardAiSearchReader';
 import { searchBoardAiContext } from '@/lib/server/ai/boardAiChatSearch';
 import {
+  boardAiSearchCoverageOf,
   boardAiSearchHasRoom,
   boardAiSearchPromptState,
   boardAiSearchSkippedBlock,
@@ -290,6 +291,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           user.id,
           message,
           BOARD_AI_CONTEXT_MAX_TOTAL_CHARS - attachmentChars,
+          // What the attachments already put in front of the model, by SPAN.
+          // A chunk from a page a document attachment never reached is not a
+          // duplicate -- it is the only evidence in the request.
+          boardAiSearchCoverageOf(currentContext),
         );
         // A SEARCH THAT FAILED IS NOT A CHAT THAT FAILED. The user asked a
         // question; an enrichment they toggled on being unavailable is not a

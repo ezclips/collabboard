@@ -312,6 +312,12 @@ async function resolveOne(
       type: 'knowledge-document',
       knowledgeDocumentId: item.knowledgeDocumentId,
       label,
+      // WHICH pages, not how many. The read is capped at
+      // BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES, so a document attachment covers a
+      // PREFIX of the document and nothing beyond it. Board search reads this to
+      // avoid sending the same page twice while still returning passages from
+      // the pages this attachment never reached.
+      pageNumbers: pages.value.map((page) => page.pageNumber),
       text: bounded(text),
     });
   }
@@ -326,6 +332,8 @@ async function resolveOne(
       type: 'knowledge-page',
       knowledgeDocumentId: item.knowledgeDocumentId,
       pageNumber: page.pageNumber,
+      // The whole page went, so the whole page is covered for de-duplication.
+      pageNumbers: [page.pageNumber],
       label: `${label} — page ${page.pageNumber}`,
       text: bounded(page.text),
     });
