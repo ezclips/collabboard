@@ -510,6 +510,77 @@ actually tested.
 change to `K` or to the context budgets. Either one invalidates the reasoning
 above and the confirm has to be re-run.
 
+### CLOSED — volume does not couple to latency, and `K = 4` stays a character decision
+
+Run 2026-09-19 on the reference board, through the real UI on the persistent
+authenticated Chromium, search on, no attachments, a fresh thread per turn.
+The instrument is `scripts/db/boardAiSearchLoadConfirm.ts`.
+
+**The sweep changed the question before it answered it.** "The reachable worst
+case" was assumed to be one question; it is two, and they are not the same one:
+
+| | most CHARACTERS | most PASSAGES |
+|---|---|---|
+| question | q02 audi-horn | q10 spreizniete |
+| assembled | **4,186** chars (29.9% of 14,000) | 3,654 chars |
+| passages | 6 — posts 3, pdf 3 | **7** — posts 3, pdf 4 |
+| live, end to end | **8.9s** (45% of the 20s timeout) | **4.4s** |
+
+**The turn with MORE passages was the FASTER turn**, by half. That is the
+answer: passage volume does not couple to generation latency.
+
+**Why it does not, measured rather than asserted.** The direct replay of the
+same assembled payloads — the only way to see a finish reason, see below —
+reports `prompt_tokens` of **1,727** and **1,796**. One more passage and 532
+fewer characters move the input by 4%. The context is simply not the expensive
+part of the request: ~1.8k prompt tokens against a 4,000-token completion
+budget. **What tracks latency is OUTPUT length**, which is a property of the
+question, not of how much was retrieved for it.
+
+So `BOARD_AI_SEARCH_LIMIT_PER_SOURCE = 4` closes as a **character-budget
+decision**, with the numbers behind it at last. The plan's feared branch — `K`
+becoming latency-driven, the ceiling or the passage count having to move before
+anything was built on it — does not obtain.
+
+**`finish_reason` is NOT observable on a live turn, and that is worth knowing on
+its own.** `adapter.generateText` returns a bare string; the adapter reads the
+finish reason and discards it. A truncated answer renders as an answer with no
+error anywhere — the same silent shape recorded against
+`BOARD_AI_CHAT_MAX_TOKENS`. The confirm therefore replays the identical
+assembled payload directly, with the real `boardAiChatSystemPrompt('ran')` and
+the real serializer:
+
+| | finish | reasoning | completion | prompt | provider call |
+|---|---|---|---|---|---|
+| q02 | **stop** | 495 | 998 / 4000 | 1,727 | 5.8s |
+| q10 | **stop** | 217 | 558 / 4000 | 1,796 | 3.4s |
+
+Worst completion is **25% of the token budget**. The pairing recorded against
+`BOARD_AI_CHAT_MAX_TOKENS` — that a completion near the 4,000 cap would need
+about 25s and be aborted — is real, and nothing on a searched turn on this board
+comes close to reaching it.
+
+**Two honest limits on the above.**
+
+1. **This tests the REACHABLE maximum, not the budget's.** 4,186 characters is
+   **29.9%** of `BOARD_AI_CONTEXT_MAX_TOTAL_CHARS`. A board with longer passages
+   could assemble three times as much and behave differently. The item asked for
+   the character count to be recorded beside the timing precisely so this is
+   visible rather than inferred, and it is: nothing above was measured above 30%
+   of the budget. **Nothing was dropped on any of the ten questions** either
+   (`used == returned`, `dropped = 0` everywhere), so the bounder was never
+   exercised.
+2. **The first live number was 11.9s and it was an artifact.** That turn compiled
+   the route in the dev server; re-run warm, the same question took 8.9s against
+   a 5.8s provider call. **Do not read 11.9s as product latency** — it was
+   3 seconds of Next.js. This is recorded because 11.9s is 60% of the timeout and
+   would have closed this item on the opposite branch.
+
+**What the board still cannot exercise**, restating item 7 from this direction:
+posts reach **3** on every question that returns any, never the per-source limit
+of 4, while PDF chunks reach 4 on two questions. The posts limit remains
+untested by anything, including this.
+
 ---
 
 ## 9. Discoverability — decided, with a review trigger
