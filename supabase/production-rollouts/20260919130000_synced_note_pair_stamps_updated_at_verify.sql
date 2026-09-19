@@ -195,13 +195,25 @@ invariants(ord, section, check_name, actual, pass) AS (
            COALESCE((SELECT position('updated_at = now()' IN src) > 0 FROM body), false)
     UNION ALL SELECT 24, 'stamp', 'the assignment is inside the pair UPDATE, before the row-count assertion',
            COALESCE((SELECT position('UPDATE public.padlets AS p' IN src)::text FROM body), '(absent)'),
-           -- Between the one UPDATE statement and the GET DIAGNOSTICS that
+           -- Between the one UPDATE statement and the row-count assertion that
            -- follows it: an assignment anywhere else -- a second statement, a
            -- comment, a RETURN clause -- is not the stamp this migration is
            -- about, and would leave one member or both unstamped.
+           --
+           -- THE CLOSING ANCHOR IS 'v_updated <> 2', NOT 'GET DIAGNOSTICS'.
+           -- position() returns the FIRST occurrence, and the first
+           -- GET DIAGNOSTICS in this body is the v_locked check after the
+           -- FOR UPDATE -- which sits BEFORE the pair UPDATE. Measured against
+           -- the applied body: lock diagnostics 3256, UPDATE 6284, stamp 6390,
+           -- assertion 7024. So `stamp < first GET DIAGNOSTICS` is 6390 < 3256,
+           -- false for every CORRECT body: the row failed on exactly what it
+           -- exists to certify. The second occurrence is not addressable through
+           -- position() without contortion; 'v_updated <> 2' is unique, is the
+           -- assertion this row's own name names, and row 20 already proves it
+           -- is present.
            COALESCE((SELECT position('UPDATE public.padlets AS p' IN src) > 0
                      AND position('updated_at = now()' IN src) > position('UPDATE public.padlets AS p' IN src)
-                     AND position('updated_at = now()' IN src) < position('GET DIAGNOSTICS' IN src) FROM body), false)
+                     AND position('updated_at = now()' IN src) < position('v_updated <> 2' IN src) FROM body), false)
 )
 -- rollout_readiness is the conjunction of every row above, on every row.
 SELECT ord, section, check_name, actual, pass, bool_and(pass) OVER () AS rollout_readiness

@@ -235,6 +235,52 @@ describe('the stamp, against a real engine', () => {
   });
 });
 
+/**
+ * THE VERIFY FILE IS EXECUTED, NOT REASONED ABOUT.
+ *
+ * A verify file is only exercisable after an apply, which is exactly why this
+ * project keeps shipping broken rows in them: row 9 of the wiki verifier did
+ * not parse, and row 24 of this one compared the stamp against the FIRST
+ * `GET DIAGNOSTICS` -- the lock check, which precedes the UPDATE -- so it
+ * failed on every correct body. Neither was visible to any amount of reading.
+ * "Verify it locally first" therefore means APPLY it locally first, which is
+ * what the scratch database above already does.
+ */
+describe('the verify file, run against the applied body', () => {
+  it('parses and returns one row per invariant', async () => {
+    await db.query('RESET ROLE');
+    const { rows } = await db.query(read(VERIFY));
+    expect(rows.length).toBeGreaterThan(20);
+  });
+
+  it('every row passes, and rollout_readiness agrees', async () => {
+    await db.query('RESET ROLE');
+    const { rows } = await db.query(read(VERIFY));
+    const failed = (rows as Array<{ ord: number; check_name: string; actual: string; pass: boolean }>)
+      .filter((r) => !r.pass)
+      .map((r) => `row ${r.ord}: ${r.check_name} (actual: ${r.actual})`);
+    expect(failed, 'a red row here is a defect in the migration OR in the row').toEqual([]);
+    expect((rows as Array<{ rollout_readiness: boolean }>).every((r) => r.rollout_readiness)).toBe(true);
+  });
+
+  it("row 24 is red for the body WITHOUT the stamp -- it discriminates", async () => {
+    // A green row proves nothing unless it can go red for the right reason.
+    // The rollback restores the pre-stamp body; row 24 must reject it, and
+    // then the newer body is restored so the rest of the suite is unaffected.
+    await db.query('RESET ROLE');
+    try {
+      await db.query(read(ROLLBACK));
+      const { rows } = await db.query(read(VERIFY));
+      const row24 = (rows as Array<{ ord: number; pass: boolean }>).find((r) => r.ord === 24);
+      expect(row24?.pass, 'the stamp is absent, so row 24 must fail').toBe(false);
+      const row4 = (rows as Array<{ ord: number; pass: boolean }>).find((r) => r.ord === 4);
+      expect(row4?.pass, 'and so must the digest').toBe(false);
+    } finally {
+      await db.query(read(ROLLOUT));
+    }
+  });
+});
+
 describe('the artifacts cannot drift apart', () => {
   it('the migration and the production rollout are byte-identical', () => {
     expect(read(ROLLOUT)).toBe(read(MIGRATION));
