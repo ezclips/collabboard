@@ -277,14 +277,37 @@ CREATE POLICY board_wiki_page_proposals_delete
 REVOKE ALL ON public.board_wiki_pages FROM anon;
 REVOKE ALL ON public.board_wiki_page_proposals FROM anon;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.board_wiki_pages TO authenticated;
+GRANT SELECT, INSERT, DELETE ON public.board_wiki_pages TO authenticated;
 GRANT SELECT, INSERT, DELETE ON public.board_wiki_page_proposals TO authenticated;
 
--- The application never updates a proposal, and neither may a client.
+-- The application never updates a proposal, and neither may a client. A
+-- table-level REVOKE is the right instrument here: there is no UPDATE to keep.
 REVOKE UPDATE ON public.board_wiki_page_proposals FROM authenticated;
 
--- Identity columns are not editable after the fact: a page cannot be moved to
--- another board, and authorship cannot be rewritten.
-REVOKE UPDATE (board_id, created_by, created_at) ON public.board_wiki_pages FROM authenticated;
+-- ---------------------------------------------------------------------------
+-- WHICH COLUMNS OF A PAGE MAY BE UPDATED -- AN ALLOWLIST, NOT A DENYLIST, AND
+-- THE REASON IS A MECHANISM, NOT A PREFERENCE.
+--
+-- A COLUMN-LEVEL REVOKE AFTER A TABLE-LEVEL GRANT IS INERT. PostgreSQL records
+-- grants, not denials: `GRANT UPDATE ON t` writes one table-wide entry in
+-- `relacl`, and `REVOKE UPDATE (board_id) ON t` finds no column entry in
+-- `attacl` to remove and leaves the table-wide grant covering every column. It
+-- raises no error. The earlier form of this block did exactly that and was
+-- proved inert against the live database -- `has_column_privilege` said
+-- `board_id`, `created_by`, `created_at` AND `id` were all still updatable,
+-- and every `attacl` was null.
+--
+-- So UPDATE is revoked at the table and granted back column by column. A column
+-- added later is NOT updatable until someone adds it here, which is the safe
+-- direction: the failure is a write that fails loudly, not an identity column
+-- that quietly became editable.
+--
+-- OUT, permanently: `id`, `board_id` (a page cannot be moved to another board),
+-- `created_by` and `created_at` (authorship cannot be rewritten after the fact).
+-- ---------------------------------------------------------------------------
+
+REVOKE UPDATE ON public.board_wiki_pages FROM authenticated;
+GRANT UPDATE (slug, title, content, sources, compiled_at, updated_by, updated_at)
+    ON public.board_wiki_pages TO authenticated;
 
 COMMIT;

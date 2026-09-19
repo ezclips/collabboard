@@ -107,9 +107,37 @@ describe('1. the access story, stated rather than inferred', () => {
   });
 
   it('a page cannot be moved to another board or have its authorship rewritten', () => {
+    // An ALLOWLIST, and it has to be one. The first version of this migration
+    // wrote `REVOKE UPDATE (board_id, created_by, created_at) ... FROM
+    // authenticated` after a table-wide `GRANT UPDATE`, and the live database
+    // proved it INERT: PostgreSQL records grants, not denials, so there was no
+    // column entry to revoke and the table-wide grant still covered every
+    // column -- `id` included, which was not even in the revoke list.
+    expect(statements).toContain('REVOKE UPDATE ON public.board_wiki_pages FROM authenticated');
     expect(statements).toContain(
-      'REVOKE UPDATE (board_id, created_by, created_at) ON public.board_wiki_pages FROM authenticated',
+      'GRANT UPDATE (slug, title, content, sources, compiled_at, updated_by, updated_at)\n    ON public.board_wiki_pages TO authenticated',
     );
+  });
+
+  it('never grants UPDATE on a page at the table level, which is what made the revoke inert', () => {
+    const tableGrants = [...statements.matchAll(/GRANT ([A-Z, ]+) ON public\.board_wiki_pages TO authenticated/g)];
+    expect(tableGrants).toHaveLength(1);
+    expect(tableGrants[0][1]).not.toContain('UPDATE');
+  });
+
+  it('uses no column-level REVOKE anywhere, because a column-level REVOKE cannot deny', () => {
+    // The technique, not the instance: `REVOKE <priv> (cols)` is a no-op unless
+    // a matching column-level GRANT exists, and it fails silently. Any
+    // reappearance of the form is the same defect wearing different columns.
+    expect(statements).not.toMatch(/REVOKE\s+[A-Z]+\s*\(/i);
+  });
+
+  it('says WHY the allowlist is an allowlist, in the file that has to stay one', () => {
+    // Without the mechanism written down, the denylist form is the obvious
+    // "simplification" and reads correctly to everyone who has not tried it.
+    expect(migration.toLowerCase()).toContain('inert');
+    // Comment-wrapped, so matched across the leading `--` of the next line.
+    expect(migration.toLowerCase()).toMatch(/postgresql records\s+(--\s+)?grants, not denials/);
   });
 
   it('says where authorization actually lives, so the policies are not mistaken for the gate', () => {
@@ -262,6 +290,46 @@ describe('the verify file checks the things that matter', () => {
     // from being "simplified" into checking only that a constraint exists.
     expect(verify).toContain("confdeltype = 'n'");
     expect(verify).toContain("confdeltype = 'c'");
+    // confdeltype is "char", not text: without the cast the row does not parse
+    // ("operator is not unique: text || char"), so it reports nothing at all
+    // rather than reporting something wrong.
+    expect(verify).toContain('con.confdeltype::text');
+  });
+
+  it('asks the EFFECTIVE update question rather than reading the grant list', () => {
+    // The blind spot this pair was written for: the migration's text said one
+    // thing, a source assertion matched that text, and the server did the
+    // opposite. Only has_column_privilege closes it.
+    expect(verify).toContain("has_column_privilege('authenticated', 'public.board_wiki_pages'");
+    // Statements only: the header explains why column_privileges was abandoned,
+    // and that prose must not read as a use of it.
+    expect(executable(verify)).not.toContain('information_schema.column_privileges');
+  });
+
+  it('checks both halves of the allowlist, not just the forbidden half', () => {
+    // Row 8 alone is satisfied by a table nobody can update at all, which is a
+    // broken feature reported as a safe one.
+    expect(verify).toContain('row 8: page identity columns are not client-updatable');
+    expect(verify).toContain('row 10: the editable columns are exactly the allowlist');
+    expect(verify).toContain("ARRAY['compiled_at', 'content', 'slug', 'sources', 'title', 'updated_at', 'updated_by']");
+  });
+
+  it('the allowlist the verifier expects is the allowlist the migration grants', () => {
+    // Two copies of one list in two files drift, and the drift is invisible:
+    // the verifier goes red against a correct database and gets "fixed" to
+    // match whatever the server happens to have.
+    const granted = statements
+      .match(/GRANT UPDATE \(([^)]+)\)/)![1]
+      .split(',').map((column) => column.trim()).sort();
+    const expected = verify
+      .match(/= ARRAY\[([^\]]+)\]\s*AS ok/)![1]
+      .split(',').map((column) => column.trim().replace(/'/g, '')).sort();
+    expect(expected).toEqual(granted);
+  });
+
+  it('checks id, the column the first revoke list forgot', () => {
+    const row8 = verify.slice(verify.indexOf('row 8: page identity columns'));
+    expect(row8.slice(0, row8.indexOf(';'))).toContain("IN ('id', 'board_id', 'created_by', 'created_at')");
   });
 
   it('numbers its rows in the order it runs them', () => {

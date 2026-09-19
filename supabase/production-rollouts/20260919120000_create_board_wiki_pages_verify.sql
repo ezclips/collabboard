@@ -34,12 +34,20 @@
 --
 -- ROW 8    the identity columns of a page are not updatable by a client, so a
 --          page cannot be moved to another board or have its authorship
---          rewritten after the fact.
+--          rewritten after the fact. Asked through `has_column_privilege`, not
+--          the catalog's grant list: this row already caught a REVOKE that was
+--          present in the file, matched by a source assertion, and INERT
+--          against the server -- which is precisely the blind spot a source
+--          scan cannot see past.
 --
 -- ROW 9    deleting an ACCOUNT must not delete board content. The page takes
 --          SET NULL and the proposal takes CASCADE, and both halves are checked
 --          -- getting either backwards is silent until the day an account is
 --          actually deleted, which is the worst possible time to find out.
+--
+-- ROW 10   the columns that ARE editable are exactly the allowlist. Row 8 is
+--          satisfied by a table with no UPDATE grant at all, which is a broken
+--          feature rather than a safe one; this row is the other half.
 --
 -- WHAT THIS FILE CANNOT TELL YOU: whether the APPLICATION honours any of it.
 -- Authorization lives in the application layer by design, and the service role
@@ -102,23 +110,36 @@ WHERE table_schema = 'public'
   AND grantee = 'authenticated'
   AND privilege_type = 'UPDATE';
 
+-- ROW 8 asks the EFFECTIVE question, not the catalog-text one. An earlier form
+-- of this row read `information_schema.column_privileges`, which lists what was
+-- granted per column and says nothing about a table-wide grant that covers
+-- every column anyway. `has_column_privilege` answers what the server would
+-- actually permit, which is the only question worth asking here. `id` is in the
+-- list because it was missing from the first version of the migration's revoke
+-- and nothing noticed.
 SELECT
     'row 8: page identity columns are not client-updatable' AS check,
-    count(*) = 0 AS ok,
-    coalesce(string_agg(column_name, ', '), '(none)') AS still_updatable
-FROM information_schema.column_privileges
-WHERE table_schema = 'public'
-  AND table_name = 'board_wiki_pages'
-  AND grantee = 'authenticated'
-  AND privilege_type = 'UPDATE'
-  AND column_name IN ('board_id', 'created_by', 'created_at');
+    count(*) FILTER (WHERE updatable) = 0 AS ok,
+    coalesce(string_agg(column_name, ', ') FILTER (WHERE updatable), '(none)') AS still_updatable
+FROM (
+    SELECT
+        c.column_name::text AS column_name,
+        has_column_privilege('authenticated', 'public.board_wiki_pages', c.column_name::text, 'UPDATE') AS updatable
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'board_wiki_pages'
+      AND c.column_name IN ('id', 'board_id', 'created_by', 'created_at')
+) identity_columns;
 
 -- ROW 9 checks the rule that deleting an ACCOUNT must not delete board
 -- content. A wiki page is durable board content other editors have worked on,
 -- so `created_by` is SET NULL like knowledge_documents and teams; a proposal is
 -- an ephemeral suggestion and keeps CASCADE. Both halves are asserted, because
 -- getting either one backwards is silent until the day an account is deleted.
--- `confdeltype` is 'n' for SET NULL and 'c' for CASCADE.
+-- `confdeltype` is 'n' for SET NULL and 'c' for CASCADE. It is of type "char"
+-- (single-byte internal), not text, so `||` against a text literal has no
+-- unique operator -- hence the explicit ::text cast, without which this row
+-- fails to parse rather than returning a wrong answer.
 SELECT
     'row 9: created_by -- page SET NULL, proposal CASCADE' AS check,
     bool_and(
@@ -127,7 +148,7 @@ SELECT
             WHEN 'board_wiki_page_proposals' THEN con.confdeltype = 'c'
         END
     ) AS ok,
-    string_agg(c.relname || '=' || con.confdeltype, ', ' ORDER BY c.relname) AS actual
+    string_agg(c.relname || '=' || con.confdeltype::text, ', ' ORDER BY c.relname) AS actual
 FROM pg_constraint con
 JOIN pg_class c ON c.oid = con.conrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -136,3 +157,22 @@ WHERE n.nspname = 'public'
   AND c.relname IN ('board_wiki_pages', 'board_wiki_page_proposals')
   AND con.contype = 'f'
   AND a.attname = 'created_by';
+
+-- ROW 10 IS ROW 8'S MIRROR, and it exists because row 8 alone can be satisfied
+-- by breaking the feature: revoking UPDATE at the table and forgetting to grant
+-- the editable columns back leaves NOTHING updatable, which row 8 reports as
+-- green while no editor can save a page. The two rows together pin the
+-- allowlist exactly -- nothing more editable, and nothing less.
+SELECT
+    'row 10: the editable columns are exactly the allowlist' AS check,
+    coalesce(editable, ARRAY[]::text[])
+        = ARRAY['compiled_at', 'content', 'slug', 'sources', 'title', 'updated_at', 'updated_by'] AS ok,
+    coalesce(array_to_string(editable, ', '), '(none)') AS editable
+FROM (
+    SELECT array_agg(c.column_name::text ORDER BY c.column_name) FILTER (
+        WHERE has_column_privilege('authenticated', 'public.board_wiki_pages', c.column_name::text, 'UPDATE')
+    ) AS editable
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'board_wiki_pages'
+) granted;
