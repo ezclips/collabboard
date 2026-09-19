@@ -45,18 +45,22 @@ supabase/.temp/
 tmp-line-debug/
 devserver.out.log
 
-# .agent/ holds local notes, with two deliberate exceptions. The verification
+# .agent/ holds local notes, with three deliberate exceptions. The verification
 # baselines are a GATE CRITERION, not a note: the failing-test-file set is what a
 # commit is judged against, so it has to travel with the code instead of living
 # on one machine. The retrieval follow-ups are DEFERRED WORK WITH EVIDENCE --
 # decisions taken, with the reasoning that justified deferring them; "remembered
-# by whoever was in the session" has already cost this project twice.
+# by whoever was in the session" has already cost this project twice. The wiki
+# plan is the same rule applied ahead of the work rather than after it: its
+# locked premises were decided once, and a premise that lives only in a chat log
+# gets re-argued from scratch by whoever builds against it.
 # `.agent/*` rather than `.agent/` is what makes a negation possible at all --
 # git will not descend into an ignored directory.
 .agent/*
 .claude/
 !.agent/verification-baselines.md
 !.agent/retrieval-followups.md
+!.agent/wiki-plan.md
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/
