@@ -814,3 +814,60 @@ Freeform post position is persistence-critical. The position stored in the DB is
 - Duplicate `mouseup` listeners (one ref-based, one stale closure) both fire → second call writes pre-drag coordinates from stale `padlets` closure after first call correctly committed
 - Missing scroll offset in drop coordinate calculation → `(clientX - rect.left) / zoom` omits `scrollLeft` / `scrollTop` → dropped item persists at wrong canvas position
 - Editor snapshot `padletToEdit` written back to DB in existing-post save → overwrites correct dragged position → reopen jumps post back to editor-open location
+
+---
+
+# Postgres Grants — Critical Rule (2026-09-19)
+
+## Rule
+
+**PostgreSQL records grants, not denials.** A column-level `REVOKE` after a
+table-level `GRANT` is **inert**: it looks for a column entry in `attacl`, finds
+none because the grant was written table-wide in `relacl`, removes nothing, and
+**raises no error**. The column stays fully writable, and any test that pins the
+`REVOKE`'s text passes — the text really is there, it just does nothing.
+
+The working form is an allowlist: revoke the privilege at the table, then grant
+it back column by column.
+
+```sql
+-- INERT. Denies nothing, warns about nothing.
+GRANT UPDATE ON public.t TO authenticated;
+REVOKE UPDATE (board_id, created_by) ON public.t FROM authenticated;
+
+-- CORRECT.
+REVOKE UPDATE ON public.t FROM authenticated;
+GRANT UPDATE (slug, title, content) ON public.t TO authenticated;
+```
+
+## Guardrails
+
+- Never write a column-level `REVOKE`. If a column must not be writable, the
+  privilege is revoked at the table and granted back to an explicit allowlist.
+- An allowlist fails in the safe direction: a column added later is not writable
+  until someone adds it, so the failure is a write that errors rather than an
+  identity column that quietly became editable.
+- **Verify with `has_column_privilege`, never with catalog text.**
+  `information_schema.column_privileges` and `role_table_grants` report what was
+  granted per column and say nothing about a table-wide grant covering
+  everything; `has_column_privilege(role, table, column, 'UPDATE')` answers what
+  the server would actually permit, which is the only question worth asking.
+- Check **both halves**. "No forbidden column is writable" is satisfied by a
+  table nobody can write at all — a broken feature reported as a safe one. Assert
+  the writable set is *exactly* the allowlist.
+- Keep one copy of the allowlist authoritative: if a verifier repeats it, assert
+  the two agree, or they drift and the verifier gets "fixed" to match the server.
+
+## Known Failure Patterns
+
+- Column `REVOKE` after table `GRANT` → no error, no effect, and a source
+  assertion that pins the statement passes for the life of the defect. Found in
+  `20260919120000_create_board_wiki_pages` only because a live verifier row asked
+  `has_column_privilege` — a source scan cannot see past this one by
+  construction, because the file and the test agree with each other and both are
+  wrong about the server.
+- A revoke list written by hand omits a column nobody thought of (`id`), and
+  nothing reports the omission.
+- Supabase default privileges grant `authenticated` a table-wide ACL at
+  `CREATE TABLE`, so a new table already has the table-wide grant that makes a
+  column `REVOKE` inert — before the migration grants anything itself.
