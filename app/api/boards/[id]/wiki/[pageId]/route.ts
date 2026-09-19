@@ -1,4 +1,5 @@
 import {
+  createBoardWikiDeleteHandler,
   createBoardWikiReadHandler,
   createBoardWikiSaveHandler,
 } from '@/lib/server/wiki/boardWikiPageRoute';
@@ -18,5 +19,14 @@ export const GET = createBoardWikiReadHandler({
 });
 
 export const PATCH = createBoardWikiSaveHandler({
+  getAuthenticatedSession: getBoardWikiSession,
+});
+
+/**
+ * Unit 2b. Irreversible, and the surface says so in the rollback's own words
+ * before the click: a page is not derived data and there is no source from
+ * which it can be recompiled.
+ */
+export const DELETE = createBoardWikiDeleteHandler({
   getAuthenticatedSession: getBoardWikiSession,
 });

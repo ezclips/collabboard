@@ -67,9 +67,15 @@ const proposal: BoardWikiProposal = {
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 const saved: { body: unknown } = { body: null };
+const deleted: { calls: number; method: string | null } = { calls: 0, method: null };
 
-function stubFetch(pageOverrides: Record<string, unknown> = {}, saveStatus = 200) {
+function stubFetch(pageOverrides: Record<string, unknown> = {}, saveStatus = 200, deleteStatus = 200) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'DELETE') {
+      deleted.calls += 1;
+      deleted.method = 'DELETE';
+      return new Response(JSON.stringify({ deleted: deleteStatus === 200 }), { status: deleteStatus });
+    }
     if (init?.method === 'PATCH') {
       saved.body = JSON.parse(String(init.body));
       return new Response(JSON.stringify({ page: { id: PAGE, title: 'x', updatedAt: 'y' } }), { status: saveStatus });
@@ -89,6 +95,8 @@ function stubFetch(pageOverrides: Record<string, unknown> = {}, saveStatus = 200
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   saved.body = null;
+  deleted.calls = 0;
+  deleted.method = null;
 });
 
 afterEach(() => {
@@ -373,6 +381,98 @@ describe('A RECOMPILE ARRIVES WHILE THE USER HAS UNSAVED EDITS', () => {
       (container.querySelector('[data-board-wiki-proposal-discard="true"]') as HTMLButtonElement).click();
     });
     expect(content(container).value).toBe('Half a sentence I am still writ');
+  });
+});
+
+describe('deleting a page (Unit 2b)', () => {
+  it('a viewer is not offered the control at all', async () => {
+    stubFetch();
+    const container = await mount({ canEdit: false });
+    await openPage(container);
+    expect(container.querySelector('[data-board-wiki-delete="true"]')).toBeNull();
+  });
+
+  it('asks first, and the asking says what is lost', async () => {
+    // There is no trash and no undo -- both are real infrastructure built on a
+    // guess that someone will want them -- so the only honest protection is
+    // telling the truth before the click, in the rollback header's own terms.
+    stubFetch();
+    const container = await mount();
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete="true"]') as HTMLButtonElement).click();
+    });
+
+    const confirm = container.querySelector('[data-board-wiki-delete-confirm="true"]')!;
+    expect(confirm.textContent).toContain('cannot be undone');
+    expect(confirm.textContent).toContain('not derived data');
+    expect(confirm.textContent).toContain('does not produce the same page twice');
+    // It names the page, so a mis-click on the wrong page is visible.
+    expect(confirm.textContent).toContain('Horn replacement');
+    // And nothing has happened yet.
+    expect(deleted.calls).toBe(0);
+  });
+
+  it('CANCEL leaves the page and its text alone', async () => {
+    stubFetch();
+    const container = await mount();
+    await openPage(container);
+    await type(content(container), 'work in progress');
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete="true"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete-cancel="true"]') as HTMLButtonElement).click();
+    });
+    expect(container.querySelector('[data-board-wiki-delete-confirm="true"]')).toBeNull();
+    expect(content(container).value).toBe('work in progress');
+    expect(deleted.calls).toBe(0);
+  });
+
+  it('confirming deletes the page and leaves nothing selected', async () => {
+    // Leaving the editor open over a page that no longer exists invites a save
+    // that would 404; picking the next page would be the surface deciding.
+    stubFetch();
+    const container = await mount();
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete="true"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete-confirmed="true"]') as HTMLButtonElement).click();
+    });
+
+    expect(deleted.calls).toBe(1);
+    expect(deleted.method).toBe('DELETE');
+    expect(content(container)).toBeNull();
+    expect(container.querySelector('[data-board-wiki-status="true"]')!.textContent).toContain('Page deleted');
+  });
+
+  it('a confirmation does not survive changing page', async () => {
+    // Otherwise the second click lands on a page the user never asked about.
+    stubFetch();
+    const container = await mount();
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete="true"]') as HTMLButtonElement).click();
+    });
+    expect(container.querySelector('[data-board-wiki-delete-confirm="true"]')).not.toBeNull();
+    await openPage(container);
+    expect(container.querySelector('[data-board-wiki-delete-confirm="true"]')).toBeNull();
+  });
+
+  it('a failed delete says so and keeps the page on screen', async () => {
+    stubFetch({}, 200, 503);
+    const container = await mount();
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete="true"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-delete-confirmed="true"]') as HTMLButtonElement).click();
+    });
+    expect(container.querySelector('[data-board-wiki-status="true"]')!.textContent).toContain('could not be deleted');
+    expect(content(container)).not.toBeNull();
   });
 });
 

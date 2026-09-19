@@ -121,6 +121,24 @@ lib/domain/canvas/documentSwitchGuard.source.test.ts > PATCH-149B2-ii: scope bou
 lib/infra/canvas/boardEditAuthorityWiring.source.test.ts > the census sanitizer counts executable source, not prose > an added consumer, or a removed one, moves the census
 lib/infra/canvas/boardEditAuthorityWiring.source.test.ts > the padlets capability is wired to padlets surfaces only > census: the padlets capability has a small, enumerable set of consumers
 lib/infra/knowledge/knowledgeEmbeddingDeploy.source.test.ts > P6I-D3 local Voyage Worker Pool preparation > keeps migrations, protected worker code, and unrelated files unchanged
+```
+
+**The two `boardEditAuthorityWiring` rows above: 63 → 64 observed, deliberate,
+DO NOT "FIX" THE CONSTANT.** Both count occurrences of `canEditBoardContent` in
+`CanvasClient.tsx` against `EXPECTED_BOARD_CONTENT_CONSUMERS = 60`. Wiki Unit 2
+added one real consumer — `canEdit={canEditBoardContent}` on `BoardWikiDrawer`,
+which is the correct gate — moving the count from 63 to 64. The test NAMES are
+unchanged; only the number inside them moved.
+
+Raising the constant to 64 would close a baseline failure nobody caused on
+purpose and erase the three pre-existing drifts that were already there at 63.
+The census is a drift detector, and a detector that gets reset to whatever the
+code currently says has stopped detecting. Leave it failing at the wrong number
+until someone deliberately reconciles all four.
+
+The remaining names:
+
+```
 lib/infra/knowledge/knowledgeExtractionScope.source.test.ts > P6H persistence scope -- provenance and privilege guards > pins one rollout-compatible completion signature with optional final chunks
 lib/infra/knowledge/knowledgeExtractionScope.source.test.ts > P6H persistence scope -- provenance and privilege guards > revokes the exact replacement RPC from every browser role
 lib/infra/knowledge/knowledgePdfAreaImageWiring.source.test.ts > F6-F10: the canvas asks the server, and claims the drop exactly once > F8: it re-checks the creation capability rather than trusting the drag

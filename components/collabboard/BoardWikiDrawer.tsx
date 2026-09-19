@@ -135,6 +135,7 @@ export default function BoardWikiDrawer({
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const loadPages = useCallback(async () => {
     try {
@@ -176,6 +177,9 @@ export default function BoardWikiDrawer({
       setFreshness(body.freshness);
       setDraft(boardWikiDraftFromPage(loaded));
       setProposal(null);
+      // A confirmation is about ONE page. Carrying it across a selection change
+      // would arm the second click over a page the user never asked about.
+      setConfirmingDelete(false);
       setStatus(null);
     } catch {
       setStatus('That page could not be loaded.');
@@ -264,6 +268,31 @@ export default function BoardWikiDrawer({
     }
   }, [boardId, draft, selectedPageId, loadPage]);
 
+  const deletePage = useCallback(async () => {
+    if (selectedPageId === null) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/boards/${boardId}/wiki/${selectedPageId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        setStatus('That page could not be deleted.');
+        return;
+      }
+      // Back to nothing selected, deliberately: leaving the editor on screen
+      // over a page that no longer exists invites a save that would 404, and
+      // re-selecting the next page would be the surface choosing for the user.
+      setConfirmingDelete(false);
+      setSelectedPageId(null);
+      setPage(null);
+      setDraft(null);
+      setSources([]);
+      setProposal(null);
+      await loadPages();
+      setStatus('Page deleted.');
+    } finally {
+      setBusy(false);
+    }
+  }, [boardId, selectedPageId, loadPages]);
+
   const requestRecompile = useCallback(async () => {
     if (!onRequestRecompile || selectedPageId === null) return;
     setBusy(true);
@@ -299,7 +328,13 @@ export default function BoardWikiDrawer({
               key={summary.id}
               type="button"
               data-board-wiki-page-item={summary.id}
-              onClick={() => setSelectedPageId(summary.id)}
+              onClick={() => {
+                // Disarmed on ANY selection click, not only on a load:
+                // re-clicking the page you are already on would otherwise leave
+                // the confirmation armed, and the next click deletes.
+                setConfirmingDelete(false);
+                setSelectedPageId(summary.id);
+              }}
               className={`block w-full truncate rounded px-2 py-1.5 text-left text-xs ${
                 summary.id === selectedPageId ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
               }`}
@@ -404,6 +439,55 @@ export default function BoardWikiDrawer({
                       Refresh from sources
                     </button>
                   )}
+                  <button
+                    type="button"
+                    data-board-wiki-delete="true"
+                    disabled={busy}
+                    onClick={() => setConfirmingDelete(true)}
+                    className={`${onRequestRecompile ? '' : 'ml-auto '}rounded border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50`}
+                  >
+                    Delete page
+                  </button>
+                </div>
+              )}
+
+              {/* THE CONFIRMATION SAYS WHAT IS LOST, IN THE ROLLBACK'S WORDS.
+                  There is no trash and no undo -- both are real infrastructure
+                  built on a guess that someone will want them -- so the only
+                  honest protection is telling the truth BEFORE the click, and
+                  the truth is the one the rollback header already states: a
+                  page is not derived data, and recompilation is not even
+                  idempotent, so nothing can put back what it said. */}
+              {canEdit && confirmingDelete && (
+                <div data-board-wiki-delete-confirm="true" className="mt-3 rounded border border-red-200 bg-red-50/50 p-3">
+                  <p className="text-xs font-medium text-red-900">
+                    Delete “{draft.title}” permanently?
+                  </p>
+                  <p className="mt-1 text-xs text-red-900">
+                    This cannot be undone. A wiki page is not derived data: what is on it is what a
+                    person last wrote, and there is no source it can be recompiled from — a
+                    recompilation does not produce the same page twice. Its record of what it was
+                    compiled from goes with it.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      data-board-wiki-delete-confirmed="true"
+                      disabled={busy}
+                      onClick={() => void deletePage()}
+                      className="rounded bg-red-700 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                    >
+                      Delete permanently
+                    </button>
+                    <button
+                      type="button"
+                      data-board-wiki-delete-cancel="true"
+                      onClick={() => setConfirmingDelete(false)}
+                      className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 

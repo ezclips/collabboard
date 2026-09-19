@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   createBoardWikiCreateHandler,
+  createBoardWikiDeleteHandler,
   createBoardWikiListHandler,
   createBoardWikiReadHandler,
   createBoardWikiSaveHandler,
@@ -46,6 +47,7 @@ function session(overrides: Partial<BoardWikiSession> = {}): BoardWikiSession {
     readPage: vi.fn(async () => ok({ page: storedPage, currentVersions: new Map() })),
     createPage: vi.fn(async () => ok(storedPage)),
     savePage: vi.fn(async () => ok(storedPage)),
+    deletePage: vi.fn(async () => ok({ deleted: true as const })),
     ...overrides,
   } as BoardWikiSession;
 }
@@ -231,6 +233,66 @@ describe('saving takes text, and the concurrency token travels with it', () => {
   });
 });
 
+describe('deleting a page (Unit 2b)', () => {
+  it('names the page from the PATH and reads no body at all', async () => {
+    const deletePage = vi.fn(async () => ok({ deleted: true as const }));
+    const handler = createBoardWikiDeleteHandler({
+      getAuthenticatedSession: async () => session({ deletePage }),
+    });
+
+    // A body is sent and must be ignored entirely: there is nothing a request
+    // could say that should change which page this removes.
+    const response = await handler(
+      new Request('http://test/api', { method: 'DELETE', body: JSON.stringify({ pageId: 'some-other-page' }) }),
+      itemContext,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: true });
+    expect(deletePage).toHaveBeenCalledWith({ boardId: BOARD, pageId: PAGE, userId: 'user-1' });
+  });
+
+  it('a viewer is refused, and told not-found rather than forbidden', async () => {
+    // A user who may not write this board may not learn whether the page
+    // exists -- the same rule create and save already follow.
+    const handler = createBoardWikiDeleteHandler({
+      getAuthenticatedSession: async () => session({
+        deletePage: vi.fn(async () => err(domainError('not_found', 'Wiki page was not found'))),
+      }),
+    });
+    const response = await handler(new Request('http://test/api', { method: 'DELETE' }), itemContext);
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe('Wiki page was not found');
+  });
+
+  it('an unauthenticated caller deletes nothing', async () => {
+    const handler = createBoardWikiDeleteHandler({ getAuthenticatedSession: async () => null });
+    expect((await handler(new Request('http://test/api', { method: 'DELETE' }), itemContext)).status).toBe(401);
+  });
+
+  it('an outage is 503, never a reported success', async () => {
+    // The one thing that must not happen is telling a user their page is gone
+    // when it is still there.
+    const handler = createBoardWikiDeleteHandler({
+      getAuthenticatedSession: async () => session({
+        deletePage: vi.fn(async () => { throw new Error('down'); }),
+      }),
+    });
+    expect((await handler(new Request('http://test/api', { method: 'DELETE' }), itemContext)).status).toBe(503);
+  });
+
+  it('the session distinguishes "deleted" from "there was nothing there"', () => {
+    const sessionSource = readFileSync(resolve(process.cwd(), 'lib/server/wiki/boardWikiPageSession.ts'), 'utf8');
+    const remove = sessionSource.slice(sessionSource.indexOf('async deletePage('));
+    const body = remove.slice(0, remove.indexOf('return ok('));
+    // Board-scoped, and the deleted row is read back: a delete that matched
+    // nothing must not report success.
+    expect(body).toContain(".eq('board_id', boardId)");
+    expect(body).toContain(".select('id')");
+    expect(body).toMatch(/if \(!data\) return err\(domainError\('not_found'/);
+  });
+});
+
 describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
   const routeSource = readFileSync(resolve(process.cwd(), 'lib/server/wiki/boardWikiPageRoute.ts'), 'utf8');
   const sessionSource = readFileSync(resolve(process.cwd(), 'lib/server/wiki/boardWikiPageSession.ts'), 'utf8');
@@ -241,11 +303,14 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     // called by a scheduler, a retry, or a refresh-all button -- so it must not
     // exist, rather than merely not be called.
     const handlers = [...routeSource.matchAll(/export function (create\w+Handler)/g)].map((m) => m[1]);
+    // Enumerated, not pattern-matched: adding a handler has to be a deliberate
+    // edit here, which is what caught Unit 2b's delete on the first run.
     expect(handlers).toEqual([
       'createBoardWikiListHandler',
       'createBoardWikiCreateHandler',
       'createBoardWikiReadHandler',
       'createBoardWikiSaveHandler',
+      'createBoardWikiDeleteHandler',
     ]);
     // The word appears only in the header that explains why the endpoint is
     // absent; no executable line names one.
@@ -253,9 +318,9 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     expect(executable).not.toMatch(/proposal/i);
   });
 
-  it('the session exposes exactly four commands, none of them about proposals', () => {
+  it('the session exposes exactly five commands, none of them about proposals', () => {
     const commands = [...routeSource.matchAll(/^ {2}(\w+)\(input: \{/gm)].map((m) => m[1]);
-    expect(commands.sort()).toEqual(['createPage', 'listPages', 'readPage', 'savePage']);
+    expect(commands.sort()).toEqual(['createPage', 'deletePage', 'listPages', 'readPage', 'savePage']);
   });
 
   it('nothing writes to the proposals table from the page surface', () => {

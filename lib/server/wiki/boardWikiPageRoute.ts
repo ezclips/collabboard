@@ -79,6 +79,11 @@ export interface BoardWikiSession {
     readonly userId: string;
     readonly request: BoardWikiSaveRequest;
   }): Promise<Result<BoardWikiPage, DomainError>>;
+  deletePage(input: {
+    readonly boardId: string;
+    readonly pageId: string;
+    readonly userId: string;
+  }): Promise<Result<{ readonly deleted: true }, DomainError>>;
 }
 
 export interface BoardWikiRouteDependencies {
@@ -301,5 +306,48 @@ export function createBoardWikiSaveHandler(deps: BoardWikiRouteDependencies) {
       { page: { id: result.value.id, title: result.value.title, updatedAt: result.value.updatedAt } },
       { status: 200 },
     );
+  };
+}
+
+/**
+ * Deleting one page (Unit 2b).
+ *
+ * WHY THIS EXISTS AT ALL, stated because "add a delete" is exactly the kind of
+ * scope creep a plan should refuse: a create-only surface accumulates mistakes
+ * nobody can remove, and Unit 2's own live pass proved it in one pass -- it
+ * left a scratch page on the reference board that needed SQL to clear.
+ *
+ * NO TRASH AND NO UNDO. Both are real infrastructure -- a retention rule, a
+ * restore path, a second lifecycle for every consumer of a page -- built on the
+ * speculation that someone will want them. The honest alternative is to say
+ * plainly what is lost BEFORE the click, in the rollback's own words, and then
+ * do exactly what the user asked.
+ *
+ * Proposals go with the page by FK (`page_id ... ON DELETE CASCADE`), which is
+ * correct and not a loss: a proposal for a page that no longer exists has
+ * nothing to be applied to.
+ */
+export function createBoardWikiDeleteHandler(deps: BoardWikiRouteDependencies) {
+  return async function DELETE(
+    _request: Request,
+    context: BoardWikiPageItemRouteContext,
+  ): Promise<NextResponse> {
+    const session = await resolveSession(deps);
+    if (!session) return unauthorized();
+
+    const { id, pageId } = await context.params;
+
+    // NO BODY IS READ. The page is named by the path and the user by the
+    // session, so there is nothing a request could say that would change what
+    // this deletes -- the same discipline the knowledge-document delete route
+    // took for the same reason.
+    let result: Result<{ readonly deleted: true }, DomainError>;
+    try {
+      result = await session.deletePage({ boardId: id, pageId, userId: session.userId });
+    } catch {
+      return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });
+    }
+    if (!result.ok) return failure(result.error);
+    return NextResponse.json({ deleted: true }, { status: 200 });
   };
 }

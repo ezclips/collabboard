@@ -306,5 +306,31 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
       }
       return ok(pageFromRow(data as StoredPageRow));
     },
+
+    async deletePage({ boardId, pageId, userId }) {
+      if (!await requireWrite(boardId, userId)) {
+        return err(domainError('not_found', 'Wiki page was not found'));
+      }
+
+      // Board-scoped, like every other operation here: without the board
+      // predicate the URL's board would be decoration and an editor of one
+      // board could delete a page of another by addressing it through theirs.
+      //
+      // `select('id')` after the delete is what distinguishes "deleted" from
+      // "there was nothing there". A delete that matched no row must not
+      // report success -- the caller would believe a page they can still see
+      // elsewhere is gone.
+      const { data, error: deleteError } = await client
+        .from('board_wiki_pages')
+        .delete()
+        .eq('board_id', boardId)
+        .eq('id', pageId)
+        .select('id')
+        .maybeSingle();
+
+      if (deleteError) return err(domainError('unavailable', 'Could not delete the wiki page'));
+      if (!data) return err(domainError('not_found', 'Wiki page was not found'));
+      return ok({ deleted: true as const });
+    },
   };
 }
