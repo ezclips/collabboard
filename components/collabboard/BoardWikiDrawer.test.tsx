@@ -415,6 +415,32 @@ describe('UNIT 2 ACCEPTANCE, checked in source rather than behaviour', () => {
     expect(hostSource).toMatch(/<BoardWikiDrawer[\s\S]{0,400}isOpen=\{isBoardWikiOpen\}/);
   });
 
+  it('THE FLOATING LAUNCHERS ARE MUTUALLY EXCLUSIVE, so neither covers the other drawer', () => {
+    // Found live, not here: the Board AI button is z-[1300] and this drawer is
+    // z-[1200], so it floated over the drawer's header and elementFromPoint at
+    // the wiki's close control returned the Board AI button. The close button
+    // rendered, passed its test, and could not be clicked -- item 15 again.
+    // jsdom has no layout, so the guard has to be read out of the host.
+    const wikiLauncher = hostSource.slice(hostSource.indexOf('data-board-wiki-open="true"') - 400);
+    expect(wikiLauncher.slice(0, 400)).toContain('!isBoardAiChatOpen');
+    expect(wikiLauncher.slice(0, 400)).toContain('!isKnowledgeReaderOpen');
+
+    const aiLauncher = hostSource.slice(hostSource.indexOf('data-board-ai-chat-open="true"') - 400);
+    expect(aiLauncher.slice(0, 400)).toContain('!isBoardWikiOpen');
+  });
+
+  it('the editor cannot grow tall enough to push the chain off the page', () => {
+    // A flex-1 editor filled the drawer and put "Compiled from" at the bottom
+    // of the scroll area -- below the fold on any shorter window. A chain you
+    // have to scroll to find is most of the way to a collapsed one.
+    const editor = componentSource.slice(componentSource.indexOf('data-board-wiki-content="true"'));
+    // Comments stripped: the explanation beside the attribute names the class
+    // it exists to keep out, and would satisfy the check it is documenting.
+    const attributes = editor.slice(0, editor.indexOf('/>')).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(attributes).toContain('max-h-');
+    expect(attributes).not.toContain('flex-1');
+  });
+
   it('the surface yields to a blocking editor, like every other floating control', async () => {
     stubFetch();
     const container = await mount({ blockingEditorOpen: true });

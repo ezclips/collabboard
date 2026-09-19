@@ -369,9 +369,16 @@ export default function BoardWikiDrawer({
                 data-board-wiki-content="true"
                 value={draft.content}
                 readOnly={!canEdit}
-                rows={16}
+                rows={14}
                 onChange={(event) => setDraft(boardWikiDraftWithContent(draft, event.target.value))}
-                className="w-full flex-1 rounded border border-gray-200 p-3 font-mono text-xs"
+                /* HEIGHT IS CAPPED, and that is the chain's requirement rather
+                   than a style choice: a `flex-1` editor grew to fill the
+                   drawer and pushed "Compiled from" to the very bottom of the
+                   scroll area, where on any shorter window it is below the
+                   fold. P1's condition is that the compiled input set is
+                   visible WITH the page, and a chain you have to scroll to find
+                   is most of the way to a collapsed one. */
+                className="w-full max-h-[40vh] rounded border border-gray-200 p-3 font-mono text-xs"
               />
 
               {canEdit && (

@@ -11134,7 +11134,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             viewers included -- reading a page and its sources chain is a read.
             Hidden while an editor owns the screen and while the wiki is already
             open, like every other floating board control. */}
-        {!isBlockingEditorModalOpen && !isBoardWikiOpen && (
+        {!isBlockingEditorModalOpen && !isBoardWikiOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (
           <button
             type="button"
             data-board-wiki-open="true"
@@ -11152,8 +11152,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             it is deliberately NOT behind canUseCanvasToolbar. Hidden while an
             editor owns the screen, like every other floating board control --
             and while a PDF reader is open, because that reader's own purple AI
-            dock is then the single AI entry point in front of the user. */}
-        {enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (
+            dock is then the single AI entry point in front of the user.
+
+            AND WHILE THE WIKI IS OPEN, which the live pass found the hard way:
+            this button is z-[1300] and the wiki drawer is z-[1200], so it
+            floated over the drawer's header and `elementFromPoint` at the
+            wiki's close control returned THIS button. The close button
+            rendered, passed its test, and could not be clicked -- item 15's
+            defect, one surface later. */}
+        {enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (
           <button
             type="button"
             data-board-ai-chat-open="true"

@@ -351,8 +351,16 @@ describe('10-15. one right-side dock, two directions', () => {
     // own purple AI dock is the single AI entry point in front of the user --
     // the board's z-[1300] shortcut would otherwise float over the docked
     // reader's chrome as a second one.
+    //
+    // WIKI-U2 added `!isBoardWikiOpen` to the same guard for the same reason,
+    // found live: at z-[1300] this shortcut floated over the wiki drawer's
+    // z-[1200] header and `elementFromPoint` at the wiki's CLOSE control
+    // returned this button, so the close button rendered and could not be
+    // clicked. The whole condition is pinned as one literal on purpose -- a
+    // clause must not be droppable without this failing -- so a legitimately
+    // added clause updates it here.
     expect(CLIENT).toContain(
-      '{enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (');
+      '{enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (');
     // The reader reports its own open state; the board cannot derive it.
     expect(CLIENT).toContain('onOpenChange={setIsKnowledgeReaderOpen}');
     expect(READER).toContain('onOpenChange?.(isOpen);');
