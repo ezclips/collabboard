@@ -1,0 +1,43 @@
+-- ROLLBACK for 20260919120000_create_board_wiki_pages.sql.
+--
+-- READ THIS BEFORE RUNNING IT.
+--
+-- THIS ONE REALLY IS A DROP, and that is different from every rollback this
+-- project has written so far. The board-search rollbacks restore an earlier
+-- function body and lose nothing; this removes two tables. Everything in them
+-- goes with them.
+--
+-- WHAT YOU DESTROY BY RUNNING IT:
+--
+--   * every wiki page on every board, including its AUTHORED CONTENT. A page is
+--     not derived data. Compilation may have seeded it, but what is in
+--     `content` is what a person last wrote, and there is no source from which
+--     it can be recompiled -- recompilation is not even idempotent (measured:
+--     11 vs 18 claims for the same topic and the same passages).
+--   * every recorded source set, which is the only record of what a page was
+--     compiled from. The sources are content, not foreign keys, precisely so
+--     they survive their sources being deleted -- and they do not survive this.
+--   * every pending proposal.
+--
+-- SO THE ORDER OF OPERATIONS IS: EXPORT FIRST, THEN DROP.
+--
+--     \copy (SELECT * FROM public.board_wiki_pages)          TO 'wiki_pages.csv'     CSV HEADER;
+--     \copy (SELECT * FROM public.board_wiki_page_proposals) TO 'wiki_proposals.csv' CSV HEADER;
+--
+-- WHEN RUNNING THIS IS THE RIGHT CALL: the feature is being withdrawn before
+-- anyone has written anything worth keeping, or the table shape is wrong and it
+-- is cheaper to recreate than to migrate. It is NOT the response to a bug in a
+-- reader or a surface -- nothing outside these tables depends on them, so a
+-- broken surface can simply be turned off while the data sits still.
+--
+-- WHAT IT DOES NOT TOUCH, and does not need to: no other table references
+-- these. `board_wiki_pages.sources` holds identity as CONTENT with no foreign
+-- keys, so dropping it cannot cascade into knowledge documents, padlets,
+-- citations or notes. That isolation is the same property that lets a deleted
+-- source render as "gone" rather than vanishing, and it is what makes this drop
+-- safe for everything around it while being total for what is inside it.
+
+DROP TABLE IF EXISTS public.board_wiki_page_proposals;
+DROP TABLE IF EXISTS public.board_wiki_pages;
+
+-- Policies and grants go with the tables; there is nothing left to revoke.
