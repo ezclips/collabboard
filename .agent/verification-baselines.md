@@ -15,6 +15,19 @@ foundation), from the gate run that produced the reading below.
 totals move whenever a test is added, and the suite is timing-sensitive. Compare
 the *file set* against the list below; a run passes when the set is identical.
 
+**AND WHEN A COMMIT TOUCHES A FILE THAT IS ALREADY IN THIS SET, THE REPORT MUST
+DIFF THAT FILE'S FAILING TEST NAMES TOO.** A baseline-failing file is already
+failing, so the set cannot notice anything that happens inside it: new tests
+added to it could fail, or a previously passing test in it could break, and the
+set still reads "identical" and the gate still says clean. Name which tests in
+that file fail and confirm they are the same ones as before — the criterion
+above is blind by construction exactly where the edit landed.
+
+Found 2026-09-19, during item 15: that commit added 7 tests to
+`KnowledgeExistingPdfPicker.test.tsx`, baseline member #1. They passed (21 of 25,
+with the file's 4 pre-existing CanvasClient wiring failures unchanged) and the
+report said so — but nothing in the gate had required it to.
+
 Reference reading (2026-09-18, clean machine):
 `27 failed | 429 passed | 9 skipped (465)` files,
 `58 failed | 9003 passed | 94 skipped (9155)` tests — where the 27th file is the
