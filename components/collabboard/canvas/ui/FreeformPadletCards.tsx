@@ -69,8 +69,9 @@ import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX, FREEFORM_WORLD_MIN_X
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
-  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus,
+  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus, Sparkles,
 } from 'lucide-react';
+import { BOARD_AI_POST_CLIP_MIME, boardAiPostClipPayload } from '@/lib/domain/ai/boardAiPostClipPayload';
 import { toast } from 'sonner';
 import {
   extractAIContentFromPadletMetadata,
@@ -204,6 +205,13 @@ function getAIImageAttributions(metadata?: Padlet["metadata"]): Array<{
 
 // -- Props --------------------------------------------------------------------- 
 export interface FreeformPadletCardsProps {
+  /**
+   * True only while Board AI is open and not hidden behind an editor. The drag
+   * handle appears when there is somewhere to drop a post and not otherwise --
+   * a permanently visible grip that does nothing for most of a session is worse
+   * than no grip at all.
+   */
+  boardAiDragEnabled?: boolean;
   // Core data
   rootPadlets: Padlet[];
   padlets: Padlet[];
@@ -1317,6 +1325,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         // every other drag (card moves, library items) must bubble normally.
         if (e.dataTransfer.types.includes(KNOWLEDGE_SOURCE_CLIP_MIME)) e.preventDefault();
       } : undefined}
+      data-board-ai-drag-host={props.boardAiDragEnabled ? padlet.id : undefined}
       onDrop={isKnowledgeSourceClipEligibleNote(padlet) ? (e) => {
         onKnowledgeSourceClipDropOnNote?.(e, padlet);
       } : undefined}
@@ -1341,7 +1350,39 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           isDragging: draggingPadletId === padlet.id,
         }),
       }}
-    >                {/* Comment Badge - positioned on outer container so not clipped */}
+    >
+      {/* DRAG A POST INTO BOARD AI.
+          The handle, not the card, is the drag source -- and that is the whole
+          design. Cards move by POINTER events; setting `draggable` on the card
+          would hand the gesture to HTML5 drag and break dragging posts around
+          the board. So the grip is a small island: `data-no-drag` keeps it out
+          of the canvas drag system, and its own mousedown never reaches the
+          capture handler above.
+
+          It carries the id and nothing else. The drawer resolves that id
+          against the board's own loaded posts, so a payload cannot describe a
+          post into existence. */}
+      {props.boardAiDragEnabled && (
+        <div
+          data-no-drag="true"
+          data-board-ai-drag-handle={padlet.id}
+          draggable
+          role="button"
+          tabIndex={-1}
+          aria-label="Drag into Board AI"
+          title="Drag into Board AI"
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDownCapture={(e) => e.stopPropagation()}
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData(BOARD_AI_POST_CLIP_MIME, boardAiPostClipPayload(String(padlet.id)));
+          }}
+          className="absolute -top-2 -left-2 z-20 flex h-5 w-5 cursor-grab items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+        >
+          <Sparkles size={11} aria-hidden="true" />
+        </div>
+      )}
+      {/* Comment Badge - positioned on outer container so not clipped */}
       {(() => {
         // Skip badge rendering for comment/image/link/todo/table/card-type padlets (they handle their own badges)
         if (padlet.type === 'comment' || (padlet.type as string) === 'Comment' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'card') return null;

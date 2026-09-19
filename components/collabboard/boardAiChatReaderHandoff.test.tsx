@@ -245,18 +245,34 @@ describe('the shell owns draft context, and owns it narrowly', () => {
   });
 
   it('6,13. a selection is reduced by the shared contract, not re-implemented', () => {
+    // UPDATED DELIBERATELY when the drop gesture landed. The reduction moved
+    // out of this memo into `boardAiChatItemForPostId`, because a DROPPED post
+    // and a SELECTED post must not become two different things -- so the memo
+    // now answers only its own question (is exactly one thing selected) and
+    // delegates the rest. The invariant is unchanged and slightly stronger:
+    // there is still exactly ONE call to the domain helper in this file, and
+    // this surface still makes no type decisions of its own.
     const selector = canvas.slice(
       canvas.indexOf('const boardAiChatSelectedItem'),
       canvas.indexOf('const boardAiChatSelectedItem') + 1200,
     );
     // Multiple selection is not one item, so it offers nothing.
     expect(selector).toContain('selectedPadletIds.length > 1');
-    // The type decision lives in the tested domain helper, not here.
-    expect(selector).toContain('boardAiDraftFromBoardItem');
+    // The type decision lives in the tested domain helper, reached through the
+    // one shared reduction rather than repeated here.
+    expect(selector).toContain('boardAiChatItemForPostId');
     expect(selector).not.toContain("=== 'todo'");
     expect(selector).not.toContain("=== 'card'");
+
+    const reduction = canvas.slice(
+      canvas.indexOf('const boardAiChatItemForPostId'),
+      canvas.indexOf('const boardAiChatItemForPostId') + 1200,
+    );
+    expect(reduction).toContain('boardAiDraftFromBoardItem');
     // A PDF placement's identity comes from the canvas's own reader.
-    expect(selector).toContain('readKnowledgePdfPlacement');
+    expect(reduction).toContain('readKnowledgePdfPlacement');
+    // And it stays the only one: two reductions is the defect this pins.
+    expect(canvas.match(/boardAiDraftFromBoardItem\(/g) ?? []).toHaveLength(1);
   });
 
   it('the drawer is given draft state, not asked to fetch board content', () => {

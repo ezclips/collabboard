@@ -2238,11 +2238,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * yields null, so the drawer offers no action rather than a promise the
    * server would refuse.
    */
-  const boardAiChatSelectedItem = useMemo<BoardAiDraftContextItem | null>(() => {
-    if (selectedPadletIds.length > 1) return null;
-    const id = selectedPadletId ?? (selectedPadletIds.length === 1 ? selectedPadletIds[0] : null);
-    if (!id) return null;
-    const post = padlets.find((candidate) => String(candidate.id) === String(id));
+  /**
+   * One post, reduced to what Board AI can use -- the single reduction, so a
+   * post that is SELECTED and the same post DRAGGED cannot become two different
+   * things. The selection path below adds only its own question (is exactly one
+   * thing selected); the drop path adds nothing at all.
+   */
+  const boardAiChatItemForPostId = useCallback((padletId: string): BoardAiDraftContextItem | null => {
+    const post = padlets.find((candidate) => String(candidate.id) === String(padletId));
     if (!post) return null;
     const placement = readKnowledgePdfPlacement(post);
     return boardAiDraftFromBoardItem({
@@ -2260,7 +2263,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // as an ordinary image and was offered nothing.
       isKnowledgePdfArea: isKnowledgePdfAreaCropPost(post),
     });
-  }, [padlets, selectedPadletId, selectedPadletIds]);
+  }, [padlets]);
+
+  const boardAiChatSelectedItem = useMemo<BoardAiDraftContextItem | null>(() => {
+    if (selectedPadletIds.length > 1) return null;
+    const id = selectedPadletId ?? (selectedPadletIds.length === 1 ? selectedPadletIds[0] : null);
+    if (!id) return null;
+    return boardAiChatItemForPostId(String(id));
+  }, [boardAiChatItemForPostId, selectedPadletId, selectedPadletIds]);
 
   // A request belongs to the scope that produced it. Clearing on scope change
   // is what stops an old board's source from opening inside a new one.
@@ -10263,6 +10273,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               <CanvasConfigProvider value={configState}>
                 <CanvasEditorProvider value={editorState}>
                   <FreeformPadletCards
+                    /* The grip appears only while there is somewhere to drop a
+                       post -- Board AI open, and not hidden behind an editor. */
+                    boardAiDragEnabled={isBoardAiChatOpen && !isBlockingOverlayOpen}
                     rootPadlets={rootPadlets}
                     padlets={padlets}
                     setPadlets={setPadlets}
@@ -11147,6 +11160,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             onDraftContextChange={setBoardAiChatDraftContext}
             onOpenCitation={openBoardAiCitation}
             selectedBoardItem={boardAiChatSelectedItem}
+            /* The same reduction the selected item uses, so a dropped post and
+               a selected one cannot become two different things. */
+            onResolveDroppedPost={boardAiChatItemForPostId}
           />
         )}
 

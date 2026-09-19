@@ -10,6 +10,10 @@ import {
 } from '@/components/collabboard/BoardAiChatContextChips';
 import { BOARD_AI_CHAT_MESSAGE_MAX } from '@/lib/domain/ai/boardAiChatClient';
 import { boardAiCitationIdentityKey } from '@/lib/domain/ai/boardAiChatCitation';
+import {
+  BOARD_AI_POST_CLIP_MIME,
+  parseBoardAiPostClipPayload,
+} from '@/lib/domain/ai/boardAiPostClipPayload';
 import type { BoardAiCitationItem } from '@/lib/domain/ai/boardAiChatCitation';
 import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
@@ -110,6 +114,15 @@ export interface BoardAiChatDrawerProps {
    * empty, multiple, or something Board AI cannot honestly use.
    */
   readonly selectedBoardItem?: BoardAiDraftContextItem | null;
+  /**
+   * Resolves a dragged post id against the board's own loaded posts. The SAME
+   * reduction that produces `selectedBoardItem`, handed down as a function so a
+   * dropped post and a selected one cannot disagree about what a post becomes.
+   * Null for an id the board does not hold, or for a post Board AI cannot
+   * honestly use -- and the drop then does nothing rather than attaching a
+   * promise the server would refuse.
+   */
+  readonly onResolveDroppedPost?: (padletId: string) => BoardAiDraftContextItem | null;
 }
 
 export interface BoardAiAssistantNoteSaveRequest {
@@ -287,6 +300,7 @@ export default function BoardAiChatDrawer({
   canSaveAssistantAsNote = false,
   onSaveAssistantAsNote,
   selectedBoardItem = null,
+  onResolveDroppedPost,
 }: BoardAiChatDrawerProps) {
   const [threads, setThreads] = useState<readonly BoardAiChatThreadSummary[]>([]);
   const [boardActiveThreadId, setBoardActiveThreadId] = useState<ActiveThread>(null);
@@ -723,6 +737,64 @@ export default function BoardAiChatDrawer({
       ? 'That is already attached.'
       : `Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
   }, [draftContext, mandatoryDocumentContext, setDraftContext]);
+
+  /* ---------------------------------------------------------------- */
+  /* Dropping a post from the board                                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * A GESTURE OVER THE EXISTING ATTACH, and nothing more.
+   *
+   * Everything a drop needs was already decided by `attach`: the cap, its
+   * message, the duplicate refusal, and the mandatory-PDF variant. So this
+   * resolves an id to the same draft item the selection path produces and hands
+   * it to `attach` -- one builder, one set of rules, one place a refusal is
+   * worded. A second path here would be free to drift, and the first thing it
+   * would drift on is the cap.
+   *
+   * ORDER MATTERS MORE THAN IT LOOKS. `addBoardAiDraftContext` APPENDS. A
+   * search block's sub-token (`S3.2`) has its block number baked from the
+   * context length before bounding runs, which is only sound because the
+   * bounder drops a suffix -- every attachment still sits in front of the
+   * search. An attach that inserted ahead of an existing item would silently
+   * misattribute every passage citation in the turn: no error, no symptom,
+   * wrong sources. Appending is load-bearing, not incidental.
+   */
+  const [dropActive, setDropActive] = useState(false);
+
+  const droppedPostIsSupported = useCallback((event: React.DragEvent) => (
+    typeof onResolveDroppedPost === 'function'
+    && event.dataTransfer.types.includes(BOARD_AI_POST_CLIP_MIME)
+  ), [onResolveDroppedPost]);
+
+  const handleContextDragOver = useCallback((event: React.DragEvent) => {
+    if (!droppedPostIsSupported(event)) return;
+    // Only a transfer we can actually honour is claimed. Without this the
+    // browser's default refusal stands, which is the correct answer for a drag
+    // carrying anything else.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDropActive(true);
+  }, [droppedPostIsSupported]);
+
+  const handleContextDragLeave = useCallback(() => setDropActive(false), []);
+
+  const handleContextDrop = useCallback((event: React.DragEvent) => {
+    if (!droppedPostIsSupported(event)) return;
+    event.preventDefault();
+    setDropActive(false);
+    const payload = parseBoardAiPostClipPayload(event.dataTransfer.getData(BOARD_AI_POST_CLIP_MIME));
+    if (!payload) return;
+    const item = onResolveDroppedPost?.(payload.padletId) ?? null;
+    if (!item) {
+      // A post the board does not hold, or one Board AI cannot use. Said out
+      // loud for the same reason the cap is: a drop that lands on nothing reads
+      // as a broken surface.
+      setContextNotice('That post cannot be used as context.');
+      return;
+    }
+    attach(item);
+  }, [attach, droppedPostIsSupported, onResolveDroppedPost]);
 
   /* ---------------------------------------------------------------- */
   /* Uploading a PDF straight into the conversation                     */
@@ -1359,7 +1431,19 @@ export default function BoardAiChatDrawer({
           }}
         />
 
-        <div className="relative mb-1.5">
+        {/* THE DROP TARGET IS THE CONTEXT STRIP ITSELF, not a zone that appears
+            during a drag. The strip is already where attachments live and where
+            the count is read, so dropping onto it needs no explanation -- and a
+            target that only exists mid-drag cannot be discovered by anyone who
+            has not already guessed the gesture. */}
+        <div
+          className={`relative mb-1.5 rounded ${dropActive ? 'bg-blue-50/70 outline-dashed outline-1 outline-offset-2 outline-blue-400' : ''}`}
+          data-board-ai-context-dropzone="true"
+          data-board-ai-context-drop-active={dropActive ? 'true' : undefined}
+          onDragOver={handleContextDragOver}
+          onDragLeave={handleContextDragLeave}
+          onDrop={handleContextDrop}
+        >
           <button
             type="button"
             data-board-ai-context-add="true"
