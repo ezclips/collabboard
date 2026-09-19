@@ -318,6 +318,52 @@ describe('refresh is a proposal: diff, apply, discard', () => {
     expect(saveButton(container).disabled).toBe(true);
   });
 
+  it('COMPILES ON THE TITLE, not on the page\'s own content', async () => {
+    // Feeding a compilation its own previous output drifts a page away from the
+    // board over successive refreshes. The title is the one thing on the page a
+    // person definitely wrote.
+    const onRequestRecompile = vi.fn(async () => proposal);
+    stubFetch();
+    const container = await mount({ onRequestRecompile });
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    expect(onRequestRecompile).toHaveBeenCalledWith(PAGE, 'Horn replacement');
+  });
+
+  it('a compilation that produces nothing says so instead of an empty panel', async () => {
+    stubFetch();
+    const container = await mount({ onRequestRecompile: async () => null });
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    expect(container.querySelector('[data-board-wiki-proposal="true"]')).toBeNull();
+    expect(container.querySelector('[data-board-wiki-status="true"]')!.textContent)
+      .toContain('nothing worth proposing');
+  });
+
+  it('THE PASSAGE MARKERS SURVIVE APPLY AND SAVE, unchanged', async () => {
+    // The contract end to end on the client: markers arrive in the proposal,
+    // land in the draft untouched, and go to storage byte-identical. Strip them
+    // anywhere and which sentence came from which passage is lost permanently.
+    const marked = { ...proposal, content: 'The horn sits behind it [S1.1].\nOne side suffices [S1.2].' };
+    stubFetch();
+    const container = await mount({ onRequestRecompile: async () => marked });
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-proposal-apply="true"]') as HTMLButtonElement).click();
+    });
+    expect(content(container).value).toBe(marked.content);
+
+    await act(async () => { saveButton(container).click(); });
+    expect((saved.body as { content: string }).content).toBe(marked.content);
+  });
+
   it('applying never touches the title, because a proposal has none', async () => {
     stubFetch();
     const container = await mount({ onRequestRecompile: async () => proposal });

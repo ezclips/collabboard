@@ -2175,6 +2175,35 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const closeBoardWiki = useCallback(() => setIsBoardWikiOpen(false), []);
 
   /**
+   * WIKI-U3. Asking the server to compile a PROPOSAL for one page.
+   *
+   * Returns the proposal to the drawer, which puts it in front of the user as a
+   * diff. Nothing here writes a page: there is no endpoint that applies a
+   * proposal, and the only way its text reaches storage is the user applying it
+   * into their draft and then saving.
+   *
+   * A null return is a real answer -- the board had nothing to say on the topic,
+   * or the compilation came back unusable -- and the drawer says so rather than
+   * showing an empty proposal panel.
+   */
+  const requestWikiRecompile = useCallback(async (pageId: string, topic: string) => {
+    // The payload is a NAMED const rather than an inline literal, deliberately:
+    // `knowledgeSourceNoteWiring.source.test.ts` pins the source-Note request by
+    // taking the FIRST `body: JSON.stringify({` in this file, so an inline
+    // object here would silently become the body that suite asserts against.
+    // Naming it keeps that tripwire pointed at what it was written to guard.
+    const compileRequest = { topic };
+    const response = await fetch(`/api/boards/${canvasId}/wiki/${pageId}/proposals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(compileRequest),
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    return body?.proposal ?? null;
+  }, [canvasId]);
+
+  /**
    * Board AI draft context for ONE PDF, addressed by the document itself.
    *
    * Keyed by document rather than by whichever PDF host happens to be on
@@ -11128,6 +11157,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canEdit={canEditBoardContent}
           blockingEditorOpen={isBlockingOverlayOpen}
           onOpenCitation={openBoardAiCitation}
+          /* Only an editor may start a compilation: it writes a proposal row
+             and spends provider tokens. A viewer reads the page and its chain
+             and gets no Refresh control at all. */
+          onRequestRecompile={canEditBoardContent ? requestWikiRecompile : undefined}
         />
 
         {/* The wiki's ONE entry point. Available to every reader of the board,

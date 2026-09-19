@@ -7,7 +7,7 @@ import {
   boardWikiSourceStates,
   type BoardWikiCurrentVersions,
 } from '../../domain/wiki/boardWikiPageSources';
-import type { BoardWikiPage, BoardWikiSaveRequest } from '../../domain/wiki/boardWikiEditing';
+import type { BoardWikiPage, BoardWikiProposal, BoardWikiSaveRequest } from '../../domain/wiki/boardWikiEditing';
 
 /**
  * The wiki page surface's HTTP edge -- reading a page, creating one, saving one.
@@ -84,6 +84,17 @@ export interface BoardWikiSession {
     readonly pageId: string;
     readonly userId: string;
   }): Promise<Result<{ readonly deleted: true }, DomainError>>;
+  /**
+   * Compiles a PROPOSAL. It cannot return a page and cannot write one -- see
+   * `boardWikiCompileSession.ts`, where that is a property of what the function
+   * is able to reach rather than of how it is called.
+   */
+  compilePage(input: {
+    readonly boardId: string;
+    readonly pageId: string;
+    readonly userId: string;
+    readonly topic: string;
+  }): Promise<Result<BoardWikiProposal, DomainError>>;
 }
 
 export interface BoardWikiRouteDependencies {
@@ -91,6 +102,12 @@ export interface BoardWikiRouteDependencies {
 }
 
 const UNAVAILABLE = 'The board wiki is temporarily unavailable';
+
+/**
+ * The longest compile topic accepted, matching the chat path's own ceiling for
+ * user-supplied text rather than inventing a second limit.
+ */
+export const BOARD_WIKI_TOPIC_MAX = 4000;
 
 const ERROR_RESPONSES: Record<DomainErrorCode, { status: number; error: string }> = {
   validation: { status: 400, error: 'Invalid request' },
@@ -306,6 +323,61 @@ export function createBoardWikiSaveHandler(deps: BoardWikiRouteDependencies) {
       { page: { id: result.value.id, title: result.value.title, updatedAt: result.value.updatedAt } },
       { status: 200 },
     );
+  };
+}
+
+/**
+ * Compiling a proposal for one page (Unit 3).
+ *
+ * THIS IS THE ONLY ENDPOINT THAT REACHES A MODEL, and it returns a PROPOSAL.
+ * There is still no endpoint that applies one: the browser puts the proposal
+ * into the user's draft, the user looks at it, and the user saves. That save
+ * arrives at `PATCH` as ordinary text, indistinguishable from text they typed,
+ * because by then it is text they accepted.
+ *
+ * A REJECTED COMPILATION IS A 409, NOT A 500. The model can produce something
+ * that is not usable as a page -- truncated, unattributed, or citing a passage
+ * it was never given. That is not an outage and not the caller's mistake, and
+ * reporting it as either would send someone looking in the wrong place. Trying
+ * again is cheap and usually works.
+ */
+export function createBoardWikiCompileHandler(deps: BoardWikiRouteDependencies) {
+  return async function POST(
+    request: Request,
+    context: BoardWikiPageItemRouteContext,
+  ): Promise<NextResponse> {
+    const session = await resolveSession(deps);
+    if (!session) return unauthorized();
+
+    const { id, pageId } = await context.params;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    // A TOPIC IS THE ONLY INPUT, and it is a search query, not a prompt: it
+    // reaches `searchBoardAiContext` as a message and reaches the model only as
+    // the topic line of a system prompt this server wrote. Nothing a caller
+    // sends chooses a model, a budget, a passage or a page.
+    const topic = typeof (body as { topic?: unknown })?.topic === 'string'
+      ? (body as { topic: string }).topic.trim()
+      : '';
+    if (topic.length === 0 || topic.length > BOARD_WIKI_TOPIC_MAX) {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    let result: Result<BoardWikiProposal, DomainError>;
+    try {
+      result = await session.compilePage({ boardId: id, pageId, userId: session.userId, topic });
+    } catch {
+      return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });
+    }
+    if (!result.ok) return failure(result.error);
+
+    return NextResponse.json({ proposal: result.value }, { status: 201 });
   };
 }
 

@@ -15,6 +15,11 @@ import {
 } from '../../domain/wiki/boardWikiPageSources';
 import { boardAiCitationIdentityKey } from '../../domain/ai/boardAiChatCitation';
 import { SupabaseKnowledgeBoardAuthorizer } from '../../infra/knowledge/knowledgeIngestionAdapters';
+import { readCurrentSourceVersions } from './boardWikiSourceVersions';
+import { compileBoardWikiProposal } from './boardWikiCompileSession';
+import { createBoardAiSearchReader } from '../../infra/ai/boardAiSearchReader';
+import { createAIRolePreferenceRepository } from '../../infra/settings/aiRolePreferenceRepository';
+import { createAIProviderCredentialRepository } from '../../infra/settings/aiProviderCredentialRepository';
 import { canReadBoardKnowledge } from '../knowledge/knowledgeBoardReadAuthorization';
 import type { BoardWikiSession } from './boardWikiPageRoute';
 
@@ -74,76 +79,6 @@ function pageFromRow(row: StoredPageRow): BoardWikiPage {
   };
 }
 
-/**
- * Reads every cited source's CURRENT version, in two queries rather than one
- * per source.
- *
- * A source absent from the returned map is gone. Both lookups are board-scoped
- * on top of RLS: a document that exists on another board must read as gone
- * here, or a page could be used to probe for ids elsewhere.
- */
-async function currentVersionsFor(
-  client: ReturnType<typeof createWikiRouteClient>,
-  boardId: string,
-  sources: readonly BoardWikiPageSource[],
-): Promise<BoardWikiCurrentVersions> {
-  const documentIds = [...new Set(
-    sources
-      .map((source) => (source.item as { knowledgeDocumentId?: string }).knowledgeDocumentId)
-      .filter((value): value is string => typeof value === 'string'),
-  )];
-  const padletIds = [...new Set(
-    sources
-      .map((source) => (source.item as { padletId?: string }).padletId)
-      .filter((value): value is string => typeof value === 'string'),
-  )];
-
-  const versionByIdentity = new Map<string, BoardWikiSourceVersion>();
-
-  if (documentIds.length > 0) {
-    const { data } = await client
-      .from('knowledge_documents')
-      .select('id, content_sha256, updated_at')
-      .eq('board_id', boardId)
-      .in('id', documentIds);
-    for (const row of (data ?? []) as readonly Record<string, unknown>[]) {
-      versionByIdentity.set(`document:${String(row.id)}`, {
-        kind: 'document',
-        contentSha256: typeof row.content_sha256 === 'string' ? row.content_sha256 : null,
-        updatedAt: String(row.updated_at ?? ''),
-      });
-    }
-  }
-
-  if (padletIds.length > 0) {
-    const { data } = await client
-      .from('padlets')
-      .select('id, updated_at')
-      .eq('board_id', boardId)
-      .in('id', padletIds);
-    for (const row of (data ?? []) as readonly Record<string, unknown>[]) {
-      versionByIdentity.set(`padlet:${String(row.id)}`, {
-        kind: 'post',
-        updatedAt: String(row.updated_at ?? ''),
-      });
-    }
-  }
-
-  // Keyed by `boardAiCitationIdentityKey`, which the derivation uses -- so the
-  // map is built from the RECORDED items rather than from the rows, and a
-  // source whose row is missing simply never gets an entry.
-  const current = new Map<string, BoardWikiSourceVersion>();
-  for (const source of sources) {
-    const item = source.item as { knowledgeDocumentId?: string; padletId?: string };
-    const version = typeof item.knowledgeDocumentId === 'string'
-      ? versionByIdentity.get(`document:${item.knowledgeDocumentId}`)
-      : typeof item.padletId === 'string'
-        ? versionByIdentity.get(`padlet:${item.padletId}`)
-        : undefined;
-    if (version) current.set(boardAiCitationIdentityKey(source.item), version);
-  }
-  return current;
-}
 
 export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
   const cookieStore = await cookies();
@@ -208,7 +143,14 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
       if (!data) return err(domainError('not_found', 'Wiki page was not found'));
 
       const page = pageFromRow(data as StoredPageRow);
-      return ok({ page, currentVersions: await currentVersionsFor(client, boardId, page.sources) });
+      return ok({
+        page,
+        currentVersions: await readCurrentSourceVersions(
+          client as never,
+          boardId,
+          page.sources.map((source) => source.item),
+        ),
+      });
     },
 
     async createPage({ boardId, userId, title }) {
@@ -274,6 +216,25 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
         boardWikiPageSourcesFromStored((existing as { sources?: unknown }).sources)
           .map((source) => [boardAiCitationIdentityKey(source.item), source] as const),
       );
+
+      // AND FROM THIS PAGE'S OWN PROPOSALS, which is where a NEWLY compiled
+      // source's version legitimately comes from. Applying a proposal moves
+      // sources the page has never held, and their compile-time versions are
+      // recorded on the proposal row the server wrote when it compiled -- never
+      // taken from the request, which carries identities and nothing else. The
+      // stored page still wins for anything it already holds, so applying a
+      // proposal cannot quietly refresh an untouched source's version.
+      const { data: proposals } = await client
+        .from('board_wiki_page_proposals')
+        .select('sources')
+        .eq('board_id', boardId)
+        .eq('page_id', pageId);
+      for (const row of (proposals ?? []) as readonly { sources?: unknown }[]) {
+        for (const source of boardWikiPageSourcesFromStored(row.sources)) {
+          const key = boardAiCitationIdentityKey(source.item);
+          if (!storedByIdentity.has(key)) storedByIdentity.set(key, source);
+        }
+      }
       const sources = request.sources
         .map((item) => storedByIdentity.get(boardAiCitationIdentityKey(item)))
         .filter((source): source is BoardWikiPageSource => source !== undefined);
@@ -331,6 +292,29 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
       if (deleteError) return err(domainError('unavailable', 'Could not delete the wiki page'));
       if (!data) return err(domainError('not_found', 'Wiki page was not found'));
       return ok({ deleted: true as const });
+    },
+
+    async compilePage({ boardId, pageId, userId, topic }) {
+      // WRITE PERMISSION, not read. A compilation writes a proposal row and
+      // spends provider tokens, so a viewer -- who may read every page and its
+      // chain -- may not start one.
+      if (!await requireWrite(boardId, userId)) {
+        return err(domainError('not_found', 'Wiki page was not found'));
+      }
+      return compileBoardWikiProposal(
+        client as never,
+        {
+          searchReader: createBoardAiSearchReader(),
+          // The SAME repositories the chat route builds. A compilation resolves
+          // the user's own Board Chat choice, so it must read the preference
+          // and the credential through the one path that already knows how.
+          resolverDeps: {
+            preferences: createAIRolePreferenceRepository(),
+            credentials: createAIProviderCredentialRepository(),
+          },
+        },
+        { boardId, pageId, userId, topic },
+      );
     },
   };
 }

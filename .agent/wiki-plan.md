@@ -293,6 +293,58 @@ budgets carry.
 
 ---
 
+## 5b. The deferred logic layer — v2, decided against real pages
+
+Added with Unit 3. **Nothing here is authorized**, and the point of writing it
+down is that the one decision it depends on has already been taken.
+
+### What the research found
+
+The Tortoise-style reading of a wiki is that a page is not the unit of meaning —
+a *claim* is. A page asserts many things; a reader wants "what does this board
+say about X, and what is that based on", which is a question about claims and
+their relations, not about documents. The failure mode of a page-only wiki is
+that two pages can quietly contradict each other and nothing in the system is
+capable of noticing, because nothing below the page has an identity.
+
+### The decision already taken, which is what makes this deferrable
+
+**Compiled content keeps its passage-level markers** (`[S1.2]`, the chat path's
+grammar) in the stored page, and the chain records each source with its
+compile-time version. So the mapping *this sentence came from that passage* is
+in the database today, on every compiled page.
+
+That is the whole reason this can wait. A claim-level layer is **derivable from
+content + chain** over pages that already exist. Deciding it later would have
+meant recompiling live pages to recover the mapping — and recompilation is not
+idempotent (measured: 11 vs 18 claims, same topic, same passages), so the pages
+would come back different. Cheap now, impossible retroactively.
+
+### The three options, in the order they should be tried
+
+1. **A claim view derived from markers.** No schema. Split a stored page on its
+   markers and render claim → passage → source. Answers "what is this sentence
+   based on" and costs nothing to abandon. It is the only one of the three that
+   can be built without deciding anything.
+2. **A typed page-relations table.** `supports` / `contradicts` / `refines`
+   between claims, written by a person or proposed by a compilation. This is
+   where contradiction detection would live, and it is a real system: identity
+   for claims that survives an edit, a lifecycle for relations whose endpoints
+   moved, and a second thing for every consumer of a page to understand. Not to
+   be started before option 1 has shown who asks for it.
+3. **An optional spike**, time-boxed, only if 1 and 2 disagree about what a claim
+   is. A spike is not a phase — it produces a written answer to one question and
+   is thrown away.
+
+### The rule
+
+**This is v2, and it is decided against real compiled pages** — not against the
+plan, not against a sample, and not before a board has pages people have edited.
+The question "is the page the wrong unit" cannot be answered by reasoning about
+it; it is answered by watching what people ask a wiki that already exists.
+
+---
+
 ## 6. Non-goals
 
 Stated so the plan cannot drift into them.

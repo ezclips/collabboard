@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BOARD_AI_CHAT_MAX_TOKENS, BOARD_AI_CHAT_TIMEOUT_MS } from './boardAiChatExecution';
 import { COMPONENT_MAX_TOKENS } from './componentGeneration';
+import { WIKI_COMPILE_MAX_TOKENS, WIKI_COMPILE_TIMEOUT_MS } from './boardWikiCompilation';
 import { DEEPSEEK_DEFAULT_MODEL } from './providers/deepSeek';
 
 /**
@@ -71,6 +72,43 @@ describe('the budgets, and the model they were measured against', () => {
     // Deliberately asserting the UNCOMFORTABLE fact rather than hiding it: the
     // top of the budget does not fit inside the timeout today.
     expect(needed).toBeGreaterThan(BOARD_AI_CHAT_TIMEOUT_MS);
+  });
+
+  it('wiki compilation holds a page -- 4000 emitted ZERO content', () => {
+    // The worst failure this file has recorded, and the first run of the
+    // fidelity instrument found it before any wiki code existed: at 4,000 the
+    // response came back finish_reason "length" with completion 4000/4000 and
+    // reasoning 4000 -- the entire budget spent thinking, nothing written.
+    //
+    // Re-measured at 8,000 before the server action adopted it. Three runs on
+    // the reference board, all finish_reason "stop":
+    //   completion 3366/8000  reasoning 3105 (92%)  15.4s  compiled
+    //   completion 1341/8000  reasoning  971 (72%)   6.0s  compiled
+    //   completion  186/8000  reasoning  153         1.3s  DECLINED
+    // Worst completion across these and the earlier 12,000-budget runs: 3,862.
+    expect(WIKI_COMPILE_MAX_TOKENS).toBeGreaterThanOrEqual(8_000);
+  });
+
+  it('the compile timeout CONTAINS its budget, unlike the chat pairing above', () => {
+    // Stated as a contrast on purpose. Chat's entry asserts the uncomfortable
+    // fact that the top of its budget does not fit inside its timeout; this one
+    // is sized so that it does, because compilation is an explicit act with a
+    // progress state rather than a reply someone is watching appear.
+    const perTokenMs = 6;
+    expect(WIKI_COMPILE_TIMEOUT_MS).toBeGreaterThanOrEqual(WIKI_COMPILE_MAX_TOKENS * perTokenMs);
+    // And it is NOT the chat timeout, which is sized for a different act.
+    expect(WIKI_COMPILE_TIMEOUT_MS).not.toBe(BOARD_AI_CHAT_TIMEOUT_MS);
+  });
+
+  it('compilation resolves an EXISTING role, and names no model of its own', () => {
+    // The plan's constraint: no hardcoded model, no browser-named provider, no
+    // second execution stack. "No new role" is v1 scope rather than principle,
+    // so the reason is in the module header where a later split would start.
+    const module = readFileSync(
+      resolve(process.cwd(), 'lib/server/ai/boardWikiCompilation.ts'), 'utf8');
+    expect(module).toContain('resolveAIModelForRole(userId, AI_ROLE_CHAT, deps)');
+    expect(module).not.toMatch(/model:\s*['"]/);
+    expect(module).not.toContain('DEEPSEEK_DEFAULT_MODEL');
   });
 
   it('component generation holds a whole card -- 1200 truncated it into invalid JSON', () => {

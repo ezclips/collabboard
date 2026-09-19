@@ -101,7 +101,10 @@ export interface BoardWikiDrawerProps {
    * rendered at all -- rather than rendered and inert, which is how a surface
    * ends up promising something no code does.
    */
-  readonly onRequestRecompile?: (pageId: string) => Promise<BoardWikiProposal | null>;
+  readonly onRequestRecompile?: (
+    pageId: string,
+    topic: string,
+  ) => Promise<BoardWikiProposal | null>;
 }
 
 const stateLabel: Record<BoardWikiSourceState, string> = {
@@ -294,14 +297,21 @@ export default function BoardWikiDrawer({
   }, [boardId, selectedPageId, loadPages]);
 
   const requestRecompile = useCallback(async () => {
-    if (!onRequestRecompile || selectedPageId === null) return;
+    if (!onRequestRecompile || selectedPageId === null || draft === null) return;
     setBusy(true);
+    setStatus('Compiling from this board…');
     try {
-      setProposal(await onRequestRecompile(selectedPageId));
+      // THE TOPIC IS THE PAGE'S TITLE, which is the one thing on the page a
+      // person definitely wrote. Using the CONTENT would feed a compilation its
+      // own previous output and drift a page away from the board over
+      // successive refreshes.
+      const compiled = await onRequestRecompile(selectedPageId, draft.title);
+      setProposal(compiled);
+      setStatus(compiled === null ? 'That produced nothing worth proposing.' : null);
     } finally {
       setBusy(false);
     }
-  }, [onRequestRecompile, selectedPageId]);
+  }, [onRequestRecompile, selectedPageId, draft]);
 
   if (!isOpen || blockingEditorOpen) return null;
 
