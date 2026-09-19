@@ -374,6 +374,24 @@ describe('2. an existing synced Note is saved by exactly one transaction', () =>
     expect(effects.editorCloses).toEqual(['note']);
   });
 
+  it('the unsynced Note update carries updated_at -- the staleness signal', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    mount(() => true, effects);
+    act(() => { setDraft!(rowById(OTHER)); });
+
+    await act(async () => { await api!.saveNote(NOTE_PAYLOAD); });
+
+    // `padlets.updated_at` is the only change signal a post has. A save that
+    // rewrites title and content without moving it tells every consumer the
+    // row is unchanged -- which is how a Note edit went unseen. Every sibling
+    // editor stamps it; this pins that the Note does too.
+    const written = effects.updates[0] as Record<string, unknown>;
+    expect(written).toHaveProperty('updated_at');
+    expect(typeof written.updated_at, 'an ISO timestamp, as the siblings write').toBe('string');
+    expect(Number.isNaN(Date.parse(written.updated_at as string))).toBe(false);
+  });
+
   it('the container and source-reference follow-ups stay limited to NEW Notes', async () => {
     const effects = newEffects();
     installSupabase(effects);

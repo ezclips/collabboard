@@ -682,13 +682,20 @@ export function usePadletSave(params: UsePadletSaveParams) {
           setPadletToEdit(null);
           return { status: 'saved' };
         }
-        // Unsynced Note: the existing single-row update, unchanged.
+        // Unsynced Note: the existing single-row update, plus the stamp every
+        // sibling editor already writes (link, todo, table, drawing, card).
+        // `updated_at` is the only staleness signal a post has -- anything
+        // watching a post for change reads this column and nothing else -- so a
+        // save that rewrites title/content without moving it reports the row as
+        // unchanged to every consumer. Same expression as the siblings, so the
+        // family has one shape.
         const { error } = await supabase
           .from('padlets')
           .update({
             title: data.title || '',
             content: data.content,
             metadata,
+            updated_at: new Date().toISOString(),
           })
           .eq('id', padletToEdit.id);
         if (error) throw error;
