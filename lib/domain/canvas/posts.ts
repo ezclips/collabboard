@@ -65,7 +65,21 @@ export interface PostPositionWriteFields {
 export interface PostsRepository {
   updateTasks(id: PostId, fields: PostTasksWriteFields): Promise<Result<void, DomainError>>;
   updateMetadata(id: PostId, fields: PostMetadataWriteFields): Promise<Result<void, DomainError>>;
-  /** Legacy groupIntoColumn parent-write sends NO updated_at (old L3665) - dedicated method. */
+  /**
+   * Legacy groupIntoColumn parent-write sends NO updated_at (old L3665) -
+   * dedicated method.
+   *
+   * THE MISSING STAMP IS A KNOWN DEFECT CARRIED BY THE PORT, not a design.
+   * `padlets.updated_at` is the only change signal a post has, and there is no
+   * trigger supplying one, so a write through here is invisible to everything
+   * that watches posts for change. It is preserved only because the port rule
+   * governs: this method reproduces the legacy statement byte-for-byte. Do not
+   * "fix" it in place, and do not copy the shape into a new caller - a new
+   * write wants `updateMetadata`. Closing it is its own unit, with its own
+   * before/after evidence. (Same defect, same reasoning: `updateTitle` and
+   * `updateFieldsById` below; closed in the save paths by the Note fix and the
+   * 20260919130000 migration.)
+   */
   updateMetadataUnstamped(
     id: PostId,
     fields: { readonly metadata: Record<string, unknown> },
@@ -75,10 +89,26 @@ export interface PostsRepository {
    * pass through VERBATIM with NO stamp added - the legacy statement sent
    * exactly the caller's fields (old useCanvasData L577); the
    * updateMetadataUnstamped no-stamp precedent, generalized.
+   *
+   * KNOWN DEFECT, CARRIED BY THE PORT: it stamps nothing, and its
+   * drawing-layout caller IS content-changing, so those edits do not move the
+   * row's change signal. Preserved under the port rule, not endorsed - see
+   * `updateMetadataUnstamped` above for why it is not repaired here. A caller
+   * that wants a stamp must send `updated_at` in its own `fields`, which this
+   * passthrough will carry.
    */
   updateFieldsById(id: PostId, fields: object): Promise<Result<void, DomainError>>;
   updatePosition(id: PostId, fields: PostPositionWriteFields): Promise<Result<void, DomainError>>;
-  /** Legacy clipart title clear sends title ONLY - no updated_at (old L7581-7584). */
+  /**
+   * Legacy clipart title clear sends title ONLY - no updated_at (old
+   * L7581-7584).
+   *
+   * KNOWN DEFECT, CARRIED BY THE PORT: clearing a title changes the post and
+   * does not move its change signal. Preserved under the port rule - see
+   * `updateMetadataUnstamped` above. `updateTitleStamped` is the sibling a new
+   * caller should reach for; this one exists to keep one legacy statement
+   * faithful, not to offer a choice.
+   */
   updateTitle(id: PostId, fields: { readonly title: string }): Promise<Result<void, DomainError>>;
   /** The hooks content write sends content + updated_at (useCanvasData old L494-500). */
   updateContent(

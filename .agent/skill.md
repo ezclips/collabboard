@@ -871,3 +871,39 @@ GRANT UPDATE (slug, title, content) ON public.t TO authenticated;
 - Supabase default privileges grant `authenticated` a table-wide ACL at
   `CREATE TABLE`, so a new table already has the table-wide grant that makes a
   column `REVOKE` inert — before the migration grants anything itself.
+
+# Live Passes Through the Real UI — Scope Every Fixture Locator (2026-09-19)
+
+## Rule
+
+A locator used in a live pass must be **scoped to the element it means**, never
+taken as the first match on the page. `page.locator('button[title="Edit"]').first()`
+is not "the Edit button of the card I selected" — a board renders one per card
+(22 of them, measured). Scope it: `card.locator('button[title="Edit"]').first()`,
+where `card` is `[data-padlet-id="<the id>"]`.
+
+## Guardrails
+
+- Resolve the target by its **identity** (`data-padlet-id`, `data-board-wiki-page-item`),
+  then query controls **within** that element. An index or a `.first()` over the
+  whole document is an accident waiting for the DOM order to change.
+- **Prove you are on the intended row before you write.** A cheap assertion on
+  the opened editor's own content (its first characters, its id in a request)
+  costs nothing and converts a silent wrong-target write into an abort.
+- Watch the request, not just the UI. Log the outgoing `PATCH`/`POST` and assert
+  the id in its URL is the id you meant. This is what caught a save that landed
+  on a different post while every on-screen affordance looked right.
+- Synthetic events are not user events. `useBackdropDismiss` only dismisses when
+  the press **began** on the backdrop, so `dispatchEvent(new MouseEvent('click'))`
+  does nothing and reads as "the app ignored me". Drive a real pointer
+  (`mouse.move` → `down` → `up`) whenever a handler tracks press origin.
+
+## Known Failure Patterns
+
+- Unscoped `button[title="Edit"]` opened a different card and saved it — the
+  same family as the wiki close button that rendered, passed its test, and could
+  not be clicked (z-index), and as `elementFromPoint` returning a ghost overlay.
+  All three: **what the DOM hands back is not what the reader assumed**, and only
+  a live check distinguishes them.
+- A live pass that reports success from the UI alone. Read the row back from the
+  database afterwards; the UI is the thing under test, not the witness.
