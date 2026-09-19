@@ -186,6 +186,54 @@ describe('3. the source set is content, and staleness is derived', () => {
   });
 });
 
+describe('deleting an ACCOUNT must not delete board content', () => {
+  it('a page keeps SET NULL on created_by, like every other durable board table', () => {
+    // The house pattern for durable content -- knowledge_documents,
+    // knowledge_source_highlights, teams -- is a NULLABLE created_by with
+    // ON DELETE SET NULL. CASCADE belongs on personal containers like
+    // board_ai_threads, where the rows ARE the user's own data.
+    //
+    // A wiki page is board content other editors have since worked on. CASCADE
+    // here would let one account deletion destroy the page and everyone else's
+    // edits with it -- losing the attribution is the correct cost, losing the
+    // page is not.
+    const table = statements.slice(
+      statements.indexOf('CREATE TABLE IF NOT EXISTS public.board_wiki_pages'),
+      statements.indexOf('CREATE INDEX IF NOT EXISTS board_wiki_pages_board_idx'),
+    );
+    expect(table).toContain('created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL');
+    expect(table).not.toMatch(/created_by[^,]*ON DELETE CASCADE/);
+    expect(table).not.toMatch(/created_by uuid NOT NULL/);
+  });
+
+  it('a PROPOSAL keeps CASCADE, and the asymmetry is deliberate', () => {
+    // An ephemeral suggestion nobody built on, left by a deleted account, is
+    // garbage by definition. The page is the opposite case.
+    const table = statements.slice(statements.indexOf('CREATE TABLE IF NOT EXISTS public.board_wiki_page_proposals'));
+    expect(table).toContain('created_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE');
+  });
+});
+
+describe('the apply is all-or-nothing', () => {
+  it('is wrapped in one transaction', () => {
+    // CREATE POLICY has no IF NOT EXISTS, so a partial apply cannot be repaired
+    // by re-running this file -- it fails on the first policy that already
+    // exists, and the only way out is the rollback, which DROPS BOTH TABLES.
+    expect(statements).toMatch(/^BEGIN;$/m);
+    expect(statements).toMatch(/^COMMIT;$/m);
+    expect(statements.indexOf('BEGIN;')).toBeLessThan(statements.indexOf('CREATE TABLE'));
+    expect(statements.lastIndexOf('COMMIT;')).toBeGreaterThan(statements.lastIndexOf('REVOKE'));
+  });
+
+  it('says why it wraps when the two nearest table-creation migrations do not', () => {
+    // 20260820 and 20260902120000 are unwrapped. Following the recent policy
+    // migrations instead is a decision, and the header has to carry it or the
+    // next reader will "restore consistency" with the wrong precedent.
+    expect(migration).toContain('20260820_create_knowledge_data_foundation.sql');
+    expect(migration).toContain('CREATE POLICY` has no\n-- `IF NOT EXISTS');
+  });
+});
+
 describe('one wiki per board, which is the whole ACL story', () => {
   it('a page belongs to exactly one board and dies with it', () => {
     expect(statements).toContain('board_id uuid NOT NULL REFERENCES public.boards(id) ON DELETE CASCADE');
@@ -206,6 +254,20 @@ describe('the verify file checks the things that matter', () => {
   it('checks anon has no privilege and proposals are not updatable', () => {
     expect(verify).toContain("grantee = 'anon'");
     expect(verify).toContain('authenticated cannot UPDATE a proposal');
+  });
+
+  it('checks the account-deletion rule on both tables', () => {
+    expect(verify).toContain('created_by -- page SET NULL, proposal CASCADE');
+    // 'n' is SET NULL and 'c' is CASCADE; asserting the letters keeps the row
+    // from being "simplified" into checking only that a constraint exists.
+    expect(verify).toContain("confdeltype = 'n'");
+    expect(verify).toContain("confdeltype = 'c'");
+  });
+
+  it('numbers its rows in the order it runs them', () => {
+    // A verifier whose output is out of order gets read out of order.
+    const order = [...verify.matchAll(/'row (\d+):/g)].map((m) => Number(m[1]));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
   it('admits what it cannot prove', () => {

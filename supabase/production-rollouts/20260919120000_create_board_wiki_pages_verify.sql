@@ -36,6 +36,11 @@
 --          page cannot be moved to another board or have its authorship
 --          rewritten after the fact.
 --
+-- ROW 9    deleting an ACCOUNT must not delete board content. The page takes
+--          SET NULL and the proposal takes CASCADE, and both halves are checked
+--          -- getting either backwards is silent until the day an account is
+--          actually deleted, which is the worst possible time to find out.
+--
 -- WHAT THIS FILE CANNOT TELL YOU: whether the APPLICATION honours any of it.
 -- Authorization lives in the application layer by design, and the service role
 -- bypasses every policy below. These rows prove the backstop is in place, not
@@ -107,3 +112,27 @@ WHERE table_schema = 'public'
   AND grantee = 'authenticated'
   AND privilege_type = 'UPDATE'
   AND column_name IN ('board_id', 'created_by', 'created_at');
+
+-- ROW 9 checks the rule that deleting an ACCOUNT must not delete board
+-- content. A wiki page is durable board content other editors have worked on,
+-- so `created_by` is SET NULL like knowledge_documents and teams; a proposal is
+-- an ephemeral suggestion and keeps CASCADE. Both halves are asserted, because
+-- getting either one backwards is silent until the day an account is deleted.
+-- `confdeltype` is 'n' for SET NULL and 'c' for CASCADE.
+SELECT
+    'row 9: created_by -- page SET NULL, proposal CASCADE' AS check,
+    bool_and(
+        CASE c.relname
+            WHEN 'board_wiki_pages' THEN con.confdeltype = 'n'
+            WHEN 'board_wiki_page_proposals' THEN con.confdeltype = 'c'
+        END
+    ) AS ok,
+    string_agg(c.relname || '=' || con.confdeltype, ', ' ORDER BY c.relname) AS actual
+FROM pg_constraint con
+JOIN pg_class c ON c.oid = con.conrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
+WHERE n.nspname = 'public'
+  AND c.relname IN ('board_wiki_pages', 'board_wiki_page_proposals')
+  AND con.contype = 'f'
+  AND a.attname = 'created_by';

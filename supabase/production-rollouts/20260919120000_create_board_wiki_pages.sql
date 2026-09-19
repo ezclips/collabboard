@@ -36,6 +36,25 @@
 -- performed by an explicit user action in the application layer.
 --
 -- So an overwrite is not merely forbidden, it has no path.
+--
+-- ===========================================================================
+-- ONE TRANSACTION, WHICH THE TWO CLOSEST PRECEDENTS ARE NOT
+-- ===========================================================================
+--
+-- `20260820_create_knowledge_data_foundation.sql` and
+-- `20260902120000_create_board_ai_chat.sql` -- the other two table-creation
+-- migrations -- are NOT wrapped. The recent policy and function migrations
+-- (`20260916150000`, `20260918180000`) are. This file follows the recent ones
+-- deliberately rather than the nearer ones by shape.
+--
+-- The reason is specific to what is below: `CREATE POLICY` has no
+-- `IF NOT EXISTS`. So a partial apply cannot be repaired by re-running this
+-- file -- it fails on the first policy that already exists -- and the only way
+-- out is the rollback, which DROPS BOTH TABLES. On a fresh install that is
+-- merely annoying; on any database where a page has been written it is
+-- destructive. All-or-nothing removes that path entirely.
+
+BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.board_wiki_pages (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -55,7 +74,17 @@ CREATE TABLE IF NOT EXISTS public.board_wiki_pages (
     -- When the content last came from a compilation. NULL for a page a person
     -- wrote from nothing, which is a legitimate page.
     compiled_at timestamptz,
-    created_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    -- SET NULL, NOT CASCADE, AND NULLABLE -- the house pattern for durable
+    -- board content (`knowledge_documents.created_by`,
+    -- `knowledge_source_highlights.created_by`, `teams.created_by`). CASCADE
+    -- belongs on personal containers like `board_ai_threads`, where the rows
+    -- ARE the user's own data.
+    --
+    -- A wiki page is not personal data. It is board content that other editors
+    -- have since worked on, so deleting the account that happened to create it
+    -- must not destroy the page and everyone else's edits with it. Losing the
+    -- attribution is the correct cost; losing the page is not.
+    created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
     updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -114,6 +143,10 @@ CREATE TABLE IF NOT EXISTS public.board_wiki_page_proposals (
     -- surface can show a diff against the right baseline and detect that the
     -- page moved underneath a pending proposal.
     based_on_content text NOT NULL,
+    -- CASCADE HERE, AND THE ASYMMETRY WITH THE PAGE ABOVE IS THE POINT. A
+    -- proposal is an ephemeral suggestion, not board content: nobody has built
+    -- on it, and one left behind by a deleted account is garbage by definition.
+    -- A page is the opposite, which is why it takes SET NULL.
     created_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
     CONSTRAINT board_wiki_page_proposals_sources_is_array CHECK (jsonb_typeof(sources) = 'array')
@@ -253,3 +286,5 @@ REVOKE UPDATE ON public.board_wiki_page_proposals FROM authenticated;
 -- Identity columns are not editable after the fact: a page cannot be moved to
 -- another board, and authorship cannot be rewritten.
 REVOKE UPDATE (board_id, created_by, created_at) ON public.board_wiki_pages FROM authenticated;
+
+COMMIT;
