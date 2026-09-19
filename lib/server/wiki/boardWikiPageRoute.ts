@@ -8,6 +8,15 @@ import {
   type BoardWikiCurrentVersions,
 } from '../../domain/wiki/boardWikiPageSources';
 import type { BoardWikiPage, BoardWikiProposal, BoardWikiSaveRequest } from '../../domain/wiki/boardWikiEditing';
+import {
+  boardWikiOkfDocument,
+  boardWikiOkfFilename,
+  boardWikiOkfIndex,
+  type BoardWikiOkfPage,
+} from '../../domain/wiki/boardWikiOkfDocument';
+
+/** One page, carrying exactly what an OKF concept file needs. */
+export type BoardWikiExportPage = Omit<BoardWikiOkfPage, 'boardId'>;
 
 /**
  * The wiki page surface's HTTP edge -- reading a page, creating one, saving one.
@@ -68,6 +77,14 @@ export interface BoardWikiSession {
     readonly pageId: string;
     readonly userId: string;
   }): Promise<Result<BoardWikiPageRead, DomainError>>;
+  /**
+   * Every page of one board, with what an OKF concept file needs and nothing
+   * more. A READ -- so a viewer gets it, exactly as a viewer can read a page.
+   */
+  exportPages(input: {
+    readonly boardId: string;
+    readonly userId: string;
+  }): Promise<Result<readonly BoardWikiExportPage[], DomainError>>;
   createPage(input: {
     readonly boardId: string;
     readonly userId: string;
@@ -192,6 +209,47 @@ export function createBoardWikiListHandler(deps: BoardWikiRouteDependencies) {
     }
     if (!result.ok) return failure(result.error);
     return NextResponse.json({ pages: result.value }, { status: 200 });
+  };
+}
+
+/**
+ * THE BOARD'S WIKI AS AN OKF BUNDLE.
+ *
+ * A READ, and only a read: same session, same RLS client, no admin client, and
+ * no branch that writes anything. Export is reading, so a viewer gets it --
+ * refusing a viewer here would be stricter than reading the page in the drawer,
+ * which is the same bytes through a different door.
+ *
+ * It returns the bundle as a JSON map of path to file content rather than a
+ * zip: the caller is a browser that already assembles what it needs, and
+ * streaming an archive from a route would add a binary path to a surface whose
+ * whole value is that it is plain text.
+ */
+export function createBoardWikiExportHandler(deps: BoardWikiRouteDependencies) {
+  return async function GET(
+    _request: Request,
+    context: BoardWikiPageRouteContext,
+  ): Promise<NextResponse> {
+    const session = await resolveSession(deps);
+    if (!session) return unauthorized();
+
+    const { id } = await context.params;
+    let result: Result<readonly BoardWikiExportPage[], DomainError>;
+    try {
+      result = await session.exportPages({ boardId: id, userId: session.userId });
+    } catch {
+      return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });
+    }
+    if (!result.ok) return failure(result.error);
+
+    const files: Record<string, string> = {
+      // A reserved OKF filename, for progressive disclosure.
+      'index.md': boardWikiOkfIndex(result.value),
+    };
+    for (const page of result.value) {
+      files[boardWikiOkfFilename(page.slug)] = boardWikiOkfDocument({ ...page, boardId: id });
+    }
+    return NextResponse.json({ files }, { status: 200 });
   };
 }
 

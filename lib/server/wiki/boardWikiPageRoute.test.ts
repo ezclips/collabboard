@@ -6,6 +6,7 @@ import {
   createBoardWikiCreateHandler,
   createBoardWikiCompileHandler,
   createBoardWikiDeleteHandler,
+  createBoardWikiExportHandler,
   createBoardWikiListHandler,
   createBoardWikiReadHandler,
   createBoardWikiSaveHandler,
@@ -47,6 +48,15 @@ function session(overrides: Partial<BoardWikiSession> = {}): BoardWikiSession {
   return {
     userId: 'user-1',
     listPages: vi.fn(async () => ok([])),
+    exportPages: vi.fn(async () => ok([{
+      slug: 'horn-replacement',
+      title: 'Horn replacement',
+      content: 'Authored by a person [S1.1].',
+      sources: [docSource],
+      compiledAt: '2026-09-19T09:00:00Z',
+      updatedAt: '2026-09-19T10:00:00Z',
+      updatedBy: 'user-1',
+    }])),
     readPage: vi.fn(async () => ok({ page: storedPage, currentVersions: new Map() })),
     createPage: vi.fn(async () => ok(storedPage)),
     savePage: vi.fn(async () => ok(storedPage)),
@@ -394,6 +404,53 @@ describe('deleting a page (Unit 2b)', () => {
   });
 });
 
+describe('the OKF export is a read, and reads through the same door', () => {
+  const exportHandler = (overrides: Partial<BoardWikiSession> = {}) =>
+    createBoardWikiExportHandler({ getAuthenticatedSession: async () => session(overrides) });
+
+  it('returns a bundle: one file per page, plus the reserved index', async () => {
+    const response = await exportHandler()(new Request('http://test/api'), boardContext);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { files: Record<string, string> };
+    expect(Object.keys(body.files).sort()).toEqual(['horn-replacement.md', 'index.md']);
+    expect(body.files['index.md']).toContain('- [Horn replacement](/horn-replacement.md)');
+  });
+
+  it('each file is a concept file, with the page prose in it', async () => {
+    const response = await exportHandler()(new Request('http://test/api'), boardContext);
+    const body = await response.json() as { files: Record<string, string> };
+    const doc = body.files['horn-replacement.md'];
+    expect(doc.startsWith('---\n')).toBe(true);
+    expect(doc).toContain('type: wiki_page');
+    expect(doc).toContain('Authored by a person');
+  });
+
+  it('a page nobody may read is a 404, never an empty bundle', async () => {
+    // Same answer the page read gives, for the same reason: a non-member may
+    // not learn whether a board has a wiki.
+    const response = await exportHandler({
+      exportPages: vi.fn(async () => err(domainError('not_found', 'Wiki page was not found'))),
+    })(new Request('http://test/api'), boardContext);
+    expect(response.status).toBe(404);
+  });
+
+  it('an unauthenticated caller gets 401', async () => {
+    const handler = createBoardWikiExportHandler({ getAuthenticatedSession: async () => null });
+    const response = await handler(new Request('http://test/api'), boardContext);
+    expect(response.status).toBe(401);
+  });
+
+  it('the handler writes nothing -- no save, no compile, no delete', () => {
+    const source = routeSourceForMarkers.slice(
+      routeSourceForMarkers.indexOf('export function createBoardWikiExportHandler'),
+      routeSourceForMarkers.indexOf('export function createBoardWikiCreateHandler'),
+    );
+    for (const forbidden of ['savePage', 'compilePage', 'deletePage', 'createPage']) {
+      expect(source, forbidden).not.toContain(forbidden);
+    }
+  });
+});
+
 describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
   const routeSource = readFileSync(resolve(process.cwd(), 'lib/server/wiki/boardWikiPageRoute.ts'), 'utf8');
   const sessionSource = readFileSync(resolve(process.cwd(), 'lib/server/wiki/boardWikiPageSession.ts'), 'utf8');
@@ -408,6 +465,11 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     // edit here, which is what caught Unit 2b's delete on the first run.
     expect(handlers).toEqual([
       'createBoardWikiListHandler',
+      // UNIT 3: the OKF export. Added here deliberately, which is the point of
+      // enumerating rather than pattern-matching. It is a READ -- it selects
+      // pages and serializes them, and the property this block protects is
+      // untouched: it takes no proposal and writes nothing.
+      'createBoardWikiExportHandler',
       'createBoardWikiCreateHandler',
       'createBoardWikiReadHandler',
       'createBoardWikiSaveHandler',
@@ -434,10 +496,14 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     expect(save.slice(0, save.indexOf('\n}\n'))).not.toMatch(/proposal/i);
   });
 
-  it('the session exposes exactly six commands, and only one of them compiles', () => {
+  it('the session exposes exactly seven commands, and only one of them compiles', () => {
+    // UNIT 3 added `exportPages`, deliberately, and this pin is enumerated so
+    // that adding one has to be an edit here. It is the second READ on the
+    // session -- it selects pages and returns them -- and it carries no write
+    // of any kind, which the export block above asserts at the handler.
     const commands = [...routeSource.matchAll(/^ {2}(\w+)\(input: \{/gm)].map((m) => m[1]);
     expect(commands.sort())
-      .toEqual(['compilePage', 'createPage', 'deletePage', 'listPages', 'readPage', 'savePage']);
+      .toEqual(['compilePage', 'createPage', 'deletePage', 'exportPages', 'listPages', 'readPage', 'savePage']);
   });
 
   it('THE REFRESH LOOP CLOSES: an applied proposal decides the versions it carries', () => {

@@ -127,6 +127,39 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
       })));
     },
 
+    /**
+     * Every page of one board, for an OKF export.
+     *
+     * A READ, through the caller's own client like everything else here, with
+     * the same `requireRead` gate a single page uses -- so a viewer can export
+     * exactly what a viewer can already read, and a non-member learns nothing.
+     *
+     * It reads `updated_by` and `created_at`, which the page reader does not,
+     * because OKF's `verified` block names WHO accepted the page. That is the
+     * only field a human save has left behind, and it is the only honest
+     * source for a trust tier.
+     */
+    async exportPages({ boardId, userId }) {
+      if (!await requireRead(boardId, userId)) {
+        return err(domainError('not_found', 'Wiki page was not found'));
+      }
+      const { data, error: exportError } = await client
+        .from('board_wiki_pages')
+        .select('slug, title, content, sources, compiled_at, updated_at, updated_by')
+        .eq('board_id', boardId)
+        .order('slug', { ascending: true });
+      if (exportError) return err(domainError('unavailable', 'Could not load the board wiki'));
+      return ok((data ?? []).map((row: Record<string, unknown>) => ({
+        slug: String(row.slug ?? ''),
+        title: String(row.title ?? ''),
+        content: typeof row.content === 'string' ? row.content : '',
+        sources: boardWikiPageSourcesFromStored(row.sources),
+        compiledAt: typeof row.compiled_at === 'string' ? row.compiled_at : null,
+        updatedAt: String(row.updated_at ?? ''),
+        updatedBy: typeof row.updated_by === 'string' ? row.updated_by : null,
+      })));
+    },
+
     async readPage({ boardId, pageId, userId }) {
       if (!await requireRead(boardId, userId)) {
         return err(domainError('not_found', 'Wiki page was not found'));
