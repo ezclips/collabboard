@@ -39,6 +39,20 @@ import { describe, expect, it } from 'vitest';
  *     npx vite-node scripts/db/boardSearchTuningBattery.ts -- --diagnose
  * and for the rank variants these pairs are meant to discriminate:
  *     scripts/db/boardSearchRankingVariants.sql   (read-only)
+ *
+ * ---------------------------------------------------------------------------
+ * READ BEFORE REGENERATING (2026-09-19): PART OF THIS FILE IS NOW STALE, AND
+ * ONE OF ITS STATED CLAIMS IS FALSE.
+ *
+ * Migration 20260919140000 admitted IMAGE posts to the searchable set. The
+ * corpus these constants were measured against no longer exists, and the block
+ * "what the ratings bar could and could not decide" at the bottom of this file
+ * rests on a fact that changed. Its own comment carries the detail, the
+ * after-measurement, and the question regeneration should answer. Nothing in
+ * this file has been re-measured or re-asserted -- deliberately: regeneration
+ * is a step a person takes, and editing constants by hand to match a number
+ * from a report is exactly how an instrument stops being one.
+ * ---------------------------------------------------------------------------
  */
 
 /**
@@ -479,6 +493,54 @@ describe('what the ratings bar could and could not decide', () => {
    * mechanism recorded above, and the argument against it -- a long post that
    * repeats one term outranking a short exact answer, which flag 0 permits and
    * flag 1 did not -- is UNMEASURABLE against these questions. Followups item 7.
+   *
+   * =========================================================================
+   * STALE AS OF 2026-09-19 -- "NEITHER HAPPENS ANYWHERE IN THIS BATTERY" IS
+   * NO LONGER TRUE. Comments only below; no constant and no assertion in this
+   * file has been touched.
+   *
+   * WHAT CHANGED. Migration 20260919140000 (board search, image captions) was
+   * applied. Image posts entered the searchable set for the first time: they
+   * had been excluded by the `type IN ('text','note','card')` predicate on the
+   * search function and on all three padlets GIN indexes, so no image was ever
+   * a candidate for any query. q02 went from 3 posts to 4.
+   *
+   * WHICH CONSTANTS ARE STALE. Both were measured before images existed in the
+   * corpus:
+   *   * `postsReturned` above records `q02: 3`. It is now 4.
+   *   * The claim in this block that "no question returns more posts than the
+   *     per-source limit of four" is now false at the boundary: q02 returns
+   *     exactly four, which is the limit rather than under it. On regeneration
+   *     the `toBeLessThan(POSTS_PER_SOURCE_LIMIT)` assertion above will fail --
+   *     correctly, and that failure is this note arriving on time rather than a
+   *     defect.
+   *
+   * THE AFTER-MEASUREMENT, recorded here so it is not re-derived from a report:
+   *   * q02 ("remove the bumper... change the horn"): the top two answering
+   *     posts are UNCHANGED and still first, tied at 0.0202642. The new row is
+   *     the image "Audi A2 Stossstange Titelbild2", also at 0.0202642, entering
+   *     third on the id tie-break; the old title-only post slides to fourth.
+   *     No answer was demoted -- the pair's requirement holds.
+   *   * q03 ("what does the Trump note post say"): "Trump Note Post" stays
+   *     first at 0.0607927, with "Trump Image Post" appearing second at
+   *     0.0405285. Title-only still wins, and an image that was invisible the
+   *     day before is findable.
+   *   * q08, the chunks control: byte-identical before and after
+   *     (0.00965131 / 0.0086352). The untouched path was proved untouched
+   *     rather than assumed to be.
+   *   * No tripwire flipped, and both newly admitted rows are images -- which
+   *     is what the migration exists to find.
+   *
+   * THE OPEN QUESTION, FOR WHOEVER REGENERATES. q02 now sits AT the per-source
+   * ceiling, so a fifth relevant row would be silently dropped rather than
+   * ranked. That is the condition this block says the battery never reaches,
+   * and it is reached. Regeneration is therefore the first opportunity to judge
+   * whether a limit of four is the right limit -- and the instrument cannot
+   * answer that while it is pinned to constants measured before images were
+   * searchable at all. Updating `postsReturned.q02` to 4 and relaxing the
+   * assertion would make this file green again while leaving the question
+   * unasked; the question is the point.
+   * =========================================================================
    */
   const POSTS_ON_THE_BOARD = 9;
   const POSTS_PER_SOURCE_LIMIT = 4;
