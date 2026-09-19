@@ -300,6 +300,21 @@ export default function BoardAiChatDrawer({
     useState<Record<string, BoardAiDocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  /**
+   * Cited documents this drawer has confirmed are GONE.
+   *
+   * A stored citation is a true statement about the past, so it is never
+   * rewritten when its source is deleted -- and it cannot be, since the
+   * citation list is inside the provenance signature over the message. What a
+   * reader needs instead is to be told, at the moment it would have navigated,
+   * that there is nothing left to open.
+   *
+   * Populated only by an ANSWERED probe. An unreachable network leaves the chip
+   * alone rather than marking a live source dead.
+   */
+  const [goneCitationDocumentIds, setGoneCitationDocumentIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
   /**
@@ -821,6 +836,48 @@ export default function BoardAiChatDrawer({
     return () => { cancelled = true; clearInterval(timer); };
   }, [boardId, draftContext, setDraftContext]);
 
+  /**
+   * Open a cited source -- or say it is gone, and open nothing.
+   *
+   * WHY THE CHECK HAPPENS HERE rather than in the reader. Navigating hands the
+   * dock to the reader and CLOSES this drawer, so a citation whose document no
+   * longer exists used to cost the user their conversation and give them an
+   * empty reader in exchange. Resolving first means a dead citation changes one
+   * chip and nothing else.
+   *
+   * The board's own document list is the probe: it is already authorized, it is
+   * already fetched by the upload poller, and it carries no page text. A
+   * document missing from it is either deleted or no longer visible to this
+   * reader, and both mean the same thing here -- there is nothing they can open.
+   */
+  const openCitation = useCallback(async (request: {
+    readonly knowledgeDocumentId: string;
+    readonly pageNumber?: number;
+  }) => {
+    if (!onOpenCitation) return;
+    if (goneCitationDocumentIds.has(request.knowledgeDocumentId)) return;
+
+    let documents: readonly { id?: unknown }[] | null = null;
+    try {
+      const response = await fetch(KNOWLEDGE_PATH(boardId));
+      if (response.ok) {
+        const payload = await response.json().catch(() => null);
+        if (Array.isArray(payload?.documents)) documents = payload.documents;
+      }
+    } catch {
+      // Unreachable, not answered. Fall through and navigate: the reader's own
+      // error is a better outcome than this drawer claiming a source is gone
+      // on the strength of a failed request.
+    }
+
+    if (documents !== null && !documents.some((document) => document.id === request.knowledgeDocumentId)) {
+      setGoneCitationDocumentIds((current) => new Set([...current, request.knowledgeDocumentId]));
+      return;
+    }
+
+    onOpenCitation(request);
+  }, [boardId, goneCitationDocumentIds, onOpenCitation]);
+
   const send = useCallback(async () => {
     const content = draft.trim();
     if (content.length === 0 || sending) return;
@@ -1140,6 +1197,25 @@ export default function BoardAiChatDrawer({
                       const citationLabel = boardAiCitationLabel(item);
                       const citedDocumentId = item.knowledgeDocumentId;
                       const chipClass = 'inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] leading-none';
+                      // THE SOURCE IS GONE. The citation itself is untouched --
+                      // it says what the answer used, which is still true --
+                      // but there is nothing to open, so the chip stops being a
+                      // button and says why rather than failing on click.
+                      if (citedDocumentId && goneCitationDocumentIds.has(citedDocumentId)) {
+                        return (
+                          <span
+                            key={citationKey}
+                            data-board-ai-chat-citation={citationKey}
+                            data-board-ai-chat-citation-gone="true"
+                            className={`${chipClass} border-gray-200 bg-gray-50 text-gray-400 line-through decoration-gray-300`}
+                            title={`${citationLabel} — this source has been deleted`}
+                          >
+                            <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{citationLabel}</span>
+                            <span className="shrink-0 no-underline">(deleted)</span>
+                          </span>
+                        );
+                      }
                       if (!onOpenCitation || !citedDocumentId) {
                         return (
                           <span
@@ -1163,10 +1239,10 @@ export default function BoardAiChatDrawer({
                           title={`Open ${citationLabel}`}
                           aria-label={`Open ${citationLabel}`}
                           className={`${chipClass} border-gray-200 text-blue-700 transition hover:border-blue-200 hover:bg-blue-50`}
-                          onClick={() => onOpenCitation({
+                          onClick={() => { void openCitation({
                             knowledgeDocumentId: citedDocumentId,
                             ...(item.pageNumber === undefined ? {} : { pageNumber: item.pageNumber }),
-                          })}
+                          }); }}
                         >
                           <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
                           <span className="truncate">{citationLabel}</span>

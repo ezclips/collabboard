@@ -108,6 +108,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const text = (data as { text?: unknown } | null)?.text;
       return typeof text === 'string' ? text : null;
     },
+    // Does the cited document still exist? Asked separately from the page text
+    // because a null page text cannot tell a deleted document apart from a
+    // page that was never extracted -- and until item 15 gave the product a
+    // per-document delete path, this distinction could barely arise. Now it
+    // can, and a source someone removed must not be reported as a message that
+    // failed verification. Read through the SAME authenticated client, so a
+    // document this user cannot see counts as gone for them.
+    async (sourceDocumentId) => {
+      const { data } = await supabase
+        .from('knowledge_documents')
+        .select('id')
+        .eq('id', sourceDocumentId)
+        .maybeSingle();
+      return data !== null;
+    },
   );
 
   if (!resolved.ok) {
@@ -149,5 +164,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
   }
 
-  return NextResponse.json({ referenceCount: resolved.references.length });
+  // `missingSources` is reported rather than inferred from a short reference
+  // count: "this answer cited three pages and two of those documents have since
+  // been deleted" is a different statement from "this answer cited one page",
+  // and only the first is true.
+  return NextResponse.json({
+    referenceCount: resolved.references.length,
+    missingSources: resolved.missingSourceDocumentIds.length,
+  });
 }

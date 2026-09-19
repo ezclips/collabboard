@@ -61,6 +61,23 @@ export default function KnowledgeExistingPdfPicker({
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [placingId, setPlacingId] = useState<string | null>(null);
   const [placeFailed, setPlaceFailed] = useState(false);
+  /**
+   * Removing one for good -- followups item 15.
+   *
+   * This chooser is where the delete control belongs because it is the only
+   * surface that shows a board's documents at all: the permanent Knowledge
+   * library PDF-C1 removed is not mounted anywhere. The comment at the top of
+   * this file describes a document stranded with "no way for anyone to reach it
+   * again"; until now the same was true of removing one.
+   *
+   * Two steps, because the deletion is irreversible and it cascades -- pages,
+   * chunks, references, highlights and embeddings go with the row, and the
+   * stored PDF goes with them. Arming one row disarms any other, so a mis-click
+   * beside a Place button cannot leave a primed control behind.
+   */
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteFailed, setDeleteFailed] = useState<string | null>(null);
 
   // Fetched on open, never polled: KnowledgePdfUploader already owns the only
   // poll over this endpoint, and a second timer would double the load for no
@@ -95,6 +112,38 @@ export default function KnowledgeExistingPdfPicker({
       setPlaceFailed(true);
     } finally {
       setPlacingId(null);
+    }
+  };
+
+  /**
+   * The row leaves the list only when the server says the document is gone. An
+   * optimistic removal would show a chooser missing a PDF the board still has,
+   * and the user's next move would be to upload it again.
+   */
+  const remove = async (documentId: string) => {
+    setDeletingId(documentId);
+    setDeleteFailed(null);
+    try {
+      const response = await fetch(
+        `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok) {
+        // Reports the server's refusal; it never predicts one. This chooser
+        // lists every document and lets the server decide.
+        setDeleteFailed(response.status === 403
+          ? 'You are not allowed to remove that PDF.'
+          : 'Could not remove that PDF.');
+        return;
+      }
+      setState((current) => (current.kind === 'loaded'
+        ? { ...current, documents: current.documents.filter((entry) => entry.id !== documentId) }
+        : current));
+      setConfirmingDeleteId(null);
+    } catch {
+      setDeleteFailed('Could not remove that PDF.');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -153,6 +202,67 @@ export default function KnowledgeExistingPdfPicker({
                       : document.pageCount === null ? '' : `${document.pageCount} pages`}
                   </span>
                 </button>
+                {/* LEFT-ALIGNED, UNDER THE ROW, AND THAT IS NOT COSMETIC. This
+                    popover is `w-72` anchored `right-0` and, with a wide tab
+                    strip, it renders partly beyond the right edge of the window
+                    -- measured at x=1824..2112 in a 1920px viewport, so its
+                    right two thirds are unreachable. A control at the row's
+                    trailing edge could not be clicked at all. Keeping it at the
+                    leading edge also matches the library surface.
+
+                    Offered in EVERY status, including `failed` and `Already on
+                    board`: a document that cannot be placed is exactly the one
+                    a user most wants to be rid of, and it is the one whose
+                    Place button is disabled. */}
+                {confirmingDeleteId !== document.id ? (
+                  <button
+                    type="button"
+                    data-existing-pdf-remove={document.id}
+                    aria-label={`Remove ${document.originalFilename}`}
+                    title={`Remove ${document.originalFilename}`}
+                    className="ml-2 mb-1 rounded text-[10px] text-gray-400 underline underline-offset-2 hover:text-red-700"
+                    onClick={() => { setConfirmingDeleteId(document.id); setDeleteFailed(null); }}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+                {confirmingDeleteId === document.id ? (
+                  <div
+                    data-existing-pdf-remove-confirm-row={document.id}
+                    className="mb-1 rounded bg-red-50 px-2 py-1"
+                  >
+                    {/* What it costs, said BEFORE the confirm rather than after. */}
+                    <p className="text-[10px] leading-snug text-gray-600">
+                      Delete this PDF, its extracted text and any highlights on it? Answers that
+                      cited it keep their citations, but the source can no longer be opened.
+                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-existing-pdf-remove-confirm={document.id}
+                        disabled={deletingId === document.id}
+                        className="text-[10px] font-medium text-red-700 underline underline-offset-2 disabled:text-gray-400 disabled:no-underline"
+                        onClick={() => { void remove(document.id); }}
+                      >
+                        {deletingId === document.id ? 'Removing…' : 'Delete permanently'}
+                      </button>
+                      <button
+                        type="button"
+                        data-existing-pdf-remove-cancel={document.id}
+                        disabled={deletingId === document.id}
+                        className="text-[10px] font-medium text-gray-600 underline underline-offset-2"
+                        onClick={() => { setConfirmingDeleteId(null); setDeleteFailed(null); }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {deleteFailed !== null ? (
+                      <p data-existing-pdf-remove-error={document.id} className="mt-0.5 text-[10px] text-red-700">
+                        {deleteFailed}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             );
           })}

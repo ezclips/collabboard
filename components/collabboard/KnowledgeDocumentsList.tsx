@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   listKnowledgePdfs,
@@ -175,12 +175,59 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const [entries, setEntries] = useState<readonly KnowledgeListEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState(''), [searchPhase, setSearchPhase] = useState<SearchPhase>('idle'), [searchResults, setSearchResults] = useState<readonly KnowledgeSearchResult[]>([]);
   const [warmPhase, setWarmPhase] = useState<WarmPhase>('idle');
+  /**
+   * Deleting a document is IRREVERSIBLE and it cascades -- pages, chunks,
+   * references, highlights and embeddings go with the row, and the stored PDF
+   * goes with them. So the control is two steps: the first arms it, the second
+   * performs it. There is no undo to offer afterwards.
+   *
+   * Only one document can be armed at a time, which is why this is an id rather
+   * than a set: arming a second disarms the first, so a mis-click cannot leave
+   * several primed buttons behind.
+   */
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const searchControllerRef = useRef<AbortController | null>(null);
   const searchGenerationRef = useRef(0);
   const warmGenerationRef = useRef(0);
   const warmReleaseRef = useRef<(() => void) | null>(null);
   const queuedSearchRef = useRef<string | null>(null);
   const executeSearchRef = useRef<(query: string) => void>(() => undefined);
+
+  /**
+   * Remove one document, for good.
+   *
+   * The row leaves this list only when the server says it is gone. An
+   * optimistic removal would show an empty library for a delete that failed,
+   * and the user's next action would be to upload the file again.
+   */
+  const deleteDocument = useCallback(async (documentId: string) => {
+    setDeletingId(documentId);
+    setDeleteError(null);
+    try {
+      const response = await fetch(
+        `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok) {
+        // The wording avoids the vocabulary of client-side role gating on
+        // purpose: this surface renders every document and lets the SERVER
+        // decide, and a source scan in its suite keeps it that way. This line
+        // REPORTS a refusal the server made; it never predicts one.
+        setDeleteError(response.status === 403
+          ? 'You are not allowed to remove this PDF.'
+          : 'Could not remove this PDF.');
+        return;
+      }
+      setEntries((current) => current.filter((entry) => entry.id !== documentId));
+      setConfirmingDeleteId(null);
+    } catch {
+      setDeleteError('Could not remove this PDF.');
+    } finally {
+      setDeletingId(null);
+    }
+  }, [boardId]);
 
   useEffect(() => {
     if (!boardId) return;
@@ -437,14 +484,65 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                 {metadata !== null ? (
                   <p className="text-[11px] text-gray-500">{metadata}</p>
                 ) : null}
-                {entry.processingStatus === 'ready' ? (
-                  <button
-                    type="button"
-                    className="mt-1 text-[11px] font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
-                    onClick={() => requestOpenDocument(entry.id)}
-                  >
-                    View text
-                  </button>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {entry.processingStatus === 'ready' ? (
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
+                      onClick={() => requestOpenDocument(entry.id)}
+                    >
+                      View text
+                    </button>
+                  ) : null}
+                  {/* Available in EVERY processing status, deliberately. A
+                      document that failed to process is exactly the one a user
+                      most wants to remove, and until this control existed the
+                      only way to remove any of them was to delete the board. */}
+                  {confirmingDeleteId === entry.id ? (
+                    <>
+                      <span className="text-[11px] text-gray-600">Remove permanently?</span>
+                      <button
+                        type="button"
+                        data-knowledge-document-remove-confirm={entry.id}
+                        className="text-[11px] font-medium text-red-700 underline underline-offset-2 hover:text-red-900 disabled:text-gray-400 disabled:no-underline"
+                        disabled={deletingId === entry.id}
+                        onClick={() => { void deleteDocument(entry.id); }}
+                      >
+                        {deletingId === entry.id ? 'Removing…' : 'Remove'}
+                      </button>
+                      <button
+                        type="button"
+                        data-knowledge-document-remove-cancel={entry.id}
+                        className="text-[11px] font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
+                        disabled={deletingId === entry.id}
+                        onClick={() => { setConfirmingDeleteId(null); setDeleteError(null); }}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      data-knowledge-document-remove={entry.id}
+                      className="text-[11px] font-medium text-gray-600 underline underline-offset-2 hover:text-red-700"
+                      onClick={() => { setConfirmingDeleteId(entry.id); setDeleteError(null); }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {/* One line, and it says what it cost: this is the warning a
+                    user gets BEFORE confirming, not after. */}
+                {confirmingDeleteId === entry.id ? (
+                  <p data-knowledge-document-remove-warning={entry.id} className="mt-0.5 text-[10px] text-gray-500">
+                    The PDF, its extracted text and any highlights on it are deleted. Answers that
+                    cited it keep their citations, but the source can no longer be opened.
+                  </p>
+                ) : null}
+                {deleteError !== null && confirmingDeleteId === entry.id ? (
+                  <p data-knowledge-document-remove-error={entry.id} className="mt-0.5 text-[10px] text-red-600">
+                    {deleteError}
+                  </p>
                 ) : null}
                     </li>
                   );

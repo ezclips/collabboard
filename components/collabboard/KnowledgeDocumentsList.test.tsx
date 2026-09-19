@@ -1005,3 +1005,106 @@ describe('P6J-F7-B1 single reader ownership', () => {
     expect(sidebarCode).not.toContain('data-knowledge-trigger="true"');
   });
 });
+
+/**
+ * REMOVING ONE PDF -- followups item 15.
+ *
+ * Until this control existed, a Knowledge document could be created by anyone
+ * who could upload and removed by nobody: `knowledgeDeletion` was reachable
+ * only by deleting the whole BOARD. Chat upload made it worse, because a PDF
+ * added from the chat drawer has no canvas card either.
+ *
+ * The deletion is irreversible and it cascades -- pages, chunks, references,
+ * highlights and embeddings go with the row, and the stored PDF goes with them
+ * -- so the control is armed before it fires, and it says what it costs first.
+ */
+describe('removing one document', () => {
+  const removeButton = (container: HTMLElement, id = 'doc-1') =>
+    container.querySelector(`[data-knowledge-document-remove="${id}"]`) as HTMLButtonElement | null;
+  const confirmButton = (container: HTMLElement, id = 'doc-1') =>
+    container.querySelector(`[data-knowledge-document-remove-confirm="${id}"]`) as HTMLButtonElement | null;
+
+  const press = async (button: HTMLElement) => {
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flushMicrotasks();
+  };
+
+  it('offers Remove on every document, and asks before doing anything', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+
+    expect(removeButton(container)).not.toBeNull();
+    expect(confirmButton(container)).toBeNull();
+
+    await press(removeButton(container)!);
+
+    expect(container.textContent).toContain('Remove permanently?');
+    expect(confirmButton(container)).not.toBeNull();
+    // Arming must not have deleted anything.
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+
+  it('states the cost BEFORE the confirm, including what happens to citations', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    await press(removeButton(container)!);
+
+    const warning = container.querySelector('[data-knowledge-document-remove-warning="doc-1"]');
+    expect(warning).not.toBeNull();
+    expect(warning!.textContent).toContain('highlights');
+    // The citation decision, said plainly where the user can act on it.
+    expect(warning!.textContent).toContain('keep their citations');
+  });
+
+  it('DELETEs the per-document endpoint and drops the row on success', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'DELETE'
+        ? jsonResponse({ deleted: true, storageCleanup: { status: 'complete', attempted: 1, failed: 0 } })
+        : jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    await press(removeButton(container)!);
+    await press(confirmButton(container)!);
+
+    const call = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
+    expect(call).toBeTruthy();
+    expect(String(call![0])).toBe(`/api/boards/${BOARD_ID}/knowledge/doc-1`);
+    expect(container.textContent).not.toContain('EMG_checklist.pdf');
+  });
+
+  it('KEEPS the row when the delete failed, rather than showing an empty library', async () => {
+    // An optimistic removal would show a library that lost a file it still
+    // has, and the user's next move would be to upload it again.
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'DELETE'
+        ? jsonResponse({ error: 'Forbidden' }, 403)
+        : jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    await press(removeButton(container)!);
+    await press(confirmButton(container)!);
+
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    const error = container.querySelector('[data-knowledge-document-remove-error="doc-1"]');
+    expect(error!.textContent).toContain('not allowed');
+  });
+
+  it('can cancel, leaving the document and the list untouched', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    await press(removeButton(container)!);
+    await press(container.querySelector('[data-knowledge-document-remove-cancel="doc-1"]') as HTMLElement);
+
+    expect(container.textContent).not.toContain('Remove permanently?');
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+
+  it('offers Remove for a document that FAILED to process', async () => {
+    // The one a user most wants gone, and the one with no "View text" to sit
+    // beside. Before this control there was no way to remove it at all.
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc({ processingStatus: 'failed' })] }));
+    const container = await renderList();
+
+    expect(container.textContent).not.toContain('View text');
+    expect(removeButton(container)).not.toBeNull();
+  });
+});

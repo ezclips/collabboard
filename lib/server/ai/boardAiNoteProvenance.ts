@@ -45,7 +45,16 @@ export type BoardAiNoteProvenanceFailure =
   | 'span_unresolvable';
 
 export type BoardAiNoteProvenanceResult =
-  | { readonly ok: true; readonly references: readonly ProvenReferenceInput[] }
+  | {
+    readonly ok: true;
+    readonly references: readonly ProvenReferenceInput[];
+    /**
+     * Cited documents that no longer exist. Distinct from `references` being
+     * short for any other reason, so a caller can say "two of the sources this
+     * answer used have since been deleted" rather than silently showing fewer.
+     */
+    readonly missingSourceDocumentIds: readonly string[];
+  }
   | { readonly ok: false; readonly reason: BoardAiNoteProvenanceFailure };
 
 /** Reads the authoritative page text, or null when it cannot be read. */
@@ -53,6 +62,19 @@ export type AuthoritativePageTextReader = (
   sourceDocumentId: string,
   pageNumber: number,
 ) => Promise<string | null>;
+
+/**
+ * Does the cited document still exist for this reader?
+ *
+ * SEPARATE FROM `readPageText` ON PURPOSE. A null page text is ambiguous -- a
+ * deleted document, a page that was never extracted and a page the reader may
+ * not see all produce it -- and the three deserve different answers. This asks
+ * the one question whose answer is unambiguous, so that "the source is gone"
+ * can stop being reported as "this message could not be verified".
+ */
+export type CitedSourceExistenceReader = (
+  sourceDocumentId: string,
+) => Promise<boolean>;
 
 /**
  * The proof-carrying half of a stored envelope.
@@ -88,17 +110,34 @@ function storedProof(citations: unknown): unknown {
  *
  * An answer with no proven citations returns an empty list. That is a success:
  * the Note saves unsourced.
+ *
+ * A CITED SOURCE THAT NO LONGER EXISTS IS SKIPPED, NOT FATAL -- and that is a
+ * different rule from the one above it, not a weakening of it. A reference the
+ * write command REJECTS is still an integrity failure and still refuses the
+ * whole Note; a forged or unsigned envelope is still a flat refusal. What
+ * changed is that a document someone deleted afterwards is neither of those.
+ * The answer citing it was true when it was written, and the only thing that
+ * cannot be produced now is a link to a row that is gone. Failing the save
+ * would tell the user their answer was untrustworthy because someone tidied up
+ * a PDF -- which is both false and unactionable.
+ *
+ * `sourceExists` is OPTIONAL, and its absence means "nothing is known to be
+ * gone": every citation is treated as live and the pre-existing failures stand.
+ * A caller that cannot check must not get a silently more permissive result.
  */
 export async function resolveProvenNoteReferences(
   message: StoredAssistantMessage | null,
   readPageText: AuthoritativePageTextReader,
+  sourceExists?: CitedSourceExistenceReader,
 ): Promise<BoardAiNoteProvenanceResult> {
   if (!message) return { ok: false, reason: 'message_not_found' };
   if (message.role !== 'assistant') return { ok: false, reason: 'not_assistant' };
 
   // No citations at all is not a failure: the answer cited nothing.
   const sanitized: BoardAiCitationEnvelope | null = boardAiCitationsFromStored(message.citations);
-  if (!sanitized || sanitized.items.length === 0) return { ok: true, references: [] };
+  if (!sanitized || sanitized.items.length === 0) {
+    return { ok: true, references: [], missingSourceDocumentIds: [] };
+  }
 
   const verified = verifyBoardAiProvenanceProof(
     {
@@ -116,8 +155,37 @@ export async function resolveProvenNoteReferences(
 
   const evidence = boardAiNoteEvidenceFromCitations(sanitized);
   const references: ProvenReferenceInput[] = [];
+  const missingSourceDocumentIds: string[] = [];
+  // One answer commonly cites several pages of the SAME document, so the
+  // existence question is asked once per document rather than once per page.
+  const existenceByDocumentId = new Map<string, boolean>();
+
+  async function documentStillExists(sourceDocumentId: string): Promise<boolean> {
+    if (!sourceExists) return true;
+    const cached = existenceByDocumentId.get(sourceDocumentId);
+    if (cached !== undefined) return cached;
+    let exists: boolean;
+    try {
+      exists = await sourceExists(sourceDocumentId);
+    } catch {
+      // A probe that could not answer must not be read as "gone". Treating an
+      // outage as a deletion would quietly strip provenance from Notes for as
+      // long as the outage lasted, and those Notes would look deliberately
+      // unsourced afterwards.
+      exists = true;
+    }
+    existenceByDocumentId.set(sourceDocumentId, exists);
+    return exists;
+  }
 
   for (const item of evidence) {
+    if (!(await documentStillExists(item.sourceDocumentId))) {
+      if (!missingSourceDocumentIds.includes(item.sourceDocumentId)) {
+        missingSourceDocumentIds.push(item.sourceDocumentId);
+      }
+      continue;
+    }
+
     if (item.charStart === null || item.charEnd === null) {
       // Page-level: the write command re-authorizes the page itself.
       references.push({
@@ -155,5 +223,5 @@ export async function resolveProvenNoteReferences(
     });
   }
 
-  return { ok: true, references };
+  return { ok: true, references, missingSourceDocumentIds };
 }

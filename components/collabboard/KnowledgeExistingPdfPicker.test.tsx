@@ -264,3 +264,108 @@ describe('1/2/10/11/12. wiring and negative controls', () => {
     }
   });
 });
+
+/**
+ * REMOVING A PDF FOR GOOD -- followups item 15.
+ *
+ * The control lives here because this chooser is the ONLY mounted surface that
+ * lists a board's Knowledge documents: PDF-C1 removed the permanent library's
+ * launcher and `KnowledgeDocumentsList` is not rendered anywhere. This file's
+ * own header describes a document stranded with "no way for anyone to reach it
+ * again" -- the same had been true of removing one, on every surface.
+ */
+describe('removing one PDF for good', () => {
+  const press = async (element: HTMLElement | null) => {
+    await act(async () => { element!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  };
+  const find = (selector: string) => host!.querySelector(selector) as HTMLElement | null;
+
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const stubFetch = (response: () => Response) => {
+    fetchMock = vi.fn(async () => response());
+    vi.stubGlobal('fetch', fetchMock);
+  };
+  const okDelete = () => new Response(
+    JSON.stringify({ deleted: true, storageCleanup: { status: 'complete', attempted: 1, failed: 0 } }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('asks before deleting, and arming deletes nothing', async () => {
+    stubFetch(okDelete);
+    await render({ listDocuments: vi.fn().mockResolvedValue([doc({ id: 'ready-1' })]) as never });
+
+    await press(find('[data-existing-pdf-remove="ready-1"]'));
+
+    expect(find('[data-existing-pdf-remove-confirm="ready-1"]')).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('says what it costs, citations included, before the confirm', async () => {
+    stubFetch(okDelete);
+    await render({ listDocuments: vi.fn().mockResolvedValue([doc({ id: 'ready-1' })]) as never });
+    await press(find('[data-existing-pdf-remove="ready-1"]'));
+
+    const row = find('[data-existing-pdf-remove-confirm-row="ready-1"]')!;
+    expect(row.textContent).toContain('highlights');
+    expect(row.textContent).toContain('keep their citations');
+  });
+
+  it('DELETEs the per-document endpoint and drops the row', async () => {
+    stubFetch(okDelete);
+    await render({ listDocuments: vi.fn().mockResolvedValue([doc({ id: 'ready-1' })]) as never });
+    await press(find('[data-existing-pdf-remove="ready-1"]'));
+    await press(find('[data-existing-pdf-remove-confirm="ready-1"]'));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/boards/${BOARD}/knowledge/ready-1`,
+      { method: 'DELETE' },
+    );
+    expect(find('[data-existing-pdf-id="ready-1"]')).toBeNull();
+  });
+
+  it('keeps the row and reports when the server refuses', async () => {
+    stubFetch(() => new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 }));
+    await render({ listDocuments: vi.fn().mockResolvedValue([doc({ id: 'ready-1' })]) as never });
+    await press(find('[data-existing-pdf-remove="ready-1"]'));
+    await press(find('[data-existing-pdf-remove-confirm="ready-1"]'));
+
+    // An optimistic removal would show a chooser missing a PDF the board still
+    // has, and the user would upload it again.
+    expect(find('[data-existing-pdf-id="ready-1"]')).not.toBeNull();
+    expect(find('[data-existing-pdf-remove-error="ready-1"]')!.textContent).toContain('not allowed');
+  });
+
+  it('cancels without touching anything', async () => {
+    stubFetch(okDelete);
+    await render({ listDocuments: vi.fn().mockResolvedValue([doc({ id: 'ready-1' })]) as never });
+    await press(find('[data-existing-pdf-remove="ready-1"]'));
+    await press(find('[data-existing-pdf-remove-cancel="ready-1"]'));
+
+    expect(find('[data-existing-pdf-remove-confirm-row="ready-1"]')).toBeNull();
+    expect(find('[data-existing-pdf-id="ready-1"]')).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('offers Remove for a document that cannot be placed at all', async () => {
+    // A failed document's Place button is disabled, so before this control it
+    // was visible, useless and permanent.
+    stubFetch(okDelete);
+    await render({
+      listDocuments: vi.fn().mockResolvedValue([doc({ id: 'broken-1', processingStatus: 'failed' })]) as never,
+    });
+    expect(find('[data-existing-pdf-remove="broken-1"]')).not.toBeNull();
+  });
+
+  it('never deletes the document it was asked to PLACE', async () => {
+    stubFetch(okDelete);
+    const { onPlace, rowFor } = await render({
+      listDocuments: vi.fn().mockResolvedValue([doc({ id: 'ready-1' })]) as never,
+    });
+    await press(rowFor('ready-1'));
+    expect(onPlace).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

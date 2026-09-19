@@ -80,6 +80,7 @@ describe('a genuine signed message yields provenance', () => {
         sourceDocumentId: DOC_A, pageStart: 5, pageEnd: 5,
         quoteText: null, charStart: null, charEnd: null, selectedText: null,
       }],
+      missingSourceDocumentIds: [],
     });
     // A page citation needs no page text.
     expect(pageReader).not.toHaveBeenCalled();
@@ -116,7 +117,7 @@ describe('a genuine signed message yields provenance', () => {
       id: 'msg-1', threadId: 'thread-1', boardId: 'board-1',
       role: 'assistant', content: 'the answer', citations: null,
     };
-    expect(await resolveProvenNoteReferences(unsourced, pageReader)).toEqual({ ok: true, references: [] });
+    expect(await resolveProvenNoteReferences(unsourced, pageReader)).toEqual({ ok: true, references: [], missingSourceDocumentIds: [] });
   });
 });
 
@@ -220,7 +221,7 @@ describe('a message the server did not sign yields NO provenance', () => {
         { id: 'm', threadId: 't', boardId: 'b', role: 'assistant', content: 'c', citations: bad },
         pageReader,
       );
-      expect(result, JSON.stringify(bad)).toEqual({ ok: true, references: [] });
+      expect(result, JSON.stringify(bad)).toEqual({ ok: true, references: [], missingSourceDocumentIds: [] });
     }
   });
 });
@@ -238,5 +239,92 @@ describe('Q. a proven citation whose source is gone fails closed', () => {
     // Silently degrading an exact citation to page-only would misstate what
     // the answer actually used.
     expect(result).toEqual({ ok: false, reason: 'span_unresolvable' });
+  });
+});
+
+/**
+ * R. A DELETED SOURCE IS NOT A FAILED VERIFICATION -- followups item 15.
+ *
+ * Before the product had a per-document delete path this could barely happen.
+ * Now it can, and the two outcomes it used to produce were both wrong: a span
+ * citation returned `source_unavailable` (a 403 reading "provenance could not
+ * be verified", which accuses the message of being forged) and a page citation
+ * reached the write command and was rejected (a 422 that rolled the Note back).
+ * Either way the user lost their Note because somebody tidied up a PDF.
+ */
+describe('R. a cited document that has since been deleted', () => {
+  const gone = vi.fn(async () => false);
+  const present = vi.fn(async () => true);
+
+  it('is skipped rather than failing the save, and is reported', async () => {
+    const result = await resolveProvenNoteReferences(genuine([pageItem]), pageReader, gone);
+    expect(result).toEqual({ ok: true, references: [], missingSourceDocumentIds: [DOC_A] });
+  });
+
+  it('skips the deleted source and KEEPS the ones that still resolve', async () => {
+    const pageB = { type: 'knowledge-page', knowledgeDocumentId: DOC_B, pageNumber: 2, label: 'p. 2' };
+    const onlyADeleted = vi.fn(async (documentId: string) => documentId !== DOC_A);
+
+    const result = await resolveProvenNoteReferences(genuine([pageItem, pageB]), pageReader, onlyADeleted);
+
+    expect(result.ok).toBe(true);
+    const value = result as unknown as {
+      references: readonly { sourceDocumentId: string }[];
+      missingSourceDocumentIds: readonly string[];
+    };
+    expect(value.references.map((r) => r.sourceDocumentId)).toEqual([DOC_B]);
+    expect(value.missingSourceDocumentIds).toEqual([DOC_A]);
+  });
+
+  it('never reads page text for a document it already knows is gone', async () => {
+    // A span citation would otherwise read a page of a deleted document and
+    // report source_unavailable -- the accusation this case exists to remove.
+    pageReader.mockClear();
+    const result = await resolveProvenNoteReferences(genuine([selectionItem]), pageReader, gone);
+    expect(result.ok).toBe(true);
+    expect(pageReader).not.toHaveBeenCalled();
+  });
+
+  it('asks once per document, not once per cited page', async () => {
+    const probe = vi.fn(async () => true);
+    const secondPage = { type: 'knowledge-page', knowledgeDocumentId: DOC_A, pageNumber: 6, label: 'p. 6' };
+    await resolveProvenNoteReferences(genuine([pageItem, secondPage]), pageReader, probe);
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a probe that THREW as present, so an outage cannot strip provenance', async () => {
+    // Reading an outage as a deletion would quietly unsource every Note saved
+    // while it lasted, and they would look deliberately unsourced afterwards.
+    const broken = vi.fn(async () => { throw new Error('down'); });
+    const result = await resolveProvenNoteReferences(genuine([pageItem]), pageReader, broken);
+    expect(result).toEqual({
+      ok: true,
+      references: [{
+        sourceDocumentId: DOC_A, pageStart: 5, pageEnd: 5,
+        quoteText: null, charStart: null, charEnd: null, selectedText: null,
+      }],
+      missingSourceDocumentIds: [],
+    });
+  });
+
+  it('with NO probe supplied, the pre-existing failures stand unchanged', async () => {
+    // The absence of a reader means "nothing is known to be gone". A caller
+    // that cannot check must not get a silently more permissive result.
+    const unreadable = vi.fn(async () => null);
+    expect(await resolveProvenNoteReferences(genuine([selectionItem]), unreadable))
+      .toEqual({ ok: false, reason: 'source_unavailable' });
+  });
+
+  it('still refuses a FORGED envelope whose sources are all gone', async () => {
+    // Integrity outranks the gone state: the skip must never become a way to
+    // launder an unsigned message into a successful save.
+    const forged = {
+      id: 'msg-1', threadId: 'thread-1', boardId: 'board-1', role: 'assistant',
+      content: 'the answer',
+      citations: { version: 1, items: [pageItem] },
+    } as unknown as StoredAssistantMessage;
+    expect(await resolveProvenNoteReferences(forged, pageReader, gone))
+      .toEqual({ ok: false, reason: 'unsigned_or_forged' });
+    expect(present).not.toHaveBeenCalled();
   });
 });

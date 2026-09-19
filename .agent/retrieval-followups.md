@@ -477,6 +477,16 @@ repository — no test, no doc, no comment. The thread id came from a chat sessi
 and the investigation was never written down. **Do not go looking for it**; that
 is the cost of the gap, not a task.
 
+**CORRECTION, 2026-09-19: the id is not gone, only the INVESTIGATION is.**
+`8ebbe969` resolves in the database — a `board_ai_threads` row with one message,
+created 2026-09-17 21:48 UTC, on the reference board. The sentence above was
+true of the repository and wrong about the world, and the difference matters:
+"the record is gone" invites nobody to look, while "the thread is still there
+and nobody wrote down what it showed" is an accurate description of what was
+lost. The row is left untouched. It is the last trace of the gate this item
+closed by measurement rather than archaeology, and the measurement did not need
+it.
+
 **What the live runs have shown since — and this is INFERENCE, not the
 diagnosis.** Search is bounded separately at `BOARD_AI_SEARCH_TIMEOUT_MS = 3_000`
 and does not consume the generation clock. q04 completed end to end in **4.5s**.
@@ -1103,3 +1113,107 @@ should be decided once rather than implied by whoever writes the route.
 **The signal that makes it urgent:** the first user who uploads a PDF to the chat
 drawer by mistake — a wrong file, a private one — and asks how to remove it. The
 honest answer today is "delete the board".
+
+### CLOSED — shipped, and the domain was already written
+
+**The function existed the whole time.** `deleteKnowledgeDocument` was
+implemented, unit-tested and integration-tested, with authorization, the row
+delete and the Storage cleanup all in place — and it had **zero production
+callers**. Board deletion called its sibling; nothing called it. So this unit
+added no deletion logic at all. It added the three things that were missing: an
+address, a control, and an answer for the two consumers of a citation whose
+source is gone.
+
+**The HTTP edge**, on the highlight route's shape: a handler factory in
+`lib/server/knowledge/knowledgeDocumentDeleteRoute.ts`, a session factory beside
+it, and `app/api/boards/[id]/knowledge/[documentId]/route.ts` binding the two.
+The first write path this resource has ever had; everything under that segment
+was a read.
+
+**One check the domain could not make.** `deleteKnowledgeDocument` authorizes
+against the document's OWN board, which is what makes it safe — but the URL's
+board would otherwise be decoration, and an editor of two boards could delete
+B's document through A's address. The session verifies the scope first and
+answers **not_found** on a mismatch, because "forbidden" would confirm the id
+exists somewhere the caller cannot see. A failed lookup is `unavailable`, never
+"not there": an outage must not read as a completed delete.
+
+**A partial Storage cleanup is a 200, not an error.** Cleanup runs after the
+authoritative row delete and continues past an individual failure, so `partial`
+means the row is gone and an object was left behind. The client cannot fix that
+and must not retry — the document no longer exists to delete — so the response
+carries the fact and counts, never paths.
+
+### Where the control went, and why it is not where this item said
+
+The item named `KnowledgeDocumentsList`. **That component is not mounted
+anywhere**: PDF-C1 removed its launcher and nothing renders it. A control added
+there would have been unreachable, which is the same defect in a new costume.
+
+The control therefore lives in **`KnowledgeExistingPdfPicker`** — the only
+mounted surface that lists a board's documents — and also in the library list,
+for the day it returns. Two steps in both, with the cost stated before the
+confirm rather than after, and offered in **every** processing status: a
+document stuck in `failed` is the one a user most wants gone and the one whose
+Place button is disabled. The board carries three of them today.
+
+**A layout defect found by the live pass, and worked around rather than fixed.**
+The chooser is a fixed `w-72` popover anchored `right-0`; with a wide tab strip
+it renders at x=1824..2112 in a 1920px window, so **its right two thirds are off
+the screen**. A control at the row's trailing edge cannot be clicked at all —
+which is how this was found. The Remove control sits at the LEADING edge for
+that reason, and the comment in the file says so. **The overflow itself is
+pre-existing and still there**: the popover's width and anchoring are untouched
+by this work. It deserves its own fix.
+
+### The citation decision, and the two consumers that now implement it
+
+**Leave them. Do not scrub.** A stored citation is a true statement about the
+past, and `board_ai_messages.citations` is inside the provenance HMAC — so
+scrubbing a citation would invalidate the signature of the very message it was
+tidying. The delete path has no `board_ai_messages` write available to it.
+
+**Save-as-Note** used to punish the user for someone else's cleanup. A span
+citation to a deleted document returned `source_unavailable` — a 403 reading
+"provenance could not be verified", which accuses the message of being forged —
+and a page citation reached the write command and was rejected with a 422 that
+rolled the Note back. Now a cited document that no longer exists is **skipped**
+and **reported** (`missingSources`), and the Note saves with whatever still
+resolves. This is a new rule beside the integrity rules, not a weakening of
+them: a rejected reference still refuses the whole Note, and a forged envelope
+is still a flat refusal even when all its sources are gone. Existence is asked
+separately from page text, because a null page text cannot tell a deletion from
+an unextracted page; it is asked once per document; and a probe that THREW
+counts as present, so an outage cannot quietly unsource every Note saved while
+it lasts.
+
+**The reader** used to be worse than useless: clicking a dead citation closed
+the chat drawer, handed the dock to a reader that could not load, and cost the
+user their conversation. The check now happens before navigation, against the
+board's own already-authorized document list, and a dead citation changes one
+chip and nothing else. The chip keeps its label — the answer did use that page —
+stops being a button, and says `(deleted)`. The gone state is keyed by DOCUMENT,
+so one click settles every page cited from it. An unanswered probe navigates
+anyway: the reader's own error beats this drawer declaring a source dead on a
+failed request.
+
+### Verified live, 2026-09-19, on the reference board
+
+- **The gone state, on citations that were already dangling.** The board carried
+  three chips citing `simple-text.pdf` — Unit 3 documents deleted afterwards,
+  the exact dangling state this item recorded, occurring naturally. One click
+  flipped **two** of them (both cite the same document), text
+  `simple-text.pdf (deleted)`, `SPAN` not `BUTTON` — and the drawer stayed open
+  with no reader opening.
+- **The delete, end to end through the real UI**, twice, on throwaway uploads:
+  armed with 23 rows listed and 23 still listed while armed (arming deletes
+  nothing), then confirmed. Row detached; 22 remaining.
+- **At the data layer**, for both: document row gone, `knowledge_pages` 0,
+  `knowledge_chunks` 0, and **every Storage path empty** — root, `pages/` and
+  `extraction/`. The blob leak this item specified is closed by the product path
+  rather than by hand.
+
+**Still open, and deliberately not done here:** the reader has no not-found
+state of its OWN. The drawer refuses to navigate to a deleted source, which
+covers the path a user actually takes; a reader opened by any other route at a
+document that vanished mid-session is not addressed.
