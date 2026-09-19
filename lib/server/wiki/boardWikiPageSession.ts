@@ -273,8 +273,19 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
           sources,
           updated_by: userId,
           updated_at: new Date().toISOString(),
-          // STAMPED ONLY WHEN A PROPOSAL WAS ACTUALLY APPLIED, and derived by
-          // the server from the fact that it resolved one -- never sent. The
+          // STAMPED WHEN THE SAVE CARRIES AN APPLIED-PROPOSAL REFERENCE -- on
+          // the REFERENCE, deliberately, not on the row resolving.
+          //
+          // The two differ in exactly one case and it is a legitimate one:
+          // apply P1, recompile (which deletes P1), then save. No row is left
+          // to resolve, but a compilation really did reach this page, and
+          // stamping only on resolution would silently under-report that. The
+          // cost is that a forged id can stamp a metadata column on a page the
+          // caller can already edit -- it moves no version, since those still
+          // come off a row that must exist -- which is the acceptable side of
+          // the trade.
+          //
+          // The value is the server's clock and is never sent. The
           // column had no writer at all until now, so a compiled page reported
           // "compiled: false", which is a lie the moment anything renders "last
           // compiled". A plain text edit leaves it untouched: the page's
