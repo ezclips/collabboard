@@ -159,6 +159,19 @@ function parseSource(raw: unknown): BoardWikiPageSource | null {
   return { item, version };
 }
 
+/**
+ * One citation item, read from untrusted input.
+ *
+ * Exported because the save path validates a chain of IDENTITIES with no
+ * versions attached -- the client is not allowed to assert a version, so it
+ * cannot send the `{item, version}` pair `boardWikiPageSourcesFromStored`
+ * expects. Same parser either way, so the two paths cannot diverge on what
+ * counts as an item.
+ */
+export function boardWikiCitationItemFromStored(raw: unknown): BoardAiCitationItem | null {
+  return parseItem(raw);
+}
+
 function parseItem(raw: unknown): BoardAiCitationItem | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const entry = raw as Record<string, unknown>;

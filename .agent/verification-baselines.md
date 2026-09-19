@@ -70,6 +70,77 @@ One of these is not an assertion failure and should not be read as one:
 or supabaseUrl and supabaseKey are required`. It is environment-dependent, not a
 code failure.
 
+### The 56 baseline failing test NAMES
+
+Recorded 2026-09-19 during wiki Unit 2, because the rule above could not be
+obeyed without them: the report must diff a touched file's failing test names,
+and there was nothing to diff against. Unit 2 touched `CanvasClient.tsx`, which
+**15 of the 26 files above read** — exactly the case the rule was written for,
+and exactly the case the file set is blind to.
+
+The 57th line below is the suite-load failure, not a test.
+
+```
+components/collabboard/KnowledgeExistingPdfPicker.test.tsx > 1/2/10/11/12. wiring and negative controls > 1. Add PDF keeps its native label activation
+components/collabboard/KnowledgeExistingPdfPicker.test.tsx > 1/2/10/11/12. wiring and negative controls > 10. both entry points share one placement authority
+components/collabboard/KnowledgeExistingPdfPicker.test.tsx > 1/2/10/11/12. wiring and negative controls > 2. Use existing PDF is a plain tool under the same layout gate
+components/collabboard/KnowledgeExistingPdfPicker.test.tsx > 1/2/10/11/12. wiring and negative controls > 2b. the chooser is withheld from viewers and unsupported layouts
+components/collabboard/KnowledgePdfCanvasSurface.test.tsx > 1. the old Knowledge launcher is gone, Add PDF stays > keeps Add PDF and its hidden picker
+components/collabboard/KnowledgePdfCanvasSurface.test.tsx > R2. external draft placement is isolated from editor state > 1 + 2. an external draft declares isNewPost itself, so an open editor cannot suppress it
+components/collabboard/KnowledgePdfCanvasSurface.test.tsx > R2. external draft placement is isolated from editor state > 3 + 4. parent/section come from the draft, never from the editor
+components/collabboard/KnowledgePdfCanvasSurface.test.tsx > R2. external draft placement is isolated from editor state > 5 + 6. editor-driven saves keep the padletToEdit-derived behaviour
+components/collabboard/KnowledgePdfUploader.test.tsx > P6C Knowledge PDF upload client > registers Add PDF as a distinct Media action without replacing Document
+components/collabboard/KnowledgeSourceRegionCrop.test.tsx > P6J-F9-C2 KnowledgeSourceRegionCrop > C15: the src carries no query string, and the props/url carry no page/document/region/rotation authority
+components/collabboard/containerResizeB3.characterization.test.tsx > PATCH POST-RESIZE-B3.A: frozen boundaries (negative controls H/I/J) > negative control I: the B1/B2 generic resize capability matrix is untouched by this characterization patch
+components/collabboard/documentReadRoutingAllHosts.architecture.test.tsx > PATCH 9D.1: architecture guards > CanvasClient.tsx openDocumentFromPreview remains the single canonical function every layout host is wired to
+components/collabboard/editors/DocumentEditor.readonly.test.tsx > DocumentEditor read-only (PATCH-149B1b-i) > has an accessible Close control; Close and backdrop invoke onClose only, never onSave
+components/collabboard/editors/DocumentEditor.test.tsx > DocumentEditor editable (PATCH-149B1b-i) > clean backdrop closes immediately; dirty backdrop saves then closes; inner clicks never trigger it
+components/collabboard/editors/DocumentEditor.test.tsx > PATCH-152: Freeform creation flow -- close always saves, never confirms > a blank untouched new draft closes without saving on Close/backdrop/Escape
+components/collabboard/editors/NoteEditor.characterization.test.tsx > NoteEditor current save-on-close lifecycle (characterized, not corrected) > backdrop click saves then closes, in that order, and the save does persist
+components/collabboard/editors/NoteEditor.characterization.test.tsx > NoteEditor current save-on-close lifecycle (characterized, not corrected) > save callback carries content/style/reaction fields plus title (a top-level padlet field, added for the ghost-placeholder title bar) — still no metadata
+components/collabboard/editors/NoteEditor.characterization.test.tsx > PATCH 8P.1: canonical Comments-panel title/style wiring (MANAGE) > opening and closing without any edit produces an unchanged commentTitle/commentTitleStyle in the onSave payload
+components/collabboard/editors/NoteEditor.characterization.test.tsx > PATCH 8P.1: canonical Comments-panel title/style wiring (MANAGE) > title and title-style persist through close/reopen (survive the onSave payload)
+components/collabboard/editors/NoteEditor.characterization.test.tsx > PATCH 8P.1: real authenticated identity for new detached comments > historical comments already persisted with userId "user1" are left completely untouched
+components/collabboard/editors/NoteEditor.characterization.test.tsx > PATCH 8P.1: real authenticated identity for new detached comments > the onSave payload for a new comment carries the real currentUserId, never the "user1" placeholder
+components/collabboard/freeformFullViewFrame.test.tsx > PATCH FULLVIEW-FRAME-R1: AI Component Reactions Row and minHeight floor > AI content-derived height (no boxManualHeight/needsContentScroll for ai-component) is untouched
+components/collabboard/freeformPdfInteractions.test.tsx > 1-4. Add PDF works from the element a person clicks > 1. Freeform renders a visible Add PDF control
+components/collabboard/freeformPdfInteractions.test.tsx > 1-4. Add PDF works from the element a person clicks > 2. the control is a real label bound to the one hidden PDF input
+components/collabboard/freeformPdfInteractions.test.tsx > 1-4. Add PDF works from the element a person clicks > 3. the PDF tool never leaks into the generic tool handler
+components/collabboard/freeformPdfInteractions.test.tsx > 1-4. Add PDF works from the element a person clicks > 4. Add PDF lives in Media, marked pinned, and exists exactly once
+components/collabboard/freeformPdfInteractions.test.tsx > 1-4. Add PDF works from the element a person clicks > 4c. when Media actually collapses, Add PDF stays out on the toolbar
+components/collabboard/freeformPostSelectionBatch1.characterization.test.tsx > PATCH FREEFORM-SELECTION-BATCH-1 Note/Todo/Link/AI-component click no longer races the blank-canvas deselect > Note and AI-component: click does NOT bubble to canvas deselect -- guard is scoped to their shared fallback wrapper
+components/collabboard/freeformTableSelection.characterization.test.tsx > PATCH FREEFORM-TABLE-SELECTION Table click no longer races the blank-canvas deselect > scoped to Table only (at the time of this patch): the generic branch's own resize/selection machinery was not touched wholesale -- Drawing (which shares the family's default {content}/{resizeHandle} wrapper and is explicitly, permanently frozen -- PATCH FREEFORM-SELECTION-BATCH-1, PATCH FREEFORM-CONTAINER-SELECTION) never gets an unconditional click guard from any of these patches
+components/collabboard/knowledgePdfCard.test.tsx > 24-29. nothing outside the card moved > 24-26. Add PDF is untouched: Media, pinned, native label
+components/collabboard/knowledgeUsedInNotes.integration.test.tsx [ components/collabboard/knowledgeUsedInNotes.integration.test.tsx ]
+components/collabboard/libraryReuseLinkLayouts.test.tsx > the real placement writers are the ones modelled above > the drag contract and the NEW-image flows are unchanged
+components/collabboard/postResizeB2.integration.test.tsx > PATCH POST-RESIZE-B2 freezes > 71/72. File and Comment stay non-resizable
+components/collabboard/postResizeB2.integration.test.tsx > PATCH POST-RESIZE-B2 renderer wiring > 14. box-manual height drives an explicit card height only for box B2 types
+components/collabboard/postResizeB2.integration.test.tsx > PATCH POST-RESIZE-B2 renderer wiring > PATCH AI-R1: Freeform AI frame height is content-derived, never the stale persisted padlet height
+lib/domain/canvas/documentSaveLifecycle.source.test.ts > PATCH-149B2-i: scope boundary -- no B2-ii, PDF or clipart work > the discard dialog owns no capability, persistence or routing logic
+lib/domain/canvas/documentSwitchGuard.source.test.ts > PATCH-149B2-ii: scope boundary -- no PDF, Read-affordance, or clipart work > no PDF branch was added, and the B1b-iii Read-affordance owners stay untouched
+lib/infra/canvas/boardEditAuthorityWiring.source.test.ts > the census sanitizer counts executable source, not prose > an added consumer, or a removed one, moves the census
+lib/infra/canvas/boardEditAuthorityWiring.source.test.ts > the padlets capability is wired to padlets surfaces only > census: the padlets capability has a small, enumerable set of consumers
+lib/infra/knowledge/knowledgeEmbeddingDeploy.source.test.ts > P6I-D3 local Voyage Worker Pool preparation > keeps migrations, protected worker code, and unrelated files unchanged
+lib/infra/knowledge/knowledgeExtractionScope.source.test.ts > P6H persistence scope -- provenance and privilege guards > pins one rollout-compatible completion signature with optional final chunks
+lib/infra/knowledge/knowledgeExtractionScope.source.test.ts > P6H persistence scope -- provenance and privilege guards > revokes the exact replacement RPC from every browser role
+lib/infra/knowledge/knowledgePdfAreaImageWiring.source.test.ts > F6-F10: the canvas asks the server, and claims the drop exactly once > F8: it re-checks the creation capability rather than trusting the drag
+lib/infra/knowledge/knowledgeSourceNoteWiring.source.test.ts > KNI-R2 existing-Note source clip drop > parses the one dedicated clip, claims synchronously, then validates the target type
+lib/infra/knowledge/knowledgeSourceNoteWiring.source.test.ts > P6J-F5 source note wiring > A: routes the Knowledge page request into the ordinary Note editor
+lib/infra/knowledge/knowledgeSourceNoteWiring.source.test.ts > P6J-F8-B1 source clip drop > re-checks the creation capability before staging the editor
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B2 source marker and navigation wiring > J: a request is refused and cleared outside the current board/auth scope
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B2 source marker and navigation wiring > K: CanvasSidebar owns Add PDF only -- never the reader, never a library modal
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B2 source marker and navigation wiring > M2: B4-B3 highlight rendering is a pure read of the index already in memory
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B2 source marker and navigation wiring > M: the reader receives the page and the citing row id, and no coordinate
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B2 source marker and navigation wiring > Q: B2 introduces no elevated authority and no new endpoint
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B4-B4 exact source interaction wiring > native text selection is never blocked, only used to suppress navigation
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F6-B4-B4 exact source interaction wiring > the reader still delegates span resolution and adds no data access
+lib/infra/knowledge/knowledgeSourceReferenceReadWiring.source.test.ts > P6J-F8-B2 source excerpt boundaries > B3: the provider still only transports what its owner derived
+scripts/harness/worktreeLifecycle.test.ts > worktree lifecycle > normalizes mixed Windows path separators to one absolute path
+scripts/harness/worktreeLifecycle.test.ts > worktree lifecycle > protects the main worktree during create and remove
+scripts/harness/worktreeLifecycle.test.ts > worktree lifecycle > refuses a target path collision
+```
+
+
 ---
 
 ## 2. `npm run check:boundaries`

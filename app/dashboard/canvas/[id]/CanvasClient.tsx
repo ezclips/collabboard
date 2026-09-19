@@ -150,6 +150,7 @@ import type {
 import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
+import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer';
 import type { PdfWorkspaceRightPanel, PdfWorkspaceTab } from '@/components/collabboard/PdfWorkspaceChrome';
 import BoardAiChatDrawer, {
   type BoardAiAssistantNoteSaveRequest,
@@ -166,7 +167,7 @@ import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
 import {
   Link,
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X,
-  Plus, Palette, Strikethrough, Settings, Bot
+  Plus, Palette, Strikethrough, Settings, Bot, BookOpen
 } from 'lucide-react';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
@@ -2159,6 +2160,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [isBoardAiChatOpen]);
 
   const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
+
+  /**
+   * WIKI-U2. The board wiki's page surface.
+   *
+   * Opened from its own control and closed from its own header, like Chat.
+   * Mounted as a shell-level sibling below for the same stacking reason the
+   * reader and Chat are -- and because Unit 2's acceptance includes that the
+   * surface is REACHABLE: `.agent/retrieval-followups.md` item 15 was a
+   * fully-built component whose only launcher had been removed, so it existed
+   * and nobody could open it.
+   */
+  const [isBoardWikiOpen, setIsBoardWikiOpen] = useState(false);
+  const closeBoardWiki = useCallback(() => setIsBoardWikiOpen(false), []);
 
   /**
    * Board AI draft context for ONE PDF, addressed by the document itself.
@@ -11098,6 +11112,39 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             onOpenCitation={openBoardAiCitation}
             selectedBoardItem={boardAiChatSelectedItem}
           />
+        )}
+
+        {/* WIKI-U2. The board wiki, a shell-level sibling for the same stacking
+            reason Chat is: mounted under CanvasSidebar's z-[3000] wrapper it
+            would be pinned above every editor modal. It yields to a blocking
+            editor on the board's own flag. */}
+        <BoardWikiDrawer
+          boardId={canvasId}
+          isOpen={isBoardWikiOpen}
+          onClose={closeBoardWiki}
+          /* Reading a wiki page is a read, so a viewer gets the surface; only
+             an editor gets the controls that write. Same capability every other
+             shared board mutation is gated on. */
+          canEdit={canEditBoardContent}
+          blockingEditorOpen={isBlockingOverlayOpen}
+          onOpenCitation={openBoardAiCitation}
+        />
+
+        {/* The wiki's ONE entry point. Available to every reader of the board,
+            viewers included -- reading a page and its sources chain is a read.
+            Hidden while an editor owns the screen and while the wiki is already
+            open, like every other floating board control. */}
+        {!isBlockingEditorModalOpen && !isBoardWikiOpen && (
+          <button
+            type="button"
+            data-board-wiki-open="true"
+            aria-label="Board wiki"
+            title="Board wiki"
+            className="fixed right-4 top-16 z-[1300] flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
+            onClick={() => setIsBoardWikiOpen(true)}
+          >
+            <BookOpen className="h-4 w-4" aria-hidden="true" />
+          </button>
         )}
 
         {/* The one board-level Board AI entry point. Available to every reader
