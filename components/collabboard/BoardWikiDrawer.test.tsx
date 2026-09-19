@@ -332,16 +332,45 @@ describe('refresh is a proposal: diff, apply, discard', () => {
     expect(onRequestRecompile).toHaveBeenCalledWith(PAGE, 'Horn replacement');
   });
 
-  it('a compilation that produces nothing says so instead of an empty panel', async () => {
+  it('SAYS "nothing on that topic" AND "try again" DIFFERENTLY', async () => {
+    // Two different answers that were collapsed into one message: a rejected
+    // compilation (409) is worth another go, and a board with nothing to say on
+    // the topic (404) is not. Telling someone to retry the second wastes their
+    // time and a provider call every time.
     stubFetch();
-    const container = await mount({ onRequestRecompile: async () => null });
+    const empty = await mount({ onRequestRecompile: async () => null });
+    await openPage(empty);
+    await act(async () => {
+      (empty.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    expect(empty.querySelector('[data-board-wiki-proposal="true"]')).toBeNull();
+    expect(empty.querySelector('[data-board-wiki-status="true"]')!.textContent)
+      .toContain('nothing on that topic');
+
+    act(() => root?.unmount());
+    host?.remove();
+
+    stubFetch();
+    const rejected = await mount({ onRequestRecompile: async () => { throw new Error('retry'); } });
+    await openPage(rejected);
+    await act(async () => {
+      (rejected.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    expect(rejected.querySelector('[data-board-wiki-status="true"]')!.textContent).toContain('Try again');
+  });
+
+  it('a failed compilation does not leave the surface stuck busy', async () => {
+    // The `finally` matters: without it a thrown compile leaves every control
+    // disabled until the drawer is reopened.
+    stubFetch();
+    const container = await mount({ onRequestRecompile: async () => { throw new Error('retry'); } });
     await openPage(container);
+    await type(content(container), 'edited');
     await act(async () => {
       (container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
     });
-    expect(container.querySelector('[data-board-wiki-proposal="true"]')).toBeNull();
-    expect(container.querySelector('[data-board-wiki-status="true"]')!.textContent)
-      .toContain('nothing worth proposing');
+    expect(saveButton(container).disabled).toBe(false);
+    expect((container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('THE PASSAGE MARKERS SURVIVE APPLY AND SAVE, unchanged', async () => {

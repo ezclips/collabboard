@@ -217,24 +217,46 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
           .map((source) => [boardAiCitationIdentityKey(source.item), source] as const),
       );
 
-      // AND FROM THIS PAGE'S OWN PROPOSALS, which is where a NEWLY compiled
-      // source's version legitimately comes from. Applying a proposal moves
-      // sources the page has never held, and their compile-time versions are
-      // recorded on the proposal row the server wrote when it compiled -- never
-      // taken from the request, which carries identities and nothing else. The
-      // stored page still wins for anything it already holds, so applying a
-      // proposal cannot quietly refresh an untouched source's version.
-      const { data: proposals } = await client
-        .from('board_wiki_page_proposals')
-        .select('sources')
-        .eq('board_id', boardId)
-        .eq('page_id', pageId);
-      for (const row of (proposals ?? []) as readonly { sources?: unknown }[]) {
-        for (const source of boardWikiPageSourcesFromStored(row.sources)) {
-          const key = boardAiCitationIdentityKey(source.item);
-          if (!storedByIdentity.has(key)) storedByIdentity.set(key, source);
+      // ===================================================================
+      // AN APPLIED PROPOSAL DECIDES EVERY VERSION IT CARRIES
+      // ===================================================================
+      //
+      // The first version of this let proposal rows fill only identities the
+      // page had NEVER held, so the page's own version always won. That made a
+      // stale page impossible to refresh: source moves A -> B, the recompile
+      // records B correctly, the save keeps A because the identity is already
+      // there, and the reader says stale again -- permanently, because this is
+      // the only writer of a page's sources. The refresh loop could not close.
+      //
+      // So when the request names the proposal it was applied from, THAT row is
+      // the authority for every identity it carries, and the stored page fills
+      // only what it does not. The row was written by this server at compile
+      // time; the browser supplies a reference to it and never a version.
+      //
+      // WHY NOT "THE NEWEST PROPOSAL WINS": a pending proposal nobody applied
+      // would freshen a page still derived from the older source -- laundering
+      // a stale page clean through an ordinary text edit. Only an apply sets
+      // the reference, so only an apply can move a version.
+      if (request.appliedProposalId) {
+        const { data: applied } = await client
+          .from('board_wiki_page_proposals')
+          .select('sources')
+          // Scoped to this page and board: a proposal id from somewhere else
+          // resolves to nothing rather than to another page's versions.
+          .eq('board_id', boardId)
+          .eq('page_id', pageId)
+          .eq('id', request.appliedProposalId)
+          .maybeSingle();
+        // A reference that resolves to nothing falls back to the stored page
+        // rather than failing the save. The row can legitimately be gone -- a
+        // later compile clears superseded proposals -- and losing someone's
+        // text over a missing version is far worse than saving it with the
+        // conservative versions, which reads as stale and can be refreshed.
+        for (const source of boardWikiPageSourcesFromStored((applied as { sources?: unknown } | null)?.sources)) {
+          storedByIdentity.set(boardAiCitationIdentityKey(source.item), source);
         }
       }
+
       const sources = request.sources
         .map((item) => storedByIdentity.get(boardAiCitationIdentityKey(item)))
         .filter((source): source is BoardWikiPageSource => source !== undefined);
@@ -251,6 +273,16 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
           sources,
           updated_by: userId,
           updated_at: new Date().toISOString(),
+          // STAMPED ONLY WHEN A PROPOSAL WAS ACTUALLY APPLIED, and derived by
+          // the server from the fact that it resolved one -- never sent. The
+          // column had no writer at all until now, so a compiled page reported
+          // "compiled: false", which is a lie the moment anything renders "last
+          // compiled". A plain text edit leaves it untouched: the page's
+          // content is then no longer what the compilation produced, and the
+          // stamp answers "when did a compilation last reach this page", not
+          // "when was this page last saved" -- `updated_at` already answers
+          // that one.
+          ...(request.appliedProposalId ? { compiled_at: new Date().toISOString() } : {}),
         })
         .eq('board_id', boardId)
         .eq('id', pageId)

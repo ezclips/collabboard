@@ -275,11 +275,21 @@ function parseSaveRequest(body: unknown): BoardWikiSaveRequest | null {
   const sources = (Array.isArray(entry.sources) ? entry.sources : [])
     .map(boardWikiCitationItemFromStored)
     .filter((item): item is NonNullable<typeof item> => item !== null);
+  // A REFERENCE, NOT DATA. The one thing a client may say about versions is
+  // WHICH proposal the server itself wrote that this draft came from; the
+  // versions are then read off that row. Anything that is not a plain string is
+  // dropped rather than rejected, so a malformed field costs the save nothing
+  // beyond the conservative version resolution.
+  const appliedProposalId = typeof entry.appliedProposalId === 'string' && entry.appliedProposalId.length > 0
+    ? entry.appliedProposalId
+    : undefined;
+
   return {
     title: entry.title.trim(),
     content: entry.content,
     sources,
     baseUpdatedAt: entry.baseUpdatedAt,
+    ...(appliedProposalId === undefined ? {} : { appliedProposalId }),
   };
 }
 

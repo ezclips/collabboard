@@ -77,6 +77,8 @@ export interface BoardWikiDraft {
   readonly baseContent: string;
   readonly baseSourcesKey: string;
   readonly baseUpdatedAt: string;
+  /** Set by `applyProposalToDraft` and by nothing else. See the save request. */
+  readonly appliedProposalId?: string;
 }
 
 /** Order-sensitive, version-sensitive, and stable enough to compare drafts by. */
@@ -134,7 +136,15 @@ export function applyProposalToDraft(
   draft: BoardWikiDraft,
   proposal: BoardWikiProposal,
 ): BoardWikiDraft {
-  return { ...draft, content: proposal.content, sources: proposal.sources };
+  return {
+    ...draft,
+    content: proposal.content,
+    sources: proposal.sources,
+    // The reference the save will carry. An apply is the ONLY thing that sets
+    // it, which is what stops a pending proposal freshening a page nobody
+    // refreshed.
+    appliedProposalId: proposal.id,
+  };
 }
 
 /**
@@ -181,6 +191,26 @@ export interface BoardWikiSaveRequest {
    */
   readonly sources: readonly BoardAiCitationItem[];
   readonly baseUpdatedAt: string;
+  /**
+   * WHICH PROPOSAL THIS DRAFT WAS APPLIED FROM, if any. A REFERENCE, NOT DATA.
+   *
+   * This exists because "the page's stored version always wins" made a stale
+   * page impossible to refresh: a source moves A -> B, the recompile records B
+   * correctly, and the save then kept A because the page already held that
+   * identity -- so the page read stale again, forever, since the save is the
+   * only writer of a page's sources.
+   *
+   * The fix cannot be "let the request carry versions", which is the
+   * self-attestation this whole chain exists to prevent. So the request names
+   * the proposal the server itself wrote, and the server reads the versions off
+   * that row.
+   *
+   * IT IS NOT "THE NEWEST PROPOSAL WINS" EITHER, and that is the subtler half:
+   * a pending proposal nobody applied would then freshen a page derived from
+   * the older source, laundering a stale page clean through an ordinary text
+   * edit. Only an APPLY sets this, so only an apply can move a version.
+   */
+  readonly appliedProposalId?: string;
 }
 
 /**
@@ -197,6 +227,7 @@ export function boardWikiSaveRequestFromDraft(draft: BoardWikiDraft): BoardWikiS
     content: draft.content,
     sources: draft.sources.map((source) => source.item),
     baseUpdatedAt: draft.baseUpdatedAt,
+    ...(draft.appliedProposalId === undefined ? {} : { appliedProposalId: draft.appliedProposalId }),
   };
 }
 

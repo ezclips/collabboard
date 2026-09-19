@@ -69,6 +69,13 @@ interface CompileClient {
     insert(row: Record<string, unknown>): {
       select(columns: string): { maybeSingle(): PromiseLike<{ data: unknown; error: unknown }> };
     };
+    delete(): {
+      eq(column: string, value: string): {
+        eq(column: string, value: string): {
+          neq(column: string, value: string): PromiseLike<{ data: unknown; error: unknown }>;
+        };
+      };
+    };
   };
 }
 
@@ -211,6 +218,27 @@ export async function compileBoardWikiProposal(
   if (insertError || !inserted) {
     return err(domainError('unavailable', 'The compilation could not be saved'));
   }
+
+  // SUPERSEDED PROPOSALS ARE DELETED, which is the lifecycle Unit 1's migration
+  // already declared -- "a superseded proposal is deleted and a new one
+  // inserted" -- and which nothing implemented, so rows accumulated silently
+  // (the first live page had two within minutes).
+  //
+  // AFTER the insert, never before: a failed compile must leave the proposal
+  // the user already has. Scoped to this page, and excluding the row just
+  // written.
+  //
+  // A save naming a now-deleted proposal falls back to the stored page's
+  // versions rather than failing -- see `savePage`. That is the narrow cost of
+  // clearing them, and it is conservative in the right direction: the page
+  // reads stale and can be refreshed, rather than losing text.
+  const insertedId = String((inserted as { id?: unknown }).id ?? '');
+  await client
+    .from('board_wiki_page_proposals')
+    .delete()
+    .eq('board_id', input.boardId)
+    .eq('page_id', input.pageId)
+    .neq('id', insertedId);
 
   return ok({
     id: String((inserted as { id?: unknown }).id ?? ''),

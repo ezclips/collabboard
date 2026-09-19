@@ -2198,7 +2198,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(compileRequest),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // 409 and 404 are different answers and the surface says so: a rejected
+      // compilation is worth retrying, and a board that does not cover the
+      // topic is not. Collapsing them into one message sent people to retry
+      // something that will never work.
+      if (response.status === 409) throw new Error('retry');
+      return null;
+    }
     const body = await response.json();
     return body?.proposal ?? null;
   }, [canvasId]);

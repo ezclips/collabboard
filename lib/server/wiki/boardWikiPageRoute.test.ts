@@ -440,6 +440,67 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
       .toEqual(['compilePage', 'createPage', 'deletePage', 'listPages', 'readPage', 'savePage']);
   });
 
+  it('THE REFRESH LOOP CLOSES: an applied proposal decides the versions it carries', () => {
+    // THE DEFECT THIS REPLACED, traced end to end:
+    //   page compiled from X at sha A -> chain records A
+    //   X changes to B                -> reader correctly says stale
+    //   user refreshes                -> new proposal records B, correctly
+    //   apply -> save                 -> X already on the page, so A won
+    //   reader                        -> A vs B -> stale AGAIN, forever,
+    // because savePage is the only writer of a page's sources. The first real
+    // source change put every page into a refresh loop that could not close.
+    //
+    // The old code read `if (!storedByIdentity.has(key))` -- proposals could
+    // fill only identities the page had NEVER held. The fix is the applied
+    // proposal overwriting unconditionally, which is asserted here rather than
+    // described.
+    const save = sessionSource.slice(sessionSource.indexOf('async savePage('));
+    const body = save.slice(0, save.indexOf('return ok('));
+    expect(body).toContain('if (request.appliedProposalId)');
+    // Unconditional set for the applied row -- the bug was the guard.
+    expect(body).toMatch(/storedByIdentity\.set\(boardAiCitationIdentityKey\(source\.item\), source\)/);
+    expect(body).not.toMatch(/if \(!storedByIdentity\.has/);
+    // Scoped, so a proposal id from elsewhere resolves to nothing.
+    expect(body).toContain(".eq('page_id', pageId)");
+    expect(body).toContain(".eq('id', request.appliedProposalId)");
+  });
+
+  it('A PLAIN EDIT CANNOT FRESHEN A PAGE -- no reference, no version change', () => {
+    // The laundering defence, and why "the newest proposal wins" would have
+    // been wrong: a pending proposal nobody applied would refresh a page still
+    // derived from the older source, through an ordinary text edit.
+    const save = sessionSource.slice(sessionSource.indexOf('async savePage('));
+    const body = save.slice(0, save.indexOf('return ok('));
+    // The proposals table is read ONLY inside the applied-reference branch.
+    const proposalRead = body.indexOf("from('board_wiki_page_proposals')");
+    const branch = body.indexOf('if (request.appliedProposalId)');
+    expect(branch).toBeGreaterThan(-1);
+    expect(proposalRead).toBeGreaterThan(branch);
+  });
+
+  it('compiled_at is stamped only by an applied proposal, and is server-derived', () => {
+    // The column had no writer at all, so a compiled page reported
+    // "compiled: false" -- harmless until something renders "last compiled".
+    const save = sessionSource.slice(sessionSource.indexOf('async savePage('));
+    expect(save).toContain('...(request.appliedProposalId ? { compiled_at:');
+    // Never taken from the request.
+    expect(save).not.toMatch(/compiled_at: request\./);
+  });
+
+  it('a successful compile clears the page\'s superseded proposals', () => {
+    // Unit 1's migration declared the lifecycle -- "a superseded proposal is
+    // deleted and a new one inserted" -- and nothing implemented it, so rows
+    // accumulated (the first live page had two within minutes).
+    const compileSource = readFileSync(
+      resolve(process.cwd(), 'lib/server/wiki/boardWikiCompileSession.ts'), 'utf8');
+    const cleanup = compileSource.slice(compileSource.indexOf('.delete()'));
+    expect(cleanup).toContain(".eq('page_id', input.pageId)");
+    // Excluding the row just written, or the compile deletes its own output.
+    expect(cleanup).toContain(".neq('id', insertedId)");
+    // AFTER the insert: a failed compile must leave the proposal the user has.
+    expect(compileSource.indexOf('.insert(')).toBeLessThan(compileSource.indexOf('.delete()'));
+  });
+
   it('THE SAVE PATH READS A PROPOSAL\'S VERSIONS AND NEVER ITS CONTENT', () => {
     // Unit 2 pinned this as "the session never names the proposals table",
     // which Unit 3 had to change: a save now resolves a NEWLY compiled source's
@@ -474,8 +535,17 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     expect(sessionSource).toContain('createRouteHandlerClient');
   });
 
-  it('the save writes no compiled_at, so authored text never dates itself as compiled', () => {
+  it('AUTHORED TEXT NEVER DATES ITSELF AS COMPILED', () => {
+    // Unit 2 pinned this as "the save writes no compiled_at at all", which was
+    // the strongest available form while the column had no writer. Unit 3's
+    // fix gave it one, so the pin is restated as the property it always meant:
+    // the stamp is guarded by an applied proposal, and cannot be reached by an
+    // ordinary save. The guard IS the assertion -- an unguarded write here
+    // would make every text edit look like a fresh compilation.
     const save = sessionSource.slice(sessionSource.indexOf('async savePage('));
-    expect(save.slice(0, save.indexOf('return ok('))).not.toContain('compiled_at');
+    const body = save.slice(0, save.indexOf('return ok('));
+    const stamps = [...body.matchAll(/compiled_at/g)];
+    expect(stamps).toHaveLength(1);
+    expect(body).toContain('...(request.appliedProposalId ? { compiled_at:');
   });
 });

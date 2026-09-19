@@ -150,6 +150,26 @@ describe('applying a proposal produces a DRAFT, and storage is a separate act', 
     expect(applied.baseContent).toBe('Authored by a person.');
   });
 
+  it('names the proposal it came from, so the server can read its versions', () => {
+    // A REFERENCE, NOT DATA. Without it the save had no way to learn the new
+    // compile-time versions except by trusting the browser, and the
+    // conservative alternative -- the page's version always wins -- made a
+    // stale page impossible to refresh.
+    const applied = applyProposalToDraft(boardWikiDraftFromPage(page()), proposal());
+    expect(applied.appliedProposalId).toBe('proposal-1');
+    expect(boardWikiSaveRequestFromDraft(applied).appliedProposalId).toBe('proposal-1');
+  });
+
+  it('A PLAIN EDIT NAMES NO PROPOSAL, so it cannot freshen anything', () => {
+    // The laundering case. If an edit could carry a reference -- or if the
+    // server took "the newest proposal" -- a pending proposal nobody applied
+    // would quietly refresh a page still derived from the older source.
+    const edited = boardWikiDraftWithContent(boardWikiDraftFromPage(page()), 'typed by hand');
+    expect(edited.appliedProposalId).toBeUndefined();
+    expect(boardWikiSaveRequestFromDraft(edited).appliedProposalId).toBeUndefined();
+    expect(Object.keys(boardWikiSaveRequestFromDraft(edited))).not.toContain('appliedProposalId');
+  });
+
   it('carries the base token forward, so applying does not silently claim a newer base', () => {
     // Applying must not make a stale save look fresh: the concurrency token is
     // the one the draft started from, not the proposal's compile time.
@@ -217,6 +237,10 @@ describe('the save request', () => {
     // the server had to distrust field by field.
     const request = boardWikiSaveRequestFromDraft(boardWikiDraftFromPage(page()));
     expect(Object.keys(request).sort()).toEqual(['baseUpdatedAt', 'content', 'sources', 'title']);
+    // And an applied draft adds exactly one thing: a reference, never a version.
+    const applied = boardWikiSaveRequestFromDraft(applyProposalToDraft(boardWikiDraftFromPage(page()), proposal()));
+    expect(Object.keys(applied).sort())
+      .toEqual(['appliedProposalId', 'baseUpdatedAt', 'content', 'sources', 'title']);
   });
 });
 

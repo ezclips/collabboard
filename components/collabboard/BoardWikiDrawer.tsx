@@ -307,7 +307,12 @@ export default function BoardWikiDrawer({
       // successive refreshes.
       const compiled = await onRequestRecompile(selectedPageId, draft.title);
       setProposal(compiled);
-      setStatus(compiled === null ? 'That produced nothing worth proposing.' : null);
+      // TWO DIFFERENT ANSWERS, SAID DIFFERENTLY. A rejected compilation is
+      // worth another go; a board with nothing to say on the topic is not, and
+      // telling someone to retry that wastes their time and a provider call.
+      setStatus(compiled === null ? 'This board has nothing on that topic yet.' : null);
+    } catch {
+      setStatus('That compilation came back unusable. Try again.');
     } finally {
       setBusy(false);
     }
