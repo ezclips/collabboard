@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, X } from 'lucide-react';
+import { saveAs } from 'file-saver';
+import { BookOpen, Download, X } from 'lucide-react';
 
 import {
   applyProposalToDraft,
@@ -20,6 +21,10 @@ import {
   boardWikiDiffIsEmpty,
   boardWikiTextDiff,
 } from '@/lib/domain/wiki/boardWikiTextDiff';
+import {
+  boardWikiExportFilename,
+  parseBoardWikiExportBundle,
+} from '@/lib/domain/wiki/boardWikiExportBundle';
 import type {
   BoardWikiPageSource,
   BoardWikiSourceState,
@@ -318,6 +323,61 @@ export default function BoardWikiDrawer({
     }
   }, [onRequestRecompile, selectedPageId, draft]);
 
+  /**
+   * The whole corpus as an Open Knowledge Format bundle, archived in the
+   * browser.
+   *
+   * THE ROUTE IS NOT ASKED TO PRODUCE THE ARCHIVE. It returns `{ files }`,
+   * which IS the OKF representation and is what a programmatic consumer wants;
+   * the .zip is a delivery convenience for a person pressing a button. Building
+   * it here leaves that contract whole, so the route's own tests keep asserting
+   * a bundle rather than a binary blob they would have to unzip to read.
+   *
+   * NOT GATED ON `canEdit`. Reading the corpus is a read, the same rule that
+   * gives a viewer the page and its sources chain -- and the bundle contains
+   * exactly the pages the caller's own RLS client returned, so a viewer's
+   * export is a viewer's view.
+   */
+  const exportBundle = useCallback(async () => {
+    setBusy(true);
+    setStatus('Preparing the export…');
+    try {
+      const response = await fetch(`/api/boards/${boardId}/wiki/export`);
+      if (!response.ok) throw new Error('export refused');
+
+      const files = parseBoardWikiExportBundle(await response.json());
+      if (files === null) throw new Error('unreadable bundle');
+
+      // Loaded on demand: the archiver is export-only weight and this drawer
+      // mounts on every canvas, the same reason the AI component export menu
+      // defers turndown and docx rather than importing them at module scope.
+      //
+      // FILE-SAVER IS IMPORTED STATICALLY AND THAT IS NOT AN OVERSIGHT. It is
+      // CommonJS with no `module` entry, so under the bundler a dynamic
+      // `import('file-saver')` resolves the module onto `.default` and the
+      // named `saveAs` destructures to undefined -- an export that fails only
+      // in a browser, which is precisely how this shipped past a green suite
+      // the first time. The static form is what the AI component export menu
+      // already uses, and it is two kilobytes.
+      const { default: JSZip } = await import('jszip');
+
+      const zip = new JSZip();
+      for (const file of files) zip.file(file.name, file.content);
+      saveAs(
+        await zip.generateAsync({ type: 'blob' }),
+        boardWikiExportFilename(new Date()),
+      );
+      setStatus(null);
+    } catch {
+      // One message for every failure, and it says what did NOT happen. A
+      // half-written archive is the outcome worth ruling out in words: the
+      // parse refuses a partial bundle, so there is nothing on disk to doubt.
+      setStatus('The export failed. Nothing was downloaded.');
+    } finally {
+      setBusy(false);
+    }
+  }, [boardId]);
+
   if (!isOpen || blockingEditorOpen) return null;
 
   return (
@@ -330,9 +390,29 @@ export default function BoardWikiDrawer({
           <BookOpen className="h-4 w-4" aria-hidden="true" />
           Board wiki
         </div>
-        <button type="button" aria-label="Close board wiki" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100">
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Board-scoped, so it sits in the header rather than beside Save and
+              Delete, which act on the one page in view. Disabled rather than
+              hidden while the corpus is empty: the capability is wired either
+              way, and hiding it would say the product cannot export when it
+              can -- there is simply nothing yet to put in the archive. */}
+          <button
+            type="button"
+            data-board-wiki-export="true"
+            disabled={busy || pages.length === 0}
+            onClick={() => void exportBundle()}
+            title={pages.length === 0
+              ? 'No pages to export yet'
+              : 'Download every page as an Open Knowledge Format bundle'}
+            className="flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            Export
+          </button>
+          <button type="button" aria-label="Close board wiki" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1">

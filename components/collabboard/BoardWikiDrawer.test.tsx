@@ -10,6 +10,39 @@ import BoardWikiDrawer from './BoardWikiDrawer';
 import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
 
 /**
+ * The archive and the download are stubbed, not exercised: JSZip's output is
+ * its own project's business, and a real saveAs would be a jsdom no-op that
+ * proves nothing. What IS asserted is everything between the response and
+ * them -- which entries were put in the archive, under which names, and
+ * whether anything was handed to the browser at all when the bundle was bad.
+ */
+const zipState = vi.hoisted(() => ({
+  entries: [] as { name: string; content: string }[],
+  generated: 0,
+  savedBlob: null as unknown,
+  savedName: null as string | null,
+}));
+
+vi.mock('jszip', () => ({
+  default: class {
+    file(name: string, content: string) {
+      zipState.entries.push({ name, content });
+    }
+    async generateAsync() {
+      zipState.generated += 1;
+      return new Blob(['archive']);
+    }
+  },
+}));
+
+vi.mock('file-saver', () => ({
+  saveAs: (blob: unknown, name: string) => {
+    zipState.savedBlob = blob;
+    zipState.savedName = name;
+  },
+}));
+
+/**
  * WIKI UNIT 2 -- the page surface.
  *
  * Three things here are acceptance criteria rather than behaviour checks, and
@@ -69,8 +102,14 @@ let host: HTMLDivElement | null = null;
 const saved: { body: unknown } = { body: null };
 const deleted: { calls: number; method: string | null } = { calls: 0, method: null };
 
+/** What the export endpoint answers with. Reset per test, like the rest. */
+const exported: { status: number; body: unknown } = { status: 200, body: null };
+
 function stubFetch(pageOverrides: Record<string, unknown> = {}, saveStatus = 200, deleteStatus = 200) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/wiki/export')) {
+      return new Response(JSON.stringify(exported.body), { status: exported.status });
+    }
     if (init?.method === 'DELETE') {
       deleted.calls += 1;
       deleted.method = 'DELETE';
@@ -97,6 +136,12 @@ beforeEach(() => {
   saved.body = null;
   deleted.calls = 0;
   deleted.method = null;
+  exported.status = 200;
+  exported.body = { files: { 'index.md': '# Board wiki\n', 'horn-replacement.md': 'page text' } };
+  zipState.entries = [];
+  zipState.generated = 0;
+  zipState.savedBlob = null;
+  zipState.savedName = null;
 });
 
 afterEach(() => {
@@ -620,5 +665,162 @@ describe('UNIT 2 ACCEPTANCE, checked in source rather than behaviour', () => {
     stubFetch();
     const container = await mount({ blockingEditorOpen: true });
     expect(container.querySelector('[data-board-wiki-drawer="true"]')).toBeNull();
+  });
+});
+
+describe('the corpus leaves the product as an OKF bundle', () => {
+  const exportButton = (c: HTMLElement) =>
+    c.querySelector('[data-board-wiki-export="true"]') as HTMLButtonElement;
+
+  async function clickExport(container: HTMLElement) {
+    await act(async () => {
+      exportButton(container).click();
+    });
+    // The handler awaits a fetch, a json(), two dynamic imports and
+    // generateAsync before it saves. One flush is not enough microtasks.
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  it('puts every file from the bundle into the archive under its own name', async () => {
+    stubFetch();
+    const container = await mount();
+    await clickExport(container);
+
+    expect(zipState.entries).toEqual([
+      { name: 'index.md', content: '# Board wiki\n' },
+      { name: 'horn-replacement.md', content: 'page text' },
+    ]);
+    expect(zipState.generated).toBe(1);
+  });
+
+  it('downloads the archive under the dated name', async () => {
+    stubFetch();
+    const container = await mount();
+    await clickExport(container);
+
+    expect(zipState.savedBlob).toBeInstanceOf(Blob);
+    expect(zipState.savedName).toMatch(/^board-wiki-export-\d{4}-\d{2}-\d{2}\.zip$/);
+  });
+
+  it('reads the bundle from the export segment, not the page list', async () => {
+    stubFetch();
+    const container = await mount();
+    await clickExport(container);
+
+    const urls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls.map((call) => String(call[0]));
+    expect(urls).toContain(`/api/boards/${BOARD}/wiki/export`);
+  });
+
+  it('EXPORTS WITHOUT A PAGE SELECTED, because the bundle is the board not the page', async () => {
+    stubFetch();
+    const container = await mount();
+    // No openPage() anywhere above: a person who opens the wiki to take a copy
+    // should not have to click into a page first.
+    await clickExport(container);
+    expect(zipState.generated).toBe(1);
+  });
+
+  it('A VIEWER CAN EXPORT. Reading the corpus is a read', async () => {
+    stubFetch();
+    const container = await mount({ canEdit: false });
+    expect(exportButton(container)).not.toBeNull();
+    await clickExport(container);
+    expect(zipState.generated).toBe(1);
+  });
+
+  it('IMPORTS file-saver STATICALLY, because a mock cannot see a bundler', async () => {
+    // Found live, not here. `file-saver` is CommonJS with no `module` entry:
+    // under the bundler `await import('file-saver')` puts the module on
+    // `.default`, so the named `saveAs` destructures to undefined and the
+    // download throws -- in a browser only. Every test above passed while that
+    // was true, because vi.mock hands back whatever shape it is asked for.
+    // The mock cannot be taught about interop; the import form can be pinned.
+    //
+    // Comments stripped before the negative check: the paragraph in the
+    // component explaining this names the very form it forbids, and would
+    // fail the assertion it exists to document.
+    const code = componentSource
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(code).toContain("import { saveAs } from 'file-saver'");
+    expect(code).not.toContain("import('file-saver')");
+  });
+
+  it('is offered but inert while the board has no pages', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ pages: [] }), { status: 200 })));
+    const container = await mount();
+    expect(exportButton(container).disabled).toBe(true);
+  });
+});
+
+describe('an export that fails downloads nothing at all', () => {
+  const clickExport = async (c: HTMLElement) => {
+    await act(async () => {
+      (c.querySelector('[data-board-wiki-export="true"]') as HTMLButtonElement).click();
+    });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+  };
+  const status = (c: HTMLElement) => c.querySelector('[data-board-wiki-status="true"]');
+
+  it('says so when the route refuses', async () => {
+    exported.status = 403;
+    exported.body = { error: 'Forbidden' };
+    stubFetch();
+    const container = await mount();
+    await clickExport(container);
+
+    expect(zipState.generated).toBe(0);
+    expect(zipState.savedName).toBeNull();
+    expect(status(container)?.textContent).toContain('Nothing was downloaded');
+  });
+
+  it('REFUSES A BUNDLE WITH NO INDEX rather than saving a partial archive', async () => {
+    // The failure this rules out is a person believing they exported their
+    // wiki when they exported some of it -- so a bundle that fails the parse
+    // must reach neither the archive nor the disk.
+    exported.body = { files: { 'horn-replacement.md': 'page text' } };
+    stubFetch();
+    const container = await mount();
+    await clickExport(container);
+
+    expect(zipState.entries).toEqual([]);
+    expect(zipState.savedName).toBeNull();
+    expect(status(container)?.textContent).toContain('Nothing was downloaded');
+  });
+
+  it('NEVER ARCHIVES AN ENTRY NAMED OUTSIDE THE ARCHIVE', async () => {
+    // Zip-slip, refused at the client boundary. The whole bundle goes, not
+    // just the offending entry.
+    exported.body = { files: { 'index.md': 'i', '../escape.md': 'payload' } };
+    stubFetch();
+    const container = await mount();
+    await clickExport(container);
+
+    expect(zipState.entries).toEqual([]);
+    expect(zipState.savedName).toBeNull();
+    // Asserted as well as the two absences above, which a handler that never
+    // ran would satisfy just as well. This one only appears if it ran and
+    // refused.
+    expect(status(container)?.textContent).toContain('Nothing was downloaded');
+  });
+
+  it('survives a response that is not JSON', async () => {
+    stubFetch();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      String(url).endsWith('/wiki/export')
+        ? new Response('<html>gateway</html>', { status: 200 })
+        : new Response(JSON.stringify({
+          pages: [{ id: PAGE, slug: 'horn-replacement', title: 'Horn replacement', updatedAt: 'u', sourceCount: 1 }],
+        }), { status: 200 })
+    )));
+    const container = await mount();
+    await clickExport(container);
+
+    expect(zipState.savedName).toBeNull();
+    expect(status(container)?.textContent).toContain('Nothing was downloaded');
   });
 });
