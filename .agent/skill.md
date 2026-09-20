@@ -897,6 +897,22 @@ where `card` is `[data-padlet-id="<the id>"]`.
   the press **began** on the backdrop, so `dispatchEvent(new MouseEvent('click'))`
   does nothing and reads as "the app ignored me". Drive a real pointer
   (`mouse.move` → `down` → `up`) whenever a handler tracks press origin.
+- **An absence is a claim, and it needs the same scoping as a presence.** Before
+  reporting that something did not render, confirm the selector can match it at
+  all — one component with two renderings answers to two different selectors.
+  `KnowledgeSourceReaderDrawer` early-returns `PdfWorkspaceChrome`
+  (`[data-pdf-workspace="true"]`) for its focused presentation and never emits
+  the `<aside data-knowledge-reader="true">` the docked one does. Probing only
+  the docked attribute reported "the workspace did not open" for three runs
+  while it was opening correctly every time.
+- Hover-revealed controls have **zero-size rects** until the card is hovered, so
+  `boundingBox()` returns a 0-width box and a click silently misses. Move the
+  pointer onto the card, wait, then take the box — and pick a target that is not
+  underneath an open drawer, which intercepts pointer events at its own width.
+- One run per script invocation. Live state carries between invocations: a drawer
+  left open hides the launcher the next script waits for, and a stale page can
+  report every surface closed. **Reload at the top of a pass**, and take the
+  reading in the same script that performed the action.
 
 ## Known Failure Patterns
 
@@ -907,3 +923,8 @@ where `card` is `[data-padlet-id="<the id>"]`.
   a live check distinguishes them.
 - A live pass that reports success from the UI alone. Read the row back from the
   database afterwards; the UI is the thing under test, not the witness.
+- A live pass that reports a FAILURE from the UI alone. "The workspace did not
+  render" was a wrong selector, reported as a gap in a commit message and
+  carried into the next unit before it was diagnosed. A negative live result is
+  a finding about the harness until the harness is ruled out — cheapest check is
+  to reproduce it with the suspected surface as the ONLY thing on screen.
