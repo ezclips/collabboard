@@ -1217,3 +1217,55 @@ failed request.
 state of its OWN. The drawer refuses to navigate to a deleted source, which
 covers the path a user actually takes; a reader opened by any other route at a
 document that vanished mid-session is not addressed.
+
+---
+
+## 16. No product route delivers a ranged citation to the FOCUSED workspace
+
+Recorded 2026-09-20, closing Stage 1 of the media-sources unit. Deferred by
+decision, not by omission.
+
+### What is true
+
+A citation into a pageless (text) source locates itself by a character range,
+and the reader renders that range in **both** presentations — asserted per host
+(`renderedRange` plus the marked substring) in `KnowledgeSourceReaderDrawer.test.tsx`.
+The hand-off that carries the range to the focused workspace was broken in two
+places and is now fixed:
+
+- `openPdfWorkspaceDocument` in `CanvasClient.tsx` never accepted
+  `charStart`/`charEnd` — pinned by source scans in `knowledgeReaderWorkspace.test.tsx`.
+- `openCitation` in `KnowledgeSourceReaderDrawer.tsx` dropped them — pinned
+  behaviourally in `knowledgeReaderCitationForwarding.test.tsx`, which drives
+  the panel's `onOpenCitation` in both hosts and asserts what leaves the drawer.
+
+### What is NOT true, and must not be claimed
+
+**That path cannot be exercised live today, because nothing produces a ranged
+citation for that host.** Three closed doors, all deliberate:
+
+1. A board-level chat citation asks for `presentation: 'side-panel'` — the
+   docked reader — by an existing decision (`openBoardAiCitation`).
+2. Both of the reader's own AI panels are **document-scoped**
+   (`documentScope={{ knowledgeDocumentId, … }}`), so neither runs a board
+   search and neither yields a search passage's range.
+3. The source-reference route carries no character range by design.
+
+So Stage 1 closes this as: **code defect fixed, verified at the component
+boundary and at the forwarding boundary — not live-verified.** Any report that
+says "verified" here is overclaiming; the accurate phrase is **"unreachable by
+product route today"**.
+
+### The decision taken, and the candidate rejected for now
+
+**Routing does not change in Stage 1.** Citations keep requesting the docked
+reader.
+
+The obvious candidate — *"a citation opens in whichever reader host is already
+open"* — was considered and **rejected for this stage**: it would cover the
+board with the workspace and change the chat's dock/close semantics. That is a
+behaviour change with its own GO, not a fix riding along inside a stage about
+source kinds.
+
+The focused host is now **correct for the day a route exists**. When one is
+added, this item is the place to record which route and why.

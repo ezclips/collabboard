@@ -70,6 +70,25 @@ One of these is not an assertion failure and should not be read as one:
 or supabaseUrl and supabaseKey are required`. It is environment-dependent, not a
 code failure.
 
+#### 2026-09-20 — the set reads 25, not 26, and nothing regressed
+
+Stage 1 of the media-sources unit runs the gate in an environment where
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are **present**
+in `.env.local`. `knowledgeUsedInNotes.integration.test.tsx` therefore loads and
+passes, and the failing-file set reads **25 files / 56 tests** rather than 26.
+
+This is an environment change, not a code change, and the distinction is the
+whole point of the paragraph above: a report that says "nothing gone" without
+naming it is claiming a passing file it did not earn. The correct statement is
+two statements:
+
+- **Assertion failures:** the 25 remaining files, 56 named tests — unchanged.
+- **Suite-load failure:** the 26th file, absent because its environment
+  dependency is now satisfied. It returns the moment the env is missing.
+
+A run on a machine without those variables should read 26 and must not be
+treated as a regression, in either direction.
+
 ### The 56 baseline failing test NAMES
 
 Recorded 2026-09-19 during wiki Unit 2, because the rule above could not be

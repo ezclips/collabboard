@@ -572,9 +572,11 @@ describe('PDF-R6K: clean page chrome, a pager, and a transient area rectangle', 
  * citation worked", which is worse than an obvious failure -- it is the exact
  * shape of defect this stage exists to prevent.
  *
- * Source proofs because the drop was in the PLUMBING, not in the reader: the
- * drawer's own suite already mounts both hosts and asserts the rendered range,
- * and it passed throughout while these two hand-offs were losing the locator.
+ * Source scans, because CanvasClient is not mounted by any suite -- this file
+ * is the repo's existing way of pinning its wiring. The drawer's own half of
+ * the drop is proved BEHAVIOURALLY instead, in
+ * knowledgeReaderCitationForwarding.test.tsx: that suite drives the panel's
+ * onOpenCitation in both hosts and asserts what leaves the drawer.
  */
 describe('Stage 1. the workspace hand-off carries the citation range', () => {
   const CANVAS = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
@@ -607,20 +609,5 @@ describe('Stage 1. the workspace hand-off carries the citation range', () => {
       CANVAS.indexOf('const closePdfWorkspace = useCallback('),
     );
     expect(reactivate).not.toContain('charStart');
-  });
-
-  it("the reader's own AI panel forwards the range in BOTH hosts", () => {
-    // In the focused workspace this handler is the only way a citation is
-    // followed at all, so a drop here is invisible until someone clicks one.
-    const block = DRAWER.slice(
-      DRAWER.indexOf('const openCitation = useCallback('),
-      DRAWER.indexOf('const openCitation = useCallback(') + 1200,
-    );
-    expect(block).toContain('readonly charStart?: number;');
-    expect(block).toContain('{ charStart: request.charStart, charEnd: request.charEnd }');
-    // Both halves or neither: half a range locates nothing.
-    expect(block).toContain('request.charStart === undefined || request.charEnd === undefined');
-    // One handler, and both hosts pass it.
-    expect((DRAWER.match(/onOpenCitation=\{openCitation\}/g) || []).length).toBe(2);
   });
 });

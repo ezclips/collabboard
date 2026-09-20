@@ -80,6 +80,11 @@ export interface KnowledgeTextSupabaseClient {
  * the document, its chunks and its readiness together, so the window does not
  * exist rather than being survivable. That needs a migration, which is not
  * this commit's to apply.
+ *
+ * THE LIMITATION THAT CARRIES UNTIL IT EXISTS is recovery: a document left at
+ * 'uploaded' by a failed promotion is not retried by anything. There is no
+ * worker and no sweep, so it stays stuck, truthfully invisible to search, and
+ * the way back is to upload the source again.
  */
 export const KNOWLEDGE_TEXT_INITIAL_STATUS = 'uploaded';
 export const KNOWLEDGE_TEXT_READY_STATUS = 'ready';

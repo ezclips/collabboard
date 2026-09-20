@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgePdfCanvasSurface, {
+  KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS,
   KnowledgePdfCardControls,
   KnowledgePdfOpenProvider,
 } from './KnowledgePdfCanvasSurface';
@@ -1918,6 +1919,52 @@ describe('Stage 1. a text source previews its text', () => {
     expect(host.textContent).toContain('no text to preview');
     expect(host.querySelector('[data-knowledge-pdf-text-excerpt="true"]')).toBeNull();
   });
+
+  it.each([
+    ['an empty canonical text', ''],
+    ['whitespace only', ' \n\t \n '],
+  ])('%s is the no-text state, not a blank body', async (_label, text) => {
+    // Canonicalisation deliberately does not refuse these -- "emptiness is
+    // handled downstream" -- and the card IS downstream. Rendering the empty
+    // string produced a text-source card with nothing in it, which reads as a
+    // failed load rather than as an empty document.
+    stubText({ text });
+    const host = await card();
+    expect(host.querySelector('[data-knowledge-pdf-text-source="true"]')).not.toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-text-empty="true"]')).not.toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-text-excerpt="true"]')).toBeNull();
+    // And no character count: "3 characters" of whitespace is a true number
+    // about nothing the reader can see.
+    expect(host.textContent).not.toContain('characters');
+  });
+
+  it('cuts the excerpt between characters, never inside one', async () => {
+    // The budget counts UTF-16 code units, because that is the unit every
+    // offset in this feature uses. An astral character straddling the boundary
+    // would be cut in half and render a replacement glyph at the end of the
+    // excerpt -- visible damage, in the one place the text is on screen.
+    const straddle = `${'a'.repeat(KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS - 1)}\u{1F9F5}${'b'.repeat(40)}`;
+    // Pinning the setup itself: the emoji really does span the boundary.
+    expect(straddle.charCodeAt(KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS - 1)).toBeGreaterThanOrEqual(0xd800);
+    expect(straddle.charCodeAt(KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS)).toBeGreaterThanOrEqual(0xdc00);
+
+    stubText({ text: straddle });
+    const host = await card();
+    const rendered = host.querySelector('[data-knowledge-pdf-text-excerpt="true"]')!.textContent!;
+    const excerpt = rendered.replace(/…\s*$/, '');
+
+    // A prefix, within budget, and whole: no unpaired surrogate anywhere.
+    expect(straddle.startsWith(excerpt)).toBe(true);
+    expect(excerpt.length).toBeLessThanOrEqual(KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS);
+    expect(countLoneSurrogates(excerpt)).toBe(0);
+    // And it still says it was truncated.
+    expect(rendered).toContain('…');
+  });
+
+  function countLoneSurrogates(text: string): number {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+    return (text.match(lone) ?? []).length;
+  }
 
   it('A PDF IS UNAFFECTED: pages, pager and no text-source body', async () => {
     // The regression control. The branch is chosen by the row's KIND, so a PDF

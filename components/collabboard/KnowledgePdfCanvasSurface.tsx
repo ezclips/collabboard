@@ -36,6 +36,7 @@ import {
 } from '@/components/collabboard/knowledgeSourceTextSelection';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { KNOWLEDGE_TEXT_KIND } from '@/lib/domain/knowledge/knowledgeTextIngestion';
+import { safeTextCutIndex } from '@/lib/domain/knowledge/knowledgeTextCanonical';
 
 /**
  * How much of a text source the card previews.
@@ -663,8 +664,23 @@ export default function KnowledgePdfCanvasSurface({
    * passage nobody chose, and the offsets that DO get chosen are the reader's
    * business, not this preview's.
    */
-  const textExcerpt = isTextSource && typeof sourceText === 'string'
-    ? sourceText.slice(0, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS)
+  /*
+    Two things a raw slice() gets wrong, and the card is the place both of them
+    would be SEEN:
+
+    1. The budget is counted in UTF-16 code units -- the same unit every offset
+       in this feature uses -- so a cut at 600 can land between the halves of an
+       astral character and render a replacement glyph at the end of the
+       excerpt. safeTextCutIndex moves BACK to the nearest whole character, so
+       the excerpt is always a prefix and never exceeds its budget.
+    2. A source whose canonical text is empty or only whitespace has nothing to
+       preview, and an excerpt of it is a blank body that looks like a failure
+       to load. Canonicalisation deliberately does not refuse such a document --
+       "emptiness is handled downstream" -- and this is downstream.
+  */
+  const hasTextToPreview = typeof sourceText === 'string' && sourceText.trim().length > 0;
+  const textExcerpt = isTextSource && hasTextToPreview && sourceText !== null
+    ? sourceText.slice(0, safeTextCutIndex(sourceText, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS))
     : null;
 
   const snippet = pages?.find((page) => page.text.trim().length > 0)?.text.trim().slice(0, 90) ?? null;
@@ -900,7 +916,10 @@ export default function KnowledgePdfCanvasSurface({
                   Text source
                 </div>
                 {textExcerpt === null ? (
-                  <p className="text-[10px] italic text-gray-400">
+                  <p
+                    data-knowledge-pdf-text-empty="true"
+                    className="text-[10px] italic text-gray-400"
+                  >
                     This source has no text to preview.
                   </p>
                 ) : (
@@ -921,7 +940,7 @@ export default function KnowledgePdfCanvasSurface({
                   </p>
                 )}
                 <div className="shrink-0 select-none text-[8px] text-gray-400">
-                  {sourceText === null
+                  {sourceText === null || !hasTextToPreview
                     ? originalFilename
                     : `${originalFilename} · ${sourceText.length.toLocaleString()} characters`}
                 </div>

@@ -37,6 +37,13 @@
 // and that is the end state: an RPC writing document, chunks and readiness
 // together. It needs a migration, so it is not this shape's to do yet.
 //
+// UNTIL THEN, THE LIMITATION IS RECOVERY, AND IT IS NOT SELF-HEALING. A
+// document left at 'uploaded' by a failed promotion stays there: nothing
+// retries it, no worker sweeps for it, and the chunks it already has are not
+// reachable through search. Recovery today means uploading the source again.
+// Deleting the real chunks to tidy the flag would be the worse outcome, so
+// the stuck state is kept rather than cleaned.
+//
 // THE INVARIANT IS CHECKED BEFORE ANYTHING IS WRITTEN, not after. A source
 // whose chunks do not reproduce it is refused as an upload -- which the user
 // can act on -- rather than stored as a corpus of citations that each land a
