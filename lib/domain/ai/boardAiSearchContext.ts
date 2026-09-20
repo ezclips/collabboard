@@ -54,6 +54,17 @@ export interface BoardAiSearchPassage {
   readonly pageStart?: number;
   readonly pageEnd?: number;
   /**
+   * Where the passage sits in a PAGELESS source, when the row could say.
+   *
+   * Present instead of the page fields, never alongside them: a source has
+   * pages or it has characters, and the two never describe the same passage.
+   * Absent means the row carried no range this build could vouch for -- the
+   * passage is then quotable but not citable, rather than citable to a span
+   * nobody verified.
+   */
+  readonly charStart?: number;
+  readonly charEnd?: number;
+  /**
    * A post that matched on its TITLE and has no body at all.
    *
    * It is a result, not noise: for "what does the Trump note post say?", the
@@ -384,6 +395,11 @@ export function boardAiSearchContextBlock(
         // A chunk may span pages; the page it BEGINS on is located, not
         // invented. `pageNumber` is the post-side field and is absent here.
         ...(passage.pageStart !== undefined ? { pageStart: passage.pageStart } : {}),
+        // And a pageless one carries its range instead, for the same reason:
+        // it is what locates the passage in a source that has no pages.
+        ...(passage.charStart !== undefined && passage.charEnd !== undefined
+          ? { charStart: passage.charStart, charEnd: passage.charEnd }
+          : {}),
       })),
     }),
     text: body,

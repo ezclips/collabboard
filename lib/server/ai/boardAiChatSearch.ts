@@ -25,6 +25,7 @@ import type { DomainError } from '../../domain/core/errors';
 import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
 import { buildBoardAiSearchQuery } from '../../domain/ai/boardAiSearchQuery';
+import { parseKnowledgeTextSourceLocator } from '../../domain/knowledge/knowledgeTextSourceLocator';
 import {
   boardAiSearchContextBlock,
   boundBoardAiSearchPassages,
@@ -67,6 +68,13 @@ export interface BoardAiSearchChunkRow {
   readonly page_end: number | null;
   readonly chunk_index: number;
   readonly text: string | null;
+  /**
+   * Where this passage sits in a PAGELESS source.
+   *
+   * `unknown` because it is a jsonb column: it may hold a PDF's bbox locators,
+   * an empty array, or nothing a build understands. It is parsed, never cast.
+   */
+  readonly source_locators?: unknown;
   readonly rank: number;
 }
 
@@ -228,15 +236,28 @@ export async function searchBoardAiContext(
     })
     : [];
   const chunkPassages: readonly BoardAiSearchPassage[] = chunks.ok
-    ? chunks.value.map((row) => ({
-      source: 'knowledge' as const,
-      label: chunkLabel(row),
-      text: (row.text ?? '').trim(),
-      rank: row.rank,
-      knowledgeDocumentId: row.document_id,
-      ...(row.page_start !== null ? { pageNumber: row.page_start, pageStart: row.page_start } : {}),
-      ...(row.page_end !== null ? { pageEnd: row.page_end } : {}),
-    }))
+    ? chunks.value.map((row) => {
+      // A PAGELESS SOURCE CARRIES A CHARACTER RANGE INSTEAD, and it is the
+      // only thing that can locate this passage: without it a citation into a
+      // text source has nowhere to point, and two passages from one document
+      // collapse to one identity. Parsed fail-closed -- a row whose locators
+      // are a PDF's bboxes, empty, or malformed yields no range, and the
+      // passage is then quotable but not citable, which is the honest
+      // outcome rather than an invented span.
+      const range = row.page_start === null
+        ? parseKnowledgeTextSourceLocator(row.source_locators)
+        : null;
+      return {
+        source: 'knowledge' as const,
+        label: chunkLabel(row),
+        text: (row.text ?? '').trim(),
+        rank: row.rank,
+        knowledgeDocumentId: row.document_id,
+        ...(row.page_start !== null ? { pageNumber: row.page_start, pageStart: row.page_start } : {}),
+        ...(row.page_end !== null ? { pageEnd: row.page_end } : {}),
+        ...(range !== null ? { charStart: range.charStart, charEnd: range.charEnd } : {}),
+      };
+    })
     : [];
   if (!posts.ok && !chunks.ok) {
     return err(domainError('unavailable', 'Could not search this board'));

@@ -185,6 +185,7 @@ const searchBlock = (
   passages: readonly {
     source: 'post' | 'knowledge'; label: string;
     padletId?: string; knowledgeDocumentId?: string; pageStart?: number;
+    charStart?: number; charEnd?: number;
   }[],
 ): ResolvedBoardAiContextBlock => ({
   type: 'board-search',
@@ -196,6 +197,8 @@ const searchBlock = (
 
 const POST_PASSAGE = { source: 'post' as const, label: 'Weekly plan', padletId: PADLET };
 const PDF_PASSAGE = { source: 'knowledge' as const, label: 'slides.pdf — page 3', knowledgeDocumentId: DOC_A, pageStart: 3 };
+const TEXT_PASSAGE_A = { source: 'knowledge' as const, label: 'tide-pools.md', knowledgeDocumentId: DOC_A, charStart: 0, charEnd: 338 };
+const TEXT_PASSAGE_B = { source: 'knowledge' as const, label: 'tide-pools.md', knowledgeDocumentId: DOC_A, charStart: 338, charEnd: 1113 };
 
 describe('search passages become ordinary, navigable citations', () => {
   it('a post passage cites the board post itself', () => {
@@ -251,6 +254,56 @@ describe('search passages become ordinary, navigable citations', () => {
       [page(DOC_A, 3, 'slides.pdf — page 3'), searchBlock([PDF_PASSAGE])],
     );
     expect(envelope?.items).toHaveLength(1);
+  });
+
+  it('a TEXT passage cites its character range, not a page', () => {
+    // Decision 0. Keying a pageless passage as knowledge-page with a synthetic
+    // or null page would collapse every passage of one document to a single
+    // citation identity.
+    const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([TEXT_PASSAGE_A])]);
+    expect(envelope?.items).toEqual([{
+      type: 'knowledge-selection', knowledgeDocumentId: DOC_A,
+      charStart: 0, charEnd: 338, label: 'tide-pools.md',
+    }]);
+    expect(envelope?.items[0].pageNumber).toBeUndefined();
+  });
+
+  it('TWO passages of ONE text document survive dedup as two citations', () => {
+    // The acceptance's own control, and the reason the identity key carries
+    // offsets: under a page-keyed identity these would collapse into one.
+    const envelope = buildBoardAiCitationEnvelope(
+      ['S1.1', 'S1.2'],
+      [searchBlock([TEXT_PASSAGE_A, TEXT_PASSAGE_B])],
+    );
+    expect(envelope?.items).toHaveLength(2);
+    expect(envelope?.items.map((item) => [item.charStart, item.charEnd]))
+      .toEqual([[0, 338], [338, 1113]]);
+  });
+
+  it('the SAME range cited twice is still one citation', () => {
+    const envelope = buildBoardAiCitationEnvelope(
+      ['S1.1', 'S1.2'],
+      [searchBlock([TEXT_PASSAGE_A, TEXT_PASSAGE_A])],
+    );
+    expect(envelope?.items).toHaveLength(1);
+  });
+
+  it.each([
+    ['no locator at all', {}],
+    ['a start but no end', { charStart: 4 }],
+    ['an empty range', { charStart: 4, charEnd: 4 }],
+    ['an inverted range', { charStart: 9, charEnd: 2 }],
+    ['a fractional offset', { charStart: 0.5, charEnd: 9 }],
+  ])('a pageless passage with %s cites nothing rather than guessing', (_label, range) => {
+    const passage = { source: 'knowledge' as const, label: 'notes.md', knowledgeDocumentId: DOC_A, ...range };
+    expect(buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([passage])])).toBeNull();
+  });
+
+  it('a PDF passage is unaffected by the range arm', () => {
+    // The regression control: the page arm is still reached, and a page
+    // citation is still what a paged source produces.
+    const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([PDF_PASSAGE])]);
+    expect(envelope?.items[0].type).toBe('knowledge-page');
   });
 
   it('no passage text can reach a citation', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BoardId, KnowledgeDocumentId, UserId } from '../../domain/core/ids';
+import { parseKnowledgeTextSourceLocator } from '../../domain/knowledge/knowledgeTextSourceLocator';
 import {
   KNOWLEDGE_TEXT_PROCESSING_STATUS,
   SupabaseKnowledgeTextRepository,
@@ -117,6 +118,21 @@ describe('the chunks', () => {
       document_id: DOC, chunk_index: 1, text: 'chunk 1', text_hash: 'h1',
       page_start: null, page_end: null, char_start: 10, char_end: 17,
     });
+  });
+
+  it('carry the range in source_locators as well as its columns', () => {
+    // Not redundancy for its own sake: the search function both consumers read
+    // returns source_locators and not char_start/char_end, so a range that
+    // lived only in the columns could never reach a citation.
+    const { api, calls } = client();
+    void new SupabaseKnowledgeTextRepository(api).insertTextChunks([chunk(1)]);
+
+    const rows = calls[0].payload as Record<string, unknown>[];
+    expect(rows[0].source_locators).toEqual([
+      { kind: 'text-range', charStart: 10, charEnd: 17 },
+    ]);
+    expect(parseKnowledgeTextSourceLocator(rows[0].source_locators))
+      .toEqual({ kind: 'text-range', charStart: 10, charEnd: 17 });
   });
 
   it('writes nothing at all for a blank source', async () => {

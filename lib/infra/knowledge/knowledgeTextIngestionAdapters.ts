@@ -21,6 +21,7 @@ import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
 import type { KnowledgeDocumentId } from '../../domain/core/ids';
 import type { KnowledgeDocument } from '../../domain/knowledge/knowledgePersistence';
+import { buildKnowledgeTextSourceLocator } from '../../domain/knowledge/knowledgeTextSourceLocator';
 import type {
   KnowledgeTextChunkInsert,
   KnowledgeTextDocumentInsert,
@@ -131,7 +132,12 @@ export class SupabaseKnowledgeTextRepository implements KnowledgeTextRepository 
         page_end: null,
         char_start: chunk.charStart,
         char_end: chunk.charEnd,
-        source_locators: [],
+        // THE SAME RANGE AGAIN, deliberately. The columns above are the truth;
+        // this is how the truth reaches the two consumers, which read the
+        // search function rather than the table -- and that function's
+        // RETURNS TABLE carries source_locators but not the character columns.
+        // See knowledgeTextSourceLocator for why it cannot simply be widened.
+        source_locators: [buildKnowledgeTextSourceLocator(chunk.charStart, chunk.charEnd)],
       })),
     );
 

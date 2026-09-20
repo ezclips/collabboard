@@ -234,6 +234,12 @@ export interface BoardAiCitablePassage {
   readonly padletId?: string;
   readonly knowledgeDocumentId?: string;
   readonly pageStart?: number;
+  /**
+   * Where a PAGELESS passage sits in its source. Identity, like everything
+   * else here -- never the text, which a citation says nothing about.
+   */
+  readonly charStart?: number;
+  readonly charEnd?: number;
 }
 
 export interface ResolvedBoardAiContextBlock {

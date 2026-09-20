@@ -253,11 +253,36 @@ function citationItemFromPassage(
   if (passage.source === 'post') {
     return passage.padletId ? { type: 'padlet', padletId: passage.padletId, label } : null;
   }
+  if (!passage.knowledgeDocumentId) return null;
+
+  // A PAGELESS SOURCE IS CITED BY ITS RANGE. This is Decision 0: keying a text
+  // passage as knowledge-page with a synthetic or null page would collapse
+  // every passage of one document to a single citation identity, so the two
+  // paragraphs an answer leaned on would arrive as one citation pointing
+  // nowhere in particular. A character range is what that document has, and
+  // knowledge-selection is the item type that carries one.
+  //
+  // Checked BEFORE the page arm, and on the range's own presence: a passage
+  // with neither a page nor a range is not citable at all and falls through to
+  // null, rather than being routed by the absence of one of them.
+  if (passage.charStart !== undefined && passage.charEnd !== undefined) {
+    if (!Number.isInteger(passage.charStart) || !Number.isInteger(passage.charEnd)) return null;
+    if (passage.charStart < 0 || passage.charEnd <= passage.charStart) return null;
+    return {
+      type: 'knowledge-selection',
+      knowledgeDocumentId: passage.knowledgeDocumentId,
+      charStart: passage.charStart,
+      charEnd: passage.charEnd,
+      // No pageNumber. Not omitted as an oversight: this source has no pages,
+      // and the resolver now refuses a page cited in a text source outright.
+      label,
+    };
+  }
+
   // A chunk may span pages. `pageStart` is where this passage actually begins,
   // so it is located rather than invented -- the same standard the
   // knowledge-document arm applies when it refuses to guess a page at all.
   const page = passage.pageStart;
-  if (!passage.knowledgeDocumentId) return null;
   if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) return null;
   return {
     type: 'knowledge-page',
@@ -330,11 +355,19 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
     let item: BoardAiCitationItem | null = null;
     if (stored.type === 'knowledge-page' && documentId && page !== undefined) {
       item = { type: 'knowledge-page', knowledgeDocumentId: documentId, pageNumber: page, label };
-    } else if (stored.type === 'knowledge-selection' && documentId && page !== undefined) {
+    } else if (
+      stored.type === 'knowledge-selection'
+      && documentId
+      // A selection is readable back if it names a PAGE (a PDF selection, as
+      // before) or a RANGE (a text selection, which has no page to name).
+      // Neither alone is weakened: a stored selection with neither locator
+      // still names nowhere and is still dropped.
+      && (page !== undefined || (charStart !== undefined && charEnd !== undefined))
+    ) {
       item = {
         type: 'knowledge-selection',
         knowledgeDocumentId: documentId,
-        pageNumber: page,
+        ...(page !== undefined ? { pageNumber: page } : {}),
         ...(charStart !== undefined ? { charStart } : {}),
         ...(charEnd !== undefined ? { charEnd } : {}),
         label,
