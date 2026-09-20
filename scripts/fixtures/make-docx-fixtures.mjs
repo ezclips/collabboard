@@ -9,7 +9,15 @@
  * WHAT THESE FIXTURES ARE, STATED PLAINLY. `structured` and `image` are
  * written by the `docx` package; `revisions` and `breaks` are the same package
  * with hand-authored OOXML injected, because that writer does not author
- * revision marks or comments. NONE OF THEM IS A WORD-PRODUCED FILE. Word's own
+ * revision marks or comments. NONE OF THEM IS A WORD-PRODUCED FILE.
+ *
+ * The Word-produced specimen is `word-authored.docx`, written by Word 16.0
+ * itself via scripts/fixtures/make-word-authored-docx.ps1. Do not add Word-only
+ * structures to this script and do not treat its output as equivalent; these
+ * fixtures pin the CONTRACT, and that one is the evidence about real Word
+ * output.
+ *
+ * Word's own
  * output carries structures these do not, and the unit's acceptance requires
  * real Word documents with tables, lists, footnotes and tracked changes before
  * Stage 2 closes. These fixtures pin the CONTRACT; they do not stand in for
