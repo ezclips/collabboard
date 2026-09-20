@@ -1,0 +1,659 @@
+{
+  "generatedAt": "2026-09-20T23:23:04.906Z",
+  "node": "v24.11.1",
+  "results": [
+    {
+      "id": "dQw4w9WgXcQ",
+      "covers": "public video with human-authored captions, several languages",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 213,
+        "audioLanguage": null,
+        "manualTracks": 5,
+        "asrTracks": 1,
+        "firstTrackLanguage": "en"
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 84,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 157,
+          "discovery": "tracks-listed",
+          "tracksDiscovered": 6,
+          "languages": [
+            "en",
+            "de-DE",
+            "ja",
+            "pt-BR",
+            "es-419"
+          ],
+          "attempts": [
+            {
+              "fmt": "default",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "json3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "srv3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "vtt",
+              "http": 200,
+              "bytes": 0
+            }
+          ],
+          "failure": "empty-200"
+        },
+        "transcriptLib": {
+          "ok": true,
+          "ms": 110,
+          "language": "en",
+          "firstTrackLanguage": "en",
+          "tookFirstTrack": true,
+          "quality": {
+            "segments": 61,
+            "textUnits": 2089,
+            "coveredSec": 210,
+            "summedSec": 178,
+            "spanVsDuration": 0.85,
+            "segSec": {
+              "min": 1.32,
+              "p50": 2.68,
+              "p95": 4.36,
+              "max": 4.68
+            },
+            "groupableInto45sWindows": 4,
+            "hasSentencePunctuation": false,
+            "hasCommas": true,
+            "upperCaseRatio": 0.045
+          },
+          "sample": [
+            "[♪♪♪]",
+            "♪ We're no strangers to love ♪"
+          ]
+        }
+      }
+    },
+    {
+      "id": "jNQXAC9IVRw",
+      "covers": "very short video (19 s) with human-authored captions",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 19,
+        "audioLanguage": null,
+        "manualTracks": 2,
+        "asrTracks": 0,
+        "firstTrackLanguage": "en"
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 33,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 115,
+          "discovery": "tracks-listed",
+          "tracksDiscovered": 2,
+          "languages": [
+            "en",
+            "de"
+          ],
+          "attempts": [
+            {
+              "fmt": "default",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "json3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "srv3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "vtt",
+              "http": 200,
+              "bytes": 0
+            }
+          ],
+          "failure": "empty-200"
+        },
+        "transcriptLib": {
+          "ok": true,
+          "ms": 110,
+          "language": "en",
+          "firstTrackLanguage": "en",
+          "tookFirstTrack": true,
+          "quality": {
+            "segments": 6,
+            "textUnits": 217,
+            "coveredSec": 18,
+            "summedSec": 15,
+            "spanVsDuration": 0.82,
+            "segSec": {
+              "min": 1.31,
+              "p50": 2.16,
+              "p95": 4.64,
+              "max": 4.64
+            },
+            "groupableInto45sWindows": 0,
+            "hasSentencePunctuation": true,
+            "hasCommas": true,
+            "upperCaseRatio": 0.006
+          },
+          "sample": [
+            "All right, so here we are, in front of the\nelephants",
+            "the cool thing about these guys is that they\nhave really..."
+          ]
+        }
+      }
+    },
+    {
+      "id": "9bZkp7q19f0",
+      "covers": "non-English (Korean) with ONLY auto-generated captions",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 252,
+        "audioLanguage": null,
+        "manualTracks": 0,
+        "asrTracks": 1,
+        "firstTrackLanguage": "ko"
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 39,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 119,
+          "discovery": "tracks-listed",
+          "tracksDiscovered": 1,
+          "languages": [
+            "ko"
+          ],
+          "attempts": [
+            {
+              "fmt": "default",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "json3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "srv3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "vtt",
+              "http": 200,
+              "bytes": 0
+            }
+          ],
+          "failure": "empty-200"
+        },
+        "transcriptLib": {
+          "ok": true,
+          "ms": 151,
+          "language": "ko",
+          "firstTrackLanguage": "ko",
+          "tookFirstTrack": true,
+          "quality": {
+            "segments": 67,
+            "textUnits": 654,
+            "coveredSec": 244,
+            "summedSec": 362,
+            "spanVsDuration": 1.48,
+            "segSec": {
+              "min": 2.96,
+              "p50": 5.2,
+              "p95": 8.32,
+              "max": 10.2
+            },
+            "groupableInto45sWindows": 5,
+            "hasSentencePunctuation": true,
+            "hasCommas": false,
+            "upperCaseRatio": 0.5
+          },
+          "sample": [
+            "오반 강남 스타일",
+            "강남 스타일"
+          ]
+        }
+      }
+    },
+    {
+      "id": "aircAruvnKk",
+      "covers": "many caption languages (30 manual) -- the track-selection case",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 1120,
+        "audioLanguage": null,
+        "manualTracks": 30,
+        "asrTracks": 1,
+        "firstTrackLanguage": "ar"
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 34,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 114,
+          "discovery": "tracks-listed",
+          "tracksDiscovered": 31,
+          "languages": [
+            "ar",
+            "bn",
+            "zh",
+            "zh-CN",
+            "zh-TW",
+            "cs",
+            "en",
+            "fil",
+            "fr",
+            "de",
+            "el",
+            "iw",
+            "hi",
+            "hu",
+            "it",
+            "ja",
+            "ko",
+            "mr",
+            "fa",
+            "fa-IR",
+            "pl",
+            "pt",
+            "pt-BR",
+            "ro",
+            "ru",
+            "es",
+            "th",
+            "tr",
+            "uk",
+            "ur"
+          ],
+          "attempts": [
+            {
+              "fmt": "default",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "json3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "srv3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "vtt",
+              "http": 200,
+              "bytes": 0
+            }
+          ],
+          "failure": "empty-200"
+        },
+        "transcriptLib": {
+          "ok": true,
+          "ms": 166,
+          "language": "ar",
+          "firstTrackLanguage": "ar",
+          "tookFirstTrack": true,
+          "quality": {
+            "segments": 216,
+            "textUnits": 13444,
+            "coveredSec": 1101,
+            "summedSec": 987,
+            "spanVsDuration": 0.9,
+            "segSec": {
+              "min": 0.02,
+              "p50": 4.64,
+              "p95": 7.58,
+              "max": 12.66
+            },
+            "groupableInto45sWindows": 23,
+            "hasSentencePunctuation": true,
+            "hasCommas": true,
+            "upperCaseRatio": 0.244
+          },
+          "sample": [
+            "هذه صورة للرقم ثلاثة.",
+            "مرسومة بإهمال و مكوّنة فقط ٢٨ * ٢٨ بكسل. و لكن أريدك أن تقدّر كيف باستطاعة عقلك،"
+          ]
+        }
+      }
+    },
+    {
+      "id": "1La4QzGeaaQ",
+      "covers": "playable video with NO captions at all -- the Stage 3d refusal case",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 338,
+        "audioLanguage": null,
+        "manualTracks": 0,
+        "asrTracks": 0,
+        "firstTrackLanguage": null
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 30,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 0,
+          "discovery": "no-tracks",
+          "failure": "captions-unavailable"
+        },
+        "transcriptLib": {
+          "ok": false,
+          "ms": 666,
+          "failure": "YoutubeTranscriptDisabledError",
+          "message": "[YoutubeTranscript] 🚨 Transcript is disabled on this video (1La4QzGeaaQ)"
+        }
+      }
+    },
+    {
+      "id": "_uQrJ0TkZlc",
+      "covers": "long (6.2 h) with human-authored captions",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 22447,
+        "audioLanguage": null,
+        "manualTracks": 8,
+        "asrTracks": 1,
+        "firstTrackLanguage": "zh-CN"
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 27,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 128,
+          "discovery": "tracks-listed",
+          "tracksDiscovered": 9,
+          "languages": [
+            "zh-CN",
+            "en",
+            "id",
+            "fa",
+            "pt",
+            "ru",
+            "es-419",
+            "tr"
+          ],
+          "attempts": [
+            {
+              "fmt": "default",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "json3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "srv3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "vtt",
+              "http": 200,
+              "bytes": 0
+            }
+          ],
+          "failure": "empty-200"
+        },
+        "transcriptLib": {
+          "ok": true,
+          "ms": 228,
+          "language": "zh-CN",
+          "firstTrackLanguage": "zh-CN",
+          "tookFirstTrack": true,
+          "quality": {
+            "segments": 4530,
+            "textUnits": 241814,
+            "coveredSec": 18304,
+            "summedSec": 18120,
+            "spanVsDuration": 0.99,
+            "segSec": {
+              "min": 4,
+              "p50": 4,
+              "p95": 4,
+              "max": 4
+            },
+            "groupableInto45sWindows": 381,
+            "hasSentencePunctuation": true,
+            "hasCommas": true,
+            "upperCaseRatio": 0.015
+          },
+          "sample": [
+            "嗨，我的名字是Mosh，我将成为你Python课程的导师。",
+            "在本课程中，您将学习使用Python开始编程所需的一切。"
+          ]
+        }
+      }
+    },
+    {
+      "id": "8jLOx1hD3_o",
+      "covers": "very long (31 h) with ONLY auto-generated captions -- the scale case",
+      "observed": {
+        "playability": "OK",
+        "durationSec": 112049,
+        "audioLanguage": null,
+        "manualTracks": 0,
+        "asrTracks": 1,
+        "firstTrackLanguage": "en"
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 32,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 114,
+          "discovery": "tracks-listed",
+          "tracksDiscovered": 1,
+          "languages": [
+            "en"
+          ],
+          "attempts": [
+            {
+              "fmt": "default",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "json3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "srv3",
+              "http": 200,
+              "bytes": 0
+            },
+            {
+              "fmt": "vtt",
+              "http": 200,
+              "bytes": 0
+            }
+          ],
+          "failure": "empty-200"
+        },
+        "transcriptLib": {
+          "ok": true,
+          "ms": 1312,
+          "language": "en",
+          "firstTrackLanguage": "en",
+          "tookFirstTrack": true,
+          "quality": {
+            "segments": 46959,
+            "textUnits": 1696642,
+            "coveredSec": 112051,
+            "summedSec": 223990,
+            "spanVsDuration": 2,
+            "segSec": {
+              "min": 1.36,
+              "p50": 4.72,
+              "p95": 6.16,
+              "max": 12.16
+            },
+            "groupableInto45sWindows": 2422,
+            "hasSentencePunctuation": true,
+            "hasCommas": false,
+            "upperCaseRatio": 0
+          },
+          "sample": [
+            "this complete c plus plus course will",
+            "take you from being an absolute beginner"
+          ]
+        }
+      }
+    },
+    {
+      "id": "2lAe1cqCOXo",
+      "covers": "gated: the watch page demands a sign-in",
+      "observed": {
+        "playability": "LOGIN_REQUIRED",
+        "durationSec": null,
+        "audioLanguage": null,
+        "manualTracks": 0,
+        "asrTracks": 0,
+        "firstTrackLanguage": null
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 28,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 0,
+          "discovery": "no-tracks",
+          "failure": "playability:LOGIN_REQUIRED"
+        },
+        "transcriptLib": {
+          "ok": false,
+          "ms": 178,
+          "failure": "YoutubeTranscriptDisabledError",
+          "message": "[YoutubeTranscript] 🚨 Transcript is disabled on this video (2lAe1cqCOXo)"
+        }
+      }
+    },
+    {
+      "id": "5qap5aO4i9A",
+      "covers": "unplayable: an ended live stream",
+      "observed": {
+        "playability": "UNPLAYABLE",
+        "durationSec": 75037431,
+        "audioLanguage": null,
+        "manualTracks": 0,
+        "asrTracks": 0,
+        "firstTrackLanguage": null
+      },
+      "drift": [],
+      "paths": {
+        "dataApi": {
+          "ok": false,
+          "ms": 37,
+          "http": 403,
+          "failure": "PERMISSION_DENIED",
+          "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+          "keyPresent": false
+        },
+        "timedtext": {
+          "ok": false,
+          "ms": 0,
+          "discovery": "no-tracks",
+          "failure": "playability:UNPLAYABLE"
+        },
+        "transcriptLib": {
+          "ok": false,
+          "ms": 617,
+          "failure": "YoutubeTranscriptDisabledError",
+          "message": "[YoutubeTranscript] 🚨 Transcript is disabled on this video (5qap5aO4i9A)"
+        }
+      }
+    }
+  ],
+  "rate": {
+    "attempts": 25,
+    "ok": 25,
+    "failures": {},
+    "statuses": {
+      "200": 25
+    },
+    "ms": 14266
+  }
+}

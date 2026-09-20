@@ -74,6 +74,7 @@ devserver.out.log
 !.agent/media-sources-unit.md
 !.agent/docx-extraction-assessment.md
 !.agent/docx-live-acceptance.md
+!.agent/youtube-caption-paths.md
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/
