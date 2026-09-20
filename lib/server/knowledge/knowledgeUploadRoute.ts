@@ -10,6 +10,7 @@ import {
   extractKnowledgeDocxText,
   isKnowledgeDocxCandidate,
 } from '@/lib/infra/knowledge/knowledgeDocxExtractionAdapter';
+import { knowledgeExtractionNotices } from '@/lib/domain/knowledge/knowledgeExtractionNotices';
 import {
   createKnowledgeTextUpload,
   type KnowledgeTextChunkHasher,
@@ -133,6 +134,9 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       // predicate; it only chooses which of them answers.
       const input = { boardId: asBoardId(boardId), userId: asUserId(userId), file: source };
       let result;
+      // What the extraction dropped or decided, carried back to the only
+      // moment the person is still looking at the document.
+      let notices: readonly string[] = [];
       if (isKnowledgeDocxCandidate(source)) {
         // EXTRACTION BEFORE CANONICALISATION. A .docx is a ZIP and would fail
         // the strict UTF-8 decode the text path opens with, so it is turned
@@ -141,6 +145,7 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
         // .docx indistinguishable from a mis-encoded text file.
         const extracted = await extractKnowledgeDocxText(bytes);
         if (!extracted.ok) return domainErrorResponse(extracted.error);
+        notices = knowledgeExtractionNotices(extracted.value);
         const text = deps.createTextIngestionDeps();
         result = await createKnowledgeTextUpload(
           text.deps,
@@ -167,6 +172,9 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
           // the kind travels with it rather than being inferred from a status
           // that could also belong to a PDF whose extraction already finished.
           kind: result.value.kind,
+          // Absent for a source that kept everything it had, rather than an
+          // empty array every client has to remember to check.
+          ...(notices.length > 0 ? { notices } : {}),
         },
         { status: 201 },
       );

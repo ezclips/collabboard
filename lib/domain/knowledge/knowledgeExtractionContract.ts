@@ -77,11 +77,23 @@ export interface KnowledgeExtractionContract {
    * disagree, and the pinned route is the HTML one, so a blank line the author
    * left between two paragraphs is not represented in the text.
    *
-   * This is a FIDELITY loss and not a correctness one, which is why it did not
-   * defeat the pin: no content is missing, the offsets stay internally
-   * consistent with the text actually stored, and a blank line carries nothing
-   * a citation could quote. Recorded because it is a real difference from the
-   * assessment's proposal, which expected empty paragraphs to survive.
+   * This did not defeat the pin -- no words are missing, and the offsets stay
+   * internally consistent with the text actually stored -- but calling it
+   * merely cosmetic would be too kind. AN OMITTED BLANK PARAGRAPH REMOVES
+   * LAYOUT INFORMATION EVEN WHERE EVERY WORD SURVIVES: the separation between
+   * a heading and what follows it, a deliberate gap between two stanzas, the
+   * break an author put between two thoughts. A chunk boundary drawn on
+   * paragraph spans can land differently because of it, so what a citation
+   * quotes can differ too, even though nothing was deleted.
+   *
+   * AND THE UPGRADE RULE, which matters more than the loss. A parser upgrade
+   * changes what NEWLY extracted text is, and its offsets with it. It must
+   * never be applied to canonical text already persisted: stored text is the
+   * authority for every offset stored against it, and re-running an extractor
+   * over an existing document produces a different string that old citations
+   * still point into. Re-extraction is a new version of a document, never a
+   * correction of one in place -- which is what the per-document contract hash
+   * exists to make detectable.
    */
   readonly emptyParagraphs: 'preserved' | 'omitted-by-parser';
 }

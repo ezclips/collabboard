@@ -228,3 +228,72 @@ describe('a compensation that fails is reported, not swallowed', () => {
     expect((result.error.details as Record<string, unknown> | undefined)?.cleanupFailed).toBeUndefined();
   });
 });
+
+/**
+ * BLANK AND WHITESPACE-ONLY SOURCES -- demonstrated, not described.
+ *
+ * THREE answers for three situations, and the shape was found by running it
+ * rather than by reading the code -- an earlier description of this as a
+ * two-way asymmetry was wrong:
+ *
+ *   - a ZERO-BYTE file is REFUSED, on size, before anything is decoded.
+ *   - a whitespace-only .txt is ACCEPTED and produces no chunks. It is
+ *     transparently blank: the person who chose it can open it and see that.
+ *   - a .docx that extracts to nothing is REFUSED, because it is not
+ *     transparent -- a document full of screenshots looks full.
+ *
+ * "Nothing at all" is trim(), not length === 0, in both the chunker and the
+ * refusal: a file containing one newline is as empty as a file containing
+ * none, and treating it as content would create a chunk of whitespace that
+ * search can match and a citation can point at.
+ */
+describe('a blank text source is accepted and indexes nothing', () => {
+  it('a ZERO-BYTE file is refused outright -- the third case', async () => {
+    // Found by running this: the behaviour is three-way, not two-way. A file
+    // with no bytes never reaches the chunker at all; Stage 1 refuses it on
+    // size before any decoding happens.
+    const { result, calls } = await upload('');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toBe('The selected file is empty');
+    // Refused before any external effect: nothing uploaded, nothing inserted.
+    expect(calls).toEqual(['authorize']);
+  });
+
+  it.each([
+    ['one newline', '\n'],
+    ['spaces and tabs and newlines', '  \t\n \r\n  '],
+  ])('%s: the document is created, and NO chunks are written', async (_label, text) => {
+    const { result, calls, written } = await upload(text);
+
+    expect(result.ok).toBe(true);
+    // The row exists and reaches ready...
+    expect(calls).toContain('insertDocument');
+    expect(calls).toContain('markReady');
+    // ...and insertTextChunks is never called at all. Not called with an empty
+    // array -- not called, so there is nothing for search to match.
+    expect(calls).not.toContain('insertChunks');
+    expect(written).toEqual([]);
+  });
+
+  it('THE CONSEQUENCE, stated: ready, visible in the library, and unfindable', async () => {
+    // This is the honest description of the state, and it is the reason the
+    // DOCX path refuses instead. A ready document with no chunks cannot be
+    // found by search and cannot be cited; it can only be opened. For a file
+    // the user knows is blank that is the truth. For a Word document they
+    // believe is full of content it would be a lie, which is why that path
+    // does not reach this state.
+    const { result, written } = await upload('   \n  ');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(written).toEqual([]);
+  });
+
+  it('a source with ANY real text does write chunks -- the positive control', async () => {
+    // Without this, the assertions above would also pass if chunking were
+    // broken for every input.
+    const { calls, written } = await upload('  \n Alpha. \n ');
+    expect(calls).toContain('insertChunks');
+    expect(written[0].length).toBeGreaterThan(0);
+  });
+});

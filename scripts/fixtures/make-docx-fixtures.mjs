@@ -154,6 +154,22 @@ const imageOnly = new Document({
 });
 write('imageonly.docx', await Packer.toBuffer(imageOnly));
 
+// --- whitespace.docx: a document whose only text is whitespace -------------
+// "Nothing at all" is trim(), not length === 0: a paragraph of spaces is as
+// empty as no paragraph, and admitting it would create a chunk of whitespace
+// that search can match and a citation can point at.
+{
+  const zip = await JSZip.loadAsync(structuredBuffer);
+  let doc = await zip.file('word/document.xml').async('string');
+  const bodyStart = doc.indexOf('<w:body>') + '<w:body>'.length;
+  const sect = doc.lastIndexOf('<w:sectPr');
+  doc = doc.slice(0, bodyStart)
+    + '<w:p><w:r><w:t xml:space="preserve">   \t  </w:t></w:r></w:p>'
+    + doc.slice(sect);
+  zip.file('word/document.xml', doc);
+  write('whitespace.docx', await zip.generateAsync({ type: 'nodebuffer' }));
+}
+
 // --- long.docx: enough text to chunk more than once -----------------------
 // The offsets instrument's gap and overlap checks need at least two chunks,
 // and a cost measurement taken on a two-paragraph document measures nothing.

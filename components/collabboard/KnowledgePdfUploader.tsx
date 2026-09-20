@@ -67,6 +67,15 @@ export interface KnowledgePdfUploadResult extends KnowledgePdfPlacementSource {
   processingStatus: 'uploaded' | 'ready';
   /** What the server stored it as. Absent on responses from older builds. */
   kind?: string;
+  /**
+   * What the extraction dropped or decided -- unread images, accepted tracked
+   * changes. Absent when it kept everything it saw.
+   *
+   * Shown at the upload because that is the only moment the person is still
+   * looking at the document. Afterwards the source is just one more thing the
+   * search returns, and nothing says the pictures were never read.
+   */
+  notices?: readonly string[];
 }
 
 /**
@@ -382,7 +391,10 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       // moment it was shown.
       if (uploaded.processingStatus === 'ready') {
         onDocumentSettled?.(uploaded.id, 'ready');
-        setNotice({ tone: 'success', message: `${uploaded.originalFilename} is ready.` });
+        setNotice({
+          tone: 'success',
+          message: knowledgeUploadReadyMessage(uploaded),
+        });
         return;
       }
 
@@ -491,3 +503,26 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
 });
 
 export default KnowledgePdfUploader;
+
+/**
+ * "Ready", plus anything the extraction did not keep.
+ *
+ * The notices ride on the SAME message rather than a second one that could be
+ * missed or dismissed separately: a person who reads "is ready" and looks away
+ * has been told the document is indexed, and that is exactly the belief the
+ * notice exists to qualify.
+ *
+ * The server authors the sentences. This adds none of its own and shows only
+ * strings, so a malformed payload can make the message longer and cannot make
+ * it into anything else.
+ */
+export function knowledgeUploadReadyMessage(uploaded: {
+  readonly originalFilename: string;
+  readonly notices?: readonly string[];
+}): string {
+  const notices = Array.isArray(uploaded.notices)
+    ? uploaded.notices.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+    : [];
+  const ready = `${uploaded.originalFilename} is ready.`;
+  return notices.length > 0 ? `${ready} ${notices.join(' ')}` : ready;
+}

@@ -10,7 +10,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { extractKnowledgeDocxText } from './knowledgeDocxExtractionAdapter';
+import {
+  extractKnowledgeDocxText,
+  KNOWLEDGE_DOCX_MAX_ENTRIES,
+} from './knowledgeDocxExtractionAdapter';
 import {
   isKnowledgeDocxCandidate,
   KNOWLEDGE_DOCX_MIME_TYPE,
@@ -184,5 +187,79 @@ describe('limits and failures', () => {
     const { elapsedMs } = await textOf('structured.docx');
     expect(elapsedMs).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(elapsedMs)).toBe(true);
+  });
+});
+
+describe('archive bounds, verified against what the libraries do NOT enforce', () => {
+  // jszip 3.10.1 has no entry cap and no size cap; mammoth 1.12.3 adds none.
+  // Every bound here is ours, and the cheap ones run before decompression.
+
+  it('refuses an archive with no main document part', async () => {
+    // A ZIP named .docx is not a .docx. Without this it reaches mammoth and
+    // comes back as an unexplained failure.
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    zip.file('hello.txt', 'not a word document');
+    const bytes = new Uint8Array(await zip.generateAsync({ type: 'nodebuffer' }));
+
+    const result = await extractKnowledgeDocxText(bytes);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toBe('This file could not be read as a Word document');
+  });
+
+  it('refuses an archive with too many parts, before decompressing any', async () => {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    zip.file('word/document.xml', '<w:document/>');
+    for (let i = 0; i < KNOWLEDGE_DOCX_MAX_ENTRIES + 10; i += 1) zip.file(`part-${i}.bin`, 'x');
+    const bytes = new Uint8Array(await zip.generateAsync({ type: 'nodebuffer' }));
+
+    const result = await extractKnowledgeDocxText(bytes);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toBe('This document has too many parts to read');
+  });
+
+  it('accepts every real fixture -- the bounds do not refuse ordinary documents', async () => {
+    // The control that keeps the limits honest: a ceiling that refuses real
+    // work is not a safeguard, it is an outage.
+    for (const name of ['structured.docx', 'revisions.docx', 'breaks.docx', 'long.docx']) {
+      const result = await extractKnowledgeDocxText(read(name));
+      expect(result.ok, `${name} must still extract`).toBe(true);
+    }
+  });
+});
+
+describe('a document whose only text is whitespace', () => {
+  it('extracts to nothing, and is therefore refused by the upload', async () => {
+    // "Nothing at all" is trim(), not length === 0. The extractor's job is
+    // only to produce the text; the refusal is the upload's, and is proved
+    // against this same shape in knowledgeTextIngestion's own suite.
+    const { text } = await textOf('whitespace.docx');
+    expect(text.length).toBeGreaterThan(0);
+    expect(text.trim()).toBe('');
+  });
+});
+
+describe('the facts a disclosure is built from', () => {
+  it('reports tracked changes from the ARCHIVE, where the fact still exists', async () => {
+    // By the time mammoth has produced HTML the revisions are already applied,
+    // so the only place this is knowable is the source XML.
+    const { hasTrackedChanges } = await textOf('revisions.docx');
+    expect(hasTrackedChanges).toBe(true);
+  });
+
+  it('does not see tracked changes in a document that has none', async () => {
+    const { hasTrackedChanges } = await textOf('structured.docx');
+    expect(hasTrackedChanges).toBe(false);
+  });
+
+  it('reports images in a MIXED document, which is the silent case', async () => {
+    // An image-only document is refused and says so. A document with text AND
+    // pictures succeeds, looks complete, and is the one that needs telling.
+    const { imageCount, text } = await textOf('image.docx');
+    expect(imageCount).toBe(1);
+    expect(text.trim().length).toBeGreaterThan(0);
   });
 });
