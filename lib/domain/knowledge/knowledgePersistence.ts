@@ -12,7 +12,32 @@ import type { Result } from '../core/result';
 import type { KnowledgeBoundingBox, KnowledgePdfElementType } from './pdfExtraction';
 import type { NormalizedPageRegion } from './knowledgePageRegionGeometry';
 
-export type KnowledgeDocumentKind = 'pdf';
+/**
+ * What a Knowledge source IS.
+ *
+ * Spelled out one value at a time, matching `knowledge_documents_kind_check`
+ * exactly -- the CHECK is what guarantees a row holds nothing else, so this
+ * union and that constraint are one decision recorded in two places and must
+ * be changed together. A kind is added here only when something exists that
+ * can create it.
+ */
+export type KnowledgeDocumentKind = 'pdf' | 'text' | 'unknown';
+
+/**
+ * The kinds a ROW may hold. 'unknown' is deliberately not among them: it is
+ * what a reader reports when a row's kind is outside this list, which can only
+ * happen if `knowledge_documents_kind_check` is gone or the value came from
+ * somewhere that is not that table. It is never written.
+ */
+export const KNOWLEDGE_DOCUMENT_KINDS = ['pdf', 'text'] as const;
+
+/** True only for a kind this build knows how to read. Never assumes a default. */
+export function isKnowledgeDocumentKind(
+  value: unknown,
+): value is (typeof KNOWLEDGE_DOCUMENT_KINDS)[number] {
+  return typeof value === 'string'
+    && (KNOWLEDGE_DOCUMENT_KINDS as readonly string[]).includes(value);
+}
 export type KnowledgeDocumentProcessingStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
 
 export interface KnowledgeDocument {

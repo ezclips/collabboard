@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { BoardId, KnowledgeDocumentId, UserId } from '../../domain/core/ids';
 import { parseKnowledgeTextSourceLocator } from '../../domain/knowledge/knowledgeTextSourceLocator';
 import {
-  KNOWLEDGE_TEXT_PROCESSING_STATUS,
+  KNOWLEDGE_TEXT_INITIAL_STATUS,
+  KNOWLEDGE_TEXT_READY_STATUS,
   SupabaseKnowledgeTextRepository,
   type KnowledgeTextSupabaseClient,
 } from './knowledgeTextIngestionAdapters';
@@ -14,20 +15,22 @@ const USER = 'u1111111-1111-4111-8111-111111111111' as UserId;
 
 interface Call {
   readonly table: string;
-  readonly op: 'insert' | 'delete';
+  readonly op: 'insert' | 'update' | 'delete';
   readonly payload: unknown;
 }
 
+const ROW = {
+  id: DOC, board_id: BOARD, created_by: USER, kind: 'text',
+  original_filename: 'notes.txt', mime_type: 'text/plain', file_size_bytes: 12,
+  storage_path: 'p', content_sha256: 'h', page_count: null,
+  processing_status: 'uploaded', processing_error: null,
+  parser_name: null, parser_version: null, parser_options_hash: null,
+  raw_artifact_path: null, created_at: 'now', updated_at: 'now',
+};
+
 function client(over: { insertError?: { message: string }; row?: Record<string, unknown> } = {}) {
   const calls: Call[] = [];
-  const row = over.row ?? {
-    id: DOC, board_id: BOARD, created_by: USER, kind: 'text',
-    original_filename: 'notes.txt', mime_type: 'text/plain', file_size_bytes: 12,
-    storage_path: 'p', content_sha256: 'h', page_count: null,
-    processing_status: 'ready', processing_error: null,
-    parser_name: null, parser_version: null, parser_options_hash: null,
-    raw_artifact_path: null, created_at: 'now', updated_at: 'now',
-  };
+  const row = over.row ?? ROW;
   const error = over.insertError ?? null;
   const api: KnowledgeTextSupabaseClient = {
     from(table) {
@@ -38,6 +41,22 @@ function client(over: { insertError?: { message: string }; row?: Record<string, 
           return Object.assign(settled, {
             select: () => ({ single: async () => ({ data: error ? null : row, error }) }),
           }) as never;
+        },
+        update(payload: unknown) {
+          return {
+            eq(_column: string, value: string) {
+              calls.push({ table, op: 'update', payload: { ...(payload as object), id: value } });
+              const settled = Promise.resolve({ error });
+              return Object.assign(settled, {
+                select: () => ({
+                  single: async () => ({
+                    data: error ? null : { ...row, ...(payload as object) },
+                    error,
+                  }),
+                }),
+              }) as never;
+            },
+          };
         },
         delete() {
           return {
@@ -65,26 +84,54 @@ const chunk = (index: number) => ({
 });
 
 describe('the document row a text source creates', () => {
-  it('is READY, not the uploaded default', async () => {
-    // The whole reason this adapter exists separately. No worker will ever
-    // claim this row, so a defaulted 'uploaded' would hide it from search
-    // permanently while the library showed it as still processing.
+  it('is NOT ready when it is inserted', async () => {
+    // Readiness follows persistence. Written on the insert, a crash before the
+    // chunk write leaves a document claiming to be searchable with nothing in
+    // it -- and no process alive to compensate.
     const { api, calls } = client();
     const result = await new SupabaseKnowledgeTextRepository(api).insertTextDocument(record);
 
     expect(result.ok).toBe(true);
     expect((calls[0].payload as Record<string, unknown>).processing_status)
-      .toBe(KNOWLEDGE_TEXT_PROCESSING_STATUS);
-    expect(KNOWLEDGE_TEXT_PROCESSING_STATUS).toBe('ready');
+      .toBe(KNOWLEDGE_TEXT_INITIAL_STATUS);
+    expect(KNOWLEDGE_TEXT_INITIAL_STATUS).not.toBe(KNOWLEDGE_TEXT_READY_STATUS);
+  });
+
+  it('is promoted to ready by its own step, addressed by id', async () => {
+    const { api, calls } = client();
+    const result = await new SupabaseKnowledgeTextRepository(api).markDocumentReady(DOC);
+
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([{
+      table: 'knowledge_documents', op: 'update',
+      payload: { processing_status: KNOWLEDGE_TEXT_READY_STATUS, id: DOC },
+    }]);
+    expect(result.ok && result.value.processingStatus).toBe('ready');
+  });
+
+  it('reports a failed promotion rather than claiming the document is ready', async () => {
+    const { api } = client({ insertError: { message: 'denied' } });
+    const result = await new SupabaseKnowledgeTextRepository(api).markDocumentReady(DOC);
+    expect(result.ok).toBe(false);
   });
 
   it('carries its own kind out, not pdf', async () => {
-    // mapKnowledgeDocumentRow hardcodes 'pdf'. If that leaked, the caller would
-    // hand every consumer a text document claiming to be a PDF -- and the
-    // citation resolver now branches on exactly this value.
+    // mapKnowledgeDocumentRow used to hardcode 'pdf' and is now the one place
+    // that reads row.kind. If that regressed, every consumer would be handed a
+    // text document claiming to be a PDF -- and the citation resolver branches
+    // on exactly this value.
     const { api } = client();
     const result = await new SupabaseKnowledgeTextRepository(api).insertTextDocument(record);
     expect(result.ok && result.value.kind).toBe('text');
+  });
+
+  it('reports an unrecognised kind as unknown rather than naming a format', async () => {
+    // Only reachable if knowledge_documents_kind_check is gone or the value
+    // came from somewhere that is not that table -- and then saying 'unknown'
+    // is the truthful answer. The citation resolver refuses it outright.
+    const { api } = client({ row: { ...ROW, kind: 'hologram' } });
+    const result = await new SupabaseKnowledgeTextRepository(api).insertTextDocument(record);
+    expect(result.ok && result.value.kind).toBe('unknown');
   });
 
   it('states page_count as null rather than zero', async () => {
@@ -133,6 +180,23 @@ describe('the chunks', () => {
     ]);
     expect(parseKnowledgeTextSourceLocator(rows[0].source_locators))
       .toEqual({ kind: 'text-range', charStart: 10, charEnd: 17 });
+  });
+
+  it('the columns and the jsonb say the SAME thing, for every chunk', () => {
+    // They come from one pair of validated values, and this pins that they
+    // cannot drift: the columns are what the table can be queried on, the
+    // jsonb is what retrieval can return, and a citation is only as correct
+    // as their agreement.
+    const { api, calls } = client();
+    void new SupabaseKnowledgeTextRepository(api)
+      .insertTextChunks([chunk(0), chunk(1), chunk(2), chunk(17)]);
+
+    for (const row of calls[0].payload as Record<string, unknown>[]) {
+      const locator = parseKnowledgeTextSourceLocator(row.source_locators);
+      expect(locator).not.toBeNull();
+      expect(locator!.charStart).toBe(row.char_start);
+      expect(locator!.charEnd).toBe(row.char_end);
+    }
   });
 
   it('writes nothing at all for a blank source', async () => {

@@ -5,6 +5,7 @@ import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
 import type { BoardId, KnowledgeDocumentId, UserId } from '../../domain/core/ids';
 import { asKnowledgeDocumentId } from '../../domain/core/ids';
+import { isKnowledgeDocumentKind } from '../../domain/knowledge/knowledgePersistence';
 import type { KnowledgeDocument } from '../../domain/knowledge/knowledgePersistence';
 import type {
   KnowledgeBoardAuthorizer,
@@ -232,7 +233,19 @@ export function mapKnowledgeDocumentRow(row: KnowledgeDocumentRow): KnowledgeDoc
     id: row.id as KnowledgeDocument['id'],
     boardId: row.board_id as KnowledgeDocument['boardId'],
     createdBy: row.created_by as KnowledgeDocument['createdBy'],
-    kind: 'pdf',
+    // THE ROW'S OWN KIND. This was hardcoded 'pdf' -- true while PDF was the
+    // only kind, and a lie the moment a second one existed. Read here rather
+    // than corrected by whoever calls it: a caller that repairs its own result
+    // is one place that learned the rule, and the rule stays wrong for the
+    // third kind.
+    //
+    // The guard is what makes this not a cast: a value outside the union
+    // cannot have come from a row that satisfies knowledge_documents_kind_check,
+    // so it means the constraint is gone or the column was read from somewhere
+    // else, and 'unknown' says exactly that rather than naming a format this
+    // document may not have. No consumer treats it as readable -- the citation
+    // resolver refuses any kind it does not know outright.
+    kind: isKnowledgeDocumentKind(row.kind) ? row.kind : 'unknown',
     originalFilename: row.original_filename,
     mimeType: row.mime_type,
     fileSizeBytes: Number(row.file_size_bytes),

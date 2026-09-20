@@ -26,6 +26,9 @@ function deps(over: {
   uploadFails?: boolean;
   documentFails?: boolean;
   chunksFail?: boolean;
+  readyFails?: boolean;
+  deleteFails?: boolean;
+  removeFails?: boolean;
 } = {}) {
   const calls: string[] = [];
   const written: KnowledgeTextChunkInsert[][] = [];
@@ -39,21 +42,33 @@ function deps(over: {
         return over.documentFails
           ? err(domainError('unavailable', 'insert failed'))
           : ok({ id: record.id, boardId: record.boardId, originalFilename: record.originalFilename,
-                 processingStatus: 'ready' } as never);
+                 processingStatus: 'uploaded' } as never);
       },
       insertTextChunks: async (chunks) => {
         calls.push('insertChunks');
         written.push([...chunks]);
         return over.chunksFail ? err(domainError('unavailable', 'chunk insert failed')) : ok(undefined);
       },
-      deleteDocument: async () => { calls.push('deleteDocument'); return ok(undefined); },
+      markDocumentReady: async (id) => {
+        calls.push('markReady');
+        return over.readyFails
+          ? err(domainError('unavailable', 'promotion failed'))
+          : ok({ id, boardId: BOARD, originalFilename: 'notes.txt', processingStatus: 'ready' } as never);
+      },
+      deleteDocument: async () => {
+        calls.push('deleteDocument');
+        return over.deleteFails ? err(domainError('unavailable', 'delete failed')) : ok(undefined);
+      },
     },
     storage: {
       upload: async () => {
         calls.push('upload');
         return over.uploadFails ? err(domainError('unavailable', 'upload failed')) : ok(undefined);
       },
-      remove: async () => { calls.push('remove'); return ok(undefined); },
+      remove: async () => {
+        calls.push('remove');
+        return over.removeFails ? err(domainError('unavailable', 'remove failed')) : ok(undefined);
+      },
     },
     hasher: { sha256: async () => 'sha-canonical' },
     ids: { newDocumentId: () => DOC },
@@ -76,7 +91,10 @@ describe('the happy path, in order', () => {
   it('authorizes, uploads, inserts the document, then the chunks', async () => {
     const { result, calls } = await upload(BODY);
     expect(result.ok).toBe(true);
-    expect(calls).toEqual(['authorize', 'upload', 'insertDocument', 'insertChunks']);
+    // READINESS IS LAST. The promotion comes after the chunks exist, so a
+    // crash anywhere before it leaves a document that is invisible to search
+    // rather than one that claims to be searchable and is empty.
+    expect(calls).toEqual(['authorize', 'upload', 'insertDocument', 'insertChunks', 'markReady']);
   });
 
   it('writes chunks that are contiguous, indexed from zero, and pageless', async () => {
@@ -100,6 +118,8 @@ describe('the happy path, in order', () => {
     const { result, calls } = await upload('   \n\n  ');
     expect(result.ok).toBe(true);
     expect(calls).not.toContain('insertChunks');
+    // Still promoted: the upload succeeded and there is nothing pending.
+    expect(calls).toContain('markReady');
   });
 });
 
@@ -154,5 +174,57 @@ describe('compensation -- no failure leaves an inconsistent pair', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.message).toBe('chunk insert failed');
+  });
+});
+
+describe('readiness follows persistence', () => {
+  it('the document is never promoted when the chunk write fails', async () => {
+    const { result, calls } = await upload(BODY, { chunksFail: true });
+    expect(result.ok).toBe(false);
+    expect(calls).not.toContain('markReady');
+  });
+
+  it('a failed promotion does NOT delete a complete document', async () => {
+    // The chunks are real and correct. Deleting good work to tidy a flag would
+    // destroy the upload; the row stays at 'uploaded', invisible to search and
+    // shown as still processing, which is the honest state to be stuck in.
+    const { result, calls } = await upload(BODY, { readyFails: true });
+    expect(result.ok).toBe(false);
+    expect(calls).not.toContain('deleteDocument');
+    expect(calls).not.toContain('remove');
+  });
+});
+
+describe('a compensation that fails is reported, not swallowed', () => {
+  it('names the document row it could not remove', async () => {
+    const { result } = await upload(BODY, { chunksFail: true, deleteFails: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The ORIGINAL cause is never replaced -- that is what the caller acts on.
+    expect(result.error.message).toBe('chunk insert failed');
+    expect(result.error.details).toMatchObject({ cleanupFailed: ['document row'] });
+  });
+
+  it('names the stored file it could not remove', async () => {
+    const { result } = await upload(BODY, { chunksFail: true, removeFails: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.details).toMatchObject({ cleanupFailed: ['stored file'] });
+  });
+
+  it('names both when neither could be removed', async () => {
+    const { result } = await upload(BODY, { chunksFail: true, deleteFails: true, removeFails: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.details).toMatchObject({ cleanupFailed: ['document row', 'stored file'] });
+  });
+
+  it('says nothing about cleanup when cleanup worked', async () => {
+    // Residue nobody knows about is the thing being ruled out. Residue that
+    // does not exist must not be announced.
+    const { result } = await upload(BODY, { chunksFail: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result.error.details as Record<string, unknown> | undefined)?.cleanupFailed).toBeUndefined();
   });
 });

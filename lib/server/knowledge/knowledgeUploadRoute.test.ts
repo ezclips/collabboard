@@ -58,6 +58,10 @@ function textDeps(authorized = true) {
   const remove = vi.fn(async () => ({ ok: true as const, value: undefined }));
   const insertTextChunks = vi.fn(async () => ({ ok: true as const, value: undefined }));
   const deleteDocument = vi.fn(async () => ({ ok: true as const, value: undefined }));
+  const markDocumentReady = vi.fn(async () => ({
+    ok: true as const,
+    value: { ...document('notes.md'), kind: 'text' as const, processingStatus: 'ready' as const },
+  }));
   const insertTextDocument = vi.fn(async (record: { originalFilename: string }) => ({
     ok: true as const,
     value: { ...document(record.originalFilename), kind: 'text' as const, processingStatus: 'ready' as const },
@@ -67,7 +71,7 @@ function textDeps(authorized = true) {
   const wiring = {
     deps: {
       authorizer: { canMutateBoard },
-      repository: { insertTextDocument, insertTextChunks, deleteDocument },
+      repository: { insertTextDocument, insertTextChunks, markDocumentReady, deleteDocument },
       storage: { upload, remove },
       hasher: { sha256: vi.fn(async () => 'b'.repeat(64)) },
       ids: { newDocumentId: vi.fn(() => DOCUMENT_ID as KnowledgeDocument['id']) },
@@ -75,7 +79,7 @@ function textDeps(authorized = true) {
     hashChunk: (text: string) => `hash:${text.length}`,
   } as unknown as KnowledgeTextIngestionWiring;
 
-  return { wiring, upload, remove, insertTextDocument, insertTextChunks, deleteDocument, canMutateBoard };
+  return { wiring, upload, remove, insertTextDocument, insertTextChunks, markDocumentReady, deleteDocument, canMutateBoard };
 }
 
 function context() {
@@ -239,6 +243,9 @@ describe('Stage 1 text sources reach the text path, and only they do', () => {
     expect(payload.processingStatus).toBe('ready');
     expect(state.text.insertTextDocument).toHaveBeenCalledOnce();
     expect(state.text.insertTextChunks).toHaveBeenCalledOnce();
+    // 'ready' in the response comes from the PROMOTION, not from the insert:
+    // the document is only searchable once what makes it searchable exists.
+    expect(state.text.markDocumentReady).toHaveBeenCalledOnce();
     expect(state.pdf.insertDocument).not.toHaveBeenCalled();
   });
 

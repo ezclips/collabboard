@@ -51,6 +51,9 @@ export interface KnowledgeTextSupabaseClient {
     insert(
       payload: Record<string, unknown> | readonly Record<string, unknown>[],
     ): KnowledgeTextInsertBuilder;
+    update(payload: Record<string, unknown>): {
+      eq(column: string, value: string): KnowledgeTextInsertBuilder;
+    };
     delete(): {
       eq(column: string, value: string): PromiseLike<{ error: SupabaseErrorLike | null }>;
     };
@@ -58,13 +61,28 @@ export interface KnowledgeTextSupabaseClient {
 }
 
 /**
- * The status a text document is created in.
+ * READINESS FOLLOWS PERSISTENCE.
  *
- * Named rather than inlined because it is the one value on this path that is
- * NOT the schema default, and the reason it differs is the whole difference
- * between the two ingestion paths.
+ * A text source is created NOT ready and is promoted only once its chunks are
+ * written. Writing 'ready' on the insert was the obvious thing and was wrong:
+ * between that row and the chunk write there is a window -- a crash, a lost
+ * connection, a killed process -- in which a document exists that reports
+ * itself searchable and contains nothing, and compensation cannot run because
+ * the process that would have run it is gone.
+ *
+ * Reversing the order reverses which state survives a crash. A document stuck
+ * at 'uploaded' is invisible to search and shows in the library as still
+ * processing: wrong, but wrong in the direction that tells the truth about
+ * what can be found in it. A 'ready' document with no chunks is a source that
+ * claims to be searchable and silently is not.
+ *
+ * ONE TRANSACTION WOULD BE BETTER and is the end state: an RPC that inserts
+ * the document, its chunks and its readiness together, so the window does not
+ * exist rather than being survivable. That needs a migration, which is not
+ * this commit's to apply.
  */
-export const KNOWLEDGE_TEXT_PROCESSING_STATUS = 'ready';
+export const KNOWLEDGE_TEXT_INITIAL_STATUS = 'uploaded';
+export const KNOWLEDGE_TEXT_READY_STATUS = 'ready';
 
 export class SupabaseKnowledgeTextRepository implements KnowledgeTextRepository {
   constructor(private readonly client: KnowledgeTextSupabaseClient) {}
@@ -84,8 +102,9 @@ export class SupabaseKnowledgeTextRepository implements KnowledgeTextRepository 
         file_size_bytes: record.fileSizeBytes,
         storage_path: record.storagePath,
         content_sha256: record.contentSha256,
-        // See the header: there is no worker to promote this row later.
-        processing_status: KNOWLEDGE_TEXT_PROCESSING_STATUS,
+        // NOT ready yet. See KNOWLEDGE_TEXT_INITIAL_STATUS: this row becomes
+        // searchable only once the chunks that make it searchable exist.
+        processing_status: KNOWLEDGE_TEXT_INITIAL_STATUS,
         // A text source has no pages. NOT zero, which would claim a page count
         // was measured and found to be none.
         page_count: null,
@@ -100,14 +119,7 @@ export class SupabaseKnowledgeTextRepository implements KnowledgeTextRepository 
       return err(domainError('unavailable', 'Could not save the document'));
     }
 
-    // mapKnowledgeDocumentRow hardcodes kind: 'pdf' -- correct when it was the
-    // only kind, wrong now. The row's own kind is restored over it rather than
-    // that function being changed, because every other caller of it reads PDF
-    // rows and this is the only place a non-PDF row is mapped today.
-    return ok({
-      ...mapKnowledgeDocumentRow(data),
-      kind: data.kind as KnowledgeDocument['kind'],
-    });
+    return ok(mapKnowledgeDocumentRow(data));
   }
 
   async insertTextChunks(
@@ -145,6 +157,25 @@ export class SupabaseKnowledgeTextRepository implements KnowledgeTextRepository 
       return err(domainError('unavailable', 'Could not save the indexed text', { cause: error }));
     }
     return ok(undefined);
+  }
+
+  async markDocumentReady(
+    documentId: KnowledgeDocumentId,
+  ): Promise<Result<KnowledgeDocument, DomainError>> {
+    const { data, error } = await this.client
+      .from('knowledge_documents')
+      .update({ processing_status: KNOWLEDGE_TEXT_READY_STATUS })
+      .eq('id', documentId)
+      .select('*')
+      .single();
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not finish indexing the document', { cause: error }));
+    }
+    if (!data) {
+      return err(domainError('unavailable', 'Could not finish indexing the document'));
+    }
+    return ok(mapKnowledgeDocumentRow(data));
   }
 
   async deleteDocument(documentId: KnowledgeDocumentId): Promise<Result<void, DomainError>> {

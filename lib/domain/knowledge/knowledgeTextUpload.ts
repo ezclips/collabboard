@@ -16,13 +16,26 @@
 //   3. assert the losslessness invariant     (still no external effect)
 //   4. hash the CANONICAL TEXT
 //   5. upload the original bytes
-//   6. insert the document row
+//   6. insert the document row, NOT READY
 //   7. insert the chunks
+//   8. promote the document to ready
 //
 // Steps 6 and 7 can each fail after an external effect exists, and each
 // compensates for everything before it. A document row with no chunks is the
-// state worth ruling out: it is a source that appears in the library, reports
-// itself ready, and can never be found or cited.
+// state worth ruling out: it is a source that appears in the library and can
+// never be found or cited.
+//
+// READINESS IS STEP 8 AND NOT PART OF STEP 6. Written on the insert, there is
+// a window between the row and its chunks in which a crash leaves a document
+// claiming to be searchable with nothing in it -- and compensation cannot run,
+// because the process that would have run it is the one that died. In this
+// order the state that survives a crash is a document stuck at 'uploaded':
+// invisible to search, shown as still processing. Wrong, but wrong in the
+// direction that tells the truth about what can be found in it.
+//
+// One transaction would remove the window rather than making it survivable,
+// and that is the end state: an RPC writing document, chunks and readiness
+// together. It needs a migration, so it is not this shape's to do yet.
 //
 // THE INVARIANT IS CHECKED BEFORE ANYTHING IS WRITTEN, not after. A source
 // whose chunks do not reproduce it is refused as an upload -- which the user
@@ -72,8 +85,11 @@ export interface KnowledgeTextDocumentInsert {
 }
 
 export interface KnowledgeTextRepository {
+  /** Writes the document NOT ready. Readiness is a separate, later step. */
   insertTextDocument(record: KnowledgeTextDocumentInsert): Promise<Result<KnowledgeDocument, DomainError>>;
   insertTextChunks(chunks: readonly KnowledgeTextChunkInsert[]): Promise<Result<void, DomainError>>;
+  /** The promotion, run only once the chunks exist. See step 8 below. */
+  markDocumentReady(documentId: KnowledgeDocumentId): Promise<Result<KnowledgeDocument, DomainError>>;
   /** Compensation for a chunk write that failed after the row existed. */
   deleteDocument(documentId: KnowledgeDocumentId): Promise<Result<void, DomainError>>;
 }
@@ -176,14 +192,47 @@ export async function createKnowledgeTextUpload(
     );
     if (!written.ok) {
       // COMPENSATE BOTH WAYS. A document row with no chunks is worse than no
-      // document at all: it appears in the library, reports itself ready, and
-      // can never be found or cited. Cleanup failures are discarded
-      // deliberately so they cannot mask the original error.
-      await deps.repository.deleteDocument(documentId);
-      await deps.storage.remove(storagePath);
-      return written;
+      // document at all: it appears in the library and can never be found or
+      // cited. Cleanup failures are discarded deliberately so they cannot mask
+      // the original error -- but they are REPORTED, below, because a failed
+      // cleanup leaves real residue and a silent one leaves it unexplained.
+      const removedRow = await deps.repository.deleteDocument(documentId);
+      const removedFile = await deps.storage.remove(storagePath);
+      return err(compensationAwareError(written.error, removedRow, removedFile));
     }
   }
 
-  return ok(inserted.value);
+  // 8. READINESS LAST. Only now is there something to find, so only now does
+  //    the document say it can be found. If this fails the row stays at
+  //    'uploaded' -- invisible to search, shown as still processing -- which
+  //    is wrong in the direction that tells the truth about its contents. It
+  //    is NOT compensated away: the chunks are real and correct, and deleting
+  //    a complete document because its last status write failed would destroy
+  //    good work to tidy a flag.
+  const ready = await deps.repository.markDocumentReady(documentId);
+  if (!ready.ok) return ready;
+  return ok(ready.value);
+}
+
+/**
+ * The original failure, plus what could not be cleaned up after it.
+ *
+ * The cause of the upload failing is never replaced -- that is the thing the
+ * caller has to act on. But a compensation that itself failed has left a row
+ * or a stored object behind, and saying so in `details` is the difference
+ * between residue someone can find and residue nobody knows exists.
+ */
+function compensationAwareError(
+  cause: DomainError,
+  removedRow: Result<void, DomainError>,
+  removedFile: Result<void, DomainError>,
+): DomainError {
+  const orphans = [
+    ...(removedRow.ok ? [] : ['document row']),
+    ...(removedFile.ok ? [] : ['stored file']),
+  ];
+  if (orphans.length === 0) return cause;
+  return domainError(cause.code, cause.message, {
+    details: { ...(cause.details ?? {}), cleanupFailed: orphans },
+  });
 }
