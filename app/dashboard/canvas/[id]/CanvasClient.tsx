@@ -151,6 +151,10 @@ import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } fr
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer';
+import {
+  boardDockClaim,
+  type BoardDockSurface,
+} from '@/lib/domain/canvas/boardDockSurface';
 import type { PdfWorkspaceRightPanel, PdfWorkspaceTab } from '@/components/collabboard/PdfWorkspaceChrome';
 import BoardAiChatDrawer, {
   type BoardAiAssistantNoteSaveRequest,
@@ -2124,6 +2128,63 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);
 
   /**
+   * WIKI-U2. The board wiki's page surface.
+   *
+   * Opened from its own control and closed from its own header, like Chat.
+   * Mounted as a shell-level sibling below for the same stacking reason the
+   * reader and Chat are -- and because Unit 2's acceptance includes that the
+   * surface is REACHABLE: `.agent/retrieval-followups.md` item 15 was a
+   * fully-built component whose only launcher had been removed, so it existed
+   * and nobody could open it.
+   *
+   * Declared HERE, beside Chat's flag and the reader's close request, because
+   * the three share one dock and the rule below has to see all three.
+   */
+  const [isBoardWikiOpen, setIsBoardWikiOpen] = useState(false);
+
+  /**
+   * =========================================================================
+   * THE DOCK HOLDS ONE SURFACE
+   * =========================================================================
+   *
+   * Chat, the side-panel reader and the wiki are all `fixed right-0` at
+   * z-[1200]. Two open at once do not tile -- they overlap, and at equal
+   * z-index the later one in the DOM wins, which is the wiki.
+   *
+   * FOUND LIVE: with the wiki open, clicking a source in its own COMPILED FROM
+   * chain opened the reader UNDERNEATH the wiki. The one control that exists
+   * to let a reader check a source could not show them the source.
+   *
+   * This was a pair of NAMED DIRECTIONS -- A closed the reader when Chat
+   * opened, B closed Chat when the reader opened -- written when there were
+   * two surfaces. A third turned two rules into six, and it arrived with none
+   * of them: the wiki neither took the dock nor yielded it. Worse, direction B
+   * was itself incomplete, because it was written on the two document-open
+   * paths and never on the SOURCE-open path, so a card's "Source - p. N" has
+   * always opened the reader over an open Chat.
+   *
+   * So the rule is stated ONCE, as a claim, and every path that opens a dock
+   * surface calls it. A fourth surface is one more line here, not a new pair
+   * of rules against every surface that already exists.
+   *
+   * The launcher guards that hide one floating button while another surface is
+   * open are NOT this rule and do not replace it: they keep a z-[1300] button
+   * off a z-[1200] drawer's header. They are also how this got through review
+   * twice -- from the outside they make the surfaces look mutually exclusive,
+   * and they only ever governed the buttons.
+   */
+  const claimDock = useCallback((surface: BoardDockSurface) => {
+    const claim = boardDockClaim(surface);
+    if (claim.closeChat) setIsBoardAiChatOpen(false);
+    if (claim.closeWiki) setIsBoardWikiOpen(false);
+    // The reader closes by request id rather than by a boolean: that drawer
+    // owns its own open state and only reports it back through onOpenChange.
+    // The counter is monotonic, so a bump while no reader is open is a no-op
+    // -- which is what direction A has relied on since it was written.
+    if (claim.closeReader) setCloseSidePanelRequestId((current) => current + 1);
+  }, []);
+
+  /**
    * BCHAT-D2. Attachments queued for the next Board AI message.
    *
    * Owned HERE rather than in the drawer because the surfaces that produce
@@ -2140,14 +2201,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     useState<Record<string, readonly BoardAiDraftContextItem[]>>({});
 
   /**
-   * The ONE reachable way Board AI opens, so direction A of the dock rule
-   * lives in exactly one place. An `open`-only helper beside this one was
-   * unreachable dead code and put the same rule in two.
+   * The ONE reachable way Board AI opens, so its dock claim lives in exactly
+   * one place. An `open`-only helper beside this one was unreachable dead code
+   * and put the same rule in two.
    *
    * The branch reads state rather than deciding inside a setState updater:
-   * bumping the close request from within an updater made it a side effect of
-   * a function React may call more than once, which could advance the id
-   * twice for a single click.
+   * claiming the dock from within an updater made it a side effect of a
+   * function React may call more than once, which could advance the reader's
+   * close-request id twice for a single click.
    */
   const toggleBoardAiChat = useCallback(() => {
     if (isBoardAiChatOpen) {
@@ -2155,23 +2216,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       return;
     }
     setIsBoardAiChatOpen(true);
-    // Direction A: Chat takes the dock, so an open side-panel reader yields it.
-    setCloseSidePanelRequestId((current) => current + 1);
-  }, [isBoardAiChatOpen]);
+    claimDock('chat');
+  }, [isBoardAiChatOpen, claimDock]);
 
   const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
 
   /**
-   * WIKI-U2. The board wiki's page surface.
-   *
-   * Opened from its own control and closed from its own header, like Chat.
-   * Mounted as a shell-level sibling below for the same stacking reason the
-   * reader and Chat are -- and because Unit 2's acceptance includes that the
-   * surface is REACHABLE: `.agent/retrieval-followups.md` item 15 was a
-   * fully-built component whose only launcher had been removed, so it existed
-   * and nobody could open it.
+   * The ONE reachable way the wiki opens, for the reason Chat's toggle states:
+   * a surface that can be opened from two places acquires the dock rule in one
+   * of them and not the other, which is this unit's entire defect.
    */
-  const [isBoardWikiOpen, setIsBoardWikiOpen] = useState(false);
+  const openBoardWiki = useCallback(() => {
+    setIsBoardWikiOpen(true);
+    claimDock('wiki');
+  }, [claimDock]);
+
   const closeBoardWiki = useCallback(() => setIsBoardWikiOpen(false), []);
 
   /**
@@ -2287,6 +2346,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const requestKnowledgeSourceOpen = useCallback((reference: SourceReference) => {
     if (!sourceReferenceScopeKey) return;
+    // This path had no dock rule at all. A card's source marker opened the
+    // reader over whatever already held the dock.
+    claimDock('reader');
     knowledgeSourceRequestIdRef.current += 1;
     setKnowledgeSourceOpenRequest(
       // Every caller of this is a source link -- a card marker, or the Note
@@ -2297,7 +2359,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         revealSource: true,
       }),
     );
-  }, [sourceReferenceScopeKey]);
+  }, [sourceReferenceScopeKey, claimDock]);
 
   /**
    * Makes one document the workspace's active tab, opening a tab for it if it
@@ -2310,7 +2372,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     originalFilename?: string;
   }) => {
     setKnowledgeReaderPresentation('workspace');
-    setIsBoardAiChatOpen(false);
+    // The focused workspace covers the whole surface, so it has no overlap to
+    // resolve -- it claims the dock anyway, to keep one behaviour rather than
+    // two and to leave nothing open behind it.
+    claimDock('reader');
     setOpenPdfIds((current) => (
       current.includes(request.documentId) ? current : [...current, request.documentId]
     ));
@@ -2334,7 +2399,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       ];
     });
     setActivePdfId(request.documentId);
-  }, []);
+  }, [claimDock]);
 
   const openPdfWorkspaceDocument = useCallback((request: {
     documentId: string;
@@ -2488,10 +2553,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // inside it: the persisted navigation request stays exactly the shape the
     // library and citation paths already build.
     const presentation = request.presentation ?? 'side-panel';
-    // Direction B: the docked reader takes the dock back, so Chat closes. The
-    // focused workspace covers the whole surface and needs no such rule, but
-    // closing Chat there too keeps one behaviour rather than two.
-    setIsBoardAiChatOpen(false);
+    // The reader takes the dock, so every other surface on it yields.
+    claimDock('reader');
     setKnowledgeReaderPresentation(presentation);
     setKnowledgeDocumentOpenRequest(
       buildKnowledgeDocumentOpenRequest(
@@ -2501,7 +2564,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         { revealSource: request.revealSource },
       ),
     );
-  }, [sourceReferenceScopeKey, openPdfWorkspaceDocument]);
+  }, [sourceReferenceScopeKey, openPdfWorkspaceDocument, claimDock]);
 
   /**
    * A citation clicked in the BOARD's own chat.
@@ -11197,7 +11260,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             aria-label="Board wiki"
             title="Board wiki"
             className="fixed right-4 top-16 z-[1300] flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
-            onClick={() => setIsBoardWikiOpen(true)}
+            onClick={openBoardWiki}
           >
             <BookOpen className="h-4 w-4" aria-hidden="true" />
           </button>

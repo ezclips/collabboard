@@ -629,9 +629,17 @@ describe('UNIT 2 ACCEPTANCE, checked in source rather than behaviour', () => {
     expect(hostSource).toContain("import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer'");
     expect(hostSource).toContain('<BoardWikiDrawer');
     expect(hostSource).toContain('data-board-wiki-open="true"');
-    // The launcher sets the state the drawer reads, so the two are actually
-    // connected rather than merely both present.
-    expect(hostSource).toContain('onClick={() => setIsBoardWikiOpen(true)}');
+    // The launcher calls the authority that opens the wiki, so the two are
+    // actually connected rather than merely both present.
+    //
+    // UPDATED DELIBERATELY: this pinned the inline `() => setIsBoardWikiOpen(
+    // true)`. An inline setter is how this surface came to open WITHOUT
+    // claiming the dock -- the rule has to live somewhere a second caller
+    // would inherit it, and an arrow function in JSX is not that place. The
+    // opener is now named, and boardDockSurface.test.ts pins that it is the
+    // only one.
+    expect(hostSource).toContain('onClick={openBoardWiki}');
+    expect(hostSource).toContain('const openBoardWiki = useCallback(');
     expect(hostSource).toMatch(/<BoardWikiDrawer[\s\S]{0,400}isOpen=\{isBoardWikiOpen\}/);
   });
 

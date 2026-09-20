@@ -264,19 +264,30 @@ describe('10-15. one right-side dock, two directions', () => {
     expect(CLIENT).toContain('const toggleBoardAiChat = useCallback(() => {');
   });
 
-  it('4-5. that authority both opens Chat and advances the close request', () => {
-    // Traced through the reachable handler's own body rather than counting
-    // call sites anywhere in the file -- a count cannot tell a live path from
-    // a dead one, which is exactly how the dead helper hid.
+  it('4-5. that authority both opens Chat and claims the dock', () => {
+    // UPDATED DELIBERATELY. This asserted that the toggle advanced the
+    // reader's close request BY HAND -- "direction A" of a pairwise rule. The
+    // pair became six rules when the wiki arrived as a third dock surface, and
+    // the wiki shipped with none of them: it neither took the dock nor yielded
+    // it, so a citation click opened the reader underneath it. The rule is now
+    // stated once, in lib/domain/canvas/boardDockSurface.ts, and every opener
+    // claims. What this test pins is unchanged -- the reachable authority
+    // opens Chat and makes the dock its own -- only the mechanism moved.
+    //
+    // Still traced through the reachable handler's own body rather than
+    // counting call sites anywhere in the file: a count cannot tell a live
+    // path from a dead one, which is exactly how the dead helper hid.
     const handler = CLIENT.slice(
       CLIENT.indexOf('const toggleBoardAiChat = useCallback(() => {'),
       CLIENT.indexOf('const closeBoardAiChat'),
     );
     expect(handler).toContain('setIsBoardAiChatOpen(true);');
-    expect(handler).toContain('setCloseSidePanelRequestId((current) => current + 1);');
-    // Closing takes neither action beyond closing.
+    expect(handler).toContain("claimDock('chat');");
+    // Closing takes no action beyond closing -- it does not claim.
     expect(handler).toContain('setIsBoardAiChatOpen(false);');
-    // The id the reader observes is the one this advances.
+    expect(handler).not.toContain("claimDock('reader')");
+    expect(handler).not.toContain("claimDock('wiki')");
+    // The id the reader observes is still the one the claim advances.
     expect(CLIENT).toContain('closeSidePanelRequestId={closeSidePanelRequestId}');
   });
 
@@ -291,31 +302,50 @@ describe('10-15. one right-side dock, two directions', () => {
     expect(handler).toContain('if (isBoardAiChatOpen) {');
   });
 
-  it('12. opening the docked reader closes Chat', () => {
+  it('12. opening the docked reader claims the dock', () => {
+    // UPDATED DELIBERATELY, same reason as 4-5: this pinned "closes Chat",
+    // which was true and insufficient. It closed Chat and left the wiki open
+    // on top of the reader it had just opened -- so the assertion passed while
+    // the surface was unreadable. Claiming names every sibling at once, which
+    // is why it is the assertion worth making.
     const opener = CLIENT.slice(
       CLIENT.indexOf('const requestKnowledgeDocumentOpen'),
       CLIENT.indexOf('const requestKnowledgeDocumentOpen') + 1200,
     );
-    expect(opener).toContain('setIsBoardAiChatOpen(false);');
+    expect(opener).toContain("claimDock('reader');");
     expect(opener).toContain("const presentation = request.presentation ?? 'side-panel';");
+    // No hand-written sibling close survives beside the claim.
+    expect(opener).not.toContain('setIsBoardAiChatOpen(false);');
   });
 
-  it('13. the ownership rule has one writer per direction, both reachable', () => {
+  it('13. the dock rule has exactly ONE writer, and it is the shared claim', () => {
+    // UPDATED DELIBERATELY, and STRENGTHENED. This counted writers per
+    // direction; there are no longer directions to count. One claim closes
+    // every sibling, so the counts collapse -- and the collapse is the point:
+    // a new dock surface cannot be added by copying a per-surface rule,
+    // because there is no per-surface rule to copy.
+    //
     // Monotonic and never reset, so every open is a fresh intent.
     expect(CLIENT).toContain('const [closeSidePanelRequestId, setCloseSidePanelRequestId] = useState(0);');
-    // Direction A is written only by the REACHABLE open authority -- the Chat
-    // toggle. PDF_READER_UI_CONSOLIDATION_1 removed the second writer with the
-    // board-level context handoff it belonged to: a PDF handoff now lands in
-    // that PDF's own conversation and never takes the dock from the reader.
-    // Anything else writing this counter would be an unreviewed dock rule.
+
+    // The reader's close request is bumped in exactly one place: the claim.
     const bumps = (CLIENT.match(/setCloseSidePanelRequestId\(\(current\) => current \+ 1\)/g) ?? []).length;
     expect(bumps).toBe(1);
-    const toggle = CLIENT.indexOf('const toggleBoardAiChat');
-    const outsideToggle = CLIENT.slice(0, toggle)
-      + CLIENT.slice(CLIENT.indexOf('const closeBoardAiChat'));
-    expect(outsideToggle).not.toContain('setCloseSidePanelRequestId((current) => current + 1)');
-    // ...and direction B only by the reader/workspace openers plus the close action.
-    expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(4);
+    const claim = CLIENT.slice(
+      CLIENT.indexOf('const claimDock = useCallback('),
+      CLIENT.indexOf('const toggleBoardAiChat'),
+    );
+    expect(claim).toContain('setCloseSidePanelRequestId((current) => current + 1)');
+
+    // Chat is closed by the claim, by its own toggle, and by its own close
+    // action -- and by nothing else. Three, down from four: the reader path
+    // that used to close it by hand now claims instead.
+    expect((CLIENT.match(/setIsBoardAiChatOpen\(false\)/g) ?? []).length).toBe(3);
+    // Same shape for the wiki, which previously had no rule at all.
+    expect((CLIENT.match(/setIsBoardWikiOpen\(false\)/g) ?? []).length).toBe(2);
+
+    // The rule itself is not restated here; it is read from the domain.
+    expect(CLIENT).toContain("from '@/lib/domain/canvas/boardDockSurface'");
   });
 
   it('a citation opens its source through the board\'s own navigation authority', () => {
