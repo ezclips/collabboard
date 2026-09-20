@@ -249,8 +249,11 @@ specifically to the commits on top of it:
 3. `86e8ffc7` — a whole excerpt, an honest empty state, and a followed citation
 4. this commit — the Stage 1 acceptance record
 
-**Four commits on `1bb74b26`, unpushed.** The board's test artifacts are
-retained: `f3932ed4-8d46-40a0-a372-89f3e01cd1f3` (pre-fix, uncitable by design),
+**Four commits on `1bb74b26`, pushed by the PM on 2026-09-20 after
+verification: origin advanced `1bb74b26` → `703dbf8c`, carrying all four.**
+(They were unpushed while this section was written; the gate rule is that the
+coder never pushes, so this line records who did and when.) The board's test
+artifacts are retained: `f3932ed4-8d46-40a0-a372-89f3e01cd1f3` (pre-fix, uncitable by design),
 `2a329736-306b-4abd-9a4a-bd354fdd0eb5` (fixed),
 `39a21588-b403-47d4-bca5-eea41e0cb47f` (tide-notes.txt),
 `457232c6-f9b0-4370-839d-b271b89d6805` (kiln-log.md),
