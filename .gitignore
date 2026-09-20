@@ -72,6 +72,7 @@ devserver.out.log
 !.agent/wiki-plan.md
 !.agent/canvas-retrieval-units.md
 !.agent/media-sources-unit.md
+!.agent/docx-extraction-assessment.md
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/
