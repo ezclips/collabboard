@@ -34,6 +34,7 @@ import {
   stitchKnowledgeTextRange,
   type KnowledgeStoredTextChunk,
 } from '../../domain/knowledge/knowledgeTextChunking';
+import { KNOWLEDGE_TEXT_KIND } from '../../domain/knowledge/knowledgeTextIngestion';
 
 /**
  * The reads this resolver performs, and nothing more. Supplied as the CALLER'S
@@ -397,7 +398,19 @@ async function resolveOne(
   //
   // So each kind states what a locator for it must look like, and anything
   // else is a validation failure with a reason rather than a quiet fallback.
-  const pageless = document.value.kind !== 'pdf';
+  //
+  // AND AN UNKNOWN KIND FAILS RATHER THAN GUESSING. `kind !== 'pdf'` reads as
+  // a two-case world, but the column is open: a kind written by a build this
+  // one does not know about would have been silently routed through the
+  // character-range reader, which is the same defect one level up -- data
+  // choosing a resolution strategy instead of a request doing it. This is the
+  // principle boardAiCitationIdentityKey holds by having no `default:` arm: an
+  // unrecognised shape must stop, because the code that would handle it has
+  // not been written yet. Stage 3 adds its kinds here when they exist.
+  if (document.value.kind !== 'pdf' && document.value.kind !== KNOWLEDGE_TEXT_KIND) {
+    return err(domainError('validation', 'This kind of source cannot be cited yet'));
+  }
+  const pageless = document.value.kind === KNOWLEDGE_TEXT_KIND;
 
   if (pageless && item.pageNumber !== undefined) {
     return err(domainError('validation', 'This source has no pages, so a page cannot be cited in it'));

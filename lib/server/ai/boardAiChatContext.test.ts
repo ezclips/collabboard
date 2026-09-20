@@ -506,11 +506,20 @@ describe('Stage 1. the locator is validated against the document kind', () => {
     expect(result.error.code).toBe('validation');
   });
 
-  it('an unknown kind is treated as pageless, not as a PDF', async () => {
-    // Forward compatibility: a kind this build does not know about has no
-    // pages it could name, and guessing 'pdf' would demand a locator the
-    // document cannot have.
-    const result = await resolveBoardAiChatContext(kindClient('youtube'), BOARD, [sel()], neverReads);
-    expect(result.ok).toBe(true);
+  it.each([
+    ['youtube'],
+    ['docx'],
+    [''],
+  ])('an unknown kind (%s) is REFUSED, not guessed at', async (kind) => {
+    // An earlier version of this treated anything that was not 'pdf' as
+    // pageless, which read as forward compatibility and was really a guess:
+    // a kind written by a build this one does not know about would have been
+    // sliced by raw character offsets whose meaning for it is undefined.
+    // Two known kinds, two stated rules, and a third case that stops.
+    const result = await resolveBoardAiChatContext(kindClient(kind), BOARD, [sel()], neverReads);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('validation');
+    expect(result.error.message).toMatch(/cannot be cited yet/);
   });
 });
