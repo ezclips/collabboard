@@ -144,19 +144,25 @@ async function readDocument(
   client: BoardAiContextSupabaseClient,
   boardId: string,
   documentId: string,
-): Promise<Result<{ filename: string; ready: boolean } | null, DomainError>> {
+): Promise<Result<{ filename: string; ready: boolean; kind: string } | null, DomainError>> {
   const { data, error } = await client
     .from('knowledge_documents')
-    .select('id, original_filename, processing_status')
+    .select('id, original_filename, processing_status, kind')
     .eq('id', documentId)
     .eq('board_id', boardId)
     .maybeSingle();
   if (error) return err(domainError('unavailable', 'Could not read the source document'));
   if (!data) return ok(null);
   return ok({
-    filename: typeof data.original_filename === 'string' ? data.original_filename : 'PDF',
+    // 'Document', not 'PDF': this is the display name of ANY source kind.
+    filename: typeof data.original_filename === 'string' ? data.original_filename : 'Document',
     // Only a finished document has persisted pages. Chat never starts one.
     ready: data.processing_status === 'ready',
+    // WHAT THIS SOURCE IS, taken from the AUTHORIZED record and from nowhere
+    // else. Never inferred from a null page, never from the retrieval origin:
+    // both of those are consequences of the kind, and reading a consequence
+    // backwards is how a malformed request gets to pick its own code path.
+    kind: typeof data.kind === 'string' ? data.kind : 'pdf',
   });
 }
 
@@ -379,11 +385,27 @@ async function resolveOne(
     });
   }
 
-  // A selection with NO page number is pageless by declaration, not by
-  // discovery. Asking readPages for "any one page" here would hand a pageless
-  // selection whatever page happened to exist and slice that instead -- so the
-  // page is only ever read when one was actually named.
-  const pageless = item.type === 'knowledge-selection' && item.pageNumber === undefined;
+  // ===========================================================================
+  // THE LOCATOR IS VALIDATED AGAINST THE DOCUMENT'S KIND, EXPLICITLY
+  // ===========================================================================
+  //
+  // The kind comes from the AUTHORIZED record read above. An earlier version
+  // of this branched on `pageNumber === undefined`, which let the REQUEST
+  // choose its own code path: omit the page and the pageless reader runs. That
+  // is the shape of defect this module exists to refuse -- a caller naming an
+  // identity is fine, a caller selecting a resolution strategy is not.
+  //
+  // So each kind states what a locator for it must look like, and anything
+  // else is a validation failure with a reason rather than a quiet fallback.
+  const pageless = document.value.kind !== 'pdf';
+
+  if (pageless && item.pageNumber !== undefined) {
+    return err(domainError('validation', 'This source has no pages, so a page cannot be cited in it'));
+  }
+  if (!pageless && item.pageNumber === undefined) {
+    return err(domainError('validation', 'A page is required to cite this source'));
+  }
+
   const pages = pageless
     ? ok([] as { pageNumber: number; text: string }[])
     : await readPages(client, item.knowledgeDocumentId, item.pageNumber ?? null, 1);
@@ -391,12 +413,16 @@ async function resolveOne(
   const page = pages.value[0];
 
   if (!page) {
-    // A PAGELESS SOURCE. Only a selection can be resolved here: a
+    // A pageless source. Only a SELECTION can be resolved here: a
     // knowledge-PAGE reference to a source that has no pages names something
     // that does not exist, and inventing page 1 for it would hand the reader a
     // locator the document never had.
     if (item.type !== 'knowledge-selection') {
       return err(domainError('not_found', 'Context is not available on this board'));
+    }
+    if (!Number.isInteger(item.charStart) || !Number.isInteger(item.charEnd)
+        || item.charStart < 0 || item.charEnd <= item.charStart) {
+      return err(domainError('validation', 'That selection range is not valid'));
     }
     const chunks = await readTextChunks(client, item.knowledgeDocumentId);
     if (!chunks.ok) return err(chunks.error);

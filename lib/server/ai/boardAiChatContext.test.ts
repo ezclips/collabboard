@@ -306,7 +306,7 @@ describe('Stage 1. a pageless source resolves from its chunks', () => {
   ];
 
   /** Like `client` above, but it can answer for knowledge_chunks too. */
-  function textClient(over: { chunks?: Record<string, unknown>[]; pages?: Record<string, unknown>[] } = {}) {
+  function textClient(over: { chunks?: Record<string, unknown>[]; pages?: Record<string, unknown>[]; kind?: string } = {}) {
     const build = (many: Record<string, unknown>[], single: Record<string, unknown> | null) => {
       const query: Record<string, unknown> = {
         eq() { return query; },
@@ -324,7 +324,14 @@ describe('Stage 1. a pageless source resolves from its chunks', () => {
     const api = {
       from(table: string) {
         if (table === 'knowledge_documents') {
-          return { select: () => build([], { id: DOC, original_filename: 'notes.txt', processing_status: 'ready' }) };
+          // THE KIND IS ON THE RECORD. The resolver reads it from here and
+          // never infers it from the request, so this fake has to declare it.
+          return {
+            select: () => build([], {
+              id: DOC, original_filename: 'notes.txt', processing_status: 'ready',
+              kind: over.kind ?? 'text',
+            }),
+          };
         }
         if (table === 'knowledge_chunks') return { select: () => build(over.chunks ?? textChunks, null) };
         if (table === 'padlets') return { select: () => build([], null) };
@@ -405,5 +412,105 @@ describe('Stage 1. a pageless source resolves from its chunks', () => {
     const result = await resolveBoardAiChatContext(
       textClient({ chunks: [] }), BOARD, [{ type: 'knowledge-document', knowledgeDocumentId: DOC }], neverReads);
     expect(result.ok).toBe(false);
+  });
+});
+
+/**
+ * THE KIND COMES FROM THE RECORD, AND THE LOCATOR IS VALIDATED AGAINST IT.
+ *
+ * An earlier version branched on `pageNumber === undefined`, which let the
+ * REQUEST choose its own resolution strategy: omit the page and the pageless
+ * reader runs. A caller naming an identity is the contract; a caller selecting
+ * a code path is the defect this module exists to refuse.
+ */
+describe('Stage 1. the locator is validated against the document kind', () => {
+  const TEXT = 'Alpha paragraph one.\n\nBeta paragraph two.';
+  const chunkRows = [{ text: TEXT, char_start: 0, char_end: TEXT.length, chunk_index: 0 }];
+
+  function kindClient(kind: string, pages: Record<string, unknown>[] = []) {
+    const build = (many: Record<string, unknown>[], single: Record<string, unknown> | null) => {
+      const query: Record<string, unknown> = {
+        eq() { return query; }, is() { return query; }, in() { return query; },
+        order() { return query; }, limit() { return query; },
+        maybeSingle: async () => ({ data: single, error: null }),
+        then(resolve: (v: { data: Record<string, unknown>[]; error: null }) => unknown) {
+          return Promise.resolve({ data: many, error: null }).then(resolve);
+        },
+      };
+      return query;
+    };
+    const api = {
+      from(table: string) {
+        if (table === 'knowledge_documents') {
+          return { select: () => build([], { id: DOC, original_filename: 'src', processing_status: 'ready', kind }) };
+        }
+        if (table === 'knowledge_chunks') return { select: () => build(chunkRows, null) };
+        if (table === 'padlets') return { select: () => build([], null) };
+        return { select: () => build(pages, null) };
+      },
+    };
+    return api as unknown as BoardAiContextSupabaseClient;
+  }
+
+  const sel = (over: Record<string, unknown> = {}) => ({
+    type: 'knowledge-selection' as const, knowledgeDocumentId: DOC,
+    charStart: 0, charEnd: 20, selectedText: TEXT.slice(0, 20), ...over,
+  });
+
+  it('A PAGELESS REQUEST AGAINST A PDF IS REFUSED, not routed to the chunk reader', async () => {
+    // The exact bypass the decision closes: without this, omitting pageNumber
+    // on a PDF would read that PDF's chunks and slice them by raw offsets.
+    const result = await resolveBoardAiChatContext(kindClient('pdf', [page(1)]), BOARD, [sel()], neverReads);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('validation');
+    expect(result.error.message).toMatch(/A page is required/);
+  });
+
+  it('A PAGE CITED IN A TEXT SOURCE IS REFUSED, with a reason', async () => {
+    const result = await resolveBoardAiChatContext(
+      kindClient('text'), BOARD, [sel({ pageNumber: 1 })], neverReads);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('validation');
+    expect(result.error.message).toMatch(/has no pages/);
+  });
+
+  it('a well-formed text selection still resolves', async () => {
+    const result = await resolveBoardAiChatContext(kindClient('text'), BOARD, [sel()], neverReads);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0].text).toBe(TEXT.slice(0, 20));
+  });
+
+  it('a well-formed PDF selection still resolves -- the regression control', async () => {
+    const pdfText = 'The stored page text, exactly as the worker persisted it.';
+    const result = await resolveBoardAiChatContext(
+      kindClient('pdf', [{ page_number: 1, text: pdfText }]), BOARD,
+      [sel({ pageNumber: 1, charStart: 4, charEnd: 10, selectedText: pdfText.slice(4, 10) })], neverReads);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]).toMatchObject({ pageNumber: 1, charStart: 4, charEnd: 10 });
+  });
+
+  it.each([
+    ['inverted', { charStart: 20, charEnd: 5 }],
+    ['empty', { charStart: 7, charEnd: 7 }],
+    ['negative', { charStart: -1, charEnd: 5 }],
+    ['fractional', { charStart: 0.5, charEnd: 5 }],
+  ])('a %s character range on a text source is refused explicitly', async (_label, range) => {
+    const result = await resolveBoardAiChatContext(
+      kindClient('text'), BOARD, [sel({ ...range, selectedText: 'x' })], neverReads);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('validation');
+  });
+
+  it('an unknown kind is treated as pageless, not as a PDF', async () => {
+    // Forward compatibility: a kind this build does not know about has no
+    // pages it could name, and guessing 'pdf' would demand a locator the
+    // document cannot have.
+    const result = await resolveBoardAiChatContext(kindClient('youtube'), BOARD, [sel()], neverReads);
+    expect(result.ok).toBe(true);
   });
 });
