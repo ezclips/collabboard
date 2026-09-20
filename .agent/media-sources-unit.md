@@ -178,6 +178,101 @@ not a partial pass**.
 
 ---
 
+## Stage 1 — ACCEPTED 2026-09-20, with one named exception
+
+Accepted by the PM with the focused-range routing exception recorded below and
+in `.agent/retrieval-followups.md` item 16. This section is written so the
+unit's completion status can be read here, without consulting another file.
+
+### The exception: range navigation in the FOCUSED workspace
+
+The acceptance line above says a citation "opens the text at the right range".
+That is met in the **docked** presentation and is met in the focused workspace
+**only as far as the product can reach it**, which today is not at all:
+
+- **Code defect: fixed.** The range was dropped in two places on the way to that
+  host — `openPdfWorkspaceDocument` in `CanvasClient.tsx` never accepted
+  `charStart`/`charEnd`, and the reader's own `openCitation` dropped them.
+- **Component-verified.** The reader renders a range it is given in both
+  presentations (`renderedRange` plus the marked substring), asserted per host.
+- **Forwarding-verified.** `knowledgeReaderCitationForwarding.test.tsx` drives
+  the panel's `onOpenCitation` in both hosts and asserts what leaves the drawer:
+  range carried, page citation unchanged, half a range dropped.
+- **Live-unreachable by product route today.** Nothing produces a ranged
+  citation for that host: a board-level chat citation asks for `'side-panel'`
+  by an existing decision, both of the reader's AI panels are document-scoped
+  and so run no board search, and the source-reference route carries no range
+  by design.
+- **Routing unchanged.** Citations keep requesting the docked reader. The
+  candidate — "open in whichever host is already open" — is recorded and
+  rejected for this stage: it would cover the board with the workspace and
+  change the chat's dock/close semantics, which needs its own GO.
+
+**The accurate phrase is "unreachable by product route today", never
+"verified".** The focused host is correct for the day a route exists.
+
+### Carried forward as landed
+
+- **Failed promotion is not self-healing.** A document left at `uploaded` is
+  retried by nothing — no worker, no sweep. It stays stuck and truthfully
+  invisible to search; the way back is to upload the source again. Deleting
+  real chunks to tidy the flag would be the worse outcome. Recorded where the
+  RPC is named in `knowledgeTextUpload.ts` and `knowledgeTextIngestionAdapters.ts`.
+- **The baseline stays environment-qualified**, and the qualification was
+  corrected on the day it was written — see the 2026-09-20 note in
+  `.agent/verification-baselines.md`. The set is **26**: 25 files failing
+  assertions (56 named tests) plus 1 failing at suite load. An earlier claim
+  that the env made it 25 was wrong; `vitest.config.ts` loads no env file.
+
+### Build and environment at closure
+
+- **Production build: passed.** `npm run build` exit 0, no errors or warnings.
+- **Preview smoke: passed.** `next start -p 3000`, driven through the persistent
+  Chromium on CDP 9333: 4 cards on the reference board — 3 PDF with pagers, 1
+  text source with an excerpt and no pager, truncation marker present, and
+  "Page content is not available" on none of them. Identical to the dev reading.
+- **Production server stopped, port 3000 released. Dev is NOT running** and
+  needs restarting next session. All live readings before this smoke were taken
+  against `next dev`, not a production build.
+- **Known flake, named correctly:** `scripts/check-react-hooks.test.ts`
+  (baselines section 3). It did **not** appear in the closure run.
+  `boardObjectReveal.test.ts` is not a flake and not a baseline member — it was
+  a gate-helper scraping artifact, corrected in the baselines note.
+
+### Commits, and what "nothing pushed" means
+
+`1bb74b26` was pushed **before** this closure work. "Nothing pushed" refers
+specifically to the commits on top of it:
+
+1. `f49add49` — the canvas card previews a text source instead of a missing page
+2. `365d7b75` — the focused workspace dropped a citation's character range
+3. `86e8ffc7` — a whole excerpt, an honest empty state, and a followed citation
+4. this commit — the Stage 1 acceptance record
+
+**Four commits on `1bb74b26`, unpushed.** The board's test artifacts are
+retained: `f3932ed4-8d46-40a0-a372-89f3e01cd1f3` (pre-fix, uncitable by design),
+`2a329736-306b-4abd-9a4a-bd354fdd0eb5` (fixed),
+`39a21588-b403-47d4-bca5-eea41e0cb47f` (tide-notes.txt),
+`457232c6-f9b0-4370-839d-b271b89d6805` (kiln-log.md),
+`064b4901-c93c-496e-b9ba-978a1619d022` (loom-notes.md), and wiki page
+`eab53547-3f4f-4d09-bc3c-a25918eb2e44`.
+
+### Rollout provenance
+
+`20260920120000_knowledge_sources_beyond_pdf`, applied by the PM through the
+managed MCP apply tool on 2026-09-20. Revision = the migration file at commit
+`7f6c40ce`, byte-identical to its rollout copy. Verify 16/16 green at apply
+time, including row 16 (no rows admitted); battery nil movement.
+
+### Known and left, as Stage 2 input
+
+The card's page/text view toggle is still offered on a text source, where it
+changes nothing. Hiding it needs the kind threaded into
+`KnowledgePdfCardControls`, which the Freeform host renders itself — inert
+rather than wrong.
+
+---
+
 # Stage 2 — docx
 
 One parser dependency (mammoth-class). Paragraphs → chunks with paragraph index

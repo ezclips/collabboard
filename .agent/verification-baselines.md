@@ -70,24 +70,51 @@ One of these is not an assertion failure and should not be read as one:
 or supabaseUrl and supabaseKey are required`. It is environment-dependent, not a
 code failure.
 
-#### 2026-09-20 — the set reads 25, not 26, and nothing regressed
+#### 2026-09-20 — the set is 26, and a checker that reads 25 is broken
 
-Stage 1 of the media-sources unit runs the gate in an environment where
-`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are **present**
-in `.env.local`. `knowledgeUsedInNotes.integration.test.tsx` therefore loads and
-passes, and the failing-file set reads **25 files / 56 tests** rather than 26.
+**Corrected the same day it was written.** An earlier version of this paragraph
+claimed the set reads 25 because `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` are present in `.env.local`, so the 26th file
+loads and passes. **That is false.** `vitest.config.ts` loads no env file and
+registers no setup that would, so those variables never reach the test process.
+`knowledgeUsedInNotes.integration.test.tsx` still fails at suite load with the
+message quoted above, exactly as the baseline records.
 
-This is an environment change, not a code change, and the distinction is the
-whole point of the paragraph above: a report that says "nothing gone" without
-naming it is claiming a passing file it did not earn. The correct statement is
-two statements:
+The real reading is the baseline, unchanged: **26 files — 25 that fail
+assertions (56 named tests) plus 1 that fails to load.**
 
-- **Assertion failures:** the 25 remaining files, 56 named tests — unchanged.
-- **Suite-load failure:** the 26th file, absent because its environment
-  dependency is now satisfied. It returns the moment the env is missing.
+**A SUITE-LOAD FAILURE IS INVISIBLE TO ANY CHECKER THAT COUNTS FAILED
+ASSERTIONS.** A file that never loads produces no assertion results at all, so
+a gate helper built as "collect every failed assertion, take the set of files"
+cannot see it — and reports 25 with no error, no warning and no gap. The file
+does not read as passing; it reads as *not existing*. That is worse than a
+wrong count, because there is nothing in the output to disbelieve.
 
-A run on a machine without those variables should read 26 and must not be
-treated as a regression, in either direction.
+A checker of this gate must therefore report **two** numbers from two different
+places in the report:
+
+- **Assertion failures** — files with at least one failed assertion.
+- **Suite-load failures** — files whose result carries zero assertions and a
+  failed status. In a vitest JSON report: `assertionResults.length === 0 &&
+  status === 'failed'`.
+
+**The second instrument defect found in the same pass**, and worth recording
+because it points the other way: a helper that scraped this document for
+baseline members by matching any line ending in `.test.ts` also swallowed
+`lib/domain/canvas/boardObjectReveal.test.ts` out of **section 2's
+`check:boundaries` block**, inventing a 27th baseline member that then reported
+as permanently "missing". `boardObjectReveal.test.ts` is not a baseline member,
+is not the known flake — section 3 names `scripts/check-react-hooks.test.ts` —
+and passes 22/22 on its own.
+
+Scrape the fenced block under *The 26 baseline failing files* and nothing else.
+This document contains several file lists for several different gates, and only
+one of them is this criterion.
+
+**The two defects partially cancelled**, which is why neither was obvious: one
+hid a real failing file, the other added a phantom one, and the totals stayed
+plausible. An instrument that is wrong twice in opposite directions still reads
+as clean.
 
 ### The 56 baseline failing test NAMES
 
