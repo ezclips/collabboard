@@ -35,6 +35,16 @@ import {
   type CapturedPageSelection,
 } from '@/components/collabboard/knowledgeSourceTextSelection';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import { KNOWLEDGE_TEXT_KIND } from '@/lib/domain/knowledge/knowledgeTextIngestion';
+
+/**
+ * How much of a text source the card previews.
+ *
+ * A card is a preview, not a reader: enough to recognise the document and
+ * decide whether to open it. Named rather than inlined so the one place that
+ * decides "how much" is findable, the way the page card's snippet length is.
+ */
+export const KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS = 600;
 
 /**
  * PDF-C1 -- the ONE canvas rendering of a Knowledge document placement.
@@ -527,6 +537,20 @@ export default function KnowledgePdfCanvasSurface({
   const [pages, setPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(
     () => pageCache?.read(documentId)?.pages ?? null,
   );
+  /**
+   * What this source IS, and -- for a pageless one -- its canonical text.
+   *
+   * Read from the same /pages answer the pages come from, because a card that
+   * inferred "text" from an empty page list would present a PDF whose
+   * extraction produced nothing as a text document with no words in it. The
+   * row's kind is the only thing that can tell those two apart.
+   */
+  const [sourceKind, setSourceKind] = useState<string>(
+    () => pageCache?.read(documentId)?.kind ?? 'pdf',
+  );
+  const [sourceText, setSourceText] = useState<string | null>(
+    () => pageCache?.read(documentId)?.text ?? null,
+  );
   const [pagesFailed, setPagesFailed] = useState(false);
   /** A 409 was seen: extraction is still finishing, so the wait is expected. */
   const [pagesPreparing, setPagesPreparing] = useState(false);
@@ -580,6 +604,8 @@ export default function KnowledgePdfCanvasSurface({
       }
       setPagesPreparing(false);
       setPages(result.entry.pages);
+      setSourceKind(result.entry.kind);
+      setSourceText(result.entry.text ?? null);
     })();
     return () => { cancelled = true; window.clearTimeout(retryTimer); };
   }, [isReady, collapsed, pages, pagesFailed, pagesAttempt, boardId, documentId]);
@@ -619,6 +645,27 @@ export default function KnowledgePdfCanvasSurface({
    * is a non-numeric state that disappears the moment content is available.
    */
   const documentLoading = isReady && !collapsed && !pages && !pagesFailed;
+
+  /**
+   * A PAGELESS source, by its own kind rather than by what it lacks.
+   *
+   * This card is a page preview and a page CONTROLLER, and a text source has
+   * nothing to control: no pages to move between, no page image, no page
+   * number a selection could be recorded against. So it shows an excerpt of
+   * the text it actually is, and Open remains the way to read the whole of it
+   * -- which is the one affordance decision this stage already made for the
+   * reader and is simply honoured here too.
+   */
+  const isTextSource = sourceKind === KNOWLEDGE_TEXT_KIND;
+  /**
+   * The excerpt: the beginning of the canonical text, never a summary and
+   * never a middle. A card that started somewhere else would be showing a
+   * passage nobody chose, and the offsets that DO get chosen are the reader's
+   * business, not this preview's.
+   */
+  const textExcerpt = isTextSource && typeof sourceText === 'string'
+    ? sourceText.slice(0, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS)
+    : null;
 
   const snippet = pages?.find((page) => page.text.trim().length > 0)?.text.trim().slice(0, 90) ?? null;
 
@@ -836,6 +883,48 @@ export default function KnowledgePdfCanvasSurface({
                     the backend has not finished extracting. No estimate is
                     shown -- the duration is not something this client knows. */}
                 {pagesPreparing ? 'Preparing document…' : 'Loading document…'}
+              </div>
+            ) : isTextSource ? (
+              /*
+                A SOURCE WITH NO PAGES. Before this, such a card fell through to
+                the last branch and read "Page content is not available for this
+                document" -- true of a page it does not have, and wrong about
+                the document, which is entirely available.
+              */
+              <div
+                data-knowledge-pdf-text-source="true"
+                data-no-drag="true"
+                className="flex min-h-0 flex-auto flex-col gap-1 px-1 py-1.5"
+              >
+                <div className="shrink-0 select-none text-[8px] uppercase tracking-wider text-gray-400">
+                  Text source
+                </div>
+                {textExcerpt === null ? (
+                  <p className="text-[10px] italic text-gray-400">
+                    This source has no text to preview.
+                  </p>
+                ) : (
+                  <p
+                    data-knowledge-pdf-text-excerpt="true"
+                    className="min-h-0 overflow-hidden whitespace-pre-wrap break-words text-[9px] leading-snug text-gray-700"
+                  >
+                    {textExcerpt}
+                    {/*
+                      Said, not implied. An excerpt that simply stopped would
+                      look like the whole of a very short document, and the one
+                      thing this card must not do is misrepresent how much of
+                      the source the reader has seen.
+                    */}
+                    {sourceText !== null && sourceText.length > textExcerpt.length ? (
+                      <span className="text-gray-400">… </span>
+                    ) : null}
+                  </p>
+                )}
+                <div className="shrink-0 select-none text-[8px] text-gray-400">
+                  {sourceText === null
+                    ? originalFilename
+                    : `${originalFilename} · ${sourceText.length.toLocaleString()} characters`}
+                </div>
               </div>
             ) : currentPageData ? (
               /*

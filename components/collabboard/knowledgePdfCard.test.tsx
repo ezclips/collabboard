@@ -1825,3 +1825,120 @@ describe('PDF-R6M-C1 preview and controls share one width', () => {
     expect(code).not.toContain('IntersectionObserver');
   });
 });
+
+/**
+ * Stage 1 -- the card for a source that has no pages.
+ *
+ * Before this the card fell through to "Page content is not available for this
+ * document": true of a page it does not have, and wrong about the document,
+ * which is entirely available. A card is a preview and a page CONTROLLER, and
+ * a text source has nothing to control -- so it previews what it actually is.
+ */
+describe('Stage 1. a text source previews its text', () => {
+  const TEXT = `# Loom setup notes\n\n${'Thread the raddle at one inch per section. '.repeat(40)}`;
+
+  function stubText(body: { kind?: string; text?: string | null } = {}) {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url) === PAGES_URL) {
+        return new Response(JSON.stringify({
+          document: { id: DOC_ID, originalFilename: 'loom-notes.md', pageCount: null, kind: body.kind ?? 'text' },
+          pages: [],
+          ...(body.text === undefined ? { text: TEXT } : (body.text === null ? {} : { text: body.text })),
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('shows an excerpt of the canonical text, not a missing-page message', async () => {
+    stubText();
+    const host = await card();
+
+    expect(host.querySelector('[data-knowledge-pdf-text-source="true"]')).not.toBeNull();
+    const excerpt = host.querySelector('[data-knowledge-pdf-text-excerpt="true"]');
+    expect(excerpt?.textContent).toContain('# Loom setup notes');
+    expect(host.textContent).not.toContain('Page content is not available');
+  });
+
+  it('the excerpt is the BEGINNING of the source, and is bounded', async () => {
+    // Never a middle: a card that started elsewhere would be showing a passage
+    // nobody chose, and choosing passages is the reader's business.
+    stubText();
+    const host = await card();
+    const excerpt = host.querySelector('[data-knowledge-pdf-text-excerpt="true"]')!;
+    expect(TEXT.startsWith(excerpt.textContent!.replace(/…\s*$/, ''))).toBe(true);
+    expect(excerpt.textContent!.length).toBeLessThan(TEXT.length);
+  });
+
+  it('says when it has been truncated, rather than looking complete', async () => {
+    stubText();
+    const long = await card();
+    expect(long.querySelector('[data-knowledge-pdf-text-excerpt="true"]')?.textContent).toContain('…');
+
+    document.body.innerHTML = '';
+    stubText({ text: 'Two sentences. That is the whole file.' });
+    const short = await card();
+    expect(short.querySelector('[data-knowledge-pdf-text-excerpt="true"]')?.textContent).not.toContain('…');
+  });
+
+  it('names the file and how much text there is', async () => {
+    stubText({ text: 'exactly ten' });
+    const host = await card();
+    // The filename is the card's own prop -- the board object's name for this
+    // document -- not something taken from the payload. The character count is
+    // the one thing only the fetched text can say.
+    expect(host.textContent).toContain('lesson.pdf');
+    expect(host.textContent).toContain('11 characters');
+  });
+
+  it('offers no page navigator for a document with no pages', async () => {
+    stubText();
+    const host = await card();
+    expect(host.querySelector('[data-knowledge-pdf-pager="true"]')).toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-page-indicator="true"]')).toBeNull();
+  });
+
+  it('still offers Open, which is how the whole source is read', async () => {
+    stubText();
+    const onOpen = vi.fn();
+    const host = await card({ onOpen });
+    const open = host.querySelector('[data-knowledge-pdf-action="open"]') as HTMLElement | null;
+    expect(open).not.toBeNull();
+    await act(async () => { open!.click(); });
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({
+      documentId: DOC_ID, presentation: 'workspace',
+    }));
+  });
+
+  it('a text source with no text says so rather than showing an empty card', async () => {
+    stubText({ text: null });
+    const host = await card();
+    expect(host.textContent).toContain('no text to preview');
+    expect(host.querySelector('[data-knowledge-pdf-text-excerpt="true"]')).toBeNull();
+  });
+
+  it('A PDF IS UNAFFECTED: pages, pager and no text-source body', async () => {
+    // The regression control. The branch is chosen by the row's KIND, so a PDF
+    // whose extraction produced nothing must still read as a broken PDF rather
+    // than as an empty text document.
+    stubPages(3);
+    const host = await card();
+    expect(host.querySelector('[data-knowledge-pdf-text-source="true"]')).toBeNull();
+    expect(host.querySelector('[data-knowledge-pdf-pager="true"]')).not.toBeNull();
+  });
+
+  it('a PDF with no pages still says the PAGE is unavailable', async () => {
+    const fetchMock = vi.fn(async (url: string) => (String(url) === PAGES_URL
+      ? new Response(JSON.stringify({
+        document: { id: DOC_ID, originalFilename: 'broken.pdf', pageCount: 2, kind: 'pdf' },
+        pages: [],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+    const host = await card();
+    expect(host.textContent).toContain('Page content is not available');
+    expect(host.querySelector('[data-knowledge-pdf-text-source="true"]')).toBeNull();
+  });
+});
