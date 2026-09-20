@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import {
@@ -7,6 +8,7 @@ import {
   SupabaseKnowledgeIngestionRepository,
   SupabaseKnowledgeStorageGateway,
 } from '@/lib/infra/knowledge/knowledgeIngestionAdapters';
+import { SupabaseKnowledgeTextRepository } from '@/lib/infra/knowledge/knowledgeTextIngestionAdapters';
 import { SupabaseKnowledgeDocumentReadRepository } from '@/lib/infra/knowledge/knowledgeReadAdapters';
 import { createKnowledgeListGetHandler } from '@/lib/server/knowledge/knowledgeListRoute';
 import { createKnowledgeUploadPostHandler } from '@/lib/server/knowledge/knowledgeUploadRoute';
@@ -72,6 +74,24 @@ export const POST = createKnowledgeUploadPostHandler({
       storage: new SupabaseKnowledgeStorageGateway(adminClient as never),
       hasher: new NodeKnowledgeContentHasher(),
       ids: new RandomKnowledgeDocumentIdFactory(),
+    };
+  },
+
+  createTextIngestionDeps() {
+    const adminClient = getSupabaseAdmin();
+    return {
+      deps: {
+        // The SAME authorizer, storage gateway, hasher and id factory as the
+        // PDF path. None of them varies by source kind, and a second copy of
+        // the board-permission predicate is exactly the kind of drift that
+        // ends with one upload path enforcing a rule the other forgot.
+        authorizer: new SupabaseKnowledgeBoardAuthorizer(adminClient as never),
+        repository: new SupabaseKnowledgeTextRepository(adminClient as never),
+        storage: new SupabaseKnowledgeStorageGateway(adminClient as never),
+        hasher: new NodeKnowledgeContentHasher(),
+        ids: new RandomKnowledgeDocumentIdFactory(),
+      },
+      hashChunk: (text: string) => createHash('sha256').update(text, 'utf8').digest('hex'),
     };
   },
 });

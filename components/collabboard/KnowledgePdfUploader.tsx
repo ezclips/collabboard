@@ -10,6 +10,8 @@ import React, {
 } from 'react';
 import { useParams } from 'next/navigation';
 
+import { KNOWLEDGE_TEXT_ACCEPT } from '@/lib/domain/knowledge/knowledgeTextIngestion';
+
 export type KnowledgePdfProcessingStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
 
 export interface KnowledgePdfSummary {
@@ -41,9 +43,28 @@ export interface KnowledgePdfPlacementSource {
 }
 
 /** A fresh upload: the same placement identity, plus what only upload knows. */
+/**
+ * What the file chooser offers.
+ *
+ * Built from the domain's own list rather than restated here, so the picker and
+ * the server's validator cannot drift: an extension offered but refused, or
+ * accepted but never offered, is a defect a literal string would hide. `accept`
+ * is a convenience, never a control -- the route validates every upload
+ * regardless of what the dialog filtered.
+ */
+export const KNOWLEDGE_UPLOAD_ACCEPT = `application/pdf,.pdf,${KNOWLEDGE_TEXT_ACCEPT}`;
+
 export interface KnowledgePdfUploadResult extends KnowledgePdfPlacementSource {
   boardId: string;
-  processingStatus: 'uploaded';
+  /**
+   * 'uploaded' means a worker still has to make this searchable; 'ready' means
+   * the server already did, which is every text source. Both are legitimate
+   * answers to an upload now -- treating 'ready' as malformed would fail an
+   * upload that had entirely succeeded.
+   */
+  processingStatus: 'uploaded' | 'ready';
+  /** What the server stored it as. Absent on responses from older builds. */
+  kind?: string;
 }
 
 /**
@@ -126,11 +147,19 @@ function apiPath(boardId: string) {
   return `/api/boards/${encodeURIComponent(boardId)}/knowledge`;
 }
 
-function uploadErrorMessage(status: number) {
-  if (status === 400) return 'Choose a valid PDF file.';
-  if (status === 401) return 'Sign in to upload a PDF.';
-  if (status === 403) return 'You do not have permission to add PDFs to this board.';
-  return 'PDF upload is temporarily unavailable. Please try again.';
+function uploadErrorMessage(status: number, serverMessage?: string) {
+  // A 400 now carries the server's own reason -- "The selected file is empty",
+  // "This file is not valid UTF-8 text" -- and those say what to do about it in
+  // a way "Choose a valid file" cannot. Only a 400 is trusted this way: the
+  // other statuses are generic by design and must not become a channel for
+  // whatever an intermediary put in an error body.
+  if (status === 400) {
+    const trimmed = (serverMessage ?? '').trim().slice(0, 200);
+    return trimmed.length > 0 ? trimmed : 'Choose a valid file.';
+  }
+  if (status === 401) return 'Sign in to upload a file.';
+  if (status === 403) return 'You do not have permission to add files to this board.';
+  return 'Upload is temporarily unavailable. Please try again.';
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -158,11 +187,13 @@ export async function uploadKnowledgePdf(
     // stop, and it must reach the caller AS an abort so nothing downstream
     // treats it as an upload that merely went wrong.
     if (isAbortError(error)) throw error;
-    throw new Error('PDF upload is temporarily unavailable. Please try again.');
+    throw new Error('Upload is temporarily unavailable. Please try again.');
   }
 
   if (!response.ok) {
-    throw new Error(uploadErrorMessage(response.status));
+    const body = await safeJson(response) as { error?: unknown } | null;
+    const reason = typeof body?.error === 'string' ? body.error : undefined;
+    throw new Error(uploadErrorMessage(response.status, reason));
   }
 
   const payload = await safeJson(response) as Partial<KnowledgePdfUploadResult> | null;
@@ -171,9 +202,9 @@ export async function uploadKnowledgePdf(
     || typeof payload.id !== 'string'
     || typeof payload.boardId !== 'string'
     || typeof payload.originalFilename !== 'string'
-    || payload.processingStatus !== 'uploaded'
+    || (payload.processingStatus !== 'uploaded' && payload.processingStatus !== 'ready')
   ) {
-    throw new Error('PDF upload is temporarily unavailable. Please try again.');
+    throw new Error('Upload is temporarily unavailable. Please try again.');
   }
 
   return payload as KnowledgePdfUploadResult;
@@ -342,6 +373,17 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       // reason -- deliberately before the wait below, never after it.
       onKnowledgeChanged?.();
       onDocumentUploaded?.(uploaded);
+
+      // ALREADY DONE. A text source is indexed by the request that uploaded it,
+      // so there is no worker to wait for: polling would ask sixty times about
+      // a status that cannot change, and "Processing…" would be false the
+      // moment it was shown.
+      if (uploaded.processingStatus === 'ready') {
+        onDocumentSettled?.(uploaded.id, 'ready');
+        setNotice({ tone: 'success', message: `${uploaded.originalFilename} is ready.` });
+        return;
+      }
+
       setNotice({ tone: 'info', message: `Processing ${uploaded.originalFilename}…` });
 
       const completed = await waitForKnowledgePdf(boardId, uploaded.id, {
@@ -406,9 +448,9 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
         ref={inputRef}
         id={inputId}
         type="file"
-        accept="application/pdf,.pdf"
+        accept={KNOWLEDGE_UPLOAD_ACCEPT}
         className="sr-only"
-        aria-label="Choose PDF to add"
+        aria-label="Choose a file to add"
         disabled={busy}
         onClick={(event) => {
           // Stops the chooser opening at all -- the label guard above is not

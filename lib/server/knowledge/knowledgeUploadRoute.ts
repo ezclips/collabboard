@@ -5,14 +5,33 @@ import {
   createKnowledgePdfUpload,
   type KnowledgeIngestionDeps,
 } from '@/lib/domain/knowledge/knowledgeIngestion';
+import { isKnowledgeTextCandidate } from '@/lib/domain/knowledge/knowledgeTextIngestion';
+import {
+  createKnowledgeTextUpload,
+  type KnowledgeTextChunkHasher,
+  type KnowledgeTextUploadDeps,
+} from '@/lib/domain/knowledge/knowledgeTextUpload';
 
 export interface KnowledgeUploadRouteContext {
   readonly params: Promise<{ id: string }>;
 }
 
+/**
+ * The text path's collaborators, bound together.
+ *
+ * One factory rather than two dependencies because a text upload cannot happen
+ * without a chunk hasher: separating them would make "wired, but with no way to
+ * hash a chunk" a representable state of the route.
+ */
+export interface KnowledgeTextIngestionWiring {
+  readonly deps: KnowledgeTextUploadDeps;
+  readonly hashChunk: KnowledgeTextChunkHasher;
+}
+
 export interface KnowledgeUploadRouteDependencies {
   getAuthenticatedUserId(): Promise<string | null>;
   createIngestionDeps(): KnowledgeIngestionDeps;
+  createTextIngestionDeps(): KnowledgeTextIngestionWiring;
 }
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
@@ -28,7 +47,12 @@ function isUploadFile(value: FormDataEntryValue | null): value is File {
 function domainErrorResponse(error: DomainError): NextResponse {
   switch (error.code) {
     case 'validation':
-      return NextResponse.json({ error: 'Invalid PDF upload' }, { status: 400 });
+      // The domain's own message, not a generic one. Every `validation` error
+      // on both ingestion paths is authored user-facing text that says what to
+      // do about it ("The selected file is empty", "...is not valid UTF-8"),
+      // and the text path's refusals are worth nothing if they arrive as
+      // "Invalid PDF upload". Only the message travels; never the cause.
+      return NextResponse.json({ error: error.message }, { status: 400 });
     case 'permission_denied':
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     case 'not_found':
@@ -78,12 +102,12 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
     try {
       formData = await request.formData();
     } catch {
-      return NextResponse.json({ error: 'A PDF file is required' }, { status: 400 });
+      return NextResponse.json({ error: 'A file is required' }, { status: 400 });
     }
 
     const file = formData.get('file');
     if (!isUploadFile(file)) {
-      return NextResponse.json({ error: 'A PDF file is required' }, { status: 400 });
+      return NextResponse.json({ error: 'A file is required' }, { status: 400 });
     }
 
     let bytes: Uint8Array;
@@ -94,17 +118,23 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
     }
 
     const { id: boardId } = await context.params;
+    const source = { filename: file.name, mimeType: file.type, bytes };
 
     try {
-      const result = await createKnowledgePdfUpload(deps.createIngestionDeps(), {
-        boardId: asBoardId(boardId),
-        userId: asUserId(userId),
-        file: {
-          filename: file.name,
-          mimeType: file.type,
-          bytes,
-        },
-      });
+      // WHICH PATH IS DECIDED HERE, ONCE, and both paths validate again for
+      // themselves. This is a routing question, not an authorization one: a
+      // file that looks like text but is not gets refused by the text
+      // validator's decode, and one that claims to be a PDF but is not gets
+      // refused by the signature check. Neither validator trusts this
+      // predicate; it only chooses which of them answers.
+      const input = { boardId: asBoardId(boardId), userId: asUserId(userId), file: source };
+      let result;
+      if (isKnowledgeTextCandidate(source)) {
+        const text = deps.createTextIngestionDeps();
+        result = await createKnowledgeTextUpload(text.deps, input, text.hashChunk);
+      } else {
+        result = await createKnowledgePdfUpload(deps.createIngestionDeps(), input);
+      }
 
       if (!result.ok) return domainErrorResponse(result.error);
 
@@ -114,6 +144,11 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
           boardId: String(result.value.boardId),
           originalFilename: result.value.originalFilename,
           processingStatus: result.value.processingStatus,
+          // The client polls an 'uploaded' document until a worker promotes it.
+          // A text source arrives 'ready' and there is nothing to poll for, so
+          // the kind travels with it rather than being inferred from a status
+          // that could also belong to a PDF whose extraction already finished.
+          kind: result.value.kind,
         },
         { status: 201 },
       );

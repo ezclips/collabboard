@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgePdfUploader, {
+  KNOWLEDGE_UPLOAD_ACCEPT,
   listKnowledgePdfs,
   uploadKnowledgePdf,
   waitForKnowledgePdf,
@@ -73,7 +74,44 @@ describe('P6C Knowledge PDF upload client', () => {
     const file = new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
 
     await expect(uploadKnowledgePdf(BOARD_ID, file, fetchImpl))
-      .rejects.toThrow('PDF upload is temporarily unavailable. Please try again.');
+      .rejects.toThrow('Upload is temporarily unavailable. Please try again.');
+  });
+
+  it.each([401, 403, 500, 503])(
+    'still discards the body of a %s, now that a 400 body is shown',
+    async (status) => {
+      // The narrowing that makes this worth re-pinning: a 400 now carries the
+      // server's own refusal ("not valid UTF-8", "The selected file is empty")
+      // because those are authored, actionable text. Every OTHER status stays
+      // generic, so an error body written by an intermediary -- or by a handler
+      // that stringified a driver error -- never reaches the screen.
+      const fetchImpl = vi.fn(async () => jsonResponse({
+        error: 'SUPABASE_SERVICE_ROLE_KEY leaked internal detail',
+      }, status));
+      const file = new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
+
+      await expect(uploadKnowledgePdf(BOARD_ID, file, fetchImpl))
+        .rejects.toThrow(/^(?!.*SUPABASE)/);
+    },
+  );
+
+  it('shows the 400 refusal the server authored, bounded', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      error: 'This file is not valid UTF-8 text',
+    }, 400));
+    const file = new File([new Uint8Array([0xff])], 'notes.txt', { type: 'text/plain' });
+
+    await expect(uploadKnowledgePdf(BOARD_ID, file, fetchImpl))
+      .rejects.toThrow('This file is not valid UTF-8 text');
+  });
+
+  it('falls back when a 400 carries no usable reason', async () => {
+    for (const body of [{}, { error: '' }, { error: '   ' }, { error: 42 }]) {
+      const fetchImpl = vi.fn(async () => jsonResponse(body, 400));
+      const file = new File(['x'], 'notes.txt', { type: 'text/plain' });
+      await expect(uploadKnowledgePdf(BOARD_ID, file, fetchImpl))
+        .rejects.toThrow('Choose a valid file.');
+    }
   });
 
   it('reads P6B status and stops when the uploaded PDF becomes ready', async () => {
@@ -133,7 +171,7 @@ describe('P6C Knowledge PDF upload client', () => {
     expect(create?.tools.some((tool) => tool.type === 'document' && tool.label === 'Document')).toBe(true);
   });
 
-  it('exposes a PDF-only file picker through the narrow imperative handle', async () => {
+  it('exposes a Knowledge-source file picker through the narrow imperative handle', async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -146,7 +184,14 @@ describe('P6C Knowledge PDF upload client', () => {
 
     const input = host.querySelector('input[type="file"]') as HTMLInputElement;
     const click = vi.spyOn(input, 'click').mockImplementation(() => undefined);
-    expect(input.accept).toBe('application/pdf,.pdf');
+    // CHANGED DELIBERATELY: 'PDF-only' was the truth when PDF was the only
+    // kind. The picker is now built from the domain's own accept list, so what
+    // it offers and what the route admits cannot drift apart.
+    expect(input.accept).toBe(KNOWLEDGE_UPLOAD_ACCEPT);
+    expect(input.accept).toContain('application/pdf');
+    for (const token of ['.txt', '.md', '.markdown', 'text/plain', 'text/markdown']) {
+      expect(input.accept).toContain(token);
+    }
 
     act(() => ref.current?.openPicker());
     expect(click).toHaveBeenCalledOnce();
@@ -216,6 +261,50 @@ describe('the upload request is bound to the uploader lifetime', () => {
 
     expect(uploadSignal!.aborted, 'the in-flight ingestion request is aborted').toBe(true);
     expect(onDocumentUploaded, 'no placement is announced').not.toHaveBeenCalled();
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('a text source that comes back ready is never polled for', async () => {
+    // A text file is indexed by the request that uploaded it. Polling would
+    // ask sixty times about a status that cannot change, and "Processing..."
+    // would be false the moment it appeared.
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onDocumentSettled = vi.fn();
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => (
+      init?.method === 'POST'
+        ? jsonResponse({
+          id: DOCUMENT_ID,
+          boardId: BOARD_ID,
+          originalFilename: 'notes.md',
+          processingStatus: 'ready',
+          kind: 'text',
+        }, 201)
+        : jsonResponse({ documents: [] })
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(<KnowledgePdfUploader onDocumentSettled={onDocumentSettled} />);
+    });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['# Notes'], 'notes.md', { type: 'text/markdown' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(onDocumentSettled).toHaveBeenCalledWith(DOCUMENT_ID, 'ready');
+    expect(container.textContent).toContain('notes.md is ready.');
+
+    act(() => { root.unmount(); });
     container.remove();
     vi.unstubAllGlobals();
   });
