@@ -35,6 +35,12 @@ function query<T>(result: Lookup<T>) {
       filters.push([column, value]);
       return builder;
     }),
+    // The pageless branch selects chunks with `.is('page_start', null)`, which
+    // sits between the eq filters and the order in the real chain.
+    is: vi.fn((column: string, value: unknown) => {
+      filters.push([column, String(value)]);
+      return builder;
+    }),
     order: vi.fn(async (column: string, options: { ascending: boolean }) => {
       ordered = { column, ascending: options.ascending };
       return result;
@@ -53,7 +59,8 @@ function configure(options: {
   user?: { id: string } | null;
   owner?: Lookup<{ id: string } | null>;
   member?: Lookup<boolean | null>;
-  document?: Lookup<{ id: string; original_filename: string; page_count: number | null; processing_status: string } | null>;
+  document?: Lookup<{ id: string; original_filename: string; page_count: number | null; processing_status: string; kind?: string } | null>;
+  chunks?: Lookup<{ chunk_index: number; char_start: number; char_end: number; text: string }[] | null>;
   pages?: Lookup<{
     page_number: number; text: string;
     width_points: number | null; height_points: number | null; rotation: number | null;
@@ -66,9 +73,11 @@ function configure(options: {
       original_filename: 'EMG_checklist.pdf',
       page_count: 2,
       processing_status: 'ready',
+      kind: 'pdf',
     },
     error: null,
   });
+  const chunksQuery = query(options.chunks ?? { data: [], error: null });
   const pagesQuery = query(options.pages ?? {
     data: [
       { page_number: 1, text: 'first', width_points: 612, height_points: 792, rotation: 0 },
@@ -82,13 +91,17 @@ function configure(options: {
     rpc: vi.fn(async () => options.member ?? { data: false, error: null }),
   };
   const adminClient = {
-    from: vi.fn((table: string) => table === 'knowledge_documents' ? documentQuery : pagesQuery),
+    from: vi.fn((table: string) => {
+      if (table === 'knowledge_documents') return documentQuery;
+      if (table === 'knowledge_chunks') return chunksQuery;
+      return pagesQuery;
+    }),
   };
   const cookieStore = { get: vi.fn(() => null), set: vi.fn() };
   mocks.cookies.mockResolvedValue(cookieStore);
   mocks.createRouteHandlerClient.mockReturnValue(sessionClient);
   mocks.getSupabaseAdmin.mockReturnValue(adminClient);
-  return { ownerQuery, documentQuery, pagesQuery, sessionClient, adminClient };
+  return { ownerQuery, documentQuery, pagesQuery, chunksQuery, sessionClient, adminClient };
 }
 
 beforeAll(async () => {
@@ -118,7 +131,10 @@ describe('Knowledge extracted pages route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(payload).toEqual({
-      document: { id: DOCUMENT_ID, originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
+      // WIDENED DELIBERATELY: the client can no longer infer a source's shape
+      // from its page list, because a pageless source has none. Pinned so a
+      // silently widened payload is still a failure.
+      document: { id: DOCUMENT_ID, originalFilename: 'EMG_checklist.pdf', pageCount: 2, kind: 'pdf' },
       pages: [
         { pageNumber: 1, text: 'first', widthPoints: 612, heightPoints: 792, rotation: 0 },
         { pageNumber: 2, text: 'second', widthPoints: 595, heightPoints: 842, rotation: 90 },
@@ -241,5 +257,141 @@ describe('Knowledge extracted pages route', () => {
     expect(source).not.toContain('canvases');
     expect(source).not.toContain('storage_path');
     expect(source).not.toContain('raw_artifact_path');
+  });
+});
+
+/**
+ * Stage 1 -- the same route, the same authorization, a different body.
+ *
+ * A pageless source is served here rather than from a sibling endpoint
+ * precisely so the session check, the owner-or-member check, the board-scoped
+ * document read and the readiness gate above cannot drift into two copies.
+ * These tests therefore care about the body and about what the route refuses.
+ */
+describe('Knowledge pages route: a source with no pages', () => {
+  const textDocument = (kind = 'text') => ({
+    data: {
+      id: DOCUMENT_ID,
+      original_filename: 'tide-pools.md',
+      page_count: null,
+      processing_status: 'ready',
+      kind,
+    },
+    error: null,
+  });
+
+  const chunkRows = (...texts: string[]) => {
+    let cursor = 0;
+    return texts.map((text, index) => {
+      const row = { chunk_index: index, char_start: cursor, char_end: cursor + text.length, text };
+      cursor += text.length;
+      return row;
+    });
+  };
+
+  it('returns the canonical text, an empty page list, and its kind', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: textDocument(),
+      chunks: { data: chunkRows('Alpha.\n\n', 'Beta paragraph.'), error: null },
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.text).toBe('Alpha.\n\nBeta paragraph.');
+    expect(payload.pages).toEqual([]);
+    // Null, not zero: this document has no pages, rather than a page count
+    // that was measured and found to be none.
+    expect(payload.document).toEqual({
+      id: DOCUMENT_ID, originalFilename: 'tide-pools.md', pageCount: null, kind: 'text',
+    });
+  });
+
+  it('reads only the PAGELESS chunks of that document, in index order', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: textDocument(),
+      chunks: { data: chunkRows('one'), error: null },
+    });
+    await route.GET(new Request('http://localhost'), context());
+
+    expect(state.chunksQuery.filters).toContainEqual(['document_id', DOCUMENT_ID]);
+    expect(state.chunksQuery.filters).toContainEqual(['page_start', 'null']);
+    expect(state.chunksQuery.ordered).toEqual({ column: 'chunk_index', ascending: true });
+    // Never the page table for a source that has none.
+    expect(state.adminClient.from).not.toHaveBeenCalledWith('knowledge_pages');
+  });
+
+  it.each([
+    ['a gap between chunks', [
+      { chunk_index: 0, char_start: 0, char_end: 3, text: 'abc' },
+      { chunk_index: 1, char_start: 9, char_end: 12, text: 'def' },
+    ]],
+    ['an overlap', [
+      { chunk_index: 0, char_start: 0, char_end: 3, text: 'abc' },
+      { chunk_index: 1, char_start: 1, char_end: 4, text: 'bcd' },
+    ]],
+    ['a span that disagrees with its text', [
+      { chunk_index: 0, char_start: 0, char_end: 99, text: 'abc' },
+    ]],
+    ['a first chunk that does not start at zero', [
+      { chunk_index: 0, char_start: 5, char_end: 8, text: 'abc' },
+    ]],
+  ])('refuses %s rather than serving text whose offsets lie', async (_label, chunks) => {
+    // Every citation after a gap would name the wrong characters. A document
+    // that reads correctly and highlights the wrong words is the exact defect
+    // this stage exists to prevent, so this fails rather than degrading.
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: textDocument(),
+      chunks: { data: chunks, error: null },
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+    expect(response.status).toBe(503);
+  });
+
+  it('a source with no chunks at all is empty, not broken', async () => {
+    // A legitimately blank file: the upload succeeded and indexed nothing.
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: textDocument(),
+      chunks: { data: [], error: null },
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+    expect(response.status).toBe(200);
+    expect((await response.json()).text).toBe('');
+  });
+
+  it('refuses a kind it does not know rather than serving its chunks as text', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: textDocument('hologram'),
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+    expect(response.status).toBe(409);
+    expect(state.adminClient.from).not.toHaveBeenCalledWith('knowledge_chunks');
+  });
+
+  it('still refuses an unauthorized reader, by the same check as a PDF', async () => {
+    // The point of sharing the route: this cannot be forgotten on one path.
+    state = configure({ document: textDocument(), member: { data: false, error: null } });
+    const response = await route.GET(new Request('http://localhost'), context());
+    expect(response.status).toBe(403);
+  });
+
+  it('still refuses a document that is not ready', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: {
+        data: {
+          id: DOCUMENT_ID, original_filename: 'tide-pools.md', page_count: null,
+          processing_status: 'uploaded', kind: 'text',
+        },
+        error: null,
+      },
+    });
+    const response = await route.GET(new Request('http://localhost'), context());
+    expect(response.status).toBe(409);
   });
 });

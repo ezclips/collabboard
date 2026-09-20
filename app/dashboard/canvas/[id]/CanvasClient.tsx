@@ -2540,6 +2540,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     documentId: string;
     originalFilename?: string;
     pageNumber?: number;
+    /**
+     * Where to open a source that has no pages, as a character range over its
+     * canonical text. The counterpart of pageNumber, and navigation only.
+     */
+    charStart?: number;
+    charEnd?: number;
     presentation?: 'workspace' | 'side-panel';
     revealSource?: boolean;
   }) => {
@@ -2561,7 +2567,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         knowledgeDocumentRequestIdRef.current,
         request.documentId,
         request.pageNumber,
-        { revealSource: request.revealSource },
+        {
+          revealSource: request.revealSource,
+          charStart: request.charStart,
+          charEnd: request.charEnd,
+        },
       ),
     );
   }, [sourceReferenceScopeKey, openPdfWorkspaceDocument, claimDock]);
@@ -2576,10 +2586,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const openBoardAiCitation = useCallback((request: {
     readonly knowledgeDocumentId: string;
     readonly pageNumber?: number;
+    readonly charStart?: number;
+    readonly charEnd?: number;
   }) => {
     requestKnowledgeDocumentOpen({
       documentId: request.knowledgeDocumentId,
       ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),
+      // A text citation names a range instead of a page. Forwarded verbatim;
+      // the builder is the one place that decides a range is well formed.
+      ...(request.charStart === undefined ? {} : { charStart: request.charStart }),
+      ...(request.charEnd === undefined ? {} : { charEnd: request.charEnd }),
       presentation: 'side-panel',
       // The click meant "show me the source", so the reader must not present
       // this document behind the panel it normally opens with.

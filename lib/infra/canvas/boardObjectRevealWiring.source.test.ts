@@ -102,13 +102,21 @@ describe('only a layout that can reveal is offered the action', () => {
   });
 
   it('both reader hosts are wired for the page-scoped list too', () => {
+    // CHANGED DELIBERATELY. There used to be two KnowledgeDocumentDetails, one
+    // per host, and this counted them to prove neither was forgotten. Stage 1
+    // added a second document shape (a pageless source), which made "the same
+    // props in two places" the wrong guarantee: the hosts now share ONE
+    // renderDocumentBody, so they cannot differ at all. The stronger claim is
+    // therefore that the reader has exactly one invocation and both hosts go
+    // through it.
     const hosts = invocationsOf(drawer, 'KnowledgeDocumentDetails');
-    expect(hosts).toHaveLength(2);
-    for (const [index, host] of hosts.entries()) {
-      expect(host, `reader host ${index}`)
-        .toContain('onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}');
-      expect(host, `reader host ${index}`).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
-    }
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]).toContain('onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}');
+    expect(hosts[0]).toContain('onOpenBacklinkTarget={onOpenBacklinkTarget}');
+    // And both hosts reach it -- the workspace and the docked drawer.
+    expect(drawer.split('renderDocumentBody(').length - 1, 'one call site per host').toBe(2);
+    expect(drawer).toContain("renderDocumentBody('workspace'");
+    expect(drawer).toMatch(/renderDocumentBody\(\s*'side-panel',/);
   });
 
   it('both of the reader\'s own backlink lists get the action', () => {

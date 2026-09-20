@@ -105,6 +105,9 @@ export interface BoardAiChatDrawerProps {
   readonly onOpenCitation?: (request: {
     readonly knowledgeDocumentId: string;
     readonly pageNumber?: number;
+    /** A pageless source's locator: where in its text the citation points. */
+    readonly charStart?: number;
+    readonly charEnd?: number;
   }) => void;
   readonly canSaveAssistantAsNote?: boolean;
   readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
@@ -925,6 +928,8 @@ export default function BoardAiChatDrawer({
   const openCitation = useCallback(async (request: {
     readonly knowledgeDocumentId: string;
     readonly pageNumber?: number;
+    readonly charStart?: number;
+    readonly charEnd?: number;
   }) => {
     if (!onOpenCitation) return;
     if (goneCitationDocumentIds.has(request.knowledgeDocumentId)) return;
@@ -1308,12 +1313,23 @@ export default function BoardAiChatDrawer({
                           data-board-ai-chat-citation={citationKey}
                           data-board-ai-chat-citation-document={citedDocumentId}
                           data-board-ai-chat-citation-page={item.pageNumber ?? ''}
+                          data-board-ai-chat-citation-range={
+                            item.charStart !== undefined && item.charEnd !== undefined
+                              ? `${item.charStart}:${item.charEnd}`
+                              : ''
+                          }
                           title={`Open ${citationLabel}`}
                           aria-label={`Open ${citationLabel}`}
                           className={`${chipClass} border-gray-200 text-blue-700 transition hover:border-blue-200 hover:bg-blue-50`}
                           onClick={() => { void openCitation({
                             knowledgeDocumentId: citedDocumentId,
                             ...(item.pageNumber === undefined ? {} : { pageNumber: item.pageNumber }),
+                            // A text citation locates itself by range instead.
+                            // Both halves or neither: the request builder
+                            // refuses a partial one rather than guessing.
+                            ...(item.charStart !== undefined && item.charEnd !== undefined
+                              ? { charStart: item.charStart, charEnd: item.charEnd }
+                              : {}),
                           }); }}
                         >
                           <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />

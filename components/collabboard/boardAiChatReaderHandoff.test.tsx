@@ -306,8 +306,14 @@ describe('52-57. PDF workspace AI handoff stays inside the focused workspace', (
 
     // 53/54: the page and selection actions inside KnowledgeDocumentDetails
     // use the wrapper rather than any raw prop, in both hosts.
+    //
+    // CHANGED DELIBERATELY: the hosts used to render KnowledgeDocumentDetails
+    // separately, so this counted two identical wirings to prove neither was
+    // forgotten. They now share one renderDocumentBody, so there is one wiring
+    // that both reach -- divergence is impossible rather than merely counted.
     expect((drawer.match(/onAddBoardAiContext=\{boardAiAvailable \? handOffToBoardAi : undefined\}/g) ?? []))
-      .toHaveLength(2);
+      .toHaveLength(1);
+    expect(drawer.split('renderDocumentBody(').length - 1, 'both hosts reach it').toBe(2);
   });
 
   it('55. workspace handoff does not open a second/floating board AI drawer', () => {

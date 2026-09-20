@@ -2217,3 +2217,106 @@ describe('the reveal intent belongs to one navigation', () => {
     expect(jump).toContain('revealSource: false,');
   });
 });
+
+/**
+ * Stage 1 -- a source with no pages, in BOTH presentations.
+ *
+ * Neither host is deferred and neither is a variant of the other: the docked
+ * drawer and the focused workspace differ in geometry, never in what the
+ * document is. A reader that showed text in one and a blank page list in the
+ * other is precisely the defect this unit was told not to leave behind, so
+ * every assertion below runs against both.
+ */
+describe('Stage 1. reading a text source', () => {
+  const TEXT = 'Alpha paragraph.\n\nBeta paragraph.\n\nAlpha paragraph.';
+
+  const serveText = (kind = 'text') => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      /\/pages$/.test(String(input))
+        ? jsonResponse({
+          document: { id: SOURCE_A, originalFilename: 'tide-pools.md', pageCount: null, kind },
+          pages: [],
+          text: TEXT,
+        })
+        : jsonResponse({ documents: [] })
+    ));
+  };
+
+  const textView = () => document.querySelector('[data-knowledge-text-source]');
+  const highlight = () => document.querySelector('[data-knowledge-text-source-highlight]');
+
+  it.each([
+    ['side-panel' as const],
+    ['workspace' as const],
+  ])('%s renders the canonical text, not an empty page list', async (presentation) => {
+    serveText();
+    await mount({
+      presentation,
+      documentOpenRequest: docRequest(1),
+    } as unknown as DrawerProps);
+
+    expect(textView()?.getAttribute('data-knowledge-text-source')).toBe('ready');
+    expect(textView()?.getAttribute('data-knowledge-text-source-presentation')).toBe(presentation);
+    expect(document.body.textContent).toContain('Beta paragraph.');
+  });
+
+  it.each([
+    ['side-panel' as const],
+    ['workspace' as const],
+  ])('%s opens a citation at its own range, chosen by index', async (presentation) => {
+    // The second 'Alpha paragraph.', which is what makes this a real check:
+    // a reader that searched for the quoted words would mark the first.
+    const charStart = TEXT.lastIndexOf('Alpha paragraph.');
+    serveText();
+    await mount({
+      presentation,
+      documentOpenRequest: { requestId: 1, sourceDocumentId: SOURCE_A, charStart, charEnd: TEXT.length },
+    } as unknown as DrawerProps);
+
+    expect(highlight()?.textContent).toBe('Alpha paragraph.');
+    expect(textView()?.getAttribute('data-knowledge-text-source-range'))
+      .toBe(`${charStart}:${TEXT.length}`);
+  });
+
+  it.each([
+    ['side-panel' as const],
+    ['workspace' as const],
+  ])('%s shows the source unmarked when no range was asked for', async (presentation) => {
+    serveText();
+    await mount({ presentation, documentOpenRequest: docRequest(1) } as unknown as DrawerProps);
+    expect(textView()).not.toBeNull();
+    expect(highlight()).toBeNull();
+  });
+
+  it.each([
+    ['side-panel' as const],
+    ['workspace' as const],
+  ])('%s refuses a kind it does not know rather than drawing it as a PDF', async (presentation) => {
+    // The same refusal the citation resolver makes one layer down. Falling
+    // through to the page reader would present an unknown source as a
+    // document that simply has no pages.
+    serveText('hologram');
+    await mount({ presentation, documentOpenRequest: docRequest(1) } as unknown as DrawerProps);
+    expect(document.querySelector('[data-knowledge-reader-unsupported-kind]')
+      ?.getAttribute('data-knowledge-reader-unsupported-kind')).toBe('hologram');
+    expect(textView()).toBeNull();
+  });
+
+  it('a PDF still renders the page reader in both hosts', async () => {
+    // The regression control for the branch itself.
+    for (const presentation of ['side-panel', 'workspace'] as const) {
+      document.body.innerHTML = '';
+      fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+        /\/pages$/.test(String(input))
+          ? jsonResponse({
+            document: { id: SOURCE_A, originalFilename: 'slides.pdf', pageCount: 1, kind: 'pdf' },
+            pages: [{ pageNumber: 1, text: 'page one body' }],
+          })
+          : jsonResponse({ documents: [] })
+      ));
+      await mount({ presentation, documentOpenRequest: docRequest(1) } as unknown as DrawerProps);
+      expect(textView(), presentation).toBeNull();
+      expect(document.body.textContent, presentation).toContain('page one body');
+    }
+  });
+});

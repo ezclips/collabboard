@@ -110,7 +110,13 @@ describe('7-13. the Library panel owns the document identity', () => {
   it('13. the workspace no longer repeats that metadata above the document', () => {
     // Suppressed only while the panel that shows it is actually open: closing
     // the dock hands the header back to the reading pane.
-    expect(DRAWER).toContain("hostRendersDocumentHeader={!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed'}");
+    // CHANGED DELIBERATELY: the two hosts now share one renderDocumentBody, so
+    // this value is passed as its argument rather than as a JSX prop. The rule
+    // it encodes is unchanged.
+    expect(DRAWER).toMatch(
+      /renderDocumentBody\(\s*'side-panel',\s*!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed',/,
+    );
+    expect(DRAWER).toContain("renderDocumentBody('workspace', true)");
     expect(DETAILS).toContain('hostRendersDocumentHeader = false');
     // Suppressed only when a host actually shows it, so Back to PDFs and the
     // filename can never disappear entirely.
@@ -272,7 +278,16 @@ describe('38-45. Open and Side panel are two hosts for one reader', () => {
     expect((code.match(/<PdfReaderDock/g) || []).length).toBe(1);
     expect((code.match(/<PdfWorkspaceLibraryPanel/g) || []).length).toBe(2);
     expect((code.match(/<BoardAiChatDrawer/g) || []).length).toBe(2);
-    expect((code.match(/<KnowledgeDocumentDetails/g) || []).length).toBe(2);
+    // CHANGED DELIBERATELY, and STRENGTHENED. There used to be one
+    // KnowledgeDocumentDetails per host, counted to prove neither was
+    // forgotten. Stage 1 added a second document shape, and "the same props in
+    // two places" stopped being a guarantee that the hosts agree -- a pageless
+    // source could have been wired into one and not the other. One shared
+    // renderDocumentBody, reached from both, makes divergence impossible
+    // rather than merely detectable.
+    expect((code.match(/<KnowledgeDocumentDetails/g) || []).length).toBe(1);
+    expect((code.match(/<KnowledgeTextSourceView/g) || []).length).toBe(1);
+    expect(code.split('renderDocumentBody(').length - 1).toBe(2);
   });
 });
 

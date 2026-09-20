@@ -23,6 +23,8 @@ import PdfWorkspaceChrome, {
   type PdfWorkspaceRightPanel,
   type PdfWorkspaceTab,
 } from '@/components/collabboard/PdfWorkspaceChrome';
+import KnowledgeTextSourceView from '@/components/collabboard/KnowledgeTextSourceView';
+import { KNOWLEDGE_TEXT_KIND } from '@/lib/domain/knowledge/knowledgeTextIngestion';
 import type {
   KnowledgePdfPlacementSource,
   KnowledgePdfProcessingStatus,
@@ -220,6 +222,20 @@ interface KnowledgeReaderState {
   originalFilename: string;
   pageCount: number | null;
   pages: readonly KnowledgeDocumentDetailPage[];
+  /**
+   * What this source IS, so the reader draws the right thing instead of
+   * inferring a shape from an empty page list. A PDF whose extraction produced
+   * no pages is a broken PDF, not a text file.
+   */
+  kind: string;
+  /** The canonical text of a pageless source. Undefined for a paged one. */
+  text?: string;
+  /**
+   * The character range a citation asked for, if it named one. Applied by
+   * INDEX against `text`, never searched for: the offsets are what the server
+   * authorized, and a search would find the wrong repeat of a phrase.
+   */
+  textHighlight?: { charStart: number; charEnd: number } | null;
   loading: boolean;
   error: boolean;
   /** Navigation state only -- never written back to source_references. */
@@ -365,6 +381,8 @@ export default function KnowledgeSourceReaderDrawer({
     sourceTarget: KnowledgeSourceTarget | null = null,
     // Same rule: an ordinary open must arrive as an ordinary open.
     revealSource = false,
+    // A pageless source's locator. Null for every open that named no range.
+    textHighlight: { charStart: number; charEnd: number } | null = null,
   ) => {
     if (!boardId) return;
     const generation = ++readGenerationRef.current;
@@ -386,6 +404,9 @@ export default function KnowledgeSourceReaderDrawer({
         originalFilename: cached.originalFilename,
         pageCount: cached.pageCount,
         pages: cached.pages,
+        kind: cached.kind,
+        text: cached.text,
+        textHighlight,
         loading: false, error: false, initialPageNumber, sourceTarget, revealSource,
         pageNavigationRequestId: navigationRequestId,
       });
@@ -402,6 +423,8 @@ export default function KnowledgeSourceReaderDrawer({
           originalFilename: revalidated.entry.originalFilename,
           pageCount: revalidated.entry.pageCount,
           pages: revalidated.entry.pages,
+          kind: revalidated.entry.kind,
+          text: revalidated.entry.text,
         }
         : current));
       return;
@@ -409,6 +432,7 @@ export default function KnowledgeSourceReaderDrawer({
 
     setReader({
       documentId, originalFilename: '', pageCount: null, pages: [],
+      kind: 'pdf', textHighlight,
       loading: true, error: false, initialPageNumber, sourceTarget, revealSource,
       pageNavigationRequestId: navigationRequestId,
     });
@@ -438,6 +462,9 @@ export default function KnowledgeSourceReaderDrawer({
           originalFilename: result.entry.originalFilename,
           pageCount: result.entry.pageCount,
           pages: result.entry.pages,
+          kind: result.entry.kind,
+          text: result.entry.text,
+          textHighlight,
           loading: false, error: false, initialPageNumber, sourceTarget, revealSource,
           pageNavigationRequestId: navigationRequestId,
         });
@@ -477,6 +504,11 @@ export default function KnowledgeSourceReaderDrawer({
       documentOpenRequest.pageNumber,
       null,
       documentOpenRequest.revealSource === true,
+      // The builder already refused a half or inverted range, so either both
+      // offsets are here and sound, or neither is.
+      documentOpenRequest.charStart !== undefined && documentOpenRequest.charEnd !== undefined
+        ? { charStart: documentOpenRequest.charStart, charEnd: documentOpenRequest.charEnd }
+        : null,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, documentOpenRequest]);
@@ -730,6 +762,75 @@ export default function KnowledgeSourceReaderDrawer({
   const readerActivePageNumber = readerActivePage?.documentId === reader.documentId
     ? readerActivePage.pageNumber
     : reader.initialPageNumber ?? 1;
+
+  /**
+   * THE DOCUMENT ITSELF, built ONCE for both hosts.
+   *
+   * The docked drawer and the focused workspace differ in geometry and in
+   * which chrome draws the header -- never in what the document is. Written as
+   * one function so they cannot drift: a reader that showed text in one host
+   * and an empty page list in the other would be exactly the defect this unit
+   * was told not to leave behind.
+   *
+   * WHICH BRANCH IS DECIDED BY THE ROW'S KIND, not by what happens to be
+   * empty. A PDF whose extraction produced no pages is a broken PDF, and
+   * rendering it as a blank text document would hide that.
+   */
+  const renderDocumentBody = (host: 'workspace' | 'side-panel', hostRendersDocumentHeader: boolean) => {
+    if (reader.kind === KNOWLEDGE_TEXT_KIND) {
+      return (
+        <KnowledgeTextSourceView
+          documentId={reader.documentId}
+          originalFilename={reader.originalFilename}
+          text={reader.text ?? null}
+          loading={reader.loading}
+          error={reader.error}
+          highlight={reader.textHighlight && reader.pageNavigationRequestId !== undefined
+            ? { ...reader.textHighlight, requestId: reader.pageNavigationRequestId }
+            : null}
+          presentation={host}
+        />
+      );
+    }
+    if (reader.kind !== 'pdf') {
+      // A kind this build does not know. It stops here rather than falling
+      // through to the PDF reader, which would present an unknown source as a
+      // document with no pages -- the same guess the citation resolver refuses
+      // one layer down.
+      return (
+        <div
+          data-knowledge-reader-unsupported-kind={reader.kind}
+          className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-500"
+        >
+          This kind of source cannot be opened in this version.
+        </div>
+      );
+    }
+    return (
+      <KnowledgeDocumentDetails
+        documentId={reader.documentId}
+        boardId={boardId}
+        originalFilename={reader.originalFilename}
+        pageCount={reader.pageCount}
+        pages={reader.pages}
+        loading={reader.loading}
+        error={reader.error}
+        initialPageNumber={reader.initialPageNumber}
+        pageNavigationRequestId={reader.pageNavigationRequestId}
+        initialSourceReferenceId={reader.sourceTarget?.referenceId}
+        initialSourceRequestId={reader.sourceTarget?.requestId}
+        onBack={closeReader}
+        hostRendersDocumentHeader={hostRendersDocumentHeader}
+        onCreateNoteFromPage={onCreateNoteFromPage}
+        onSaveSelectionAsNote={onSaveSelectionAsNote}
+        onOpenBacklinkTarget={onOpenBacklinkTarget}
+        onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
+        onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
+        onActivePageChange={handleActivePageChange}
+      />
+    );
+  };
+
   if (isWorkspace) {
     const effectiveTabs = workspaceTabs.length > 0
       ? workspaceTabs
@@ -809,27 +910,8 @@ export default function KnowledgeSourceReaderDrawer({
           className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-4 py-3"
         >
           {readerMatchesActiveDocument ? (
-            <KnowledgeDocumentDetails
-              documentId={reader.documentId}
-              boardId={boardId}
-              originalFilename={reader.originalFilename}
-              pageCount={reader.pageCount}
-              pages={reader.pages}
-              loading={reader.loading}
-              error={reader.error}
-              initialPageNumber={reader.initialPageNumber}
-              pageNavigationRequestId={reader.pageNavigationRequestId}
-              initialSourceReferenceId={reader.sourceTarget?.referenceId}
-              initialSourceRequestId={reader.sourceTarget?.requestId}
-              onBack={closeReader}
-              hostRendersDocumentHeader
-              onCreateNoteFromPage={onCreateNoteFromPage}
-              onSaveSelectionAsNote={onSaveSelectionAsNote}
-              onOpenBacklinkTarget={onOpenBacklinkTarget}
-            onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
-              onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
-              onActivePageChange={handleActivePageChange}
-            />
+            // The workspace chrome draws the header, so the body never does.
+            renderDocumentBody('workspace', true)
           ) : (
             <div data-knowledge-reader-workspace-loading="true" className="flex h-full items-center justify-center text-sm text-gray-500">
               Opening document…
@@ -942,36 +1024,17 @@ export default function KnowledgeSourceReaderDrawer({
           data-knowledge-reader-workspace="true"
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-3"
         >
-          <KnowledgeDocumentDetails
-            documentId={reader.documentId}
-            boardId={boardId}
-            originalFilename={reader.originalFilename}
-            pageCount={reader.pageCount}
-            pages={reader.pages}
-            loading={reader.loading}
-            error={reader.error}
-            initialPageNumber={reader.initialPageNumber}
-            pageNavigationRequestId={reader.pageNavigationRequestId}
-            initialSourceReferenceId={reader.sourceTarget?.referenceId}
-            initialSourceRequestId={reader.sourceTarget?.requestId}
-            onBack={closeReader}
-            // The right panel owns the document's identity while it is open --
-            // and it is on screen at every width now, so this follows the panel
-            // alone. With it closed (or with no backlink target at all) the
-            // reading pane keeps its own header, so Back to PDFs and the
-            // filename can never disappear.
-            hostRendersDocumentHeader={!!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed'}
-            onCreateNoteFromPage={onCreateNoteFromPage}
-            onSaveSelectionAsNote={onSaveSelectionAsNote}
-            onOpenBacklinkTarget={onOpenBacklinkTarget}
-            onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
-            // Page and exact-selection handoffs live where the page rows and
-            // the selection toolbar already are; both carry identity only,
-            // neither writes anything, and both land in the SAME document-
-            // scoped Board AI panel the dock opens.
-            onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
-            onActivePageChange={handleActivePageChange}
-          />
+          {/*
+            The right panel owns the document's identity while it is open --
+            and it is on screen at every width now, so the header follows the
+            panel alone. With it closed (or with no backlink target at all) the
+            reading pane keeps its own header, so Back to PDFs and the filename
+            can never disappear.
+          */}
+          {renderDocumentBody(
+            'side-panel',
+            !!onOpenBacklinkTarget && sidePanelRightPanel !== 'closed',
+          )}
         </div>
         {/*
           The docked reader's right side, arranged exactly as the focused

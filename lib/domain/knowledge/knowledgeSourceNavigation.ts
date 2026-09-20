@@ -106,6 +106,19 @@ export interface KnowledgeDocumentOpenRequest {
   readonly sourceDocumentId: string;
   readonly pageNumber?: number;
   /**
+   * Where to open a PAGELESS source, as a half-open character range over its
+   * canonical text.
+   *
+   * The counterpart of `pageNumber`, and mutually exclusive with it for the
+   * same reason a source has pages or characters but never both. Like
+   * `pageNumber` this is display navigation: it says where to look, and
+   * carries no quote, no geometry and no provenance -- the server already
+   * authorized the citation that produced it, and the reader shows the stored
+   * text at these offsets rather than anything the caller supplied.
+   */
+  readonly charStart?: number;
+  readonly charEnd?: number;
+  /**
    * This open exists to SHOW the document, not merely to have it open.
    *
    * A Board AI citation is the case it was added for: the click means "show me
@@ -126,12 +139,25 @@ export function buildKnowledgeDocumentOpenRequest(
   requestId: number,
   sourceDocumentId: string,
   pageNumber?: number,
-  options: { readonly revealSource?: boolean } = {},
+  options: {
+    readonly revealSource?: boolean;
+    readonly charStart?: number;
+    readonly charEnd?: number;
+  } = {},
 ): KnowledgeDocumentOpenRequest {
+  // A RANGE IS CARRIED ONLY WHEN IT IS WHOLE AND WELL FORMED. Half a range
+  // locates nothing, and passing one on would make the reader decide what a
+  // malformed locator means -- which is the decision that belongs here, once,
+  // rather than in each surface that draws a document.
+  const range = Number.isInteger(options.charStart)
+    && Number.isInteger(options.charEnd)
+    && (options.charStart as number) >= 0
+    && (options.charEnd as number) > (options.charStart as number);
   return {
     requestId,
     sourceDocumentId,
     ...(pageNumber === undefined ? {} : { pageNumber }),
+    ...(range ? { charStart: options.charStart, charEnd: options.charEnd } : {}),
     ...(options.revealSource ? { revealSource: true } : {}),
   };
 }

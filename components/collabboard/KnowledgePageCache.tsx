@@ -54,6 +54,18 @@ export interface KnowledgeReadyPages {
   readonly originalFilename: string;
   readonly pageCount: number | null;
   readonly pages: readonly KnowledgeDocumentDetailPage[];
+  /**
+   * What this source IS, from the server's own row. 'pdf' only when a build
+   * that predates kinds answered -- the one shape that existed then.
+   */
+  readonly kind: string;
+  /**
+   * The whole canonical text of a PAGELESS source: the exact string a
+   * citation's character offsets index into. Absent for a paged source, which
+   * has `pages` instead. The two are never both present, because a source has
+   * pages or it has characters.
+   */
+  readonly text?: string;
   /** When this answer arrived, for the freshness rule above. */
   readonly loadedAt: number;
 }
@@ -113,14 +125,19 @@ const newStore = (scope: string | null): Store => ({
 /** The same two payload rules the reader has always applied, in one place. */
 export function knowledgeDocumentMetadata(
   value: unknown,
-): { originalFilename: string; pageCount: number | null } {
-  if (!value || typeof value !== 'object') return { originalFilename: '', pageCount: null };
+): { originalFilename: string; pageCount: number | null; kind: string } {
+  if (!value || typeof value !== 'object') return { originalFilename: '', pageCount: null, kind: 'pdf' };
   const record = value as Record<string, unknown>;
   return {
     originalFilename: typeof record.originalFilename === 'string' ? record.originalFilename : '',
     pageCount: typeof record.pageCount === 'number' && Number.isInteger(record.pageCount) && record.pageCount > 0
       ? record.pageCount
       : null,
+    // 'pdf' ONLY when the field is absent, which means a build predating kinds
+    // answered. Never a fallback for a kind this client does not recognise:
+    // that value travels through unchanged, and the reader refuses it rather
+    // than rendering an unknown source as a PDF.
+    kind: typeof record.kind === 'string' && record.kind.length > 0 ? record.kind : 'pdf',
   };
 }
 
@@ -148,7 +165,7 @@ export async function fetchKnowledgeReadyPages(
     // Never a stored answer: still extracting is a state, not content.
     if (response.status === 409) return { status: 'preparing' };
     const payload = await response.json().catch(() => null) as
-      { pages?: unknown; document?: unknown } | null;
+      { pages?: unknown; document?: unknown; text?: unknown } | null;
     if (!response.ok || !payload || !Array.isArray(payload.pages)) return { status: 'failed' };
     return {
       status: 'ready',
@@ -156,6 +173,10 @@ export async function fetchKnowledgeReadyPages(
         documentId,
         ...knowledgeDocumentMetadata(payload.document),
         pages: payload.pages.filter(isKnowledgeDetailPage),
+        // Only a STRING is taken. A pageless source whose text did not arrive
+        // leaves the reader with nothing to show, which is honest; anything
+        // coerced into a string would be a document reading '[object Object]'.
+        ...(typeof payload.text === 'string' ? { text: payload.text } : {}),
         loadedAt: Date.now(),
       },
     };
