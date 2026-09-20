@@ -263,3 +263,50 @@ describe('the facts a disclosure is built from', () => {
     expect(text.trim().length).toBeGreaterThan(0);
   });
 });
+
+describe('the limits that are ENFORCED rather than declared', () => {
+  /**
+   * The gap this closes, stated once: the archive preflight reads the size the
+   * central directory DECLARES, and that is a number inside a file the
+   * uploader wrote. zipbomb.docx declares 4,096 bytes for a part that inflates
+   * to 335 MB. Nothing checked before decompression can catch it, and a check
+   * after decompression runs only once the memory has already been taken.
+   *
+   * Extraction therefore runs in a worker with a V8-enforced heap ceiling and
+   * a terminable thread, so the failure happens DURING inflation.
+   */
+  it('stops a bomb that lies about its size, during decompression', async () => {
+    const started = Date.now();
+    const result = await extractKnowledgeDocxText(read('zipbomb.docx'));
+    const elapsed = Date.now() - started;
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The refusal says the file could not be read, and nothing about heaps or
+    // workers: the cause is ours, not the uploader's business.
+    expect(result.error.code).toBe('validation');
+    expect(result.error.message).toBe('This file could not be read as a Word document');
+    // And it fails FAST -- it is stopped while inflating, not after.
+    expect(elapsed).toBeLessThan(30_000);
+  }, 60_000);
+
+  it('the same bomb is caught EARLIER when it declares its real size', async () => {
+    // The honest control: with a truthful central directory the preflight
+    // refuses it without decompressing anything at all. Both layers matter --
+    // this one is cheap, the worker is the one that cannot be lied to.
+    const honest = read('zipbomb.docx');
+    // Rewrite the declared size back to something over the ceiling.
+    const view = Buffer.from(honest.buffer.slice(0));
+    for (let i = 0; i < view.length - 46; i += 1) {
+      if (view.readUInt32LE(i) !== 0x02014b50) continue;
+      const nameLength = view.readUInt16LE(i + 28);
+      if (view.toString('utf8', i + 46, i + 46 + nameLength) !== 'word/document.xml') continue;
+      view.writeUInt32LE(300 * 1024 * 1024, i + 24);
+    }
+
+    const result = await extractKnowledgeDocxText(new Uint8Array(view));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toBe('This document is too large to read');
+  }, 60_000);
+});

@@ -150,6 +150,23 @@ export function boardAiCitationIdentityKey(item: BoardAiCitationItem): string {
       return `knowledge-document:${item.knowledgeDocumentId}`;
     case 'knowledge-page':
       return `knowledge-page:${item.knowledgeDocumentId}:${item.pageNumber}`;
+    // THE LITERAL "undefined" IN THIS KEY IS KNOWN AND DELIBERATE.
+    //
+    // A pageless selection has no pageNumber, so the slot stringifies to
+    // "undefined" and a live key reads
+    // `knowledge-selection:<doc>:undefined:795:1590`.
+    //
+    // It is NOT the wiki defect that keyed a pageless source as
+    // `knowledge-page:<doc>:undefined`. That one collapsed every passage of a
+    // document onto one identity, because the page was the only distinguishing
+    // part and it was missing. Here the RANGE is still in the key, so two
+    // passages of one document remain two citations -- verified live, with
+    // 0:795 and 795:1590 of the same source appearing as separate citations in
+    // one answer.
+    //
+    // Left exactly as it is. This string is the dedupe key inside stored
+    // envelopes, so tidying it would re-key every citation already persisted:
+    // a cosmetic change that silently alters how old messages deduplicate.
     case 'knowledge-selection':
       return `knowledge-selection:${item.knowledgeDocumentId}:${item.pageNumber}:${item.charStart}:${item.charEnd}`;
     case 'padlet':

@@ -13,8 +13,10 @@
  * converter here emits an empty `src` and counts the image instead, which is
  * also what makes the disclosure downstream possible.
  */
+import path from 'node:path';
+import { Worker } from 'node:worker_threads';
+
 import JSZip from 'jszip';
-import mammoth from 'mammoth';
 
 import { domainError, type DomainError } from '@/lib/domain/core/errors';
 import { err, ok, type Result } from '@/lib/domain/core/result';
@@ -45,6 +47,16 @@ export {
 export const KNOWLEDGE_DOCX_MAX_BYTES = 25 * 1024 * 1024;
 export const KNOWLEDGE_DOCX_MAX_HTML_CHARS = 8 * 1024 * 1024;
 export const KNOWLEDGE_DOCX_TIMEOUT_MS = 30_000;
+
+/**
+ * The heap the extraction worker is allowed, enforced by V8 from inside it.
+ *
+ * This is the bound the post-decompression ceilings could not provide: they
+ * run after the memory has already been allocated. Generous for a document a
+ * person wrote, and small enough that a decompression bomb hits it long before
+ * it reaches the server's own limit.
+ */
+export const KNOWLEDGE_DOCX_MAX_HEAP_MB = 256;
 
 /**
  * VERIFIED, not assumed: neither library enforces anything.
@@ -88,34 +100,9 @@ export async function extractKnowledgeDocxText(
   const preflight = await inspectKnowledgeDocxArchive(bytes);
   if (!preflight.ok) return err(preflight.error);
 
-  let imageCount = 0;
-
-  let html: string;
-  try {
-    const conversion = await withTimeout(
-      mammoth.convertToHtml(
-        { buffer: Buffer.from(bytes) },
-        {
-          // Counted here and dropped; see the module comment.
-          convertImage: mammoth.images.imgElement(async () => {
-            imageCount += 1;
-            return { src: '' };
-          }),
-        },
-      ),
-      KNOWLEDGE_DOCX_TIMEOUT_MS,
-    );
-    html = conversion.value;
-  } catch (cause) {
-    // A corrupt container, an encrypted document, or the timeout. The user can
-    // act on all three, and none of them should reach them as a stack trace.
-    return err(domainError(
-      'validation',
-      cause instanceof Error && cause.message === TIMEOUT
-        ? 'This document took too long to read'
-        : 'This file could not be read as a Word document',
-    ));
-  }
+  const converted = await convertInWorker(bytes);
+  if (!converted.ok) return err(converted.error);
+  const { html, imageCount } = converted.value;
 
   if (html.length > KNOWLEDGE_DOCX_MAX_HTML_CHARS) {
     return err(domainError('validation', 'This document is too complex to read'));
@@ -212,22 +199,83 @@ async function inspectKnowledgeDocxArchive(
   return ok({ hasTrackedChanges });
 }
 
-const TIMEOUT = 'knowledge-docx-timeout';
+/** Where the worker lives, resolved from the repository root at runtime. */
+export const KNOWLEDGE_DOCX_WORKER_PATH = 'lib/infra/knowledge/knowledgeDocxWorker.cjs';
+
+interface KnowledgeDocxConversion {
+  readonly html: string;
+  readonly imageCount: number;
+}
 
 /**
- * A deadline around the parse.
+ * Decompress and parse in a worker with enforced limits.
  *
- * It bounds the WAIT, not the work -- mammoth offers no cancellation, so the
- * parse continues in the background until it finishes. That is stated because
- * it matters: the timeout protects the request, and a pathological document
- * can still occupy the process after the user has been answered.
+ * THE DIFFERENCE FROM A DEADLINE, which is the whole point: a promise race
+ * rejects and leaves the work running. Terminating the thread stops it, and
+ * resourceLimits has V8 enforce the heap ceiling from inside -- so a
+ * decompression bomb fails WHILE it inflates rather than after, which is the
+ * one thing a post-decompression check can never do.
+ *
+ * Failures are deliberately indistinguishable to the caller: a corrupt
+ * container, an encrypted document, a heap ceiling and a kill all mean the
+ * same thing to the person who uploaded it. The exception is the deadline,
+ * which tells them the document was too big rather than broken.
  */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(TIMEOUT)), ms);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (cause) => { clearTimeout(timer); reject(cause); },
-    );
+async function convertInWorker(
+  bytes: Uint8Array,
+): Promise<Result<KnowledgeDocxConversion, DomainError>> {
+  // Copied so the worker owns its buffer: the request's bytes are still held
+  // by the caller, and a transfer would detach them underneath it.
+  const copy = new Uint8Array(bytes);
+
+  return new Promise<Result<KnowledgeDocxConversion, DomainError>>((resolve) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(path.join(process.cwd(), KNOWLEDGE_DOCX_WORKER_PATH), {
+        workerData: { bytes: copy },
+        transferList: [copy.buffer],
+        resourceLimits: {
+          maxOldGenerationSizeMb: KNOWLEDGE_DOCX_MAX_HEAP_MB,
+          maxYoungGenerationSizeMb: 32,
+        },
+      });
+    } catch {
+      return resolve(err(domainError('unavailable', 'Upload is temporarily unavailable')));
+    }
+
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const finish = (result: Result<KnowledgeDocxConversion, DomainError>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Always terminate. A worker that answered still has to be reaped, and
+      // one that failed may still be running.
+      void worker.terminate();
+      resolve(result);
+    };
+
+    timer = setTimeout(() => {
+      finish(err(domainError('validation', 'This document took too long to read')));
+    }, KNOWLEDGE_DOCX_TIMEOUT_MS);
+
+    worker.on('message', (message: { ok: boolean; value?: KnowledgeDocxConversion }) => {
+      finish(message.ok && message.value
+        ? ok(message.value)
+        : err(domainError('validation', 'This file could not be read as a Word document')));
+    });
+
+    // Covers the heap ceiling (ERR_WORKER_OUT_OF_MEMORY) and a worker that
+    // could not start at all -- a deployment that did not carry the file.
+    worker.on('error', () => {
+      finish(err(domainError('validation', 'This file could not be read as a Word document')));
+    });
+
+    // Only reached when the worker ended without answering; a normal answer
+    // has already settled by the time this fires.
+    worker.on('exit', () => {
+      finish(err(domainError('validation', 'This file could not be read as a Word document')));
+    });
   });
 }

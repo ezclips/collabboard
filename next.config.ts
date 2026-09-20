@@ -8,6 +8,15 @@ const nextConfig: NextConfig = {
   // @napi-rs/canvas is native; Next externalizes sharp by default but not this,
   // so the F9-C1 crop route would otherwise get bundled into the client graph.
   serverExternalPackages: ['@napi-rs/canvas'],
+  // DOCX extraction runs in a worker thread, loaded by PATH at runtime rather
+  // than imported. Nothing in the module graph references the file, so the
+  // build's tracing cannot see it and a standalone output would ship without
+  // it -- extraction would then fail at the worker's own startup, in
+  // production only, with the same "could not be read" message a corrupt file
+  // gets. Named here so the file travels with the server bundle.
+  outputFileTracingIncludes: {
+    '/api/boards/[id]/knowledge': ['./lib/infra/knowledge/knowledgeDocxWorker.cjs'],
+  },
   eslint: {
     // 5,426 pre-existing lint errors block `next build` (Phase 0 audit).
     // Lint runs separately via `npm run lint`; build gates on compile + types.

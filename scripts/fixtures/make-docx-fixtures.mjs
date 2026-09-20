@@ -186,3 +186,38 @@ const longDoc = new Document({
 write('long.docx', await Packer.toBuffer(longDoc));
 
 console.log('\nfixtures written to', OUT);
+
+// --- zipbomb.docx: an archive that LIES about how far it expands ------------
+// The pre-decompression check reads the size the central directory declares,
+// and that is a number inside a file the uploader wrote. This one declares
+// 4 KB for a part that inflates past the extraction worker's heap ceiling, so
+// only an enforced limit during decompression can stop it.
+//
+// Generated with a larger heap than the default, because building the payload
+// needs one: `node --max-old-space-size=6000 scripts/fixtures/make-docx-fixtures.mjs`.
+{
+  const unit = `<w:p><w:r><w:t>${'A'.repeat(900)}</w:t></w:r></w:p>`;
+  const parts = [];
+  for (let size = 0; size < 320 * 1024 * 1024; size += unit.length) parts.push(unit);
+  const body = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+    + `${parts.join('')}</w:body></w:document>`;
+
+  const zip = await JSZip.loadAsync(structuredBuffer);
+  zip.file('word/document.xml', body);
+  const packed = await zip.generateAsync({
+    type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 },
+  });
+
+  // Rewrite the declared uncompressed size in the central directory.
+  let lied = 0;
+  for (let i = 0; i < packed.length - 46; i += 1) {
+    if (packed.readUInt32LE(i) !== 0x02014b50) continue;
+    const nameLength = packed.readUInt16LE(i + 28);
+    if (packed.toString('utf8', i + 46, i + 46 + nameLength) !== 'word/document.xml') continue;
+    packed.writeUInt32LE(4096, i + 24);
+    lied += 1;
+  }
+  if (!lied) throw new Error('zipbomb: no central directory entry was rewritten');
+  write('zipbomb.docx', packed);
+}
