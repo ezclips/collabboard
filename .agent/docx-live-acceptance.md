@@ -213,6 +213,42 @@ Two things follow, and both were missed before:
   read pulled all 335 MB *before* the worker was ever created, so the isolation
   downstream of it protected nothing.
 
+## What the inflation limit is, precisely
+
+It is a **rejection threshold, not a guaranteed maximum allocation.**
+
+Counting stops the moment the threshold is crossed and `pause()` stops the
+inflater, but chunks already queued still arrive. On `zipbomb.docx` that
+overshoot was **observed at ~3.6 MB**. That figure is one measurement, of one
+fixture, on one machine — **an observation, not a guaranteed ceiling on bytes
+allocated.** What is guaranteed is that crossing the threshold *ends the scan
+and refuses the document* rather than inflating to completion.
+
+### What a rejection means downstream, stated one by one
+
+1. **Mammoth never runs.** `extractKnowledgeDocxText` calls the scan at
+   `knowledgeDocxExtractionAdapter.ts` and returns on failure *before*
+   `convertInWorker`. A scan refusal never reaches the parser.
+2. **No worker is created.** The worker is constructed inside `convertInWorker`,
+   which the refusal returns before.
+3. **The scan itself ends.** The stream is paused and the entry loop returns, so
+   no further entry is inflated.
+4. **There is therefore nothing to terminate** on a scan refusal. `terminate()`
+   remains on the worker path, covering the different case: a document that
+   *passes* the scan and then misbehaves inside mammoth, plus worker-path
+   failures such as a worker that cannot start.
+
+### Mammoth's own later decompression cannot bypass the scan
+
+It is handed **the same bytes** the scan read — one uploaded buffer, no second
+source and no re-read from disk — and the scan counts **every non-directory
+entry** in the archive, not only `word/document.xml`. There is no entry mammoth
+can decompress that was not measured first.
+
+What this does *not* claim: the scan bounds what the **archive expands to**. It
+does not bound what mammoth then does with a document that legitimately passed.
+That is what the worker's isolation and `terminate()` are for.
+
 ## What enforces the bound now
 
 `lib/infra/knowledge/knowledgeDocxArchiveScan.ts`. Every entry is inflated as a
@@ -255,6 +291,13 @@ while the upload is in flight. An earlier version of this probe reported 0/40 on
 `about:blank`. The control is why it was caught, and the fixed probe answers
 40/40 on both.
 
+**Qualification, so this is not read as more than it is.** 40/40 supports
+**the tested workload**: one upload at a time, on this machine, against one
+probing client. It is **not** a general concurrency guarantee and **not** a
+memory guarantee. Nothing here was tested with many simultaneous hostile
+uploads, and the scan's cost is per request — several concurrent refusals would
+each pay their own inflation up to the threshold.
+
 Extraction on the production build produced **byte-identical text** to dev — 462
 code units, headings, nested list markers, joined table rows, the footnote
 reference and body, the tracked insertion kept and the deletion gone.
@@ -280,20 +323,49 @@ Fixed by naming mammoth's **whole 25-package runtime closure** in
 to 1,058 files / 26 packages**.
 
 Guarded, because a hand-written list rots: `knowledgeDocxDeployment.test.ts`
-recomputes the closure from `package.json` and fails naming what is missing, and
-a second test copies **only** the named packages plus the worker into an empty
-temporary directory and runs a real DOCX extraction there, with `cwd` set to
-that directory so nothing can resolve back into the repo.
+recomputes the closure from `package.json` and fails naming what is missing.
 
-**Shown able to go red:** with the `node_modules` entries stripped, that test
-fails with `Cannot find module 'mammoth'` — the production failure itself.
+### The packaging check consumes the EMITTED manifest
+
+The first version of this check copied the packages **named in
+`next.config.ts`**. That proves the list is sufficient; it does **not** prove the
+build emits it — a glob matching nothing, or an include attached to the wrong
+route key, would leave the config looking correct and the manifest empty. Those
+are different claims, and only the second is about what deploys.
+
+It now reads `.next/server/app/api/boards/[id]/knowledge/route.js.nft.json`,
+resolves and de-duplicates its entries (Next emits both slash styles), copies
+**only** those files into a fresh directory under the OS temp dir — deliberately
+**not** under the repository, so resolution cannot walk up into the checkout's
+`node_modules` — runs with `cwd` set there and `NODE_PATH` cleared, and extracts
+`structured.docx` through the real worker.
+
+The decisive assertion is not that it worked but **where mammoth came from**: the
+driver reports `require.resolve('mammoth')` and the test asserts that path lies
+inside the staged directory.
+
+**Run for real, not merely written:**
+
+| Build | Manifest | Result |
+|---|---|---|
+| includes present | 1,058 files / 26 packages | **passes**, mammoth resolved inside the staged tree |
+| includes stripped, rebuilt | 59 files / 1 package (`next`) | **fails: `Cannot find module 'mammoth'`** |
+
+**The stripped build still exited 0.** That is the whole point: the build cannot
+detect this, and neither can `next start` in the checkout.
+
+The check **skips** — loudly and by name — when no production build is present,
+because `next dev` overwrites `.next`. A skip is recorded as a skip; the passing
+run above was taken against a real build, with dev stopped.
 
 ## Instruments shown able to go red
 
-- **Bounded-decompression test** — raising the inflation ceiling above the
+- **Bounded-decompression test** — raising the inflation threshold above the
   fixture's real expansion makes the bomb reach the worker again, and the
   duration and memory assertions fail. Verified by doing it.
-- **Deployment packaging test** — above.
+- **Closure test** — fails naming all 25 packages when the includes are removed.
+- **Manifest-driven packaging test** — fails with the production error against a
+  rebuilt, include-stripped manifest, as tabulated above.
 
 ## What is still not verified
 

@@ -72,62 +72,98 @@ describe('deployment tracing for the DOCX extraction worker', () => {
   });
 });
 
-describe('the worker running from a tree containing only what was packaged', () => {
-  it('extracts a real DOCX with no repository around it', () => {
-    // THE POINT. The worker and its declared closure are copied into an empty
-    // directory -- no repo, no .next, no wider node_modules -- and run there.
-    // If the closure in next.config.ts is wrong, this fails the way production
-    // would, which is the failure the other tests cannot see.
-    const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'docx-package-'));
-    try {
-      const included = (nextConfig.outputFileTracingIncludes?.[ROUTE] ?? []) as readonly string[];
-      const packages = included
-        .map((entry) => entry.match(/^\.\/node_modules\/(.+)\/\*\*\/\*$/)?.[1])
-        .filter((name): name is string => typeof name === 'string');
+/** The trace manifest the BUILD emits for the upload route. */
+const MANIFEST = path.join(
+  process.cwd(),
+  '.next/server/app/api/boards/[id]/knowledge/route.js.nft.json',
+);
 
-      fs.mkdirSync(path.join(stage, 'node_modules'), { recursive: true });
-      for (const name of packages) {
-        fs.cpSync(
-          path.join(process.cwd(), 'node_modules', name),
-          path.join(stage, 'node_modules', name),
-          { recursive: true },
-        );
+describe('the worker running from a tree populated by the emitted trace manifest', () => {
+  /**
+   * WHY THIS READS THE MANIFEST AND NOT next.config.ts.
+   *
+   * An earlier version of this test copied the packages NAMED IN THE CONFIG
+   * into a temp directory. That proves the list is sufficient; it does not
+   * prove the build EMITS it. Those are different claims, and only the second
+   * one is about what gets deployed -- a glob that matches nothing, or an
+   * include attached to the wrong route key, would leave the config looking
+   * correct and the manifest empty. So this reads the build's own output.
+   *
+   * It needs a production build to exist, which a plain `vitest run` after
+   * `next dev` does not have -- dev overwrites `.next`. The test therefore
+   * skips, loudly and by name, rather than failing the gate for an absent
+   * artifact or quietly passing on a fallback. A recorded run of it after a
+   * real build is in .agent/docx-live-acceptance.md.
+   */
+  const built = fs.existsSync(MANIFEST);
+
+  it.skipIf(!built)('extracts a real DOCX with no access to the checkout', () => {
+    const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) as { files: string[] };
+    const manifestDir = path.dirname(MANIFEST);
+
+    // Entries are relative to the manifest, and Next emits both slash styles
+    // for the same file, so they are resolved and de-duplicated.
+    const traced = new Map<string, string>();
+    for (const entry of manifest.files) {
+      const absolute = path.resolve(manifestDir, entry.split('\\').join('/'));
+      const relative = path.relative(process.cwd(), absolute).split('\\').join('/');
+      if (relative.startsWith('..') || !fs.existsSync(absolute)) continue;
+      if (fs.statSync(absolute).isDirectory()) continue;
+      traced.set(relative, absolute);
+    }
+
+    // Staged in the OS temp directory, not under the repo, so module
+    // resolution cannot walk up into the checkout's node_modules and quietly
+    // rescue a package the manifest failed to carry.
+    const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'docx-traced-'));
+    try {
+      for (const [relative, absolute] of traced) {
+        const target = path.join(stage, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(absolute, target);
       }
-      fs.copyFileSync(
-        path.join(process.cwd(), 'lib/infra/knowledge/knowledgeDocxWorker.cjs'),
-        path.join(stage, 'worker.cjs'),
-      );
+
+      expect(fs.existsSync(path.join(stage, 'lib/infra/knowledge/knowledgeDocxWorker.cjs'))).toBe(true);
 
       const fixture = path.join(process.cwd(), 'lib/infra/knowledge/fixtures/docx/structured.docx');
       const driver = path.join(stage, 'run.cjs');
       fs.writeFileSync(driver, [
         "const { Worker } = require('node:worker_threads');",
         "const fs = require('node:fs');",
+        "const path = require('node:path');",
         `const bytes = new Uint8Array(fs.readFileSync(${JSON.stringify(fixture)}));`,
-        "const w = new Worker(require('node:path').join(__dirname, 'worker.cjs'), {",
+        // Where mammoth resolves FROM is the proof that nothing reached back
+        // into the repository; it is reported and asserted below.
+        "const resolved = require.resolve('mammoth', { paths: [path.join(__dirname, 'lib/infra/knowledge')] });",
+        "const w = new Worker(path.join(__dirname, 'lib/infra/knowledge/knowledgeDocxWorker.cjs'), {",
         '  workerData: { bytes },',
         '  resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32 },',
         '});',
-        "w.on('message', (m) => { console.log(JSON.stringify({ ok: m.ok, length: m.value ? m.value.html.length : 0, message: m.message })); process.exit(0); });",
-        "w.on('error', (e) => { console.log(JSON.stringify({ ok: false, message: String(e && e.message) })); process.exit(0); });",
+        "w.on('message', (m) => { console.log(JSON.stringify({ ok: m.ok, length: m.value ? m.value.html.length : 0, message: m.message, resolved })); process.exit(0); });",
+        "w.on('error', (e) => { console.log(JSON.stringify({ ok: false, message: String(e && e.message), resolved })); process.exit(0); });",
       ].join('\n'));
 
-      // cwd is the staged directory, so a stray resolution back into the repo
-      // would not accidentally rescue a missing package.
       const out = execFileSync(process.execPath, [driver], {
         cwd: stage,
         encoding: 'utf8',
-        timeout: 60_000,
+        timeout: 120_000,
+        // A leaked NODE_PATH would let the staged tree borrow the checkout's
+        // modules, which is exactly the rescue this test exists to prevent.
+        env: { ...process.env, NODE_PATH: '' },
       });
       const result = JSON.parse(out.trim().split('\n').pop() as string) as {
-        ok: boolean; length: number; message?: string;
+        ok: boolean; length: number; message?: string; resolved: string;
       };
 
       expect(result.message ?? null).toBeNull();
       expect(result.ok).toBe(true);
       expect(result.length).toBeGreaterThan(0);
+      // The decisive assertion: mammoth came from the staged tree.
+      expect(result.resolved.split('\\').join('/')).toContain(
+        stage.split('\\').join('/'),
+      );
     } finally {
       fs.rmSync(stage, { recursive: true, force: true });
     }
-  }, 180_000);
+  }, 300_000);
 });

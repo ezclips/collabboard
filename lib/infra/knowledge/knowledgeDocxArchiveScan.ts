@@ -26,11 +26,33 @@
  * stops the stream mid-entry, so the process never holds the full expansion of
  * a hostile file.
  *
- * THE CEILING IS A CEILING, NOT A TRIPWIRE, and the overshoot is bounded rather
- * than zero: `pause()` stops the inflater, but chunks already queued still
- * arrive -- measured at ~3.6 MB past the limit on this fixture. Counting stops
- * at the limit; inflation winds down just after it. Recorded because "stops at
- * exactly N bytes" would be a claim the measurement does not support.
+ * WHAT THE LIMIT IS, EXACTLY. It is a REJECTION THRESHOLD, not a guaranteed
+ * maximum allocation. Counting stops the moment the threshold is crossed and
+ * `pause()` stops the inflater, but chunks already queued still arrive, so some
+ * bytes land past the threshold. On `zipbomb.docx` that overshoot was OBSERVED
+ * at ~3.6 MB. That figure is one measurement of one fixture on one machine --
+ * it is not a bound, and nothing here should be read as promising a ceiling on
+ * bytes allocated. What is guaranteed is that crossing the threshold ends the
+ * scan and refuses the document, instead of inflating to completion.
+ *
+ * WHAT A REJECTION MEANS DOWNSTREAM, stated explicitly because the ordering is
+ * the protection:
+ *
+ *   - `extractKnowledgeDocxText` calls this scan BEFORE `convertInWorker` and
+ *     returns on failure, so a refusal means mammoth never runs and no worker
+ *     is ever created.
+ *   - The scan ends at the refusal: the stream is paused and the loop returns,
+ *     so no further entry is inflated.
+ *   - There is consequently nothing to terminate. `terminate()` still exists on
+ *     the worker path, covering documents that PASS this scan and then behave
+ *     badly inside mammoth.
+ *
+ * WHY MAMMOTH CANNOT SLIP PAST THIS. It is handed the same bytes this scan
+ * read -- one uploaded buffer, no second source -- and this scan counts EVERY
+ * non-directory entry in the archive, not merely `word/document.xml`. So there
+ * is no entry mammoth can decompress that was not measured first. The scan
+ * bounds what the archive expands to; it does not bound what mammoth then does
+ * with a document that passed, which is what the worker is for.
  *
  * VERIFIED, not assumed: jszip 3.10.1 enforces no entry count, no entry size
  * and no total size of its own, and mammoth 1.12.3 adds none. Every bound here
