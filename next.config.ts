@@ -10,12 +10,51 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['@napi-rs/canvas'],
   // DOCX extraction runs in a worker thread, loaded by PATH at runtime rather
   // than imported. Nothing in the module graph references the file, so the
-  // build's tracing cannot see it and a standalone output would ship without
-  // it -- extraction would then fail at the worker's own startup, in
-  // production only, with the same "could not be read" message a corrupt file
-  // gets. Named here so the file travels with the server bundle.
+  // build's tracing cannot see it and a packaged output would ship without it.
+  //
+  // NAMING THE WORKER IS NOT ENOUGH, which the trace manifest says plainly:
+  // after adding the file alone, the route's .nft.json carried the worker and
+  // exactly one package, `next`. The application's own libraries are bundled
+  // INTO route.js by webpack, so they need no tracing -- but the worker is not
+  // bundled. It is plain CommonJS calling require('mammoth') at runtime, and
+  // that require is invisible to both webpack and the tracer. A packaged
+  // deployment would therefore ship a worker with nothing to load, and every
+  // DOCX upload would fail IN PRODUCTION ONLY, with the same "could not be
+  // read" message a corrupt file gets.
+  //
+  // So mammoth's whole runtime closure is named here. The list is explicit
+  // rather than a wildcard because a wildcard over node_modules would ship the
+  // entire tree; it is kept honest by knowledgeDocxDeployment.test.ts, which
+  // recomputes the closure from package.json and fails if anything is missing.
   outputFileTracingIncludes: {
-    '/api/boards/[id]/knowledge': ['./lib/infra/knowledge/knowledgeDocxWorker.cjs'],
+    '/api/boards/[id]/knowledge': [
+      './lib/infra/knowledge/knowledgeDocxWorker.cjs',
+      './node_modules/@xmldom/xmldom/**/*',
+      './node_modules/argparse/**/*',
+      './node_modules/base64-js/**/*',
+      './node_modules/bluebird/**/*',
+      './node_modules/core-util-is/**/*',
+      './node_modules/dingbat-to-unicode/**/*',
+      './node_modules/duck/**/*',
+      './node_modules/immediate/**/*',
+      './node_modules/inherits/**/*',
+      './node_modules/isarray/**/*',
+      './node_modules/jszip/**/*',
+      './node_modules/lie/**/*',
+      './node_modules/lop/**/*',
+      './node_modules/mammoth/**/*',
+      './node_modules/option/**/*',
+      './node_modules/pako/**/*',
+      './node_modules/path-is-absolute/**/*',
+      './node_modules/process-nextick-args/**/*',
+      './node_modules/readable-stream/**/*',
+      './node_modules/safe-buffer/**/*',
+      './node_modules/setimmediate/**/*',
+      './node_modules/string_decoder/**/*',
+      './node_modules/underscore/**/*',
+      './node_modules/util-deprecate/**/*',
+      './node_modules/xmlbuilder/**/*',
+    ],
   },
   eslint: {
     // 5,426 pre-existing lint errors block `next build` (Phase 0 audit).

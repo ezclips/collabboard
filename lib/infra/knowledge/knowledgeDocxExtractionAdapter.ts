@@ -16,8 +16,6 @@
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import JSZip from 'jszip';
-
 import { domainError, type DomainError } from '@/lib/domain/core/errors';
 import { err, ok, type Result } from '@/lib/domain/core/result';
 import {
@@ -26,6 +24,14 @@ import {
   KNOWLEDGE_DOCX_EXTRACTOR_VERSION,
 } from '@/lib/domain/knowledge/knowledgeExtractionContract';
 import { knowledgeDocxHtmlToText } from '@/lib/domain/knowledge/knowledgeDocxHtmlText';
+import { scanKnowledgeDocxArchive } from './knowledgeDocxArchiveScan';
+
+export {
+  KNOWLEDGE_DOCX_MAX_DECLARED_BYTES,
+  KNOWLEDGE_DOCX_MAX_ENTRIES,
+  KNOWLEDGE_DOCX_MAX_INFLATED_ENTRY_BYTES,
+  KNOWLEDGE_DOCX_MAX_INFLATED_TOTAL_BYTES,
+} from './knowledgeDocxArchiveScan';
 
 // Routing lives in the domain, so the browser can learn which files it may
 // offer without pulling a ZIP parser toward the bundle.
@@ -49,24 +55,25 @@ export const KNOWLEDGE_DOCX_MAX_HTML_CHARS = 8 * 1024 * 1024;
 export const KNOWLEDGE_DOCX_TIMEOUT_MS = 30_000;
 
 /**
- * The heap the extraction worker is allowed, enforced by V8 from inside it.
+ * The heap the extraction worker is allowed.
  *
- * This is the bound the post-decompression ceilings could not provide: they
- * run after the memory has already been allocated. Generous for a document a
- * person wrote, and small enough that a decompression bomb hits it long before
- * it reaches the server's own limit.
+ * WHAT THIS IS AND IS NOT, corrected after measurement. An earlier version of
+ * this comment claimed the worker's heap ceiling is what stops a decompression
+ * bomb. It is not, and the committed fixture proves it: running `zipbomb.docx`
+ * through this worker returns a normal failure MESSAGE -- jszip's own
+ * "uncompressed data size mismatch" -- in ~755 ms, having taken the process to
+ * ~402 MB RSS. The heap ceiling never fired. Per Node's documentation
+ * `resourceLimits` bounds the JS engine only: external ArrayBuffer allocations
+ * and process-wide exhaustion are outside it.
+ *
+ * So this is defence in depth, not the bound. It is kept because `terminate()`
+ * is real -- it stops work a promise race would merely stop waiting for -- and
+ * because a parser fault is contained off the request thread. The enforceable
+ * bound on memory lives in `knowledgeDocxArchiveScan`, which counts inflated
+ * bytes as they are produced and refuses mid-stream.
  */
 export const KNOWLEDGE_DOCX_MAX_HEAP_MB = 256;
 
-/**
- * VERIFIED, not assumed: neither library enforces anything.
- *
- * jszip 3.10.1 has no entry cap and no size cap, and mammoth 1.12.3 adds none
- * of its own. So every bound below is ours, and the ones that can be checked
- * BEFORE decompressing are checked before decompressing.
- */
-export const KNOWLEDGE_DOCX_MAX_ENTRIES = 512;
-export const KNOWLEDGE_DOCX_MAX_DECLARED_BYTES = 200 * 1024 * 1024;
 export const KNOWLEDGE_DOCX_MAX_TEXT_CHARS = 4 * 1024 * 1024;
 
 export interface KnowledgeDocxExtraction {
@@ -82,6 +89,13 @@ export interface KnowledgeDocxExtraction {
    * disclosed rather than silently applied.
    */
   readonly hasTrackedChanges: boolean;
+  /**
+   * Bytes the archive actually inflated to, measured during the bounded scan.
+   *
+   * Carried so the measured record is taken from the real pipeline rather than
+   * from a probe written alongside it.
+   */
+  readonly inflatedBytes: number;
   readonly parserName: string;
   readonly parserVersion: string;
   /** How long mammoth plus the walk actually took, for the measured record. */
@@ -97,8 +111,12 @@ export async function extractKnowledgeDocxText(
 
   const started = Date.now();
 
-  const preflight = await inspectKnowledgeDocxArchive(bytes);
-  if (!preflight.ok) return err(preflight.error);
+  // Bounded, streaming, and BEFORE the parser. This both MEASURES what the
+  // archive really expands to and refuses it mid-inflation when that is too
+  // much, so mammoth below is handed a container whose expansion is a measured
+  // fact rather than a number the uploader wrote.
+  const scanned = await scanKnowledgeDocxArchive(bytes);
+  if (!scanned.ok) return err(scanned.error);
 
   const converted = await convertInWorker(bytes);
   if (!converted.ok) return err(converted.error);
@@ -124,79 +142,12 @@ export async function extractKnowledgeDocxText(
     // content is missing from the text.
     imageCount: Math.max(imageCount, walked.imageCount),
     footnoteCount: walked.footnoteCount,
-    hasTrackedChanges: preflight.value.hasTrackedChanges,
+    hasTrackedChanges: scanned.value.hasTrackedChanges,
+    inflatedBytes: scanned.value.inflatedBytes,
     parserName: KNOWLEDGE_DOCX_EXTRACTOR_NAME,
     parserVersion: KNOWLEDGE_DOCX_EXTRACTOR_VERSION,
     elapsedMs: Date.now() - started,
   });
-}
-
-/**
- * The pre-decompression look at the archive.
- *
- * A .docx is a ZIP, so the uploaded size bounds nothing about what it expands
- * to. The central directory declares each entry's uncompressed size, and jszip
- * exposes it without inflating anything -- so the cheap checks happen here,
- * before a single entry is decompressed.
- *
- * WHAT THIS DOES NOT DO, said plainly: the declared size is a number inside a
- * file the uploader wrote, so a hostile archive can lie about it. This stops
- * the accidental case and the naive malicious one at no cost. The bounds that
- * do not trust the file are the ones AFTER decompression -- the HTML ceiling,
- * the extracted-text ceiling and the deadline -- and they are why those still
- * exist rather than being replaced by this.
- */
-interface KnowledgeDocxArchiveFacts {
-  readonly hasTrackedChanges: boolean;
-}
-
-async function inspectKnowledgeDocxArchive(
-  bytes: Uint8Array,
-): Promise<Result<KnowledgeDocxArchiveFacts, DomainError>> {
-  let zip: JSZip;
-  try {
-    zip = await JSZip.loadAsync(Buffer.from(bytes));
-  } catch {
-    return err(domainError('validation', 'This file could not be read as a Word document'));
-  }
-
-  const names = Object.keys(zip.files);
-  if (names.length > KNOWLEDGE_DOCX_MAX_ENTRIES) {
-    return err(domainError('validation', 'This document has too many parts to read'));
-  }
-
-  // A .docx without a main document part is not a .docx, whatever it is named.
-  const main = zip.file('word/document.xml');
-  if (!main) {
-    return err(domainError('validation', 'This file could not be read as a Word document'));
-  }
-
-  let declared = 0;
-  for (const name of names) {
-    const entry = zip.files[name] as unknown as { _data?: { uncompressedSize?: number } };
-    const size = entry._data?.uncompressedSize;
-    if (typeof size === 'number' && Number.isFinite(size) && size > 0) declared += size;
-    if (declared > KNOWLEDGE_DOCX_MAX_DECLARED_BYTES) {
-      return err(domainError('validation', 'This document is too large to read'));
-    }
-  }
-
-  // Read once, here, while the part is already in hand. A revision mark is a
-  // w:ins or w:del ELEMENT, so the check is for the element's opening
-  // delimiter rather than a bare substring -- "w:instrText" begins with
-  // "w:ins" and is a field code, not an insertion.
-  let hasTrackedChanges = false;
-  try {
-    const xml = await main.async('string');
-    hasTrackedChanges = /<w:(?:ins|del)[ >]/.test(xml);
-  } catch {
-    // A body that cannot be read here will fail in mammoth a moment later with
-    // a better message. Not knowing whether there were revisions is not a
-    // reason to refuse the document.
-    hasTrackedChanges = false;
-  }
-
-  return ok({ hasTrackedChanges });
 }
 
 /** Where the worker lives, resolved from the repository root at runtime. */
@@ -210,11 +161,12 @@ interface KnowledgeDocxConversion {
 /**
  * Decompress and parse in a worker with enforced limits.
  *
- * THE DIFFERENCE FROM A DEADLINE, which is the whole point: a promise race
- * rejects and leaves the work running. Terminating the thread stops it, and
- * resourceLimits has V8 enforce the heap ceiling from inside -- so a
- * decompression bomb fails WHILE it inflates rather than after, which is the
- * one thing a post-decompression check can never do.
+ * THE DIFFERENCE FROM A DEADLINE, which is why the worker is here: a promise
+ * race rejects and leaves the work running, because mammoth offers no
+ * cancellation. Terminating the thread stops it. That is what this buys, and
+ * the claim stops there -- the heap ceiling is a second line that measurement
+ * showed does not fire on the bomb fixture, and the bound on decompression is
+ * enforced before this function is ever reached.
  *
  * Failures are deliberately indistinguishable to the caller: a corrupt
  * container, an encrypted document, a heap ceiling and a kill all mean the

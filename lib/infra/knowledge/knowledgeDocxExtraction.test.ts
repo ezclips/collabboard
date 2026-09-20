@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extractKnowledgeDocxText,
   KNOWLEDGE_DOCX_MAX_ENTRIES,
+  KNOWLEDGE_DOCX_MAX_INFLATED_TOTAL_BYTES,
 } from './knowledgeDocxExtractionAdapter';
 import {
   isKnowledgeDocxCandidate,
@@ -266,36 +267,57 @@ describe('the facts a disclosure is built from', () => {
 
 describe('the limits that are ENFORCED rather than declared', () => {
   /**
-   * The gap this closes, stated once: the archive preflight reads the size the
-   * central directory DECLARES, and that is a number inside a file the
-   * uploader wrote. zipbomb.docx declares 4,096 bytes for a part that inflates
-   * to 335 MB. Nothing checked before decompression can catch it, and a check
-   * after decompression runs only once the memory has already been taken.
+   * WHAT WAS WRONG BEFORE, recorded because the correction is the point.
    *
-   * Extraction therefore runs in a worker with a V8-enforced heap ceiling and
-   * a terminable thread, so the failure happens DURING inflation.
+   * An earlier version of this suite asserted that the extraction WORKER stops
+   * `zipbomb.docx`, and credited its V8 heap ceiling. Measurement disproved it.
+   * Run through the worker alone, the bomb comes back as an ordinary parse
+   * failure -- jszip's own "uncompressed data size mismatch" -- after ~755 ms,
+   * having taken the process to ~402 MB RSS. The heap ceiling never fired, and
+   * the stop was the LIBRARY noticing its own inconsistency, which is luck: it
+   * depends on the archive lying. An archive that declares its sizes truthfully
+   * inflates in full without complaint.
+   *
+   * Worse, the old preflight read `word/document.xml` in full, in the request
+   * process, to look for revision marks -- so the parent paid that 335 MB
+   * inflation BEFORE the worker was even created. Isolation downstream of an
+   * unbounded read protects nothing.
+   *
+   * What the refusal is now: a limit on bytes actually produced, counted as
+   * they are produced, per entry and across the archive. It does not depend on
+   * the archive being honest, and it does not wait for the allocation.
    */
-  it('stops a bomb that lies about its size, during decompression', async () => {
+  it('stops a bomb by COUNTING inflated bytes, not by trusting or by luck', async () => {
+    const before = process.memoryUsage().rss;
     const started = Date.now();
     const result = await extractKnowledgeDocxText(read('zipbomb.docx'));
     const elapsed = Date.now() - started;
+    const growthMb = (process.memoryUsage().rss - before) / (1024 * 1024);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    // The refusal says the file could not be read, and nothing about heaps or
-    // workers: the cause is ours, not the uploader's business.
+
+    // The refusal names the reason our limit refused it -- too large -- rather
+    // than the generic parse failure the worker produced by accident.
     expect(result.error.code).toBe('validation');
-    expect(result.error.message).toBe('This file could not be read as a Word document');
-    // And it fails FAST -- it is stopped while inflating, not after.
-    expect(elapsed).toBeLessThan(30_000);
+    expect(result.error.message).toBe('This document is too large to read');
+
+    // Stopped DURING inflation: a part declaring 4 KB and expanding past 320 MB
+    // is refused having produced at most the per-entry ceiling.
+    expect(elapsed).toBeLessThan(5_000);
+    // The bound that matters. Unbounded, this same fixture grew the process by
+    // ~350 MB; the ceiling is 32 MB per entry plus streaming overhead. The
+    // threshold is deliberately loose enough not to flake and far below what
+    // the unbounded path took.
+    expect(growthMb).toBeLessThan(200);
   }, 60_000);
 
   it('the same bomb is caught EARLIER when it declares its real size', async () => {
-    // The honest control: with a truthful central directory the preflight
-    // refuses it without decompressing anything at all. Both layers matter --
-    // this one is cheap, the worker is the one that cannot be lied to.
+    // The honest control: with a truthful central directory the declared-size
+    // check refuses it without inflating a byte. That check is SUPPLEMENTARY
+    // and kept for exactly this case -- it is cheap, and it is not what stops
+    // the dishonest archive above.
     const honest = read('zipbomb.docx');
-    // Rewrite the declared size back to something over the ceiling.
     const view = Buffer.from(honest.buffer.slice(0));
     for (let i = 0; i < view.length - 46; i += 1) {
       if (view.readUInt32LE(i) !== 0x02014b50) continue;
@@ -308,5 +330,33 @@ describe('the limits that are ENFORCED rather than declared', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.message).toBe('This document is too large to read');
+  }, 60_000);
+
+  it('leaves the process able to extract a normal document immediately after', async () => {
+    // A limit that stops the attack but wedges the server has moved the outage
+    // rather than prevented it. The refusal must be survivable: the very next
+    // ordinary document has to extract correctly, in ordinary time.
+    const refused = await extractKnowledgeDocxText(read('zipbomb.docx'));
+    expect(refused.ok).toBe(false);
+
+    const started = Date.now();
+    const after = await extractKnowledgeDocxText(read('structured.docx'));
+    const elapsed = Date.now() - started;
+
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.text).toContain('Loom setup notes');
+    expect(after.value.text).toContain('8/2 cotton | 20 epi');
+    expect(elapsed).toBeLessThan(10_000);
+  }, 120_000);
+
+  it('measures what an ordinary document really inflates to', async () => {
+    // The scan reports real inflated bytes, so the measured record comes from
+    // the production path rather than from a probe written beside it.
+    const result = await extractKnowledgeDocxText(read('long.docx'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.inflatedBytes).toBeGreaterThan(0);
+    expect(result.value.inflatedBytes).toBeLessThan(KNOWLEDGE_DOCX_MAX_INFLATED_TOTAL_BYTES);
   }, 60_000);
 });
