@@ -196,7 +196,7 @@ export class SupabaseKnowledgeStorageGateway implements KnowledgeStorageGateway 
 // Repository
 // ---------------------------------------------------------------------------
 
-interface KnowledgeDocumentRow {
+export interface KnowledgeDocumentRow {
   readonly id: string;
   readonly board_id: string;
   readonly created_by: string | null;
