@@ -137,11 +137,11 @@ async function main(): Promise<void> {
     const { block, result } = searched.value;
     const passages = block.passages ?? [];
     const posts = passages.filter((p) => p.source === 'post').length;
-    const pdfs = passages.filter((p) => p.source === 'pdf').length;
+    const knowledgePassages = passages.filter((p) => p.source === 'knowledge').length;
 
     console.log(
       `${message.slice(0, 46).padEnd(48)} chars=${String(block.text.length).padStart(5)}  `
-      + `used=${result.used}/${result.returned} dropped=${result.dropped}  posts=${posts} pdf=${pdfs}`,
+      + `used=${result.used}/${result.returned} dropped=${result.dropped}  posts=${posts} pdf=${knowledgePassages}`,
     );
 
     if (block.text.length > worstChars.chars) {

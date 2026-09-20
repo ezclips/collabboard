@@ -73,7 +73,7 @@ describe('the budget order: attachments win, search yields', () => {
 
   it('a search block placed after the attachments is what gets dropped, never they', () => {
     const search = boardAiSearchContextBlock(
-      [{ source: 'pdf', label: 'slides.pdf — page 3', text: 'b'.repeat(9000), rank: 0.4 }],
+      [{ source: 'knowledge', label: 'slides.pdf — page 3', text: 'b'.repeat(9000), rank: 0.4 }],
       'oil',
       RESULT,
     );
@@ -112,7 +112,7 @@ describe('the search block carries its passages, and only for this turn', () => 
   const passages = [
     { source: 'post' as const, label: 'Weekly plan', text: 'plan body', rank: 0.9, padletId: PADLET },
     {
-      source: 'pdf' as const, label: 'slides.pdf — page 3', text: 'slide text', rank: 0.8,
+      source: 'knowledge' as const, label: 'slides.pdf — page 3', text: 'slide text', rank: 0.8,
       knowledgeDocumentId: DOC, pageStart: 3, pageEnd: 3,
     },
   ];
@@ -121,7 +121,7 @@ describe('the search block carries its passages, and only for this turn', () => 
     const block = boardAiSearchContextBlock(passages, 'plan', RESULT, 0);
     expect(block.passages).toEqual([
       { source: 'post', label: 'Weekly plan', padletId: PADLET },
-      { source: 'pdf', label: 'slides.pdf — page 3', knowledgeDocumentId: DOC, pageStart: 3 },
+      { source: 'knowledge', label: 'slides.pdf — page 3', knowledgeDocumentId: DOC, pageStart: 3 },
     ]);
     expect(block.text).toContain('[S1.1 | board post: Weekly plan]');
     expect(block.text).toContain('[S1.2 | PDF text: slides.pdf — page 3]');

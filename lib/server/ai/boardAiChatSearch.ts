@@ -132,7 +132,11 @@ function postLabel(row: BoardAiSearchPostRow): string {
  * break genuinely is on both and naming one would be a small lie in a citation.
  */
 function chunkLabel(row: BoardAiSearchChunkRow): string {
-  const filename = (row.original_filename ?? '').trim() || 'PDF';
+  // 'Document', not 'PDF'. original_filename is the DISPLAY NAME of any source
+  // kind and is NOT NULL, so this fallback is for a blank one only -- but a
+  // blank text source labelled "PDF" would be the same lie the source
+  // discriminator was widened to stop telling.
+  const filename = (row.original_filename ?? '').trim() || 'Document';
   const start = row.page_start;
   const end = row.page_end;
   if (start === null) return filename;
@@ -225,7 +229,7 @@ export async function searchBoardAiContext(
     : [];
   const chunkPassages: readonly BoardAiSearchPassage[] = chunks.ok
     ? chunks.value.map((row) => ({
-      source: 'pdf' as const,
+      source: 'knowledge' as const,
       label: chunkLabel(row),
       text: (row.text ?? '').trim(),
       rank: row.rank,
@@ -255,7 +259,7 @@ export async function searchBoardAiContext(
   // of its own, and an empty one could not have matched in the first place.
   const usable = (passage: BoardAiSearchPassage) => {
     if (isBoardAiSearchPassageCovered(passage, coverage)) return false;
-    if (passage.source === 'pdf') return passage.text.length > 0;
+    if (passage.source === 'knowledge') return passage.text.length > 0;
     return passage.text.length > 0 || passage.label.length > 0;
   };
   // DE-DUPLICATE AFTER THE MERGE, WHICH IS WHERE THE BATTERY MEASURED IT.

@@ -30,6 +30,10 @@ import {
   knowledgePdfAreaImagePath,
   parseKnowledgePdfAreaProvenance,
 } from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
+import {
+  stitchKnowledgeTextRange,
+  type KnowledgeStoredTextChunk,
+} from '../../domain/knowledge/knowledgeTextChunking';
 
 /**
  * The reads this resolver performs, and nothing more. Supplied as the CALLER'S
@@ -41,7 +45,7 @@ import {
  * would make the answer meaningless.
  */
 export interface BoardAiContextSupabaseClient {
-  from(table: 'knowledge_documents' | 'knowledge_pages' | 'padlets'): {
+  from(table: 'knowledge_documents' | 'knowledge_pages' | 'knowledge_chunks' | 'padlets'): {
     select(columns: string): ContextQuery;
   };
 }
@@ -50,6 +54,8 @@ interface ContextRow { readonly [key: string]: unknown }
 
 interface ContextQuery extends PromiseLike<{ data: ContextRow[] | null; error: unknown }> {
   eq(column: string, value: unknown): ContextQuery;
+  /** Needed for `page_start IS NULL`: a pageless source is selected by it. */
+  is(column: string, value: null): ContextQuery;
   in(column: string, values: readonly unknown[]): ContextQuery;
   order(column: string, options: { ascending: boolean }): ContextQuery;
   limit(count: number): ContextQuery;
@@ -171,6 +177,40 @@ async function readPages(
     pageNumber: Number(row.page_number),
     text: typeof row.text === 'string' ? row.text : '',
   })));
+}
+
+/**
+ * The chunks of a PAGELESS source, in order.
+ *
+ * Stage 1 decision (A): for a source with no pages the CHUNKS ARE THE
+ * CANONICAL TEXT -- there is no knowledge_pages row to slice, and creating a
+ * synthetic page 1 to make the existing path work would put a locator in the
+ * database that says something untrue about the source.
+ *
+ * Contiguity and losslessness are asserted at INGEST, so the rows read here
+ * concatenate back to exactly the text the offsets were computed against.
+ * stitchKnowledgeTextRange re-checks that on the way out anyway, and returns
+ * nothing rather than a fragment if a row is missing.
+ */
+async function readTextChunks(
+  client: BoardAiContextSupabaseClient,
+  documentId: string,
+): Promise<Result<KnowledgeStoredTextChunk[], DomainError>> {
+  const { data, error } = await client
+    .from('knowledge_chunks')
+    .select('text, char_start, char_end, chunk_index')
+    .eq('document_id', documentId)
+    .is('page_start', null)
+    .order('chunk_index', { ascending: true });
+  if (error) return err(domainError('unavailable', 'Could not read the source text'));
+  return ok((data ?? [])
+    .filter((row) => typeof row.text === 'string' && row.char_start !== null && row.char_end !== null)
+    .map((row) => ({
+      text: String(row.text),
+      charStart: Number(row.char_start),
+      charEnd: Number(row.char_end),
+      chunkIndex: Number(row.chunk_index),
+    })));
 }
 
 /**
@@ -301,7 +341,24 @@ async function resolveOne(
     const pages = await readPages(client, item.knowledgeDocumentId, null, BOARD_AI_CONTEXT_MAX_DOCUMENT_PAGES);
     if (!pages.ok) return err(pages.error);
     if (pages.value.length === 0) {
-      return err(domainError('not_found', 'Context is not available on this board'));
+      // A pageless source: the chunks are the text. Not an error -- every text
+      // and markdown source reaches this branch.
+      const chunks = await readTextChunks(client, item.knowledgeDocumentId);
+      if (!chunks.ok) return err(chunks.error);
+      if (chunks.value.length === 0) {
+        return err(domainError('not_found', 'Context is not available on this board'));
+      }
+      return ok({
+        type: 'knowledge-document',
+        knowledgeDocumentId: item.knowledgeDocumentId,
+        label,
+        // No pages to enumerate. Board search reads pageNumbers to avoid
+        // sending the same page twice; an empty list means it has nothing to
+        // exclude, which is correct -- a pageless source has no page identity
+        // to collide on.
+        pageNumbers: [],
+        text: bounded(chunks.value.map((chunk) => chunk.text).join('')),
+      });
     }
     // Page identity survives into the text so a later citation slice can tell
     // which page an answer leaned on -- never one provenance-less blob.
@@ -322,10 +379,48 @@ async function resolveOne(
     });
   }
 
-  const pages = await readPages(client, item.knowledgeDocumentId, item.pageNumber, 1);
+  // A selection with NO page number is pageless by declaration, not by
+  // discovery. Asking readPages for "any one page" here would hand a pageless
+  // selection whatever page happened to exist and slice that instead -- so the
+  // page is only ever read when one was actually named.
+  const pageless = item.type === 'knowledge-selection' && item.pageNumber === undefined;
+  const pages = pageless
+    ? ok([] as { pageNumber: number; text: string }[])
+    : await readPages(client, item.knowledgeDocumentId, item.pageNumber ?? null, 1);
   if (!pages.ok) return err(pages.error);
   const page = pages.value[0];
-  if (!page) return err(domainError('not_found', 'Context is not available on this board'));
+
+  if (!page) {
+    // A PAGELESS SOURCE. Only a selection can be resolved here: a
+    // knowledge-PAGE reference to a source that has no pages names something
+    // that does not exist, and inventing page 1 for it would hand the reader a
+    // locator the document never had.
+    if (item.type !== 'knowledge-selection') {
+      return err(domainError('not_found', 'Context is not available on this board'));
+    }
+    const chunks = await readTextChunks(client, item.knowledgeDocumentId);
+    if (!chunks.ok) return err(chunks.error);
+
+    const canonical = stitchKnowledgeTextRange(chunks.value, item.charStart, item.charEnd);
+    // THE SAME CHECK THE PAGED PATH MAKES, for the same reason: the client's
+    // string only answers "did we select the same characters?". Our stored
+    // text is what is kept. A range the chunks do not fully cover stitches to
+    // null and is refused rather than quoted short.
+    if (canonical === null || canonical.length === 0 || canonical !== item.selectedText) {
+      return err(domainError('validation', 'Selection does not match the stored source text'));
+    }
+    return ok({
+      type: 'knowledge-selection',
+      knowledgeDocumentId: item.knowledgeDocumentId,
+      charStart: item.charStart,
+      charEnd: item.charEnd,
+      // KIND-AWARE LABEL: no page to name, so none is named. The search side
+      // already did this (chunkLabel drops the page when it is null); this is
+      // the context side catching up, which is the decision in the brief.
+      label,
+      text: bounded(canonical),
+    });
+  }
 
   if (item.type === 'knowledge-page') {
     return ok({

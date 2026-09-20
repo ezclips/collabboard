@@ -17,7 +17,23 @@ import {
 import { boardAiCitationSourceToken } from './boardAiChatCitation';
 
 /** Which index a passage came from. Never merged away; every passage keeps it. */
-export type BoardAiSearchSource = 'post' | 'pdf';
+/**
+ * Which SEARCH a passage came from -- the board's posts, or its knowledge
+ * corpus. Not which file format it happens to be.
+ *
+ * This was 'pdf', and a text source admitted under Stage 1 would have claimed
+ * to be one. It could not simply be told the truth instead: the shared
+ * retrieval function does not return `knowledge_documents.kind`, and adding it
+ * would mean changing a RETURNS TABLE -- which CREATE OR REPLACE cannot do, so
+ * it would mean dropping and recreating the function both Board AI and the
+ * wiki compiler retrieve through. Inferring the kind from a null page_start
+ * would be a guess dressed as a fact.
+ *
+ * So the discriminator stops naming a format. It only ever meant "which of the
+ * two searches produced this", which is what the merge step uses it for, and
+ * that meaning is true for every kind the corpus will hold.
+ */
+export type BoardAiSearchSource = 'post' | 'knowledge';
 
 /**
  * One passage, already read and already authorized, with its origin attached.

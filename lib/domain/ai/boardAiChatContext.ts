@@ -85,7 +85,19 @@ export interface KnowledgePageContextRequest {
 export interface KnowledgeSelectionContextRequest {
   readonly type: 'knowledge-selection';
   readonly knowledgeDocumentId: string;
-  readonly pageNumber: number;
+  /**
+   * ABSENT FOR A PAGELESS SOURCE, and that absence is the locator rather than
+   * a missing field. A text or markdown document has no pages, so a selection
+   * in one is located by its character range alone; supplying a page here for
+   * such a source would name something the document does not have.
+   *
+   * Optional rather than nullable so the two cases are distinguishable at the
+   * type level: a PDF selection carries a page, and a text selection has no
+   * page to carry. The resolver branches on it directly and never probes for a
+   * page that might not exist -- reading "page 1" when none was asked for is
+   * how a pageless selection would silently resolve against the wrong text.
+   */
+  readonly pageNumber?: number;
   readonly charStart: number;
   readonly charEnd: number;
   readonly selectedText: string;
@@ -217,7 +229,7 @@ export const BOARD_AI_CONTEXT_IMAGE_MARKER = '[image attached]';
  * the page it BEGINS on is located rather than invented.
  */
 export interface BoardAiCitablePassage {
-  readonly source: 'post' | 'pdf';
+  readonly source: 'post' | 'knowledge';
   readonly label: string;
   readonly padletId?: string;
   readonly knowledgeDocumentId?: string;

@@ -217,7 +217,7 @@ async function main(): Promise<void> {
   say(`model        : ${DEEPSEEK_DEFAULT_MODEL}  (max_tokens ${budget}, temp ${WIKI_COMPILE_TEMPERATURE})`);
   say(`query        : ${result.query}`);
   say(`passages      : ${passages.length} (${block.text.length} chars) -- posts `
-    + `${passages.filter((p) => p.source === 'post').length}, pdf ${passages.filter((p) => p.source === 'pdf').length}`);
+    + `${passages.filter((p) => p.source === 'post').length}, knowledge ${passages.filter((p) => p.source === 'knowledge').length}`);
   say(`finish_reason: ${choice?.finish_reason}  completion ${data.usage?.completion_tokens}/${budget}`
     + `  reasoning ${data.usage?.completion_tokens_details?.reasoning_tokens ?? 0}`
     + `  prompt ${data.usage?.prompt_tokens}  ${(ms / 1000).toFixed(1)}s`);

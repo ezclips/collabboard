@@ -28,6 +28,8 @@
 // that never entered the corpus rather than a citation that quietly lands in
 // the wrong sentence.
 
+import { isSafeTextCutIndex, safeTextCutIndex } from './knowledgeTextCanonical';
+
 /** One chunk of a pageless text source. */
 export interface KnowledgeTextChunkDraft {
   /** Byte-for-byte `source.slice(charStart, charEnd)`. */
@@ -89,7 +91,19 @@ function splitLongSpan(source: string, span: Span): readonly Span[] {
     const cut = window.search(/\s(?=\S*$)/);
     // `cut + 1` keeps the whitespace with the chunk that precedes it, which is
     // what keeps the spans contiguous.
-    const end = cut > KNOWLEDGE_TEXT_CHUNK_MIN_CHARS ? start + cut + 1 : limit;
+    const wanted = cut > KNOWLEDGE_TEXT_CHUNK_MIN_CHARS ? start + cut + 1 : limit;
+    // NEVER BETWEEN A SURROGATE PAIR. A hard cut at the budget can land inside
+    // an astral character -- an emoji, most often -- and split it into two
+    // halves that render as replacement glyphs on both sides of the boundary,
+    // in the chunk text AND in every citation whose range crosses it. Moving
+    // back one keeps the pair whole and keeps the chunk under budget.
+    const end = safeTextCutIndex(source, wanted);
+    // Defensive: a cut that moved back to where it started would not advance.
+    if (end <= start) {
+      out.push({ start, end: limit + 1 <= span.end ? limit + 1 : span.end });
+      start = limit + 1 <= span.end ? limit + 1 : span.end;
+      continue;
+    }
     out.push({ start, end });
     start = end;
   }
@@ -218,6 +232,12 @@ export function assertLosslessChunking(
     }
     if (chunk.text !== source.slice(chunk.charStart, chunk.charEnd)) {
       return `Chunk ${chunk.chunkIndex} text does not match its own span`;
+    }
+    // A boundary inside a surrogate pair leaves half an astral character at
+    // the end of one chunk and half at the start of the next. Both halves
+    // survive concatenation, so losslessness alone would not catch it.
+    if (!isSafeTextCutIndex(source, chunk.charStart) || !isSafeTextCutIndex(source, chunk.charEnd)) {
+      return `Chunk ${chunk.chunkIndex} boundary splits a surrogate pair`;
     }
     cursor = chunk.charEnd;
     expectedIndex += 1;

@@ -120,7 +120,7 @@ describe('authorization happens BEFORE the privileged search', () => {
 });
 
 describe('the merge rule', () => {
-  const passage = (source: 'post' | 'pdf', label: string, rank: number): BoardAiSearchPassage =>
+  const passage = (source: 'post' | 'knowledge', label: string, rank: number): BoardAiSearchPassage =>
     ({ source, label, text: `text of ${label}`, rank });
 
   it('takes top-K from each source independently and never ranks across them', () => {
@@ -128,20 +128,20 @@ describe('the merge rule', () => {
     // would put all four PDF passages first; the rule says each source keeps its
     // own slots, because the two ts_rank scales are not comparable.
     const posts = [passage('post', 'a', 0.1), passage('post', 'b', 0.05), passage('post', 'c', 0.01)];
-    const chunks = [passage('pdf', 'x', 0.9), passage('pdf', 'y', 0.8), passage('pdf', 'z', 0.7)];
+    const chunks = [passage('knowledge', 'x', 0.9), passage('knowledge', 'y', 0.8), passage('knowledge', 'z', 0.7)];
 
     const merged = mergeBoardAiSearchPassages(posts, chunks, 2);
 
     expect(merged.map((item) => item.label)).toEqual(['a', 'b', 'x', 'y']);
     // Origin survives the merge on every passage.
-    expect(merged.map((item) => item.source)).toEqual(['post', 'post', 'pdf', 'pdf']);
+    expect(merged.map((item) => item.source)).toEqual(['post', 'post', 'knowledge', 'knowledge']);
   });
 
   it('a source with nothing does not lend its slots to the other', () => {
-    const merged = mergeBoardAiSearchPassages([], [passage('pdf', 'x', 0.9)], 4);
+    const merged = mergeBoardAiSearchPassages([], [passage('knowledge', 'x', 0.9)], 4);
     expect(merged).toHaveLength(1);
     // No ratio is baked in: K is per source, and an empty source is just empty.
-    expect(merged[0].source).toBe('pdf');
+    expect(merged[0].source).toBe('knowledge');
   });
 
   it('one failing source does not lose the other', async () => {
@@ -164,7 +164,7 @@ describe('the merge rule', () => {
 
 describe('the budget yields whole passages, loudly', () => {
   const passage = (label: string, length: number): BoardAiSearchPassage =>
-    ({ source: 'pdf', label, text: 'x'.repeat(length), rank: 0.5 });
+    ({ source: 'knowledge', label, text: 'x'.repeat(length), rank: 0.5 });
 
   it('drops whole passages and counts them, never splitting one', () => {
     const passages = [passage('a', 300), passage('b', 300), passage('c', 300)];
@@ -258,7 +258,7 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
       pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8], text: '…',
     }]);
     expect(isBoardAiSearchPassageCovered(
-      { source: 'pdf', label: 'slides.pdf — page 3', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 3, pageEnd: 3 },
+      { source: 'knowledge', label: 'slides.pdf — page 3', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 3, pageEnd: 3 },
       coverage,
     )).toBe(true);
   });
@@ -274,7 +274,7 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
       pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8], text: '…',
     }]);
     expect(isBoardAiSearchPassageCovered(
-      { source: 'pdf', label: 'slides.pdf — page 9', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 9, pageEnd: 9 },
+      { source: 'knowledge', label: 'slides.pdf — page 9', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 9, pageEnd: 9 },
       coverage,
     )).toBe(false);
   });
@@ -285,7 +285,7 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
       pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8], text: '…',
     }]);
     expect(isBoardAiSearchPassageCovered(
-      { source: 'pdf', label: 'slides.pdf — pages 8–9', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 8, pageEnd: 9 },
+      { source: 'knowledge', label: 'slides.pdf — pages 8–9', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 8, pageEnd: 9 },
       coverage,
     )).toBe(false);
   });
@@ -299,7 +299,7 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
     }]);
     expect(coverage.documentPages.size).toBe(0);
     expect(isBoardAiSearchPassageCovered(
-      { source: 'pdf', label: 'slides.pdf — page 3', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 3, pageEnd: 3 },
+      { source: 'knowledge', label: 'slides.pdf — page 3', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1', pageStart: 3, pageEnd: 3 },
       coverage,
     )).toBe(false);
   });
@@ -312,7 +312,7 @@ describe('a passage the user already attached is dropped BY SPAN, not by id', ()
     // Keeping a possible duplicate costs characters; dropping possible evidence
     // costs the answer.
     expect(isBoardAiSearchPassageCovered(
-      { source: 'pdf', label: 'slides.pdf', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1' },
+      { source: 'knowledge', label: 'slides.pdf', text: 'x', rank: 0.4, knowledgeDocumentId: 'd1' },
       coverage,
     )).toBe(false);
   });
@@ -378,8 +378,8 @@ describe('the same passage text returned twice is one passage', () => {
     const shared = 'the very same words';
     const kept = dropDuplicateBoardAiSearchPassages([
       { source: 'post', label: 'A note', text: shared, rank: 0.9 },
-      { source: 'pdf', label: 'doc.pdf — page 1', text: shared, rank: 0.8 },
-      { source: 'pdf', label: 'doc.pdf — page 2', text: 'different words', rank: 0.7 },
+      { source: 'knowledge', label: 'doc.pdf — page 1', text: shared, rank: 0.8 },
+      { source: 'knowledge', label: 'doc.pdf — page 2', text: 'different words', rank: 0.7 },
     ]);
     expect(kept).toHaveLength(2);
     expect(kept[0].source).toBe('post');
@@ -391,8 +391,8 @@ describe('the same passage text returned twice is one passage', () => {
     // similarity threshold -- a tuned constant -- which is the thing the battery
     // disqualified.
     const kept = dropDuplicateBoardAiSearchPassages([
-      { source: 'pdf', label: 'a', text: 'Applying lubricant correctly.', rank: 0.9 },
-      { source: 'pdf', label: 'b', text: 'Applying lubricant correctly!', rank: 0.8 },
+      { source: 'knowledge', label: 'a', text: 'Applying lubricant correctly.', rank: 0.9 },
+      { source: 'knowledge', label: 'b', text: 'Applying lubricant correctly!', rank: 0.8 },
     ]);
     expect(kept).toHaveLength(2);
   });

@@ -183,7 +183,7 @@ describe('H: a stored envelope is read back strictly', () => {
  */
 const searchBlock = (
   passages: readonly {
-    source: 'post' | 'pdf'; label: string;
+    source: 'post' | 'knowledge'; label: string;
     padletId?: string; knowledgeDocumentId?: string; pageStart?: number;
   }[],
 ): ResolvedBoardAiContextBlock => ({
@@ -195,7 +195,7 @@ const searchBlock = (
 });
 
 const POST_PASSAGE = { source: 'post' as const, label: 'Weekly plan', padletId: PADLET };
-const PDF_PASSAGE = { source: 'pdf' as const, label: 'slides.pdf — page 3', knowledgeDocumentId: DOC_A, pageStart: 3 };
+const PDF_PASSAGE = { source: 'knowledge' as const, label: 'slides.pdf — page 3', knowledgeDocumentId: DOC_A, pageStart: 3 };
 
 describe('search passages become ordinary, navigable citations', () => {
   it('a post passage cites the board post itself', () => {

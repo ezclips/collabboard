@@ -257,7 +257,7 @@ describe('21,24,25. current fails closed; historical is dropped', () => {
 });
 
 describe('the resolver reads only through the caller and only what it needs', () => {
-  it('touches three tables and no admin client', async () => {
+  it('touches four tables and no admin client', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const raw = fs.readFileSync(path.join(process.cwd(), 'lib/server/ai/boardAiChatContext.ts'), 'utf8');
@@ -269,6 +269,141 @@ describe('the resolver reads only through the caller and only what it needs', ()
     expect(source).not.toContain('source_references');
     expect(source).not.toMatch(/from\('boards'\)/);
     const tables = new Set(source.match(/from\('(\w+)'\)/g) ?? []);
-    expect([...tables].sort()).toEqual(["from('knowledge_documents')", "from('knowledge_pages')", "from('padlets')"]);
+    // UPDATED DELIBERATELY at Stage 1. knowledge_chunks joins the list because
+    // a PAGELESS source has no knowledge_pages row to slice -- for text and
+    // markdown the chunks ARE the canonical text, and a citation's range is
+    // stitched from the chunks that cover it.
+    //
+    // The rule this tripwire actually guards is unchanged and is the reason it
+    // is still worth failing on: every read goes through the CALLER'S client,
+    // so RLS decides what exists. knowledge_chunks carries its own board-scoped
+    // policy exactly as the other three do, and the read is keyed by a
+    // document_id that readDocument has already proved sits on the route board.
+    expect([...tables].sort()).toEqual([
+      "from('knowledge_chunks')",
+      "from('knowledge_documents')",
+      "from('knowledge_pages')",
+      "from('padlets')",
+    ]);
+  });
+});
+
+/**
+ * STAGE 1 -- a source with no pages.
+ *
+ * For text and markdown the CHUNKS are the canonical text: there is no
+ * knowledge_pages row to slice, and Decision (A) refuses to create a synthetic
+ * page 1 to make the paged path work. So a citation's range is stitched from
+ * the chunks that cover it, and the two things that must not happen are a
+ * pageless source failing to resolve at all, and a range resolving SHORT.
+ */
+describe('Stage 1. a pageless source resolves from its chunks', () => {
+  const TEXT = 'Alpha paragraph one.\n\nBeta paragraph two.\n\nGamma paragraph three.';
+  const CUT = 24;
+  const textChunks = [
+    { text: TEXT.slice(0, CUT), char_start: 0, char_end: CUT, chunk_index: 0 },
+    { text: TEXT.slice(CUT), char_start: CUT, char_end: TEXT.length, chunk_index: 1 },
+  ];
+
+  /** Like `client` above, but it can answer for knowledge_chunks too. */
+  function textClient(over: { chunks?: Record<string, unknown>[]; pages?: Record<string, unknown>[] } = {}) {
+    const build = (many: Record<string, unknown>[], single: Record<string, unknown> | null) => {
+      const query: Record<string, unknown> = {
+        eq() { return query; },
+        is() { return query; },
+        in() { return query; },
+        order() { return query; },
+        limit() { return query; },
+        maybeSingle: async () => ({ data: single, error: null }),
+        then(resolve: (v: { data: Record<string, unknown>[]; error: null }) => unknown) {
+          return Promise.resolve({ data: many, error: null }).then(resolve);
+        },
+      };
+      return query;
+    };
+    const api = {
+      from(table: string) {
+        if (table === 'knowledge_documents') {
+          return { select: () => build([], { id: DOC, original_filename: 'notes.txt', processing_status: 'ready' }) };
+        }
+        if (table === 'knowledge_chunks') return { select: () => build(over.chunks ?? textChunks, null) };
+        if (table === 'padlets') return { select: () => build([], null) };
+        // knowledge_pages: empty, which is what makes the source pageless.
+        return { select: () => build(over.pages ?? [], null) };
+      },
+    };
+    return api as unknown as BoardAiContextSupabaseClient;
+  }
+
+  const selection = (over: Record<string, unknown> = {}) => ({
+    type: 'knowledge-selection' as const,
+    knowledgeDocumentId: DOC,
+    charStart: 0,
+    charEnd: 20,
+    selectedText: TEXT.slice(0, 20),
+    ...over,
+  });
+
+  it('resolves a selection inside a single chunk', async () => {
+    const result = await resolveBoardAiChatContext(textClient(), BOARD, [selection()], neverReads);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]).toMatchObject({ type: 'knowledge-selection', charStart: 0, charEnd: 20 });
+    expect(result.value[0].text).toBe(TEXT.slice(0, 20));
+  });
+
+  it('RESOLVES A SELECTION THAT STRADDLES TWO CHUNKS', async () => {
+    // The property Decision 0 spends. A citation names offsets into the
+    // source, not into a chunk, so the boundary must be invisible.
+    const straddle = selection({ charStart: CUT - 6, charEnd: CUT + 6, selectedText: TEXT.slice(CUT - 6, CUT + 6) });
+    const result = await resolveBoardAiChatContext(textClient(), BOARD, [straddle], neverReads);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0].text).toBe(TEXT.slice(CUT - 6, CUT + 6));
+  });
+
+  it('NAMES NO PAGE IN ITS LABEL, because the source has none', async () => {
+    const result = await resolveBoardAiChatContext(textClient(), BOARD, [selection()], neverReads);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0].label).not.toMatch(/page/i);
+    expect(result.value[0].label).toContain('notes');
+  });
+
+  it('refuses a selection whose text does not match the stored chunks', async () => {
+    const result = await resolveBoardAiChatContext(
+      textClient(), BOARD, [selection({ selectedText: 'not what is stored' })], neverReads);
+    expect(result.ok).toBe(false);
+  });
+
+  it('REFUSES A RANGE THE CHUNKS DO NOT COVER rather than quoting short', async () => {
+    // A citation that silently returns less than it names is a quotation the
+    // reader believes is complete.
+    const missing = [textChunks[0]];
+    const straddle = selection({ charStart: CUT - 6, charEnd: CUT + 6, selectedText: TEXT.slice(CUT - 6, CUT + 6) });
+    const result = await resolveBoardAiChatContext(textClient({ chunks: missing }), BOARD, [straddle], neverReads);
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a knowledge-PAGE reference to a source that has no pages', async () => {
+    // Naming page 1 of a text file names something that does not exist.
+    const result = await resolveBoardAiChatContext(
+      textClient(), BOARD, [{ type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1 }], neverReads);
+    expect(result.ok).toBe(false);
+  });
+
+  it('a whole-document attachment is the concatenated chunks, with no page list', async () => {
+    const result = await resolveBoardAiChatContext(
+      textClient(), BOARD, [{ type: 'knowledge-document', knowledgeDocumentId: DOC }], neverReads);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0].text).toBe(TEXT);
+    expect(result.value[0].pageNumbers).toEqual([]);
+  });
+
+  it('a document with neither pages nor chunks is still not found', async () => {
+    const result = await resolveBoardAiChatContext(
+      textClient({ chunks: [] }), BOARD, [{ type: 'knowledge-document', knowledgeDocumentId: DOC }], neverReads);
+    expect(result.ok).toBe(false);
   });
 });
