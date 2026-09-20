@@ -1,5 +1,9 @@
 import { asUserId } from '../../domain/core/ids';
-import { boardAiCitationIdentityKey } from '../../domain/ai/boardAiChatCitation';
+import {
+  boardAiCitationIdentityKey,
+  boardAiCitationItemFromPassage,
+} from '../../domain/ai/boardAiChatCitation';
+import type { BoardAiCitationItem } from '../../domain/ai/boardAiChatCitation';
 import { readCurrentSourceVersions } from './boardWikiSourceVersions';
 import { domainError, type DomainError } from '../../domain/core/errors';
 import { err, ok, type Result } from '../../domain/core/result';
@@ -134,19 +138,28 @@ export async function compileBoardWikiProposal(
     return err(domainError('not_found', 'Nothing on this board matches that topic'));
   }
 
-  const tokenedItems = boardWikiPassageTokens(0, passages).map(({ token, passage }) => ({
-    token,
-    item: passage.padletId !== undefined
-      ? { type: 'padlet' as const, padletId: passage.padletId, label: passage.label }
-      : {
-        type: 'knowledge-page' as const,
-        knowledgeDocumentId: String(passage.knowledgeDocumentId),
-        // The passage demonstrably BEGINS at pageStart; it is located, not
-        // invented. Same decision the chat citation path records.
-        ...(passage.pageStart === undefined ? {} : { pageNumber: passage.pageStart }),
-        label: passage.label,
-      },
-  }));
+  // THE SAME RULE THE CHAT CITES BY, not a second copy of it.
+  //
+  // This used to build its own item, and the copy had fallen behind: a
+  // PAGELESS passage became a knowledge-page with no page number, so every
+  // passage of one text source shared a single citation identity and pointed
+  // at a page that does not exist. Two spellings of one rule meant one of them
+  // was always going to be the old one.
+  //
+  // A passage that cannot form a truthful citation yields null and ABORTS the
+  // compile below, for the same reason an unversionable one does: a wiki page
+  // whose references are partly guesses is worse than no page.
+  const tokenedItems: { token: string; item: BoardAiCitationItem }[] = [];
+  for (const { token, passage } of boardWikiPassageTokens(0, passages)) {
+    const item = boardAiCitationItemFromPassage(passage);
+    if (item === null) {
+      return err(domainError(
+        'conflict',
+        'One of the passages for this topic cannot be cited, so this page was not compiled',
+      ));
+    }
+    tokenedItems.push({ token, item });
+  }
 
   // THE COMPILE-TIME VERSION IS READ, NEVER INVENTED. At the moment of
   // compilation the source's CURRENT version is its compile-time version, and

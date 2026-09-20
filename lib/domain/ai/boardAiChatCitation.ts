@@ -13,7 +13,11 @@
  */
 
 import { boardAiContextLabel, isBoardAiContextType } from './boardAiChatContext';
-import type { BoardAiContextType, ResolvedBoardAiContextBlock } from './boardAiChatContext';
+import type {
+  BoardAiCitablePassage,
+  BoardAiContextType,
+  ResolvedBoardAiContextBlock,
+} from './boardAiChatContext';
 
 export const BOARD_AI_CITATION_VERSION = 1;
 
@@ -247,6 +251,22 @@ function citationItemFromPassage(
   if (block.type !== 'board-search') return null;
   const passage = block.passages?.[passageIndex];
   if (!passage) return null;
+  return boardAiCitationItemFromPassage(passage);
+}
+
+/**
+ * ONE PASSAGE, ONE CITATION -- the rule, in one place.
+ *
+ * Exported because the wiki compiles from the same passages the chat cites,
+ * and it was building its own item: a pageless passage became a
+ * knowledge-page with no page number, which is the Decision 0 collapse (every
+ * passage of one document sharing a single citation identity, pointing at a
+ * page that does not exist). Two copies of this rule meant one of them was
+ * always going to be the old one.
+ */
+export function boardAiCitationItemFromPassage(
+  passage: BoardAiCitablePassage,
+): BoardAiCitationItem | null {
   const label = boardAiContextLabel(passage.label);
   if (!label) return null;
 
