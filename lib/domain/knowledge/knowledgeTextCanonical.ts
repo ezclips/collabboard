@@ -70,6 +70,18 @@ export function canonicalizeKnowledgeText(bytes: Uint8Array): KnowledgeTextCanon
     return { ok: false, reason: 'not-utf8', message: MESSAGES['not-utf8'] };
   }
 
+  return canonicalizeDecodedKnowledgeText(decoded);
+}
+
+/**
+ * The same contract, from a string that is already text.
+ *
+ * Split out for the extraction step: a DOCX is a ZIP, so it never survives the
+ * strict decode above and must be turned into text BEFORE canonicalisation.
+ * Both paths converge here, so a `.txt` and a `.docx` are normalised by one
+ * rule rather than by two that drift.
+ */
+export function canonicalizeDecodedKnowledgeText(decoded: string): KnowledgeTextCanonicalResult {
   // A BOM anywhere else is a legitimate (if odd) zero-width character and is
   // left alone; only a LEADING one is an encoding marker rather than content.
   const withoutBom = decoded.startsWith(BOM) ? decoded.slice(BOM.length) : decoded;

@@ -7,6 +7,10 @@ import {
 } from '@/lib/domain/knowledge/knowledgeIngestion';
 import { isKnowledgeTextCandidate } from '@/lib/domain/knowledge/knowledgeTextIngestion';
 import {
+  extractKnowledgeDocxText,
+  isKnowledgeDocxCandidate,
+} from '@/lib/infra/knowledge/knowledgeDocxExtractionAdapter';
+import {
   createKnowledgeTextUpload,
   type KnowledgeTextChunkHasher,
   type KnowledgeTextUploadDeps,
@@ -129,7 +133,21 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       // predicate; it only chooses which of them answers.
       const input = { boardId: asBoardId(boardId), userId: asUserId(userId), file: source };
       let result;
-      if (isKnowledgeTextCandidate(source)) {
+      if (isKnowledgeDocxCandidate(source)) {
+        // EXTRACTION BEFORE CANONICALISATION. A .docx is a ZIP and would fail
+        // the strict UTF-8 decode the text path opens with, so it is turned
+        // into text first and the text path is handed the result. Doing it the
+        // other way -- canonicalise, extract on failure -- would make a corrupt
+        // .docx indistinguishable from a mis-encoded text file.
+        const extracted = await extractKnowledgeDocxText(bytes);
+        if (!extracted.ok) return domainErrorResponse(extracted.error);
+        const text = deps.createTextIngestionDeps();
+        result = await createKnowledgeTextUpload(
+          text.deps,
+          { ...input, file: { ...source, extraction: extracted.value } },
+          text.hashChunk,
+        );
+      } else if (isKnowledgeTextCandidate(source)) {
         const text = deps.createTextIngestionDeps();
         result = await createKnowledgeTextUpload(text.deps, input, text.hashChunk);
       } else {

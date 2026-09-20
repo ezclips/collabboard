@@ -17,6 +17,7 @@ import type { DomainError } from '../core/errors';
 import { err, ok, type Result } from '../core/result';
 
 import {
+  canonicalizeDecodedKnowledgeText,
   canonicalizeKnowledgeText,
 } from './knowledgeTextCanonical';
 import { buildKnowledgeTextChunks, type KnowledgeTextChunkDraft } from './knowledgeTextChunking';
@@ -43,10 +44,30 @@ export const KNOWLEDGE_TEXT_ACCEPT = [
   ...KNOWLEDGE_TEXT_EXTENSIONS,
 ].join(',');
 
+/**
+ * The result of turning a source into text, when that took a step.
+ *
+ * EXTRACTION COMES BEFORE CANONICALISATION, and this is what carries it.
+ * A `.txt` or `.md` needs no extraction -- the bytes ARE the text -- so this is
+ * absent for them and Stage 1's path is unchanged bit for bit. A `.docx` is a
+ * ZIP and never survives the strict UTF-8 decode, so it arrives here already
+ * turned into text by the adapter that knows how.
+ */
+export interface KnowledgeSourceExtraction {
+  readonly text: string;
+  readonly parserName: string;
+  readonly parserVersion: string;
+  /** Content that carried no text, so the upload can disclose it. */
+  readonly imageCount: number;
+  readonly footnoteCount: number;
+}
+
 export interface KnowledgeTextCandidate {
   readonly filename: string;
   readonly mimeType: string;
   readonly bytes: Uint8Array;
+  /** Absent means identity: this file's bytes are already its text. */
+  readonly extraction?: KnowledgeSourceExtraction;
 }
 
 export interface ValidatedKnowledgeTextSource {
@@ -57,6 +78,8 @@ export interface ValidatedKnowledgeTextSource {
   /** The one string offsets, the hash and chunks are all computed against. */
   readonly canonicalText: string;
   readonly chunks: readonly KnowledgeTextChunkDraft[];
+  /** Absent for a source whose bytes were already its text. */
+  readonly extraction?: KnowledgeSourceExtraction;
 }
 
 const hasTextExtension = (filename: string) =>
@@ -88,7 +111,12 @@ export function validateKnowledgeTextSource(
     return err(domainError('validation', 'A filename is required'));
   }
 
-  if (!isKnowledgeTextCandidate({ filename: originalFilename, mimeType: candidate.mimeType })) {
+  // A candidate that arrives WITH an extraction was routed by the step that
+  // produced it; re-checking the text rules here would refuse every .docx.
+  if (
+    candidate.extraction === undefined
+    && !isKnowledgeTextCandidate({ filename: originalFilename, mimeType: candidate.mimeType })
+  ) {
     return err(domainError('validation', 'That file type cannot be added to Knowledge', {
       details: { mimeType: candidate.mimeType, filename: originalFilename },
     }));
@@ -98,12 +126,37 @@ export function validateKnowledgeTextSource(
     return err(domainError('validation', 'The selected file is empty'));
   }
 
-  const canonical = canonicalizeKnowledgeText(candidate.bytes);
+  const canonical = candidate.extraction === undefined
+    ? canonicalizeKnowledgeText(candidate.bytes)
+    : canonicalizeDecodedKnowledgeText(candidate.extraction.text);
   if (!canonical.ok) {
     // The refusal's own sentence, not a paraphrase: it names what to do next.
     return err(domainError('validation', canonical.message, {
       details: { reason: canonical.reason },
     }));
+  }
+
+  // A DOCUMENT THAT EXTRACTED TO NOTHING IS REFUSED, and a blank .txt is not.
+  //
+  // The two look alike and are not. A blank text file is transparently blank:
+  // the person who chose it can open it and see that. A Word document full of
+  // screenshots looks like a document full of content, extracts to nothing,
+  // and would sit in the library claiming to be indexed. Refusing it is the
+  // only answer that tells the truth at the moment the user can still act.
+  //
+  // NO THRESHOLD, deliberately: a two-line document is a legitimate document,
+  // and any "too little" number would refuse real sources to catch this one.
+  // The test is nothing at all, not nearly nothing.
+  if (candidate.extraction !== undefined && canonical.text.trim().length === 0) {
+    return err(domainError(
+      'validation',
+      candidate.extraction.imageCount > 0
+        // Named rather than generic: this is the common case, and the person
+        // needs to know it is the pictures, not a broken file.
+        ? 'No text could be read from this document. Text inside images is not read.'
+        : 'No text could be read from this document',
+      { details: { imageCount: candidate.extraction.imageCount } },
+    ));
   }
 
   return ok({
@@ -112,5 +165,6 @@ export function validateKnowledgeTextSource(
     fileSizeBytes: candidate.bytes.byteLength,
     canonicalText: canonical.text,
     chunks: buildKnowledgeTextChunks(canonical.text),
+    extraction: candidate.extraction,
   });
 }

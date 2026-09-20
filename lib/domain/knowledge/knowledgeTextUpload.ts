@@ -56,6 +56,13 @@ import type { BoardId, KnowledgeDocumentId, UserId } from '../core/ids';
 import type { KnowledgeDocument } from './knowledgePersistence';
 
 import { knowledgeTextHashInput } from './knowledgeTextCanonical';
+import {
+  canonicalExtractionContractJson,
+  KNOWLEDGE_DOCX_CONTRACT_V1,
+  KNOWLEDGE_TEXT_CONTRACT_V1,
+  KNOWLEDGE_TEXT_EXTRACTOR_NAME,
+  KNOWLEDGE_TEXT_EXTRACTOR_VERSION,
+} from './knowledgeExtractionContract';
 import { assertLosslessChunking, type KnowledgeTextChunkDraft } from './knowledgeTextChunking';
 import {
   KNOWLEDGE_TEXT_KIND,
@@ -89,6 +96,10 @@ export interface KnowledgeTextDocumentInsert {
   readonly storagePath: string;
   readonly contentSha256: string;
   readonly kind: typeof KNOWLEDGE_TEXT_KIND;
+  /** What produced the text, and under which extraction contract. */
+  readonly parserName: string;
+  readonly parserVersion: string;
+  readonly parserOptionsHash: string;
 }
 
 export interface KnowledgeTextRepository {
@@ -118,15 +129,40 @@ export interface CreateKnowledgeTextUploadInput {
 /**
  * Where the original bytes live.
  *
- * The extension is taken from the KIND, never from the user's filename: a
- * filename is caller-controlled and a path built from one can escape its
- * prefix. The same rule buildKnowledgeStoragePath states for PDFs.
+ * THIS USED TO SAY the extension is taken from the kind and never from the
+ * user's filename, because a filename is caller-controlled and a path built
+ * from one can escape its prefix. The reasoning still holds; the conclusion
+ * changed, because `.txt` for every source became false the moment a .docx was
+ * retained.
+ *
+ * So the filename now contributes the extension and is NOT trusted to: only a
+ * short, lowercase, alphanumeric suffix is accepted, and anything else falls
+ * back to `.txt`. No dots, no slashes and no traversal can reach the key --
+ * see knowledgeSourceExtension, where that is the whole job.
  */
 export function buildKnowledgeTextStoragePath(
   boardId: BoardId,
   documentId: KnowledgeDocumentId,
+  originalFilename = '',
 ): string {
-  return `knowledge/${boardId}/${documentId}/original.txt`;
+  // THE RETAINED BLOB KEEPS THE SOURCE'S OWN EXTENSION. It used to be `.txt`
+  // for everything, which was true while everything was text and became a lie
+  // the moment a .docx was retained: the original bytes would sit in storage
+  // under a name claiming to be plain text, and anything that later serves
+  // them -- a download, a re-extraction -- would start from that claim.
+  const extension = knowledgeSourceExtension(originalFilename);
+  return `knowledge/${boardId}/${documentId}/original${extension}`;
+}
+
+/** The source's own extension, lowercased, or `.txt` when it has none. */
+export function knowledgeSourceExtension(originalFilename: string): string {
+  const dot = originalFilename.lastIndexOf('.');
+  if (dot <= 0 || dot === originalFilename.length - 1) return '.txt';
+  const extension = originalFilename.slice(dot).toLowerCase();
+  // Bounded and character-checked: this string becomes part of a storage KEY,
+  // and a filename is caller-controlled. Anything unexpected falls back
+  // rather than travelling into the path.
+  return /^\.[a-z0-9]{1,12}$/.test(extension) ? extension : '.txt';
 }
 
 /** The per-chunk hash, mirroring what the PDF chunker stores. */
@@ -163,10 +199,38 @@ export async function createKnowledgeTextUpload(
   // different line endings is the same version. See knowledgeTextCanonical.
   const contentSha256 = await deps.hasher.sha256(knowledgeTextHashInput(canonicalText));
   const documentId = deps.ids.newDocumentId();
-  const storagePath = buildKnowledgeTextStoragePath(input.boardId, documentId);
+  const storagePath = buildKnowledgeTextStoragePath(
+    input.boardId,
+    documentId,
+    validated.value.originalFilename,
+  );
 
-  const uploaded = await deps.storage.upload(storagePath, input.file.bytes, 'text/plain');
+  // THE REAL MEDIA TYPE, not 'text/plain'. A .docx stored as text/plain would
+  // be served as text/plain, and the first thing to fetch it back would have
+  // to disbelieve the storage layer to read it.
+  const storedMimeType = validated.value.mimeType.trim() || 'text/plain';
+  const uploaded = await deps.storage.upload(storagePath, input.file.bytes, storedMimeType);
   if (!uploaded.ok) return uploaded;
+
+  // WHAT PRODUCED THIS TEXT, recorded per document.
+  //
+  // The contract is hashed rather than named: parser_options_hash is a hash in
+  // every other kind that writes it, and a bare version string there would be
+  // a second meaning for one column. The version travels inside the hashed
+  // options, so the hash moves when any rule moves -- including a rule edited
+  // without remembering to bump the version. The committed contract registry
+  // is what turns a stored hash back into a name and a number.
+  //
+  // Text sources start recording this too, from now on. Rows written before
+  // this keep NULL: nothing was captured for them, and filling it in now would
+  // be claiming metadata that never existed.
+  const extraction = validated.value.extraction;
+  const contract = extraction === undefined
+    ? KNOWLEDGE_TEXT_CONTRACT_V1
+    : KNOWLEDGE_DOCX_CONTRACT_V1;
+  const parserOptionsHash = await deps.hasher.sha256(
+    new TextEncoder().encode(canonicalExtractionContractJson(contract)),
+  );
 
   const inserted = await deps.repository.insertTextDocument({
     id: documentId,
@@ -178,6 +242,9 @@ export async function createKnowledgeTextUpload(
     storagePath,
     contentSha256,
     kind: KNOWLEDGE_TEXT_KIND,
+    parserName: extraction?.parserName ?? KNOWLEDGE_TEXT_EXTRACTOR_NAME,
+    parserVersion: extraction?.parserVersion ?? KNOWLEDGE_TEXT_EXTRACTOR_VERSION,
+    parserOptionsHash,
   });
   if (!inserted.ok) {
     await deps.storage.remove(storagePath);

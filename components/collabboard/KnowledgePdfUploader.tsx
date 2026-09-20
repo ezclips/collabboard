@@ -11,6 +11,7 @@ import React, {
 import { useParams } from 'next/navigation';
 
 import { KNOWLEDGE_TEXT_ACCEPT } from '@/lib/domain/knowledge/knowledgeTextIngestion';
+import { KNOWLEDGE_DOCX_ACCEPT } from '@/lib/domain/knowledge/knowledgeDocxSource';
 
 export type KnowledgePdfProcessingStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
 
@@ -52,7 +53,8 @@ export interface KnowledgePdfPlacementSource {
  * is a convenience, never a control -- the route validates every upload
  * regardless of what the dialog filtered.
  */
-export const KNOWLEDGE_UPLOAD_ACCEPT = `application/pdf,.pdf,${KNOWLEDGE_TEXT_ACCEPT}`;
+export const KNOWLEDGE_UPLOAD_ACCEPT =
+  `application/pdf,.pdf,${KNOWLEDGE_TEXT_ACCEPT},${KNOWLEDGE_DOCX_ACCEPT}`;
 
 export interface KnowledgePdfUploadResult extends KnowledgePdfPlacementSource {
   boardId: string;

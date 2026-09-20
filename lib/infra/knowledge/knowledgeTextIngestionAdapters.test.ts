@@ -76,6 +76,11 @@ const record = {
   id: DOC, boardId: BOARD, createdBy: USER, originalFilename: 'notes.txt',
   mimeType: 'text/plain', fileSizeBytes: 12, storagePath: 'p', contentSha256: 'h',
   kind: 'text' as const,
+  // Stage 2: what produced the text, and under which extraction contract.
+  // Text sources record this too now -- previously all three were NULL.
+  parserName: 'knowledge-text-canonical',
+  parserVersion: '1',
+  parserOptionsHash: 'contract-hash',
 };
 
 const chunk = (index: number) => ({
