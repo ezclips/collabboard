@@ -599,11 +599,21 @@ export default function KnowledgeSourceReaderDrawer({
   const openCitation = useCallback((request: {
     readonly knowledgeDocumentId: string;
     readonly pageNumber?: number;
+    readonly charStart?: number;
+    readonly charEnd?: number;
   }) => {
     if (!onOpenKnowledgeDocument) return;
     onOpenKnowledgeDocument({
       documentId: request.knowledgeDocumentId,
       ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),
+      // A citation into a PAGELESS source locates itself by range. This is the
+      // reader's OWN AI panel, so in the focused workspace it is the only way
+      // a citation is followed at all -- dropping it here would open the right
+      // document at no particular place, which reads as "the citation worked"
+      // and is the defect this stage exists to prevent.
+      ...(request.charStart === undefined || request.charEnd === undefined
+        ? {}
+        : { charStart: request.charStart, charEnd: request.charEnd }),
       presentation,
       // Whichever document this lands on -- this one or another -- the reader
       // must end up showing it, not presenting it behind a panel.

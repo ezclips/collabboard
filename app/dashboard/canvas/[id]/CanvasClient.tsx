@@ -2405,6 +2405,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     documentId: string;
     originalFilename?: string;
     pageNumber?: number;
+    charStart?: number;
+    charEnd?: number;
     revealSource?: boolean;
   }) => {
     if (!sourceReferenceScopeKey) return;
@@ -2416,7 +2418,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         knowledgeDocumentRequestIdRef.current,
         request.documentId,
         restoredPage,
-        { revealSource: request.revealSource },
+        {
+          revealSource: request.revealSource,
+          // CARRIED, NOT RESTORED -- unlike the page above. A remembered page
+          // is where you were last reading, which is worth returning to; a
+          // remembered RANGE is a citation someone followed once, and
+          // re-highlighting it when a tab is merely re-activated would mark a
+          // passage this open never asked for. So it travels only when this
+          // request names it, and re-activation carries none.
+          charStart: request.charStart,
+          charEnd: request.charEnd,
+        },
       ),
     );
   }, [sourceReferenceScopeKey, pdfWorkspacePageById, registerPdfWorkspaceDocument]);

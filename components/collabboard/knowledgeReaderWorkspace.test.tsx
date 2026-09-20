@@ -562,3 +562,65 @@ describe('PDF-R6K: clean page chrome, a pager, and a transient area rectangle', 
     expect(b).toMatch(/note-from-area[\s\S]{0,1600}setArmedRegion\(null\)/);
   });
 });
+
+/**
+ * Stage 1 -- a citation's RANGE must survive the trip to either host.
+ *
+ * Found live: the docked path carried charStart/charEnd and the focused path
+ * dropped them in two separate places, so a citation into a pageless source
+ * opened the right document at no particular place. That reads as "the
+ * citation worked", which is worse than an obvious failure -- it is the exact
+ * shape of defect this stage exists to prevent.
+ *
+ * Source proofs because the drop was in the PLUMBING, not in the reader: the
+ * drawer's own suite already mounts both hosts and asserts the rendered range,
+ * and it passed throughout while these two hand-offs were losing the locator.
+ */
+describe('Stage 1. the workspace hand-off carries the citation range', () => {
+  const CANVAS = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+
+  it('openPdfWorkspaceDocument accepts a range and passes it to the builder', () => {
+    const block = CANVAS.slice(
+      CANVAS.indexOf('const openPdfWorkspaceDocument = useCallback('),
+      CANVAS.indexOf('const activatePdfWorkspaceTab = useCallback('),
+    );
+    expect(block.length).toBeGreaterThan(0);
+    expect(block).toContain('charStart?: number;');
+    expect(block).toContain('charEnd?: number;');
+    expect(block).toContain('charStart: request.charStart,');
+    expect(block).toContain('charEnd: request.charEnd,');
+  });
+
+  it('a range is CARRIED, never restored like a page', () => {
+    // A remembered page is where you were last reading. A remembered range is
+    // a citation someone followed once, and re-highlighting it when a tab is
+    // merely re-activated would mark a passage this open never asked for.
+    const block = CANVAS.slice(
+      CANVAS.indexOf('const openPdfWorkspaceDocument = useCallback('),
+      CANVAS.indexOf('const activatePdfWorkspaceTab = useCallback('),
+    );
+    expect(block).toContain('request.pageNumber ?? pdfWorkspacePageById[request.documentId]');
+    expect(block).not.toMatch(/charStart[^\n]*\?\?/);
+
+    const reactivate = CANVAS.slice(
+      CANVAS.indexOf('const activatePdfWorkspaceTab = useCallback('),
+      CANVAS.indexOf('const closePdfWorkspace = useCallback('),
+    );
+    expect(reactivate).not.toContain('charStart');
+  });
+
+  it("the reader's own AI panel forwards the range in BOTH hosts", () => {
+    // In the focused workspace this handler is the only way a citation is
+    // followed at all, so a drop here is invisible until someone clicks one.
+    const block = DRAWER.slice(
+      DRAWER.indexOf('const openCitation = useCallback('),
+      DRAWER.indexOf('const openCitation = useCallback(') + 1200,
+    );
+    expect(block).toContain('readonly charStart?: number;');
+    expect(block).toContain('{ charStart: request.charStart, charEnd: request.charEnd }');
+    // Both halves or neither: half a range locates nothing.
+    expect(block).toContain('request.charStart === undefined || request.charEnd === undefined');
+    // One handler, and both hosts pass it.
+    expect((DRAWER.match(/onOpenCitation=\{openCitation\}/g) || []).length).toBe(2);
+  });
+});
