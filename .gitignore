@@ -57,7 +57,12 @@ devserver.out.log
 # units are that rule again for work NOT YET DISPATCHED: each unit's decisions
 # are reserved for a human and its costs were measured against the live
 # database, so a later reader inherits the measurement instead of re-deriving
-# it -- and instead of inheriting the wrong number from a chat log.
+# it -- and instead of inheriting the wrong number from a chat log. The media
+# sources unit is the same rule once more, and it carries something the others
+# do not: CORRECTIONS TO ITS OWN EARLIER DRAFT, each with the schema or function
+# that disproved it. A plan that was wrong once and is now right reads
+# identically to a plan that was always right -- unless the disproof travels
+# with it, which is how the "risk-free" stage stops being re-proposed.
 # `.agent/*` rather than `.agent/` is what makes a negation possible at all --
 # git will not descend into an ignored directory.
 .agent/*
@@ -66,6 +71,7 @@ devserver.out.log
 !.agent/retrieval-followups.md
 !.agent/wiki-plan.md
 !.agent/canvas-retrieval-units.md
+!.agent/media-sources-unit.md
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/
