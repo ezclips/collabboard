@@ -26,9 +26,12 @@
  *                       four-shaft table loom."
  *   word/numbering.xml  1 w:abstractNum definition
  *
- * Word also emits parts no library writer produces -- people.xml, theme1.xml,
- * settings.xml, webSettings.xml, fontTable.xml -- which is the point of using
- * a real one.
+ * WHERE PROVENANCE COMES FROM, since it is easy to get this backwards. It is
+ * the documented creation process -- the committed COM script, reproducible
+ * and inspectable -- and not the presence of parts like people.xml or
+ * settings.xml. Any writer could emit those, so they prove nothing about
+ * authorship. The XML above is cited for something narrower and checkable:
+ * WHICH STRUCTURES this specimen actually exercises.
  */
 import fs from 'node:fs';
 import path from 'node:path';

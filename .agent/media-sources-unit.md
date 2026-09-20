@@ -288,6 +288,83 @@ this slips with it; it has no independent risk of its own.
 
 As Stage 1, on a real .docx with headings and lists. Battery before/after.
 
+## Stage 2 — ACCEPTED 2026-09-21
+
+Accepted by the PM on the evidence below, after an independent structural check
+of the committed specimen bytes matched the report one for one.
+
+**No schema change.** DOCX reuses `kind: 'text'`; format identity rides in
+`mime_type` + `original_filename` + the retained blob. `parser_name`,
+`parser_version` and `parser_options_hash` already existed and are now written
+for TXT/MD uploads too. No CHECK widening, no new kind, no migration.
+
+### The specimen
+
+| | |
+|---|---|
+| File | `lib/infra/knowledge/fixtures/docx/word-authored.docx` (18,405 B) |
+| Written by | Microsoft Word 16.0 |
+| How | `scripts/fixtures/make-word-authored-docx.ps1` — opens Word over COM, types, and asks Word to save |
+| Tests | `lib/infra/knowledge/knowledgeDocxWordAuthored.test.ts` (7) |
+
+**Provenance rests on the documented creation process** — the committed script,
+reproducible and inspectable — **not** on the presence of parts such as
+`people.xml` or `settings.xml`. Any writer could emit those, so they prove
+nothing about authorship; an earlier draft argued from them and that argument is
+withdrawn. The XML is cited only for the narrower, checkable claim of **which
+structures the specimen exercises**.
+
+It was machine-driven rather than typed by a person. The PM accepted that
+explicitly: Word itself created and serialised the bytes, and human typing was
+never an acceptance condition.
+
+### Structures exercised, counted in the document's own XML
+
+1 `w:tbl` / 3 `w:tr` / 6 `w:tc`; 4 `w:numPr` (two at `w:ilvl` 0, two at 1) over
+a real `w:abstractNum`; 1 `w:footnoteReference` with its body in
+`word/footnotes.xml`; 1 `w:ins` and 1 `w:del` whose `w:delText` is `"rarely "`
+exactly once; 20 `w:p`; headings resolved through Word's own `styles.xml`
+(`Heading1` → `heading 1`, `w:outlineLvl` 0).
+
+### Expected text derived independently
+
+Read out of `document.xml` and `footnotes.xml` and reduced **by hand** under the
+contract rule — insertions kept, deletions dropped — **before** extraction was
+run, so the test is a check on the parser rather than a transcript of it. The
+extractor produced exactly that: **551 code units**, nesting preserved with the
+inner level restarting at 1 and the outer continuing at 2, table rows joined,
+footnote inline with its body appended, and the sentence reading *"The tidewater
+sett is twenty ends per inch."* with `rarely` nowhere. The `w:delText` trap is
+closed on a real Word document.
+
+### Timing
+
+Five consecutive runs through the whole pipeline, including the bounded archive
+scan and the extraction worker: **199, 161, 180, 167, 201 ms**. Input 18,405 B,
+**86,352 B inflated (measured)**, 551 code units. Dominated by worker startup.
+
+**Scope of that figure:** it is documented at this 18 KB specimen's scale and is
+not a claim about larger documents.
+
+### Live persistence
+
+Uploaded through the real file input on `next dev`: stored canonical text
+**551 code units, identical to the offline extraction**. The tracked-changes
+disclosure fired; the image disclosure was **correctly silent** — a negative
+control on a real Word file.
+
+Full record, including the production-build readings and the bounded-inflation
+work: `.agent/docx-live-acceptance.md`.
+
+### Carried forward, unchanged
+
+- **The focused-workspace range exception**, as accepted at Stage 1 and recorded
+  in `retrieval-followups.md` item 16. Not reopened.
+- The deferred **page/text toggle** wart.
+- The `knowledge/search` endpoint audit (unmounted caller, no user-visible
+  impact) and the documented, untouched citation identity key — both accepted as
+  recorded, with no change proposed.
+
 ---
 
 # Stage 3 — YouTube (the risky one)
