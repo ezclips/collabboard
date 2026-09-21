@@ -53,26 +53,50 @@ export async function readCurrentSourceVersions(
   const byRowIdentity = new Map<string, BoardWikiSourceVersion>();
 
   if (documentIds.length > 0) {
-    const { data } = await client
+    // `transcript_mutation_revision::text` is REQUIRED, not cosmetic. PostgREST
+    // serializes int8 as a JSON number, and JSON.parse rounds it before this
+    // code runs -- stringifying afterwards would preserve a value that is
+    // already wrong for a revision past Number.MAX_SAFE_INTEGER. The cast is
+    // the only place the exact value survives the wire; the returned key is
+    // still `transcript_mutation_revision`.
+    const { data, error } = await client
       .from('knowledge_documents')
-      .select('id, content_sha256, updated_at')
+      .select('id, content_sha256, transcript_mutation_revision::text, updated_at')
       .eq('board_id', boardId)
       .in('id', documentIds);
+    // A failed read must fail loudly. Swallowing the error would leave `data`
+    // null, the map empty, and EVERY source on the page rendering as gone --
+    // telling a user their sources were deleted when the query merely failed.
+    // FLAG, DO NOT BURY applies in both directions.
+    if (error) throw error;
     for (const row of (data ?? []) as readonly Record<string, unknown>[]) {
+      const revision = row.transcript_mutation_revision;
       byRowIdentity.set(`document:${String(row.id)}`, {
         kind: 'document',
         contentSha256: typeof row.content_sha256 === 'string' ? row.content_sha256 : null,
         updatedAt: String(row.updated_at ?? ''),
+        // Same conditional-key rule as the parser: a string is the value; a
+        // bare number is the fallback for an uncast response and is stringified,
+        // though a rounded number cannot be un-rounded; anything else omits the
+        // key rather than materializing a null.
+        ...(typeof revision === 'string'
+          ? { transcriptMutationRevision: revision }
+          : typeof revision === 'number'
+            ? { transcriptMutationRevision: String(revision) }
+            : {}),
       });
     }
   }
 
   if (padletIds.length > 0) {
-    const { data } = await client
+    const { data, error } = await client
       .from('padlets')
       .select('id, updated_at')
       .eq('board_id', boardId)
       .in('id', padletIds);
+    // Same rule as the document read above: a failed read is never an empty
+    // board.
+    if (error) throw error;
     for (const row of (data ?? []) as readonly Record<string, unknown>[]) {
       byRowIdentity.set(`padlet:${String(row.id)}`, {
         kind: 'post',

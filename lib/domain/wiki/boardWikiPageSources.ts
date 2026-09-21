@@ -30,6 +30,16 @@ export type BoardWikiSourceVersion =
     readonly kind: 'document';
     /** From ingestion. Null for a document ingested before hashing existed. */
     readonly contentSha256: string | null;
+    /**
+     * bigint, carried as a STRING, and ABSENT rather than null when unknown.
+     *
+     * `| null` is deliberately NOT in this type. A materialized null breaks
+     * toEqual expectations that predate the field -- toEqual treats an absent key
+     * and undefined as equal, but null as a difference -- and the reader
+     * normalizes with `?? null` anyway. Leaving null out makes the compiler
+     * enforce that, instead of this comment.
+     */
+    readonly transcriptMutationRevision?: string;
     readonly updatedAt: string;
   }
   | {
@@ -69,15 +79,36 @@ export type BoardWikiCurrentVersions = ReadonlyMap<string, BoardWikiSourceVersio
 /**
  * Has this source changed since the page was compiled?
  *
- * A DOCUMENT COMPARES ITS HASH FIRST. `content_sha256` is the only signal that
+ * A DOCUMENT COMPARES TWO TOKENS, and neither subsumes the other. A transcript
+ * carries `content_sha256` -- a fingerprint over canonical text, every cue's
+ * character range and timings, and the claimed video identity -- AND
+ * `transcript_mutation_revision`, a monotonic counter that advances for
+ * metadata-only edits and same-hash format replacements, which leave the hash
+ * deliberately unchanged. Compare only the hash and a corrected title reads as
+ * current; compare only the revision and a re-imported transcript whose text
+ * and timings moved reads as current. So a differing revision, when BOTH sides
+ * carry one, is a change on its own.
+ *
+ * A DOCUMENT ALSO COMPARES ITS HASH. `content_sha256` is the signal that
  * actually tracks content; `updated_at` moves for reasons that are not content
  * at all -- a re-render, a status transition, a backfill. The hash is used when
  * both sides have one, and `updated_at` is the fallback when either does not,
- * because a missing hash must not read as "unchanged".
+ * because a missing hash must not read as "unchanged". An absent revision on
+ * either side falls through to that same logic rather than manufacturing
+ * staleness: every page compiled before this field existed has an absent
+ * revision, and marking all of them stale would be worse than the defect.
  */
 function hasChanged(recorded: BoardWikiSourceVersion, current: BoardWikiSourceVersion): boolean {
   if (recorded.kind !== current.kind) return true;
   if (recorded.kind === 'document' && current.kind === 'document') {
+    // Opaque strings compared for inequality, never parsed as numbers: a bigint
+    // past Number.MAX_SAFE_INTEGER rounds, and two different revisions would
+    // then read as equal.
+    const recordedRevision = recorded.transcriptMutationRevision ?? null;
+    const currentRevision = current.transcriptMutationRevision ?? null;
+    if (recordedRevision !== null && currentRevision !== null && recordedRevision !== currentRevision) {
+      return true;
+    }
     if (recorded.contentSha256 !== null && current.contentSha256 !== null) {
       return recorded.contentSha256 !== current.contentSha256;
     }
@@ -200,6 +231,12 @@ function parseVersion(raw: unknown): BoardWikiSourceVersion | null {
       kind: 'document',
       contentSha256: typeof entry.contentSha256 === 'string' ? entry.contentSha256 : null,
       updatedAt: entry.updatedAt,
+      // Conditional, never `transcriptMutationRevision: null`: an absent key and
+      // null are different to toEqual, and the absent key is what old stored
+      // entries really have.
+      ...(typeof entry.transcriptMutationRevision === 'string'
+        ? { transcriptMutationRevision: entry.transcriptMutationRevision }
+        : {}),
     };
   }
   return null;

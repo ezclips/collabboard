@@ -90,6 +90,92 @@ describe('THE COARSE COMPARISON, pinned so nobody narrows it to the cited page',
   });
 });
 
+describe('transcripts carry two change tokens, and neither subsumes the other', () => {
+  it('METADATA-ONLY: same hash, revision advanced, is stale', () => {
+    // A corrected title, language or track kind moves the revision and
+    // deliberately leaves the hash alone. The hash-only comparison this
+    // replaced read that edit as current on every citing page.
+    const source = docSource(6, { transcriptMutationRevision: '3' });
+    const states = boardWikiSourceStates([source], now([
+      source,
+      { kind: 'document', contentSha256: 'sha-1', transcriptMutationRevision: '4', updatedAt: 'x' },
+    ]));
+    expect(states[0].state).toBe('stale');
+  });
+
+  it('CONTENT REPLACEMENT: both tokens moved, is stale', () => {
+    const source = docSource(6, { transcriptMutationRevision: '3' });
+    const states = boardWikiSourceStates([source], now([
+      source,
+      { kind: 'document', contentSha256: 'sha-2', transcriptMutationRevision: '4', updatedAt: 'x' },
+    ]));
+    expect(states[0].state).toBe('stale');
+  });
+
+  it('TIMING-ONLY: same words, cue times corrected, is stale through the hash', () => {
+    // A regression pin, not new logic: the hash covers cue timings, so a
+    // timing-only correction moves it. The two-token split exists precisely
+    // because the hash does not cover what the revision does.
+    const source = docSource(6, { transcriptMutationRevision: '3' });
+    const states = boardWikiSourceStates([source], now([
+      source,
+      { kind: 'document', contentSha256: 'sha-timing-2', transcriptMutationRevision: '3', updatedAt: 'x' },
+    ]));
+    expect(states[0].state).toBe('stale');
+  });
+
+  it('RE-CLAIMED VIDEO: same words and timings, different video, is stale through the hash', () => {
+    // The claimed video identity is inside the hash because a timestamp means
+    // something different against a different video.
+    const source = docSource(6, { transcriptMutationRevision: '3' });
+    const states = boardWikiSourceStates([source], now([
+      source,
+      { kind: 'document', contentSha256: 'sha-other-video', transcriptMutationRevision: '3', updatedAt: 'x' },
+    ]));
+    expect(states[0].state).toBe('stale');
+  });
+
+  it('a revision on ONE side only is not staleness by itself', () => {
+    // Every page compiled before this field existed has an ABSENT revision.
+    // Manufacturing staleness from that would flag the whole corpus, which is
+    // worse than the defect being fixed.
+    const recordedWithout = docSource(6);
+    const currentWith = boardWikiSourceStates([recordedWithout], now([
+      recordedWithout,
+      { kind: 'document', contentSha256: 'sha-1', transcriptMutationRevision: '4', updatedAt: 'x' },
+    ]));
+    expect(currentWith[0].state).toBe('current');
+
+    const recordedWith = docSource(6, { transcriptMutationRevision: '3' });
+    const currentWithout = boardWikiSourceStates([recordedWith], now([
+      recordedWith,
+      { kind: 'document', contentSha256: 'sha-1', updatedAt: 'x' },
+    ]));
+    expect(currentWithout[0].state).toBe('current');
+  });
+
+  it('BOTH ABSENT: an ordinary document behaves exactly as it does today', () => {
+    const source = docSource(6);
+    const same = boardWikiSourceStates([source], now([source, { kind: 'document', contentSha256: 'sha-1', updatedAt: 'moved' }]));
+    const moved = boardWikiSourceStates([source], now([source, { kind: 'document', contentSha256: 'sha-2', updatedAt: 'x' }]));
+    expect(same[0].state).toBe('current');
+    expect(moved[0].state).toBe('stale');
+  });
+
+  it('revisions past Number.MAX_SAFE_INTEGER compare as STRINGS, not numbers', () => {
+    // Both values round to the same double, so a numeric comparison reads them
+    // as equal and misses the change entirely -- asserted here so the premise
+    // is visible if anyone ever "simplifies" the comparison to Number().
+    expect(Number('9007199254740993')).toBe(Number('9007199254740992'));
+    const source = docSource(6, { transcriptMutationRevision: '9007199254740992' });
+    const states = boardWikiSourceStates([source], now([
+      source,
+      { kind: 'document', contentSha256: 'sha-1', transcriptMutationRevision: '9007199254740993', updatedAt: 'x' },
+    ]));
+    expect(states[0].state).toBe('stale');
+  });
+});
+
 describe('a source that no longer exists is gone, not stale', () => {
   it('is gone when the lookup has no entry for it', () => {
     const source = docSource(6);
@@ -179,6 +265,31 @@ describe('the stored array is untrusted input', () => {
     ]);
     expect(parsed).toHaveLength(2);
     expect(parsed[0].version).toEqual({ kind: 'document', contentSha256: 'sha-1', updatedAt: 't' });
+  });
+
+  it('round-trips a stored revision EXACTLY, past Number.MAX_SAFE_INTEGER', () => {
+    const parsed = boardWikiPageSourcesFromStored([{
+      item: { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 6, label: 'p6' },
+      version: { kind: 'document', contentSha256: 'sha-1', transcriptMutationRevision: '9007199254740993', updatedAt: 't' },
+    }]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].version).toEqual({
+      kind: 'document',
+      contentSha256: 'sha-1',
+      transcriptMutationRevision: '9007199254740993',
+      updatedAt: 't',
+    });
+  });
+
+  it('parses a stored document with no revision with the key ABSENT, not null', () => {
+    // toEqual treats an absent key and undefined as equal but a materialized
+    // null as a difference, and an old stored entry really has no key at all.
+    const parsed = boardWikiPageSourcesFromStored([{
+      item: { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 6, label: 'p6' },
+      version: { kind: 'document', contentSha256: 'sha-1', updatedAt: 't' },
+    }]);
+    expect(parsed).toHaveLength(1);
+    expect(Object.prototype.hasOwnProperty.call(parsed[0].version, 'transcriptMutationRevision')).toBe(false);
   });
 
   it('drops a malformed entry WITHOUT disturbing the ones around it', () => {
