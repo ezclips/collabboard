@@ -40,6 +40,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
+import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 
 /**
  * How long a cached Ready answer is served without revalidating. `/pages` for a
@@ -66,6 +67,13 @@ export interface KnowledgeReadyPages {
    * pages or it has characters.
    */
   readonly text?: string;
+  /**
+   * Present ONLY for a transcript, and carried from the server row rather
+   * than derived here. A reader that inferred "transcript" from the
+   * absence of pages would attach an unverified-claim notice to every
+   * plain text file.
+   */
+  readonly transcriptRepresentation?: KnowledgeTranscriptStoredRepresentation | null;
   /** When this answer arrived, for the freshness rule above. */
   readonly loadedAt: number;
 }
@@ -122,11 +130,42 @@ const newStore = (scope: string | null): Store => ({
   imageless: new Map(),
 });
 
+/**
+ * A transcript representation, checked rather than trusted.
+ *
+ * It arrives over the network, and everything downstream uses its cues to
+ * decide whether a citation may name a moment. A malformed value must
+ * therefore read as "not a transcript" -- no disclosure, no timestamps --
+ * rather than as a transcript whose cues cannot be trusted.
+ */
+function isTranscriptRepresentation(
+  value: unknown,
+): value is KnowledgeTranscriptStoredRepresentation {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.representationVersion !== "number") return false;
+  if (!Array.isArray(record.cues)) return false;
+  return record.cues.every((cue) => {
+    if (!cue || typeof cue !== "object") return false;
+    const entry = cue as Record<string, unknown>;
+    return [entry.charStart, entry.charEnd, entry.startMs, entry.endMs].every(
+      (slot) => typeof slot === "number" && Number.isInteger(slot),
+    );
+  });
+}
+
 /** The same two payload rules the reader has always applied, in one place. */
 export function knowledgeDocumentMetadata(
   value: unknown,
-): { originalFilename: string; pageCount: number | null; kind: string } {
-  if (!value || typeof value !== 'object') return { originalFilename: '', pageCount: null, kind: 'pdf' };
+): {
+  originalFilename: string;
+  pageCount: number | null;
+  kind: string;
+  transcriptRepresentation: KnowledgeTranscriptStoredRepresentation | null;
+} {
+  if (!value || typeof value !== 'object') {
+    return { originalFilename: '', pageCount: null, kind: 'pdf', transcriptRepresentation: null };
+  }
   const record = value as Record<string, unknown>;
   return {
     originalFilename: typeof record.originalFilename === 'string' ? record.originalFilename : '',
@@ -138,6 +177,12 @@ export function knowledgeDocumentMetadata(
     // that value travels through unchanged, and the reader refuses it rather
     // than rendering an unknown source as a PDF.
     kind: typeof record.kind === 'string' && record.kind.length > 0 ? record.kind : 'pdf',
+    // Structurally checked, not cast: this arrives from the network, and a
+    // malformed value must read as 'not a transcript' rather than as a
+    // transcript whose cues cannot be trusted.
+    transcriptRepresentation: isTranscriptRepresentation(record.transcriptRepresentation)
+      ? record.transcriptRepresentation
+      : null,
   };
 }
 

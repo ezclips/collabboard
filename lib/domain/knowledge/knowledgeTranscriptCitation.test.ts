@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  cueOwningRange,
+  cuesIntersectingRange,
   knowledgeTranscriptCitationTarget,
   knowledgeTranscriptVideoUrl,
   KNOWLEDGE_TRANSCRIPT_DISCLOSURE,
@@ -9,8 +9,9 @@ import {
 import type { KnowledgeTranscriptStoredRepresentation } from './knowledgeTranscriptVersion';
 
 // Two cues that OVERLAP IN TIME and are DISJOINT IN CHARACTERS -- the ordinary
-// shape of a machine transcript, and the case a "nearest cue" lookup gets
-// wrong.
+// shape of a machine transcript. Canonical text: 'hello\nthere' (11 units).
+const CANONICAL = 'hello\nthere';
+
 const representation = (
   over: Partial<KnowledgeTranscriptStoredRepresentation> = {},
 ): KnowledgeTranscriptStoredRepresentation => ({
@@ -27,40 +28,43 @@ const representation = (
   ...over,
 });
 
-describe('cueOwningRange', () => {
-  it('finds the cue that wholly contains the range', () => {
-    expect(cueOwningRange(representation(), 0, 5)?.startMs).toBe(1000);
-    expect(cueOwningRange(representation(), 7, 10)?.startMs).toBe(2500);
+const cited = (charStart: number, charEnd: number) => CANONICAL.slice(charStart, charEnd);
+
+describe('cuesIntersectingRange', () => {
+  it('finds the single cue a small range falls in', () => {
+    expect(cuesIntersectingRange(representation(), 0, 5).map((cue) => cue.startMs)).toEqual([1000]);
+    expect(cuesIntersectingRange(representation(), 7, 10).map((cue) => cue.startMs)).toEqual([2500]);
   });
 
-  it('picks by CHARACTERS even though the cues overlap in time', () => {
-    // The second cue starts before the first one ends. A lookup that reasoned
-    // about time would have two candidates here; characters have one.
+  it('finds BOTH cues for a range spanning them', () => {
+    // The case the first version rejected, and the normal shape of a chat
+    // citation: a chunk containing several cues.
+    expect(cuesIntersectingRange(representation(), 3, 8).map((cue) => cue.startMs)).toEqual([
+      1000, 2500,
+    ]);
+  });
+
+  it('returns them in CHARACTER order regardless of their times', () => {
+    // The second cue starts before the first one ends. Ordering by time would
+    // put the wrong cue first and link past the start of the quotation.
     const rep = representation();
     expect(rep.cues[1].startMs).toBeLessThan(rep.cues[0].endMs);
-    expect(cueOwningRange(rep, 6, 11)?.startMs).toBe(2500);
+    expect(cuesIntersectingRange(rep, 0, 11).map((cue) => cue.charStart)).toEqual([0, 6]);
   });
 
-  it('returns nothing for a range spanning two cues', () => {
-    // No single moment was quoted, so no single moment can be named.
-    expect(cueOwningRange(representation(), 3, 8)).toBeNull();
+  it('finds nothing in the gap between cues', () => {
+    expect(cuesIntersectingRange(representation(), 5, 6)).toEqual([]);
   });
 
-  it('returns nothing for a range in the gap between cues', () => {
-    // Offset 5 is the separator: nobody said it.
-    expect(cueOwningRange(representation(), 5, 6)).toBeNull();
-  });
-
-  it('accepts a range that exactly meets a cue boundary', () => {
-    expect(cueOwningRange(representation(), 0, 0)?.startMs).toBe(1000);
-    expect(cueOwningRange(representation(), 5, 5)?.startMs).toBe(1000);
-    expect(cueOwningRange(representation(), 11, 11)?.startMs).toBe(2500);
+  it('ignores zero-length cues, which cover no text', () => {
+    const rep = representation({ cues: [{ charStart: 3, charEnd: 3, startMs: 0, endMs: 0 }] });
+    expect(cuesIntersectingRange(rep, 0, 11)).toEqual([]);
   });
 
   it('refuses an impossible or non-integer range', () => {
-    expect(cueOwningRange(representation(), -1, 5)).toBeNull();
-    expect(cueOwningRange(representation(), 5, 2)).toBeNull();
-    expect(cueOwningRange(representation(), 0.5, 5)).toBeNull();
+    expect(cuesIntersectingRange(representation(), -1, 5)).toEqual([]);
+    expect(cuesIntersectingRange(representation(), 5, 2)).toEqual([]);
+    expect(cuesIntersectingRange(representation(), 0.5, 5)).toEqual([]);
   });
 });
 
@@ -73,8 +77,6 @@ describe('knowledgeTranscriptVideoUrl', () => {
   });
 
   it('fails closed on every identity it does not recognise', () => {
-    // A malformed id interpolated into a URL is at best broken and at worst a
-    // link to someone else's video.
     for (const identity of [
       'dQw4w9WgXcQ',
       'yt:short',
@@ -97,73 +99,160 @@ describe('knowledgeTranscriptVideoUrl', () => {
 });
 
 describe('knowledgeTranscriptCitationTarget', () => {
-  it('offers a timestamp when a cue owns the range and a video is claimed', () => {
-    const target = knowledgeTranscriptCitationTarget(representation(), 6, 11);
+  it('offers a timestamp for a single-cue citation', () => {
+    const target = knowledgeTranscriptCitationTarget(representation(), 6, 11, cited(6, 11));
 
     expect(target.kind).toBe('timestamped');
     if (target.kind === 'timestamped') {
       expect(target.startMs).toBe(2500);
-      expect(target.endMs).toBe(5000);
       expect(target.url).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=2s');
     }
   });
 
+  it('offers the FIRST quoted cue for a citation spanning several', () => {
+    // The separator between the cues is whitespace, so it is accounted for.
+    const target = knowledgeTranscriptCitationTarget(representation(), 0, 11, cited(0, 11));
+
+    expect(target.kind).toBe('timestamped');
+    if (target.kind === 'timestamped') expect(target.startMs).toBe(1000);
+  });
+
   it('opens a plain transcript by range only', () => {
-    // Not a timed transcript with timings missing -- one that never had any.
     const target = knowledgeTranscriptCitationTarget(
       representation({ cues: [], format: 'plain', videoIdentity: null }),
       0,
       10,
+      cited(0, 10),
     );
     expect(target).toEqual({ kind: 'range', reason: 'no-cues' });
   });
 
-  it('opens by range, never by a guess, when no cue owns the offset', () => {
-    // THE INFERENCE THIS MODULE EXISTS TO REFUSE. A nearest-cue lookup would
-    // happily return the previous cue here and send the reader to a moment
-    // nobody quoted.
-    expect(knowledgeTranscriptCitationTarget(representation(), 5, 6)).toEqual({
+  it('opens by range when no cue intersects the citation at all', () => {
+    expect(knowledgeTranscriptCitationTarget(representation(), 5, 6, cited(5, 6))).toEqual({
       kind: 'range',
-      reason: 'no-cue-owns-the-range',
+      reason: 'no-cue-intersects-the-range',
     });
-    expect(knowledgeTranscriptCitationTarget(representation(), 3, 8)).toEqual({
+  });
+
+  it('refuses a timestamp when the citation contains words no cue accounts for', () => {
+    // A cue table that does not describe this text cannot be trusted to time
+    // any part of it.
+    const rep = representation({
+      cues: [{ charStart: 0, charEnd: 5, startMs: 1000, endMs: 3000 }],
+    });
+    expect(knowledgeTranscriptCitationTarget(rep, 0, 11, cited(0, 11))).toEqual({
       kind: 'range',
-      reason: 'no-cue-owns-the-range',
+      reason: 'text-not-accounted-for',
     });
   });
 
   it('opens a timed transcript with no claimed video by range only', () => {
-    expect(knowledgeTranscriptCitationTarget(representation({ videoIdentity: null }), 0, 5)).toEqual(
-      { kind: 'range', reason: 'no-video-claimed' },
-    );
+    expect(
+      knowledgeTranscriptCitationTarget(representation({ videoIdentity: null }), 0, 5, cited(0, 5)),
+    ).toEqual({ kind: 'range', reason: 'no-video-claimed' });
   });
 
   it('opens by range when the claimed identity is malformed', () => {
-    // The identity was never validated on the way in -- it is stored verbatim
-    // as the importer's claim -- so this is the first place it can be refused.
     expect(
-      knowledgeTranscriptCitationTarget(representation({ videoIdentity: 'yt:nope' }), 0, 5),
+      knowledgeTranscriptCitationTarget(representation({ videoIdentity: 'yt:nope' }), 0, 5, cited(0, 5)),
     ).toEqual({ kind: 'range', reason: 'unsupported-video-identity' });
   });
 
-  it('distinguishes its four reasons rather than collapsing them', () => {
-    // They are different facts about the source, and a caller that treated
-    // them alike would tell the reader the wrong thing about it.
-    const reasons = new Set([
-      knowledgeTranscriptCitationTarget(representation({ cues: [] }), 0, 1),
-      knowledgeTranscriptCitationTarget(representation(), 5, 6),
-      knowledgeTranscriptCitationTarget(representation({ videoIdentity: null }), 0, 5),
-      knowledgeTranscriptCitationTarget(representation({ videoIdentity: 'bad' }), 0, 5),
-    ].map((target) => (target.kind === 'range' ? target.reason : 'timestamped')));
+  it('keeps its five reasons distinct rather than collapsing them', () => {
+    const shortRep = representation({
+      cues: [{ charStart: 0, charEnd: 5, startMs: 1000, endMs: 3000 }],
+    });
+    const reasons = new Set(
+      [
+        knowledgeTranscriptCitationTarget(representation({ cues: [] }), 0, 1, cited(0, 1)),
+        knowledgeTranscriptCitationTarget(representation(), 5, 6, cited(5, 6)),
+        knowledgeTranscriptCitationTarget(shortRep, 0, 11, cited(0, 11)),
+        knowledgeTranscriptCitationTarget(representation({ videoIdentity: null }), 0, 5, cited(0, 5)),
+        knowledgeTranscriptCitationTarget(representation({ videoIdentity: 'bad' }), 0, 5, cited(0, 5)),
+      ].map((target) => (target.kind === 'range' ? target.reason : 'timestamped')),
+    );
 
-    expect(reasons.size).toBe(4);
+    expect(reasons.size).toBe(5);
+  });
+});
+
+describe('a realistic chat citation', () => {
+  // WHAT A CITATION ACTUALLY LOOKS LIKE: one chunk covering a ~45-second
+  // window of a machine transcript -- nine short, overlapping cues. The first
+  // version of this module gave every one of these NO timestamp, because no
+  // single cue contained the range.
+  const lines = [
+    'so the first thing to notice', 'is that the numbers here', 'do not add up the way',
+    'you would expect them to', 'and that is the whole point', 'of this section',
+    'which we will come back to', 'after the break', 'in about ten minutes',
+  ];
+
+  const canonical = lines.join('\n');
+  const cues = (() => {
+    const built: { charStart: number; charEnd: number; startMs: number; endMs: number }[] = [];
+    let cursor = 0;
+    lines.forEach((line, index) => {
+      const charStart = cursor;
+      cursor += line.length;
+      built.push({
+        charStart,
+        charEnd: cursor,
+        // Overlapping, as ASR tracks are: each cue runs 6s and starts 5s apart.
+        startMs: 120_000 + index * 5_000,
+        endMs: 120_000 + index * 5_000 + 6_000,
+      });
+      cursor += 1; // the separator
+    });
+    return built;
+  })();
+
+  const rep = (): KnowledgeTranscriptStoredRepresentation => ({
+    representationVersion: 1,
+    videoIdentity: 'yt:dQw4w9WgXcQ',
+    cues,
+    language: 'en',
+    trackKind: 'machine',
+    format: 'vtt',
+    videoAssociation: 'claimed',
+  });
+
+  it('times a whole-window citation at the first cue it quotes', () => {
+    const charStart = 0;
+    const charEnd = canonical.length;
+    const target = knowledgeTranscriptCitationTarget(
+      rep(),
+      charStart,
+      charEnd,
+      canonical.slice(charStart, charEnd),
+    );
+
+    expect(target.kind).toBe('timestamped');
+    if (target.kind === 'timestamped') {
+      expect(target.startMs).toBe(120_000);
+      expect(target.url).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120s');
+    }
+    // Nine cues, one citation, one moment.
+    expect(cuesIntersectingRange(rep(), charStart, charEnd)).toHaveLength(9);
+  });
+
+  it('times a partial citation at the first cue it touches, not the window start', () => {
+    // Starting mid-way through cue 4 must open at cue 4, not at cue 0.
+    const charStart = cues[4].charStart + 3;
+    const charEnd = cues[6].charEnd;
+    const target = knowledgeTranscriptCitationTarget(
+      rep(),
+      charStart,
+      charEnd,
+      canonical.slice(charStart, charEnd),
+    );
+
+    expect(target.kind).toBe('timestamped');
+    if (target.kind === 'timestamped') expect(target.startMs).toBe(cues[4].startMs);
   });
 });
 
 describe('the disclosure', () => {
   it('states both unverified claims', () => {
-    // A reader needs both before trusting a timestamp: a person pasted this,
-    // and a person said which video it belongs to.
     expect(KNOWLEDGE_TRANSCRIPT_DISCLOSURE).toContain('User-provided transcript');
     expect(KNOWLEDGE_TRANSCRIPT_DISCLOSURE).toContain('has not been verified');
   });

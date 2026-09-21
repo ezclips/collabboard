@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { KnowledgeTranscriptCitationLink } from './KnowledgeTranscriptCitationLink';
 import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 
+const CANONICAL = ['hello', 'there'].join(String.fromCharCode(10));
+const cited = (a: number, b: number) => CANONICAL.slice(a, b);
+
 const representation = (
   over: Partial<KnowledgeTranscriptStoredRepresentation> = {},
 ): KnowledgeTranscriptStoredRepresentation => ({
@@ -28,7 +31,7 @@ afterEach(cleanup);
 
 describe('KnowledgeTranscriptCitationLink', () => {
   it('offers the moment when a cue owns the cited range', () => {
-    render(<KnowledgeTranscriptCitationLink representation={representation()} charStart={0} charEnd={5} />);
+    render(<KnowledgeTranscriptCitationLink representation={representation()} charStart={0} charEnd={5} citedText={cited(0, 5)} />);
 
     const link = screen.getByRole('link', { name: /Open at 0:01/ });
     expect(link.getAttribute('href')).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1s');
@@ -38,7 +41,7 @@ describe('KnowledgeTranscriptCitationLink', () => {
   });
 
   it('formats past an hour as h:mm:ss', () => {
-    render(<KnowledgeTranscriptCitationLink representation={representation()} charStart={6} charEnd={11} />);
+    render(<KnowledgeTranscriptCitationLink representation={representation()} charStart={6} charEnd={11} citedText={cited(6, 11)} />);
     expect(screen.getByRole('link', { name: /Open at 1:02:05/ })).toBeTruthy();
   });
 
@@ -46,7 +49,7 @@ describe('KnowledgeTranscriptCitationLink', () => {
     // Offset 5 is the separator between two cues: nobody said it. A
     // nearest-cue guess would link to a moment nobody quoted, and nothing
     // about that link would look wrong.
-    render(<KnowledgeTranscriptCitationLink representation={representation()} charStart={5} charEnd={6} />);
+    render(<KnowledgeTranscriptCitationLink representation={representation()} charStart={5} charEnd={6} citedText={cited(5, 6)} />);
     expect(screen.queryByRole('link')).toBeNull();
   });
 
@@ -56,6 +59,7 @@ describe('KnowledgeTranscriptCitationLink', () => {
         representation={representation({ cues: [], format: 'plain', videoIdentity: null })}
         charStart={0}
         charEnd={4}
+        citedText={cited(0, 4)}
       />,
     );
     expect(screen.queryByRole('link')).toBeNull();
@@ -67,6 +71,7 @@ describe('KnowledgeTranscriptCitationLink', () => {
         representation={representation({ videoIdentity: 'yt:nope' })}
         charStart={0}
         charEnd={5}
+        citedText={cited(0, 5)}
       />,
     );
     expect(screen.queryByRole('link')).toBeNull();
@@ -76,10 +81,10 @@ describe('KnowledgeTranscriptCitationLink', () => {
     // A reader who saw it only beside timestamps would reasonably conclude the
     // rest had been checked.
     for (const props of [
-      { representation: representation(), charStart: 0, charEnd: 5 },
-      { representation: representation(), charStart: 5, charEnd: 6 },
-      { representation: representation({ cues: [], videoIdentity: null }), charStart: 0, charEnd: 1 },
-      { representation: representation({ videoIdentity: 'bad' }), charStart: 0, charEnd: 5 },
+      { representation: representation(), charStart: 0, charEnd: 5, citedText: cited(0, 5) },
+      { representation: representation(), charStart: 5, charEnd: 6, citedText: cited(5, 6) },
+      { representation: representation({ cues: [], videoIdentity: null }), charStart: 0, charEnd: 1, citedText: cited(0, 1) },
+      { representation: representation({ videoIdentity: 'bad' }), charStart: 0, charEnd: 5, citedText: cited(0, 5) },
     ]) {
       const { unmount } = render(<KnowledgeTranscriptCitationLink {...props} />);
       expect(screen.getByText(/User-provided transcript/)).toBeTruthy();

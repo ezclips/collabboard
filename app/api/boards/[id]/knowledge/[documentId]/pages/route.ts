@@ -64,7 +64,7 @@ export async function GET(
       // has one continuous canonical text. Read from the row, never inferred
       // from an empty page set -- a PDF whose extraction produced nothing
       // would otherwise be served as though it were text.
-      .select('id, original_filename, page_count, processing_status, content_sha256, kind')
+      .select('id, original_filename, page_count, processing_status, content_sha256, kind, transcript_representation')
       .eq('id', documentId)
       .eq('board_id', boardId)
       .maybeSingle();
@@ -150,6 +150,11 @@ export async function GET(
             // count that was measured and found to be none.
             pageCount: null,
             kind: document.kind,
+            // WHAT MAKES A TEXT SOURCE A TRANSCRIPT. Null for an
+            // ordinary text file, and the reader needs the difference:
+            // inferring "transcript" from the absence of pages would
+            // attach an unverified-claim notice to a plain .txt.
+            transcriptRepresentation: document.transcript_representation ?? null,
           },
           // Empty by construction, and present so one client shape reads both.
           pages: [],

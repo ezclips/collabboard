@@ -3386,3 +3386,37 @@ describe('Show on board sits beside the backlink, never replacing it', () => {
     expect(onReveal).not.toHaveBeenCalled();
   });
 });
+
+describe('the transcript disclosure on the source header', () => {
+  // A transcript is stored as kind 'text' like any other text source, so the
+  // ONLY thing that distinguishes one is the representation the server sends.
+  // A reader that inferred it from the absence of pages would put an
+  // unverified-claim notice on every plain .txt.
+  const representation = {
+    representationVersion: 1,
+    videoIdentity: 'yt:dQw4w9WgXcQ',
+    cues: [{ charStart: 0, charEnd: 5, startMs: 1000, endMs: 3000 }],
+    language: null,
+    trackKind: 'machine' as const,
+    format: 'srt' as const,
+    videoAssociation: 'claimed' as const,
+  };
+
+  it('shows it for a transcript', () => {
+    const element = mountWith({ transcriptRepresentation: representation });
+    expect(element.textContent).toContain('User-provided transcript');
+    expect(element.textContent).toContain('has not been verified');
+  });
+
+  it('does NOT show it for a plain text source', () => {
+    const element = mountWith({ transcriptRepresentation: null });
+    expect(element.textContent).not.toContain('User-provided transcript');
+  });
+
+  it('does NOT show it when the host says nothing at all', () => {
+    // The prop is optional, and absent must mean "not a transcript" rather
+    // than "unknown, so warn anyway".
+    const element = mountWith({});
+    expect(element.textContent).not.toContain('User-provided transcript');
+  });
+});

@@ -7,6 +7,7 @@ import KnowledgeDocumentDetails, {
   pageCountSummary,
   type KnowledgeDocumentDetailPage,
 } from '@/components/collabboard/KnowledgeDocumentDetails';
+import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import {
   useKnowledgePageCache,
@@ -231,6 +232,13 @@ interface KnowledgeReaderState {
   /** The canonical text of a pageless source. Undefined for a paged one. */
   text?: string;
   /**
+   * Present ONLY for a transcript, from the server row. It is what tells
+   * the reader to show the unverified-claim disclosure; a reader that
+   * inferred it from the absence of pages would show that notice on every
+   * plain text file.
+   */
+  transcriptRepresentation?: KnowledgeTranscriptStoredRepresentation | null;
+  /**
    * The character range a citation asked for, if it named one. Applied by
    * INDEX against `text`, never searched for: the offsets are what the server
    * authorized, and a search would find the wrong repeat of a phrase.
@@ -406,6 +414,7 @@ export default function KnowledgeSourceReaderDrawer({
         pages: cached.pages,
         kind: cached.kind,
         text: cached.text,
+        transcriptRepresentation: cached.transcriptRepresentation ?? null,
         textHighlight,
         loading: false, error: false, initialPageNumber, sourceTarget, revealSource,
         pageNavigationRequestId: navigationRequestId,
@@ -425,6 +434,7 @@ export default function KnowledgeSourceReaderDrawer({
           pages: revalidated.entry.pages,
           kind: revalidated.entry.kind,
           text: revalidated.entry.text,
+          transcriptRepresentation: revalidated.entry.transcriptRepresentation ?? null,
         }
         : current));
       return;
@@ -464,6 +474,7 @@ export default function KnowledgeSourceReaderDrawer({
           pages: result.entry.pages,
           kind: result.entry.kind,
           text: result.entry.text,
+          transcriptRepresentation: result.entry.transcriptRepresentation ?? null,
           textHighlight,
           loading: false, error: false, initialPageNumber, sourceTarget, revealSource,
           pageNavigationRequestId: navigationRequestId,
@@ -821,6 +832,7 @@ export default function KnowledgeSourceReaderDrawer({
         documentId={reader.documentId}
         boardId={boardId}
         originalFilename={reader.originalFilename}
+        transcriptRepresentation={reader.transcriptRepresentation}
         pageCount={reader.pageCount}
         pages={reader.pages}
         loading={reader.loading}

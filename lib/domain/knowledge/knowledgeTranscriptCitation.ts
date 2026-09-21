@@ -26,7 +26,8 @@ export type KnowledgeTranscriptCitationTarget =
       readonly kind: 'range';
       readonly reason:
         | 'no-cues'
-        | 'no-cue-owns-the-range'
+        | 'no-cue-intersects-the-range'
+        | 'text-not-accounted-for'
         | 'no-video-claimed'
         | 'unsupported-video-identity';
     }
@@ -37,31 +38,61 @@ export type KnowledgeTranscriptCitationTarget =
       readonly url: string;
     };
 
+type StoredCue = KnowledgeTranscriptStoredRepresentation['cues'][number];
+
 /**
- * The cue that OWNS a citation's range, or null.
+ * The cues a citation's range touches, in character order.
  *
- * Ownership means containment: the cited range lies wholly inside the cue. A
- * range that spans two cues has no single moment, and a range that starts in
- * the gap between cues was never spoken by either.
+ * CORRECTED, AND THE FIRST VERSION WAS TOO STRICT TO BE USEFUL. It required
+ * the range to sit wholly inside ONE cue. But a chat citation names a chunk --
+ * a 30-to-60-second window containing several cues -- so almost every real
+ * citation spanned more than one, found no owner, and got no timestamp. A rule
+ * that is correct on the cases it accepts and rejects nearly everything is not
+ * a safe rule; it is a broken feature that looks careful.
  *
- * OVERLAPPING CUES ARE THE NORMAL CASE in a machine transcript -- 99.9% of
- * cues overlapped in time on one sampled track -- but they overlap in TIME,
- * not in characters: each cue holds its own distinct span of the canonical
- * text. So at most one cue can contain a given character range, and the first
- * container found is the only container.
+ * Intersection is by CHARACTERS, and needs no tie-breaking: cues overlap in
+ * TIME -- 99.9% of them on one sampled track -- but each holds its own
+ * distinct span of the canonical text. Zero-length cues are excluded because
+ * they cover no text and so can intersect nothing.
  */
-export function cueOwningRange(
+export function cuesIntersectingRange(
   representation: KnowledgeTranscriptStoredRepresentation,
   charStart: number,
   charEnd: number,
-): KnowledgeTranscriptStoredRepresentation['cues'][number] | null {
-  if (!Number.isInteger(charStart) || !Number.isInteger(charEnd)) return null;
-  if (charStart < 0 || charEnd < charStart) return null;
+): readonly StoredCue[] {
+  if (!Number.isInteger(charStart) || !Number.isInteger(charEnd)) return [];
+  if (charStart < 0 || charEnd < charStart) return [];
 
-  for (const cue of representation.cues) {
-    if (charStart >= cue.charStart && charEnd <= cue.charEnd) return cue;
+  return representation.cues
+    .filter((cue) => cue.charEnd > cue.charStart && cue.charStart < charEnd && cue.charEnd > charStart)
+    .slice()
+    .sort((left, right) => left.charStart - right.charStart);
+}
+
+/**
+ * The characters in the cited range that NO cue accounts for.
+ *
+ * The separators between cues land here, which is expected and harmless: they
+ * are whitespace. Anything else is text that appears in the citation and was
+ * spoken by nobody -- a sign the stored cues do not describe this document --
+ * and the caller refuses to name a moment for it.
+ */
+function unaccountedText(
+  cues: readonly StoredCue[],
+  charStart: number,
+  charEnd: number,
+  citedText: string,
+): string {
+  const sliceOf = (from: number, to: number) => citedText.slice(from - charStart, to - charStart);
+  let cursor = charStart;
+  let leftover = '';
+
+  for (const cue of cues) {
+    if (cue.charStart > cursor) leftover += sliceOf(cursor, cue.charStart);
+    cursor = Math.max(cursor, cue.charEnd);
   }
-  return null;
+  if (cursor < charEnd) leftover += sliceOf(cursor, charEnd);
+  return leftover;
 }
 
 /**
@@ -105,6 +136,8 @@ export function knowledgeTranscriptCitationTarget(
   representation: KnowledgeTranscriptStoredRepresentation,
   charStart: number,
   charEnd: number,
+  /** The cited characters themselves: canonicalText.slice(charStart, charEnd). */
+  citedText: string,
 ): KnowledgeTranscriptCitationTarget {
   // A plain transcript has no cues at all. It is not a timed transcript whose
   // timings are missing; it is one that never had any, and the reader must not
@@ -113,10 +146,23 @@ export function knowledgeTranscriptCitationTarget(
     return { kind: 'range', reason: 'no-cues' };
   }
 
-  const cue = cueOwningRange(representation, charStart, charEnd);
-  if (cue === null) {
-    return { kind: 'range', reason: 'no-cue-owns-the-range' };
+  const cues = cuesIntersectingRange(representation, charStart, charEnd);
+  if (cues.length === 0) {
+    return { kind: 'range', reason: 'no-cue-intersects-the-range' };
   }
+
+  // WHAT THE CUES DO NOT COVER. Separators are whitespace and are expected;
+  // anything else is text in the citation that no cue claims, which means the
+  // stored cues do not describe this document and no moment in it can be
+  // trusted.
+  if (unaccountedText(cues, charStart, charEnd, citedText).trim().length > 0) {
+    return { kind: 'range', reason: 'text-not-accounted-for' };
+  }
+
+  // THE FIRST QUOTED CUE, in character order. A citation spanning a window
+  // starts where its first spoken words start; linking to any later cue would
+  // open past the beginning of what is quoted.
+  const cue = cues[0];
 
   if (representation.videoIdentity === null) {
     // Timed, but nothing was claimed to time it against. The range still

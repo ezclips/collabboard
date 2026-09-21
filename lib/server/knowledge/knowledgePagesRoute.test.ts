@@ -305,6 +305,10 @@ describe('Knowledge pages route: a source with no pages', () => {
     // that was measured and found to be none.
     expect(payload.document).toEqual({
       id: DOCUMENT_ID, originalFilename: 'tide-pools.md', pageCount: null, kind: 'text',
+      // Null for an ordinary text source. A reader that inferred
+      // 'transcript' from the absence of pages would attach an
+      // unverified-claim notice to every plain text file.
+      transcriptRepresentation: null,
     });
   });
 

@@ -19,15 +19,23 @@ import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowl
  *      only sees the disclosure next to timestamps would reasonably conclude
  *      the ones without it had been checked.
  *
- * It renders nothing clickable when no cue owns the cited range. That is the
- * case this whole path exists to get right: a nearest-cue guess would produce
- * a link to a moment nobody quoted, and nothing about such a link looks wrong.
+ * It renders nothing clickable when no cue intersects the cited range, or when
+ * the range contains words no cue accounts for. That is the case this whole
+ * path exists to get right: a guess would produce a link to a moment nobody
+ * quoted, and nothing about such a link looks wrong.
  */
 export interface KnowledgeTranscriptCitationLinkProps {
   readonly representation: KnowledgeTranscriptStoredRepresentation;
   /** The cited range, in UTF-16 code units of the canonical transcript. */
   readonly charStart: number;
   readonly charEnd: number;
+  /**
+   * The cited characters themselves. Required, because deciding whether the
+   * cues account for this range means looking at what is NOT covered: a gap
+   * that is whitespace is a separator, and a gap that is words is text nobody
+   * spoke.
+   */
+  readonly citedText: string;
 }
 
 /** mm:ss, or h:mm:ss past an hour. Shown so the link says where it goes. */
@@ -45,8 +53,9 @@ export function KnowledgeTranscriptCitationLink({
   representation,
   charStart,
   charEnd,
+  citedText,
 }: KnowledgeTranscriptCitationLinkProps) {
-  const target = knowledgeTranscriptCitationTarget(representation, charStart, charEnd);
+  const target = knowledgeTranscriptCitationTarget(representation, charStart, charEnd, citedText);
 
   return (
     <span className="inline-flex flex-col gap-0.5 text-xs text-gray-600">
