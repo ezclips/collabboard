@@ -13,6 +13,7 @@ import {
   type KnowledgeTranscriptCreateWrite,
   type KnowledgeTranscriptImportDeps,
   type KnowledgeTranscriptImportInput,
+  type KnowledgeTranscriptMetadata,
   type KnowledgeTranscriptReplaceWrite,
   type KnowledgeTranscriptTarget,
   type KnowledgeTranscriptVersionBody,
@@ -61,6 +62,11 @@ interface Recorder {
   readonly creates: KnowledgeTranscriptCreateWrite[];
   readonly replaces: { write: KnowledgeTranscriptReplaceWrite; expected: string }[];
   readonly loads: { boardId: BoardId; documentId: KnowledgeDocumentId }[];
+  readonly metadataUpdates: {
+    scope: { documentId: KnowledgeDocumentId; boardId: BoardId };
+    metadata: Omit<KnowledgeTranscriptMetadata, 'format'>;
+    expected: string;
+  }[];
 }
 
 function makeDeps(options: {
@@ -69,6 +75,7 @@ function makeDeps(options: {
   writeResult?: Result<KnowledgeDocument, DomainError>;
   uploadResult?: Result<void, DomainError>;
   removeResult?: Result<void, DomainError>;
+  metadataResult?: Result<KnowledgeDocument, DomainError>;
   uploadIds?: string[];
 } = {}): Recorder {
   const uploads: Recorder['uploads'] = [];
@@ -76,7 +83,9 @@ function makeDeps(options: {
   const creates: KnowledgeTranscriptCreateWrite[] = [];
   const replaces: Recorder['replaces'] = [];
   const loads: Recorder['loads'] = [];
+  const metadataUpdates: Recorder['metadataUpdates'] = [];
   const stored = { id: DOC } as unknown as KnowledgeDocument;
+  const updatedStored = { id: DOC, renamed: true } as unknown as KnowledgeDocument;
   const ids = [...(options.uploadIds ?? ['upload01'])];
 
   return {
@@ -85,6 +94,7 @@ function makeDeps(options: {
     creates,
     replaces,
     loads,
+    metadataUpdates,
     deps: {
       authorizer: {
         canMutateBoard: () => Promise.resolve(ok(options.authorized ?? true)),
@@ -101,6 +111,10 @@ function makeDeps(options: {
         replaceTranscriptVersion: (write, expected) => {
           replaces.push({ write, expected });
           return Promise.resolve(options.writeResult ?? ok(stored));
+        },
+        updateTranscriptMetadata: (scope, metadata, expected) => {
+          metadataUpdates.push({ scope, metadata, expected });
+          return Promise.resolve(options.metadataResult ?? ok(updatedStored));
         },
       },
       storage: {
@@ -158,6 +172,7 @@ const transcriptTarget = (
   }),
   contentSha256: 'a'.repeat(64),
   storagePath: 'knowledge/board-1/doc-1/transcript-old.srt',
+  originalFilename: 'Lecture 1',
   document: { id: DOC } as unknown as KnowledgeDocument,
   ...over,
 });
@@ -414,7 +429,7 @@ describe('importKnowledgeTranscript', () => {
       expect(allWrites(r)).toHaveLength(0);
     });
 
-    it('removes the superseded object only AFTER the write committed', async () => {
+    it('RETAINS the superseded object and returns it as a cleanup candidate', async () => {
       const target = transcriptTarget();
       const r = makeDeps({ target });
       const result = await importKnowledgeTranscript(
@@ -426,8 +441,31 @@ describe('importKnowledgeTranscript', () => {
       );
 
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.value.supersededPath).toBe(target.storagePath);
-      expect(r.removed).toEqual([target.storagePath]);
+      if (result.ok) expect(result.value.supersededCleanupCandidate).toBe(target.storagePath);
+      // NOT deleted. A candidate is not residue, and this request is not in a
+      // position to know whether anything is still mid-flight against it.
+      expect(r.removed).toHaveLength(0);
+    });
+
+    it('leaves an in-flight reader of the previous version able to fetch it', async () => {
+      // The race the old code created: a reader resolves the row, the replace
+      // commits, the object is deleted, and the reader's fetch fails on an
+      // object that existed when it was told about it.
+      const target = transcriptTarget();
+      const r = makeDeps({ target });
+
+      // A reader that resolved the OLD row before the import ran.
+      const readerHolds = target.storagePath;
+
+      await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        }),
+      );
+
+      expect(r.removed).not.toContain(readerHolds);
     });
 
     it('does not touch the superseded object when the write fails', async () => {
@@ -470,12 +508,111 @@ describe('importKnowledgeTranscript', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.written).toBe(false);
-        expect(result.value.supersededPath).toBeNull();
+        expect(result.value.metadataOnly).toBe(false);
+        expect(result.value.metadataChanged).toEqual([]);
+        expect(result.value.supersededCleanupCandidate).toBeNull();
         expect(result.value.document).toBe(target.document);
       }
       expect(r.uploads).toHaveLength(0);
       expect(r.removed).toHaveLength(0);
+      expect(r.metadataUpdates).toHaveLength(0);
       expect(allWrites(r)).toHaveLength(0);
+    });
+
+    // METADATA IS NOT COVERED BY THE HASH, so an identical hash does not mean
+    // an identical request. Each of these was silently discarded before.
+    const metadataCase = (
+      label: string,
+      over: Partial<KnowledgeTranscriptImportInput>,
+      field: string,
+    ) => {
+      it(`applies a ${label} correction instead of dropping it`, async () => {
+        const same = await hashOf(SRT);
+        const target = transcriptTarget({ contentSha256: same });
+        const r = makeDeps({ target });
+
+        const result = await importKnowledgeTranscript(
+          r.deps,
+          baseInput({
+            payload: SRT,
+            replaces: { documentId: DOC, expectedContentSha256: same },
+            ...over,
+          }),
+        );
+
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value.written).toBe(false);
+          expect(result.value.metadataOnly).toBe(true);
+          expect(result.value.metadataChanged).toContain(field);
+        }
+        expect(r.metadataUpdates).toHaveLength(1);
+        // Scoped and conditional, exactly like a replacement: a metadata write
+        // is no less able to land on the wrong row.
+        expect(r.metadataUpdates[0].scope).toEqual({ documentId: DOC, boardId: BOARD });
+        expect(r.metadataUpdates[0].expected).toBe(same);
+        // The version is untouched: nothing uploaded, no chunk or text write.
+        expect(r.uploads).toHaveLength(0);
+        expect(allWrites(r)).toHaveLength(0);
+      });
+    };
+
+    metadataCase('title', { title: 'Lecture 1 (corrected)' }, 'originalFilename');
+    metadataCase('language', { language: 'de' }, 'language');
+    metadataCase('track-kind', { trackKind: 'human' }, 'trackKind');
+
+    it('treats a format change as a new stored original, not as metadata', async () => {
+      // The declared format describes the RETAINED ORIGINAL. Changing it while
+      // keeping the old object would leave the row claiming a format its
+      // stored bytes are not in, so this takes the full path -- with the same
+      // hash, because the content genuinely did not change.
+      const same = await hashOf(SRT);
+      const target = transcriptTarget({ contentSha256: same });
+      const r = makeDeps({ target });
+
+      const vtt = ['WEBVTT', '', '00:00:01.000 --> 00:00:03.000', 'hello there', '',
+        '00:00:02.500 --> 00:00:05.000', 'hello there', ''].join('\n');
+
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: vtt,
+          format: 'vtt',
+          replaces: { documentId: DOC, expectedContentSha256: same },
+        }),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.written).toBe(true);
+        expect(result.value.metadataOnly).toBe(false);
+        expect(result.value.metadataChanged).toContain('format');
+      }
+      expect(r.metadataUpdates).toHaveLength(0);
+      expect(r.replaces).toHaveLength(1);
+      expect(r.replaces[0].write.contentSha256).toBe(same);
+      expect(r.uploads[0].contentType).toBe('text/vtt');
+    });
+
+    it('reports a failed metadata update rather than claiming success', async () => {
+      const same = await hashOf(SRT);
+      const r = makeDeps({
+        target: transcriptTarget({ contentSha256: same }),
+        metadataResult: err(domainError('conflict', 'expected hash no longer stored')),
+      });
+
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT,
+          title: 'renamed',
+          replaces: { documentId: DOC, expectedContentSha256: same },
+        }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('conflict');
+      expect(r.uploads).toHaveLength(0);
     });
 
     it('confirms the reformatted paste really is the same version', async () => {

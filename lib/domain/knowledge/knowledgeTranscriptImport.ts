@@ -169,9 +169,44 @@ export interface KnowledgeTranscriptTarget {
   /** Non-null exactly when the target is already a transcript. */
   readonly transcriptRepresentation: KnowledgeTranscriptStoredRepresentation | null;
   readonly contentSha256: string;
-  /** The object the stored row points at. Superseded only after a commit. */
+  /** The object the stored row points at, until a replacement commits. */
   readonly storagePath: string;
+  /** Metadata the import can change without changing the version. */
+  readonly originalFilename: string;
   readonly document: KnowledgeDocument;
+}
+
+/**
+ * The fields an import can change WITHOUT changing the version.
+ *
+ * The hash covers text, cue ranges, timings and the claimed video. It does not
+ * cover the name, the language, the track kind or the source format -- so an
+ * identical hash does NOT mean an identical import request, and treating it
+ * that way silently discarded corrections. Someone fixing `unknown` to `human`
+ * is telling the truth about provenance; dropping that is worse than refusing
+ * it, because nothing says it was dropped.
+ */
+export interface KnowledgeTranscriptMetadata {
+  readonly originalFilename: string;
+  readonly language: string | null;
+  readonly trackKind: 'human' | 'machine' | 'unknown';
+  readonly format: KnowledgeTranscriptFormat;
+}
+
+export type KnowledgeTranscriptMetadataField = keyof KnowledgeTranscriptMetadata;
+
+/** Which of them the request would change. Empty means a true no-op. */
+export function transcriptMetadataChanges(
+  target: KnowledgeTranscriptTarget,
+  requested: KnowledgeTranscriptMetadata,
+): readonly KnowledgeTranscriptMetadataField[] {
+  const stored = target.transcriptRepresentation;
+  const changed: KnowledgeTranscriptMetadataField[] = [];
+  if (target.originalFilename !== requested.originalFilename) changed.push('originalFilename');
+  if ((stored?.language ?? null) !== requested.language) changed.push('language');
+  if (stored !== null && stored.trackKind !== requested.trackKind) changed.push('trackKind');
+  if (stored !== null && stored.format !== requested.format) changed.push('format');
+  return changed;
 }
 
 export interface KnowledgeTranscriptRepository {
@@ -200,6 +235,20 @@ export interface KnowledgeTranscriptRepository {
    */
   replaceTranscriptVersion(
     write: KnowledgeTranscriptReplaceWrite,
+    expectedContentSha256: string,
+  ): Promise<Result<KnowledgeDocument, DomainError>>;
+  /**
+   * Changes metadata ONLY, when the version is unchanged.
+   *
+   * Same locked checks as a replacement -- document id, board id, the stored
+   * hash and that the row is still a transcript -- because a metadata write is
+   * no less able to land on the wrong row. It must not touch the text, the
+   * cues, the chunks, the hash or the stored original: the version is not
+   * changing, which is precisely why this exists instead of a replacement.
+   */
+  updateTranscriptMetadata(
+    scope: { readonly documentId: KnowledgeDocumentId; readonly boardId: BoardId },
+    metadata: Omit<KnowledgeTranscriptMetadata, 'format'>,
     expectedContentSha256: string,
   ): Promise<Result<KnowledgeDocument, DomainError>>;
 }
@@ -259,15 +308,26 @@ export interface KnowledgeTranscriptImportInput {
   } | null;
 }
 
-/** A replacement that changed nothing, and therefore wrote nothing. */
 export interface KnowledgeTranscriptImportOutcome {
   readonly document: KnowledgeDocument;
+  /** True when a new VERSION was written. False for a no-op or metadata-only. */
   readonly written: boolean;
+  /** True when only name/language/track-kind changed; the version did not. */
+  readonly metadataOnly: boolean;
+  /** Which metadata fields the request changed. Empty on a pure no-op. */
+  readonly metadataChanged: readonly KnowledgeTranscriptMetadataField[];
   /**
-   * The object the PREVIOUS version pointed at, after a committed replacement.
-   * Null when nothing was superseded. See the retention note on removal.
+   * The object the PREVIOUS version pointed at, RETAINED for delayed
+   * collection. Null when nothing was superseded.
+   *
+   * IT IS NOT RESIDUE AND IT HAS NOT BEEN DELETED. Deleting it here would
+   * break a reader that resolved the old row moments before the commit and
+   * fetches its object moments after -- a live request failing on an object
+   * that existed when it was told about it. Retention removes that race
+   * instead of documenting it; a sweep that knows nothing references the path
+   * can collect it later, when no request is mid-flight against it.
    */
-  readonly supersededPath: string | null;
+  readonly supersededCleanupCandidate: string | null;
 }
 
 const MIME_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
@@ -499,17 +559,63 @@ export async function importKnowledgeTranscript(
       );
     }
 
-    // SAME VERSION, RE-PASTED. The hash is the version, and equivalent
-    // formatting can produce the same version from different raw bytes. There
-    // is nothing to write: writing would swap the stored original for bytes
-    // that mean the same thing, change nothing anyone can observe, and put the
-    // referenced object at risk for no gain. Nothing is uploaded either -- this
-    // returns before step 5 -- so there is no object to clean up.
+    // SAME VERSION, RE-PASTED -- WHICH IS NOT THE SAME AS AN IDENTICAL REQUEST.
     //
-    // THE CONSEQUENCE, stated rather than hidden: the retained original stays
-    // the paste that FIRST produced this version, not the most recent one.
+    // CORRECTED. This used to return immediately on a matching hash, before
+    // anything compared the name, the language, the track kind or the format.
+    // So a user correcting `unknown` to `human`, fixing a language, renaming
+    // the transcript, or re-pasting the same cues in another format got a
+    // silent no-op: the correction was discarded and NOTHING SAID SO. A
+    // dropped truth that reports success is worse than a refusal.
+    //
+    // The hash covers text, cue ranges, timings and the claimed video. It does
+    // NOT cover these four, so they are compared explicitly.
     if (contentSha256 === loaded.value.contentSha256) {
-      return ok({ document: loaded.value.document, written: false, supersededPath: null });
+      const requested: KnowledgeTranscriptMetadata = {
+        originalFilename: title,
+        language: representation.language,
+        trackKind: input.trackKind,
+        format: document.format,
+      };
+      const changed = transcriptMetadataChanges(loaded.value, requested);
+
+      if (changed.length === 0) {
+        // Genuinely identical. Nothing uploaded, nothing written, and the
+        // retained original stays the paste that first produced this version.
+        return ok({
+          document: loaded.value.document,
+          written: false,
+          metadataOnly: false,
+          metadataChanged: [],
+          supersededCleanupCandidate: null,
+        });
+      }
+
+      // A FORMAT CHANGE IS NOT METADATA-ONLY. The declared format describes
+      // the RETAINED ORIGINAL, so changing it while keeping the old object
+      // would leave the row claiming a format its stored bytes are not in.
+      // That case falls through to the full path below, which uploads the new
+      // paste and replaces the version -- with the same hash, because the
+      // content genuinely did not change.
+      if (!changed.includes('format')) {
+        const updated = await deps.repository.updateTranscriptMetadata(
+          { documentId: loaded.value.documentId, boardId: input.boardId },
+          {
+            originalFilename: requested.originalFilename,
+            language: requested.language,
+            trackKind: requested.trackKind,
+          },
+          loaded.value.contentSha256,
+        );
+        if (!updated.ok) return updated;
+        return ok({
+          document: updated.value,
+          written: false,
+          metadataOnly: true,
+          metadataChanged: changed,
+          supersededCleanupCandidate: null,
+        });
+      }
     }
 
     documentId = loaded.value.documentId;
@@ -582,27 +688,37 @@ export async function importKnowledgeTranscript(
     );
   }
 
-  // 7. RETENTION OF THE SUPERSEDED PAYLOAD -- decided, not left open.
+  // 7. RETENTION OF THE SUPERSEDED PAYLOAD -- corrected.
   //
-  //    It is REMOVED, best effort, and only after the commit. Once the
-  //    transaction has moved the row, nothing references those bytes: the
-  //    previous version no longer exists as a row, so there is nothing to
-  //    recover it TO, and keeping it would grow one orphan per re-import
-  //    forever.
+  //    IT IS NOT DELETED HERE. An earlier version removed it immediately after
+  //    the commit and discarded the result, which was wrong twice over: it
+  //    created a race -- a reader that resolved the old row moments earlier
+  //    fetches an object that has just been deleted -- and the outcome then
+  //    reported the same path whether the removal had succeeded or failed, so
+  //    a caller could not tell a clean cleanup from real residue.
   //
-  //    Best effort, and never fatal: the version IS committed, and failing the
-  //    request over a leftover object would report a successful import as a
-  //    failure. The path is returned so a caller can log or sweep it.
+  //    The path is RETAINED and returned as a CLEANUP CANDIDATE. A sweep can
+  //    collect it once nothing can still be mid-flight against it, which is a
+  //    judgement this request cannot make. Growth is bounded by that sweep,
+  //    not by deleting under a live reader.
   //
-  //    The one consequence, stated: a reader that read the row just before the
-  //    commit and fetches the object just after gets a missing object. That is
-  //    a transient failure on a version that no longer exists, not corruption
-  //    of one that does.
-  if (target !== null) {
-    await deps.storage.remove(target.storagePath);
-    return ok({ document: written.value, written: true, supersededPath: target.storagePath });
-  }
-  return ok({ document: written.value, written: true, supersededPath: null });
+  //    Failed-attempt cleanup stays immediate and is unaffected: that object
+  //    was never published, no reader can hold it, and nothing else can name
+  //    its attempt-scoped key.
+  return ok({
+    document: written.value,
+    written: true,
+    metadataOnly: false,
+    metadataChanged: target === null
+      ? []
+      : transcriptMetadataChanges(target, {
+          originalFilename: title,
+          language: representation.language,
+          trackKind: input.trackKind,
+          format: document.format,
+        }),
+    supersededCleanupCandidate: target?.storagePath ?? null,
+  });
 }
 
 /** Windows become chunks, in order, with their own timings carried along. */
