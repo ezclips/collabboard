@@ -1,6 +1,6 @@
 # PATCH-153 — Transcript disclosure on board wiki pages
 
-**Status:** done — implemented , CTO re-verified 2026-09-21
+**Status:** done — implemented `f577c32a`, CTO re-verified 2026-09-21
 
 > Lifecycle note: this is the draft. The **Final Implementation Specification**
 > is written into this file only after the owner approves, and the handoff to

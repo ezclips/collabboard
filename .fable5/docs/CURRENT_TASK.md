@@ -44,7 +44,7 @@ maintenance-risk grounds; it is not disproven, it is declined.
 | Transcript schema, RPCs, route, import UI | committed; **verified on an isolated local stack, clean run, no shims**; NOT applied to hosted |
 | Transcript citations with timestamps (reader) | landed (`9b356a4d`) |
 | Wiki staleness blind to transcript mutations | **fixed** (`f6858669`) |
-| Transcript disclosure on wiki pages | next work unit |
+| Transcript disclosure on wiki pages | **done** — PATCH-153, `f577c32a`, CTO re-verified |
 | Timestamped citations on wiki pages | HELD until the transcript batch is applied to hosted |
 
 **Blocking the hosted path:** the Supabase branch price decision is the
@@ -445,6 +445,31 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 - Excalidraw fork has its own `node_modules` committed (major repo bloat); handle carefully in a later phase — it backs a `file:` dependency.
 
 ## Log
+
+- **2026-09-21** — **PATCH-153 DONE (`f577c32a`), CTO re-verified.** First
+  unit through the Fable 5 patch workflow on this stream: drafted, reviewed
+  by the implementer as a SPEC before approval, revised, approved, handed off
+  via CODER_HANDOFF_TEMPLATE, implemented, then re-verified independently
+  rather than from the report. Exactly the 7 authorized files, zero MUST-NOT
+  files, the four MUST-NOT consumers byte-unchanged, zero deletions in the
+  appended test files, tsc 0, check:boundaries still exactly its two
+  pre-existing errors, failing file set identical both directions.
+
+  Two process results worth keeping. The pre-approval spec review produced
+  six findings; three changed the patch and three did not survive checking,
+  and two of those three were settled by RUNNING something rather than
+  arguing — PostgREST does accept JSON-path and cast expressions in select
+  (tested against the local stack with an unknown-column control), and a
+  failed wiki read renders "That page could not be loaded", not "written by
+  hand". The best finding was that the patch never said whether the new field
+  lived on the version type or the status type: both defensible, different
+  files, and one route passing through a MUST-NOT file.
+
+  Recorded as a CTO defect: review finding B2 corrected a claim, I narrowed
+  it in Architecture Notes and not in the `## Commit` section, and rule 12
+  forbids the implementer from repairing that message — so the overstatement
+  shipped verbatim into git history. Rule now in the patch: when a review
+  corrects a claim, grep the WHOLE patch for it.
 
 - **2026-09-21** — **"Now" corrected after it had been wrong for weeks.** It
   still named the Drawing-canvas slider sequence as the current focus while
