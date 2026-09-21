@@ -15,9 +15,53 @@
 // limitation is survivable for a create and is NOT survivable for a replace,
 // so this path requires the transaction rather than deferring it: the
 // repository port below exposes exactly one write per outcome, and the adapter
-// behind it is an RPC. There is no compensation logic here because there is
-// nothing to compensate -- the database either moved to the new version or
-// stayed on the old one.
+// behind it is an RPC.
+//
+// ============================================================================
+// SCOPE IS PART OF IDENTITY, NOT A LOOKUP DETAIL
+// ============================================================================
+//
+// CORRECTED, and this was a real privilege escalation. The target used to be
+// loaded by document id alone. The RPC behind these ports runs as service_role
+// -- RLS does not narrow it -- so a caller authorized on board A could name a
+// document id belonging to board B and have its content replaced. The board
+// authorization check passed, because it was asked about the caller's OWN
+// board, and then a different board's document was written.
+//
+// Every read and every write is therefore scoped by BOTH board and document,
+// and the transaction must re-check the board while it holds the row. A check
+// performed before the lock is a check about the past.
+//
+// ============================================================================
+// A REPLACEMENT HAS NO AUTHOR
+// ============================================================================
+//
+// CORRECTED for the same reason. One write record carried boardId and
+// createdBy for both outcomes, so a replacement stamped the CURRENT actor as
+// the document's original creator -- silently rewriting provenance on someone
+// else's document, which is exactly the kind of claim the rest of this system
+// refuses to fabricate.
+//
+// The two outcomes now have two different types, and the replace type HAS NO
+// AUTHOR FIELD AT ALL. `id`, `board_id`, `created_by` and `created_at` are
+// preserved by the transaction; nothing in the replace path can express
+// changing them. `boardId` on the replace record is the SCOPE TO MATCH, never
+// a value to write.
+//
+// ============================================================================
+// ONE OBJECT PER ATTEMPT
+// ============================================================================
+//
+// CORRECTED, and this one could destroy a published version. The storage key
+// used to be derived from board, document, hash and format, so two concurrent
+// imports producing the SAME new hash produced the SAME key -- and the loser's
+// cleanup would then delete the object the winner's committed row points at.
+//
+// Every attempt now owns its object: the key carries a fresh upload id, so no
+// two requests can ever name the same one, and cleanup can only ever remove an
+// object this request created. The same change removes the other half of the
+// problem: an equivalent re-import can no longer overwrite an object the
+// current row still references.
 //
 // ============================================================================
 // WHAT "ONE VERSION" MEANS
@@ -28,31 +72,13 @@
 // and start/end in integer milliseconds, cue order including overlaps, and the
 // claimed video identity -- so a re-import that changes ONLY timings changes
 // the hash, which is the whole point: a timing-only correction is a new
-// version of the transcript and anything citing a timestamp in it is stale.
+// version and anything citing a timestamp in it is stale.
 //
 // THE STORAGE KIND IS SHARED, THE REPRESENTATION IS NOT. A transcript is
 // stored with kind 'text' like any other text source; what makes it a
 // transcript is a non-null transcript_representation. The hash difference
 // between a .txt of the same words and a pasted transcript is a REPRESENTATION
 // distinction, not a claim that they are different kinds of thing.
-//
-// THAT SHARING IS ALSO THE RISK. An ordinary text update path, seeing kind
-// 'text', would happily rewrite the text of a transcript and leave its cues
-// and representation describing the previous words. `transcriptConsistency`
-// below is the domain half of the guard; the database half is a CHECK the
-// migration owns, and until that is applied and verified the guard is enforced
-// in one process only. Stated, not assumed.
-//
-// ============================================================================
-// WHY THE ORIGINAL IS WRITTEN TO A VERSION-SCOPED PATH
-// ============================================================================
-//
-// Overwriting `original.vtt` in place would destroy the previous version's
-// bytes BEFORE the row that still points at them has moved. A failed replace
-// would then leave a perfectly good old row whose original no longer exists.
-// So each version's payload goes to its own key, the row points at that key,
-// and a failed replace leaves an unreferenced object behind instead of a
-// referenced hole. Residue is recoverable; a hole is not.
 
 import { domainError } from '../core/errors';
 import type { DomainError } from '../core/errors';
@@ -94,23 +120,16 @@ export interface KnowledgeTranscriptChunkInsert {
 }
 
 /**
- * ONE VERSION, as the repository receives it.
- *
- * Every field here is derived from the same parse. They are passed together
- * because they must be WRITTEN together -- a port that accepted them in
- * separate calls would be an invitation to the half-written state this module
- * exists to rule out.
+ * The content of one version, with nothing in it that identifies WHO or WHICH
+ * BOARD. Both outcomes write this; only a create may accompany it with
+ * authorship.
  */
-export interface KnowledgeTranscriptVersionWrite {
-  readonly documentId: KnowledgeDocumentId;
-  readonly boardId: BoardId;
-  readonly createdBy: UserId;
+export interface KnowledgeTranscriptVersionBody {
   readonly originalFilename: string;
   readonly mimeType: string;
   readonly fileSizeBytes: number;
   readonly storagePath: string;
   readonly contentSha256: string;
-  readonly kind: typeof KNOWLEDGE_TEXT_KIND;
   readonly parserName: string;
   readonly parserVersion: string;
   readonly parserOptionsHash: string;
@@ -119,34 +138,81 @@ export interface KnowledgeTranscriptVersionWrite {
   readonly chunks: readonly KnowledgeTranscriptChunkInsert[];
 }
 
+/** A NEW document. This is the only shape that may name an author. */
+export interface KnowledgeTranscriptCreateWrite extends KnowledgeTranscriptVersionBody {
+  readonly documentId: KnowledgeDocumentId;
+  readonly boardId: BoardId;
+  readonly createdBy: UserId;
+  readonly kind: typeof KNOWLEDGE_TEXT_KIND;
+}
+
+/**
+ * A NEW VERSION of an existing document.
+ *
+ * NO AUTHOR, BY CONSTRUCTION. `board_id`, `created_by` and `created_at` are
+ * preserved by the transaction, and this type cannot express changing them.
+ * `boardId` here is the scope the transaction must MATCH while holding the
+ * row -- if the stored row belongs to another board the write is refused, not
+ * re-homed.
+ */
+export interface KnowledgeTranscriptReplaceWrite extends KnowledgeTranscriptVersionBody {
+  readonly documentId: KnowledgeDocumentId;
+  readonly boardId: BoardId;
+}
+
 /** What the caller believed it was replacing. */
 export interface KnowledgeTranscriptTarget {
   readonly documentId: KnowledgeDocumentId;
+  /** The board the STORED row belongs to, never the caller's claim. */
+  readonly boardId: BoardId;
   readonly kind: string;
   /** Non-null exactly when the target is already a transcript. */
   readonly transcriptRepresentation: KnowledgeTranscriptStoredRepresentation | null;
   readonly contentSha256: string;
+  /** The object the stored row points at. Superseded only after a commit. */
+  readonly storagePath: string;
+  readonly document: KnowledgeDocument;
 }
 
 export interface KnowledgeTranscriptRepository {
-  /** The document being replaced, or null when it does not exist. */
+  /**
+   * The document being replaced, or null when no such document exists ON THAT
+   * BOARD. Scoped by both, so a document id from another board reads as
+   * absent rather than as a target.
+   */
   loadTranscriptTarget(
+    boardId: BoardId,
     documentId: KnowledgeDocumentId,
   ): Promise<Result<KnowledgeTranscriptTarget | null, DomainError>>;
   /** Creates document, cues, chunks and readiness in ONE transaction. */
   createTranscriptVersion(
-    write: KnowledgeTranscriptVersionWrite,
+    write: KnowledgeTranscriptCreateWrite,
   ): Promise<Result<KnowledgeDocument, DomainError>>;
   /**
-   * Replaces ONE version with another in ONE transaction, and only if the
-   * stored hash is still `expectedContentSha256`. A mismatch means somebody
-   * else re-imported in the meantime; the write is refused and the stored
-   * version is left exactly as it was.
+   * Replaces ONE version with another in ONE transaction.
+   *
+   * THE TRANSACTION MUST, while holding the row locked: match `documentId` AND
+   * `boardId`, match the stored hash against `expectedContentSha256`, and
+   * confirm the row is still a transcript. Any mismatch refuses the write and
+   * leaves the stored version exactly as it was. The checks this module
+   * performs before calling are for clearer messages; they can all go stale
+   * between here and the lock, and only the locked checks cannot.
    */
   replaceTranscriptVersion(
-    write: KnowledgeTranscriptVersionWrite,
+    write: KnowledgeTranscriptReplaceWrite,
     expectedContentSha256: string,
   ): Promise<Result<KnowledgeDocument, DomainError>>;
+}
+
+/**
+ * A fresh id per upload ATTEMPT, not per version.
+ *
+ * Two concurrent imports can legitimately produce the same content hash. What
+ * they must never share is a storage key, because cleanup deletes by key and a
+ * shared key makes one request's cleanup the other request's data loss.
+ */
+export interface KnowledgeTranscriptUploadIdFactory {
+  newUploadId(): string;
 }
 
 export interface KnowledgeTranscriptImportDeps {
@@ -155,6 +221,7 @@ export interface KnowledgeTranscriptImportDeps {
   readonly storage: Pick<KnowledgeStorageGateway, 'upload' | 'remove'>;
   readonly hasher: KnowledgeContentHasher;
   readonly ids: KnowledgeDocumentIdFactory;
+  readonly uploads: KnowledgeTranscriptUploadIdFactory;
 }
 
 export interface KnowledgeTranscriptImportInput {
@@ -183,15 +250,24 @@ export interface KnowledgeTranscriptImportInput {
    */
   readonly videoIdentity: string | null;
   /**
-   * The document to replace, or null to create a new one.
-   *
-   * `expectedContentSha256` is the version the user was looking at when they
-   * started. See replaceTranscriptVersion.
+   * The document to replace, or null to create a new one. The document is
+   * looked up ON `boardId`; an id from another board is not found.
    */
   readonly replaces: {
     readonly documentId: KnowledgeDocumentId;
     readonly expectedContentSha256: string;
   } | null;
+}
+
+/** A replacement that changed nothing, and therefore wrote nothing. */
+export interface KnowledgeTranscriptImportOutcome {
+  readonly document: KnowledgeDocument;
+  readonly written: boolean;
+  /**
+   * The object the PREVIOUS version pointed at, after a committed replacement.
+   * Null when nothing was superseded. See the retention note on removal.
+   */
+  readonly supersededPath: string | null;
 }
 
 const MIME_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
@@ -207,23 +283,32 @@ const EXTENSION_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
 };
 
 /**
- * The key this version's payload is written to.
+ * The key THIS ATTEMPT's payload is written to.
  *
- * VERSION-SCOPED BY HASH, so a failed replace cannot destroy the bytes the
- * surviving row points at. The hash is hex from the hasher and is length- and
- * character-checked before it reaches a storage key, because a key is not the
- * place to find out that an input was not what it claimed.
+ * UNIQUE PER ATTEMPT, by an upload id that no other request holds. The hash
+ * stays in the key because it is useful to a human reading a bucket listing,
+ * but it is the upload id that makes the key safe: cleanup removes exactly the
+ * object this request created and can never reach another request's object, or
+ * the object a committed row points at.
+ *
+ * Both components are length- and character-checked before they reach a key. A
+ * storage key is not the place to discover that an input was not what it
+ * claimed.
  */
 export function buildKnowledgeTranscriptStoragePath(
   boardId: BoardId,
   documentId: KnowledgeDocumentId,
   contentSha256: string,
+  uploadId: string,
   format: KnowledgeTranscriptFormat,
 ): string {
   if (!/^[0-9a-f]{64}$/.test(contentSha256)) {
     throw new Error('a transcript storage key needs a 64-character lowercase hex hash');
   }
-  return `knowledge/${boardId}/${documentId}/transcript-${contentSha256}${EXTENSION_BY_FORMAT[format]}`;
+  if (!/^[0-9a-z]{8,64}$/.test(uploadId)) {
+    throw new Error('a transcript upload id must be 8-64 lowercase alphanumerics');
+  }
+  return `knowledge/${boardId}/${documentId}/transcript-${contentSha256}-${uploadId}${EXTENSION_BY_FORMAT[format]}`;
 }
 
 /**
@@ -271,18 +356,24 @@ export function transcriptChunkingBreak(
 }
 
 /**
- * The domain half of the transcript consistency guard.
+ * ONE HALF OF ONE CROSSING, and the claim is narrowed to what this is.
  *
- * A transcript shares kind 'text' with ordinary text sources, so a caller
- * holding a text-update path could reach one. This refuses the crossing in
- * both directions, and says which crossing it refused: rewriting a transcript
- * as plain text would leave its cues describing words that are no longer
- * there, and replacing a plain text document with a transcript version would
- * attach cues to a document nothing else treats as timed.
+ * CORRECTED. This was described as refusing "both crossings". IT DOES NOT. It
+ * stops THIS IMPORTER from replacing a plain text document with a transcript
+ * version. It does NOTHING about the other direction: an ordinary text write
+ * path, running as service_role and seeing kind 'text', can still rewrite a
+ * transcript's text and leave its cues and representation describing words
+ * that are no longer there. That guard does not live here and cannot: it has
+ * to be in the transactional write path that touches the document and its
+ * chunks together.
  *
- * THE DATABASE HALF IS NOT IN FORCE YET. This runs in one process; a second
- * writer -- another deployment, a script, the SQL console -- is not subject to
- * it until the migration's CHECK is applied and verified.
+ * A ROW CHECK CANNOT DO IT EITHER. A CHECK constraint sees one row; the
+ * inconsistency it would have to detect is between a document's text and its
+ * CHILD chunk and cue rows. Only the transaction that writes them can hold
+ * that invariant.
+ *
+ * knowledgeTranscriptWriters.source.test.ts pins the writers that exist today,
+ * so a new one has to be considered rather than discovered later.
  */
 export function transcriptConsistencyBreak(target: KnowledgeTranscriptTarget): string | null {
   if (target.kind !== KNOWLEDGE_TEXT_KIND) {
@@ -297,7 +388,7 @@ export function transcriptConsistencyBreak(target: KnowledgeTranscriptTarget): s
 export async function importKnowledgeTranscript(
   deps: KnowledgeTranscriptImportDeps,
   input: KnowledgeTranscriptImportInput,
-): Promise<Result<KnowledgeDocument, DomainError>> {
+): Promise<Result<KnowledgeTranscriptImportOutcome, DomainError>> {
   // 1. Cheapest rejection first, and before anything is parsed or stored.
   const authorized = await deps.authorizer.canMutateBoard(input.boardId, input.userId);
   if (!authorized.ok) return authorized;
@@ -370,16 +461,29 @@ export async function importKnowledgeTranscript(
   // 4. Resolve the target BEFORE writing anything, so a refused replacement
   //    costs nothing and leaves nothing.
   let documentId: KnowledgeDocumentId;
+  let target: KnowledgeTranscriptTarget | null = null;
   let expected: string | null = null;
   if (input.replaces === null) {
     documentId = deps.ids.newDocumentId();
   } else {
-    const target = await deps.repository.loadTranscriptTarget(input.replaces.documentId);
-    if (!target.ok) return target;
-    if (target.value === null) {
+    // SCOPED BY BOARD. An id belonging to another board is not found here, so
+    // it never becomes a target, and the write below re-checks the same scope
+    // while holding the row.
+    const loaded = await deps.repository.loadTranscriptTarget(
+      input.boardId,
+      input.replaces.documentId,
+    );
+    if (!loaded.ok) return loaded;
+    if (loaded.value === null) {
       return err(domainError('not_found', 'That transcript no longer exists'));
     }
-    const inconsistent = transcriptConsistencyBreak(target.value);
+    if (loaded.value.boardId !== input.boardId) {
+      // Belt as well as braces: a repository that ignored its scope argument
+      // must not be able to hand this path a document from another board.
+      return err(domainError('not_found', 'That transcript no longer exists'));
+    }
+
+    const inconsistent = transcriptConsistencyBreak(loaded.value);
     if (inconsistent !== null) {
       return err(
         domainError('validation', 'That document cannot be replaced by a transcript', {
@@ -387,30 +491,41 @@ export async function importKnowledgeTranscript(
         }),
       );
     }
-    // Read-time check, for a clear message. The WRITE is still conditional on
-    // the same hash inside the transaction -- this one can go stale between
-    // here and there, and only the transactional check cannot.
-    if (target.value.contentSha256 !== input.replaces.expectedContentSha256) {
+    if (loaded.value.contentSha256 !== input.replaces.expectedContentSha256) {
       return err(
         domainError('conflict', 'This transcript changed since you opened it', {
           details: { expected: input.replaces.expectedContentSha256 },
         }),
       );
     }
-    documentId = target.value.documentId;
+
+    // SAME VERSION, RE-PASTED. The hash is the version, and equivalent
+    // formatting can produce the same version from different raw bytes. There
+    // is nothing to write: writing would swap the stored original for bytes
+    // that mean the same thing, change nothing anyone can observe, and put the
+    // referenced object at risk for no gain. Nothing is uploaded either -- this
+    // returns before step 5 -- so there is no object to clean up.
+    //
+    // THE CONSEQUENCE, stated rather than hidden: the retained original stays
+    // the paste that FIRST produced this version, not the most recent one.
+    if (contentSha256 === loaded.value.contentSha256) {
+      return ok({ document: loaded.value.document, written: false, supersededPath: null });
+    }
+
+    documentId = loaded.value.documentId;
+    target = loaded.value;
     expected = input.replaces.expectedContentSha256;
   }
 
+  // 5. This attempt's own object, at a key no other request can name.
   const storagePath = buildKnowledgeTranscriptStoragePath(
     input.boardId,
     documentId,
     contentSha256,
+    deps.uploads.newUploadId(),
     document.format,
   );
   const mimeType = MIME_BY_FORMAT[document.format];
-
-  // 5. The payload goes to a key NOTHING currently points at, so this cannot
-  //    disturb the version already stored.
   const uploaded = await deps.storage.upload(storagePath, payloadBytes, mimeType);
   if (!uploaded.ok) return uploaded;
 
@@ -425,16 +540,12 @@ export async function importKnowledgeTranscript(
     ),
   );
 
-  const write: KnowledgeTranscriptVersionWrite = {
-    documentId,
-    boardId: input.boardId,
-    createdBy: input.userId,
+  const body: KnowledgeTranscriptVersionBody = {
     originalFilename: title,
     mimeType,
     fileSizeBytes: payloadBytes.length,
     storagePath,
     contentSha256,
-    kind: KNOWLEDGE_TEXT_KIND,
     parserName: KNOWLEDGE_TRANSCRIPT_PARSER_NAME,
     parserVersion: KNOWLEDGE_TRANSCRIPT_PARSER_VERSION,
     parserOptionsHash,
@@ -444,15 +555,24 @@ export async function importKnowledgeTranscript(
   };
 
   // 6. ONE call. Either the database is on the new version entirely, or it is
-  //    on the old one entirely. The only residue a failure can leave is the
-  //    object uploaded at step 5, which nothing references -- removed here,
-  //    and reported if the removal itself fails, because unreported residue is
-  //    residue nobody knows exists.
+  //    on the old one entirely.
   const written = expected === null
-    ? await deps.repository.createTranscriptVersion(write)
-    : await deps.repository.replaceTranscriptVersion(write, expected);
+    ? await deps.repository.createTranscriptVersion({
+        ...body,
+        documentId,
+        boardId: input.boardId,
+        createdBy: input.userId,
+        kind: KNOWLEDGE_TEXT_KIND,
+      })
+    : await deps.repository.replaceTranscriptVersion(
+        { ...body, documentId, boardId: input.boardId },
+        expected,
+      );
 
   if (!written.ok) {
+    // THIS request's object, and only this request's. A concurrent import that
+    // produced the same content hash owns a different key, so a loser cleaning
+    // up cannot reach the winner's published object.
     const removed = await deps.storage.remove(storagePath);
     if (removed.ok) return written;
     return err(
@@ -461,7 +581,28 @@ export async function importKnowledgeTranscript(
       }),
     );
   }
-  return written;
+
+  // 7. RETENTION OF THE SUPERSEDED PAYLOAD -- decided, not left open.
+  //
+  //    It is REMOVED, best effort, and only after the commit. Once the
+  //    transaction has moved the row, nothing references those bytes: the
+  //    previous version no longer exists as a row, so there is nothing to
+  //    recover it TO, and keeping it would grow one orphan per re-import
+  //    forever.
+  //
+  //    Best effort, and never fatal: the version IS committed, and failing the
+  //    request over a leftover object would report a successful import as a
+  //    failure. The path is returned so a caller can log or sweep it.
+  //
+  //    The one consequence, stated: a reader that read the row just before the
+  //    commit and fetches the object just after gets a missing object. That is
+  //    a transient failure on a version that no longer exists, not corruption
+  //    of one that does.
+  if (target !== null) {
+    await deps.storage.remove(target.storagePath);
+    return ok({ document: written.value, written: true, supersededPath: target.storagePath });
+  }
+  return ok({ document: written.value, written: true, supersededPath: null });
 }
 
 /** Windows become chunks, in order, with their own timings carried along. */

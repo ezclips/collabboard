@@ -10,18 +10,23 @@ import {
   transcriptChunkingBreak,
   transcriptConsistencyBreak,
   buildKnowledgeTranscriptStoragePath,
+  type KnowledgeTranscriptCreateWrite,
   type KnowledgeTranscriptImportDeps,
   type KnowledgeTranscriptImportInput,
+  type KnowledgeTranscriptReplaceWrite,
   type KnowledgeTranscriptTarget,
-  type KnowledgeTranscriptVersionWrite,
+  type KnowledgeTranscriptVersionBody,
 } from './knowledgeTranscriptImport';
 import { buildKnowledgeTranscriptDocument } from './knowledgeTranscriptDocument';
 import { parseKnowledgeTranscript } from './knowledgeTranscriptCues';
 import { knowledgeTranscriptStoredRepresentation } from './knowledgeTranscriptVersion';
 
 const BOARD = 'board-1' as BoardId;
+const OTHER_BOARD = 'board-2' as BoardId;
 const USER = 'user-1' as UserId;
+const OTHER_USER = 'user-2' as UserId;
 const DOC = 'doc-1' as KnowledgeDocumentId;
+const NEW_DOC = 'doc-new' as KnowledgeDocumentId;
 
 // Two cues that OVERLAP IN TIME and carry the SAME TEXT. Both properties are
 // load-bearing: overlap must survive into the hash, and repeated text must not
@@ -40,15 +45,22 @@ const SRT = [
 /** The same words, one timing moved by a second. Nothing else differs. */
 const SRT_RETIMED = SRT.replace('00:00:02,500', '00:00:03,500');
 
+/** The same transcript, re-pasted with different raw bytes. Same version. */
+const SRT_REFORMATTED = `${SRT.replace(/\n/g, '\r\n')}\r\n\r\n`;
+
 /** `details` is deliberately `unknown` on DomainError, so read it narrowly. */
 const cleanupResidue = (error: DomainError): unknown =>
   (error.details as { cleanupFailed?: unknown } | undefined)?.cleanupFailed;
+
+type AnyWrite = KnowledgeTranscriptCreateWrite | KnowledgeTranscriptReplaceWrite;
 
 interface Recorder {
   readonly deps: KnowledgeTranscriptImportDeps;
   readonly uploads: { path: string; bytes: Uint8Array; contentType: string }[];
   readonly removed: string[];
-  readonly writes: { write: KnowledgeTranscriptVersionWrite; expected: string | null }[];
+  readonly creates: KnowledgeTranscriptCreateWrite[];
+  readonly replaces: { write: KnowledgeTranscriptReplaceWrite; expected: string }[];
+  readonly loads: { boardId: BoardId; documentId: KnowledgeDocumentId }[];
 }
 
 function makeDeps(options: {
@@ -57,30 +69,39 @@ function makeDeps(options: {
   writeResult?: Result<KnowledgeDocument, DomainError>;
   uploadResult?: Result<void, DomainError>;
   removeResult?: Result<void, DomainError>;
+  uploadIds?: string[];
 } = {}): Recorder {
   const uploads: Recorder['uploads'] = [];
   const removed: string[] = [];
-  const writes: Recorder['writes'] = [];
+  const creates: KnowledgeTranscriptCreateWrite[] = [];
+  const replaces: Recorder['replaces'] = [];
+  const loads: Recorder['loads'] = [];
   const stored = { id: DOC } as unknown as KnowledgeDocument;
-
-  const record = (write: KnowledgeTranscriptVersionWrite, expected: string | null) => {
-    writes.push({ write, expected });
-    return Promise.resolve(options.writeResult ?? ok(stored));
-  };
+  const ids = [...(options.uploadIds ?? ['upload01'])];
 
   return {
     uploads,
     removed,
-    writes,
+    creates,
+    replaces,
+    loads,
     deps: {
       authorizer: {
         canMutateBoard: () => Promise.resolve(ok(options.authorized ?? true)),
       },
       repository: {
-        loadTranscriptTarget: () =>
-          Promise.resolve(ok(options.target === undefined ? null : options.target)),
-        createTranscriptVersion: (write) => record(write, null),
-        replaceTranscriptVersion: (write, expected) => record(write, expected),
+        loadTranscriptTarget: (boardId, documentId) => {
+          loads.push({ boardId, documentId });
+          return Promise.resolve(ok(options.target === undefined ? null : options.target));
+        },
+        createTranscriptVersion: (write) => {
+          creates.push(write);
+          return Promise.resolve(options.writeResult ?? ok(stored));
+        },
+        replaceTranscriptVersion: (write, expected) => {
+          replaces.push({ write, expected });
+          return Promise.resolve(options.writeResult ?? ok(stored));
+        },
       },
       storage: {
         upload: (path, bytes, contentType) => {
@@ -96,12 +117,20 @@ function makeDeps(options: {
         sha256: (bytes: Uint8Array) =>
           Promise.resolve(createHash('sha256').update(Buffer.from(bytes)).digest('hex')),
       },
-      ids: { newDocumentId: () => DOC },
+      ids: { newDocumentId: () => NEW_DOC },
+      uploads: { newUploadId: () => ids.shift() ?? 'exhausted' },
     },
   };
 }
 
-const baseInput = (over: Partial<KnowledgeTranscriptImportInput> = {}): KnowledgeTranscriptImportInput => ({
+const allWrites = (r: Recorder): AnyWrite[] => [
+  ...r.creates,
+  ...r.replaces.map((entry) => entry.write),
+];
+
+const baseInput = (
+  over: Partial<KnowledgeTranscriptImportInput> = {},
+): KnowledgeTranscriptImportInput => ({
   boardId: BOARD,
   userId: USER,
   payload: SRT,
@@ -114,8 +143,11 @@ const baseInput = (over: Partial<KnowledgeTranscriptImportInput> = {}): Knowledg
   ...over,
 });
 
-const transcriptTarget = (over: Partial<KnowledgeTranscriptTarget> = {}): KnowledgeTranscriptTarget => ({
+const transcriptTarget = (
+  over: Partial<KnowledgeTranscriptTarget> = {},
+): KnowledgeTranscriptTarget => ({
   documentId: DOC,
+  boardId: BOARD,
   kind: 'text',
   transcriptRepresentation: knowledgeTranscriptStoredRepresentation({
     cues: [],
@@ -125,8 +157,17 @@ const transcriptTarget = (over: Partial<KnowledgeTranscriptTarget> = {}): Knowle
     format: 'srt',
   }),
   contentSha256: 'a'.repeat(64),
+  storagePath: 'knowledge/board-1/doc-1/transcript-old.srt',
+  document: { id: DOC } as unknown as KnowledgeDocument,
   ...over,
 });
+
+/** The hash the importer will compute for a given payload and video. */
+async function hashOf(payload: string, videoIdentity: string | null = 'yt:abc123'): Promise<string> {
+  const r = makeDeps();
+  await importKnowledgeTranscript(r.deps, baseInput({ payload, videoIdentity }));
+  return r.creates[0].contentSha256;
+}
 
 describe('importKnowledgeTranscript', () => {
   it('refuses an unauthorized board without touching storage or the database', async () => {
@@ -138,7 +179,7 @@ describe('importKnowledgeTranscript', () => {
     // The order matters, not just the refusal: a rejection that has already
     // uploaded is a rejection that left something behind.
     expect(r.uploads).toHaveLength(0);
-    expect(r.writes).toHaveLength(0);
+    expect(allWrites(r)).toHaveLength(0);
   });
 
   it('writes the whole version in ONE repository call', async () => {
@@ -146,11 +187,10 @@ describe('importKnowledgeTranscript', () => {
     const result = await importKnowledgeTranscript(r.deps, baseInput());
 
     expect(result.ok).toBe(true);
-    expect(r.writes).toHaveLength(1);
-    const { write, expected } = r.writes[0];
-    expect(expected).toBeNull();
-    // Text, cues, chunks and hash arrive together, because they must be
-    // written together.
+    if (result.ok) expect(result.value.written).toBe(true);
+    expect(r.creates).toHaveLength(1);
+    expect(r.replaces).toHaveLength(0);
+    const write = r.creates[0];
     expect(write.canonicalText).toContain('hello there');
     expect(write.representation.cues).toHaveLength(2);
     expect(write.chunks.length).toBeGreaterThan(0);
@@ -161,9 +201,8 @@ describe('importKnowledgeTranscript', () => {
     const r = makeDeps();
     await importKnowledgeTranscript(r.deps, baseInput());
 
-    const { write } = r.writes[0];
-    const occurrences = write.canonicalText.split('hello there').length - 1;
-    expect(occurrences).toBe(2);
+    const write = r.creates[0];
+    expect(write.canonicalText.split('hello there').length - 1).toBe(2);
     expect(write.representation.cues).toHaveLength(2);
   });
 
@@ -171,7 +210,7 @@ describe('importKnowledgeTranscript', () => {
     const r = makeDeps();
     await importKnowledgeTranscript(r.deps, baseInput());
 
-    const [first, second] = r.writes[0].write.representation.cues;
+    const [first, second] = r.creates[0].representation.cues;
     // The second cue starts BEFORE the first one ends. That is a timing
     // property; the characters do not overlap.
     expect(second.startMs).toBeLessThan(first.endMs);
@@ -187,8 +226,8 @@ describe('importKnowledgeTranscript', () => {
     const second = makeDeps();
     await importKnowledgeTranscript(second.deps, baseInput({ payload: SRT_RETIMED }));
 
-    expect(first.writes[0].write.canonicalText).toBe(second.writes[0].write.canonicalText);
-    expect(first.writes[0].write.contentSha256).not.toBe(second.writes[0].write.contentSha256);
+    expect(first.creates[0].canonicalText).toBe(second.creates[0].canonicalText);
+    expect(first.creates[0].contentSha256).not.toBe(second.creates[0].contentSha256);
   });
 
   it('gives the same transcript under a different video a different hash', async () => {
@@ -197,63 +236,150 @@ describe('importKnowledgeTranscript', () => {
     const second = makeDeps();
     await importKnowledgeTranscript(second.deps, baseInput({ videoIdentity: 'yt:other' }));
 
-    expect(first.writes[0].write.contentSha256).not.toBe(second.writes[0].write.contentSha256);
+    expect(first.creates[0].contentSha256).not.toBe(second.creates[0].contentSha256);
   });
 
-  it('writes each version to its own storage key', async () => {
-    const first = makeDeps();
-    await importKnowledgeTranscript(first.deps, baseInput());
-    const second = makeDeps();
-    await importKnowledgeTranscript(second.deps, baseInput({ payload: SRT_RETIMED }));
-
-    // Version-scoped: a failed replace cannot destroy the bytes the surviving
-    // row points at.
-    expect(first.uploads[0].path).not.toBe(second.uploads[0].path);
-    expect(first.uploads[0].path).toContain(first.writes[0].write.contentSha256);
-  });
-
-  it('uploads before it writes, and to a key nothing points at yet', async () => {
+  it('uploads before it writes, to the key it then records', async () => {
     const r = makeDeps();
     await importKnowledgeTranscript(r.deps, baseInput());
 
     expect(r.uploads).toHaveLength(1);
     expect(r.uploads[0].contentType).toBe('application/x-subrip');
-    expect(r.uploads[0].path).toBe(r.writes[0].write.storagePath);
+    expect(r.uploads[0].path).toBe(r.creates[0].storagePath);
+  });
+
+  describe('object ownership', () => {
+    it('gives two attempts with the SAME content hash different keys', async () => {
+      // The concurrency hazard in one assertion: a key derived from content
+      // alone would be shared, and then one request's cleanup is the other
+      // request's data loss.
+      const first = makeDeps({ uploadIds: ['uploadaa'] });
+      await importKnowledgeTranscript(first.deps, baseInput());
+      const second = makeDeps({ uploadIds: ['uploadbb'] });
+      await importKnowledgeTranscript(second.deps, baseInput());
+
+      expect(first.creates[0].contentSha256).toBe(second.creates[0].contentSha256);
+      expect(first.uploads[0].path).not.toBe(second.uploads[0].path);
+    });
+
+    it('cleans up only its own object when two replacements race', async () => {
+      // Both callers hold the SAME expected hash and produce the SAME new
+      // content hash. One commits; the other loses the transactional check.
+      const target = transcriptTarget();
+      const winner = makeDeps({ target, uploadIds: ['winner01'] });
+      const loser = makeDeps({
+        target,
+        uploadIds: ['loser001'],
+        writeResult: err(domainError('conflict', 'expected hash no longer stored')),
+      });
+      const replaceInput = baseInput({
+        payload: SRT_RETIMED,
+        replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+      });
+
+      const won = await importKnowledgeTranscript(winner.deps, replaceInput);
+      const lost = await importKnowledgeTranscript(loser.deps, replaceInput);
+
+      expect(won.ok).toBe(true);
+      expect(lost.ok).toBe(false);
+      if (!lost.ok) expect(lost.error.code).toBe('conflict');
+
+      const winnerObject = winner.uploads[0].path;
+      // The loser removed its own object and nothing else. The winner's
+      // published object is untouched by the loser.
+      expect(loser.removed).toEqual([loser.uploads[0].path]);
+      expect(loser.removed).not.toContain(winnerObject);
+      expect(loser.uploads[0].path).not.toBe(winnerObject);
+    });
   });
 
   describe('replacing an existing transcript', () => {
+    it('looks the target up scoped by board, not by document alone', async () => {
+      const target = transcriptTarget();
+      const r = makeDeps({ target });
+      await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        }),
+      );
+
+      expect(r.loads).toEqual([{ boardId: BOARD, documentId: DOC }]);
+    });
+
+    it('refuses a target whose stored board is not the caller’s board', async () => {
+      // A service_role RPC is not narrowed by RLS, so a caller authorized on
+      // its own board could otherwise nominate another board's document.
+      const r = makeDeps({ target: transcriptTarget({ boardId: OTHER_BOARD }) });
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) },
+        }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('not_found');
+      expect(r.uploads).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
+    });
+
+    it('never carries an author on a replacement', async () => {
+      // Provenance is preserved by the transaction; the replace type cannot
+      // even express changing it. Checked at runtime too, because a type is
+      // not a guarantee about what the adapter receives.
+      const target = transcriptTarget();
+      const r = makeDeps({ target });
+      await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          userId: OTHER_USER,
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        }),
+      );
+
+      const write = r.replaces[0].write as unknown as Record<string, unknown>;
+      expect(write.createdBy).toBeUndefined();
+      expect(write.kind).toBeUndefined();
+      // boardId is present as the SCOPE to match, not a value to re-home to.
+      expect(write.boardId).toBe(BOARD);
+      expect(write.documentId).toBe(DOC);
+    });
+
     it('passes the expected hash to the transactional write', async () => {
       const target = transcriptTarget();
       const r = makeDeps({ target });
       const result = await importKnowledgeTranscript(
         r.deps,
-        baseInput({ replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 } }),
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        }),
       );
 
       expect(result.ok).toBe(true);
-      // The read-time check is for a clear message; THIS is the check that
-      // cannot go stale, so it has to reach the repository.
-      expect(r.writes[0].expected).toBe(target.contentSha256);
-      expect(r.writes[0].write.documentId).toBe(DOC);
+      expect(r.replaces[0].expected).toBe(target.contentSha256);
     });
 
     it('refuses, and writes nothing, when the stored version moved', async () => {
       const r = makeDeps({ target: transcriptTarget({ contentSha256: 'b'.repeat(64) }) });
       const result = await importKnowledgeTranscript(
         r.deps,
-        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) } }),
+        baseInput({
+          replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) },
+        }),
       );
 
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe('conflict');
       expect(r.uploads).toHaveLength(0);
-      expect(r.writes).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
     });
 
     it('refuses to overwrite a plain text document', async () => {
-      // The consistency guard. A transcript shares kind 'text', so without
-      // this a text source could be replaced by a version carrying cues that
-      // nothing else on that document treats as timed.
       const r = makeDeps({ target: transcriptTarget({ transcriptRepresentation: null }) });
       const result = await importKnowledgeTranscript(
         r.deps,
@@ -262,7 +388,7 @@ describe('importKnowledgeTranscript', () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe('validation');
-      expect(r.writes).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
     });
 
     it('refuses to overwrite a document of another kind', async () => {
@@ -273,7 +399,7 @@ describe('importKnowledgeTranscript', () => {
       );
 
       expect(result.ok).toBe(false);
-      expect(r.writes).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
     });
 
     it('reports a missing target rather than creating a new document', async () => {
@@ -285,19 +411,87 @@ describe('importKnowledgeTranscript', () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe('not_found');
-      expect(r.writes).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
+    });
+
+    it('removes the superseded object only AFTER the write committed', async () => {
+      const target = transcriptTarget();
+      const r = makeDeps({ target });
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        }),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.supersededPath).toBe(target.storagePath);
+      expect(r.removed).toEqual([target.storagePath]);
+    });
+
+    it('does not touch the superseded object when the write fails', async () => {
+      const target = transcriptTarget();
+      const r = makeDeps({
+        target,
+        writeResult: err(domainError('conflict', 'expected hash no longer stored')),
+      });
+      await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        }),
+      );
+
+      // The surviving row still points at it. Removing it would leave a good
+      // row with a missing original.
+      expect(r.removed).not.toContain(target.storagePath);
+    });
+  });
+
+  describe('a re-import of the same version', () => {
+    it('writes nothing and uploads nothing when the hash is unchanged', async () => {
+      // Equivalent formatting, different raw bytes, SAME semantic version.
+      // Writing would swap the referenced original for bytes that mean the
+      // same thing, and put a referenced object at risk for no gain.
+      const same = await hashOf(SRT);
+      const target = transcriptTarget({ contentSha256: same });
+      const r = makeDeps({ target });
+
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_REFORMATTED,
+          replaces: { documentId: DOC, expectedContentSha256: same },
+        }),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.written).toBe(false);
+        expect(result.value.supersededPath).toBeNull();
+        expect(result.value.document).toBe(target.document);
+      }
+      expect(r.uploads).toHaveLength(0);
+      expect(r.removed).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
+    });
+
+    it('confirms the reformatted paste really is the same version', async () => {
+      // Guards the test above from passing for the wrong reason: if the two
+      // pastes hashed differently, the no-op branch would never be reached.
+      expect(await hashOf(SRT_REFORMATTED)).toBe(await hashOf(SRT));
     });
   });
 
   describe('when the write fails', () => {
-    it('removes the object it uploaded and leaves the stored version alone', async () => {
+    it('removes the object it uploaded', async () => {
       const r = makeDeps({ writeResult: err(domainError('conflict', 'someone else wrote')) });
       const result = await importKnowledgeTranscript(r.deps, baseInput());
 
       expect(result.ok).toBe(false);
       expect(r.removed).toEqual([r.uploads[0].path]);
-      // Nothing here deletes or rewrites a document: the previous version
-      // survives because this path never touched it.
       if (!result.ok) expect(cleanupResidue(result.error)).toBeUndefined();
     });
 
@@ -321,7 +515,7 @@ describe('importKnowledgeTranscript', () => {
       const result = await importKnowledgeTranscript(r.deps, baseInput());
 
       expect(result.ok).toBe(false);
-      expect(r.writes).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
     });
   });
 });
@@ -350,7 +544,14 @@ describe('transcriptChunkingBreak', () => {
     // no single cue behind it, so no timestamp could be named for it.
     const cut = document.cues[0].charStart + 2;
     const chunks = [
-      { chunkIndex: 0, text: document.canonicalText.slice(0, cut), charStart: 0, charEnd: cut, startMs: 1000, endMs: 3000 },
+      {
+        chunkIndex: 0,
+        text: document.canonicalText.slice(0, cut),
+        charStart: 0,
+        charEnd: cut,
+        startMs: 1000,
+        endMs: 3000,
+      },
       {
         chunkIndex: 1,
         text: document.canonicalText.slice(cut),
@@ -365,9 +566,18 @@ describe('transcriptChunkingBreak', () => {
 
   it('rejects chunk text that disagrees with its own range', () => {
     const chunks = [
-      { chunkIndex: 0, text: 'something else', charStart: 0, charEnd: document.canonicalText.length, startMs: 1000, endMs: 5000 },
+      {
+        chunkIndex: 0,
+        text: 'something else',
+        charStart: 0,
+        charEnd: document.canonicalText.length,
+        startMs: 1000,
+        endMs: 5000,
+      },
     ];
-    expect(transcriptChunkingBreak(document, chunks)).toContain('does not match its own character range');
+    expect(transcriptChunkingBreak(document, chunks)).toContain(
+      'does not match its own character range',
+    );
   });
 });
 
@@ -377,8 +587,9 @@ describe('transcriptConsistencyBreak', () => {
   });
 
   it('names the crossing it refused', () => {
-    expect(transcriptConsistencyBreak(transcriptTarget({ transcriptRepresentation: null })))
-      .toContain('plain text source');
+    expect(
+      transcriptConsistencyBreak(transcriptTarget({ transcriptRepresentation: null })),
+    ).toContain('plain text source');
     expect(transcriptConsistencyBreak(transcriptTarget({ kind: 'pdf' }))).toContain("kind 'pdf'");
   });
 });
@@ -386,11 +597,47 @@ describe('transcriptConsistencyBreak', () => {
 describe('buildKnowledgeTranscriptStoragePath', () => {
   it('refuses a hash that is not what it claims to be', () => {
     // A storage key is not the place to discover an input was malformed.
-    expect(() => buildKnowledgeTranscriptStoragePath(BOARD, DOC, '../escape', 'srt')).toThrow();
+    expect(() =>
+      buildKnowledgeTranscriptStoragePath(BOARD, DOC, '../escape', 'upload01', 'srt'),
+    ).toThrow();
   });
 
-  it('scopes the key by version', () => {
-    const path = buildKnowledgeTranscriptStoragePath(BOARD, DOC, 'c'.repeat(64), 'vtt');
-    expect(path).toBe(`knowledge/${BOARD}/${DOC}/transcript-${'c'.repeat(64)}.vtt`);
+  it('refuses an upload id that is not what it claims to be', () => {
+    expect(() =>
+      buildKnowledgeTranscriptStoragePath(BOARD, DOC, 'c'.repeat(64), '../escape', 'srt'),
+    ).toThrow();
+  });
+
+  it('scopes the key by version AND by attempt', () => {
+    const path = buildKnowledgeTranscriptStoragePath(BOARD, DOC, 'c'.repeat(64), 'upload01', 'vtt');
+    expect(path).toBe(`knowledge/${BOARD}/${DOC}/transcript-${'c'.repeat(64)}-upload01.vtt`);
+  });
+});
+
+describe('the version body carries no identity', () => {
+  it('has no author or board field to set', () => {
+    // A compile-time fact, asserted so it is visible: the shared body is
+    // content only. Authorship lives on the create shape alone.
+    const body: KnowledgeTranscriptVersionBody = {
+      originalFilename: 'x',
+      mimeType: 'text/vtt',
+      fileSizeBytes: 1,
+      storagePath: 'p',
+      contentSha256: 'd'.repeat(64),
+      parserName: 'n',
+      parserVersion: '1',
+      parserOptionsHash: 'e'.repeat(64),
+      canonicalText: '',
+      representation: knowledgeTranscriptStoredRepresentation({
+        cues: [],
+        videoIdentity: null,
+        language: null,
+        trackKind: 'unknown',
+        format: 'plain',
+      }),
+      chunks: [],
+    };
+    expect(Object.keys(body)).not.toContain('createdBy');
+    expect(Object.keys(body)).not.toContain('boardId');
   });
 });
