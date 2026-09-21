@@ -5,7 +5,7 @@
 -- grants, role membership and PUBLIC, so every check below asks
 -- has_*_privilege what a role can actually do.
 
-DO $$
+DO $insertprivs$
 DECLARE
     still text[];
 BEGIN
@@ -44,7 +44,8 @@ BEGIN
     IF has_column_privilege('authenticated', 'public.knowledge_documents', 'content_sha256', 'UPDATE') THEN
         RAISE EXCEPTION 'authenticated can UPDATE content_sha256 -- item 17 has been undone';
     END IF;
-END $$;
+END
+$insertprivs$;
 
 -- BEHAVIOURAL CONTROL: the caller-selected-id path, which is the reason this
 -- migration exists.
@@ -53,7 +54,7 @@ END $$;
 -- OLD id with a chosen hash, so a wiki source shown as gone would look present
 -- and unchanged. This reproduces that attempt under a genuine authorized
 -- identity and requires it to fail on PRIVILEGES.
-DO $$
+DO $recycleprobe$
 DECLARE
     probe_board uuid;
     probe_owner uuid;
@@ -61,16 +62,19 @@ DECLARE
     blocked boolean := false;
     seen_uid uuid;
 BEGIN
+    -- FATAL, not skippable. A control that returns quietly would let this
+    -- script print its final ok having exercised nothing.
     IF to_regclass('public.boards') IS NULL THEN
-        RAISE NOTICE 'skipping the live-table control: no boards table here';
-        RETURN;
+        RAISE EXCEPTION
+            'prerequisite missing: no public.boards table -- this verifier must run against a full schema';
     END IF;
 
     SELECT b.id, b.user_id INTO probe_board, probe_owner
       FROM public.boards b WHERE b.user_id IS NOT NULL LIMIT 1;
 
     IF probe_board IS NULL THEN
-        RAISE EXCEPTION 'this control needs a board with an owner in the isolated test database';
+        RAISE EXCEPTION
+            'prerequisite missing: the isolated test database needs at least one board with an owner (boards.user_id)';
     END IF;
 
     PERFORM set_config(
@@ -83,7 +87,9 @@ BEGIN
     seen_uid := auth.uid();
     IF seen_uid IS NULL OR seen_uid <> probe_owner THEN
         RESET ROLE;
-        RAISE EXCEPTION 'the probe identity was not established: auth.uid() = %', seen_uid;
+        RAISE EXCEPTION
+            'prerequisite missing: auth.uid() = %, expected % -- the probe identity was not established',
+            seen_uid, probe_owner;
     END IF;
 
     -- An id the caller chose, on a board it genuinely owns, with created_by
@@ -107,6 +113,7 @@ BEGIN
         RAISE EXCEPTION
             'an authorized client inserted a document under a chosen id with a chosen hash -- item 18 is not in force';
     END IF;
-END $$;
+END
+$recycleprobe$;
 
 SELECT 'knowledge_documents insert permission verify: ok' AS result;

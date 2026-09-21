@@ -1460,3 +1460,38 @@ owner, identity asserted before the attempt — and requires it to fail on
 privileges.
 
 **Unverified.** No SQL in items 17 or 18 has been executed anywhere.
+
+### Corrections before execution — items 17 and 18
+
+Four defects found in review of the committed SQL. All four held; all four are
+fixed, and none of this SQL has still been executed anywhere.
+
+1. **Invalid dollar quoting.** Item 17's real-table block opened with `DO $`
+   and closed with `END $;`. A lone `$` is not a dollar-quote, so that block
+   would not parse. Every anonymous block in these files now uses a **named
+   tag** (`$item17$`, `$rlsprobe$`, …), so a stray edit cannot silently produce
+   an unparseable file, and a structural check confirms every tag balances.
+
+2. **Neither migration was repeat-applicable.** Item 17 required the exact
+   21-column allowlist and would raise on its own 20-column result; item 18
+   required table-wide INSERT for both client roles and would raise once it had
+   removed them. A migration that cannot recognise its own post-state cannot be
+   applied twice, which a rollout sequence requires. Both now classify into
+   exactly three outcomes: **the supported pre-state** → repair; **the exact
+   intended post-state** → verified no-op; **anything else** → raise and change
+   nothing.
+
+3. **Item 18's preflight did not validate the shape its rollback restores.** It
+   checked which roles held table-wide INSERT and that `service_role` kept it,
+   and nothing else. It now also requires: no grant options on any client-role
+   INSERT; no separate **column-level** INSERT grants (a table revoke would
+   destroy them and the rollback would not bring them back); no INSERT granted
+   to **PUBLIC** (which a per-role revoke cannot remove); and no effective
+   INSERT arriving by **role membership** beyond the direct table grants. Each
+   unchecked case would have been silently destroyed and silently not restored.
+
+4. **A behavioural control could skip and still report ok.** Both verifiers
+   returned quietly when `boards` was absent, so the script could print its
+   final `ok` having exercised nothing. Missing prerequisites — the `boards`
+   table, a board with an owner, and an established `auth.uid()` — are now
+   **fatal**, in both files.

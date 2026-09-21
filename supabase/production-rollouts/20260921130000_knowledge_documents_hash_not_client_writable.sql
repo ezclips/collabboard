@@ -13,80 +13,76 @@
 -- unchanged and a citing page keeps quoting text that no longer says what it
 -- said.
 --
--- SCOPE: THIS FIXES UPDATE ONLY. `authenticated` also holds TABLE-WIDE INSERT,
--- which reaches every column including this one and any added later. That is
--- followups item 18, and it is a PREREQUISITE in its own right rather than a
--- tidy-up -- a caller may supply an explicit `id`, so a deleted document can be
--- recreated under its old id with a chosen hash. Item 18 is a separate
--- migration because broadening a narrow repair is how a permission change
--- becomes an outage; the two are ordered, not merged.
+-- SCOPE. This fixes UPDATE. Client INSERT is item 18, which is a prerequisite
+-- in its own right: `id` has a DEFAULT rather than being generated, so a caller
+-- may supply one and recreate a deleted document under its old id. The two are
+-- ordered, not merged.
 --
 -- ============================================================================
--- WHY A REVOKE, AND WHAT IS VALIDATED FIRST
+-- REPEAT-APPLICABLE BY DESIGN
 -- ============================================================================
 --
--- Omitting a column from a new GRANT does not remove an earlier grant --
--- privileges accumulate, and only a REVOKE removes one. REVOKE UPDATE at TABLE
+-- An earlier version of this migration accepted exactly one starting state --
+-- the 21-column allowlist -- and raised on any other, so running it twice
+-- failed on its own result. A migration that cannot recognise its own
+-- post-state is not safely re-runnable, and a rollout sequence has to be able
+-- to apply, verify, apply again and still be correct.
+--
+-- So exactly three outcomes are possible here:
+--
+--   NEEDS REPAIR   the supported pre-state -> revoke and re-grant
+--   ALREADY DONE   the exact intended post-state -> verified no-op
+--   anything else  -> raise, and change nothing
+--
+-- ============================================================================
+-- WHY A REVOKE, AND WHAT IS COMPARED
+-- ============================================================================
+--
+-- Omitting a column from a new GRANT does not remove an earlier grant;
+-- privileges accumulate and only a REVOKE removes one. REVOKE UPDATE at TABLE
 -- level drops the table-wide privilege and every column-level UPDATE together,
--- so this takes the house allowlist form: revoke at the table, grant back the
--- reviewed columns, minus one.
+-- so this takes the house allowlist form.
 --
--- THE EXPECTED ALLOWLIST IS PINNED BY NAME, NOT BY COUNT. An earlier version
--- of this migration checked the direct set's SIZE and that content_sha256 was
--- in it. A different 21-column set containing content_sha256 would have
--- passed, and the error that printed the found set is a message, not a
--- comparison. The array below is compared exactly, in both directions.
+-- The allowlist is pinned BY NAME and compared in both directions. A count
+-- would pass on the wrong columns. Effective privileges are read with
+-- has_column_privilege over every live column, because filtering
+-- information_schema by grantee cannot see privileges arriving through PUBLIC
+-- or role membership -- those rows carry a different grantee.
 --
--- PROVENANCE OF THAT ARRAY, stated because it matters: it is derived from this
--- repository's migration history -- every column of knowledge_documents except
--- `id` -- and it matches the column count observed on the live schema. It has
--- NOT been observed name-by-name. If it is wrong, this migration fails and
--- prints both sets rather than repairing anything; that is the intended
--- behaviour, and correcting the array from that output is the next step.
+-- PROVENANCE OF THE ARRAY: derived from this repository's migration history
+-- (every column of knowledge_documents except `id`) and matching the column
+-- count observed on the live schema. It has NOT been observed name-by-name. If
+-- it is wrong this migration fails and prints both sets rather than repairing
+-- anything.
 
-DO $$
+DO $item17$
 DECLARE
-    expected_update_columns CONSTANT text[] := ARRAY[
-        'board_id',
-        'content_sha256',
-        'created_at',
-        'created_by',
-        'derivatives_rendered_at',
-        'derivatives_requested_at',
-        'file_size_bytes',
-        'kind',
-        'mime_type',
-        'original_filename',
-        'page_count',
-        'parser_name',
-        'parser_options_hash',
-        'parser_version',
-        'processing_error',
-        'processing_lease_expires_at',
-        'processing_lease_token',
-        'processing_status',
-        'raw_artifact_path',
-        'storage_path',
-        'updated_at'
+    expected_all CONSTANT text[] := ARRAY[
+        'board_id', 'content_sha256', 'created_at', 'created_by',
+        'derivatives_rendered_at', 'derivatives_requested_at', 'file_size_bytes',
+        'kind', 'mime_type', 'original_filename', 'page_count', 'parser_name',
+        'parser_options_hash', 'parser_version', 'processing_error',
+        'processing_lease_expires_at', 'processing_lease_token',
+        'processing_status', 'raw_artifact_path', 'storage_path', 'updated_at'
     ];
+    expected_after text[];
     direct_columns    text[];
     effective_columns text[];
-    kept              text;
-    missing           text[];
-    extra             text[];
-    has_table_update  boolean;
-    grantable         integer;
+    kept    text;
+    missing text[];
+    extra   text[];
+    has_table_update boolean;
+    grantable integer;
 BEGIN
+    SELECT array_agg(c ORDER BY c) INTO expected_after
+      FROM unnest(expected_all) c WHERE c <> 'content_sha256';
+
     -- ---------------------------------------------------------------------
-    -- 1. The supported starting ACL state.
+    -- Facts, gathered once.
     -- ---------------------------------------------------------------------
 
-    -- (a) No table-wide UPDATE: a column allowlist would otherwise be
-    --     decoration, and replaying "every column" would freeze today's
-    --     column list into permanent grants.
     SELECT EXISTS (
-        SELECT 1
-          FROM pg_class c
+        SELECT 1 FROM pg_class c
           CROSS JOIN LATERAL aclexplode(c.relacl) acl
           JOIN pg_roles r ON r.oid = acl.grantee
          WHERE c.oid = 'public.knowledge_documents'::regclass
@@ -94,12 +90,6 @@ BEGIN
            AND acl.privilege_type = 'UPDATE'
     ) INTO has_table_update;
 
-    IF has_table_update THEN
-        RAISE EXCEPTION
-            'unsupported starting state: authenticated holds TABLE-WIDE UPDATE; this migration is designed for a column allowlist';
-    END IF;
-
-    -- (b) DIRECT column grants, from the ACL itself.
     SELECT coalesce(array_agg(a.attname::text ORDER BY a.attname), ARRAY[]::text[])
       INTO direct_columns
       FROM pg_attribute a
@@ -110,13 +100,6 @@ BEGIN
        AND r.rolname = 'authenticated'
        AND acl.privilege_type = 'UPDATE';
 
-    -- (c) EFFECTIVE privileges, asked of every live column.
-    --
-    --     This is the check the earlier version could not perform. Filtering
-    --     information_schema by grantee = 'authenticated' cannot see privileges
-    --     arriving through PUBLIC or through role membership -- those rows
-    --     carry a different grantee entirely. has_column_privilege answers what
-    --     the role can actually do, whatever the path.
     SELECT coalesce(array_agg(a.attname::text ORDER BY a.attname), ARRAY[]::text[])
       INTO effective_columns
       FROM pg_attribute a
@@ -124,32 +107,6 @@ BEGIN
        AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'UPDATE');
 
-    -- (d) Effective must equal direct. If it exceeds it, UPDATE is reaching
-    --     the role by a path this migration cannot revoke, and replaying the
-    --     direct set would turn inherited access into permanent direct grants
-    --     while leaving the inherited path open.
-    SELECT array_agg(c ORDER BY c) INTO extra
-      FROM unnest(effective_columns) c WHERE NOT (c = ANY (direct_columns));
-    IF extra IS NOT NULL THEN
-        RAISE EXCEPTION
-            'unsupported starting state: UPDATE reaches authenticated on % by a path other than a direct grant (PUBLIC or role membership)',
-            array_to_string(extra, ', ');
-    END IF;
-
-    -- (e) EXACT comparison against the reviewed array, both directions.
-    SELECT array_agg(c ORDER BY c) INTO missing
-      FROM unnest(expected_update_columns) c WHERE NOT (c = ANY (direct_columns));
-    SELECT array_agg(c ORDER BY c) INTO extra
-      FROM unnest(direct_columns) c WHERE NOT (c = ANY (expected_update_columns));
-
-    IF missing IS NOT NULL OR extra IS NOT NULL THEN
-        RAISE EXCEPTION
-            'unsupported starting state: the UPDATE allowlist is not the reviewed set. missing=[%] unexpected=[%]',
-            coalesce(array_to_string(missing, ', '), ''),
-            coalesce(array_to_string(extra, ', '), '');
-    END IF;
-
-    -- (f) No grant options: a grantable privilege may have been passed on.
     SELECT count(*) INTO grantable
       FROM pg_attribute a
       CROSS JOIN LATERAL aclexplode(a.attacl) acl
@@ -159,16 +116,57 @@ BEGIN
        AND acl.privilege_type = 'UPDATE'
        AND acl.is_grantable;
 
+    -- ---------------------------------------------------------------------
+    -- Invariants that must hold in EITHER accepted state.
+    -- ---------------------------------------------------------------------
+
+    IF has_table_update THEN
+        RAISE EXCEPTION
+            'unsupported state: authenticated holds TABLE-WIDE UPDATE; this migration is designed for a column allowlist';
+    END IF;
+
     IF grantable > 0 THEN
-        RAISE EXCEPTION 'unsupported starting state: % UPDATE grant(s) are WITH GRANT OPTION', grantable;
+        RAISE EXCEPTION 'unsupported state: % UPDATE grant(s) to authenticated are WITH GRANT OPTION', grantable;
+    END IF;
+
+    -- Effective must not exceed direct, or UPDATE is reaching the role by a
+    -- path this migration cannot revoke -- and replaying the direct set would
+    -- make inherited access permanent while leaving that path open.
+    SELECT array_agg(c ORDER BY c) INTO extra
+      FROM unnest(effective_columns) c WHERE NOT (c = ANY (direct_columns));
+    IF extra IS NOT NULL THEN
+        RAISE EXCEPTION
+            'unsupported state: UPDATE reaches authenticated on [%] other than by a direct grant (PUBLIC or role membership)',
+            array_to_string(extra, ', ');
     END IF;
 
     -- ---------------------------------------------------------------------
-    -- 2. The narrow repair.
+    -- ALREADY DONE: the exact intended post-state. Verified, then no-op.
     -- ---------------------------------------------------------------------
 
-    SELECT string_agg(quote_ident(c), ', ' ORDER BY c) INTO kept
-      FROM unnest(expected_update_columns) c WHERE c <> 'content_sha256';
+    IF effective_columns @> expected_after AND effective_columns <@ expected_after THEN
+        RAISE NOTICE 'item 17: already applied -- authenticated cannot UPDATE content_sha256, and the other % columns are intact',
+            array_length(expected_after, 1);
+        RETURN;
+    END IF;
+
+    -- ---------------------------------------------------------------------
+    -- NEEDS REPAIR: the exact supported pre-state, and nothing else.
+    -- ---------------------------------------------------------------------
+
+    SELECT array_agg(c ORDER BY c) INTO missing
+      FROM unnest(expected_all) c WHERE NOT (c = ANY (effective_columns));
+    SELECT array_agg(c ORDER BY c) INTO extra
+      FROM unnest(effective_columns) c WHERE NOT (c = ANY (expected_all));
+
+    IF missing IS NOT NULL OR extra IS NOT NULL THEN
+        RAISE EXCEPTION
+            'unsupported state: the UPDATE allowlist is neither the reviewed pre-state nor the intended post-state. missing=[%] unexpected=[%]',
+            coalesce(array_to_string(missing, ', '), ''),
+            coalesce(array_to_string(extra, ', '), '');
+    END IF;
+
+    SELECT string_agg(quote_ident(c), ', ' ORDER BY c) INTO kept FROM unnest(expected_after) c;
 
     RAISE NOTICE 'item 17: removing content_sha256 from the authenticated UPDATE allowlist';
 
@@ -176,7 +174,7 @@ BEGIN
     EXECUTE format('GRANT UPDATE (%s) ON TABLE public.knowledge_documents TO authenticated', kept);
 
     -- ---------------------------------------------------------------------
-    -- 3. The post-state, by EFFECTIVE privilege, in the same transaction.
+    -- Post-state, by EFFECTIVE privilege, inside the same transaction.
     -- ---------------------------------------------------------------------
 
     SELECT coalesce(array_agg(a.attname::text ORDER BY a.attname), ARRAY[]::text[])
@@ -186,21 +184,11 @@ BEGIN
        AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'UPDATE');
 
-    SELECT array_agg(c ORDER BY c) INTO missing
-      FROM unnest(expected_update_columns) c
-     WHERE c <> 'content_sha256' AND NOT (c = ANY (effective_columns));
-    SELECT array_agg(c ORDER BY c) INTO extra
-      FROM unnest(effective_columns) c WHERE NOT (c = ANY (expected_update_columns));
-
-    IF 'content_sha256' = ANY (effective_columns) THEN
-        RAISE EXCEPTION 'repair failed: authenticated can still UPDATE content_sha256';
+    IF NOT (effective_columns @> expected_after AND effective_columns <@ expected_after) THEN
+        RAISE EXCEPTION 'repair failed: the surviving UPDATE set is not the intended post-state ([%])',
+            array_to_string(effective_columns, ', ');
     END IF;
-    IF missing IS NOT NULL THEN
-        RAISE EXCEPTION 'repair failed: these columns lost UPDATE and should not have: %', array_to_string(missing, ', ');
-    END IF;
-    IF extra IS NOT NULL THEN
-        RAISE EXCEPTION 'repair failed: unexpected UPDATE remains on: %', array_to_string(extra, ', ');
-    END IF;
-END $$;
+END
+$item17$;
 
 -- service_role is untouched: it is the role the server writes with.
