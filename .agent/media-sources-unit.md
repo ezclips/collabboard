@@ -384,7 +384,137 @@ assumes yes.
 
 The ToS and quota reasoning goes in the commit that lands the chosen path.
 
-## 3b — Ingestion
+## 3a — REPORTED 2026-09-21, and accepted
+
+Findings: `.agent/youtube-caption-paths.md`. Instrument:
+`tools/youtube-caption-probe/`.
+
+Outcome: **automatic acquisition is deferred by product decision.** It was not
+universally disproven — the third-party library acquired captions for 6 of 6
+captioned videos, and the official API's authenticated behaviour was never
+measured. Rejecting the working path is a maintenance-risk judgement about a
+false client identity against a private endpoint, and it could be reopened
+without contradicting anything measured.
+
+**3b–3d below are superseded by the amendment that follows, pending its
+approval.**
+
+---
+
+## AMENDMENT — transcript import (PROPOSED, REVIEW ONLY)
+
+**NOT APPROVED AND NOT IMPLEMENTED.** This is the revised scope for review. No
+code is written against it, and Stage 3b does not begin until it is approved.
+STT remains separately gated under Stage 4.
+
+### What may be ingested, and what may be claimed
+
+| Input | Ingested | Honest citation behaviour |
+|---|---|---|
+| Plain transcript text | yes | character-range citations into the transcript **only** |
+| SRT/VTT **+** a supplied video URL | yes | transcript ranges **and** timestamp links derived from cues |
+| A URL alone | **no** | refused until an acquisition path is approved |
+
+**A URL alone is refused, not attempted.** No fetch, no "best effort", no
+partial ingestion. The refusal names the workaround, and says nothing about why
+captions could not be obtained, because nothing was tried.
+
+### Provenance: the transcript is user-provided, and says so
+
+Every transcript ingested this way is **labelled user-provided** wherever it is
+surfaced — reader, citation, wiki compilation. This is not a disclaimer to bury.
+
+**A supplied video URL is an association, not evidence.** Nothing checks that
+the transcript belongs to the video, and nothing can: a user may paste any text
+beside any URL. Consequences that follow, and which the implementation may not
+soften:
+
+- The association is recorded as **claimed**, never as verified.
+- Timestamp links are **offered on the user's assertion** that the cues match
+  the video.
+- **The timestamp path must be accepted against a known example** — a video and
+  its real caption file, where a cue's timestamp is checked to land at the
+  moment it claims. Until that acceptance runs, timestamp links are not shipped.
+
+### Language and track provenance, recorded explicitly
+
+The instrument found that the measured library returns the **first** track
+rather than a chosen one, which silently produced Arabic and Chinese
+transcripts for English videos. A supplied file has the same hazard in a
+different form: nothing about an `.srt` states its language.
+
+So the importer records, per source, as data rather than inference:
+
+- **language** — declared by the user, or read from the file when the format
+  carries it (VTT `Language:` header); never guessed from the text.
+- **track kind** — whether the user says this is human-authored or
+  machine-generated, **unknown** when not stated.
+- **format** — plain / SRT / VTT, and the parser version, exactly as Stage 2
+  records `parser_name` and `parser_version`.
+
+`unknown` is a legitimate value and must not be defaulted into a claim.
+
+### Cue handling — the rules the measurements force
+
+- **Absolute cue timestamps are preserved**, as given. Never recomputed by
+  accumulating durations: measured cues overlap on 99.9% of one ASR track, and
+  arithmetic would drift the whole way through a long video.
+- **Overlaps are preserved, not normalised away.** The overlap is what the
+  source says.
+- **Windows are cut on absolute offsets.** ~30–60 s is the target the
+  measurements *support trying*, not a guarantee.
+- **An oversized cue — longer than a window — is defined behaviour, not an
+  assumption.** The observed maximum was 12.7 s, but nothing bounds it. A cue
+  longer than a window becomes its own window rather than being split, so a
+  citation's range never straddles a boundary that has no cue.
+- **Repeated rolling-caption text needs a stated de-duplication rule.** It was
+  rare in what the instrument fetched (0.5%), but supplied SRT/VTT from rolling
+  captions genuinely repeats lines, and the rule may not rest on this set's
+  number. Proposed: a cue whose text is wholly contained in its immediate
+  predecessor contributes its **timing** but not a second copy of its text.
+  Open for review.
+
+### Size limits, before anything is stored
+
+The instrument measured a 31-hour video at **46,959 cues and 1.7 MB** of text,
+which is larger than any DOCX the Stage 2 ceilings admit. A pasted or uploaded
+transcript needs its own bounds, enforced the way Stage 2's are — refusing
+before the cost, not after:
+
+- a byte ceiling on the uploaded or pasted payload;
+- a **cue-count ceiling**, since cue count drives per-cue work that bytes alone
+  do not predict;
+- a ceiling on **canonical text length**, consistent with the existing
+  extracted-text ceiling.
+
+Numbers are deliberately not fixed here: they should be set against measured
+cost, as Stage 2's were, in the commit that implements them.
+
+### Versioning: timing is part of the version
+
+**The crux, and it is a real gap in the current shape.** Stage 3's staleness
+proof reuses `content_sha256`, which hashes canonical text. If cue timings live
+beside that text, then **re-importing a corrected caption file whose words are
+identical but whose timings have shifted would not change the hash** — every
+citing wiki page would keep a timestamp that now points at the wrong moment,
+and nothing would be flagged stale.
+
+Proposed: the stored version hashes **canonical text *and* normalised cue
+timing together**, so a timing-only correction is a new version and citing
+pages are flagged stale exactly as a text change would flag them.
+
+This needs review because it decides what `content_sha256` means for this kind
+of source, and that is a contract question, not an implementation detail.
+
+### What this amendment does not include
+
+- **No acquisition of any kind.** No fetch path, no URL-alone ingestion.
+- **No STT.** Stage 4 stays separately gated.
+- **No timestamp links** until the known-example acceptance passes.
+
+---
+
+## 3b — Ingestion (SUPERSEDED by the amendment above, pending approval)
 
 Paste URL → validate id → fetch captions → document (`kind = 'youtube'`, url,
 title, channel, duration) + chunks as caption segments grouped to ~30–60s

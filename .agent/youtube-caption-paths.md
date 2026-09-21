@@ -38,12 +38,18 @@ character on every run and reports drift; the run below reported none.
 | | A — Data API v3 | B — timedtext | C — transcript library |
 |---|---|---|---|
 | Videos attempted | 9 | 9 | 9 |
-| **Caption text acquired** | **0 / 9** | **0 / 9** | **6 / 9** |
-| Of the 6 that have captions | 0 | 0 | **6 / 6** |
-| Track metadata obtained | 0 (no key) | **7 / 9** | 6 / 9 |
-| Formats returned | — | none (empty body) | JSON segments |
-| Median latency | 0.2 s (error) | 1–3 s | 0.10–1.45 s |
-| Rate limiting seen | n/a | none at 25 requests | none at 25 requests |
+| **Caption text acquired** | **unmeasured** (see below) | **0 / 9** | **6 / 9** |
+| Of the 6 that have captions | unmeasured | 0 | **6 / 6** |
+| Track metadata obtained | unmeasured (no key) | **7 / 9** | 6 / 9 |
+| Formats returned | unmeasured | none (empty body) | JSON segments |
+| Median latency | 0.2 s (unauthenticated error) | 1–3 s | 0.10–1.45 s |
+| Rate limiting seen | unmeasured | none at 25 requests | none at 25 requests |
+
+**Path A is scored `unmeasured`, not zero.** A 0/9 would sit in the table as
+though the path had been tried and failed, which is not what happened: no
+authenticated call was ever made. The only thing measured on path A is the
+response to an unauthenticated request. Everything else about it below is
+documentary.
 
 ### A — official YouTube Data API v3
 
@@ -52,18 +58,25 @@ Measured: `captions.list` without a key returns **HTTP 403
 expected answer to an unauthenticated call and says nothing about the path's
 viability, so the decisive point is documentary rather than measured:
 
-> **`captions.download` requires an OAuth token for the channel that owns the
-> video.** There is no documented way for a third party to download another
-> channel's caption track.
+> **`captions.download` requires an OAuth token carrying permission to EDIT the
+> video** — the owning channel, or an account it has granted edit rights to.
+> An API key alone does not satisfy it.
 
 **This is an authorisation limit, not a quota limit.** A funded project with
-raised quota still could not use this path for arbitrary user-submitted videos.
-`captions.list` would return track *metadata* — languages, whether a track is
-ASR — but never the text.
+raised quota still could not use this path for arbitrary user-submitted videos,
+because the barrier is per-video edit permission the uploader would have to
+grant. `captions.list` would return track *metadata* — languages, whether a
+track is ASR — but that is metadata, not text.
 
-**Not measured, stated plainly:** behaviour with a valid key, and real quota
-costs. Both need a Google Cloud project that does not exist here. The probe
-runs the live call automatically if `YOUTUBE_API_KEY` is set.
+Said precisely, because the earlier wording overstated it: the constraint is
+**edit permission, not strictly ownership**, and it is a statement about the
+documented API surface rather than a measured result.
+
+**Unmeasured, stated plainly:** any authenticated call at all — acquisition,
+`captions.list` with a key, and real quota costs. All need a Google Cloud
+project and, for download, a video this account may edit; none exists here. The
+probe makes the live call automatically if `YOUTUBE_API_KEY` is set, so the
+metadata half is reproducible by anyone with a key.
 
 ### B — timedtext
 
@@ -118,26 +131,54 @@ this commit does not take it.
 
 **Timing granularity:** integer milliseconds throughout, on every track.
 
-**Can segments group into the plan's ~30–60 s windows?** Yes. Median segment
-length is 2–5 s and the maximum seen is 12.7 s, so windows are built from many
-whole segments and never need one split. The `45 s windows` column is the count
-produced by cutting on offsets.
+**Can segments group into the plan's ~30–60 s windows?** The measurements
+**support trying it**, and that is the strongest form the claim may take.
+Median cue length is 2–5 s and the longest cue *observed* is 12.7 s, so in this
+set a window is built from many whole cues. **That is an observed maximum, not
+a guarantee**: nothing in the formats bounds cue duration, and a future or
+unsampled track may carry a cue longer than a window. Any implementation must
+therefore define what happens to an oversized cue rather than assume none
+exists — see *Rules an importer must define* below. The `45 s windows` column
+is the count produced by cutting on offsets.
 
 ### Three quality findings that would have become defects
 
-1. **Segments overlap, so windows must be cut on offsets, not by summing
-   durations.** On auto-generated tracks the segment spans sum to **2.00×** the
-   video's real length (`8jLOx1hD3_o`) and **1.48×** (`9bZkp7q19f0`), because
-   consecutive ASR segments deliberately overlap. Human-authored tracks run
-   0.82–0.99× — under 1, because they have gaps. Any windowing that adds
-   durations would mis-time every citation after the first overlap, and the
-   error grows through the video.
+1. **Cues overlap in time, so windows must be cut on absolute offsets, not by
+   summing durations.** On auto-generated tracks the cue spans sum to **2.00×**
+   the video's real length (`8jLOx1hD3_o`) and **1.48×** (`9bZkp7q19f0`);
+   counted directly, **99.9%** of that video's 46,959 cues start before the
+   previous cue ends (77.6% on the Korean track). Human-authored tracks run
+   0.82–0.99× with **0%** overlap — under 1 because they have gaps instead.
+   Any windowing that adds durations would mis-time every citation after the
+   first overlap, and the error accumulates through the video.
 
-2. **Auto-generated captions have no casing and no commas.** `8jLOx1hD3_o`:
-   upper-case ratio **0.000** over 1.7 M characters, no commas at all. Sample:
-   `"this complete c plus plus course will"`. Human-authored tracks by contrast
-   carry both. So transcript text quality is bimodal, and any claim about
-   citation readability has to say which kind of track it came from.
+   **Absolute cue timestamps and the overlaps themselves must be preserved**,
+   not normalised away: the overlap is what the source says, and a citation's
+   timestamp has to be traceable to a cue's own start rather than to a position
+   reconstructed from arithmetic.
+
+   **Overlapping time did not mean duplicated words here.** Checked rather than
+   assumed: consecutive cues repeat text in only **0.5%** of cases on the
+   31-hour ASR track (239 of 46,959). So this delivery is a sliding window in
+   *time* carrying distinct words, not the rolling-caption duplication that
+   other caption formats can produce. **That is a property of what this path
+   returned, not a guarantee about SRT/VTT a user supplies**, where rolling
+   captions genuinely do repeat lines — which is why an importer has to state a
+   rule rather than rely on this number.
+
+2. **The two auto-generated tracks sampled here carry no casing and, in one
+   case, no commas.** `8jLOx1hD3_o`: upper-case ratio **0.000** over 1.7 M
+   characters, no commas. Sample: `"this complete c plus plus course will"`.
+   The human-authored tracks sampled carry both.
+
+   **Scope of that claim, stated because it is easy to over-read.** This is an
+   observation about **two ASR tracks in this set**, not a general property of
+   auto-generated captions — YouTube's ASR output varies by language, age and
+   pipeline, and two samples cannot establish otherwise. It also says **nothing
+   about transcription accuracy**: whether the words are *correct* was not
+   measured at all, and formatting is not a proxy for it. What follows is only
+   that citation readability cannot be assumed uniform, so any claim about it
+   must say which track it came from and on what evidence.
 
 3. **Scale is real.** A 31-hour video yields **46,959 segments and 1.7 MB of
    text** from a single URL paste. That is larger than any DOCX the extraction
@@ -157,8 +198,23 @@ produced by cutting on offsets.
 come back as "Transcript is disabled on this video", including the two where
 captions are not the problem at all. Stage 3d requires refusing *with a
 sentence that names the workaround*; built on path C, that sentence would tell
-users captions were disabled when the video actually needed a sign-in. The
-distinction is only available from path B's playability status.
+users captions were disabled when the video actually needed a sign-in.
+
+**The rule this implies, stated so it is not mis-taken as licence to diagnose.**
+Playability status *can* separate some causes — `LOGIN_REQUIRED` and
+`UNPLAYABLE` are specific and were observed. But it is not a general diagnosis
+and must not be treated as one:
+
+- Assert a specific cause **only** when the response explicitly supports it.
+- **"Captions are disabled" is only ever said when the source actually says
+  so.** It must never be inferred from an absence, an empty body, an unexpected
+  shape or a failed request.
+- Everything else — unavailable, ambiguous, empty, unrecognised, network
+  failure — is **"could not retrieve captions"**, which is honest about not
+  knowing.
+
+An unsupported diagnosis is worse than no diagnosis: it sends the person to fix
+something that is not broken.
 
 **Quota / rate limiting:** no 429 and no throttling at 25 consecutive requests
 on either reachable path (path B 25/25 HTTP 200 in 14.6 s; path C 25/25 in
@@ -188,8 +244,9 @@ is used.
 
 **None of the three paths should be adopted as an automatic fetch path.**
 
-- **A** cannot serve third-party videos at all. The blocker is owner
-  authorisation, and no amount of quota or funding changes it.
+- **A** cannot serve arbitrary third-party videos. The blocker is per-video
+  **edit permission**, which the uploader would have to grant, and no amount of
+  quota or funding changes that. Its authenticated behaviour is **unmeasured**.
 - **B** can discover tracks but cannot fetch text, and fails as a silent
   HTTP 200 — the worst shape of failure for a pipeline that would store the
   result.
@@ -206,6 +263,31 @@ is used.
 paste-a-transcript for Stage 3b, with STT as the Stage 4 door.** The plan wrote
 that this is better learned from an instrument than from a feature that breaks
 weekly, and that is what the instrument found.
+
+### How this recommendation should be read
+
+**Automatic acquisition is deferred by product decision. It is not universally
+disproven**, and the difference matters if this is revisited.
+
+Path C acquired captions for **6 of 6** videos that had them. Rejecting it is a
+judgement about **maintenance risk and a false client identity against a private
+endpoint** — not a finding that acquisition is impossible. Path A's
+authenticated behaviour was never measured at all. A later decision could
+legitimately reopen either without contradicting anything measured here.
+
+## Rules an importer must define
+
+Consequences of the measurements above, listed because each is a case the data
+shows is real or shows cannot be ruled out. **These are requirements on a future
+importer, not decisions taken here.**
+
+| Case | Why it must be handled | Rule owed |
+|---|---|---|
+| Cue longer than a window | 12.7 s is the observed max; nothing bounds it | Define oversized-cue behaviour; never assume none exists |
+| Cues overlapping in time | 99.9% of cues on one track | Cut windows on absolute offsets; preserve the overlap |
+| Repeated rolling-caption text | rare here (0.5%) but normal in supplied SRT/VTT | State a de-duplication rule rather than rely on this set |
+| Ambiguous or empty response | timedtext returns HTTP 200 + empty body | "Could not retrieve captions"; never "captions disabled" |
+| Track language | no track is chosen by the measured library | Record language and track kind explicitly as provenance |
 
 ### What paste-a-transcript keeps, and what it costs
 
@@ -237,3 +319,24 @@ plain text. That is a Stage 3b design question this instrument does not decide.
   see that.
 - **Longitudinal stability.** One run on one day. The InnerTube path's whole
   risk is that it changes, and a single green run says nothing about next month.
+
+---
+
+## Instrument status: COMPLETE, with qualifications
+
+Stage 3a is done. What it establishes, and the limits on each:
+
+| Established | Qualification |
+|---|---|
+| timedtext acquires nothing, failing as HTTP 200 + empty body | measured on 7 videos with tracks, one IP, one day |
+| A third-party library acquires captions for every captioned video tested | 6/6, by presenting a false client identity to a private API |
+| Cues overlap in time; windows must cut on absolute offsets | 99.9% / 77.6% on two ASR tracks; 0% on human tracks |
+| Cue lengths in this set fit 30–60 s windows | observed maximum 12.7 s — supports trying, guarantees nothing |
+| Two sampled ASR tracks lack casing/punctuation | says nothing about accuracy, nor about ASR in general |
+| Failure causes are distinguishable only from playability status | and only sometimes; otherwise "could not retrieve captions" |
+| No track selection happens by default | 6/6 returned the first track, not the video's language |
+
+**Not established, and not to be cited as if it were:** authenticated Data API
+behaviour; quota and sustained rate limits; geographic variation; longitudinal
+stability; transcription accuracy of any track; the behaviour of hosted
+transcript services.
