@@ -411,6 +411,41 @@ export function revisionAdvanceBreak(
     : null;
 }
 
+/**
+ * The reason code a caller keys off when the revision did not advance.
+ *
+ * NOT A FAILED SAVE, AND NOT SAFE TO RETRY. The transaction COMMITTED -- the
+ * change is stored -- but the token that separates concurrent edits did not
+ * move, so this process can no longer tell what the stored state is or whether
+ * anyone else's edit was lost. A blind retry would re-send the same expected
+ * revision, match again, and overwrite again.
+ *
+ * The honest instruction to the user is to RELOAD before editing further, and
+ * the honest instruction to the code is to surface it distinctly from an
+ * ordinary conflict, which IS safe to retry after re-reading.
+ *
+ * Primary enforcement belongs in the RPC: it must assert advancement inside
+ * the transaction and raise, so the whole mutation rolls back and this state
+ * never reaches a caller. This is defence against adapter or RPC drift.
+ */
+export const KNOWLEDGE_TRANSCRIPT_SAVED_STATE_UNCERTAIN = 'transcript_saved_state_uncertain';
+
+function savedStateUncertain(reason: string): DomainError {
+  return domainError(
+    'unknown',
+    'Your change was saved, but the transcript could not confirm its new version. Reload it before editing again.',
+    {
+      details: {
+        reason,
+        code: KNOWLEDGE_TRANSCRIPT_SAVED_STATE_UNCERTAIN,
+        // Explicit, because "unknown" alone invites a retry loop.
+        safeToRetry: false,
+        refreshRequired: true,
+      },
+    },
+  );
+}
+
 const MIME_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
   srt: 'application/x-subrip',
   vtt: 'text/vtt',
@@ -710,11 +745,7 @@ export async function importKnowledgeTranscript(
           updated.value.mutationRevision,
         );
         if (stalled !== null) {
-          return err(
-            domainError('unknown', 'The transcript was saved, but its version marker did not move', {
-              details: { reason: stalled },
-            }),
-          );
+          return err(savedStateUncertain(stalled));
         }
         return ok({
           document: updated.value.document,
@@ -801,11 +832,7 @@ export async function importKnowledgeTranscript(
   if (expected !== null) {
     const stalled = revisionAdvanceBreak(expected.mutationRevision, written.value.mutationRevision);
     if (stalled !== null) {
-      return err(
-        domainError('unknown', 'The transcript was saved, but its version marker did not move', {
-          details: { reason: stalled },
-        }),
-      );
+      return err(savedStateUncertain(stalled));
     }
   }
 

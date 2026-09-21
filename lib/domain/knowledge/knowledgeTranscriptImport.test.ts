@@ -7,6 +7,7 @@ import type { BoardId, KnowledgeDocumentId, UserId } from '../core/ids';
 import type { KnowledgeDocument } from './knowledgePersistence';
 import {
   importKnowledgeTranscript,
+  KNOWLEDGE_TRANSCRIPT_SAVED_STATE_UNCERTAIN,
   transcriptChunkingBreak,
   transcriptConsistencyBreak,
   buildKnowledgeTranscriptStoragePath,
@@ -54,6 +55,13 @@ const SRT_RETIMED = SRT.replace('00:00:02,500', '00:00:03,500');
 const SRT_REFORMATTED = `${SRT.replace(/\n/g, '\r\n')}\r\n\r\n`;
 
 /** `details` is deliberately `unknown` on DomainError, so read it narrowly. */
+const uncertainty = (error: DomainError) => {
+  const d = error.details as Record<string, unknown> | undefined;
+  return d === undefined
+    ? undefined
+    : { code: d.code, safeToRetry: d.safeToRetry, refreshRequired: d.refreshRequired };
+};
+
 const cleanupResidue = (error: DomainError): unknown =>
   (error.details as { cleanupFailed?: unknown } | undefined)?.cleanupFailed;
 
@@ -463,7 +471,14 @@ describe('importKnowledgeTranscript', () => {
       );
 
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(String(result.error.message)).toContain('version marker');
+      // Reported as SAVED-STATE-UNCERTAIN, not as an ordinary failed save: the
+      // transaction committed, so a blind retry would re-send the same expected
+      // revision, match again, and overwrite again.
+      if (!result.ok) expect(uncertainty(result.error)).toEqual({
+        code: KNOWLEDGE_TRANSCRIPT_SAVED_STATE_UNCERTAIN,
+        safeToRetry: false,
+        refreshRequired: true,
+      });
     });
 
     it('refuses a metadata update that committed without moving it', async () => {
@@ -479,7 +494,14 @@ describe('importKnowledgeTranscript', () => {
       );
 
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(String(result.error.message)).toContain('version marker');
+      // Reported as SAVED-STATE-UNCERTAIN, not as an ordinary failed save: the
+      // transaction committed, so a blind retry would re-send the same expected
+      // revision, match again, and overwrite again.
+      if (!result.ok) expect(uncertainty(result.error)).toEqual({
+        code: KNOWLEDGE_TRANSCRIPT_SAVED_STATE_UNCERTAIN,
+        safeToRetry: false,
+        refreshRequired: true,
+      });
     });
 
     it('reports the new revision for a caller editing on', async () => {
