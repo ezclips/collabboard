@@ -1302,7 +1302,43 @@ writable set and its own rollback. Deliberately **not** folded into the
 additive transcript rollout, whose stated scope is one new column — widening it
 would make its blast radius larger than its description.
 
-**Worth noting alongside:** the transcript work makes such a forgery
-*detectable* for the first time. The hash is re-derivable from the stored
-representation, so re-hashing a stored row and comparing is now a check that
-can be written. It does not exist yet, and it would only cover transcripts.
+**Worth noting alongside, stated narrowly.** Not "detectable for the first
+time" — canonical TXT and DOCX text is already stored and so already
+reproducible, and retained PDF bytes can support recomputation. What the
+transcript representation adds is a reproducible fingerprint over text AND
+timing together. In all cases detection requires an implemented check, and none
+exists yet.
+
+### Status: PREPARED, and reclassified as a prerequisite
+
+Not an open-ended follow-up. It gates live acceptance of the transcript
+staleness guarantee, because that guarantee is exactly the thing a client-side
+hash write would defeat.
+
+Prepared, narrowly scoped, and **unverified — no SQL has been executed
+anywhere**:
+
+- `supabase/migrations/20260921130000_knowledge_documents_hash_not_client_writable.sql`
+- the same file plus `_verify.sql` and `_rollback.sql` under
+  `supabase/production-rollouts/`
+
+**The form matters.** Omitting a column from a new GRANT does not remove a
+grant made earlier — privileges accumulate, and only a REVOKE removes one.
+`REVOKE UPDATE ON TABLE` drops the table-wide privilege and every column-level
+UPDATE together, so the migration takes the house allowlist form: revoke at the
+table, then grant back exactly the columns that had it, minus `content_sha256`.
+
+**The allowlist is read from the database rather than retyped.** Listing 21
+column names in a migration would let a typo silently drop a privilege the
+application needs, and would drift as the table changes. The set is captured
+before the revoke and replayed after it.
+
+**INSERT is checked separately from UPDATE**, because a role that cannot
+rewrite a hash but can insert a row still chooses the version of everything it
+creates — and the verifier asks the same question of
+`transcript_representation`, which is the other half of a transcript's version.
+
+The verifier reads effective privileges with `has_column_privilege`, then
+**exercises** them: as `authenticated`, against a copy of the table carrying
+the same grants, the hash write must fail and a permitted metadata update must
+still succeed. A revoke that took everything would pass a one-sided check.

@@ -659,9 +659,14 @@ than a grant.
 **Who writes what.** The knowledge routes authorise with the caller's session
 client and then write with the admin (`service_role`) client. So the importer
 writes `transcript_representation` as `service_role`, and `authenticated` needs
-no write on it. The rollout grants exactly that, and the verify asserts **both
-halves**: the intended grants exist, and `authenticated` and `anon` cannot
-write the column.
+no write on it. The rollout grants exactly that, and **the verifier asserts**
+both halves: that the intended grants exist, and that `authenticated` and
+`anon` cannot write the column.
+
+**That is a statement about the verifier, not about a database.** No SQL in
+this unit has been executed anywhere yet, so no privilege has been confirmed;
+the assertions are written and unrun. They become evidence only once the
+scripts run in an isolated test database.
 
 **The real finding about `content_sha256`.** It sits in the `authenticated`
 UPDATE allowlist, so a client could set it on any row its RLS policy lets it
@@ -687,10 +692,13 @@ possible for PDF, TXT and DOCX sources all along. What changes is the
 *consequence*: with timing inside the hash, that value now also governs whether
 a citation's **timestamp** still means what it claimed.
 
-**One thing the change gives back:** the hash is now re-derivable from the
-stored representation, so a forged or stale `content_sha256` becomes
-**detectable** — re-hash the stored row and compare. No such check was possible
-before, for any source kind.
+**What the change gives back, scoped correctly.** An earlier draft said this
+made forgery "detectable for the first time". That was too broad and is
+withdrawn: canonical TXT and DOCX text is stored, so its hash is already
+reproducible, and retained PDF bytes can support recomputation too. What the
+transcript representation adds is reproducibility for the **combined
+text-and-timing fingerprint**, which had no stored basis before. In every case
+detection still needs a **check that is written**, and none is.
 
 **Recommended, and deliberately NOT done in this rollout:** remove
 `content_sha256` from the `authenticated` UPDATE allowlist. That is a
