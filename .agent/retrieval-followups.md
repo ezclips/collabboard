@@ -1489,9 +1489,45 @@ fixed, and none of this SQL has still been executed anywhere.
    to **PUBLIC** (which a per-role revoke cannot remove); and no effective
    INSERT arriving by **role membership** beyond the direct table grants. Each
    unchecked case would have been silently destroyed and silently not restored.
+   (The membership and PUBLIC checks as first written were still asked at table
+   level — see correction 5.)
 
 4. **A behavioural control could skip and still report ok.** Both verifiers
    returned quietly when `boards` was absent, so the script could print its
    final `ok` having exercised nothing. Missing prerequisites — the `boards`
    table, a board with an owner, and an established `auth.uid()` — are now
    **fatal**, in both files.
+
+5. **Item 18's classifier asked a table-level question and produced a false
+   no-op.** Every branch — the "already applied" test, the PUBLIC test and the
+   membership test — was decided from `has_table_privilege(role, …, 'INSERT')`.
+   INSERT reaching a client role **only at column level** answers that question
+   `false`, so a column grant to PUBLIC, a column grant inherited through
+   another role, or a direct client column grant would all have been classified
+   as the intended post-state: **a verified no-op while a client could still
+   insert selected columns**. That is not a narrower version of the attack, it
+   is the attack — `id`, `created_by` and `content_sha256` are all a recycled
+   document needs. The wrong answer was also the quiet one: the verifier's
+   per-column scan would have caught it afterwards, but the migration would
+   already have reported success.
+
+   Effective access is now derived over **every live column for both client
+   roles** with `has_column_privilege`, and the no-op requires **both effective
+   sets to be empty**. PUBLIC is asked at both levels, and membership is
+   detected from the direct grants held by every role a client role is a member
+   of, rather than inferred from a table-level answer.
+
+   Three adversarial shapes are exercised in
+   `supabase/production-rollouts/20260921140000_…_adversarial.sql`: a PUBLIC
+   column-level INSERT grant, INSERT inherited through another role, and a
+   direct client column-level grant — each on an otherwise post-state ACL, so
+   each would have been a no-op before. Two positive controls sit beside them,
+   because a classifier that rejected everything would pass the other three: the
+   genuine post-state must no-op, and the supported pre-state must repair. Every
+   case runs inside a transaction that is rolled back. **The file has not been
+   executed.**
+
+   One further drift found while fixing this: `supabase/production-rollouts/`
+   carries a byte-identical mirror of each migration, and the item 18 mirror was
+   not being updated with it. Both copies are now in sync, and the adversarial
+   cases include the migration from `supabase/migrations/`.

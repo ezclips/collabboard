@@ -2,9 +2,11 @@
 --
 -- NARROWLY DESCRIBED, as item 17's rollback now is. This restores INSERT as a
 -- table-wide grant to both roles, which is the shape the migration required as
--- its starting state and verified before changing anything. It does not
--- reconstruct grant options or inherited paths, and it is an inverse only
--- within that validated shape.
+-- its starting state and verified before changing anything: direct table
+-- grants to exactly these two roles, no grant options, no column-level INSERT
+-- grants to them or to PUBLIC, and nothing arriving through role membership.
+-- It does not reconstruct grant options, column-level grants or inherited
+-- paths, and it is an inverse only within that validated shape.
 --
 -- WHAT RESTORING IT RESTORES, so this is a decision and not a reflex: a
 -- permitted client can again create knowledge_documents rows choosing their
