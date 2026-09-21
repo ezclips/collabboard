@@ -4,6 +4,72 @@
 
 ## Now
 
+**Stream: Board AI + Board Wiki, on the Freeform canvas. Stage 3b — getting
+YouTube transcripts into Board AI and the board wiki.** (Owner direction,
+2026-09-21.)
+
+### Scope, stated as exclusions because that is what keeps it honest
+
+- **The Drawing canvas is FINISHED AND APPLIED. Do not change drawing-canvas
+  code.** The slider sequence that this section used to describe as "Now"
+  (PATCH-114 closed 2026-07-27, PATCH-115) is done. Drawing is frozen, not
+  paused.
+- Work is **exclusively Freeform canvas, Board AI, and Board Wiki**. Nothing
+  else is in scope without a new owner decision.
+
+### Standing rule — Freeform first, then port (owner, 2026-09-21)
+
+A per-layout feature is built in **Freeform first**, brought to a tight,
+verified state, and only then ported to another layout. Never two parallel
+implementations of the same feature: they diverge, and then every defect has
+to be found and fixed twice, in two dialects.
+
+Note for anyone applying this rule: **the Board Wiki and Knowledge drawers are
+NOT per-layout.** `BoardWikiDrawer` and `KnowledgeSourceReaderDrawer` are
+mounted once at shell level in `CanvasClient.tsx` with no layout gate, so they
+render for every layout. There is no second copy to keep in step, and this
+rule does not bind them.
+
+### Stage 3b state (2026-09-21)
+
+Automatic YouTube caption acquisition was **measured and rejected** in Stage
+3a (`.agent/youtube-caption-paths.md`): the only working path presents a false
+client identity to a private, undocumented API. Stage 3b is therefore
+**paste a timed transcript** (SRT/VTT), with the video identity recorded as
+the importer CLAIM. Automatic acquisition may be revisited later on
+maintenance-risk grounds; it is not disproven, it is declined.
+
+| Piece | State |
+|---|---|
+| Transcript schema, RPCs, route, import UI | committed; **verified on an isolated local stack, clean run, no shims**; NOT applied to hosted |
+| Transcript citations with timestamps (reader) | landed (`9b356a4d`) |
+| Wiki staleness blind to transcript mutations | **fixed** (`f6858669`) |
+| Transcript disclosure on wiki pages | next work unit |
+| Timestamped citations on wiki pages | HELD until the transcript batch is applied to hosted |
+
+**Blocking the hosted path:** the Supabase branch price decision is the
+owner’s alone (Project → Branches). Nothing reaches hosted before it. See
+`.agent/isolated-sql-verification.md` for the two local runs, the five defects
+the first one found, and the ordering constraint.
+
+### Standing defect (not ours, not fixed)
+
+`npm run check:boundaries` **exits 1** on this branch: two
+`no-restricted-imports` errors in `lib/domain/canvas/boardObjectReveal.ts` and
+its test, importing UI into `lib/domain`. Introduced `21d6533e` (2026-09-11),
+before the board-retrieval work and in files it never touched. The protocol
+says this check stays green; it is currently red and unowned.
+
+---
+
+**EVERYTHING BELOW THIS LINE IS HISTORY,** kept because it records how the
+domain seam and the grandfather list were built. It described itself as "Now"
+until 2026-09-21, by which point it had been wrong for weeks — the read-order
+sends every fresh session here first, so a stale "Now" mis-briefs every one of
+them.
+
+## Superseded — Phase 1 domain-layer history (was "Now" until 2026-09-21)
+
 **Phase 1 — Domain Layer & Characterization Net** (opened 2026-07-06).
 Work flows through numbered patches in `.fable5/patches/` designed by the CTO model
 and executed by implementation models (SKILL.md).
@@ -379,6 +445,19 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 - Excalidraw fork has its own `node_modules` committed (major repo bloat); handle carefully in a later phase — it backs a `file:` dependency.
 
 ## Log
+
+- **2026-09-21** — **"Now" corrected after it had been wrong for weeks.** It
+  still named the Drawing-canvas slider sequence as the current focus while
+  the actual work had been the board-retrieval / Board AI / Board Wiki stream.
+  Owner direction recorded: Drawing canvas is finished and applied and its
+  code is frozen; work is exclusively Freeform + Board AI + Board Wiki; the
+  stage is 3b, YouTube transcripts into Board AI and the wiki. The
+  Freeform-first-then-port rule was recorded as a standing rule, with the note
+  that the wiki and knowledge drawers are shell-level and so not bound by it.
+  Also logged: `check:boundaries` is red from `21d6533e` (2026-09-11), unowned
+  and not ours. This entry exists because the read-order sends every fresh
+  session to this file first — a stale "Now" mis-briefs all of them, and it
+  mis-briefed this one.
 
 - **2026-07-27** — **PATCH-114 CLOSED (commit
   `44c0d5a6400edc00361e1f9141c17bd96680f91a`), PATCH-115 AUTHORIZED.**
