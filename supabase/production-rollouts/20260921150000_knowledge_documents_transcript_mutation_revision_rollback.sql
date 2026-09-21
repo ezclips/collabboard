@@ -40,10 +40,16 @@ DO $revisionrollback$
 DECLARE
     tbl CONSTANT regclass := 'public.knowledge_documents'::regclass;
     col CONSTANT text := 'transcript_mutation_revision';
+    -- Updated when the RPCs landed: the two shared validators are named here
+    -- too. They do not reference the column, but they exist only to serve
+    -- functions that do, and leaving them behind would be leaving half a
+    -- feature installed.
     rpc_names CONSTANT text[] := ARRAY[
         'knowledge_transcript_create_version',
         'knowledge_transcript_replace_version',
-        'knowledge_transcript_update_metadata'
+        'knowledge_transcript_update_metadata',
+        'knowledge_transcript_assert_chunks',
+        'knowledge_transcript_assert_representation'
     ];
     present_rpcs text[];
     dependents   text[];
