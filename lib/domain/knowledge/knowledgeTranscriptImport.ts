@@ -160,6 +160,45 @@ export interface KnowledgeTranscriptReplaceWrite extends KnowledgeTranscriptVers
   readonly boardId: BoardId;
 }
 
+/**
+ * A token that changes on EVERY mutation of the document, content or not.
+ *
+ * WHY THE CONTENT HASH IS NOT ENOUGH, and this was a real lost update. Both
+ * transactional ports used content_sha256 as their only compare-and-swap
+ * token, and the two same-hash paths -- the metadata-only update and the
+ * format replacement -- deliberately leave that hash unchanged. So two
+ * operations that began from the SAME observed version both matched the locked
+ * check, and the second silently overwrote the first: two people correcting the
+ * track kind and the title, and only one correction survives, with nothing
+ * saying so.
+ *
+ * OPAQUE HERE, BY DESIGN. The domain compares it for equality and never
+ * interprets it. `updated_at` is acceptable ONLY if the database guarantees it
+ * moves on every relevant mutation of the document AND the RPC compares it
+ * under the row lock; otherwise a dedicated monotonically changing column is
+ * required. That choice belongs to the migration, which is why nothing here
+ * assumes a shape.
+ *
+ * THE WRITE MUST MOVE IT. Every successful mutation -- including a
+ * metadata-only update and a same-hash format replacement -- has to produce a
+ * new revision, or the next writer inherits the same lost update. That is an
+ * obligation on the RPC, and `assertRevisionAdvanced` below refuses a result
+ * that breaks it rather than passing it on.
+ */
+export type KnowledgeTranscriptMutationRevision = string;
+
+/** The exact version a caller is acting on. BOTH halves are compared. */
+export interface KnowledgeTranscriptExpectedVersion {
+  readonly contentSha256: string;
+  readonly mutationRevision: KnowledgeTranscriptMutationRevision;
+}
+
+/** What a transactional write returns: the row, and its NEW revision. */
+export interface KnowledgeTranscriptWriteResult {
+  readonly document: KnowledgeDocument;
+  readonly mutationRevision: KnowledgeTranscriptMutationRevision;
+}
+
 /** What the caller believed it was replacing. */
 export interface KnowledgeTranscriptTarget {
   readonly documentId: KnowledgeDocumentId;
@@ -169,6 +208,8 @@ export interface KnowledgeTranscriptTarget {
   /** Non-null exactly when the target is already a transcript. */
   readonly transcriptRepresentation: KnowledgeTranscriptStoredRepresentation | null;
   readonly contentSha256: string;
+  /** Moves on every mutation, including ones that leave the hash alone. */
+  readonly mutationRevision: KnowledgeTranscriptMutationRevision;
   /** The object the stored row points at, until a replacement commits. */
   readonly storagePath: string;
   /** Metadata the import can change without changing the version. */
@@ -222,35 +263,45 @@ export interface KnowledgeTranscriptRepository {
   /** Creates document, cues, chunks and readiness in ONE transaction. */
   createTranscriptVersion(
     write: KnowledgeTranscriptCreateWrite,
-  ): Promise<Result<KnowledgeDocument, DomainError>>;
+  ): Promise<Result<KnowledgeTranscriptWriteResult, DomainError>>;
   /**
    * Replaces ONE version with another in ONE transaction.
    *
-   * THE TRANSACTION MUST, while holding the row locked: match `documentId` AND
-   * `boardId`, match the stored hash against `expectedContentSha256`, and
-   * confirm the row is still a transcript. Any mismatch refuses the write and
-   * leaves the stored version exactly as it was. The checks this module
-   * performs before calling are for clearer messages; they can all go stale
-   * between here and the lock, and only the locked checks cannot.
+   * THE TRANSACTION MUST, while holding the row locked, match ALL FIVE:
+   * `documentId`, `boardId`, the stored content hash, the stored mutation
+   * revision, and that the row is still a transcript. Any mismatch refuses the
+   * write and leaves the stored version exactly as it was. The checks this
+   * module performs before calling are for clearer messages; they can all go
+   * stale between here and the lock, and only the locked checks cannot.
+   *
+   * The hash alone is NOT sufficient: a same-hash path leaves it unchanged, so
+   * two callers starting from one observed version would both match it.
+   *
+   * On success it must return a revision DIFFERENT from the expected one.
    */
   replaceTranscriptVersion(
     write: KnowledgeTranscriptReplaceWrite,
-    expectedContentSha256: string,
-  ): Promise<Result<KnowledgeDocument, DomainError>>;
+    expected: KnowledgeTranscriptExpectedVersion,
+  ): Promise<Result<KnowledgeTranscriptWriteResult, DomainError>>;
   /**
    * Changes metadata ONLY, when the version is unchanged.
    *
-   * Same locked checks as a replacement -- document id, board id, the stored
-   * hash and that the row is still a transcript -- because a metadata write is
-   * no less able to land on the wrong row. It must not touch the text, the
-   * cues, the chunks, the hash or the stored original: the version is not
-   * changing, which is precisely why this exists instead of a replacement.
+   * THE SAME FIVE LOCKED CHECKS as a replacement -- document id, board id,
+   * content hash, mutation revision, still a transcript -- because a metadata
+   * write is no less able to land on the wrong row, and because THIS is the
+   * path where the hash cannot distinguish two callers at all: it leaves the
+   * hash exactly as it found it. The revision is the only thing separating two
+   * corrections made from one observed version.
+   *
+   * It must not touch the text, the cues, the chunks, the hash or the stored
+   * original: the version is not changing, which is precisely why this exists
+   * instead of a replacement. It MUST still move the revision.
    */
   updateTranscriptMetadata(
     scope: { readonly documentId: KnowledgeDocumentId; readonly boardId: BoardId },
     metadata: Omit<KnowledgeTranscriptMetadata, 'format'>,
-    expectedContentSha256: string,
-  ): Promise<Result<KnowledgeDocument, DomainError>>;
+    expected: KnowledgeTranscriptExpectedVersion,
+  ): Promise<Result<KnowledgeTranscriptWriteResult, DomainError>>;
 }
 
 /**
@@ -305,6 +356,15 @@ export interface KnowledgeTranscriptImportInput {
   readonly replaces: {
     readonly documentId: KnowledgeDocumentId;
     readonly expectedContentSha256: string;
+    /**
+     * OBSERVED WHEN EDITING BEGAN, and carried by the client.
+     *
+     * Re-loading the current row inside the request cannot substitute for it:
+     * an intervening metadata change does not move content_sha256, so a fresh
+     * read would simply agree with whatever just happened and the earlier edit
+     * would be lost without a word.
+     */
+    readonly expectedMutationRevision: KnowledgeTranscriptMutationRevision;
   } | null;
 }
 
@@ -328,6 +388,27 @@ export interface KnowledgeTranscriptImportOutcome {
    * can collect it later, when no request is mid-flight against it.
    */
   readonly supersededCleanupCandidate: string | null;
+  /** The revision now stored. A caller editing on must carry this one next. */
+  readonly mutationRevision: KnowledgeTranscriptMutationRevision;
+}
+
+/**
+ * A write that reports success without moving the revision is a lost update
+ * waiting to happen, so it is refused here rather than passed on.
+ *
+ * It cannot be undone -- the transaction has committed -- and this does not
+ * pretend otherwise. What it does is stop the caller being handed a revision
+ * that the next writer would also match, and name the contract that was
+ * broken, which is the difference between a bug found in the isolated database
+ * and a bug found as two silently merged corrections in production.
+ */
+export function revisionAdvanceBreak(
+  expected: KnowledgeTranscriptMutationRevision,
+  observed: KnowledgeTranscriptMutationRevision,
+): string | null {
+  return expected === observed
+    ? `the write committed but left the mutation revision at ${observed}`
+    : null;
 }
 
 const MIME_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
@@ -522,7 +603,7 @@ export async function importKnowledgeTranscript(
   //    costs nothing and leaves nothing.
   let documentId: KnowledgeDocumentId;
   let target: KnowledgeTranscriptTarget | null = null;
-  let expected: string | null = null;
+  let expected: KnowledgeTranscriptExpectedVersion | null = null;
   if (input.replaces === null) {
     documentId = deps.ids.newDocumentId();
   } else {
@@ -551,6 +632,9 @@ export async function importKnowledgeTranscript(
         }),
       );
     }
+    // BOTH HALVES. The hash alone cannot separate two callers who started from
+    // one observed version, because the same-hash paths below leave it exactly
+    // where they found it.
     if (loaded.value.contentSha256 !== input.replaces.expectedContentSha256) {
       return err(
         domainError('conflict', 'This transcript changed since you opened it', {
@@ -558,6 +642,18 @@ export async function importKnowledgeTranscript(
         }),
       );
     }
+    if (loaded.value.mutationRevision !== input.replaces.expectedMutationRevision) {
+      return err(
+        domainError('conflict', 'This transcript was edited since you opened it', {
+          details: { expectedRevision: input.replaces.expectedMutationRevision },
+        }),
+      );
+    }
+
+    const expectedVersion: KnowledgeTranscriptExpectedVersion = {
+      contentSha256: input.replaces.expectedContentSha256,
+      mutationRevision: input.replaces.expectedMutationRevision,
+    };
 
     // SAME VERSION, RE-PASTED -- WHICH IS NOT THE SAME AS AN IDENTICAL REQUEST.
     //
@@ -588,6 +684,7 @@ export async function importKnowledgeTranscript(
           metadataOnly: false,
           metadataChanged: [],
           supersededCleanupCandidate: null,
+          mutationRevision: loaded.value.mutationRevision,
         });
       }
 
@@ -605,22 +702,34 @@ export async function importKnowledgeTranscript(
             language: requested.language,
             trackKind: requested.trackKind,
           },
-          loaded.value.contentSha256,
+          expectedVersion,
         );
         if (!updated.ok) return updated;
+        const stalled = revisionAdvanceBreak(
+          expectedVersion.mutationRevision,
+          updated.value.mutationRevision,
+        );
+        if (stalled !== null) {
+          return err(
+            domainError('unknown', 'The transcript was saved, but its version marker did not move', {
+              details: { reason: stalled },
+            }),
+          );
+        }
         return ok({
-          document: updated.value,
+          document: updated.value.document,
           written: false,
           metadataOnly: true,
           metadataChanged: changed,
           supersededCleanupCandidate: null,
+          mutationRevision: updated.value.mutationRevision,
         });
       }
     }
 
     documentId = loaded.value.documentId;
     target = loaded.value;
-    expected = input.replaces.expectedContentSha256;
+    expected = expectedVersion;
   }
 
   // 5. This attempt's own object, at a key no other request can name.
@@ -677,8 +786,9 @@ export async function importKnowledgeTranscript(
 
   if (!written.ok) {
     // THIS request's object, and only this request's. A concurrent import that
-    // produced the same content hash owns a different key, so a loser cleaning
-    // up cannot reach the winner's published object.
+    // produced the same content hash owns a different key, so the loser of a
+    // race cleans up its own upload and cannot reach the winner's published
+    // object.
     const removed = await deps.storage.remove(storagePath);
     if (removed.ok) return written;
     return err(
@@ -686,6 +796,17 @@ export async function importKnowledgeTranscript(
         details: { ...(written.error.details ?? {}), cleanupFailed: ['stored file'] },
       }),
     );
+  }
+
+  if (expected !== null) {
+    const stalled = revisionAdvanceBreak(expected.mutationRevision, written.value.mutationRevision);
+    if (stalled !== null) {
+      return err(
+        domainError('unknown', 'The transcript was saved, but its version marker did not move', {
+          details: { reason: stalled },
+        }),
+      );
+    }
   }
 
   // 7. RETENTION OF THE SUPERSEDED PAYLOAD -- corrected.
@@ -699,14 +820,28 @@ export async function importKnowledgeTranscript(
   //
   //    The path is RETAINED and returned as a CLEANUP CANDIDATE. A sweep can
   //    collect it once nothing can still be mid-flight against it, which is a
-  //    judgement this request cannot make. Growth is bounded by that sweep,
-  //    not by deleting under a live reader.
+  //    judgement this request cannot make.
+  //
+  //    WHAT THAT COSTS, stated accurately. Each retained object is bounded --
+  //    KNOWLEDGE_TRANSCRIPT_MAX_PAYLOAD_BYTES -- but the ACCUMULATION IS NOT:
+  //    one object per superseding re-import, forever, until a sweep exists. An
+  //    earlier note said growth was "bounded by that sweep", which described a
+  //    sweep that has not been written.
+  //
+  //    AND RETURNING THE PATH IS TELEMETRY, NOT GARBAGE COLLECTION. It tells
+  //    one caller about one object, in one response, and nothing durable
+  //    records it. A real sweep needs: a grace period long enough that no
+  //    request begun before the commit can still be running, and a FRESH
+  //    database check that no row references the path, performed at deletion
+  //    time rather than inherited from whatever produced the candidate.
+  //    Recorded as a followup; it is not done here.
   //
   //    Failed-attempt cleanup stays immediate and is unaffected: that object
   //    was never published, no reader can hold it, and nothing else can name
   //    its attempt-scoped key.
   return ok({
-    document: written.value,
+    document: written.value.document,
+    mutationRevision: written.value.mutationRevision,
     written: true,
     metadataOnly: false,
     metadataChanged: target === null

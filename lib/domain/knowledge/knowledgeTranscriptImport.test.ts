@@ -13,10 +13,12 @@ import {
   type KnowledgeTranscriptCreateWrite,
   type KnowledgeTranscriptImportDeps,
   type KnowledgeTranscriptImportInput,
+  type KnowledgeTranscriptExpectedVersion,
   type KnowledgeTranscriptMetadata,
   type KnowledgeTranscriptReplaceWrite,
   type KnowledgeTranscriptTarget,
   type KnowledgeTranscriptVersionBody,
+  type KnowledgeTranscriptWriteResult,
 } from './knowledgeTranscriptImport';
 import { buildKnowledgeTranscriptDocument } from './knowledgeTranscriptDocument';
 import { parseKnowledgeTranscript } from './knowledgeTranscriptCues';
@@ -28,6 +30,8 @@ const USER = 'user-1' as UserId;
 const OTHER_USER = 'user-2' as UserId;
 const DOC = 'doc-1' as KnowledgeDocumentId;
 const NEW_DOC = 'doc-new' as KnowledgeDocumentId;
+/** The revision a caller observed when it began editing. */
+const REV = 'rev-1';
 
 // Two cues that OVERLAP IN TIME and carry the SAME TEXT. Both properties are
 // load-bearing: overlap must survive into the hash, and repeated text must not
@@ -60,23 +64,24 @@ interface Recorder {
   readonly uploads: { path: string; bytes: Uint8Array; contentType: string }[];
   readonly removed: string[];
   readonly creates: KnowledgeTranscriptCreateWrite[];
-  readonly replaces: { write: KnowledgeTranscriptReplaceWrite; expected: string }[];
+  readonly replaces: { write: KnowledgeTranscriptReplaceWrite; expected: KnowledgeTranscriptExpectedVersion }[];
   readonly loads: { boardId: BoardId; documentId: KnowledgeDocumentId }[];
   readonly metadataUpdates: {
     scope: { documentId: KnowledgeDocumentId; boardId: BoardId };
     metadata: Omit<KnowledgeTranscriptMetadata, 'format'>;
-    expected: string;
+    expected: KnowledgeTranscriptExpectedVersion;
   }[];
 }
 
 function makeDeps(options: {
   authorized?: boolean;
   target?: KnowledgeTranscriptTarget | null;
-  writeResult?: Result<KnowledgeDocument, DomainError>;
+  writeResult?: Result<KnowledgeTranscriptWriteResult, DomainError>;
   uploadResult?: Result<void, DomainError>;
   removeResult?: Result<void, DomainError>;
-  metadataResult?: Result<KnowledgeDocument, DomainError>;
+  metadataResult?: Result<KnowledgeTranscriptWriteResult, DomainError>;
   uploadIds?: string[];
+  nextRevision?: string;
 } = {}): Recorder {
   const uploads: Recorder['uploads'] = [];
   const removed: string[] = [];
@@ -84,8 +89,9 @@ function makeDeps(options: {
   const replaces: Recorder['replaces'] = [];
   const loads: Recorder['loads'] = [];
   const metadataUpdates: Recorder['metadataUpdates'] = [];
-  const stored = { id: DOC } as unknown as KnowledgeDocument;
-  const updatedStored = { id: DOC, renamed: true } as unknown as KnowledgeDocument;
+  const doc = { id: DOC } as unknown as KnowledgeDocument;
+  const stored = { document: doc, mutationRevision: options.nextRevision ?? 'rev-2' };
+  const updatedStored = { document: doc, mutationRevision: options.nextRevision ?? 'rev-2' };
   const ids = [...(options.uploadIds ?? ['upload01'])];
 
   return {
@@ -171,6 +177,7 @@ const transcriptTarget = (
     format: 'srt',
   }),
   contentSha256: 'a'.repeat(64),
+  mutationRevision: 'rev-1',
   storagePath: 'knowledge/board-1/doc-1/transcript-old.srt',
   originalFilename: 'Lecture 1',
   document: { id: DOC } as unknown as KnowledgeDocument,
@@ -289,7 +296,7 @@ describe('importKnowledgeTranscript', () => {
       });
       const replaceInput = baseInput({
         payload: SRT_RETIMED,
-        replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+        replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
       });
 
       const won = await importKnowledgeTranscript(winner.deps, replaceInput);
@@ -308,6 +315,190 @@ describe('importKnowledgeTranscript', () => {
     });
   });
 
+  // TWO OPERATIONS THAT BEGAN FROM ONE OBSERVED VERSION. The content hash
+  // cannot separate them -- the same-hash paths leave it exactly where they
+  // found it -- so the mutation revision is the only thing that can. In each
+  // scenario the winner commits and the loser is refused by the locked check.
+  describe('concurrent edits from the same observed revision', () => {
+    const conflict = err(domainError('conflict', 'the stored revision has moved'));
+
+    it('lets exactly one of two metadata corrections commit', async () => {
+      const target = transcriptTarget();
+      const same = await hashOf(SRT);
+      const observed = transcriptTarget({ contentSha256: same });
+
+      const winner = makeDeps({ target: observed, nextRevision: 'rev-2' });
+      const loser = makeDeps({ target: observed, metadataResult: conflict });
+
+      const titleFix = baseInput({
+        payload: SRT,
+        title: 'Lecture 1 (corrected)',
+        replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+      });
+      const languageFix = baseInput({
+        payload: SRT,
+        language: 'de',
+        replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+      });
+
+      const won = await importKnowledgeTranscript(winner.deps, titleFix);
+      const lost = await importKnowledgeTranscript(loser.deps, languageFix);
+
+      expect(won.ok).toBe(true);
+      // Both carried the SAME revision; only the locked check can separate
+      // them, and it did.
+      expect(winner.metadataUpdates[0].expected.mutationRevision).toBe(REV);
+      expect(loser.metadataUpdates[0].expected.mutationRevision).toBe(REV);
+      expect(lost.ok).toBe(false);
+      if (!lost.ok) expect(lost.error.code).toBe('conflict');
+      // A metadata correction uploads nothing, so it has nothing to remove --
+      // and in particular nothing of the winner's.
+      expect(loser.removed).toHaveLength(0);
+      expect(target.storagePath).not.toBe('');
+    });
+
+    it('lets exactly one of a metadata correction and a same-hash format replacement commit', async () => {
+      const same = await hashOf(SRT);
+      const observed = transcriptTarget({ contentSha256: same });
+      const vtt = [
+        'WEBVTT', '', '00:00:01.000 --> 00:00:03.000', 'hello there', '',
+        '00:00:02.500 --> 00:00:05.000', 'hello there', '',
+      ].join('\n');
+
+      const formatWinner = makeDeps({ target: observed, uploadIds: ['fmtwin01'] });
+      const metadataLoser = makeDeps({ target: observed, metadataResult: conflict });
+
+      const won = await importKnowledgeTranscript(
+        formatWinner.deps,
+        baseInput({
+          payload: vtt,
+          format: 'vtt',
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+        }),
+      );
+      const lost = await importKnowledgeTranscript(
+        metadataLoser.deps,
+        baseInput({
+          payload: SRT,
+          trackKind: 'human',
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+        }),
+      );
+
+      expect(won.ok).toBe(true);
+      if (won.ok) expect(won.value.written).toBe(true);
+      expect(lost.ok).toBe(false);
+      // The format replacement's own object must survive the loser's failure.
+      expect(metadataLoser.removed).not.toContain(formatWinner.uploads[0].path);
+    });
+
+    it('lets exactly one of a metadata correction and a content replacement commit', async () => {
+      const same = await hashOf(SRT);
+      const observed = transcriptTarget({ contentSha256: same });
+
+      const contentWinner = makeDeps({ target: observed, uploadIds: ['contwin1'] });
+      const metadataLoser = makeDeps({ target: observed, metadataResult: conflict });
+
+      const won = await importKnowledgeTranscript(
+        contentWinner.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+        }),
+      );
+      const lost = await importKnowledgeTranscript(
+        metadataLoser.deps,
+        baseInput({
+          payload: SRT,
+          title: 'renamed while timings were being fixed',
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+        }),
+      );
+
+      expect(won.ok).toBe(true);
+      expect(lost.ok).toBe(false);
+      if (!lost.ok) expect(lost.error.code).toBe('conflict');
+      expect(metadataLoser.removed).not.toContain(contentWinner.uploads[0].path);
+      // The winner's superseded object is a retained candidate, not a deletion.
+      if (won.ok) expect(won.value.supersededCleanupCandidate).toBe(observed.storagePath);
+      expect(contentWinner.removed).toHaveLength(0);
+    });
+
+    it('refuses before any effect when the observed revision is stale', async () => {
+      // The read-time check, which exists for a clear message. The locked
+      // check is what actually decides, but this one costs nothing.
+      const r = makeDeps({ target: transcriptTarget({ mutationRevision: 'rev-9' }) });
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: {
+            documentId: DOC,
+            expectedContentSha256: 'a'.repeat(64),
+            expectedMutationRevision: REV,
+          },
+        }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('conflict');
+      expect(r.uploads).toHaveLength(0);
+      expect(allWrites(r)).toHaveLength(0);
+      expect(r.metadataUpdates).toHaveLength(0);
+    });
+  });
+
+  describe('the revision must move on every successful write', () => {
+    it('refuses a replacement that committed without moving it', async () => {
+      // An RPC that forgets to bump hands the caller a revision the NEXT
+      // writer will also match -- the same lost update, one step later.
+      const target = transcriptTarget();
+      const r = makeDeps({ target, nextRevision: REV });
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT_RETIMED,
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
+        }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(String(result.error.message)).toContain('version marker');
+    });
+
+    it('refuses a metadata update that committed without moving it', async () => {
+      const same = await hashOf(SRT);
+      const r = makeDeps({ target: transcriptTarget({ contentSha256: same }), nextRevision: REV });
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT,
+          title: 'renamed',
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+        }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(String(result.error.message)).toContain('version marker');
+    });
+
+    it('reports the new revision for a caller editing on', async () => {
+      const same = await hashOf(SRT);
+      const r = makeDeps({ target: transcriptTarget({ contentSha256: same }), nextRevision: 'rev-7' });
+      const result = await importKnowledgeTranscript(
+        r.deps,
+        baseInput({
+          payload: SRT,
+          title: 'renamed',
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
+        }),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.mutationRevision).toBe('rev-7');
+    });
+  });
+
   describe('replacing an existing transcript', () => {
     it('looks the target up scoped by board, not by document alone', async () => {
       const target = transcriptTarget();
@@ -316,7 +507,7 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
         }),
       );
 
@@ -331,7 +522,7 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) },
+          replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64), expectedMutationRevision: REV },
         }),
       );
 
@@ -352,7 +543,7 @@ describe('importKnowledgeTranscript', () => {
         baseInput({
           userId: OTHER_USER,
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
         }),
       );
 
@@ -371,12 +562,12 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
         }),
       );
 
       expect(result.ok).toBe(true);
-      expect(r.replaces[0].expected).toBe(target.contentSha256);
+      expect(r.replaces[0].expected).toEqual({ contentSha256: target.contentSha256, mutationRevision: REV });
     });
 
     it('refuses, and writes nothing, when the stored version moved', async () => {
@@ -384,7 +575,7 @@ describe('importKnowledgeTranscript', () => {
       const result = await importKnowledgeTranscript(
         r.deps,
         baseInput({
-          replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) },
+          replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64), expectedMutationRevision: REV },
         }),
       );
 
@@ -398,7 +589,7 @@ describe('importKnowledgeTranscript', () => {
       const r = makeDeps({ target: transcriptTarget({ transcriptRepresentation: null }) });
       const result = await importKnowledgeTranscript(
         r.deps,
-        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) } }),
+        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64), expectedMutationRevision: REV } }),
       );
 
       expect(result.ok).toBe(false);
@@ -410,7 +601,7 @@ describe('importKnowledgeTranscript', () => {
       const r = makeDeps({ target: transcriptTarget({ kind: 'pdf' }) });
       const result = await importKnowledgeTranscript(
         r.deps,
-        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) } }),
+        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64), expectedMutationRevision: REV } }),
       );
 
       expect(result.ok).toBe(false);
@@ -421,7 +612,7 @@ describe('importKnowledgeTranscript', () => {
       const r = makeDeps({ target: null });
       const result = await importKnowledgeTranscript(
         r.deps,
-        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64) } }),
+        baseInput({ replaces: { documentId: DOC, expectedContentSha256: 'a'.repeat(64), expectedMutationRevision: REV } }),
       );
 
       expect(result.ok).toBe(false);
@@ -436,7 +627,7 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
         }),
       );
 
@@ -461,7 +652,7 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
         }),
       );
 
@@ -478,7 +669,7 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_RETIMED,
-          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256 },
+          replaces: { documentId: DOC, expectedContentSha256: target.contentSha256, expectedMutationRevision: REV },
         }),
       );
 
@@ -501,7 +692,7 @@ describe('importKnowledgeTranscript', () => {
         r.deps,
         baseInput({
           payload: SRT_REFORMATTED,
-          replaces: { documentId: DOC, expectedContentSha256: same },
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
         }),
       );
 
@@ -535,7 +726,7 @@ describe('importKnowledgeTranscript', () => {
           r.deps,
           baseInput({
             payload: SRT,
-            replaces: { documentId: DOC, expectedContentSha256: same },
+            replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
             ...over,
           }),
         );
@@ -550,7 +741,7 @@ describe('importKnowledgeTranscript', () => {
         // Scoped and conditional, exactly like a replacement: a metadata write
         // is no less able to land on the wrong row.
         expect(r.metadataUpdates[0].scope).toEqual({ documentId: DOC, boardId: BOARD });
-        expect(r.metadataUpdates[0].expected).toBe(same);
+        expect(r.metadataUpdates[0].expected).toEqual({ contentSha256: same, mutationRevision: REV });
         // The version is untouched: nothing uploaded, no chunk or text write.
         expect(r.uploads).toHaveLength(0);
         expect(allWrites(r)).toHaveLength(0);
@@ -578,7 +769,7 @@ describe('importKnowledgeTranscript', () => {
         baseInput({
           payload: vtt,
           format: 'vtt',
-          replaces: { documentId: DOC, expectedContentSha256: same },
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
         }),
       );
 
@@ -606,7 +797,7 @@ describe('importKnowledgeTranscript', () => {
         baseInput({
           payload: SRT,
           title: 'renamed',
-          replaces: { documentId: DOC, expectedContentSha256: same },
+          replaces: { documentId: DOC, expectedContentSha256: same, expectedMutationRevision: REV },
         }),
       );
 

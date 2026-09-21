@@ -1531,3 +1531,43 @@ fixed, and none of this SQL has still been executed anywhere.
    carries a byte-identical mirror of each migration, and the item 18 mirror was
    not being updated with it. Both copies are now in sync, and the adversarial
    cases include the migration from `supabase/migrations/`.
+
+---
+
+## 19. No sweep for superseded transcript payloads
+
+**Status: OPEN. Created by a deliberate decision, recorded rather than
+deferred silently.**
+
+When a transcript re-import replaces a version, the previous version's stored
+payload is **retained**, not deleted. That is the right call: deleting it right
+after the commit raced a reader that had resolved the old row moments earlier,
+and discarding the delete's result made a clean cleanup indistinguishable from
+real residue.
+
+**What it costs, stated accurately.** Each retained object is size-bounded by
+`KNOWLEDGE_TRANSCRIPT_MAX_PAYLOAD_BYTES` (8 MiB). The **accumulation is not
+bounded**: one object per superseding re-import, indefinitely, until a sweep
+exists. An earlier note in the importer said growth was "bounded by that
+sweep", which described a sweep nobody has written.
+
+**Returning `supersededCleanupCandidate` is telemetry, not garbage
+collection.** It tells one caller about one object in one response. Nothing
+durable records it, so a caller that never reads the field, or a process that
+dies before it does, loses the path entirely.
+
+**What a real sweep needs, both parts:**
+
+1. **A grace period**, long enough that no request begun before the commit can
+   still be running. Without it the sweep reintroduces the reader race that
+   retention was chosen to remove.
+2. **A fresh database reference check at deletion time** — not inherited from
+   whatever produced the candidate. The candidate says the path was
+   unreferenced when one transaction committed; only a check performed at the
+   moment of deletion says it is unreferenced *now*.
+
+Deleting on either half alone is worse than not sweeping: one brings back the
+race, the other can delete a referenced object.
+
+**Not scheduled.** It is a real cost and a real follow-up, not a solved
+problem, and it does not block the importer.
