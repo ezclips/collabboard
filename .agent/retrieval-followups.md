@@ -1342,3 +1342,79 @@ The verifier reads effective privileges with `has_column_privilege`, then
 **exercises** them: as `authenticated`, against a copy of the table carrying
 the same grants, the hash write must fail and a permitted metadata update must
 still succeed. A revoke that took everything would pass a one-sided check.
+
+---
+
+## 18. `authenticated` holds table-wide INSERT on `knowledge_documents`
+
+Found by the PM's read-only check of the live schema while reviewing item 17,
+and it corrected two assertions I had written that were simply false.
+
+### The facts, observed
+
+- `has_table_privilege('authenticated', 'knowledge_documents', 'INSERT')` =
+  **true**. A table-wide INSERT covers **every column, present and future**.
+- Therefore `has_column_privilege(..., 'content_sha256', 'INSERT')` = **true**,
+  and `transcript_representation` is reached **automatically the moment it
+  exists** — no grant in the transcript rollout is needed for that to happen,
+  and none can prevent it.
+- `anon` holds the same table-wide INSERT grant. Production denies it because
+  there is no RLS INSERT policy for `anon`, so the denial is at the policy
+  layer, not the grant layer.
+- `service_role` INSERT/UPDATE on the hash = true, as intended.
+
+### What it means, and what it does not
+
+A client can create a `knowledge_documents` row choosing its own
+`content_sha256` — and, once the column exists, its own
+`transcript_representation`. Whether it can do so for a given board is governed
+by the RLS INSERT policy, not by grants.
+
+**It does not defeat the staleness guarantee.** That guarantee is about an
+**existing** document being re-versioned under a wiki page that cites it.
+INSERT creates a new row with a new id; it cannot re-version a document
+already cited. Removing UPDATE (item 17) is sufficient for that specific
+guarantee, which is why item 17 was not broadened to cover INSERT.
+
+**It is still an unused capability.** As with UPDATE: every production INSERT
+into `knowledge_documents` happens in `lib/infra/knowledge/*Adapters.ts`
+through the admin client. No component, hook or client-side path inserts.
+
+### The decision that is owed
+
+**May `authenticated` create documents with initial hashes?** Today: **yes**,
+by grant and by RLS policy. Nothing in the application relies on it.
+
+**How is transcript-bearing creation restricted?** Today: **not at all at the
+grant level.** The table-wide INSERT reaches the new column automatically.
+
+Options, not chosen here:
+
+1. **Leave it.** Defensible: RLS still decides which boards a caller may write
+   to, and a self-created inconsistent document harms only itself.
+2. **Narrow INSERT to a column allowlist**, the house form — revoke at the
+   table, grant back the columns the server actually writes. Closes the
+   grant-level gap for both `content_sha256` and `transcript_representation`.
+   Broader blast radius, and needs the same starting-shape validation item 17
+   now performs.
+
+**Recommend (2), as its own change**, after item 17 is verified. Not folded
+into either prepared migration: broadening a narrow repair is how a permission
+migration becomes an outage, and item 17's scope is stated on its face.
+
+### What this corrected
+
+Two assertions I had written were false against the live schema and would have
+failed a correctly applied rollout:
+
+- the transcript verifier asserted `authenticated` cannot INSERT
+  `transcript_representation`;
+- item 17's verifier asserted the same for `content_sha256`.
+
+Both are now replaced by assertions of what is actually intended, plus a NOTICE
+that records the open INSERT path so reading the output cannot leave anyone
+believing the column is unwritable by clients in every sense.
+
+Also corrected: the transcript verifier's comment claimed its query caught a
+grant widened **anywhere on the table**. It inspects the new column only.
+Auditing the whole allowlist is item 17's verifier, which counts it.

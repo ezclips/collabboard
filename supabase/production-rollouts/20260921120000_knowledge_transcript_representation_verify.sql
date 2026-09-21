@@ -103,21 +103,35 @@ BEGIN
         RAISE EXCEPTION 'authenticated cannot read transcript_representation -- the reader needs it for timestamps';
     END IF;
 
-    -- And the half that matters more: nobody else may WRITE it.
+    -- UPDATE: nobody but service_role may rewrite it on an existing row.
     IF has_column_privilege('authenticated', 'public.knowledge_documents', 'transcript_representation', 'UPDATE') THEN
         RAISE EXCEPTION 'authenticated can UPDATE transcript_representation -- it could be made to disagree with content_sha256';
     END IF;
-    IF has_column_privilege('authenticated', 'public.knowledge_documents', 'transcript_representation', 'INSERT') THEN
-        RAISE EXCEPTION 'authenticated can INSERT transcript_representation';
-    END IF;
-    IF has_column_privilege('anon', 'public.knowledge_documents', 'transcript_representation', 'UPDATE')
-       OR has_column_privilege('anon', 'public.knowledge_documents', 'transcript_representation', 'INSERT') THEN
-        RAISE EXCEPTION 'anon can write transcript_representation';
+    IF has_column_privilege('anon', 'public.knowledge_documents', 'transcript_representation', 'UPDATE') THEN
+        RAISE EXCEPTION 'anon can UPDATE transcript_representation';
     END IF;
 
-    -- The writable set for authenticated must be EXACTLY what it was before
-    -- this rollout. Naming the new column is not enough: this catches a grant
-    -- widened anywhere on the table while this migration was applied.
+    -- INSERT: REPORTED, NOT ASSERTED AWAY.
+    --
+    -- CORRECTED. This file previously asserted that authenticated cannot
+    -- INSERT transcript_representation. That was FALSE against the live
+    -- schema and would have failed on a correctly applied rollout:
+    -- authenticated holds TABLE-WIDE INSERT on knowledge_documents, and a
+    -- table-wide grant covers every column, including ones added later. This
+    -- column is reached by it automatically the moment it exists.
+    --
+    -- Not repaired here, by decision: INSERT creates new rows and cannot
+    -- re-version a document a wiki page already cites, which is what the
+    -- staleness guarantee protects. Recorded as followups item 18.
+    IF has_table_privilege('authenticated', 'public.knowledge_documents', 'INSERT') THEN
+        RAISE NOTICE
+            'OPEN, BY DECISION: authenticated table-wide INSERT reaches transcript_representation on rows it creates. Item 18.';
+    END IF;
+
+    -- What this next check DOES cover, stated accurately. It inspects the NEW
+    -- COLUMN only -- an earlier comment claimed it caught a grant widened
+    -- anywhere on the table, which it never did. Auditing the whole allowlist
+    -- belongs to item 17's verifier, which counts it.
     SELECT string_agg(column_name, ', ' ORDER BY column_name) INTO unexpected
       FROM information_schema.column_privileges
      WHERE grantee = 'authenticated'
@@ -127,7 +141,7 @@ BEGIN
        AND column_name = 'transcript_representation';
 
     IF unexpected IS NOT NULL THEN
-        RAISE EXCEPTION 'unexpected authenticated UPDATE grant on: %', unexpected;
+        RAISE EXCEPTION 'unexpected authenticated UPDATE grant on the new column: %', unexpected;
     END IF;
 END $$;
 
