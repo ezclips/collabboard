@@ -71,6 +71,15 @@ devserver.out.log
 # was always right -- and the operator who applies it to hosted is not the
 # person who ran it.
 #
+# The Stage 4 transcription engines findings are the rule applied to a
+# MEASUREMENT WE HAVE NOT TAKEN YET. It records what the gates are, what was
+# licensed, and -- the part that has to survive -- which corpus categories the
+# sources we assessed did not supply. That gap list is what commissions
+# recordings from real people, so it has to travel with the repo rather than
+# with whoever read it once: the alternative is re-recording what a corpus
+# already covers, or quietly substituting something convenient for the
+# positive control and calling the gate green.
+#
 # `.agent/*` rather than `.agent/` is what makes a negation possible at all --
 # git will not descend into an ignored directory.
 .agent/*
@@ -84,6 +93,14 @@ devserver.out.log
 !.agent/docx-live-acceptance.md
 !.agent/youtube-caption-paths.md
 !.agent/isolated-sql-verification.md
+!.agent/stage4-transcription-engines.md
+
+# Transcription probe MEDIA is never committed. The probe's manifest carries a
+# rightsBasis per clip precisely because the audio is licensed, or consented
+# to, under terms that are not this repository's to redistribute -- and some of
+# it will be recordings of real people's voices. The manifest travels; the
+# media does not. last-run.json and the manifest itself stay tracked.
+tools/transcription-probe/media/
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/
