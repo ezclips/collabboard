@@ -54,6 +54,8 @@
 -- count observed on the live schema. It has NOT been observed name-by-name. If
 -- it is wrong this migration fails and prints both sets rather than repairing
 -- anything.
+--
+-- UNVERIFIED: this migration has not been executed against any database.
 
 DO $item17$
 DECLARE

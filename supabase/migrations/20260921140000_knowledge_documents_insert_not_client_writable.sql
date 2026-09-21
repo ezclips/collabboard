@@ -59,6 +59,8 @@
 --
 -- The three adversarial shapes are exercised by
 -- production-rollouts/20260921140000_..._adversarial.sql.
+--
+-- UNVERIFIED: this migration has not been executed against any database.
 
 DO $item18$
 DECLARE
