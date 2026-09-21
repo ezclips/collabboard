@@ -624,12 +624,17 @@ row is what that audit was for.
 `knowledgeTextHashInput` is the natural extension point: transcripts get their
 own hash-input builder beside it, and the text and PDF paths are untouched.
 
-**One consequence to accept knowingly:** a transcript imported as plain text
-hashes through the transcript representation (with zero cues), **not** as bare
-canonical text. So the same characters uploaded as `.txt` and pasted as a
-transcript produce different version hashes. That is correct — they are
-different source kinds with different citation behaviour — but it is a
-deliberate choice and is flagged rather than buried.
+**One consequence to accept knowingly, stated as what it is.** A transcript
+imported as plain text hashes through the transcript representation (with zero
+cues), **not** as bare canonical text. So the same characters uploaded as
+`.txt` and pasted as a transcript produce different version hashes.
+
+This is a **representation distinction, not a difference of source kind.** The
+two may well share the same storage kind — as DOCX already shares `kind:
+'text'` — and the differing hash reflects only that one was hashed through the
+transcript representation and the other through the plain-text one. It is
+deliberate, and flagged rather than buried, but it should not be read as a
+claim that the two are different kinds of thing in the schema.
 
 ### Tests owed before this ships
 
