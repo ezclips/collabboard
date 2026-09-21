@@ -931,6 +931,114 @@ describe('transcriptChunkingBreak', () => {
   });
 });
 
+describe('transcript chunks are a lossless partition of the canonical text', () => {
+  it('reproduces the canonical text exactly from the chunks it writes', async () => {
+    // THE PROPERTY THE STORED FINGERPRINT DEPENDS ON. The canonical text is
+    // not stored in a column; it IS the chunks. If they cannot rebuild it, a
+    // stored transcript can never be re-verified against its own hash.
+    const r = makeDeps();
+    await importKnowledgeTranscript(r.deps, baseInput());
+
+    const { chunks, canonicalText } = r.creates[0];
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(canonicalText);
+  });
+
+  it('starts at 0, joins end to start, and ends at the text length', async () => {
+    const r = makeDeps();
+    await importKnowledgeTranscript(r.deps, baseInput());
+    const { chunks, canonicalText } = r.creates[0];
+
+    expect(chunks[0].charStart).toBe(0);
+    for (let i = 1; i < chunks.length; i += 1) {
+      expect(chunks[i].charStart).toBe(chunks[i - 1].charEnd);
+    }
+    expect(chunks[chunks.length - 1].charEnd).toBe(canonicalText.length);
+  });
+
+  it('keeps every cue wholly inside exactly one chunk', async () => {
+    const r = makeDeps();
+    await importKnowledgeTranscript(r.deps, baseInput());
+    const { chunks, representation } = r.creates[0];
+
+    for (const cue of representation.cues) {
+      const homes = chunks.filter(
+        (chunk) => cue.charStart >= chunk.charStart && cue.charEnd <= chunk.charEnd,
+      );
+      expect(homes).toHaveLength(1);
+    }
+  });
+
+  it('survives an astral character, where UTF-16 units and code points differ', async () => {
+    // The offsets are UTF-16 code units. A string containing a surrogate pair
+    // has more UTF-16 units than code points, so anything that measured the
+    // text in code points would produce ranges that do not describe it.
+    const emoji = String.fromCodePoint(0x1f600);
+    const payload = [
+      '1', '00:00:01,000 --> 00:00:03,000', `hi ${emoji}`, '',
+      '2', '00:00:04,000 --> 00:00:06,000', 'bye', '',
+    ].join('\n');
+
+    const r = makeDeps();
+    const result = await importKnowledgeTranscript(r.deps, baseInput({ payload }));
+
+    expect(result.ok).toBe(true);
+    const { chunks, canonicalText } = r.creates[0];
+    expect(canonicalText).toContain(emoji);
+    expect([...canonicalText].length).toBeLessThan(canonicalText.length);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(canonicalText);
+  });
+
+  it('gives a plain transcript one chunk and no timings', async () => {
+    // A plain paste has no cues, so it has no times. Null, not zero, which
+    // would claim a time was known.
+    const r = makeDeps();
+    const result = await importKnowledgeTranscript(
+      r.deps,
+      baseInput({ payload: 'just some words', format: 'plain' }),
+    );
+
+    expect(result.ok).toBe(true);
+    const { chunks, canonicalText } = r.creates[0];
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].startMs).toBeNull();
+    expect(chunks[0].endMs).toBeNull();
+    expect(chunks[0].text).toBe(canonicalText);
+  });
+
+  it('rejects a gap between two chunks', () => {
+    const parsed = parseKnowledgeTranscript(SRT, 'srt');
+    if (!parsed.ok) throw new Error('fixture must parse');
+    const document = buildKnowledgeTranscriptDocument(parsed.value.cues, 'srt', SRT);
+    const total = document.canonicalText.length;
+
+    // A gap is a run of characters no chunk holds: the canonical text could
+    // not be rebuilt, and the version could never be re-verified.
+    const chunks = [
+      { chunkIndex: 0, text: document.canonicalText.slice(0, 5), charStart: 0, charEnd: 5, startMs: 0, endMs: 1000 },
+      {
+        chunkIndex: 1,
+        text: document.canonicalText.slice(6, total),
+        charStart: 6,
+        charEnd: total,
+        startMs: 1000,
+        endMs: 5000,
+      },
+    ];
+    expect(transcriptChunkingBreak(document, chunks)).toContain('previous chunk ended at 5');
+  });
+
+  it('rejects chunks that stop short of the end of the text', () => {
+    const parsed = parseKnowledgeTranscript(SRT, 'srt');
+    if (!parsed.ok) throw new Error('fixture must parse');
+    const document = buildKnowledgeTranscriptDocument(parsed.value.cues, 'srt', SRT);
+
+    const chunks = [
+      { chunkIndex: 0, text: document.canonicalText.slice(0, 5), charStart: 0, charEnd: 5, startMs: 0, endMs: 1000 },
+    ];
+    expect(transcriptChunkingBreak(document, chunks)).toContain('but the text is');
+  });
+});
+
 describe('transcriptConsistencyBreak', () => {
   it('passes a transcript', () => {
     expect(transcriptConsistencyBreak(transcriptTarget())).toBeNull();

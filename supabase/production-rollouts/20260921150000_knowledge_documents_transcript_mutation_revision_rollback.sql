@@ -49,7 +49,8 @@ DECLARE
         'knowledge_transcript_replace_version',
         'knowledge_transcript_update_metadata',
         'knowledge_transcript_assert_chunks',
-        'knowledge_transcript_assert_representation'
+        'knowledge_transcript_assert_representation',
+        'knowledge_transcript_assert_version'
     ];
     present_rpcs text[];
     dependents   text[];

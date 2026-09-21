@@ -14,7 +14,8 @@
 --
 -- PREREQUISITE, FATAL: a board with a non-null user_id.
 --
--- PASS CRITERION: the verdict row reads ALL PASS, and every case row is PASS.
+-- PASS CRITERION: the verdict row reads ALL PASS -- 8 of 8, and every case row
+-- is PASS.
 --
 -- UNVERIFIED: not executed anywhere.
 
@@ -36,7 +37,8 @@ DECLARE
         'public.knowledge_transcript_replace_version(uuid, uuid, text, bigint, text, text, bigint, text, text, text, text, text, jsonb, jsonb)',
         'public.knowledge_transcript_update_metadata(uuid, uuid, text, bigint, text, text, text)',
         'public.knowledge_transcript_assert_chunks(jsonb)',
-        'public.knowledge_transcript_assert_representation(jsonb)'
+        'public.knowledge_transcript_assert_representation(jsonb)',
+        'public.knowledge_transcript_assert_version(jsonb, jsonb)'
     ];
     reachable text[];
     missing   text[];
@@ -72,7 +74,7 @@ END
 $case1$;
 
 -- ===========================================================================
--- CASES 2-6 -- BEHAVIOUR, against real rows.
+-- CASES 2-8 -- BEHAVIOUR, against real rows.
 -- ===========================================================================
 DO $behaviour$
 DECLARE
@@ -98,6 +100,27 @@ DECLARE
     bad_chunks CONSTANT jsonb := jsonb_build_array(
         jsonb_build_object('chunkIndex', 7, 'text', 'wrong index', 'charStart', 0,
                            'charEnd', 11, 'startMs', 0, 'endMs', 2000));
+    -- THE ASTRAL FIXTURE. 'hi ' + U+1F600 + newline + 'bye'.
+    --   UTF-16 code units: 9  (the emoji is a surrogate PAIR)
+    --   code points:       8  (what PostgreSQL's length() returns)
+    -- The two disagree, which is the point: the offsets below are UTF-16 and
+    -- must never be checked against a PostgreSQL length.
+    astral_canonical CONSTANT text := 'hi ' || chr(128512) || chr(10) || 'bye';
+    astral_chunks CONSTANT jsonb := jsonb_build_array(
+        jsonb_build_object('chunkIndex', 0, 'text', 'hi ' || chr(128512),
+                           'charStart', 0, 'charEnd', 5, 'startMs', 0, 'endMs', 1000),
+        -- The separator belongs to the FOLLOWING chunk, which is what makes
+        -- the partition lossless.
+        jsonb_build_object('chunkIndex', 1, 'text', chr(10) || 'bye',
+                           'charStart', 5, 'charEnd', 9, 'startMs', 1000, 'endMs', 2000));
+    astral_rep CONSTANT jsonb := jsonb_build_object(
+        'representationVersion', 1, 'videoIdentity', null,
+        'cues', jsonb_build_array(
+            jsonb_build_object('charStart', 0, 'charEnd', 5, 'startMs', 0, 'endMs', 1000),
+            jsonb_build_object('charStart', 6, 'charEnd', 9, 'startMs', 1000, 'endMs', 2000)),
+        'language', null, 'trackKind', 'machine', 'format', 'srt',
+        'videoAssociation', 'none');
+    rebuilt text;
     verdict text;
     detail  text;
 BEGIN
@@ -315,6 +338,123 @@ BEGIN
     INSERT INTO knowledge_transcript_rpc_result VALUES
         (6, verdict, 'a failure restores the complete prior version', detail);
 
+    -- -------------------------------------------------------------------
+    -- CASE 7: A GENUINE POST-DELETE FAILURE.
+    --
+    -- Case 6 is rejected by validation, above the lock and above the DELETE,
+    -- so it never reaches the state this case is about. Here the replacement
+    -- gets all the way through: predicates matched, row updated, OLD CHUNKS
+    -- DELETED -- and then a trigger raises during the insert of the new ones.
+    --
+    -- That is the moment the whole design exists for. Everything must come
+    -- back: the old chunk text, the old hash, the old storage path, the old
+    -- representation and the old revision.
+    -- -------------------------------------------------------------------
+    BEGIN
+        SELECT r.mutation_revision INTO rev0
+          FROM public.knowledge_transcript_create_version(
+                 doc_id, probe_board, probe_owner, 'probe.srt', 'application/x-subrip',
+                 10, 'probe/transcript', sha_a, 'knowledge-transcript', '1',
+                 repeat('c', 64), rep, chunks) r;
+
+        EXECUTE $trg$
+            CREATE OR REPLACE FUNCTION pg_temp.knowledge_transcript_probe_fail()
+            RETURNS trigger LANGUAGE plpgsql AS $body$
+            BEGIN
+                RAISE EXCEPTION 'injected failure during chunk insert' USING ERRCODE = 'ZZ009';
+            END
+            $body$;
+        $trg$;
+        EXECUTE 'CREATE TRIGGER knowledge_transcript_probe_fail_trg
+                   BEFORE INSERT ON public.knowledge_chunks
+                   FOR EACH ROW EXECUTE FUNCTION pg_temp.knowledge_transcript_probe_fail()';
+
+        BEGIN
+            PERFORM public.knowledge_transcript_replace_version(
+                doc_id, probe_board, sha_a, rev0, 'renamed.srt', 'application/x-subrip',
+                20, 'probe/transcript-2', sha_b, 'knowledge-transcript', '1',
+                repeat('c', 64), rep, chunks2);
+            EXECUTE 'DROP TRIGGER knowledge_transcript_probe_fail_trg ON public.knowledge_chunks';
+            RAISE EXCEPTION 'the injected failure did not stop the replacement'
+                USING ERRCODE = 'ZZ002';
+        EXCEPTION WHEN sqlstate 'ZZ009' THEN
+            NULL; -- expected: the failure landed AFTER the delete
+        END;
+
+        -- The trigger's own subtransaction has unwound. Remove it before
+        -- reading, so nothing below is affected by it.
+        EXECUTE 'DROP TRIGGER IF EXISTS knowledge_transcript_probe_fail_trg ON public.knowledge_chunks';
+
+        SELECT d.transcript_mutation_revision INTO rev2
+          FROM public.knowledge_documents d WHERE d.id = doc_id;
+
+        IF NOT EXISTS (SELECT 1 FROM public.knowledge_chunks c
+                        WHERE c.document_id = doc_id AND c.text = 'hello') THEN
+            RAISE EXCEPTION 'the deleted chunks did not come back' USING ERRCODE = 'ZZ002';
+        END IF;
+        IF (SELECT count(*) FROM public.knowledge_chunks c WHERE c.document_id = doc_id) <> 1 THEN
+            RAISE EXCEPTION 'the restored chunk set is the wrong size' USING ERRCODE = 'ZZ002';
+        END IF;
+        IF rev2 <> rev0 THEN
+            RAISE EXCEPTION 'the revision survived the failure at % (was %)', rev2, rev0
+                USING ERRCODE = 'ZZ002';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM public.knowledge_documents d
+                        WHERE d.id = doc_id AND d.content_sha256 = sha_a
+                          AND d.storage_path = 'probe/transcript'
+                          AND d.original_filename = 'probe.srt'
+                          AND d.transcript_representation = rep) THEN
+            RAISE EXCEPTION 'the document row did not come back intact' USING ERRCODE = 'ZZ002';
+        END IF;
+        RAISE EXCEPTION 'ok' USING ERRCODE = 'ZZ001';
+    EXCEPTION WHEN OTHERS THEN
+        BEGIN
+            EXECUTE 'DROP TRIGGER IF EXISTS knowledge_transcript_probe_fail_trg ON public.knowledge_chunks';
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+        IF SQLSTATE = 'ZZ001' THEN verdict := 'PASS'; detail := 'chunks, hash, path, representation and revision all restored';
+        ELSE verdict := 'FAIL'; detail := SQLERRM; END IF;
+    END;
+    INSERT INTO knowledge_transcript_rpc_result VALUES
+        (7, verdict, 'a failure AFTER the delete restores the prior version', detail);
+
+    -- -------------------------------------------------------------------
+    -- CASE 8: THE STORED CHUNKS REBUILD THE CANONICAL TEXT.
+    --
+    -- This is what makes the version fingerprint reproducible without a second
+    -- copy of the text, so it is checked against a fixture rather than assumed
+    -- from the partition rules.
+    --
+    -- THE FIXTURE CONTAINS AN ASTRAL CHARACTER on purpose. Its offsets are
+    -- UTF-16 code units and PostgreSQL's length() counts CODE POINTS, so the
+    -- two disagree for this string -- which is exactly why the comparison here
+    -- is a CONCATENATION and never a length or a substring.
+    -- -------------------------------------------------------------------
+    BEGIN
+        SELECT r.mutation_revision INTO rev0
+          FROM public.knowledge_transcript_create_version(
+                 doc_id, probe_board, probe_owner, 'astral.srt', 'application/x-subrip',
+                 10, 'probe/transcript', sha_a, 'knowledge-transcript', '1',
+                 repeat('c', 64), astral_rep, astral_chunks) r;
+
+        SELECT string_agg(c.text, '' ORDER BY c.chunk_index) INTO rebuilt
+          FROM public.knowledge_chunks c WHERE c.document_id = doc_id;
+
+        IF rebuilt IS DISTINCT FROM astral_canonical THEN
+            RAISE EXCEPTION 'rebuilt [%] does not match the canonical fixture [%]',
+                coalesce(rebuilt, '<null>'), astral_canonical USING ERRCODE = 'ZZ002';
+        END IF;
+        RAISE EXCEPTION 'ok' USING ERRCODE = 'ZZ001';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLSTATE = 'ZZ001' THEN
+            verdict := 'PASS';
+            detail := format('rebuilt exactly; utf16 units %s vs code points %s',
+                             9, length(astral_canonical));
+        ELSE verdict := 'FAIL'; detail := SQLERRM; END IF;
+    END;
+    INSERT INTO knowledge_transcript_rpc_result VALUES
+        (8, verdict, 'stored chunks reproduce the canonical text, astral included', detail);
+
     -- NO OUTER ROLLBACK WRAPPER, deliberately. Each case above is its own
     -- subtransaction that always ends by raising, so each case's rows are
     -- already gone by the time the next one starts. Wrapping the whole block
@@ -328,10 +468,10 @@ $behaviour$;
 -- ---------------------------------------------------------------------------
 SELECT
     CASE
-        WHEN count(*) <> 6 THEN '*** INCOMPLETE -- ' || count(*)::text || ' of 6 cases reported'
+        WHEN count(*) <> 8 THEN '*** INCOMPLETE -- ' || count(*)::text || ' of 8 cases reported'
         WHEN count(*) FILTER (WHERE outcome <> 'PASS') > 0
             THEN '*** FAIL -- ' || (count(*) FILTER (WHERE outcome <> 'PASS'))::text || ' case(s) failed'
-        ELSE 'ALL PASS -- 6 of 6'
+        ELSE 'ALL PASS -- 8 of 8'
     END AS verdict
 FROM knowledge_transcript_rpc_result;
 

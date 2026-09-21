@@ -24,7 +24,8 @@ DECLARE
         'public.knowledge_transcript_replace_version(uuid, uuid, text, bigint, text, text, bigint, text, text, text, text, text, jsonb, jsonb)',
         'public.knowledge_transcript_update_metadata(uuid, uuid, text, bigint, text, text, text)',
         'public.knowledge_transcript_assert_chunks(jsonb)',
-        'public.knowledge_transcript_assert_representation(jsonb)'
+        'public.knowledge_transcript_assert_representation(jsonb)',
+        'public.knowledge_transcript_assert_version(jsonb, jsonb)'
     ];
     dropped integer := 0;
 BEGIN

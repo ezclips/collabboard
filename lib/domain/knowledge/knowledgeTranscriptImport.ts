@@ -109,14 +109,37 @@ import {
 export const KNOWLEDGE_TRANSCRIPT_PARSER_NAME = 'knowledge-transcript';
 export const KNOWLEDGE_TRANSCRIPT_PARSER_VERSION = '1';
 
-/** One chunk of a transcript. Bounded by cues, never mid-cue. */
+/**
+ * One chunk of a transcript.
+ *
+ * A CONTIGUOUS PARTITION OF THE CANONICAL TEXT, not a selection from it. The
+ * chunks start at offset 0, each begins exactly where the previous one ended,
+ * the last ends at the text's length, and concatenating them in order
+ * reproduces the canonical text exactly.
+ *
+ * WHY THAT MATTERS AND IS NOT TIDINESS. The version fingerprint is computed
+ * over the canonical text, and the canonical text is not stored anywhere else.
+ * When chunks merely covered the cues, the separators between two windows
+ * belonged to no chunk, the stored rows could not reproduce the string that
+ * was hashed, and a stored transcript could never be re-verified. Lossless
+ * chunks make the fingerprint reproducible from what is stored -- without
+ * duplicating up to four million characters into a second column.
+ *
+ * Cues are still never split: a boundary is always at a cue edge, so an offset
+ * resolves to one chunk and one cue.
+ */
 export interface KnowledgeTranscriptChunkInsert {
   readonly chunkIndex: number;
   readonly text: string;
   readonly charStart: number;
   readonly charEnd: number;
-  readonly startMs: number;
-  readonly endMs: number;
+  /**
+   * Null exactly when the chunk contains no cue -- a plain transcript, which
+   * has no timings at all. NOT zero, which would claim a time was known and
+   * found to be the start.
+   */
+  readonly startMs: number | null;
+  readonly endMs: number | null;
 }
 
 /**
@@ -505,27 +528,61 @@ export function transcriptChunkingBreak(
   document: KnowledgeTranscriptDocument,
   chunks: readonly KnowledgeTranscriptChunkInsert[],
 ): string | null {
-  let previousEnd = -1;
+  const total = document.canonicalText.length;
+
+  if (chunks.length === 0) {
+    return total === 0 ? null : `no chunks were produced for ${total} characters of text`;
+  }
+  if (chunks[0].charStart !== 0) {
+    return `the first chunk starts at ${chunks[0].charStart}, not 0`;
+  }
+
+  let previousEnd = 0;
   for (const [index, chunk] of chunks.entries()) {
     if (chunk.chunkIndex !== index) return `chunk ${index} is indexed ${chunk.chunkIndex}`;
-    if (chunk.charStart < 0 || chunk.charEnd < chunk.charStart) {
+    if (chunk.charEnd < chunk.charStart) {
       return `chunk ${index} has an impossible range ${chunk.charStart}..${chunk.charEnd}`;
     }
-    if (chunk.charStart < previousEnd) {
-      return `chunk ${index} starts at ${chunk.charStart}, inside the previous chunk`;
+    // CONTIGUOUS, not merely non-overlapping. A gap here is a run of
+    // characters no chunk holds, and the canonical text could not be rebuilt.
+    if (chunk.charStart !== previousEnd) {
+      return `chunk ${index} starts at ${chunk.charStart}, but the previous chunk ended at ${previousEnd}`;
     }
     if (chunk.text !== document.canonicalText.slice(chunk.charStart, chunk.charEnd)) {
       return `chunk ${index} text does not match its own character range`;
     }
+    if ((chunk.startMs === null) !== (chunk.endMs === null)) {
+      return `chunk ${index} has only one of its two timings`;
+    }
+    if (chunk.startMs !== null && chunk.endMs !== null && chunk.endMs < chunk.startMs) {
+      return `chunk ${index} ends at ${chunk.endMs} before it starts at ${chunk.startMs}`;
+    }
     previousEnd = chunk.charEnd;
   }
 
+  if (previousEnd !== total) {
+    return `the last chunk ends at ${previousEnd}, but the text is ${total} characters long`;
+  }
+
+  // THE PROPERTY THAT ACTUALLY MATTERS, asserted directly rather than inferred
+  // from the ones above: the stored chunks must rebuild what was hashed.
+  if (chunks.map((chunk) => chunk.text).join('') !== document.canonicalText) {
+    return 'the ordered chunk text does not reproduce the canonical text';
+  }
+
   for (const cue of document.cues) {
-    const home = chunks.find(
+    const homes = chunks.filter(
       (chunk) => cue.charStart >= chunk.charStart && cue.charEnd <= chunk.charEnd,
     );
-    if (home === undefined) {
+    if (homes.length === 0) {
       return `the cue at ${cue.charStart}..${cue.charEnd} is not wholly inside any chunk`;
+    }
+    // A ZERO-LENGTH CUE SITS EXACTLY ON A BOUNDARY and is therefore inside
+    // both neighbours. That is genuinely ambiguous and genuinely harmless: it
+    // selects no characters, so no citation can land in it. Only a cue that
+    // covers text must resolve to one chunk.
+    if (homes.length > 1 && cue.charEnd > cue.charStart) {
+      return `the cue at ${cue.charStart}..${cue.charEnd} is inside ${homes.length} chunks, not exactly one`;
     }
   }
   return null;
@@ -883,17 +940,43 @@ export async function importKnowledgeTranscript(
   });
 }
 
-/** Windows become chunks, in order, with their own timings carried along. */
+/**
+ * Windows become chunks -- widened into a LOSSLESS CONTIGUOUS PARTITION.
+ *
+ * A window spans its own cues, so the separator between the last cue of one
+ * window and the first cue of the next belongs to neither. Each chunk
+ * therefore starts where the previous one ENDED rather than where its own
+ * first cue begins, which hands every separator to the following chunk, and
+ * the last chunk runs to the end of the text. Cue containment is unaffected:
+ * a chunk only ever grows leftwards into a gap.
+ */
 function transcriptChunks(
   document: KnowledgeTranscriptDocument,
 ): readonly KnowledgeTranscriptChunkInsert[] {
+  const total = document.canonicalText.length;
+
+  // A transcript with no cues is a plain paste: one chunk, no timings, and
+  // still the whole text.
+  if (document.cues.length === 0) {
+    return total === 0
+      ? []
+      : [{ chunkIndex: 0, text: document.canonicalText, charStart: 0, charEnd: total, startMs: null, endMs: null }];
+  }
+
   const windows: readonly KnowledgeTranscriptWindow[] = groupKnowledgeTranscriptWindows(document);
-  return windows.map((window, index) => ({
-    chunkIndex: index,
-    text: document.canonicalText.slice(window.charStart, window.charEnd),
-    charStart: window.charStart,
-    charEnd: window.charEnd,
-    startMs: window.startMs,
-    endMs: window.endMs,
-  }));
+  const chunks: KnowledgeTranscriptChunkInsert[] = [];
+  let start = 0;
+  for (const [index, window] of windows.entries()) {
+    const end = index === windows.length - 1 ? total : window.charEnd;
+    chunks.push({
+      chunkIndex: index,
+      text: document.canonicalText.slice(start, end),
+      charStart: start,
+      charEnd: end,
+      startMs: window.startMs,
+      endMs: window.endMs,
+    });
+    start = end;
+  }
+  return chunks;
 }

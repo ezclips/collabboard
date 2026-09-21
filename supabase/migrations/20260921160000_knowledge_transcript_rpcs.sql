@@ -11,13 +11,28 @@
 -- SECURITY INVOKER, AND WHY
 -- ============================================================================
 --
--- These are SECURITY INVOKER, not DEFINER. A DEFINER function would run with
--- the owner's rights and quietly step around RLS for whoever managed to call
--- it, so the ONLY thing standing between a client and another board's
--- transcript would be the predicates inside the body. Invoker keeps the
--- database's own boundary in place: the caller's privileges and policies still
--- apply, and the predicates here are an additional layer rather than a
--- replacement for one.
+-- These are SECURITY INVOKER, not DEFINER, so they run with the CALLER's
+-- privileges rather than the owner's.
+--
+-- CORRECTED, because an earlier version of this note claimed invoker "keeps
+-- RLS in place". IT DOES NOT, for the caller these functions actually have.
+-- They are called by service_role, and service_role BYPASSES RLS -- so no
+-- policy is evaluated during these calls, whichever security mode they carry.
+--
+-- What safety actually rests on, in order:
+--
+--   1. The EXECUTE grant. service_role alone can call them, so a client cannot
+--      reach these bodies at all.
+--   2. Application authorization. The board mutation check runs before any of
+--      this, against the caller's own identity.
+--   3. The board/document predicates BELOW, under the row lock. With RLS
+--      bypassed these are not a second opinion -- for cross-board access they
+--      are the ONLY check inside the database, which is why they are matched
+--      while the row is held rather than before.
+--
+-- Invoker is still the right mode: it declines authority these functions do
+-- not need, and it means a future caller that is NOT service_role would still
+-- be subject to its own policies. It is simply not what makes them safe today.
 --
 -- Execution is granted to service_role ALONE and revoked from PUBLIC, anon and
 -- authenticated. PUBLIC is revoked explicitly because CREATE FUNCTION grants
@@ -34,16 +49,25 @@
 -- WHAT IS NOT HERE, STATED RATHER THAN LEFT TO BE DISCOVERED
 -- ============================================================================
 --
--- THE CANONICAL TEXT IS NOT STORED. Chunks carry their own text, and the
--- representation carries cue ranges and timings -- but the joined canonical
--- string is not persisted anywhere, and window boundaries drop the separator
--- between two chunks, so it cannot be reconstructed exactly from the chunks.
--- knowledgeTranscriptVersionBytesFromStored() therefore cannot be run against
--- a stored row yet: re-hashing a stored transcript needs that text.
+-- THE CANONICAL TEXT IS STORED AS THE CHUNKS THEMSELVES, and no document
+-- column duplicates it.
 --
--- This migration does NOT invent a column for it. It is a real gap, it belongs
--- to the representation or to a column of its own, and it is a reviewed
--- decision rather than something to slip in beside three functions.
+-- RESOLVED. The chunks used to cover only the cues, so the separators between
+-- windows belonged to no chunk and the stored rows could not rebuild the
+-- string that was hashed. Chunks are now a LOSSLESS CONTIGUOUS PARTITION:
+-- first offset 0, each starting where the previous ended, the last ending at
+-- the text length, and ordered concatenation reproducing the canonical text
+-- exactly. So the fingerprint is reproducible from stored chunks plus the
+-- representation, without copying up to four million characters into a second
+-- column.
+--
+-- OFFSETS ARE UTF-16 CODE UNITS AND THIS FILE NEVER COMPARES THEM TO TEXT.
+-- PostgreSQL's length() counts CODE POINTS, so for any transcript containing
+-- an astral character (an emoji, most historic scripts) length(text) and
+-- charEnd - charStart are DIFFERENT NUMBERS for the same substring. Every
+-- check below treats the offsets as opaque ordinals -- contiguity, ordering,
+-- containment -- and never as a measurement of the text beside them. The one
+-- place text is compared is a concatenation, which needs no offsets at all.
 --
 -- ============================================================================
 -- ERROR SIGNALLING
@@ -70,7 +94,8 @@ SET search_path = ''
 AS $assertchunks$
 DECLARE
     expected_index integer := 0;
-    previous_end   integer := -1;
+    -- Starts at 0 so the FIRST chunk's contiguity check is "starts at 0".
+    previous_end   integer := 0;
     chunk jsonb;
 BEGIN
     IF p_chunks IS NULL OR jsonb_typeof(p_chunks) <> 'array' THEN
@@ -101,14 +126,26 @@ BEGIN
                 USING ERRCODE = 'KT003';
         END IF;
 
-        -- Chunks must not overlap in characters, or one offset would resolve
-        -- to two chunks and a citation could not name a single passage.
-        IF (chunk ->> 'charStart')::integer < previous_end THEN
-            RAISE EXCEPTION 'chunk % starts inside the previous chunk', expected_index
+        -- CONTIGUOUS, not merely non-overlapping. The first chunk starts at 0
+        -- and each one starts exactly where the last ended; anything else
+        -- leaves characters in no chunk, and the canonical text -- which is
+        -- what the version fingerprint covers -- could not be rebuilt from
+        -- what is stored.
+        IF (chunk ->> 'charStart')::integer <> previous_end THEN
+            RAISE EXCEPTION
+                'chunk % starts at %, but the previous chunk ended at % -- chunks must be contiguous from 0',
+                expected_index, chunk ->> 'charStart', previous_end USING ERRCODE = 'KT003';
+        END IF;
+
+        -- Both timings or neither. Null is how a chunk with no cue says it has
+        -- no time, and half a pair says nothing coherent at all.
+        IF (chunk -> 'startMs' = 'null'::jsonb) <> (chunk -> 'endMs' = 'null'::jsonb) THEN
+            RAISE EXCEPTION 'chunk % has only one of its two timings', expected_index
                 USING ERRCODE = 'KT003';
         END IF;
 
-        IF (chunk ->> 'endMs')::bigint < (chunk ->> 'startMs')::bigint THEN
+        IF chunk -> 'startMs' <> 'null'::jsonb
+           AND (chunk ->> 'endMs')::bigint < (chunk ->> 'startMs')::bigint THEN
             RAISE EXCEPTION 'chunk % ends before it starts', expected_index USING ERRCODE = 'KT003';
         END IF;
 
@@ -146,6 +183,102 @@ END
 $assertrep$;
 
 -- ---------------------------------------------------------------------------
+-- THE COMBINED ASSERTION: cues AND chunks, together.
+--
+-- WHY IT HAS TO EXIST SEPARATELY. The two validators above each see one half.
+-- assert_chunks proves the chunks partition a range; assert_representation
+-- proves the cues are shaped like cues. NEITHER CAN SEE whether the cue ranges
+-- actually fall inside those chunks -- and that is the invariant citations
+-- depend on: an offset must resolve to one chunk and one cue, or a quotation
+-- cannot name the time it came from.
+--
+-- This is a CROSS-ROW invariant -- a document's representation against its
+-- child chunk rows -- so no CHECK constraint can hold it. The transaction is
+-- the enforcement point, which is why this runs inside these functions rather
+-- than beside them.
+--
+-- Offsets are compared only to other offsets. See the note on UTF-16 above.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.knowledge_transcript_assert_version(
+    p_representation jsonb,
+    p_chunks jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+IMMUTABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $assertversion$
+DECLARE
+    cue jsonb;
+    cue_index integer := 0;
+    previous_cue_end integer := 0;
+    homes integer;
+    text_end integer;
+BEGIN
+    PERFORM public.knowledge_transcript_assert_version(p_representation, p_chunks);
+
+    -- Where the chunks stop. A cue beyond this is describing text nothing
+    -- stored.
+    SELECT coalesce(max((c ->> 'charEnd')::integer), 0) INTO text_end
+      FROM jsonb_array_elements(p_chunks) AS c;
+
+    FOR cue IN SELECT * FROM jsonb_array_elements(p_representation -> 'cues') LOOP
+        IF jsonb_typeof(cue) <> 'object'
+           OR NOT (cue ? 'charStart' AND cue ? 'charEnd' AND cue ? 'startMs' AND cue ? 'endMs') THEN
+            RAISE EXCEPTION 'cue % is not a complete cue', cue_index USING ERRCODE = 'KT003';
+        END IF;
+
+        IF (cue ->> 'charStart')::integer < 0
+           OR (cue ->> 'charEnd')::integer < (cue ->> 'charStart')::integer THEN
+            RAISE EXCEPTION 'cue % has an impossible character range', cue_index
+                USING ERRCODE = 'KT003';
+        END IF;
+
+        IF (cue ->> 'startMs')::bigint < 0
+           OR (cue ->> 'endMs')::bigint < (cue ->> 'startMs')::bigint THEN
+            RAISE EXCEPTION 'cue % ends before it starts, or starts before zero', cue_index
+                USING ERRCODE = 'KT003';
+        END IF;
+
+        -- CHARACTER ranges are ordered and disjoint; TIMES are not, and must
+        -- not be checked as though they were. Overlapping cues are ordinary in
+        -- machine transcripts and are preserved deliberately.
+        IF (cue ->> 'charStart')::integer < previous_cue_end THEN
+            RAISE EXCEPTION 'cue % starts inside the previous cue', cue_index
+                USING ERRCODE = 'KT003';
+        END IF;
+
+        IF (cue ->> 'charEnd')::integer > text_end THEN
+            RAISE EXCEPTION 'cue % ends at %, past the end of the stored text (%)',
+                cue_index, cue ->> 'charEnd', text_end USING ERRCODE = 'KT003';
+        END IF;
+
+        SELECT count(*) INTO homes
+          FROM jsonb_array_elements(p_chunks) AS c
+         WHERE (cue ->> 'charStart')::integer >= (c ->> 'charStart')::integer
+           AND (cue ->> 'charEnd')::integer   <= (c ->> 'charEnd')::integer;
+
+        IF homes = 0 THEN
+            RAISE EXCEPTION 'cue % is not wholly inside any chunk', cue_index
+                USING ERRCODE = 'KT003';
+        END IF;
+        -- A zero-length cue sits exactly on a boundary and is inside both
+        -- neighbours. Ambiguous, and harmless: it selects no characters, so no
+        -- citation can land in it. Only a cue covering text must resolve to
+        -- exactly one chunk.
+        IF homes > 1 AND (cue ->> 'charEnd')::integer > (cue ->> 'charStart')::integer THEN
+            RAISE EXCEPTION 'cue % is inside % chunks, not exactly one', cue_index, homes
+                USING ERRCODE = 'KT003';
+        END IF;
+
+        previous_cue_end := (cue ->> 'charEnd')::integer;
+        cue_index := cue_index + 1;
+    END LOOP;
+END
+$assertversion$;
+
+-- ---------------------------------------------------------------------------
 -- CREATE. Document, representation, chunks, readiness and the first revision,
 -- together.
 -- ---------------------------------------------------------------------------
@@ -174,8 +307,7 @@ DECLARE
 BEGIN
     -- VALIDATE FIRST. Nothing below this point should discover a malformed
     -- input after it has written anything.
-    PERFORM public.knowledge_transcript_assert_representation(p_representation);
-    PERFORM public.knowledge_transcript_assert_chunks(p_chunks);
+    PERFORM public.knowledge_transcript_assert_version(p_representation, p_chunks);
 
     -- The id and the board are BOUND by the caller, not defaulted. A create
     -- that let the row choose its own id could not be correlated with the
@@ -264,8 +396,7 @@ DECLARE
 BEGIN
     -- VALIDATE BEFORE THE LOCK AND BEFORE ANY DELETE. A malformed payload must
     -- cost nothing and must never be discovered after the old chunks are gone.
-    PERFORM public.knowledge_transcript_assert_representation(p_representation);
-    PERFORM public.knowledge_transcript_assert_chunks(p_chunks);
+    PERFORM public.knowledge_transcript_assert_version(p_representation, p_chunks);
 
     -- ALL FIVE PREDICATES, UNDER THE LOCK. A check performed before the lock
     -- is a check about the past.
@@ -437,6 +568,7 @@ DECLARE
     fns CONSTANT text[] := ARRAY[
         'public.knowledge_transcript_assert_chunks(jsonb)',
         'public.knowledge_transcript_assert_representation(jsonb)',
+        'public.knowledge_transcript_assert_version(jsonb, jsonb)',
         'public.knowledge_transcript_create_version(uuid, uuid, uuid, text, text, bigint, text, text, text, text, text, jsonb, jsonb)',
         'public.knowledge_transcript_replace_version(uuid, uuid, text, bigint, text, text, bigint, text, text, text, text, text, jsonb, jsonb)',
         'public.knowledge_transcript_update_metadata(uuid, uuid, text, bigint, text, text, text)'
