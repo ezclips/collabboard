@@ -81,14 +81,60 @@ describe('item 18 prepared SQL', () => {
     expect(raises).toBe(CASE_COUNT);
   });
 
+  // THE ISOLATED RUN CAUGHT A BUG THIS FILE DID NOT. The classifier carried a
+  // `malformed array literal` fault, and cases 1-3 scored PASS on it: they
+  // accepted ANY error as a refusal, so a classifier that could not run at all
+  // looked adversarially sound. A rejection now has to be THE rejection.
+  it('fails a case refused by a fault rather than by a check', () => {
+    // P0001 is what a plain RAISE EXCEPTION produces. Anything else -- 22P02
+    // for the malformed array literal, 42703 for a missing column -- is the
+    // classifier breaking, not judging.
+    expect(adversarial).toContain("ELSIF SQLSTATE <> 'P0001' THEN");
+    expect(adversarial).toContain('refused by a FAULT, not by a check');
+  });
+
+  it('pins each shape to the specific check that must catch it', () => {
+    // Not merely 'some unsupported state' -- the one named for this shape. A
+    // shape refused by a different check is refused by accident.
+    for (const expected of [
+      'unsupported state: column-level INSERT is granted to PUBLIC%',
+      'unsupported state: INSERT reaches a client role through role membership%',
+      'unsupported state: separate column-level INSERT grants exist%',
+    ]) {
+      expect(adversarial, `no case pins: ${expected}`).toContain(`SQLERRM NOT LIKE '${expected}'`);
+    }
+    expect(adversarial).toContain('refused by the WRONG check');
+  });
+
+  it('pins the refusal messages to text the classifier actually raises', () => {
+    // The pin is worthless if it names a message no longer in the migration:
+    // the LIKE would never match and every case would FAIL. Check both ends.
+    for (const prefix of [
+      'unsupported state: column-level INSERT is granted to PUBLIC',
+      'unsupported state: INSERT reaches a client role through role membership',
+      'unsupported state: separate column-level INSERT grants exist',
+    ]) {
+      expect(classifier, `the classifier no longer raises: ${prefix}`).toContain(prefix);
+    }
+  });
   it('computes its own verdict rather than leaving it to be eyeballed', () => {
     expect(adversarial).toContain("'*** INCOMPLETE -- '");
     expect(adversarial).toContain("count(*) <> 5");
     expect(adversarial).toContain("'ALL PASS -- 5 of 5'");
   });
 
-  it('records that none of this SQL has been executed', () => {
-    expect(adversarial).toContain('UNVERIFIED');
-    expect(migration).toContain('has not been executed');
+  // CHANGED DELIBERATELY. This asserted 'has not been executed', which stopped
+  // being true on 2026-09-21: the SQL ran on an isolated local stack. The test
+  // still exists for the same reason -- these files must state their execution
+  // status truthfully -- but the truthful status is now narrower than 'never
+  // ran', and a stale 'UNVERIFIED' would understate what is known and overstate
+  // what is safe.
+  it('states an execution status that is current, and not yet a clean one', () => {
+    for (const [name, sql] of [['adversarial', adversarial], ['migration', migration]] as const) {
+      expect(sql, `${name} must carry a dated status`).toContain('STATUS 2026-09-21');
+      expect(sql, `${name} must say it ran only in isolation`).toContain('isolated LOCAL stack');
+      expect(sql, `${name} must not claim hosted application`).toContain('NEVER been applied to hosted');
+      expect(sql, `${name} must not claim a clean run`).toMatch(/NOT been re-run|NOT been re-run clean/);
+    }
   });
 });

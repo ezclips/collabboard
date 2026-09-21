@@ -34,7 +34,10 @@
 -- yet: checking for a function that has not been written is harmless, and
 -- checking for one that has is the whole point.
 --
--- UNVERIFIED: not executed anywhere.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY, in a shimmed
+-- run that found five defects in this rollout's SQL -- all now fixed. It has
+-- NOT been re-run clean, and has NEVER been applied to hosted. See
+-- .agent/isolated-sql-verification.md.
 
 DO $revisionrollback$
 DECLARE

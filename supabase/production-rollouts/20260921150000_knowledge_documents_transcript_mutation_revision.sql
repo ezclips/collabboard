@@ -50,7 +50,10 @@
 -- revision; every replacement and metadata-only update increments it exactly
 -- once, inside the same transaction that made the change.
 --
--- UNVERIFIED: this migration has not been executed against any database.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY, in a shimmed
+-- run that found five defects in this rollout's SQL -- all now fixed. It has
+-- NOT been re-run clean, and has NEVER been applied to hosted. See
+-- .agent/isolated-sql-verification.md.
 
 DO $revision$
 DECLARE

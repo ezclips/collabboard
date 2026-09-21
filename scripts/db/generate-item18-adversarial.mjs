@@ -49,6 +49,7 @@ const cases = [
   {
     n: 1,
     title: 'a column-level INSERT grant to PUBLIC',
+    expectMessage: 'unsupported state: column-level INSERT is granted to PUBLIC%',
     why: 'has_table_privilege(client, INSERT) is FALSE here and every role on the server can still insert that column; revoking from anon and authenticated would not remove it',
     shape: [...revokeBoth, `GRANT INSERT (content_sha256) ON TABLE ${TABLE} TO PUBLIC`],
     expect: 'reject',
@@ -56,6 +57,7 @@ const cases = [
   {
     n: 2,
     title: 'INSERT inherited through another role',
+    expectMessage: 'unsupported state: INSERT reaches a client role through role membership%',
     why: 'authenticated holds no grant of its own; it is a member of a role that does, and this migration cannot revoke another role’s grant',
     shape: [
       ...revokeBoth,
@@ -68,6 +70,7 @@ const cases = [
   {
     n: 3,
     title: 'a direct client column-level grant in an otherwise post-state ACL',
+    expectMessage: 'unsupported state: separate column-level INSERT grants exist%',
     why: 'a table revoke would destroy this grant without the rollback restoring it, and until then the client can insert exactly the columns a recycled document needs',
     shape: [
       ...revokeBoth,
@@ -110,12 +113,26 @@ const caseSql = (c) => {
   const shape = c.shape.map((s) => `        EXECUTE '${s.replace(/'/g, "''")}';`).join('\n');
   const verdict =
     c.expect === 'reject'
-      ? `        IF SQLSTATE = 'ZZ001' THEN
+      ? `        -- REJECTION IS NOT ENOUGH; IT MUST BE THE INTENDED REJECTION.
+        -- An earlier revision scored a PASS on ANY error, so a plain
+        -- malformed-array-literal BUG inside the classifier collected three
+        -- of them -- the shape was refused for a reason having nothing to do
+        -- with the shape. A broken classifier must never read as
+        -- adversarially sound, so both the SQLSTATE and the specific check
+        -- that must catch this shape are pinned.
+        IF SQLSTATE = 'ZZ001' THEN
             outcome := 'FAIL';
             detail  := 'the classifier ACCEPTED this state instead of rejecting it';
+        ELSIF SQLSTATE <> 'P0001' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by a FAULT, not by a check -- SQLSTATE '
+                       || SQLSTATE || ': ' || SQLERRM;
+        ELSIF SQLERRM NOT LIKE '${c.expectMessage.replace(/'/g, "''")}' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by the WRONG check: ' || SQLERRM;
         ELSE
             outcome := 'PASS';
-            detail  := 'rejected: ' || SQLERRM;
+            detail  := 'refused as intended: ' || SQLERRM;
         END IF;`
       : `        IF SQLSTATE = 'ZZ001' THEN
             outcome := 'PASS';
@@ -195,7 +212,13 @@ const header = `-- ADVERSARIAL CHECKS for item 18's state classifier. PLAIN SQL 
 -- PASS CRITERION: five rows, every outcome PASS, and the final verdict row
 -- reading ALL PASS.
 --
--- UNVERIFIED. This file has not been executed anywhere.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY. That run
+-- reported ALL PASS -- 5 of 5, and the result was WORTHLESS: the classifier
+-- carried a malformed-array-literal fault, and cases 1-3 counted that fault
+-- as a refusal. A classifier that could not run at all read as adversarially
+-- sound. Both are fixed -- the fault, and the verdict that excused it -- but
+-- this file has NOT been re-run since, and has NEVER been applied to hosted.
+-- See .agent/isolated-sql-verification.md.
 
 CREATE TEMP TABLE item18_adversarial_result (
     case_no integer PRIMARY KEY,

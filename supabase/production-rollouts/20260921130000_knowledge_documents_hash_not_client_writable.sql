@@ -49,21 +49,33 @@
 -- information_schema by grantee cannot see privileges arriving through PUBLIC
 -- or role membership -- those rows carry a different grantee.
 --
--- PROVENANCE OF THE ARRAY: derived from this repository's migration history
--- (every column of knowledge_documents except `id`) and matching the column
--- count observed on the live schema. It has NOT been observed name-by-name. If
--- it is wrong this migration fails and prints both sets rather than repairing
--- anything.
+-- PROVENANCE OF THE ARRAY: the set restored by the PDF-R1 rollout, which
+-- names it as "the exact mutable column set this rollout restores UPDATE on"
+-- -- see 20260903_pdf_derivative_render_lifecycle.sql. Read back from the
+-- hosted ACL and reproduced on an isolated local stack, name by name, both
+-- agreeing with that list.
 --
--- UNVERIFIED: this migration has not been executed against any database.
+-- AN EARLIER DRAFT GUESSED IT, and the guess is worth recording because the
+-- shape of the error is the point. It was inferred as "every column except
+-- `id`" and checked only against the COLUMN COUNT, which matched -- 21 either
+-- way. The guess wrongly included derivatives_rendered_at and
+-- derivatives_requested_at (server-written lifecycle columns, never granted to
+-- a client) and wrongly omitted `id` and processing_attempt. A count agreed
+-- while the SET was wrong, which is exactly why this is pinned BY NAME: the
+-- exact-name comparison refused to run and printed both sets, as designed.
+--
+-- NOTE, NOT A CHANGE: `id` really is client-UPDATE-able here. That predates
+-- this migration, whose contract is to remove content_sha256 and preserve the
+-- rest EXACTLY; narrowing it silently would break restoration matching. It is
+-- recorded as followups item 20.
 
 DO $item17$
 DECLARE
     expected_all CONSTANT text[] := ARRAY[
         'board_id', 'content_sha256', 'created_at', 'created_by',
-        'derivatives_rendered_at', 'derivatives_requested_at', 'file_size_bytes',
-        'kind', 'mime_type', 'original_filename', 'page_count', 'parser_name',
-        'parser_options_hash', 'parser_version', 'processing_error',
+        'file_size_bytes', 'id', 'kind', 'mime_type', 'original_filename',
+        'page_count', 'parser_name', 'parser_options_hash', 'parser_version',
+        'processing_attempt', 'processing_error',
         'processing_lease_expires_at', 'processing_lease_token',
         'processing_status', 'raw_artifact_path', 'storage_path', 'updated_at'
     ];

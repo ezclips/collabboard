@@ -14,7 +14,10 @@
 -- NO CASCADE. If something else has come to depend on one of these, that is a
 -- second change nobody reviewed, and PostgreSQL saying so is the right outcome.
 --
--- UNVERIFIED: not executed anywhere.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY, in a shimmed
+-- run that found five defects in this rollout's SQL -- all now fixed. It has
+-- NOT been re-run clean, and has NEVER been applied to hosted. See
+-- .agent/isolated-sql-verification.md.
 
 DO $rpcrollback$
 DECLARE

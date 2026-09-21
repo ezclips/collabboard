@@ -36,7 +36,13 @@
 -- PASS CRITERION: five rows, every outcome PASS, and the final verdict row
 -- reading ALL PASS.
 --
--- UNVERIFIED. This file has not been executed anywhere.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY. That run
+-- reported ALL PASS -- 5 of 5, and the result was WORTHLESS: the classifier
+-- carried a malformed-array-literal fault, and cases 1-3 counted that fault
+-- as a refusal. A classifier that could not run at all read as adversarially
+-- sound. Both are fixed -- the fault, and the verdict that excused it -- but
+-- this file has NOT been re-run since, and has NEVER been applied to hosted.
+-- See .agent/isolated-sql-verification.md.
 
 CREATE TEMP TABLE item18_adversarial_result (
     case_no integer PRIMARY KEY,
@@ -181,12 +187,16 @@ BEGIN
      WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'INSERT');
 
+    -- array_append, NOT `|| 'anon'`. With an untyped literal PostgreSQL
+    -- resolves `text[] || unknown` as array-to-array concatenation and tries to
+    -- read the literal as an array, which fails with `malformed array literal`.
+    -- array_append(anyarray, anyelement) forces the element reading.
     effective_roles := ARRAY[]::text[];
     IF array_length(effective_anon, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'anon';
+        effective_roles := array_append(effective_roles, 'anon');
     END IF;
     IF array_length(effective_auth, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'authenticated';
+        effective_roles := array_append(effective_roles, 'authenticated');
     END IF;
 
     -- ---------------------------------------------------------------------
@@ -281,12 +291,26 @@ $mig$;
 
         RAISE EXCEPTION 'the classifier ran to completion' USING ERRCODE = 'ZZ001';
     EXCEPTION WHEN OTHERS THEN
+        -- REJECTION IS NOT ENOUGH; IT MUST BE THE INTENDED REJECTION.
+        -- An earlier revision scored a PASS on ANY error, so a plain
+        -- malformed-array-literal BUG inside the classifier collected three
+        -- of them -- the shape was refused for a reason having nothing to do
+        -- with the shape. A broken classifier must never read as
+        -- adversarially sound, so both the SQLSTATE and the specific check
+        -- that must catch this shape are pinned.
         IF SQLSTATE = 'ZZ001' THEN
             outcome := 'FAIL';
             detail  := 'the classifier ACCEPTED this state instead of rejecting it';
+        ELSIF SQLSTATE <> 'P0001' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by a FAULT, not by a check -- SQLSTATE '
+                       || SQLSTATE || ': ' || SQLERRM;
+        ELSIF SQLERRM NOT LIKE 'unsupported state: column-level INSERT is granted to PUBLIC%' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by the WRONG check: ' || SQLERRM;
         ELSE
             outcome := 'PASS';
-            detail  := 'rejected: ' || SQLERRM;
+            detail  := 'refused as intended: ' || SQLERRM;
         END IF;
     END;
 
@@ -433,12 +457,16 @@ BEGIN
      WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'INSERT');
 
+    -- array_append, NOT `|| 'anon'`. With an untyped literal PostgreSQL
+    -- resolves `text[] || unknown` as array-to-array concatenation and tries to
+    -- read the literal as an array, which fails with `malformed array literal`.
+    -- array_append(anyarray, anyelement) forces the element reading.
     effective_roles := ARRAY[]::text[];
     IF array_length(effective_anon, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'anon';
+        effective_roles := array_append(effective_roles, 'anon');
     END IF;
     IF array_length(effective_auth, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'authenticated';
+        effective_roles := array_append(effective_roles, 'authenticated');
     END IF;
 
     -- ---------------------------------------------------------------------
@@ -533,12 +561,26 @@ $mig$;
 
         RAISE EXCEPTION 'the classifier ran to completion' USING ERRCODE = 'ZZ001';
     EXCEPTION WHEN OTHERS THEN
+        -- REJECTION IS NOT ENOUGH; IT MUST BE THE INTENDED REJECTION.
+        -- An earlier revision scored a PASS on ANY error, so a plain
+        -- malformed-array-literal BUG inside the classifier collected three
+        -- of them -- the shape was refused for a reason having nothing to do
+        -- with the shape. A broken classifier must never read as
+        -- adversarially sound, so both the SQLSTATE and the specific check
+        -- that must catch this shape are pinned.
         IF SQLSTATE = 'ZZ001' THEN
             outcome := 'FAIL';
             detail  := 'the classifier ACCEPTED this state instead of rejecting it';
+        ELSIF SQLSTATE <> 'P0001' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by a FAULT, not by a check -- SQLSTATE '
+                       || SQLSTATE || ': ' || SQLERRM;
+        ELSIF SQLERRM NOT LIKE 'unsupported state: INSERT reaches a client role through role membership%' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by the WRONG check: ' || SQLERRM;
         ELSE
             outcome := 'PASS';
-            detail  := 'rejected: ' || SQLERRM;
+            detail  := 'refused as intended: ' || SQLERRM;
         END IF;
     END;
 
@@ -683,12 +725,16 @@ BEGIN
      WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'INSERT');
 
+    -- array_append, NOT `|| 'anon'`. With an untyped literal PostgreSQL
+    -- resolves `text[] || unknown` as array-to-array concatenation and tries to
+    -- read the literal as an array, which fails with `malformed array literal`.
+    -- array_append(anyarray, anyelement) forces the element reading.
     effective_roles := ARRAY[]::text[];
     IF array_length(effective_anon, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'anon';
+        effective_roles := array_append(effective_roles, 'anon');
     END IF;
     IF array_length(effective_auth, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'authenticated';
+        effective_roles := array_append(effective_roles, 'authenticated');
     END IF;
 
     -- ---------------------------------------------------------------------
@@ -783,12 +829,26 @@ $mig$;
 
         RAISE EXCEPTION 'the classifier ran to completion' USING ERRCODE = 'ZZ001';
     EXCEPTION WHEN OTHERS THEN
+        -- REJECTION IS NOT ENOUGH; IT MUST BE THE INTENDED REJECTION.
+        -- An earlier revision scored a PASS on ANY error, so a plain
+        -- malformed-array-literal BUG inside the classifier collected three
+        -- of them -- the shape was refused for a reason having nothing to do
+        -- with the shape. A broken classifier must never read as
+        -- adversarially sound, so both the SQLSTATE and the specific check
+        -- that must catch this shape are pinned.
         IF SQLSTATE = 'ZZ001' THEN
             outcome := 'FAIL';
             detail  := 'the classifier ACCEPTED this state instead of rejecting it';
+        ELSIF SQLSTATE <> 'P0001' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by a FAULT, not by a check -- SQLSTATE '
+                       || SQLSTATE || ': ' || SQLERRM;
+        ELSIF SQLERRM NOT LIKE 'unsupported state: separate column-level INSERT grants exist%' THEN
+            outcome := 'FAIL';
+            detail  := 'refused by the WRONG check: ' || SQLERRM;
         ELSE
             outcome := 'PASS';
-            detail  := 'rejected: ' || SQLERRM;
+            detail  := 'refused as intended: ' || SQLERRM;
         END IF;
     END;
 
@@ -932,12 +992,16 @@ BEGIN
      WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'INSERT');
 
+    -- array_append, NOT `|| 'anon'`. With an untyped literal PostgreSQL
+    -- resolves `text[] || unknown` as array-to-array concatenation and tries to
+    -- read the literal as an array, which fails with `malformed array literal`.
+    -- array_append(anyarray, anyelement) forces the element reading.
     effective_roles := ARRAY[]::text[];
     IF array_length(effective_anon, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'anon';
+        effective_roles := array_append(effective_roles, 'anon');
     END IF;
     IF array_length(effective_auth, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'authenticated';
+        effective_roles := array_append(effective_roles, 'authenticated');
     END IF;
 
     -- ---------------------------------------------------------------------
@@ -1181,12 +1245,16 @@ BEGIN
      WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'INSERT');
 
+    -- array_append, NOT `|| 'anon'`. With an untyped literal PostgreSQL
+    -- resolves `text[] || unknown` as array-to-array concatenation and tries to
+    -- read the literal as an array, which fails with `malformed array literal`.
+    -- array_append(anyarray, anyelement) forces the element reading.
     effective_roles := ARRAY[]::text[];
     IF array_length(effective_anon, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'anon';
+        effective_roles := array_append(effective_roles, 'anon');
     END IF;
     IF array_length(effective_auth, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'authenticated';
+        effective_roles := array_append(effective_roles, 'authenticated');
     END IF;
 
     -- ---------------------------------------------------------------------

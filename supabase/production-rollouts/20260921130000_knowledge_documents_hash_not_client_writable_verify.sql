@@ -25,10 +25,10 @@ DO $privileges$
 DECLARE
     -- The reviewed allowlist MINUS content_sha256: exactly what must remain.
     expected_after CONSTANT text[] := ARRAY[
-        'board_id', 'created_at', 'created_by', 'derivatives_rendered_at',
-        'derivatives_requested_at', 'file_size_bytes', 'kind', 'mime_type',
-        'original_filename', 'page_count', 'parser_name', 'parser_options_hash',
-        'parser_version', 'processing_error', 'processing_lease_expires_at',
+        'board_id', 'created_at', 'created_by', 'file_size_bytes', 'id',
+        'kind', 'mime_type', 'original_filename', 'page_count',
+        'parser_name', 'parser_options_hash', 'parser_version',
+        'processing_attempt', 'processing_error', 'processing_lease_expires_at',
         'processing_lease_token', 'processing_status', 'raw_artifact_path',
         'storage_path', 'updated_at'
     ];
@@ -104,7 +104,7 @@ DECLARE
     blocked boolean := false;
 BEGIN
     CREATE TEMP TABLE hash_grant_probe
-        (LIKE public.knowledge_documents INCLUDING CONSTRAINTS) ON COMMIT DROP;
+        (LIKE public.knowledge_documents INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP;
 
     EXECUTE 'REVOKE ALL ON hash_grant_probe FROM authenticated';
     EXECUTE 'GRANT INSERT, SELECT ON hash_grant_probe TO authenticated';

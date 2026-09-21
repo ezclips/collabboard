@@ -48,17 +48,25 @@ END $$;
 --
 -- An earlier draft of this file 'tested' the check with an UPDATE ... WHERE
 -- false, which touches no row and therefore proves nothing. This copies the
--- table definition INCLUDING CONSTRAINTS into a temporary table -- no FKs, no
--- production rows -- and writes a representation that is not an object. The
--- check must reject it. If it does not, the constraint is not doing its job
--- and this script must fail rather than report ok.
+-- table definition INCLUDING CONSTRAINTS INCLUDING DEFAULTS into a temporary
+-- table -- no FKs, no production rows. DEFAULTS is not cosmetic: LIKE copies
+-- NOT NULL WITHOUT the gen_random_uuid() behind it, so a probe built from
+-- CONSTRAINTS alone dies on a null id before it ever reaches the check under
+-- test. The narrow handler below is what made that loud: it catches
+-- check_violation ONLY, so the null id escaped as an uncaught
+-- not_null_violation and failed the script. A WHEN OTHERS there would have
+-- swallowed it and reported ok on a probe that never ran.
+--
+-- It then writes a representation that is not an object. The check must
+-- reject it. If it does not, the constraint is not doing its job and this
+-- script must fail rather than report ok.
 
 DO $$
 DECLARE
     rejected boolean := false;
 BEGIN
     CREATE TEMP TABLE transcript_check_probe
-        (LIKE public.knowledge_documents INCLUDING CONSTRAINTS) ON COMMIT DROP;
+        (LIKE public.knowledge_documents INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP;
 
     BEGIN
         INSERT INTO transcript_check_probe

@@ -45,7 +45,8 @@ supabase/.temp/
 tmp-line-debug/
 devserver.out.log
 
-# .agent/ holds local notes, with three deliberate exceptions. The verification
+# .agent/ holds local notes, with a deliberate set of exceptions (the count in
+# this comment said "three" long after there were more than three). The verification
 # baselines are a GATE CRITERION, not a note: the failing-test-file set is what a
 # commit is judged against, so it has to travel with the code instead of living
 # on one machine. The retrieval follow-ups are DEFERRED WORK WITH EVIDENCE --
@@ -63,6 +64,13 @@ devserver.out.log
 # that disproved it. A plan that was wrong once and is now right reads
 # identically to a plan that was always right -- unless the disproof travels
 # with it, which is how the "risk-free" stage stops being re-proposed.
+# The isolated SQL verification is the sharpest case of that rule: the run it
+# records reported ALL PASS on a harness that was passing for the wrong reason,
+# and it names the five defects and the guess that produced the worst of them.
+# A rollout that was wrong once and is now right reads identically to one that
+# was always right -- and the operator who applies it to hosted is not the
+# person who ran it.
+#
 # `.agent/*` rather than `.agent/` is what makes a negation possible at all --
 # git will not descend into an ignored directory.
 .agent/*
@@ -75,6 +83,7 @@ devserver.out.log
 !.agent/docx-extraction-assessment.md
 !.agent/docx-live-acceptance.md
 !.agent/youtube-caption-paths.md
+!.agent/isolated-sql-verification.md
 
 # local dev artifacts (Phase 0 hygiene)
 tmp/

@@ -80,7 +80,10 @@
 --          back rather than returning a token the next writer would match.
 --   KT003  input failed validation. Always raised BEFORE anything is deleted.
 --
--- UNVERIFIED: none of this has been executed against any database.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY, in a shimmed
+-- run that found five defects in this rollout's SQL -- all now fixed. It has
+-- NOT been re-run clean, and has NEVER been applied to hosted. See
+-- .agent/isolated-sql-verification.md.
 
 -- ---------------------------------------------------------------------------
 -- Shared input validation. Called before any destructive step, in every path.
@@ -216,7 +219,12 @@ DECLARE
     homes integer;
     text_end integer;
 BEGIN
-    PERFORM public.knowledge_transcript_assert_version(p_representation, p_chunks);
+    -- The two single-argument assertions FIRST: this function only adds the
+    -- cross-row checks, and running them against a shape neither helper has
+    -- accepted would report a cross-row fault for what is really a malformed
+    -- chunk or cue.
+    PERFORM public.knowledge_transcript_assert_chunks(p_chunks);
+    PERFORM public.knowledge_transcript_assert_representation(p_representation);
 
     -- Where the chunks stop. A cue beyond this is describing text nothing
     -- stored.

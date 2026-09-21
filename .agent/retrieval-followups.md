@@ -1571,3 +1571,35 @@ race, the other can delete a referenced object.
 
 **Not scheduled.** It is a real cost and a real follow-up, not a solved
 problem, and it does not block the importer.
+
+## 20. `authenticated` can UPDATE `knowledge_documents.id`
+
+Found by reading the hosted ACL name-by-name during the isolated verification
+run of 2026-09-21, while correcting item 17's expected allowlist. It is
+**pre-existing state, not something the transcript work introduced**, and it
+predates items 17 and 18.
+
+The 21-column UPDATE allowlist `authenticated` holds on
+`public.knowledge_documents` includes **`id`** — the primary key. A client with
+an authenticated session, subject to RLS, can change the primary key of a row
+it may update. What RLS restricts is *which rows*; it does not stop a permitted
+row from having its identity rewritten. Every foreign key pointing at that
+document (`knowledge_pages`, chunk rows, chat citations, provenance) is then
+either broken or silently repointed, depending on the FK's own action.
+
+**Deliberately not fixed here.** Item 17's contract is to remove
+`content_sha256` from that allowlist and preserve the rest *exactly*; its
+rollback restores the recorded pre-state, and restoration is asserted by exact
+name comparison. Narrowing the allowlist in the same change would make the
+restoration check disagree with the ACL it is restoring, and would mix an
+unrelated privilege decision into a migration whose whole value is that it does
+one nameable thing.
+
+**What closing it needs:** its own migration, its own rollback, and — before
+either — a check of whether anything actually writes `id`. The PDF-R1 rollout
+(`20260903_pdf_derivative_render_lifecycle.sql`) names this set as "the exact
+mutable column set this rollout restores UPDATE on", so the grant is
+deliberate-looking; whether it is deliberately *this wide* is the question to
+answer first. Nothing in the application writes `id` today.
+
+**Not a blocker** for the transcript rollout.

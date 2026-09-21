@@ -60,7 +60,10 @@
 -- The three adversarial shapes are exercised by
 -- production-rollouts/20260921140000_..._adversarial.sql.
 --
--- UNVERIFIED: this migration has not been executed against any database.
+-- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY, in a shimmed
+-- run that found five defects in this rollout's SQL -- all now fixed. It has
+-- NOT been re-run clean, and has NEVER been applied to hosted. See
+-- .agent/isolated-sql-verification.md.
 
 DO $item18$
 DECLARE
@@ -179,12 +182,16 @@ BEGIN
      WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped
        AND has_column_privilege('authenticated', a.attrelid, a.attname, 'INSERT');
 
+    -- array_append, NOT `|| 'anon'`. With an untyped literal PostgreSQL
+    -- resolves `text[] || unknown` as array-to-array concatenation and tries to
+    -- read the literal as an array, which fails with `malformed array literal`.
+    -- array_append(anyarray, anyelement) forces the element reading.
     effective_roles := ARRAY[]::text[];
     IF array_length(effective_anon, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'anon';
+        effective_roles := array_append(effective_roles, 'anon');
     END IF;
     IF array_length(effective_auth, 1) IS NOT NULL THEN
-        effective_roles := effective_roles || 'authenticated';
+        effective_roles := array_append(effective_roles, 'authenticated');
     END IF;
 
     -- ---------------------------------------------------------------------
