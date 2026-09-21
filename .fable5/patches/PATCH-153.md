@@ -1,6 +1,6 @@
 # PATCH-153 — Transcript disclosure on board wiki pages
 
-**Status:** approved — Final Implementation Specification written, ready for handoff
+**Status:** done — implemented , CTO re-verified 2026-09-21
 
 > Lifecycle note: this is the draft. The **Final Implementation Specification**
 > is written into this file only after the owner approves, and the handoff to
@@ -479,3 +479,57 @@ STOP and report, leaving the tree clean, if:
 - any existing test fails and the only available fix is to change that test
 - you conclude the scalar select must be replaced by the full column
 - `check:boundaries` gains a third error
+
+---
+
+## CTO review — 2026-09-21. Verdict: ACCEPTED. Commit `f577c32a`.
+
+Re-verified independently rather than from the report, per AI_WORKFLOW.
+
+| Check | Result |
+|---|---|
+| Files touched | **exactly the 7 authorized**; zero MUST-NOT files |
+| Acceptance 9 (optional, not required) | held — the four MUST-NOT consumers are byte-unchanged |
+| Deletions in the three test files | **0** — the appends are pure |
+| `npx tsc --noEmit` | exit 0 |
+| `npm run check:boundaries` | exit 1, **exactly the same two** pre-existing errors, no third |
+| `npx vitest run` | 527 files, 26 failed, 56 failed tests, 10234 passed |
+| Failing FILE SET vs before | **identical** — diffed both directions, empty |
+| Commit message | verbatim from `## Commit` (rule 12) |
+
+Implementation spot-checked against intent, not only against green tests:
+`isTranscript?: true` is optional and true-only; `hasChanged` carries the
+not-compared comment and no comparison; `parseVersion` does not mention it; a
+gone source yields `false`; the select carries the `is_transcript:` alias and
+the mapper reads PRESENCE only; the drawer imports the constant and renders
+once behind `=== true`.
+
+### Two notes the implementer raised, both correct
+
+**1. A CTO defect in this patch file.** The `## Commit` message still contains
+"which the column's CHECK constraint makes a database-enforced test rather than
+a convention" — the exact phrasing review finding B2 corrected, which I
+narrowed in Architecture Notes and failed to narrow here. The implementer used
+the message verbatim as rule 12 requires and reported the discrepancy rather
+than editing it, which is the right call both ways.
+
+**The accurate claim is the one in Architecture Notes:** the CHECK guarantees
+the scalar is a faithful proxy for the column, and nothing more. A row is a
+transcript because a representation was written to it. The commit body
+overstates it. Not amended — the commit is the implementer's and the correction
+travels here, where anyone tracing the claim will find it.
+
+**Reusable rule:** when a review corrects a claim, grep the patch for every
+place that claim appears — the `## Commit` section is prose the implementer is
+FORBIDDEN to fix, so an uncorrected sentence there ships verbatim into history.
+
+**2. A self-correction, disclosed unprompted.** A first edit to
+`BoardWikiDrawer.test.tsx` truncated an existing test's `stubFetch` setup; it
+reverted and verified byte-identity before appending. Confirmed independently:
+zero deleted lines in that file. Disclosing a reverted mistake nobody would
+have found is the behaviour that makes the rest of a report worth reading.
+
+### Not closed by this patch
+Timestamped citations on wiki pages remain HELD behind the hosted transcript
+batch. Ordering stands: `20260921120000` must be applied before this code
+reaches production.
