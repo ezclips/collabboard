@@ -1,6 +1,6 @@
 # PATCH-154 — Stage 4 transcription instrument: faster-whisper baseline, pyVideoTrans challenger
 
-**Status:** draft — awaiting owner approval
+**Status:** approved 2026-09-22 — Phase A authorized and handed off; Phase B NOT authorized (needs an approved corpus)
 
 > Lifecycle note: this is the draft. The **Final Implementation Specification**
 > is written only after the owner approves (AI_WORKFLOW.md, patch lifecycle).
@@ -273,3 +273,158 @@ cleanup, retention periods for original media and derived transcripts, and safe
 collection of superseded objects — which item 19 already says needs a grace
 period plus a fresh reference check at deletion time. The instrument does not
 implement the sweep; it documents its own artifacts.
+
+---
+
+# Final Implementation Specification
+
+**Approved by the owner 2026-09-22.** Execute this section EXACTLY. Everything
+above it is context. Where this section and the context disagree, this section
+wins; if the disagreement looks like a defect rather than a refinement, STOP and
+report.
+
+## Execution is in two phases. Phase A is authorized now. Phase B is not.
+
+**Phase B cannot run yet** — it needs a corpus that does not exist, whose rights
+basis is an owner decision. Do not begin it. Do not collect media. Do not
+download model weights.
+
+**One consolidated report still applies**: the recommendation is delivered once,
+at the end of Phase B. Phase A produces decision inputs, not a recommendation.
+
+---
+
+# PHASE A — authorized
+
+Three deliverables. No Python is installed, no model is downloaded, no media is
+collected, and nothing is benchmarked.
+
+## A1 — Gate 0: gather the licensing facts. Do NOT conclude.
+
+Produce a findings section that **quotes sources and stops**. You are gathering
+evidence for a decision the CTO drafts and the owner takes. Do not write "we
+can" or "we cannot".
+
+Gather, with exact quotes and links:
+1. The pyVideoTrans licence as published in its repository (confirm GPL-3.0 and
+   the exact file).
+2. The faster-whisper licence (confirm MIT and the exact file).
+3. The licence of the model weights each candidate would use by default — this
+   is separate from the code licence and is frequently different.
+4. ffmpeg's licensing as typically distributed, noting that GPL and LGPL builds
+   differ.
+5. The FSF's own published position on the distinction between **running** an
+   unmodified GPL program as a separate process for internal use, **copying**
+   its code into another program, and **distributing** it.
+
+Then state, as three labelled questions with the evidence under each and **no
+answer**:
+- Q1: running an unmodified pyVideoTrans CLI as a separate process, internally
+- Q2: copying any of its code into our application
+- Q3: distributing it with our application
+
+**Rule 9 still applies**: if you find a licence that forbids commercial use
+outright, report it immediately.
+
+## A2 — the harness, runnable but unrun
+
+Create `tools/transcription-probe/`, matching the shape of the existing
+`tools/youtube-caption-probe/`:
+
+- **`corpus.json`** — the MANIFEST SCHEMA plus the entries you can fill from A3.
+  Every entry carries: `id`, `category`, `language`, `durationSeconds`,
+  `origin` (where it came from), `licence`, `rightsBasis` (why we may process
+  it), `referenceTranscriptPath` (may be null until a human supplies it).
+  **Media files are never committed and never referenced by absolute path
+  outside the probe's own working directory.**
+- **`probe.mjs`** — the orchestrator. It must:
+  - read `corpus.json` and refuse to run on any entry lacking `rightsBasis`
+  - invoke each candidate as an external process
+  - record, per clip per candidate: the pinned model, decoding settings and VAD
+    configuration; wall-clock processing time; peak memory; the produced
+    segments with timings
+  - write `last-run.json` with all of it, including a `configuration` block
+  - **not** score accuracy. Scoring compares against human references that do
+    not exist yet.
+- **`README.md`** — how to reproduce, what gets installed, where, how much disk,
+  and how to remove it. Written for someone who has not read this patch.
+
+`probe.mjs` must run and exit cleanly against an EMPTY corpus, reporting that
+there is nothing to measure. That is its Phase A acceptance test.
+
+## A3 — propose the corpus, do not collect it
+
+Research and propose, for the owner to approve:
+
+- **Openly licensed speech corpora** that could supply the English and German
+  clips. For each: exact name, exact release/version, exact licence, where it is
+  hosted, and whether it permits our use. Name candidate clips by identifier
+  where the corpus allows.
+- Which categories an open corpus can cover, and which it cannot. The patch
+  requires: clear English; clear German; names/numbers/units/negation; multiple
+  speakers; background noise or music; long pauses; a no-speech control; a
+  **quiet-speech positive control**; one long recording.
+- The gap: state plainly which categories would need purpose-recorded audio
+  from consenting participants, because that is the part the owner must supply.
+
+**Collect nothing.** Propose only. No downloads.
+
+---
+
+# PHASE B — NOT authorized. Do not begin.
+
+Listed so the shape is known. It starts only on a separate owner approval that
+names the approved corpus.
+
+B1. Install the external Python environment per the README; report disk used and
+    install locations.
+B2. Download the pinned models; report sizes.
+B3. Run Gate 1 (no-speech) on the complete pipeline of each candidate, with the
+    three negative inputs and the quiet-speech positive control. **Blocking.**
+B4. Run Gate 2 comparison on equal settings, translation and LLM
+    post-correction disabled.
+B5. Measure cost per source hour, time per source minute, peak memory, disk.
+B6. Write `.agent/stage4-transcription-engines.md` and commit `last-run.json`.
+
+---
+
+## Verification — Phase A
+
+Before any edit, capture and paste:
+
+```
+npx vitest run
+npm run check:boundaries
+```
+
+After:
+
+```
+npx vitest run            # failing FILE SET identical to the capture
+npx tsc --noEmit          # exit 0
+npm run check:boundaries  # identical to the capture (2 pre-existing errors)
+node tools/transcription-probe/probe.mjs   # exits cleanly on an empty corpus
+git status --porcelain
+git log --oneline -1
+```
+
+Paste REAL, COMPLETE output for every one (handoff rule 6).
+
+## Stop conditions
+
+STOP and report, leaving the tree clean, if:
+- any work appears to require a file on the MUST NOT list
+- you are tempted to install Python, download a model, or fetch media — that is
+  Phase B and it is not authorized
+- you cannot answer a licensing question from a primary source. Report the gap;
+  do not infer a licence
+- an openly licensed corpus cannot cover a required category. That is a finding,
+  not a problem to solve by substituting something convenient
+
+## Commit
+
+Use the `## Commit` message in this patch file verbatim, with this single
+addition as its final line:
+
+    Phase A only: licensing evidence, harness, corpus proposal. Nothing
+    installed, nothing downloaded, nothing measured.
