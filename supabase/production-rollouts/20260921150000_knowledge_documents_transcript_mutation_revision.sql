@@ -56,9 +56,41 @@ DO $revision$
 DECLARE
     tbl CONSTANT regclass := 'public.knowledge_documents'::regclass;
     col CONSTANT text := 'transcript_mutation_revision';
+    -- The comment is PART OF THE INTENDED SHAPE, not decoration: it is what
+    -- tells the next reader not to write this column from application code.
+    -- Narrowed deliberately -- the RPC IS application behaviour, so claiming
+    -- "never written by application code" was wrong. What is true is that no
+    -- direct column write by a client, and no hand-written UPDATE, may touch
+    -- it: it advances only through the transcript RPCs.
+    expected_comment CONSTANT text :=
+        'Server-owned compare-and-swap token for transcript edits. Never directly client-written; advanced only by the transcript RPCs, under the row lock, exactly once per mutation -- including metadata-only and same-hash format changes.';
+    expected_default text;
     existing record;
+    existing_comment text;
     writable text[];
 BEGIN
+    -- WHAT POSTGRESQL ACTUALLY PRODUCES for the intended default, asked rather
+    -- than guessed. An earlier version tested `default_expr NOT LIKE '0%'`,
+    -- which accepts `0 + 1`, `0::int` and anything else beginning with a zero
+    -- -- so a column with the wrong default would have been reported as the
+    -- intended post-state. Hardcoding a normalised string would be a guess
+    -- about this server's rendering; building the same column and reading back
+    -- its default is not.
+    CREATE TEMP TABLE knowledge_revision_shape_probe (v bigint NOT NULL DEFAULT 0);
+
+    SELECT pg_get_expr(d.adbin, d.adrelid)
+      INTO expected_default
+      FROM pg_attribute a
+      JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+     WHERE a.attrelid = 'knowledge_revision_shape_probe'::regclass
+       AND a.attname = 'v';
+
+    DROP TABLE knowledge_revision_shape_probe;
+
+    IF expected_default IS NULL THEN
+        RAISE EXCEPTION 'could not determine the normalised form of the intended default';
+    END IF;
+
     -- ---------------------------------------------------------------------
     -- Prerequisites. Neither is optional, and neither is this migration's to
     -- repair -- they are separate, reviewed changes.
@@ -89,12 +121,25 @@ BEGIN
        AND a.attnum > 0 AND NOT a.attisdropped;
 
     IF FOUND THEN
+        -- EXACT, on every part of the shape. A near-match is not this
+        -- migration's post-state, and treating it as one would report a
+        -- column it did not produce as already applied.
         IF existing.type_name <> 'bigint' OR NOT existing.not_null
-           OR coalesce(existing.default_expr, '') NOT LIKE '0%' THEN
+           OR coalesce(existing.default_expr, '') IS DISTINCT FROM expected_default THEN
             RAISE EXCEPTION
-                'unsupported state: % exists as % (not null = %, default = %), which is not the intended bigint NOT NULL DEFAULT 0',
+                'unsupported state: % exists as % (not null = %, default = %), which is not the intended bigint NOT NULL DEFAULT % ',
                 col, existing.type_name, existing.not_null,
-                coalesce(existing.default_expr, '<none>');
+                coalesce(existing.default_expr, '<none>'), expected_default;
+        END IF;
+
+        SELECT col_description(tbl, a.attnum) INTO existing_comment
+          FROM pg_attribute a
+         WHERE a.attrelid = tbl AND a.attname = col;
+
+        IF coalesce(existing_comment, '') IS DISTINCT FROM expected_comment THEN
+            RAISE EXCEPTION
+                'unsupported state: % exists but its comment is not the intended one. found = [%]',
+                col, coalesce(existing_comment, '<none>');
         END IF;
 
         -- The no-op is VERIFIED, not assumed. A column that exists but became
@@ -124,11 +169,10 @@ BEGIN
     EXECUTE format(
         'ALTER TABLE public.knowledge_documents ADD COLUMN %I bigint NOT NULL DEFAULT 0', col);
 
-    -- The comment is part of the change: a bare bigint column invites someone
-    -- to write it from application code.
+    -- The comment is part of the change, and is compared exactly on re-apply:
+    -- a bare bigint column invites someone to write it by hand.
     EXECUTE format(
-        'COMMENT ON COLUMN public.knowledge_documents.%I IS %L', col,
-        'Server-owned compare-and-swap token for transcript edits. Incremented under the row lock by the transcript RPCs, exactly once per mutation, including metadata-only and same-hash format changes. Never written by application code and never writable by a client role.');
+        'COMMENT ON COLUMN public.knowledge_documents.%I IS %L', col, expected_comment);
 
     -- ---------------------------------------------------------------------
     -- Post-state, by EFFECTIVE privilege, inside the same transaction. A

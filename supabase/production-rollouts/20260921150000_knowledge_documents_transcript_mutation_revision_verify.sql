@@ -16,6 +16,7 @@ DECLARE
     col CONSTANT text := 'transcript_mutation_revision';
     writable text[];
     type_name text;
+    col_comment text;
     not_null boolean;
 BEGIN
     -- 1. It exists, and in the intended shape.
@@ -33,6 +34,18 @@ BEGIN
     END IF;
     IF NOT not_null THEN
         RAISE EXCEPTION 'the % column is nullable; a null revision matches nothing and blocks every edit', col;
+    END IF;
+
+    -- The comment is part of the intended shape, because it is what tells the
+    -- next reader not to write this column by hand. Checked here so it cannot
+    -- drift away from the migration that set it.
+    SELECT col_description(tbl, a.attnum) INTO col_comment
+      FROM pg_attribute a
+     WHERE a.attrelid = tbl AND a.attname = col;
+
+    IF coalesce(col_comment, '') NOT LIKE '%advanced only by the transcript RPCs%' THEN
+        RAISE EXCEPTION
+            'the % column is missing its intended comment. found = [%]', col, coalesce(col_comment, '<none>');
     END IF;
 
     -- 2. THE POINT OF THE COLUMN: no client role may write it, by any path.
