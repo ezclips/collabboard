@@ -15,7 +15,18 @@
 
 DO $$
 DECLARE
-    remaining integer;
+    -- The reviewed allowlist MINUS content_sha256: what must remain.
+    expected_after CONSTANT text[] := ARRAY[
+        'board_id','created_at','created_by','derivatives_rendered_at',
+        'derivatives_requested_at','file_size_bytes','kind','mime_type',
+        'original_filename','page_count','parser_name','parser_options_hash',
+        'parser_version','processing_error','processing_lease_expires_at',
+        'processing_lease_token','processing_status','raw_artifact_path',
+        'storage_path','updated_at'
+    ];
+    effective_columns text[];
+    missing text[];
+    extra text[];
     table_insert boolean;
 BEGIN
     -- 1. The thing this migration exists to stop.
@@ -33,21 +44,30 @@ BEGIN
         RAISE EXCEPTION 'anon can UPDATE content_sha256';
     END IF;
 
-    -- 4. THE OTHER HALF: the intended writable columns must SURVIVE. A revoke
-    --    that took everything would satisfy every check above.
-    SELECT count(*)
-      INTO remaining
-      FROM information_schema.column_privileges
-     WHERE grantee = 'authenticated'
-       AND table_schema = 'public'
-       AND table_name = 'knowledge_documents'
-       AND privilege_type = 'UPDATE';
+    -- 4. THE OTHER HALF, by EFFECTIVE privilege and by NAME.
+    --
+    --    A count would pass on the wrong twenty columns, and filtering
+    --    information_schema by grantee cannot see privileges arriving through
+    --    PUBLIC or role membership. has_column_privilege over every live
+    --    column answers what the role can actually do, whatever the path.
+    SELECT coalesce(array_agg(a.attname::text ORDER BY a.attname), ARRAY[]::text[])
+      INTO effective_columns
+      FROM pg_attribute a
+     WHERE a.attrelid = 'public.knowledge_documents'::regclass
+       AND a.attnum > 0 AND NOT a.attisdropped
+       AND has_column_privilege('authenticated', a.attrelid, a.attname, 'UPDATE');
 
-    IF remaining <> 20 THEN
-        RAISE EXCEPTION
-            'expected 20 updatable columns for authenticated after removing content_sha256, found %', remaining;
+    SELECT array_agg(c ORDER BY c) INTO missing
+      FROM unnest(expected_after) c WHERE NOT (c = ANY (effective_columns));
+    SELECT array_agg(c ORDER BY c) INTO extra
+      FROM unnest(effective_columns) c WHERE NOT (c = ANY (expected_after));
+
+    IF missing IS NOT NULL THEN
+        RAISE EXCEPTION 'these columns lost UPDATE and should not have: %', array_to_string(missing, ', ');
     END IF;
-
+    IF extra IS NOT NULL THEN
+        RAISE EXCEPTION 'unexpected UPDATE remains for authenticated on: %', array_to_string(extra, ', ');
+    END IF;
     -- 5. service_role must still be able to do the server's work.
     IF NOT has_column_privilege('service_role', 'public.knowledge_documents', 'content_sha256', 'INSERT') THEN
         RAISE EXCEPTION 'service_role cannot INSERT content_sha256 -- ingestion would fail';
@@ -123,46 +143,80 @@ BEGIN
     RESET ROLE;
 END $$;
 
--- (B) Against the REAL, MIGRATED table, with a representative row, as
---     `authenticated`, under RLS.
+-- (B) Against the REAL, MIGRATED table, as a GENUINELY AUTHORIZED identity,
+--     under RLS.
 --
---     The copied-table probe above is evidence about GRANTS only -- it has no
---     RLS and it is not the table the application uses. This one is. It runs
---     inside a transaction that is rolled back, so no row survives it.
+--     CORRECTED. An earlier version did `SET LOCAL ROLE authenticated` without
+--     establishing any JWT claims and picked an arbitrary board with
+--     `SELECT id FROM boards LIMIT 1`. auth.uid() was therefore NULL, every
+--     RLS policy on this table denied, and the permitted update could never
+--     apply -- so the probe would have raised its own
+--     "cannot distinguish a privilege block from an RLS block" exception on a
+--     correctly applied migration. It proved nothing and failed honestly only
+--     by accident.
 --
---     The two failure modes must be told apart: a hash write blocked by RLS
---     would look like success here while proving nothing about privileges, so
---     the permitted metadata update is required to SUCCEED on the same row
---     under the same identity. If RLS were hiding the row, that would fail too.
-DO $$
+--     This version establishes the identity the policies actually read:
+--     a board is chosen together with its OWNER, request.jwt.claims is set so
+--     auth.uid() returns that owner, and the identity is asserted before any
+--     write is attempted. Both updates then run against the SAME row under the
+--     SAME identity, so the two outcomes are comparable: the hash write must
+--     fail on privileges while the metadata write succeeds under RLS.
+--
+--     Everything is undone before the block ends; no row survives it.
+DO $
 DECLARE
     probe_board uuid;
-    probe_doc uuid;
-    blocked boolean := false;
-    permitted_ok boolean := false;
+    probe_owner uuid;
+    probe_doc   uuid;
+    seen_uid    uuid;
+    blocked     boolean := false;
+    permitted   boolean := false;
 BEGIN
     IF to_regclass('public.boards') IS NULL THEN
-        RAISE NOTICE 'skipping the live-table control: no boards table in this database';
+        RAISE NOTICE 'skipping the live-table control: no boards table here';
         RETURN;
     END IF;
 
-    -- A board the probe identity may act on has to exist for RLS to permit
-    -- anything. Creating one is the test environment's job; if the operator
-    -- has not supplied one, say so rather than pass silently.
-    SELECT id INTO probe_board FROM public.boards LIMIT 1;
+    -- A board WITH its owner. The owner is what auth.uid() must return for the
+    -- INSERT and UPDATE policies to permit anything at all.
+    SELECT b.id, b.user_id
+      INTO probe_board, probe_owner
+      FROM public.boards b
+     WHERE b.user_id IS NOT NULL
+     LIMIT 1;
+
     IF probe_board IS NULL THEN
         RAISE EXCEPTION
-            'the live-table control needs at least one board row in the isolated test database';
+            'the live-table control needs a board with an owner (boards.user_id) in the isolated test database';
     END IF;
 
+    -- Seeded as the owner, so created_by = auth.uid() holds for the policy.
     INSERT INTO public.knowledge_documents
-        (board_id, kind, original_filename, content_sha256, processing_status, file_size_bytes, storage_path, mime_type)
+        (board_id, created_by, kind, original_filename, content_sha256,
+         processing_status, file_size_bytes, storage_path, mime_type)
     VALUES
-        (probe_board, 'text', 'item17-probe.txt', repeat('c', 64), 'ready', 1, 'probe/item17', 'text/plain')
+        (probe_board, probe_owner, 'text', 'item17-probe.txt', repeat('c', 64),
+         'ready', 1, 'probe/item17', 'text/plain')
     RETURNING id INTO probe_doc;
 
+    -- The claim auth.uid() reads. Local to this transaction.
+    PERFORM set_config(
+        'request.jwt.claims',
+        json_build_object('sub', probe_owner::text, 'role', 'authenticated')::text,
+        true
+    );
     SET LOCAL ROLE authenticated;
 
+    -- ASSERT THE IDENTITY BEFORE TRUSTING ANY OUTCOME. Without this, a null
+    -- uid would make both writes fail and look like a privilege result.
+    seen_uid := auth.uid();
+    IF seen_uid IS NULL OR seen_uid <> probe_owner THEN
+        RESET ROLE;
+        RAISE EXCEPTION
+            'the probe identity was not established: auth.uid() = %, expected %', seen_uid, probe_owner;
+    END IF;
+
+    -- The write this migration must stop. Privilege failure, not policy.
     BEGIN
         UPDATE public.knowledge_documents
            SET content_sha256 = repeat('d', 64)
@@ -171,13 +225,14 @@ BEGIN
         blocked := true;
     END;
 
+    -- The write that must still work, same row, same identity.
     BEGIN
         UPDATE public.knowledge_documents
            SET processing_status = 'failed'
          WHERE id = probe_doc;
-        permitted_ok := FOUND;
+        permitted := FOUND;
     EXCEPTION WHEN insufficient_privilege THEN
-        permitted_ok := false;
+        permitted := false;
     END;
 
     RESET ROLE;
@@ -188,12 +243,13 @@ BEGIN
             'authenticated rewrote content_sha256 on the real table -- the repair is not in force';
     END IF;
 
-    -- Without this, an RLS policy hiding the row entirely would produce the
-    -- same "blocked" reading and be mistaken for a privilege success.
-    IF NOT permitted_ok THEN
+    -- RLS and grants are independent, and this separates them: if the row were
+    -- invisible or the policy denied, this would fail too, and the blocked
+    -- result above would mean nothing about privileges.
+    IF NOT permitted THEN
         RAISE EXCEPTION
-            'the permitted metadata update did not apply -- this control cannot distinguish a privilege block from an RLS block, so it must not pass';
+            'the permitted metadata update did not apply under RLS, so the hash block cannot be attributed to privileges';
     END IF;
-END $$;
+END $;
 
 SELECT 'knowledge_documents hash permission verify: ok' AS result;

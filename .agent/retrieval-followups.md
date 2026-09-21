@@ -1418,3 +1418,45 @@ believing the column is unwritable by clients in every sense.
 Also corrected: the transcript verifier's comment claimed its query caught a
 grant widened **anywhere on the table**. It inspects the new column only.
 Auditing the whole allowlist is item 17's verifier, which counts it.
+
+### CORRECTED, and reclassified: item 18 is a PREREQUISITE
+
+My reasoning above — that INSERT cannot defeat the staleness guarantee because
+it creates new rows with new ids — **was wrong**. The live schema says why:
+
+- `id` carries a `gen_random_uuid()` **DEFAULT**. It is `is_identity = NO` and
+  `is_generated = NEVER`, so **a caller may supply an explicit `id`**.
+- The INSERT policy checks `created_by = auth.uid()` and board ownership or an
+  editor role. **It says nothing about `id`.**
+
+So a permitted client can **recreate a deleted document under its old id**,
+with a chosen `content_sha256` and — once the column exists — a chosen
+`transcript_representation`. A wiki source previously shown as gone would
+appear **present and unchanged**. That defeats provenance and staleness
+together.
+
+It is therefore a prerequisite for the full provenance/staleness guarantee, not
+a follow-up, and it is prepared:
+
+- `supabase/migrations/20260921140000_knowledge_documents_insert_not_client_writable.sql`
+  plus `_verify.sql` and `_rollback.sql` under `supabase/production-rollouts/`.
+
+**Revoke rather than allowlist.** Every production INSERT runs through the
+admin client in `lib/infra/knowledge/*Adapters.ts`; no client-side path
+inserts. The capability is unused, so removing it is the narrowest correct
+repair. An allowlist would still let clients create rows, and would have to
+exclude `id` and `created_by` anyway — leaving almost nothing useful. If a
+client workflow is later **verified** to need INSERT, the allowlist form is the
+way back, excluding at minimum `id`, `content_sha256`,
+`transcript_representation` and the server-owned lifecycle columns.
+
+**`anon` is handled and verified separately**, because its denial today comes
+from a missing RLS INSERT policy rather than from the grant. RLS and grants are
+independent layers, and this migration closes the grant side.
+
+The verifier reproduces the **caller-selected-id attempt** under a genuine
+board-owner identity — `request.jwt.claims` set so `auth.uid()` returns the
+owner, identity asserted before the attempt — and requires it to fail on
+privileges.
+
+**Unverified.** No SQL in items 17 or 18 has been executed anywhere.
