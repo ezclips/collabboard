@@ -1,6 +1,6 @@
 # PATCH-153 — Transcript disclosure on board wiki pages
 
-**Status:** draft — awaiting owner approval
+**Status:** approved — Final Implementation Specification written, ready for handoff
 
 > Lifecycle note: this is the draft. The **Final Implementation Specification**
 > is written into this file only after the owner approves, and the handoff to
@@ -274,3 +274,208 @@ three changed this patch, three did not survive checking. CTO verdicts:
 
 Two of the three rejections were settled by running something rather than by
 arguing. That is the cheaper move whenever it is available.
+
+---
+
+# Final Implementation Specification
+
+**Approved by the owner 2026-09-21.** Execute this section EXACTLY. Everything
+above it is context. Where this section and the context disagree, this section
+wins; if the disagreement looks like a defect rather than a refinement, STOP and
+report.
+
+## Edit 1 — `lib/domain/wiki/boardWikiPageSources.ts`
+
+**1a.** In `BoardWikiSourceVersion`, `document` variant only, directly after the
+`transcriptMutationRevision` field, add:
+
+```ts
+    /**
+     * True when this document carries a transcript representation RIGHT NOW.
+     *
+     * OPTIONAL and `true`-only: there is no `false`, because absent already
+     * means "not a transcript" and a second way to say it is a second thing to
+     * keep in step. Set only on a CURRENT version -- never recorded, never
+     * parsed back -- because it is a fact about what the reader is looking at,
+     * not about what was compiled.
+     */
+    readonly isTranscript?: true;
+```
+
+**1b.** In `hasChanged`, change no logic. Add this comment immediately above
+the `if (recorded.contentSha256 !== null ...)` line:
+
+```ts
+    // `isTranscript` is deliberately NOT compared. It is not a change signal,
+    // and it never appears on the recorded side at all.
+```
+
+**1c.** In `BoardWikiSourceStatus`, add a third field:
+
+```ts
+  /**
+   * True when this source is a transcript RIGHT NOW. False when it is not, or
+   * is gone -- a source we cannot read is a source we cannot make claims
+   * about.
+   */
+  readonly isTranscript: boolean;
+```
+
+**1d.** In `boardWikiSourceStates`, set it on both return paths:
+
+```ts
+  return sources.map((source) => {
+    const now = current.get(boardAiCitationIdentityKey(source.item));
+    if (now === undefined) return { source, state: 'gone' as const, isTranscript: false };
+    const isTranscript = now.kind === 'document' && now.isTranscript === true;
+    return {
+      source,
+      state: hasChanged(source.version, now) ? 'stale' as const : 'current' as const,
+      isTranscript,
+    };
+  });
+```
+
+**1e.** `parseVersion`: **no change.** It must not read `isTranscript`.
+
+## Edit 2 — `lib/server/wiki/boardWikiSourceVersions.ts`
+
+**2a.** Change the documents select to exactly:
+
+```ts
+      .select('id, content_sha256, transcript_mutation_revision::text, is_transcript:transcript_representation->>representationVersion, updated_at')
+```
+
+The alias `is_transcript:` is required. Without it the returned key for a
+JSON-path expression is not something this spec is willing to assume.
+
+**2b.** Above that select, extend the existing comment block with:
+
+```ts
+    // The transcript discriminator is a SCALAR pulled out of the jsonb, never
+    // the column itself: `transcript_representation` holds every cue and can
+    // reach 8 MiB, and this runs for every source of every page render. The
+    // column's CHECK constraint guarantees `representationVersion` is present
+    // whenever the column is non-null, so the scalar is a faithful proxy for
+    // "is this row a transcript" at a few bytes.
+```
+
+**2c.** In the document row mapping, add — same conditional-key discipline as
+`transcriptMutationRevision`:
+
+```ts
+        ...(row.is_transcript !== null && row.is_transcript !== undefined
+          ? { isTranscript: true as const }
+          : {}),
+```
+
+## Edit 3 — `lib/server/wiki/boardWikiPageRoute.ts`
+
+In `pageResponseBody`, in the `sources: states.map(...)` object, add one field
+after `state`:
+
+```ts
+      isTranscript: status.isTranscript,
+```
+
+Nothing else in this file changes. In particular `version:` keeps sending the
+RECORDED version.
+
+## Edit 4 — `components/collabboard/BoardWikiDrawer.tsx`
+
+**4a.** Add to the existing import from
+`@/lib/domain/knowledge/knowledgeTranscriptCitation`, or add the import if
+absent:
+
+```ts
+import { KNOWLEDGE_TRANSCRIPT_DISCLOSURE } from '@/lib/domain/knowledge/knowledgeTranscriptCitation';
+```
+
+Import the constant. Do not retype the sentence anywhere.
+
+**4b.** In `BoardWikiSourceStatusView`, add:
+
+```ts
+  /** Absent means NOT a transcript. The response is untrusted input. */
+  readonly isTranscript?: boolean;
+```
+
+**4c.** Inside the `<section data-board-wiki-sources="true">`, immediately
+AFTER the closing `</ul>` of the chips list and before the section closes, add:
+
+```tsx
+                {sources.some((status) => status.isTranscript === true) && (
+                  <p
+                    data-board-wiki-transcript-disclosure="true"
+                    className="mt-2 text-[11px] leading-snug text-amber-800"
+                  >
+                    {KNOWLEDGE_TRANSCRIPT_DISCLOSURE}
+                  </p>
+                )}
+```
+
+`=== true` is deliberate: absent, undefined and false all mean "not a
+transcript". Once per page, never per chip.
+
+## Edit 5 — tests
+
+**5a. `lib/server/wiki/boardWikiSourceVersions.test.ts`** — add:
+- a row with a non-null `is_transcript` scalar yields `isTranscript: true`
+- a row with `is_transcript: null` yields the key **absent** (assert with
+  `Object.prototype.hasOwnProperty.call(...)`, as the existing revision tests do)
+- a row with no `is_transcript` key at all yields the key absent
+- the select string contains `is_transcript:transcript_representation->>representationVersion`
+  and does **not** contain a bare `transcript_representation,` or
+  ` transcript_representation ` column request
+
+**5b. `lib/server/wiki/boardWikiPageRoute.test.ts`** — add:
+- the serialized source carries `isTranscript` beside `state`
+- a source that is gone serializes `isTranscript: false`
+
+**5c. `components/collabboard/BoardWikiDrawer.test.tsx`** — add the four cases:
+- one transcript source -> the disclosure renders exactly once
+  (`getAllByText` length 1, or query the `data-board-wiki-transcript-disclosure`
+  attribute)
+- only PDFs/posts -> no disclosure
+- two transcript sources -> renders exactly **once**
+- `isTranscript` absent on every source -> no disclosure
+
+Match the conventions already in that file (jsdom pragma, `afterEach(cleanup)`,
+`getAttribute`/`toBeTruthy` rather than jest-dom matchers).
+
+## Verification — run all of these, paste REAL COMPLETE output
+
+**Before any edit:**
+
+```
+npx vitest run
+npm run check:boundaries
+```
+
+Keep both. `check:boundaries` is expected to FAIL with exactly two
+`no-restricted-imports` errors in `lib/domain/canvas/boardObjectReveal.ts` and
+its test. That is pre-existing and not yours.
+
+**After the edits:**
+
+```
+npx vitest run
+npx tsc --noEmit
+npm run check:boundaries
+git log --oneline -1
+```
+
+Pass conditions:
+- the failing test FILE SET is identical to the before-capture
+- `tsc` exits 0
+- `check:boundaries` shows the **same two** errors and no third
+- the commit exists
+
+## Stop conditions
+
+STOP and report, leaving the tree clean, if:
+- adding `isTranscript?: true` forces an edit to any MUST-NOT-TOUCH file (it
+  should not; if it does, you made the field required)
+- any existing test fails and the only available fix is to change that test
+- you conclude the scalar select must be replaced by the full column
+- `check:boundaries` gains a third error
