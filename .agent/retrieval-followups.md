@@ -1269,3 +1269,40 @@ source kinds.
 
 The focused host is now **correct for the day a route exists**. When one is
 added, this item is the place to record which route and why.
+
+---
+
+## 17. `content_sha256` is writable by `authenticated`, and nothing uses that
+
+Found while adding column grants for the transcript representation (Stage 3b).
+
+`content_sha256` sits in the `authenticated` UPDATE allowlist on
+`knowledge_documents`. Searched for what relies on it:
+
+- **No application code updates `content_sha256`.** The only production UPDATE
+  against that table sets `processing_status`, through the admin client.
+- The value is written **once, at INSERT**, also through the admin client.
+
+So the grant is unused capability, and what it permits is the one thing the
+versioning depends on not happening. A client with UPDATE rights on a row can:
+
+- set a **different** hash, marking every citing wiki page stale though nothing
+  changed; or
+- set it **back** to a previously recorded value, making a genuinely changed
+  source look unchanged — a page keeps citing text that no longer says what it
+  said. Silent, and the worse direction.
+
+**Pre-existing**, for PDF, TXT and DOCX alike. Stage 3b does not introduce it,
+but raises its consequence: with cue timing inside the hash, that value also
+governs whether a citation's **timestamp** still means what it claimed.
+
+**Proposed:** a migration of its own that removes `content_sha256` from the
+`authenticated` UPDATE allowlist, with its own verify asserting the resulting
+writable set and its own rollback. Deliberately **not** folded into the
+additive transcript rollout, whose stated scope is one new column — widening it
+would make its blast radius larger than its description.
+
+**Worth noting alongside:** the transcript work makes such a forgery
+*detectable* for the first time. The hash is re-derivable from the stored
+representation, so re-hashing a stored row and comparing is now a check that
+can be written. It does not exist yet, and it would only cover transcripts.

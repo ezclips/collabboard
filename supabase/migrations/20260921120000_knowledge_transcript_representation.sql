@@ -61,3 +61,27 @@ COMMENT ON COLUMN public.knowledge_documents.transcript_representation IS
     'content_sha256 is taken over a deterministic serialisation of this plus '
     'the canonical text, so a timing-only correction is a new version. NULL '
     'for every other source kind.';
+
+-- ---------------------------------------------------------------------------
+-- GRANTS. An added column is writable by NOBODY but postgres until it is
+-- granted, including service_role -- confirmed read-only against the live
+-- schema before this was written, not assumed from Supabase defaults.
+--
+-- WHO WRITES IT. The knowledge routes authorise with the caller's session
+-- client and then write with the admin (service_role) client. So the importer
+-- writes this column as service_role, and `authenticated` needs no UPDATE on
+-- it at all.
+--
+-- WHY `authenticated` IS DELIBERATELY NOT GRANTED. The stored representation
+-- and content_sha256 must agree: the hash is taken over the representation,
+-- and the wiki's staleness signal is the comparison of that hash. A column a
+-- client could write independently of the text it describes is a column that
+-- can be made to disagree with it, and the disagreement would be invisible --
+-- a citing page either falsely stale or, worse, falsely fresh. Keeping the
+-- write on one server-side path keeps the two written together.
+-- ---------------------------------------------------------------------------
+
+GRANT SELECT (transcript_representation) ON TABLE public.knowledge_documents TO authenticated;
+GRANT SELECT (transcript_representation) ON TABLE public.knowledge_documents TO service_role;
+GRANT INSERT (transcript_representation) ON TABLE public.knowledge_documents TO service_role;
+GRANT UPDATE (transcript_representation) ON TABLE public.knowledge_documents TO service_role;

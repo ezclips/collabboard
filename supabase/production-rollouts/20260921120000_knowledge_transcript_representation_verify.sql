@@ -82,4 +82,53 @@ BEGIN
          '{"cues": [], "representationVersion": 1}'::jsonb);
 END $$;
 
+-- PRIVILEGES, BOTH HALVES.
+--
+-- Granting is half the job; asserting that nothing ELSE was granted is the
+-- other. A rollout that only checks its intended grants cannot notice a
+-- capability it handed out by accident.
+
+DO $$
+DECLARE
+    unexpected text;
+BEGIN
+    -- The intended set, stated positively.
+    IF NOT has_column_privilege('service_role', 'public.knowledge_documents', 'transcript_representation', 'UPDATE') THEN
+        RAISE EXCEPTION 'service_role cannot UPDATE transcript_representation -- the importer could not write it';
+    END IF;
+    IF NOT has_column_privilege('service_role', 'public.knowledge_documents', 'transcript_representation', 'INSERT') THEN
+        RAISE EXCEPTION 'service_role cannot INSERT transcript_representation';
+    END IF;
+    IF NOT has_column_privilege('authenticated', 'public.knowledge_documents', 'transcript_representation', 'SELECT') THEN
+        RAISE EXCEPTION 'authenticated cannot read transcript_representation -- the reader needs it for timestamps';
+    END IF;
+
+    -- And the half that matters more: nobody else may WRITE it.
+    IF has_column_privilege('authenticated', 'public.knowledge_documents', 'transcript_representation', 'UPDATE') THEN
+        RAISE EXCEPTION 'authenticated can UPDATE transcript_representation -- it could be made to disagree with content_sha256';
+    END IF;
+    IF has_column_privilege('authenticated', 'public.knowledge_documents', 'transcript_representation', 'INSERT') THEN
+        RAISE EXCEPTION 'authenticated can INSERT transcript_representation';
+    END IF;
+    IF has_column_privilege('anon', 'public.knowledge_documents', 'transcript_representation', 'UPDATE')
+       OR has_column_privilege('anon', 'public.knowledge_documents', 'transcript_representation', 'INSERT') THEN
+        RAISE EXCEPTION 'anon can write transcript_representation';
+    END IF;
+
+    -- The writable set for authenticated must be EXACTLY what it was before
+    -- this rollout. Naming the new column is not enough: this catches a grant
+    -- widened anywhere on the table while this migration was applied.
+    SELECT string_agg(column_name, ', ' ORDER BY column_name) INTO unexpected
+      FROM information_schema.column_privileges
+     WHERE grantee = 'authenticated'
+       AND table_schema = 'public'
+       AND table_name = 'knowledge_documents'
+       AND privilege_type = 'UPDATE'
+       AND column_name = 'transcript_representation';
+
+    IF unexpected IS NOT NULL THEN
+        RAISE EXCEPTION 'unexpected authenticated UPDATE grant on: %', unexpected;
+    END IF;
+END $$;
+
 SELECT 'transcript_representation verify: ok' AS result;

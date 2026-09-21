@@ -651,6 +651,56 @@ claim that the two are different kinds of thing in the schema.
 | Boundary | each resource limit accepted at the limit, refused one past it |
 | Staleness, end to end | timing-only re-import marks a citing wiki page **stale** |
 
+### Permissions on the version, and the `content_sha256` question
+
+Checked against the code, because the review's point deserved analysis rather
+than a grant.
+
+**Who writes what.** The knowledge routes authorise with the caller's session
+client and then write with the admin (`service_role`) client. So the importer
+writes `transcript_representation` as `service_role`, and `authenticated` needs
+no write on it. The rollout grants exactly that, and the verify asserts **both
+halves**: the intended grants exist, and `authenticated` and `anon` cannot
+write the column.
+
+**The real finding about `content_sha256`.** It sits in the `authenticated`
+UPDATE allowlist, so a client could set it on any row its RLS policy lets it
+update. Searched for what actually uses that capability:
+
+- **Nothing in the application updates `content_sha256` at all.** The only
+  UPDATE against `knowledge_documents` in production code sets
+  `processing_status`, through the admin client.
+- `content_sha256` is written **once, at INSERT**, also through the admin
+  client.
+
+So the grant is **unused capability** — and what it permits is exactly the
+inconsistency this unit's versioning depends on not happening:
+
+- Setting a **different** value marks every citing wiki page stale though
+  nothing changed.
+- Setting it **back** to a previously recorded value makes a genuinely changed
+  source look unchanged — a page keeps citing text that no longer says what it
+  said. That is the worse direction, and it is silent.
+
+**This is pre-existing and not introduced here.** The same write has been
+possible for PDF, TXT and DOCX sources all along. What changes is the
+*consequence*: with timing inside the hash, that value now also governs whether
+a citation's **timestamp** still means what it claimed.
+
+**One thing the change gives back:** the hash is now re-derivable from the
+stored representation, so a forged or stale `content_sha256` becomes
+**detectable** — re-hash the stored row and compare. No such check was possible
+before, for any source kind.
+
+**Recommended, and deliberately NOT done in this rollout:** remove
+`content_sha256` from the `authenticated` UPDATE allowlist. That is a
+permission change on an existing column with existing behaviour, so it belongs
+in its own migration with its own verification and rollback — not folded into
+an additive one whose stated scope is a new column. Smuggling it in would make
+this rollout's blast radius larger than what it says on the tin. Recorded as a
+follow-up rather than done quietly.
+
+
 ### What this amendment does not include
 
 - **No acquisition of any kind.** No fetch path, no URL-alone ingestion.
