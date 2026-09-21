@@ -1,0 +1,207 @@
+{
+  "$comment": [
+    "Stage 4 transcription instrument -- the corpus MANIFEST.",
+    "",
+    "THIS FILE IS A SCHEMA PLUS A PROPOSAL. Phase A of PATCH-154 forbids",
+    "collecting media, so there are NO entries here yet: the `clips` array is",
+    "empty on purpose, and `proposedSources` records the corpora A3 researched",
+    "for the owner to approve. When the owner names an approved corpus, a",
+    "human fills `clips` -- one entry per selected clip -- and the probe runs.",
+    "",
+    "MEDIA IS NEVER COMMITTED. `mediaPath` is resolved INSIDE the probe's own",
+    "working directory (tools/transcription-probe/media/), never by absolute",
+    "path, and media/ is gitignored. The manifest and the raw run are committed;",
+    "the bytes are not."
+  ],
+  "schema": {
+    "clip": {
+      "id": "string -- stable identifier, unique within this file. For an OpenSLR/LibriSpeech clip use the corpus' own utterance id (e.g. '1272-128104-0000'); for purpose-recorded audio use a name the owner can trace to a consent record.",
+      "category": "one of CATEGORIES below -- what this clip is FOR",
+      "language": "BCP-47 language tag: 'en', 'de', 'en-US'. Reported separately, never pooled.",
+      "durationSeconds": "number -- real measured duration, not a claim from the corpus docs",
+      "origin": "string -- where it came from: corpus name + release + the URL it was fetched from",
+      "licence": "string -- the exact licence as published for this clip's source (e.g. 'CC BY 4.0')",
+      "rightsBasis": "string -- WHY we may process this clip. REQUIRED and non-empty: the probe refuses to run on any clip lacking it. 'It was on my machine' is not a rights basis.",
+      "referenceTranscriptPath": "string | null -- a transcript derived INDEPENDENTLY of both engines. null until a human supplies one; a null reference means the clip can be run but not scored for accuracy.",
+      "mediaPath": "string -- relative to tools/transcription-probe/media/, e.g. 'librispeech/1272-128104-0000.flac'",
+      "referenceDerivedBy": "string | null -- who/what produced the reference and how, so it is auditable that neither engine was its source"
+    },
+    "CATEGORIES": [
+      "clear-english",
+      "clear-german",
+      "names-numbers-units-negation",
+      "multiple-speakers",
+      "background-noise-or-music",
+      "long-pauses",
+      "no-speech-control",
+      "quiet-speech-positive-control",
+      "attenuated-speech-supplementary",
+      "long-recording"
+    ],
+    "CATEGORY_LIMITS": {
+      "quiet-speech-positive-control": "NATURALLY quiet speech, purpose-recorded. This is the Gate 1 ACCEPTANCE case. It stands alone and nothing else may be substituted for it.",
+      "attenuated-speech-supplementary": "A NORMAL-LEVEL clip reduced in gain. This is a SUPPLEMENTARY ROBUSTNESS test of low SIGNAL LEVEL ONLY. It is explicitly NOT an acceptance case and MUST NOT satisfy the Gate 1 positive control. Attenuation reduces level; it does not reproduce the articulation, breath support or room acoustics of naturally quiet speech, so the two are never pooled. Results are reported separately and never merged into the acceptance verdict."
+    },
+    "REQUIRED_CATEGORIES_NOTE": "The nine categories above are the patch's coverage requirement. An open corpus covers some; the gap is stated in .agent/stage4-transcription-engines.md and is what the owner must supply as purpose-recorded audio."
+  },
+  "clips": [],
+  "proposedSources": [
+    {
+      "id": "librispeech",
+      "name": "LibriSpeech ASR corpus",
+      "exactRelease": "SLR12 (openslr.org/12), derived from LibriVox audiobooks",
+      "licence": "CC BY 4.0",
+      "hostedAt": "https://openslr.org/12/",
+      "language": "en (read English speech, 16kHz)",
+      "covers": ["clear-english", "long-recording"],
+      "cannotCover": ["multiple-speakers in conversation", "background-noise-or-music", "names-numbers-units-negation (fiction narration, not dictated data)", "no-speech-control", "quiet-speech-positive-control"],
+      "note": "Speaker-disjoint and segmented; utterance ids are stable and nameable. The natural source for clear English plus one long audiobook chapter for duration scaling."
+    },
+    {
+      "id": "mini-librispeech",
+      "name": "Mini LibriSpeech ASR corpus",
+      "exactRelease": "SLR31 (openslr.org/31)",
+      "licence": "CC BY 4.0",
+      "hostedAt": "https://openslr.org/31/",
+      "language": "en",
+      "covers": ["clear-english"],
+      "cannotCover": ["as librispeech"],
+      "note": "A small regression subset of LibriSpeech. Useful if the owner wants a few hundred MB rather than a few GB; does not add coverage LibriSpeech lacks."
+    },
+    {
+      "id": "mls",
+      "name": "Multilingual LibriSpeech (MLS)",
+      "exactRelease": "SLR94 (openslr.org/94)",
+      "licence": "CC BY 4.0 (verify the per-language README at approval time)",
+      "hostedAt": "https://openslr.org/94/",
+      "language": "en, de, and others",
+      "covers": ["clear-english", "clear-german", "long-recording"],
+      "cannotCover": ["background-noise-or-music", "multiple-speakers in conversation", "dictated names/numbers/units", "no-speech-control", "quiet-speech-positive-control"],
+      "note": "The only openly licensed source found that supplies BOTH clear English and clear German read speech under one licence. German audio is large; a single subset is enough."
+    },
+    {
+      "id": "thorsten",
+      "name": "Thorsten Mueller German Neutral-TTS dataset",
+      "exactRelease": "SLR95 (openslr.org/95), >23 hours, single speaker",
+      "licence": "CC BY 4.0 (verify at approval time)",
+      "hostedAt": "https://openslr.org/95/",
+      "language": "de",
+      "covers": ["clear-german", "long-recording"],
+      "cannotCover": ["multiple-speakers", "background-noise-or-music", "no-speech-control", "quiet-speech-positive-control"],
+      "note": "A second, independent German source. SINGLE speaker, so it can never satisfy the multiple-speakers requirement on its own. A companion emotional set exists (SLR110) -- not proposed, since emotion is not a required category."
+    },
+    {
+      "id": "ami",
+      "name": "The AMI Meeting Corpus",
+      "exactRelease": "SLR16 (openslr.org/16)",
+      "licence": "CC BY 4.0 (verify at approval time)",
+      "hostedAt": "https://openslr.org/16/",
+      "language": "en",
+      "covers": ["multiple-speakers", "background-noise-or-music (meeting rooms with overlap and room tone)"],
+      "cannotCover": ["clear English in the LibriSpeech sense -- these are spontaneous meetings", "no-speech-control", "quiet-speech-positive-control"],
+      "note": "The credible openly licensed answer to 'multiple speakers in one recording'. Overlapping speech is real here, which is both the point and a scoring hazard: a reference a human can align to is harder to produce."
+    },
+    {
+      "id": "musan",
+      "name": "MUSAN",
+      "exactRelease": "SLR17 (openslr.org/17)",
+      "licence": "CC BY 4.0 (verify at approval time)",
+      "hostedAt": "https://openslr.org/17/",
+      "language": "n/a",
+      "covers": ["background-noise-or-music (as NOISE/MUSIC beds to mix under speech)"],
+      "cannotCover": ["it is not speech at all -- it cannot satisfy any speech category, and a music-only clip here is a Gate 1 negative input, not a corpus clip"],
+      "note": "Proposed strictly as a noise/music SOURCE for the background-noise category: a speech clip mixed with a MUSAN bed under a documented SN. The mixing is itself a rights-basis-bearing act the owner should approve."
+    },
+    {
+      "id": "tedx-multilingual",
+      "name": "Multilingual TEDx",
+      "exactRelease": "SLR100 (openslr.org/100)",
+      "licence": "CC BY 4.0 (verify at approval time)",
+      "hostedAt": "https://openslr.org/100/",
+      "language": "many, including en and de",
+      "covers": ["clear-english", "clear-german (talk register, single speaker per clip)"],
+      "cannotCover": ["multiple-speakers", "no-speech-control", "quiet-speech-positive-control", "dictated names/numbers/units"],
+      "note": "Talk-register speech, closer to the product's real input than read audiobook prose. A useful cross-check on whether engine quality holds outside read speech."
+    },
+    {
+      "id": "sbcsae",
+      "name": "Santa Barbara Corpus of Spoken American English",
+      "exactRelease": "SLR155 (openslr.org/155)",
+      "licence": "Verify at approval time (mirrored from UCSB; the licence must be read from the corpus itself before selection)",
+      "hostedAt": "https://openslr.org/155/",
+      "language": "en",
+      "covers": ["multiple-speakers (spontaneous conversation)"],
+      "cannotCover": ["unknown until the licence is read -- listed here as a CANDIDATE ONLY, not as an approved source"],
+      "note": "Named because it is the real conversational-speech option on OpenSLR. NOT proposed as approved: its licence was not confirmed from a primary source in this pass, and the spec forbids inferring a licence."
+    }
+  ],
+  "notCoveredByOpenCorpora": {
+    "claimStrength": "WEAK CLAIM, deliberately. Eight sources were assessed. The defensible statement is 'the eight sources assessed do not supply a suitable example, and here is the evidence for each' -- NOT 'an open corpus cannot supply this'. A broader corpus may exist that was not surveyed; that is a research gap, not a factual claim about all corpora. Where a stronger claim is supportable for a SPECIFIC gap, it is made there with its evidence attached.",
+    "summary": "The eight assessed sources supply clear English, clear German, multiple speakers, a long recording, and (via MUSAN mixing, with owner approval) background noise. They do not, per the evidence under each gap below, supply the inputs the Gate 1 discipline depends on most, nor dictated-data coverage.",
+    "sourcesAssessed": [
+      "LibriSpeech ASR corpus (SLR12)",
+      "Mini LibriSpeech (SLR31)",
+      "Multilingual LibriSpeech / MLS (SLR94)",
+      "Thorsten Mueller German Neutral-TTS (SLR95)",
+      "The AMI Meeting Corpus (SLR16)",
+      "MUSAN (SLR17)",
+      "Multilingual TEDx (SLR100)",
+      "Santa Barbara Corpus of Spoken American English (SLR155, licence unconfirmed)"
+    ],
+    "gaps": [
+      {
+        "category": "no-speech-control",
+        "claim": "The eight sources assessed do not supply a suitable room-noise-no-speech or instrumental-music-no-vocals control for our capture environment.",
+        "evidence": [
+          "SLR12 / SLR31 / SLR94 / SLR100 / SLR95: read or talk SPEECH corpora. Every clip contains speech by construction; that is what a speech corpus is. None is a no-speech recording.",
+          "SLR16 (AMI): meeting-room audio, but it is a SPEECH corpus -- room tone exists only as a by-product inside clips that also contain speech, not as a clean no-speech segment.",
+          "SLR155 (SBCSAE): conversational speech; same reason. Licence also unconfirmed.",
+          "SLR17 (MUSAN): the closest fit, containing dedicated noise and music subsets. Checked: its music subset is instrumental music, which is a legitimate Gate 1 negative input -- but it is music the corpus chose, not the product's audio path, and its noise subset is generic, not a recording of our capture environment."
+        ],
+        "whyWhatItContainsDoesNotFit": "MUSAN's music subset DOES satisfy the 'instrumental music, no vocals' negative as a test input. What none of the eight supplies is a clean no-speech ROOM recording from the environment the product will actually capture in. Digital silence is generable locally with no rights question and no corpus.",
+        "ownerMustSupply": "Digital silence (generable locally, no rights issue) and a real no-speech room recording from the eventual capture environment. MUSAN music may be used as the instrumental-music negative; that is not a gap.",
+        "strongerClaimSupported": false
+      },
+      {
+        "category": "quiet-speech-positive-control",
+        "claim": "The eight sources assessed do not supply naturally quiet real speech, which is the Gate 1 acceptance control.",
+        "evidence": [
+          "SLR12 / SLR31 / SLR94 / SLR100: read audiobook and talk speech, recorded at normal level for intelligibility -- that is the point of a corpus intended to train or evaluate ASR.",
+          "SLR95 (Thorsten): studio-optimised TTS-reference speech, normal level by construction.",
+          "SLR16 (AMI) / SLR155 (SBCSAE): spontaneous speech, recorded to be intelligible in meetings and interviews; not quiet-speech material.",
+          "SLR17 (MUSAN): noise and music only, no speech at all."
+        ],
+        "whyWhatItContainsDoesNotFit": "Naturally quiet speech differs from normal-level speech in articulation and breath support, not only in level. No assessed corpus is recorded under that condition, and re-gaining a normal clip in post is a SYNTHETIC manipulation of level, not a recording of the phenomenon. Retained as its own category (attenuated-speech-supplementary) precisely so it is not mistaken for this one.",
+        "ownerMustSupply": "Purpose-recorded NATURALLY quiet real speech from a consenting speaker, ideally in the eventual capture acoustic setting, with an independently derived reference transcript. This is the Gate 1 acceptance case and nothing may substitute for it.",
+        "strongerClaimSupported": true,
+        "strongerClaimWhy": "For THIS gap the stronger claim holds on the evidence: a corpus recorded for intelligibility, by definition, does not contain the quiet-speech condition. The claim is made per-gap, not across all four."
+      },
+      {
+        "category": "names-numbers-units-negation",
+        "claim": "The eight sources assessed do not supply clips chosen for names, spoken numbers, units and negated statements, with a reference verified to contain them.",
+        "evidence": [
+          "SLR12 / SLR31 / SLR94 / SLR95: prose (audiobooks) or studio sentences. Numbers occur by chance in a narrative; no assessed corpus is a dictated-data corpus.",
+          "SLR100 (TEDx): talk register. Speakers say numbers incidentally; the corpus does not classify or select for them.",
+          "SLR16 / SLR155: conversation, same reason.",
+          "Checked against what would be needed: the category requires clips CHOSEN to contain names, spoken numbers, units and negations. None of the eight publishes such a selection, and one cannot be assembled by grepping a reference without a human deciding which occurrences are the interesting ones."
+        ],
+        "whyWhatItContainsDoesNotFit": "Prose and talks contain these phenomena incidentally and unboundedly; the category needs them deliberately and enumerated. That is a selection act, not a property of a corpus.",
+        "ownerMustSupply": "Purpose-recorded speech from consenting participants reading a scripted list of names, numbers, units and negations -- in both English and German -- or a human-curated selection from a corpus WITH a reference that a second person has verified contains them.",
+        "strongerClaimSupported": false
+      },
+      {
+        "category": "consent-and-retention-provenance-for-purpose-recorded-audio",
+        "claim": "No corpus among the eight can supply the consent record that purpose-recorded audio requires; this is a property of the recording method, not a research gap.",
+        "evidence": [
+          "A consent record is an artifact WE hold, not something any corpus contains or could.",
+          "For purpose-recorded audio the manifest's origin/licence/rightsBasis fields must point at a real consent document naming permission to retain the recording AND derived transcripts.",
+          "OpenSLR licences (CC BY 4.0 where confirmed) are the corpus's own grant; they say nothing about our consent obligations to a participant we record ourselves."
+        ],
+        "whyWhatItContainsDoesNotFit": "Not a coverage question. CC BY 4.0 covers a corpus clip; it cannot cover audio we record, because the participant's permission is a separate act.",
+        "ownerMustSupply": "A consent record per speaker, naming permission to retain the recording AND derived transcripts, plus retention terms for both.",
+        "strongerClaimSupported": true,
+        "strongerClaimWhy": "This is a categorical claim and it is safe: no dataset can contain our consent record for a recording made after the dataset exists."
+      }
+    ]
+  }
+}

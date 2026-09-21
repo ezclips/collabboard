@@ -1,0 +1,64 @@
+{
+  "status": "UNRUN -- no media processed, no measurements taken",
+  "statusMeaning": {
+    "recognitionQualityEvaluated": false,
+    "gate1NoSpeech": "NOT EVALUATED -- a run with no media cannot test invented speech over silence",
+    "gate2Comparison": "NOT EVALUATED -- no engine was invoked, so there is nothing to compare",
+    "emptyCorpusRunSatisfiesGates": false,
+    "note": "An empty-corpus run demonstrates the harness executes and the rights-basis refusal works. It is not a measurement and must never be reported as one."
+  },
+  "generatedAt": "2026-09-21T23:24:48.082Z",
+  "node": "v24.11.1",
+  "phase": "A",
+  "configuration": {
+    "baseline": {
+      "id": "faster-whisper",
+      "invocation": "python -m faster_whisper CLI (or the faster-whisper script)",
+      "model": "large-v3 (ct2 conversion, Systran/faster-whisper-large-v3)",
+      "computeType": "float16",
+      "beamSize": 5,
+      "vad": {
+        "enabled": true,
+        "engine": "silero",
+        "note": "evaluated explicitly, never left at a library default"
+      },
+      "language": null,
+      "note": "language: null means auto-detect, reported per clip. Translation is never enabled."
+    },
+    "challenger": {
+      "id": "pyvideotrans",
+      "invocation": "python cli.py --task stt --name <media> --model_name large-v3 (separate process)",
+      "model": "large-v3 (its own local faster-whisper path)",
+      "translationEnabled": false,
+      "llmPostCorrectionEnabled": false,
+      "note": "Translation and any optional LLM rewrite are DISABLED. An enabled rewriter compared against a raw engine is not a comparison (Gate 2).",
+      "isolationNote": "Its recognition modules read shared application configuration; if isolating the transcription task proves impractical that is a FINDING to report, not a problem to fight (patch Risk 3)."
+    },
+    "gates": {
+      "noSpeech": {
+        "blocking": true,
+        "negatives": [
+          "digital-silence",
+          "room-noise-no-speech",
+          "instrumental-music-no-vocals"
+        ],
+        "positiveControl": "quiet-real-speech-must-transcribe",
+        "rule": "Any invented speech on any negative input FAILS that configuration and no other result redeems it."
+      },
+      "comparison": {
+        "sameMedia": true,
+        "translationDisabled": true,
+        "llmPostCorrectionDisabled": true,
+        "attributionRequired": "Any pyVideoTrans advantage must be attributed to audio preprocessing, segmentation, or different model settings (patch Gate 2 and criterion 7)."
+      }
+    }
+  },
+  "corpus": {
+    "path": "tools/transcription-probe/corpus.json",
+    "clipCount": 0,
+    "proposedSourceCount": 8
+  },
+  "results": [],
+  "nothingToMeasure": true,
+  "phaseANote": "Phase A: no media collected, nothing installed, nothing measured. Fill corpus.json `clips` from an owner-approved corpus to run Phase B."
+}
