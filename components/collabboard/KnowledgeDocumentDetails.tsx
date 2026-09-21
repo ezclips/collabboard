@@ -7,6 +7,8 @@ import type {
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
 import { useKnowledgeReaderActivePage } from './useKnowledgeReaderActivePage';
+import { KNOWLEDGE_TRANSCRIPT_DISCLOSURE } from '@/lib/domain/knowledge/knowledgeTranscriptCitation';
+import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 /**
  * PDF-R6J. One compact icon button, used by every page/document action in the
  * reader.
@@ -106,6 +108,15 @@ export interface KnowledgeDocumentDetailsProps {
    */
   boardId?: string;
   originalFilename: string;
+  /**
+   * Present only for a transcript source, and the reason it is a PROP rather
+   * than something this reader derives: the disclosure belongs to whoever
+   * knows the document is a transcript. A reader that guessed from the
+   * absence of pages would eventually call a pageless text file a transcript
+   * and attach an unverified-claim notice to a document nobody claimed
+   * anything about.
+   */
+  transcriptRepresentation?: KnowledgeTranscriptStoredRepresentation | null;
   pageCount: number | null;
   pages: readonly KnowledgeDocumentDetailPage[];
   loading: boolean;
@@ -593,6 +604,7 @@ export default function KnowledgeDocumentDetails({
   documentId,
   boardId,
   originalFilename,
+  transcriptRepresentation,
   pageCount,
   hostRendersDocumentHeader = false,
   pages,
@@ -1179,6 +1191,14 @@ export default function KnowledgeDocumentDetails({
             </h2>
             {pageSummary !== null ? (
               <p className="text-[11px] text-gray-500">{pageSummary}</p>
+            ) : null}
+            {transcriptRepresentation ? (
+              // ALWAYS for a transcript, not only beside a timestamp. A reader
+              // who saw this notice only where links appear would reasonably
+              // conclude the rest had been checked.
+              <p className="text-[11px] text-gray-500">
+                {KNOWLEDGE_TRANSCRIPT_DISCLOSURE}
+              </p>
             ) : null}
             <UsedInNotes
               scope="document"
