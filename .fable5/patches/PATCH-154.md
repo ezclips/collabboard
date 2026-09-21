@@ -2,8 +2,9 @@
 
 **Status:** approved 2026-09-22 — Phase A authorized and handed off; Phase B NOT authorized (needs an approved corpus)
 
-> Lifecycle note: this is the draft. The **Final Implementation Specification**
-> is written only after the owner approves (AI_WORKFLOW.md, patch lifecycle).
+> Lifecycle note: approved, and the **Final Implementation Specification** is
+> written below. Execution is split: Phase A is handed off, Phase B waits on an
+> owner-approved corpus (AI_WORKFLOW.md, patch lifecycle).
 
 > **This patch is an INSTRUMENT, not a feature.** It measures. It ships no
 > product code, touches no database, provisions nothing paid, and integrates
