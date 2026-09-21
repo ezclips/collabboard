@@ -30,6 +30,7 @@ import type {
   BoardWikiSourceState,
 } from '@/lib/domain/wiki/boardWikiPageSources';
 import type { BoardAiCitationItem } from '@/lib/domain/ai/boardAiChatCitation';
+import { KNOWLEDGE_TRANSCRIPT_DISCLOSURE } from '@/lib/domain/knowledge/knowledgeTranscriptCitation';
 
 /**
  * The board wiki's page surface.
@@ -61,6 +62,8 @@ interface BoardWikiSourceStatusView {
   readonly item: BoardAiCitationItem;
   readonly version: BoardWikiPageSource['version'];
   readonly state: BoardWikiSourceState;
+  /** Absent means NOT a transcript. The response is untrusted input. */
+  readonly isTranscript?: boolean;
 }
 
 interface BoardWikiPageResponse {
@@ -638,6 +641,14 @@ export default function BoardWikiDrawer({
                     );
                   })}
                 </ul>
+                {sources.some((status) => status.isTranscript === true) && (
+                  <p
+                    data-board-wiki-transcript-disclosure="true"
+                    className="mt-2 text-[11px] leading-snug text-amber-800"
+                  >
+                    {KNOWLEDGE_TRANSCRIPT_DISCLOSURE}
+                  </p>
+                )}
               </section>
 
               {proposal !== null && (

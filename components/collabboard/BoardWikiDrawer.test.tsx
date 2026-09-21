@@ -832,3 +832,60 @@ describe('an export that fails downloads nothing at all', () => {
     expect(status(container)?.textContent).toContain('Nothing was downloaded');
   });
 });
+
+describe('the transcript disclosure, once per page', () => {
+  // The disclosure is a statement about the page's provenance, not about a
+  // chip. A caveat repeated on every source stops being read, so the four cases
+  // here are about WHEN it appears and never about how many sources carry it.
+  const transcriptSourceView = (state: 'current' | 'stale' | 'gone' = 'current') => ({
+    item: { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 6, label: 'talk — transcript' },
+    version: { kind: 'document', contentSha256: 'sha-1', updatedAt: '2026-09-01T00:00:00Z' },
+    state,
+    isTranscript: true,
+  });
+
+  const disclosureOf = (container: HTMLElement) =>
+    container.querySelector('[data-board-wiki-transcript-disclosure="true"]');
+
+  it('renders once when a page cites a transcript', async () => {
+    stubFetch({ sources: [transcriptSourceView()] });
+    const container = await mount();
+    await openPage(container);
+
+    const disclosures = container.querySelectorAll('[data-board-wiki-transcript-disclosure="true"]');
+    expect(disclosures.length).toBe(1);
+    // The sentence is imported, never retyped at the call site.
+    expect(disclosures[0].textContent).toContain('User-provided transcript');
+  });
+
+  it('renders nothing when a page cites only PDFs and posts', async () => {
+    stubFetch({ sources: [docSourceView('current'), postSourceView('current')] });
+    const container = await mount();
+    await openPage(container);
+
+    expect(disclosureOf(container)).toBeNull();
+  });
+
+  it('renders ONCE with two transcript sources, not twice', async () => {
+    stubFetch({
+      sources: [
+        transcriptSourceView(),
+        { ...transcriptSourceView(), item: { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 7, label: 'talk — page 7' } },
+      ],
+    });
+    const container = await mount();
+    await openPage(container);
+
+    expect(container.querySelectorAll('[data-board-wiki-transcript-disclosure="true"]').length).toBe(1);
+  });
+
+  it('renders nothing when isTranscript is absent on every source', async () => {
+    // Absent means NOT a transcript, never "warn to be safe" -- otherwise every
+    // PDF acquires an unverified-claim notice.
+    stubFetch({ sources: [docSourceView('current')] });
+    const container = await mount();
+    await openPage(container);
+
+    expect(disclosureOf(container)).toBeNull();
+  });
+});

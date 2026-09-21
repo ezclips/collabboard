@@ -187,6 +187,7 @@ function pageResponseBody(read: BoardWikiPageRead) {
       item: status.source.item,
       version: status.source.version,
       state: status.state,
+      isTranscript: status.isTranscript,
     })),
     freshness: boardWikiPageFreshness(states),
   };

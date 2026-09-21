@@ -40,6 +40,16 @@ export type BoardWikiSourceVersion =
      * enforce that, instead of this comment.
      */
     readonly transcriptMutationRevision?: string;
+    /**
+     * True when this document carries a transcript representation RIGHT NOW.
+     *
+     * OPTIONAL and `true`-only: there is no `false`, because absent already
+     * means "not a transcript" and a second way to say it is a second thing to
+     * keep in step. Set only on a CURRENT version -- never recorded, never
+     * parsed back -- because it is a fact about what the reader is looking at,
+     * not about what was compiled.
+     */
+    readonly isTranscript?: true;
     readonly updatedAt: string;
   }
   | {
@@ -64,6 +74,12 @@ export type BoardWikiSourceState = 'current' | 'stale' | 'gone';
 export interface BoardWikiSourceStatus {
   readonly source: BoardWikiPageSource;
   readonly state: BoardWikiSourceState;
+  /**
+   * True when this source is a transcript RIGHT NOW. False when it is not, or
+   * is gone -- a source we cannot read is a source we cannot make claims
+   * about.
+   */
+  readonly isTranscript: boolean;
 }
 
 /**
@@ -109,6 +125,8 @@ function hasChanged(recorded: BoardWikiSourceVersion, current: BoardWikiSourceVe
     if (recordedRevision !== null && currentRevision !== null && recordedRevision !== currentRevision) {
       return true;
     }
+    // `isTranscript` is deliberately NOT compared. It is not a change signal,
+    // and it never appears on the recorded side at all.
     if (recorded.contentSha256 !== null && current.contentSha256 !== null) {
       return recorded.contentSha256 !== current.contentSha256;
     }
@@ -137,8 +155,13 @@ export function boardWikiSourceStates(
 ): readonly BoardWikiSourceStatus[] {
   return sources.map((source) => {
     const now = current.get(boardAiCitationIdentityKey(source.item));
-    if (now === undefined) return { source, state: 'gone' as const };
-    return { source, state: hasChanged(source.version, now) ? 'stale' as const : 'current' as const };
+    if (now === undefined) return { source, state: 'gone' as const, isTranscript: false };
+    const isTranscript = now.kind === 'document' && now.isTranscript === true;
+    return {
+      source,
+      state: hasChanged(source.version, now) ? 'stale' as const : 'current' as const,
+      isTranscript,
+    };
   });
 }
 

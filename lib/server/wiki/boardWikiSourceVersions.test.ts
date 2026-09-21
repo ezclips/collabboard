@@ -136,6 +136,65 @@ describe('the revision survives the wire as an exact string', () => {
   });
 });
 
+describe('the transcript discriminator is pulled out of the jsonb, never the column', () => {
+  it('marks a row a transcript when the scalar is present', async () => {
+    // `->>` yields text, so a representation version arrives as a string; only
+    // its PRESENCE is read here, and the value is never interpreted.
+    const { client } = stubClient({
+      documents: [{
+        id: DOC,
+        content_sha256: 'sha-1',
+        transcript_mutation_revision: '3',
+        is_transcript: '1',
+        updated_at: 't',
+      }],
+    });
+
+    const versions = await readCurrentSourceVersions(client, BOARD, [docItem]);
+
+    expect(versions.get(boardAiCitationIdentityKey(docItem))).toMatchObject({ isTranscript: true });
+  });
+
+  it('omits the key when the scalar comes back null, which is every non-transcript', async () => {
+    const { client } = stubClient({
+      documents: [{ id: DOC, content_sha256: 'sha-1', is_transcript: null, updated_at: 't' }],
+    });
+
+    const versions = await readCurrentSourceVersions(client, BOARD, [docItem]);
+    const version = versions.get(boardAiCitationIdentityKey(docItem));
+
+    expect(version).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(version, 'isTranscript')).toBe(false);
+  });
+
+  it('omits the key when the response carries no is_transcript at all', async () => {
+    const { client } = stubClient({
+      documents: [{ id: DOC, content_sha256: 'sha-1', updated_at: 't' }],
+    });
+
+    const versions = await readCurrentSourceVersions(client, BOARD, [docItem]);
+    const version = versions.get(boardAiCitationIdentityKey(docItem));
+
+    expect(version).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(version, 'isTranscript')).toBe(false);
+  });
+
+  it('selects the aliased scalar and never the bare column', async () => {
+    // The payload argument, as a source-level assertion: the bare column is
+    // every cue and can reach 8 MiB, per source, per render. This proves the
+    // query we SEND, not that PostgREST accepted it -- see the patch's
+    // local-stack syntax proof for that half.
+    const { client, selects } = stubClient({ documents: [] });
+
+    await readCurrentSourceVersions(client, BOARD, [docItem]);
+    const documentSelect = selects.find((columns) => columns.includes('content_sha256'));
+
+    expect(documentSelect).toContain('is_transcript:transcript_representation->>representationVersion');
+    expect(documentSelect).not.toContain('transcript_representation,');
+    expect(documentSelect).not.toMatch(/(?:^|,\s*)transcript_representation\s*,/);
+  });
+});
+
 describe('a failed read fails loudly, never as "all sources gone"', () => {
   it('throws when the document query carries an error', async () => {
     // The un-migrated case the ordering dependency names: unknown column ->

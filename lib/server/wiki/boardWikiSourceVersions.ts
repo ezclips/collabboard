@@ -59,9 +59,15 @@ export async function readCurrentSourceVersions(
     // already wrong for a revision past Number.MAX_SAFE_INTEGER. The cast is
     // the only place the exact value survives the wire; the returned key is
     // still `transcript_mutation_revision`.
+    // The transcript discriminator is a SCALAR pulled out of the jsonb, never
+    // the column itself: `transcript_representation` holds every cue and can
+    // reach 8 MiB, and this runs for every source of every page render. The
+    // column's CHECK constraint guarantees `representationVersion` is present
+    // whenever the column is non-null, so the scalar is a faithful proxy for
+    // "is this row a transcript" at a few bytes.
     const { data, error } = await client
       .from('knowledge_documents')
-      .select('id, content_sha256, transcript_mutation_revision::text, updated_at')
+      .select('id, content_sha256, transcript_mutation_revision::text, is_transcript:transcript_representation->>representationVersion, updated_at')
       .eq('board_id', boardId)
       .in('id', documentIds);
     // A failed read must fail loudly. Swallowing the error would leave `data`
@@ -84,6 +90,9 @@ export async function readCurrentSourceVersions(
           : typeof revision === 'number'
             ? { transcriptMutationRevision: String(revision) }
             : {}),
+        ...(row.is_transcript !== null && row.is_transcript !== undefined
+          ? { isTranscript: true as const }
+          : {}),
       });
     }
   }

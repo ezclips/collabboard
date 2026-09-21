@@ -121,6 +121,38 @@ describe('reading a page derives its source states rather than storing them', ()
     expect(body.freshness).toBe('sources-gone');
   });
 
+  it('serializes transcript-ness from the CURRENT version, beside state', async () => {
+    // Read from current, never recorded: a compile-time snapshot is not a fact
+    // about what the reader is looking at now, and a gone source makes no claim.
+    const current = new Map([
+      [boardAiCitationIdentityKey(docSource.item), {
+        kind: 'document' as const,
+        contentSha256: 'sha-1',
+        isTranscript: true as const,
+        updatedAt: 'x',
+      }],
+    ]);
+    const handler = createBoardWikiReadHandler({
+      getAuthenticatedSession: async () => session({
+        readPage: vi.fn(async () => ok({ page: storedPage, currentVersions: current })),
+      }),
+    });
+
+    const body = await (await handler(new Request('http://test/api'), itemContext)).json();
+
+    expect(body.sources[0].state).toBe('current');
+    expect(body.sources[0].isTranscript).toBe(true);
+    // The RECORDED version still travels with the item, unchanged.
+    expect(body.sources[0].version).toEqual(docSource.version);
+  });
+
+  it('a gone source serializes isTranscript false, not an absent claim', async () => {
+    const handler = createBoardWikiReadHandler({ getAuthenticatedSession: async () => session() });
+    const body = await (await handler(new Request('http://test/api'), itemContext)).json();
+
+    expect(body.sources.map((source: { isTranscript: boolean }) => source.isTranscript)).toEqual([false, false]);
+  });
+
   it('a page the caller cannot reach is 404, never 403', async () => {
     // 403 confirms the id exists somewhere, which is the leak the knowledge
     // routes already refuse to make.
