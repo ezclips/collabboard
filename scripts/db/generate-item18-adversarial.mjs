@@ -177,15 +177,20 @@ const header = `-- ADVERSARIAL CHECKS for item 18's state classifier. PLAIN SQL 
 -- NOTHING HERE PERSISTS. Every case applies its shape inside a PL/pgSQL
 -- subtransaction that always ends by raising, so the shape is always rolled
 -- back -- on the accepting path too, which is why the success path raises
--- ZZ001 deliberately rather than returning. CREATE ROLE is transactional, so
--- the probe role goes with it.
+-- ZZ001 deliberately rather than returning. CREATE ROLE and GRANT are
+-- transactional, so the probe role and every grant go with it, and an
+-- interrupted session is no exception: PostgreSQL rolls back the active
+-- transaction, role and ACL changes included.
 --
 -- RUN IT AS ONE CALL. The temp table is session-scoped; a runner that splits
 -- these statements across connections will fail loudly on the final SELECT
 -- rather than quietly report success.
 --
 -- RUN IT AGAINST THE ISOLATED DATABASE ONLY, as a role that may GRANT, REVOKE
--- and CREATE ROLE. A rolled-back transaction is not a read-only one.
+-- and CREATE ROLE. Not because the rollback is in doubt -- it is not -- but
+-- because this file deliberately exercises privileged ACL and role mutations
+-- on a live table, which is not something to point at a production database
+-- whatever its cleanup guarantees.
 --
 -- PASS CRITERION: five rows, every outcome PASS, and the final verdict row
 -- reading ALL PASS.
