@@ -403,9 +403,18 @@ approval.**
 
 ## AMENDMENT — transcript import (PROPOSED, REVIEW ONLY)
 
-**NOT APPROVED AND NOT IMPLEMENTED.** This is the revised scope for review. No
-code is written against it, and Stage 3b does not begin until it is approved.
-STT remains separately gated under Stage 4.
+**NOT APPROVED AND NOT IMPLEMENTED.** This is the revised scope, completed for
+implementation approval. No code is written against it, and Stage 3b does not
+begin until it is approved. STT remains separately gated under Stage 4.
+
+**Settled within it:** the **fallback scope** (the ingestion table below) and
+the **versioning decision** — that a transcript's version hash covers cue
+timing, so a timing-only correction marks dependent wiki pages stale. Both were
+approved 2026-09-21; the specification of the second is below, along with the
+audit of existing `content_sha256` consumers it required.
+
+Everything else here — serialisation layout, limits, cue rules — is proposed
+and awaits this document's approval as a whole.
 
 ### What may be ingested, and what may be claimed
 
@@ -424,17 +433,20 @@ captions could not be obtained, because nothing was tried.
 Every transcript ingested this way is **labelled user-provided** wherever it is
 surfaced — reader, citation, wiki compilation. This is not a disclaimer to bury.
 
-**A supplied video URL is an association, not evidence.** Nothing checks that
-the transcript belongs to the video, and nothing can: a user may paste any text
-beside any URL. Consequences that follow, and which the implementation may not
-soften:
+**A supplied video URL is an association, not evidence.** **The importer cannot
+verify that the transcript belongs to the video** — a user may paste any text
+beside any URL, and no check available to the software distinguishes the cases.
+**A person can verify it**, by watching the video at a cue's timestamp and
+reading what the cue says; that is exactly what the known-example acceptance
+does. Consequences the implementation may not soften:
 
 - The association is recorded as **claimed**, never as verified.
 - Timestamp links are **offered on the user's assertion** that the cues match
   the video.
 - **The timestamp path must be accepted against a known example** — a video and
-  its real caption file, where a cue's timestamp is checked to land at the
-  moment it claims. Until that acceptance runs, timestamp links are not shipped.
+  its real caption file, where a cue's timestamp is checked **by a person** to
+  land at the moment it claims. Until that acceptance runs, timestamp links are
+  not shipped.
 
 ### Language and track provenance, recorded explicitly
 
@@ -467,44 +479,172 @@ So the importer records, per source, as data rather than inference:
   assumption.** The observed maximum was 12.7 s, but nothing bounds it. A cue
   longer than a window becomes its own window rather than being split, so a
   citation's range never straddles a boundary that has no cue.
-- **Repeated rolling-caption text needs a stated de-duplication rule.** It was
-  rare in what the instrument fetched (0.5%), but supplied SRT/VTT from rolling
-  captions genuinely repeats lines, and the rule may not rest on this set's
-  number. Proposed: a cue whose text is wholly contained in its immediate
-  predecessor contributes its **timing** but not a second copy of its text.
-  Open for review.
+- **Repeated cue text is PRESERVED VERBATIM in v1. No automatic
+  de-duplication.** This supersedes an earlier proposal here that a cue
+  contained in its predecessor would contribute timing but not text. Removing
+  repetition can change meaning — a line genuinely said twice is not a rolling
+  artefact — and it breaks the character-to-time mapping, because a cue with no
+  text of its own has no character range to key a citation on. Any later
+  de-duplication is a **separately measured and separately versioned** change,
+  not a v1 default.
 
-### Size limits, before anything is stored
+### Oversized and malformed cues — defined, not assumed
 
-The instrument measured a 31-hour video at **46,959 cues and 1.7 MB** of text,
-which is larger than any DOCX the Stage 2 ceilings admit. A pasted or uploaded
-transcript needs its own bounds, enforced the way Stage 2's are — refusing
-before the cost, not after:
+- A cue **longer than a window becomes its own window**, never split. A window
+  boundary inside a cue would give a citation a character range with no cue
+  behind part of it.
+- `endMs < startMs` is **malformed**: the file is refused. Not repaired, not
+  reordered — a file whose timings contradict themselves is not one whose
+  timestamps should be offered to a reader.
+- `endMs === startMs` (zero duration) is **accepted and preserved**. It occurs
+  legitimately and carries a position.
+- Cues are kept in **file order**. Order is not sorted by start time, because
+  re-sorting would silently rewrite a file whose cues overlap.
 
-- a byte ceiling on the uploaded or pasted payload;
-- a **cue-count ceiling**, since cue count drives per-cue work that bytes alone
-  do not predict;
-- a ceiling on **canonical text length**, consistent with the existing
-  extracted-text ceiling.
+### Resource limits — chosen deliberately, and tested at the boundary
 
-Numbers are deliberately not fixed here: they should be set against measured
-cost, as Stage 2's were, in the commit that implements them.
+The instrument measured a 31-hour video at **46,959 cues and 1.7 MB** of text.
+**That is an observed workload, not a justified maximum**, and the limits below
+are not derived from it by arithmetic. They are choices, each with its headroom
+over the observed case stated so the choice can be argued with:
 
-### Versioning: timing is part of the version
+| Limit | Proposed | Observed worst case | Reasoning |
+|---|---|---|---|
+| Payload bytes (paste or upload) | **8 MiB** | ~1.7 MB text, larger as SRT | ~4× headroom; refusal is cheap and pre-parse |
+| Cue count | **100,000** | 46,959 | ~2× headroom; cue count drives per-cue work that bytes do not predict |
+| Canonical text units | **4,000,000** | 1,696,642 | same ceiling DOCX extraction already enforces, so one number governs stored text |
 
-**The crux, and it is a real gap in the current shape.** Stage 3's staleness
-proof reuses `content_sha256`, which hashes canonical text. If cue timings live
-beside that text, then **re-importing a corrected caption file whose words are
-identical but whose timings have shifted would not change the hash** — every
-citing wiki page would keep a timestamp that now points at the wrong moment,
-and nothing would be flagged stale.
+**Each limit gets a boundary test**: a case at the limit that is accepted, and
+a case one unit past it that is refused. A limit with no test at its edge is a
+number, not a limit.
 
-Proposed: the stored version hashes **canonical text *and* normalised cue
-timing together**, so a timing-only correction is a new version and citing
-pages are flagged stale exactly as a text change would flag them.
+Refusal happens **before** the cost, as Stage 2's do: payload bytes before
+parsing, cue count as cues are produced, text length before persistence.
 
-This needs review because it decides what `content_sha256` means for this kind
-of source, and that is a contract question, not an implementation detail.
+### Versioning: timing is part of the version — APPROVED, specified here
+
+**The problem.** Stage 3's staleness proof reuses `content_sha256`. If cue
+timings sat outside it, re-importing a corrected caption file whose words are
+identical but whose timings shifted would **not** change the hash: every citing
+wiki page would keep a timestamp now pointing at the wrong moment, and nothing
+would be flagged stale.
+
+**Approved resolution.** The transcript's version hash covers a deterministic,
+versioned representation of:
+
+1. the **canonical transcript text**;
+2. each cue's **character range** and **start/end time in integer
+   milliseconds**;
+3. **cue order, preserving overlaps**;
+4. the **associated video identity**, when timestamp links depend on it.
+
+#### What "normalised" means, and what it must never do
+
+Normalisation is **units and serialisation only**. It must **never**:
+
+- shift a timestamp,
+- remove or merge an overlap,
+- reorder cues,
+- round away precision the source format supports.
+
+Integer milliseconds is lossless for both formats: SRT writes
+`HH:MM:SS,mmm` and VTT `HH:MM:SS.mmm`, both millisecond-precision. So parsing
+to integer ms discards nothing either format can express. **A format that later
+carries finer precision would need a new representation version, not silent
+rounding.**
+
+Consequences that must hold:
+
+- **Equivalent spellings hash identically.** `00:00:01,500` (SRT) and
+  `00:00:01.500` (VTT) are the same instant; so are `0:00:01.500`,
+  `00:00:01.5`, and the same file with CRLF instead of LF line endings, or a
+  trailing newline. All parse to `1500` and serialise one way.
+- **Changed timing changes the hash**, even by one millisecond, even when every
+  word is identical.
+- **A changed video association changes the hash**, because timestamp links
+  mean something different against a different video.
+
+#### The serialised representation
+
+A single UTF-8 byte string, fed to sha256. Written out here because "hash the
+transcript and its timings" is not a specification:
+
+```
+line 1   knowledge-transcript\t<representationVersion>
+line 2   video\t<videoIdentity | ->
+line 3   text\t<utf8ByteLength>\n<canonicalText>
+line 4   cues\t<cueCount>
+then     <charStart>\t<charEnd>\t<startMs>\t<endMs>   -- one line per cue,
+                                                          in file order
+```
+
+**Why the text is length-prefixed:** without it, a transcript whose own text
+contains newlines and tabs could serialise to the same bytes as a different
+transcript with a different cue layout — a collision built in by construction.
+The length prefix makes the text opaque to the framing.
+
+`representationVersion` is an integer inside the hashed bytes, so a future
+change to this layout is a new version rather than a silent re-interpretation
+of stored hashes — the same rule the extraction contract already follows.
+
+**Everything needed to recompute the hash is stored**: canonical text, the cue
+array with character ranges and integer-ms times in order, the claimed video
+identity, and the representation version. A stored row can be re-hashed and
+compared without re-parsing the original upload — and a test asserts exactly
+that round trip.
+
+#### Audit of existing `content_sha256` consumers
+
+Done before proposing the change, because compatibility is a claim about code
+that exists.
+
+**The column is already an opaque per-kind fingerprint, not "the hash of the
+text".** Two producers already disagree about what it hashes, which is the
+finding that makes this a compatible extension rather than a redefinition:
+
+| Producer | Hashes |
+|---|---|
+| PDF (`knowledgeIngestion.ts`) | the **raw uploaded file bytes** |
+| Text / DOCX (`knowledgeTextUpload.ts`) | **UTF-8 of the canonical text**, via `knowledgeTextHashInput` |
+
+Consumers, all of which treat it as opaque:
+
+| Consumer | Use | Compatible? |
+|---|---|---|
+| `boardWikiPageSources.ts` `hasChanged` | inequality between recorded and current | **yes** — the staleness proof needs only "differs" |
+| `boardWikiEditing.ts`, `boardWikiSourceVersions.ts` | record / read the value | **yes** |
+| `knowledgePdfRenderPolicy.ts` `knowledgePageImageETag` | opaque ETag component | **yes**, and PDF-only |
+| `knowledgeExtractionAdapters.ts` `p_expected_content_sha256` | optimistic concurrency, stored vs stored | **yes** |
+| Database | `content_sha256 text NOT NULL` — no generated column, no CHECK, no unique index | **yes** |
+
+**No consumer recomputes `content_sha256` from text**, so none needs an
+adjustment. Had one existed it would have needed an explicit change, and this
+row is what that audit was for.
+
+`knowledgeTextHashInput` is the natural extension point: transcripts get their
+own hash-input builder beside it, and the text and PDF paths are untouched.
+
+**One consequence to accept knowingly:** a transcript imported as plain text
+hashes through the transcript representation (with zero cues), **not** as bare
+canonical text. So the same characters uploaded as `.txt` and pasted as a
+transcript produce different version hashes. That is correct — they are
+different source kinds with different citation behaviour — but it is a
+deliberate choice and is flagged rather than buried.
+
+### Tests owed before this ships
+
+| Test | Asserts |
+|---|---|
+| Equivalent formatting | SRT `,` vs VTT `.`, leading zeros, CRLF vs LF, trailing newline → **identical hash** |
+| Timing-only change | identical words, one cue moved 1 ms → **different hash** |
+| Changed video association | identical text and cues, different video → **different hash** |
+| Text-only change (control) | identical timings, one word changed → different hash |
+| Cue order | two cues swapped → different hash |
+| Overlap preserved | overlapping cues survive a round trip unchanged |
+| Repeated cue text | a repeated line is stored twice, verbatim |
+| Reproducibility | re-hashing from the stored representation alone equals the stored hash |
+| Boundary | each resource limit accepted at the limit, refused one past it |
+| Staleness, end to end | timing-only re-import marks a citing wiki page **stale** |
 
 ### What this amendment does not include
 
