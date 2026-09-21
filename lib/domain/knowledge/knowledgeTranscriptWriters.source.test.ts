@@ -16,16 +16,23 @@ import { describe, expect, it } from 'vitest';
 // one row. Only the transaction that writes the document and its children
 // together can hold this invariant, which is why it belongs in the RPC.
 //
-// UNTIL THAT RPC EXISTS, this suite is the control that exists: it PINS the
+// THE RPC NOW HOLDS IT FOR ITS OWN WRITES -- knowledge_transcript_replace_version
+// writes document, representation and chunks in one transaction and validates
+// cue containment first. It cannot hold it for anyone ELSE’S write path, so
+// this suite remains the control for those: it PINS the
 // files that touch these tables. A new writer changes the set and fails here,
 // so it has to be considered against the invariant rather than discovered
 // afterwards. It does not prove the existing writers are safe -- it proves
 // nobody added one quietly.
 
+// --untracked, because a NEW writer is exactly the thing this is watching for
+// and a new file is untracked until it is staged. Without it the tripwire
+// stayed quiet through the whole commit that introduced the transcript
+// adapter, and would only have fired afterwards.
 const listFiles = (table: string): string[] =>
   execFileSync(
     'git',
-    ['grep', '-l', '--', table, '--', 'lib/**/*.ts', 'app/**/*.ts', 'workers/**/*.ts'],
+    ['grep', '-l', '--untracked', '--', table, '--', 'lib/**/*.ts', 'app/**/*.ts', 'workers/**/*.ts'],
     { encoding: 'utf8' },
   )
     .split('\n')
@@ -54,6 +61,12 @@ const DOCUMENT_TOUCHERS = [
   'lib/infra/knowledge/knowledgeSourceHighlightAdapters.ts',
   'lib/infra/knowledge/knowledgeSourceReferenceWriteAdapters.ts',
   'lib/infra/knowledge/knowledgeTextIngestionAdapters.ts',
+  // ADDED with the transcript adapter, and it is the one writer here that
+  // CANNOT leave a transcript's text disagreeing with its cues: it writes
+  // nothing itself. Every mutation goes through knowledge_transcript_*, which
+  // writes document, representation and chunks in one transaction and
+  // validates cue containment against those chunks before doing so.
+  'lib/infra/knowledge/knowledgeTranscriptAdapters.ts',
   'lib/server/ai/boardAiChatContext.ts',
   'lib/server/knowledge/knowledgeDocumentDeleteSession.ts',
   'lib/server/wiki/boardWikiSourceVersions.ts',
@@ -78,10 +91,11 @@ describe('transcript consistency: the writers that exist', () => {
     expect(listFiles('knowledge_chunks')).toEqual(CHUNK_TOUCHERS);
   });
 
-  it('records that no transcript-aware write path exists yet', () => {
-    // When the RPC lands, this expectation flips and the guard moves into the
-    // transaction. Until then the claim stays honest: the invariant is pinned,
-    // not enforced.
-    expect(DOCUMENT_TOUCHERS).not.toContain('lib/infra/knowledge/knowledgeTranscriptAdapters.ts');
+  it('records that the transcript adapter is the only transcript-aware writer', () => {
+    // The adapter now exists and is pinned. What is still absent is a
+    // transcript-aware guard in any OTHER write path: the RPC protects its own
+    // writes, and nothing stops a different service_role text path rewriting a
+    // transcript's text out from under its cues.
+    expect(DOCUMENT_TOUCHERS).toContain('lib/infra/knowledge/knowledgeTranscriptAdapters.ts');
   });
 });

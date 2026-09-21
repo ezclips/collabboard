@@ -411,8 +411,13 @@ export interface KnowledgeTranscriptImportOutcome {
    * can collect it later, when no request is mid-flight against it.
    */
   readonly supersededCleanupCandidate: string | null;
-  /** The revision now stored. A caller editing on must carry this one next. */
+  /**
+   * The revision and hash NOW STORED. A caller editing on must carry BOTH
+   * into its next write, or that write is refused -- or, worse, matches a
+   * token the database has already moved past.
+   */
   readonly mutationRevision: KnowledgeTranscriptMutationRevision;
+  readonly contentSha256: string;
 }
 
 /**
@@ -777,6 +782,7 @@ export async function importKnowledgeTranscript(
           metadataChanged: [],
           supersededCleanupCandidate: null,
           mutationRevision: loaded.value.mutationRevision,
+          contentSha256: loaded.value.contentSha256,
         });
       }
 
@@ -811,6 +817,8 @@ export async function importKnowledgeTranscript(
           metadataChanged: changed,
           supersededCleanupCandidate: null,
           mutationRevision: updated.value.mutationRevision,
+          // UNCHANGED, and that is the point of this path.
+          contentSha256: loaded.value.contentSha256,
         });
       }
     }
@@ -926,6 +934,7 @@ export async function importKnowledgeTranscript(
   return ok({
     document: written.value.document,
     mutationRevision: written.value.mutationRevision,
+    contentSha256,
     written: true,
     metadataOnly: false,
     metadataChanged: target === null
