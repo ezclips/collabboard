@@ -123,18 +123,20 @@ describe('item 18 prepared SQL', () => {
     expect(adversarial).toContain("'ALL PASS -- 5 of 5'");
   });
 
-  // CHANGED DELIBERATELY. This asserted 'has not been executed', which stopped
-  // being true on 2026-09-21: the SQL ran on an isolated local stack. The test
-  // still exists for the same reason -- these files must state their execution
-  // status truthfully -- but the truthful status is now narrower than 'never
-  // ran', and a stale 'UNVERIFIED' would understate what is known and overstate
-  // what is safe.
-  it('states an execution status that is current, and not yet a clean one', () => {
+  // CHANGED TWICE, BOTH TIMES DELIBERATELY. It first asserted 'has not been
+  // executed'; then, after the shimmed run, that no clean run had happened.
+  // Both stopped being true. The test survives because the requirement never
+  // changed: these files must state their execution status, and it must be the
+  // CURRENT one. A stale line understates what is known; a generous one
+  // overstates what is safe -- and the second error is the one that ends with
+  // SQL applied to a database nobody verified it against.
+  it('states a current execution status that stops short of hosted', () => {
     for (const [name, sql] of [['adversarial', adversarial], ['migration', migration]] as const) {
       expect(sql, `${name} must carry a dated status`).toContain('STATUS 2026-09-21');
-      expect(sql, `${name} must say it ran only in isolation`).toContain('isolated LOCAL stack');
-      expect(sql, `${name} must not claim hosted application`).toContain('NEVER been applied to hosted');
-      expect(sql, `${name} must not claim a clean run`).toMatch(/NOT been re-run|NOT been re-run clean/);
+      expect(sql, `${name} must name where it ran`).toContain('isolated LOCAL stack');
+      expect(sql, `${name} must record the clean run commit`).toContain('571b19b6');
+      expect(sql, `${name} must not claim hosted application`).toContain('NEVER applied to hosted');
+      expect(sql, `${name} must not claim a hosted run`).toContain('NOT yet run against the hosted database');
     }
   });
 });

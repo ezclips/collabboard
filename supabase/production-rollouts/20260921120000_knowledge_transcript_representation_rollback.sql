@@ -8,6 +8,12 @@
 --
 -- So: roll back only if the importer has not yet run in this environment.
 -- Check first, and stop if anything is populated.
+--
+-- STATUS 2026-09-21: VERIFIED on an isolated LOCAL stack -- clean run, no
+-- shims, at 571b19b6, against a pre-state matching the hosted ACL. An earlier
+-- shimmed run found five defects in this rollout's SQL; all are fixed and the
+-- clean run is green. NOT yet run against the hosted database.
+-- NEVER applied to hosted. See .agent/isolated-sql-verification.md.
 
 DO $$
 BEGIN

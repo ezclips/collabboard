@@ -1,11 +1,21 @@
-# Isolated SQL verification — run of 2026-09-21
+# Isolated SQL verification — 2026-09-21
 
-The first execution of the transcript rollout SQL anywhere. Run by the PM on a
-**disposable local Supabase stack** (`collabboard-verify`, ports 56321/56322),
-built from the baseline snapshot plus all 43 migrations through
-`20260920120000`, with the pre-state confirmed to match hosted exactly.
+The first execution of the transcript rollout SQL anywhere, in **two runs** on
+a **disposable local Supabase stack** (`collabboard-verify`, ports
+56321/56322), built from the baseline snapshot plus all 43 migrations through
+`20260920120000`, with the pre-state confirmed to match the hosted ACL exactly.
+Both were run by the PM.
 
-**No hosted contact.** Nothing in this run touched the hosted project. Full
+| Run | Against | Outcome |
+|---|---|---|
+| **1 — shimmed** | the SQL as committed at `9b356a4d` | **five defects**, each shimmed past to reach the next |
+| **2 — clean** | the fixed SQL at `571b19b6`, fresh stack, **no shims** | **fully green** |
+
+Run 2 is what verifies anything. Run 1 is kept because what it found — and how
+one of its defects hid inside the harness built to catch that very kind of
+defect — is the part a later reader needs.
+
+**No hosted contact** in either run. Full
 log: `C:\Windows\TEMP\opencode\cb-verify\run-log.txt` (outside the repo).
 
 ## Why a local stack, and what it does not settle
@@ -14,13 +24,17 @@ A local stack builds its schema from migrations, so its pre-state is
 *constructed*. A hosted branch clones the **real** ACL. Item 18's whole premise
 is "is the real ACL a supported pre-state?", and only a branch answers that.
 
-What the local run does settle is everything mechanical — whether the SQL
-applies, repeat-applies, refuses the states it should refuse, rolls back, and
-restores — and it settled it with unlimited retries at no cost. The hosted
-branch is still required, and now runs once against a sequence already known to
-work, instead of spending branch hours discovering syntax errors.
+What the local runs settle is everything mechanical — whether the SQL applies,
+repeat-applies, refuses the states it should refuse, rolls back, and restores —
+and they settled it with unlimited retries at no cost. **That is now done.**
 
-## Five defects, all in the prepared SQL, none in the application code
+The hosted branch is still required, and it now runs **once**, against a
+sequence already known to work, to answer the one question a local stack
+cannot: whether the REAL ACL is a supported pre-state. It is not spending
+branch hours discovering syntax errors — which is precisely what run 1 would
+have been.
+
+## Run 1 — five defects, all in the prepared SQL, none in the application code
 
 The run was shimmed in `%TEMP%\cb-verify` to get past each defect; **repo files
 were never edited during the run.** All five are fixed in the commit that
@@ -73,29 +87,65 @@ in `knowledgeItem18Sql.source.test.ts` pin this, including one that checks each
 pinned message is text the classifier still raises — a pin naming a vanished
 message would fail every case instead of passing them.
 
-## Verified green, with the shims
+## Run 2 — the clean run, fully green
 
-- Transcript rollout: apply + verify
-- Item 17: apply → verify → repeat-apply → verify
-- Item 18 adversarial: **ALL PASS -- 5 of 5**, with correct reasons
-- Item 18: apply → verify → repeat-apply → verify
-- Revision column: apply + verify
-- RPCs: apply + verifier **ALL PASS -- 8 of 8** (initial revision, stale
-  conflict, content advance, metadata-only advance, failure restore,
-  post-delete restore, astral rebuild)
-- All four rollbacks
-- Restoration matching the recorded pre-state **exactly**: 21-column UPDATE
-  allowlist including `content_sha256`, table-wide INSERT restored for `anon`
-  and `authenticated`, revision column and RPCs dropped, zero test rows left
+Fresh stack, rebuilt from the baseline snapshot plus all 43 migrations through
+`20260920120000`, pre-state again matching the hosted ACL exactly, then the
+fixed files at `571b19b6`. **No shims.**
+
+| Step | Result |
+|---|---|
+| Transcript representation apply + verify | `transcript_representation verify: ok` |
+| Item 17 apply → verify → repeat-apply → verify | `hash permission verify: ok`; repeat correctly no-op'd |
+| **Item 18 adversarial** | **`ALL PASS -- 5 of 5`** |
+| Item 18 apply → verify → repeat-apply → verify | `insert permission verify: ok`; repeat correctly no-op'd |
+| Revision column apply + verify | `transcript mutation revision verify: ok` |
+| **Transcript RPCs apply + verify** | **`ALL PASS -- 8 of 8`** |
+| Rollbacks ×4 (RPCs → revision → item 18 → item 17) | all exit 0 |
+| Restoration | UPDATE set == pre-state `True`; table-wide INSERT restored; `content_sha256` client-writable again; revision column and RPCs gone; zero test rows |
+
+**Record the two harness verdicts separately, each against its own
+denominator.** A short count reads `*** INCOMPLETE`, never `ALL PASS`, and
+combining the totals under one label would let a short adversarial run hide
+behind the verifier's count.
 
 `transcript_representation` remains after rollback **by design** — that rollout
 has no rollback file.
 
+### The adversarial result means something now, and did not before
+
+Run 1 also reported `ALL PASS -- 5 of 5`, and it was worthless: cases 1-3 were
+passing on the classifier's own `malformed array literal` fault, because any
+error counted as a refusal. In run 2 each refusal is reported as **"refused as
+intended: `<the specific check>`"** — the shape is refused by the check written
+to catch that shape, and a fault or the wrong check now fails the case.
+
+The two runs print the same line. Only the second one is evidence.
+
+## Environment note — not a repo defect
+
+The local storage-api creates `storage.objects` policies under **different
+names** than the hosted database, so the six expected policy names had to be
+created locally before `20260916160000_narrow_storage_write_policies.sql` could
+apply.
+
+This is a property of the local stack, not of the rollout, and it is the one
+place where local and hosted are known to differ in a way that mattered.
+**Nothing was changed in that migration**, and the hosted branch will carry the
+real policies. Worth remembering as the kind of gap a local stack can hide:
+everything here passed *around* a difference that hosted will present for real.
+
 ## Status
 
-This run used shims, so it is **not** a clean verification. Standing until a
-clean re-run: the SQL is unverified.
+**Locally verified, clean, at `571b19b6`. Not applied to hosted.**
 
-Next: re-run the full sequence with **no shims** on a fresh local stack, then
-the hosted branch for the real-ACL pre-state. The branch price decision belongs
-to the human. Hosted applies stay with the authorized operator.
+What remains, and what each step answers:
+
+1. **Hosted branch** — the real-ACL pre-state, the one question local cannot
+   answer. The price decision belongs to the human (Project → Branches).
+2. **Hosted rollout** by the authorized operator.
+3. **Live end-to-end acceptance**, including a person checking a known
+   timestamp.
+
+The local `collabboard-verify` stack is disposable:
+`supabase stop --project-id collabboard-verify --no-backup`.

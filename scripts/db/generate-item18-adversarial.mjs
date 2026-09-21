@@ -212,12 +212,19 @@ const header = `-- ADVERSARIAL CHECKS for item 18's state classifier. PLAIN SQL 
 -- PASS CRITERION: five rows, every outcome PASS, and the final verdict row
 -- reading ALL PASS.
 --
--- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY. That run
--- reported ALL PASS -- 5 of 5, and the result was WORTHLESS: the classifier
--- carried a malformed-array-literal fault, and cases 1-3 counted that fault
--- as a refusal. A classifier that could not run at all read as adversarially
--- sound. Both are fixed -- the fault, and the verdict that excused it -- but
--- this file has NOT been re-run since, and has NEVER been applied to hosted.
+-- STATUS 2026-09-21: VERIFIED on an isolated LOCAL stack -- clean run, no
+-- shims, at 571b19b6. ALL PASS -- 5 of 5, each case reporting "refused as
+-- intended: <the specific check>".
+--
+-- AN EARLIER RUN PRINTED THE SAME ALL PASS LINE AND MEANT NOTHING BY IT. The
+-- classifier then carried a malformed-array-literal fault, and cases 1-3
+-- counted that fault as a refusal, so a classifier that could not run at all
+-- read as adversarially sound. Both were fixed: the fault, and the verdict
+-- that excused it. The verdict is why the second run is evidence and the
+-- first was not -- a reject case now demands SQLSTATE P0001 AND the message
+-- of the check written for that shape.
+--
+-- NOT yet run against the hosted database, and NEVER applied to hosted.
 -- See .agent/isolated-sql-verification.md.
 
 CREATE TEMP TABLE item18_adversarial_result (

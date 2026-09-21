@@ -27,6 +27,12 @@
 -- column and in the parser_* columns that already exist. Adding a kind would
 -- force every consumer that switches on kind to grow a branch that behaves
 -- identically to the one beside it.
+--
+-- STATUS 2026-09-21: VERIFIED on an isolated LOCAL stack -- clean run, no
+-- shims, at 571b19b6, against a pre-state matching the hosted ACL. An earlier
+-- shimmed run found five defects in this rollout's SQL; all are fixed and the
+-- clean run is green. NOT yet run against the hosted database.
+-- NEVER applied to hosted. See .agent/isolated-sql-verification.md.
 
 ALTER TABLE public.knowledge_documents
     ADD COLUMN IF NOT EXISTS transcript_representation jsonb;

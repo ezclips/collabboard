@@ -8,10 +8,11 @@
 -- behavioural control that returned quietly would let the script print its
 -- final ok having exercised nothing.
 --
--- STATUS 2026-09-21: executed on an isolated LOCAL stack ONLY, in a shimmed
--- run that found five defects in this rollout's SQL -- all now fixed. It has
--- NOT been re-run clean, and has NEVER been applied to hosted. See
--- .agent/isolated-sql-verification.md.
+-- STATUS 2026-09-21: VERIFIED on an isolated LOCAL stack -- clean run, no
+-- shims, at 571b19b6, against a pre-state matching the hosted ACL. An earlier
+-- shimmed run found five defects in this rollout's SQL; all are fixed and the
+-- clean run is green. NOT yet run against the hosted database.
+-- NEVER applied to hosted. See .agent/isolated-sql-verification.md.
 
 DO $revisionprivs$
 DECLARE

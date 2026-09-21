@@ -68,6 +68,12 @@
 -- this migration, whose contract is to remove content_sha256 and preserve the
 -- rest EXACTLY; narrowing it silently would break restoration matching. It is
 -- recorded as followups item 20.
+--
+-- STATUS 2026-09-21: VERIFIED on an isolated LOCAL stack -- clean run, no
+-- shims, at 571b19b6, against a pre-state matching the hosted ACL. An earlier
+-- shimmed run found five defects in this rollout's SQL; all are fixed and the
+-- clean run is green. NOT yet run against the hosted database.
+-- NEVER applied to hosted. See .agent/isolated-sql-verification.md.
 
 DO $item17$
 DECLARE
