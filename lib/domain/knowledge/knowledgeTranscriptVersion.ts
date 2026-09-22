@@ -23,6 +23,7 @@
  * identically; changed timing or a changed video association does not.
  */
 import type { KnowledgeTranscriptPlacedCue } from './knowledgeTranscriptDocument';
+import type { KnowledgeTranscriptFormat } from './knowledgeTranscriptCues';
 
 /**
  * The layout version, INSIDE the hashed bytes.
@@ -116,7 +117,19 @@ export interface KnowledgeTranscriptStoredRepresentation {
   /** Recorded as provenance, never inferred from the text. `null` means unknown. */
   readonly language: string | null;
   readonly trackKind: 'human' | 'machine' | 'unknown';
-  readonly format: 'srt' | 'vtt' | 'plain';
+  /**
+   * Which parser produced these cues. The domain FOLLOWS
+   * `KnowledgeTranscriptFormat`, so one union describes the concept rather than
+   * two drifting apart.
+   *
+   * WIDENING THIS DOMAIN DOES NOT CHANGE THE REPRESENTATION VERSION. The
+   * representation's SHAPE is unchanged -- only the value domain of an existing
+   * field grows -- and `format` is NOT part of the hashed bytes
+   * (`knowledgeTranscriptVersionBytes` covers canonical text, cues and video
+   * identity). So every stored row stays valid and readable, and no
+   * `representationVersion` bump is warranted or given.
+   */
+  readonly format: KnowledgeTranscriptFormat;
   /** The association is the user's claim. Nothing here verifies it. */
   readonly videoAssociation: 'claimed' | 'none';
 }
@@ -126,7 +139,7 @@ export function knowledgeTranscriptStoredRepresentation(input: {
   readonly videoIdentity: string | null;
   readonly language: string | null;
   readonly trackKind: 'human' | 'machine' | 'unknown';
-  readonly format: 'srt' | 'vtt' | 'plain';
+  readonly format: KnowledgeTranscriptFormat;
 }): KnowledgeTranscriptStoredRepresentation {
   return {
     representationVersion: KNOWLEDGE_TRANSCRIPT_REPRESENTATION_VERSION,

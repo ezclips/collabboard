@@ -28,8 +28,9 @@
  */
 import { domainError, type DomainError } from '../core/errors';
 import { err, ok, type Result } from '../core/result';
+import { parseYouTubeTranscriptPanel } from './knowledgeTranscriptPanelPaste';
 
-export type KnowledgeTranscriptFormat = 'srt' | 'vtt' | 'plain';
+export type KnowledgeTranscriptFormat = 'srt' | 'vtt' | 'plain' | 'youtube-panel';
 
 export interface KnowledgeTranscriptCue {
   /** Position in the file, from 0. Not the cue's own numbering, which may lie. */
@@ -68,6 +69,15 @@ export interface KnowledgeTranscriptParse {
   readonly cues: readonly KnowledgeTranscriptCue[];
   /** Declared by the file, when the format carries it. Never guessed from the text. */
   readonly declaredLanguage: string | null;
+  /**
+   * True when cue END times were DERIVED rather than declared by the source.
+   *
+   * OPTIONAL and `true`-only: absent already means "the source declared them",
+   * and a second way to say it is a second thing to keep in step. SRT and VTT
+   * declare both times; YouTube's panel declares only starts, and a citation's
+   * range must not claim a precision the source never gave it.
+   */
+  readonly endsAreDerived?: true;
 }
 
 /**
@@ -96,6 +106,11 @@ export function parseKnowledgeTranscript(
     // the caller must not present one.
     return ok({ format, cues: [], declaredLanguage: null });
   }
+
+  // The panel format is line-based, not block-based: its cues have no blank
+  // lines between them, so this file's block splitter cannot see them at all.
+  // It lives in its own module and is delegated to here.
+  if (format === 'youtube-panel') return parseYouTubeTranscriptPanel(source);
 
   const text = source.replace(/^﻿/, '');
   let declaredLanguage: string | null = null;

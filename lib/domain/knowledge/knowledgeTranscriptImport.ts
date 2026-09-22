@@ -478,12 +478,14 @@ const MIME_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
   srt: 'application/x-subrip',
   vtt: 'text/vtt',
   plain: 'text/plain',
+  'youtube-panel': 'text/plain',
 };
 
 const EXTENSION_BY_FORMAT: Record<KnowledgeTranscriptFormat, string> = {
   srt: '.srt',
   vtt: '.vtt',
   plain: '.txt',
+  'youtube-panel': '.txt',
 };
 
 /**
