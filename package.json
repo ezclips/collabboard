@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "check:schema": "node scripts/db/check-live-schema.mjs",
     "check:boundaries": "eslint --no-warn-ignored --no-inline-config -c eslint.boundaries.config.mjs \"components/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"lib/domain/**/*.ts\"",
     "dev": "next dev",
     "build:fork": "node scripts/build-excalidraw-fork.mjs",
