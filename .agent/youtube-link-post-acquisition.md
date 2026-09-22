@@ -206,3 +206,76 @@ pasted link, including the many that are pasted and never read, and it makes the
   requirements, independent of which acquisition is chosen. W7 in particular —
   URL change and deletion — needs a written rule before any acquisition ships,
   because it is what stops a post citing a previous video's transcript.
+
+---
+
+## 7. Option 2 measured, and it does not work — 2026-09-22
+
+The owner chose Option 2. Before building it, the assumption it rests on was
+tested, because §6 listed it as the one cheap experiment that could change the
+recommendation. **It changed it, in the other direction.**
+
+Measured from a real page at `http://localhost:3000` in the authenticated
+Chromium over CDP 9333, against `dQw4w9WgXcQ` (6 caption tracks, confirmed
+present).
+
+### 7.1 What a browser may call, and what it returns
+
+| Endpoint | CORS | Result |
+|---|---|---|
+| `youtube.com/watch` | **no `Access-Control-Allow-Origin` header at all** | `TypeError: Failed to fetch` |
+| `youtubei/v1/player` | **preflight `OPTIONS` → HTTP 403** | `TypeError: Failed to fetch` |
+| `api/timedtext` | **`Access-Control-Allow-Origin: http://localhost:3000`** (echoed, with `Allow-Credentials: true`) | HTTP **200, 0 bytes** |
+
+**The only endpoint that permits cross-origin access is the one that returns
+nothing.** Both endpoints that can enumerate caption tracks refuse the browser
+outright — one by omitting the header, one by rejecting the preflight.
+
+A `no-cors` request to the watch page returns an **opaque** response
+(`type: "opaque"`, `status: 0`), which proves the network path is fine and the
+refusal is CORS specifically — and an opaque body is unreadable by construction,
+so it is not a workaround.
+
+### 7.2 The empty 200 is not a CORS artifact
+
+A **real, freshly extracted, signed** caption URL was tested — pulled from the
+watch page on this machine's own residential IP, carrying
+`ip, expire, signature, sparams, key` — and requested two ways:
+
+- from the browser page, cross-origin: **200, 0 bytes**
+- from `curl` on the **same machine and same IP that obtained it**: **200, 0 bytes**
+
+So the empty body is not caused by CORS, by the origin, or by an IP mismatch
+against the URL's own `ip` parameter. `timedtext` returns a silent empty 200 to a
+correctly signed request from the IP it was signed for. This independently
+reproduces Stage 3a's path-B finding — *"can discover tracks but cannot fetch
+text, and fails as a silent HTTP 200"* — and shows it now holds even with a valid
+signature.
+
+### 7.3 Why Option 2 cannot be built
+
+The client-side chain needs two steps: **enumerate the caption tracks**, then
+**fetch one**. Step 1 is refused by the browser at both available endpoints. Even
+granting step 2 a working URL, step 1 has no path — and step 2 returns nothing
+anyway. There is no ordering of these that succeeds.
+
+**This is not a limitation we can engineer around from a page context.** It is
+not a missing header we can add, a proxy we can configure, or a parameter we
+have not found: one endpoint refuses the origin, the other refuses the
+preflight, and the permitted one is empty.
+
+### 7.4 What this does and does not prove
+
+- It **does** establish that our own JavaScript, in the user's browser, cannot
+  acquire a YouTube transcript for a Link post. Option 2 is closed.
+- It **does not** establish that the paid-service route fails; vendors operate
+  outside a browser origin and are unaffected by every measurement here.
+- It **does not** contradict Stage 3a's path C, which used a non-browser client
+  and is subject to §4.2's cloud-IP block rather than to CORS.
+- The `timedtext` empty 200 is measured, not explained. The likely cause is an
+  additional attestation parameter now required alongside the signature, but that
+  was **not** confirmed and should not be repeated as fact.
+
+**Consequence: the choice collapses to the paid caption service (Option 1) or
+staying with paste-a-transcript.** Both remaining options are the owner's
+decision, and Option 1 still carries the §4.3 transfer question unanswered.
