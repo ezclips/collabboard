@@ -282,3 +282,86 @@ preflight, and the permitted one is empty.
 **Consequence: the choice collapses to the paid caption service (Option 1) or
 staying with paste-a-transcript.** Both remaining options are the owner's
 decision, and Option 1 still carries the §4.3 transfer question unanswered.
+
+---
+
+## 8. Owner decision: no scraping, direct or purchased — 2026-09-22
+
+**The owner has ruled out obtaining YouTube captions by scraping**, citing legal
+exposure. This closes BOTH remaining options from §5, and the second one is the
+part worth stating plainly:
+
+- **Option 1 (paid caption service) is closed too.** §4.3 recorded that a vendor
+  has no authorized route either — it has proxy infrastructure and a contract
+  with us. Buying the capability transfers the activity; it does not change what
+  the activity is. With scraping declined as a category, a vendor performing it
+  on our behalf is declined with it. The §4.3 question is now answered.
+- **Option 2 was already closed by measurement** (§7).
+
+**PATCH-155 (YouTube caption acquisition) is therefore cancelled, not deferred.**
+Nothing further should be spent evaluating acquisition mechanisms.
+
+### 8.1 Heptabase does not give us a path, and the reason is architectural
+
+Heptabase was raised as a model to follow. It imports YouTube captions with one
+click, and notably does **not** meter that against its transcription quota —
+which is itself the tell: caption import costs them nothing because no
+speech-to-text runs. It is an acquisition, not a transcription.
+
+**Heptabase is a desktop application.** The request therefore originates on the
+user's own machine, from the user's own IP. That is why neither constraint we
+measured applies to them: no CORS, because it is not a browser page bound by an
+origin, and no datacenter IP block, because no datacenter is involved.
+
+So "do what Heptabase does" means one of:
+- ship a desktop client, or
+- ship a browser extension,
+
+and **in both cases it is the same acquisition the owner has just declined**,
+performed from the user's device instead of ours. Relocating it does not change
+its nature. The model is not available to us on the YouTube side, and following
+it would contradict the decision in §8.
+
+**What Heptabase does that IS clean and IS available to us** is its other path:
+metered speech-to-text over media the user supplies. That is exactly the
+capability PATCH-154 was built to evaluate, and it is unaffected by this
+decision.
+
+### 8.2 What remains, and it is more than it looks
+
+**A person reading a transcript in YouTube's own interface and copying it is not
+scraping.** It is a human using the product as designed. That path stays open and
+needs no vendor, no proxy and no undocumented endpoint.
+
+The reason this matters more than it first appears: Stage 3a recorded that
+paste-a-transcript costs us timestamp citations, because *"pasted transcripts
+usually carry no timings"* — which makes W4 unsatisfiable. But that was written
+about transcripts pasted from arbitrary sources. **YouTube's own transcript panel
+displays a timestamp against every line.** If a paste taken from that panel
+carries its timestamps, the cost Stage 3a recorded is not a cost here, and W4
+survives without any acquisition.
+
+**NOT YET VERIFIED, and it must be before anything is built on it:** the exact
+text a copy from that panel produces. An attempt to read the panel through the
+persistent browser confirmed the control exists but did not render the segments
+(the button carries a localised label on this machine). **The claim above is a
+design premise, not a measurement.** Confirming it costs one manual copy-paste
+and should happen before the parser is specified, not after.
+
+### 8.3 Direction
+
+1. **Keep the video card** exactly as it is (W3).
+2. **Add a transcript by paste**, with a parser for the timestamped format
+   YouTube's panel produces — pending §8.2's verification. If the timestamps
+   survive the paste, W2 and W4 are both satisfied with no acquisition at all.
+3. **Uploaded media → speech-to-text**, which is now the primary AUTOMATED
+   capability rather than a fallback behind captions. PATCH-154 continues
+   unchanged and becomes more important, not less.
+4. **W7 still applies** to pasted transcripts. A Link post whose URL changes must
+   not keep a transcript belonging to the previous video, however that transcript
+   arrived. Nothing about this decision relaxes it.
+
+**The honest cost: there is no one-click YouTube import.** The user copies and
+pastes, once per video. That is the price of the decision, it is a real
+reduction in convenience against Heptabase, and it should be stated to users
+rather than hidden behind a spinner that sometimes fails.
