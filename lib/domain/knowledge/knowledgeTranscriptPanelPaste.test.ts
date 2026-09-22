@@ -371,3 +371,65 @@ describe('a caption FILE pasted as a panel copy is refused, not half-read', () =
     expect(result.ok && result.value.cues[0].text).toBe('Well -- as I was saying -> the point is this');
   });
 });
+
+describe('the REAL clipboard shape, measured at last', () => {
+  /**
+   * SETTLED 2026-09-22, BY A REAL PASTE FROM A REAL VIDEO.
+   *
+   * Everything before this was measured from the panel's RENDERED text, which
+   * §9 of the acquisition note was careful to call a proxy for -- not proof of
+   * -- what the clipboard receives. The open question was whether the
+   * accessibility label ("8 seconds") survives a copy.
+   *
+   * IT DOES NOT. What the clipboard actually carries is the timestamp on its
+   * own line and the text on the next, with no label between them:
+   *
+   *     0:58
+   *     of the
+   *     0:59
+   *     bumper at all it can be stay
+   *
+   * So the parser accepting BOTH shapes was the right call and needs no change
+   * now that one of them is confirmed -- which was the stated test of that
+   * decision: "the parser must not need changing if it is the other one."
+   *
+   * The words below are re-typed from the owner's own screen rather than
+   * copied from YouTube, and are kept short deliberately: committing
+   * third-party transcript text is the scraping question in different clothes.
+   */
+  const REAL_PASTE = [
+    '0:55', "you don't have to remove the other side",
+    '0:58', 'of the',
+    '0:59', 'bumper at all it can be stay',
+    '1:02', "fixed there it's a little bit faster",
+  ].join('\n');
+
+  it('parses the timestamp-then-text pairs with no accessibility label', () => {
+    const result = parseKnowledgeTranscript(REAL_PASTE, 'youtube-panel');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cues.map((cue) => [cue.startMs, cue.text])).toEqual([
+      [55_000, "you don't have to remove the other side"],
+      [58_000, 'of the'],
+      [59_000, 'bumper at all it can be stay'],
+      [62_000, "fixed there it's a little bit faster"],
+    ]);
+  });
+
+  it('chains each end to the next start, and gives the last one the median', () => {
+    const result = parseKnowledgeTranscript(REAL_PASTE, 'youtube-panel');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const cues = result.value.cues;
+    expect(cues.map((cue) => cue.endMs)).toEqual([58_000, 59_000, 62_000, 65_000]);
+    // 3s, 1s, 3s -> median 3s. Data from this transcript, not a constant.
+    expect(cues[3].endMs - cues[3].startMs).toBe(3_000);
+    expect(result.value.endsAreDerived).toBe(true);
+  });
+
+  it('is NOT refused by the density rule -- 4 cues across 7 seconds', () => {
+    // The positive control, now with real data: a short genuine excerpt must
+    // pass, or the summary rule is just refusing everything.
+    expect(parseKnowledgeTranscript(REAL_PASTE, 'youtube-panel').ok).toBe(true);
+  });
+});

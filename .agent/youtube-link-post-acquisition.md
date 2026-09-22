@@ -427,3 +427,36 @@ degrade every citation built on it.
 
 Summaries may still be useful, but as DERIVED content that is labelled as such
 and never cited as source.
+
+## 10. §9's open question is CLOSED: the accessibility label does not survive a copy — 2026-09-22
+
+Measured from a real paste, by the owner, from a real video
+(`sAKVRgN11Po`, an Audi A2 bumper removal) into the import panel.
+
+§9 was careful to say that the triple it recorded was the panel's **rendered**
+text, "a proxy for -- not proof of -- what the clipboard receives", and named
+the unknown: whether the `N seconds` accessibility line survives a copy.
+
+**It does not.** What the clipboard actually carries is a pair per cue:
+
+```
+0:58
+of the
+0:59
+bumper at all it can be stay
+```
+
+The timestamp on its own line, the text on the next, and nothing between them.
+
+**The parser needed no change**, which was the explicit test that decision was
+set for it: PATCH-156 said accepting both shapes was worth it only if "the
+parser must not need changing if it is the other one." A bare timestamp opens a
+cue and the following non-timestamp lines become its text, so the real shape
+parses on the path that was already there. The accessibility-label branch stays:
+it costs one regex, it is what the rendered panel shows, and a future YouTube
+build or a different copy path may yet produce it.
+
+It is pinned by tests in `knowledgeTranscriptPanelPaste.test.ts` under *the REAL
+clipboard shape, measured at last*. The fixture words are re-typed from a
+screenshot rather than copied, and kept to four cues: committing third-party
+transcript text is the scraping question wearing different clothes.

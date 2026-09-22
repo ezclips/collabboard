@@ -68,6 +68,11 @@ export interface KnowledgeTranscriptImportPanelProps {
   readonly initialFormat?: KnowledgeTranscriptFormat;
 }
 
+/** One label and one control style, so no two fields can drift apart. */
+const labelClass = 'mb-1 block text-xs font-medium text-gray-700';
+const controlClass =
+  'block w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500';
+
 type Status =
   | { kind: 'idle' }
   | { kind: 'saving' }
@@ -174,84 +179,152 @@ export function KnowledgeTranscriptImportPanel({
   );
 
   return (
-    <form onSubmit={submit} aria-label="Import a transcript">
-      <label htmlFor="transcript-title">Name</label>
-      <input
-        id="transcript-title"
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-        required
-      />
+    /**
+     * STYLING ADDED 2026-09-22, AFTER IT WAS SEEN FOR THE FIRST TIME.
+     *
+     * This form carried no classes at all -- every label ran inline with its
+     * own control, so the panel read as one run-on paragraph with boxes in it.
+     * It was not a regression: the component shipped in Stage 3b, was mounted
+     * NOWHERE until PATCH-156 Part B, and so had never been rendered for
+     * anybody to look at. Unreachable code is untested code in every sense,
+     * including this one.
+     *
+     * Presentation only below. Every id, handler, validation rule and piece of
+     * state is exactly as it was -- the ids in particular are load-bearing:
+     * the dialog's clipboard button finds the textarea by `transcript-payload`.
+     */
+    <form onSubmit={submit} aria-label="Import a transcript" className="space-y-3">
+      <div>
+        <label htmlFor="transcript-title" className={labelClass}>
+          Name
+        </label>
+        <input
+          id="transcript-title"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          required
+          className={controlClass}
+        />
+      </div>
 
-      <label htmlFor="transcript-format">Format</label>
-      <select
-        id="transcript-format"
-        value={format}
-        onChange={(event) => setFormat(event.target.value as KnowledgeTranscriptFormat)}
-        required
-      >
-        <option value="">Choose the format you pasted…</option>
-        {FORMAT_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <div>
+        <label htmlFor="transcript-format" className={labelClass}>
+          Format
+        </label>
+        <select
+          id="transcript-format"
+          value={format}
+          onChange={(event) => setFormat(event.target.value as KnowledgeTranscriptFormat)}
+          required
+          className={controlClass}
+        >
+          <option value="">Choose the format you pasted…</option>
+          {FORMAT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <label htmlFor="transcript-track-kind">Track</label>
-      <select
-        id="transcript-track-kind"
-        value={trackKind}
-        onChange={(event) =>
-          setTrackKind(event.target.value as 'human' | 'machine' | 'unknown')
-        }
-      >
-        {/* 'unknown' is the honest default: nothing here can tell. */}
-        <option value="unknown">Not known</option>
-        <option value="human">Written by a person</option>
-        <option value="machine">Machine generated</option>
-      </select>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor="transcript-track-kind" className={labelClass}>
+            Track
+          </label>
+          <select
+            id="transcript-track-kind"
+            value={trackKind}
+            onChange={(event) =>
+              setTrackKind(event.target.value as 'human' | 'machine' | 'unknown')
+            }
+            className={controlClass}
+          >
+            {/* 'unknown' is the honest default: nothing here can tell. */}
+            <option value="unknown">Not known</option>
+            <option value="human">Written by a person</option>
+            <option value="machine">Machine generated</option>
+          </select>
+        </div>
 
-      <label htmlFor="transcript-language">Language (optional)</label>
-      <input
-        id="transcript-language"
-        value={language}
-        onChange={(event) => setLanguage(event.target.value)}
-        placeholder="e.g. en"
-      />
+        <div>
+          <label htmlFor="transcript-language" className={labelClass}>
+            Language <span className="font-normal text-gray-400">(optional)</span>
+          </label>
+          <input
+            id="transcript-language"
+            value={language}
+            onChange={(event) => setLanguage(event.target.value)}
+            placeholder="e.g. en"
+            className={controlClass}
+          />
+        </div>
+      </div>
 
-      <label htmlFor="transcript-video">Video this describes (optional)</label>
-      <input
-        id="transcript-video"
-        value={videoIdentity}
-        onChange={(event) => setVideoIdentity(event.target.value)}
-        placeholder="e.g. yt:dQw4w9WgXcQ"
-      />
-      <p>
-        Recorded as your claim. Nothing here checks it against the video — open a
-        timestamp and read along to confirm it.
-      </p>
+      <div>
+        <label htmlFor="transcript-video" className={labelClass}>
+          Video this describes <span className="font-normal text-gray-400">(optional)</span>
+        </label>
+        <input
+          id="transcript-video"
+          value={videoIdentity}
+          onChange={(event) => setVideoIdentity(event.target.value)}
+          placeholder="e.g. yt:dQw4w9WgXcQ"
+          className={`${controlClass} font-mono`}
+        />
+        <p className="mt-1 text-[11px] leading-snug text-gray-500">
+          Recorded as your claim. Nothing here checks it against the video — open a
+          timestamp and read along to confirm it.
+        </p>
+      </div>
 
-      <label htmlFor="transcript-payload">Transcript</label>
-      <textarea
-        id="transcript-payload"
-        value={payload}
-        onChange={(event) => setPayload(event.target.value)}
-        required
-        rows={12}
-      />
+      <div>
+        <label htmlFor="transcript-payload" className={labelClass}>
+          Transcript
+        </label>
+        <textarea
+          id="transcript-payload"
+          value={payload}
+          onChange={(event) => setPayload(event.target.value)}
+          required
+          rows={12}
+          placeholder="Paste the transcript here…"
+          // Monospace and pre-wrap: this is a timestamped list, and reading it
+          // back to check a paste worked is most of what this box is for.
+          className={`${controlClass} min-h-[12rem] resize-y whitespace-pre-wrap font-mono text-[11px] leading-relaxed`}
+        />
+      </div>
 
-      <button type="submit" disabled={status.kind === 'saving' || format === ''}>
-        {version === null ? 'Import transcript' : 'Save new version'}
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={status.kind === 'saving' || format === ''}
+          className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+        >
+          {status.kind === 'saving'
+            ? 'Saving…'
+            : version === null
+              ? 'Import transcript'
+              : 'Save new version'}
+        </button>
+        {format === '' ? (
+          // Says WHY the button is dead. A disabled control with no
+          // explanation is the same dead end the menu item had.
+          <span className="text-[11px] text-gray-500">Choose the format first.</span>
+        ) : null}
+      </div>
 
-      {status.kind === 'saved' ? <p role="status">{status.message}</p> : null}
+      {status.kind === 'saved' ? (
+        <p role="status" className="rounded bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800">
+          {status.message}
+        </p>
+      ) : null}
 
       {status.kind === 'error' ? (
-        <div role="alert">
+        <div role="alert" className="rounded bg-red-50 px-3 py-2 text-[11px] text-red-800">
           <p>{status.message}</p>
           {status.refreshRequired ? (
-            <p>
+            <p className="mt-1">
               {status.safeToRetry
                 ? 'Reload this transcript to see the current version, then apply your change again.'
                 : 'Reload this transcript before editing it again. Do not resend this change.'}
