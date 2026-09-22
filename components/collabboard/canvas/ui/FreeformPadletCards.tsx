@@ -561,26 +561,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   } | null>(null);
 
   /**
-   * Start a transcript for one media post: open the video, open the paste box.
+   * Start a transcript for one media post: open the paste box, and NOTHING
+   * ELSE.
    *
-   * THE TAB IS OPENED HERE, INSIDE THE CLICK HANDLER, and not from an effect
-   * inside the dialog. `window.open` is only honoured during a real user
-   * gesture; called a tick later from a mounted effect it is silently swallowed
-   * by the popup blocker, and the person is left looking at a dialog that told
-   * them to go and copy something from a tab that never opened.
+   * THE VIDEO IS NO LONGER OPENED HERE, and the reason is what the owner saw:
+   * choosing the menu item opened the YouTube tab immediately, which TOOK
+   * FOCUS, so the instructions explaining what to do there were behind it. They
+   * only found them after coming back to the board -- by which point they had
+   * already been on YouTube not knowing what they were looking for.
+   *
+   * Opening a tab is not the expensive part; opening it BEFORE the person has
+   * read why is. So the dialog opens first and carries its own button, which is
+   * still a real user gesture and so still survives the popup blocker.
    *
    * WHAT WE CANNOT DO, recorded so nobody re-attempts it: open YouTube's
    * transcript panel, or pre-select its text. Both would mean scripting a page
    * on another origin, which the same-origin policy forbids outright, and
-   * YouTube publishes no URL parameter that opens the panel. The dialog spells
-   * out the steps instead.
+   * YouTube publishes no URL parameter that opens the panel.
    */
   const startTranscriptForPost = React.useCallback(
-    (url: string, title?: string) => {
-      // noopener: the new tab must not get a handle on this window.
-      window.open(url, '_blank', 'noopener,noreferrer');
-      setTranscriptDialog({ url, title });
-    },
+    (url: string, title?: string) => setTranscriptDialog({ url, title }),
     [],
   );
 
@@ -4484,22 +4484,33 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onAddImage={() => addImageToLink(padlet.id)}
               onCopyLinkAddress={() => copyLinkAddress(padlet.id)}
               {...(() => {
-                // PATCH-156 Part B. The item appears ONLY on a post pointing at
-                // media a transcript can describe, and only once the board's
-                // transcript index has actually been read -- offering "Add
-                // transcript" for a video that already has one is the duplicate
-                // this feature exists to prevent (W1).
+                // PATCH-156 Part B. The item appears on any post pointing at
+                // media a transcript can describe -- and STAYS THERE once one
+                // exists, greyed out, rather than vanishing. An item that comes
+                // and goes reads as the feature being missing rather than as
+                // the work being done, and teaches nobody where it lives.
                 const url = typeof padlet.metadata?.linkUrl === 'string' ? padlet.metadata.linkUrl : '';
-                if (!url || !mediaPostCarriesSpokenContent(url) || !transcriptIndex.loaded) return {};
+                if (!url || !mediaPostCarriesSpokenContent(url)) return {};
+                // Still nothing until the index has been READ: a failed read
+                // must not offer a paste for a video that already has one.
+                if (!transcriptIndex.loaded) return {};
                 const state = mediaPostTranscriptState(url, transcriptIndex.entries);
-                if (!mediaPostOffersTranscriptPaste(state)) return {};
+                const offers = mediaPostOffersTranscriptPaste(state);
                 return {
                   onAddTranscript: () =>
                     startTranscriptForPost(url, padlet.metadata?.linkTitle || undefined),
-                  // A retry is a different thing from a first attempt, and the
-                  // menu says which one it is offering.
+                  transcriptActionDisabled: !offers,
+                  // The label carries the REASON it is disabled. "Add
+                  // transcript" greyed out with no explanation is a dead end;
+                  // "Transcript added" is an answer.
                   transcriptActionLabel:
-                    state.kind === 'failed' ? 'Retry transcript' : 'Add transcript',
+                    state.kind === 'failed'
+                      ? 'Retry transcript'
+                      : state.kind === 'ready'
+                        ? 'Transcript added'
+                        : state.kind === 'processing'
+                          ? 'Transcript processing…'
+                          : 'Add transcript',
                 };
               })()}
             >

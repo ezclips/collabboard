@@ -45,8 +45,18 @@ interface LinkPostContextMenuProps {
      * 'Add transcript' on every news link is noise, not guidance.
      */
     onAddTranscript?: () => void;
-    /** What the menu should call it: adding, or retrying a failed import. */
+    /** What the menu should call it: adding, retrying, or why it is unavailable. */
     transcriptActionLabel?: string;
+    /**
+     * Greyed out rather than gone.
+     *
+     * OWNER DECISION, 2026-09-22. The item used to VANISH once a video had a
+     * transcript, which reads as the feature being missing rather than as the
+     * work being done -- and a menu whose items come and go teaches nobody
+     * where anything is. Disabled, it still says the capability exists and the
+     * label says why it is not offered right now.
+     */
+    transcriptActionDisabled?: boolean;
     disabled?: boolean;
 }
 
@@ -71,6 +81,7 @@ export function LinkPostContextMenu({
     onAddToLibrary,
     onAddTranscript,
     transcriptActionLabel,
+    transcriptActionDisabled = false,
     disabled = false,
 }: LinkPostContextMenuProps) {
     if (disabled) {
@@ -144,7 +155,10 @@ export function LinkPostContextMenu({
                     Copy link address
                 </ContextMenuItem>
                 {onAddTranscript && (
-                    <ContextMenuItem onClick={onAddTranscript}>
+                    <ContextMenuItem
+                        onClick={transcriptActionDisabled ? undefined : onAddTranscript}
+                        disabled={transcriptActionDisabled}
+                    >
                         {transcriptActionLabel ?? 'Add transcript'}
                     </ContextMenuItem>
                 )}

@@ -33,10 +33,17 @@ import { transcriptImportVideoIdentity } from '@/lib/domain/knowledge/boardTrans
  * A browser extension could do all three, because an extension is allowed on
  * the page and we are not. That was considered and not taken.
  *
- * WHAT WE CAN DO is remove every step on OUR side of the boundary: the video
- * tab is already open (from the click that opened this), the format is already
- * chosen, the video is already identified, and the clipboard can be read in one
- * click on return. That leaves the three steps below, and no more.
+ * WHAT WE CAN DO is remove every step on OUR side of the boundary: the format
+ * is already chosen, the video is already identified, the link is one click,
+ * and the clipboard can be read in one click on return. That leaves the three
+ * steps below, and no more.
+ *
+ * ORDER MATTERS, AND THE FIRST VERSION GOT IT WRONG. Choosing the menu item
+ * opened the YouTube tab immediately. The new tab took focus, so these
+ * instructions were behind it, and the owner arrived on YouTube without yet
+ * knowing what to look for -- then could not find "Show transcript", which is
+ * genuinely buried. The video now opens from a button in here, after the steps
+ * have been read, and those steps name BOTH places YouTube puts that control.
  */
 export interface MediaPostTranscriptDialogProps {
   readonly boardId: string;
@@ -127,32 +134,57 @@ export function MediaPostTranscriptDialog({
           </button>
         </div>
 
-        <ol className="mb-3 list-decimal space-y-1 pl-5 text-xs text-gray-700">
-          <li>The video just opened in a new tab. There, click “…more”, then “Show transcript”.</li>
-          <li>Click inside the transcript, select all of it, and copy (Ctrl+C).</li>
-          <li>Come back here and press “Paste transcript”.</li>
+        {/* READ FIRST, THEN LEAVE. The video used to open the moment the menu
+            item was chosen, which took focus and put these instructions behind
+            it -- so the owner arrived on YouTube not yet knowing what to look
+            for, and found the steps only after coming back. */}
+        <ol className="mb-3 list-decimal space-y-2 pl-5 text-xs text-gray-700">
+          <li>
+            <span className="font-medium">Open the video</span>, then find its transcript.
+            YouTube hides it in one of two places:
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-gray-600">
+              <li>
+                under the video, click <span className="font-medium">“…more”</span> in the
+                description, then scroll to the bottom and click{' '}
+                <span className="font-medium">“Show transcript”</span>; or
+              </li>
+              <li>
+                click the <span className="font-medium">“···”</span> next to the Share
+                button and choose <span className="font-medium">“Show transcript”</span>.
+              </li>
+            </ul>
+          </li>
+          <li>Click inside the transcript panel, select all of it, and copy (Ctrl+C).</li>
+          <li>
+            Come back to this tab and press <span className="font-medium">“Paste
+            transcript”</span>.
+          </li>
         </ol>
         <p className="mb-3 text-[11px] text-gray-500">
-          Keep the timestamps switched on — they are what lets a citation open the video
+          Leave the timestamps switched on — they are what lets a citation open the video
           at the moment the words were said.
         </p>
 
-        <div className="mb-3 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={pasteFromClipboard}
-            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
-          >
-            Paste transcript
-          </button>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {/* THE PRIMARY ACTION, and it is a real click rather than something
+              that fired on the way in -- so the popup blocker allows it for the
+              same reason it allowed the old one, and the person has read the
+              steps before they land there. */}
           <a
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[11px] text-blue-700 underline"
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white no-underline"
           >
-            Open the video again
+            Open the video on YouTube ↗
           </a>
+          <button
+            type="button"
+            onClick={pasteFromClipboard}
+            className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-800"
+          >
+            Paste transcript
+          </button>
         </div>
 
         {clipboardNotice ? (
