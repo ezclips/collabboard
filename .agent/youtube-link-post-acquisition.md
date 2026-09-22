@@ -365,3 +365,65 @@ and should happen before the parser is specified, not after.
 pastes, once per video. That is the price of the decision, it is a real
 reduction in convenience against Heptabase, and it should be stated to users
 rather than hidden behind a spinner that sometimes fails.
+
+---
+
+## 9. §8.2 resolved: the transcript panel carries per-line timestamps — 2026-09-22
+
+Measured, not assumed. The panel was opened through YouTube's own interface on
+`VzRZG_NEeLk` (34:13) and its contents read.
+
+**Result: 324 timestamps across 974 lines.** The panel is a repeating triple:
+
+```
+0:00
+0 seconds
+Nater Masare. I'm the president and CEO of Buffalo Wings and Rings.
+0:08
+8 seconds
+I am in my hometown, Cincinnati, where Buffalo Wings and Rings started.
+```
+
+Line 1 is the cue offset. Line 2 is an **accessibility label** restating that
+offset in words. Line 3 is the text.
+
+**So §8.2's premise holds and W4 survives with no acquisition.** Stage 3a's
+finding that pasting costs timestamps was true of arbitrary sources; it is not
+true of a paste taken from this panel.
+
+**Still not measured, and it is the one thing a parser must be built against:**
+this is the panel's rendered text, which is a proxy for -- not proof of -- what
+the clipboard receives on select-all-and-copy. Whether the "N seconds"
+accessibility line survives a copy is unknown. The parser must therefore
+tolerate BOTH shapes rather than assume one:
+
+- the triple above, discarding the accessibility label
+- `0:00  text` collapsed onto one line
+
+and must accept `m:ss`, `mm:ss` and `h:mm:ss` -- this specimen is under an hour,
+so the hour form was not observed here and must not be inferred to be absent.
+
+### 9.1 A SUMMARY IS NOT A TRANSCRIPT, and the importer must refuse one
+
+The owner's first paste was a segment summary with coarse ranges
+(`Cincinnati Dishroom Visit (0:00 - 5:05)`), not the panel's output. The
+distinction is load-bearing and the importer must enforce it:
+
+- A transcript is **what was said**. A citation can quote it and land on the
+  moment it was said.
+- A summary is **someone else's paraphrase** -- here, a model's. Storing one as a
+  transcript would let Board AI quote a restatement as though it were the source,
+  with a timestamp lending it false precision. That is exactly the failure this
+  stream exists to prevent: a confident answer drawn from less than the reader
+  believes it has.
+
+A summary's ranges (`0:00 - 5:05`) are also structurally different from cue
+offsets: coarse, span-shaped, and far fewer. **A simple ratio test separates
+them** -- this specimen carries 324 cues across 34 minutes, roughly one per six
+seconds, while the summary carried three ranges across the same video. An
+importer should refuse input whose timestamp density is orders of magnitude
+below a plausible cue rate, and say why, rather than accept it and silently
+degrade every citation built on it.
+
+Summaries may still be useful, but as DERIVED content that is labelled as such
+and never cited as source.
