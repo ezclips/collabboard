@@ -140,9 +140,52 @@ function medianDerivedDuration(durations: readonly number[]): number {
     : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 
+/**
+ * The SRT/WebVTT cue-range arrow, and the WebVTT header.
+ *
+ * ============================================================================
+ * WHY THIS REFUSAL EXISTS: SRT PARSED HERE SUCCEEDED, AND LOST THE WORDS
+ * ============================================================================
+ *
+ * Measured 2026-09-22, on this parser as shipped in Part A. Given ordinary SRT:
+ *
+ *     1
+ *     00:00:01,000 --> 00:00:04,000
+ *     Hello there
+ *
+ * it returned **ok** with two cues whose text was `"--> 00:00:04,000"`. The
+ * range line matched the COLLAPSED shape -- a timestamp, whitespace, then
+ * "text" -- so the arrow and the end time became the spoken words, and
+ * "Hello there" was discarded entirely.
+ *
+ * That is the worst available outcome, and not a near miss: it is a SUCCESS
+ * carrying a transcript of a video in which nobody said anything except a row
+ * of timestamps. Every citation built on it would resolve, render, and quote
+ * punctuation. It is the same shape as the summary this module already refuses,
+ * and as the three defects in LESSONS_LEARNED -- a failure and an answer
+ * converging on one value.
+ *
+ * `-->` IS A DEFINITIVE SIGNAL, not a heuristic. Neither shape of YouTube's
+ * panel ever contains it: the panel declares starts only, so there is no range
+ * to write. Its presence means the paste is a caption FILE, which this
+ * application already parses correctly under its own format.
+ */
+const CAPTION_FILE_MARKERS = /(^|\n)\s*(WEBVTT\b|.*-->)/;
+
 export function parseYouTubeTranscriptPanel(
   source: string,
 ): Result<KnowledgeTranscriptParse, DomainError> {
+  // REFUSED BEFORE ANYTHING IS PARSED, and named so the person can act on it.
+  // "Choose a different format" is a fix they can apply in one click; a generic
+  // parse failure would leave them re-copying a transcript that was never the
+  // problem.
+  if (CAPTION_FILE_MARKERS.test(source)) {
+    return err(domainError(
+      'validation',
+      'This looks like an SRT or WebVTT caption file, not a copy of YouTube’s transcript panel. Choose SubRip (.srt) or WebVTT (.vtt) as the format instead.',
+    ));
+  }
+
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
 
   // Every line before the first timestamp is panel CHROME -- a header like

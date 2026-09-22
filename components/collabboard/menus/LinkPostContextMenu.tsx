@@ -37,6 +37,16 @@ interface LinkPostContextMenuProps {
     onAddImage?: () => void;
     onCopyLinkAddress?: () => void;
     onAddToLibrary?: () => void;
+    /**
+     * PATCH-156 Part B. Present ONLY when this post points at media a
+     * transcript can describe -- a video, audio, or one of the social
+     * platforms that carry spoken content. Absent on an article link, which
+     * is why the item below is conditional rather than disabled: a greyed-out
+     * 'Add transcript' on every news link is noise, not guidance.
+     */
+    onAddTranscript?: () => void;
+    /** What the menu should call it: adding, or retrying a failed import. */
+    transcriptActionLabel?: string;
     disabled?: boolean;
 }
 
@@ -59,6 +69,8 @@ export function LinkPostContextMenu({
     onAddImage,
     onCopyLinkAddress,
     onAddToLibrary,
+    onAddTranscript,
+    transcriptActionLabel,
     disabled = false,
 }: LinkPostContextMenuProps) {
     if (disabled) {
@@ -131,6 +143,11 @@ export function LinkPostContextMenu({
                 <ContextMenuItem onClick={() => handleAction('post.copyLinkAddress')}>
                     Copy link address
                 </ContextMenuItem>
+                {onAddTranscript && (
+                    <ContextMenuItem onClick={onAddTranscript}>
+                        {transcriptActionLabel ?? 'Add transcript'}
+                    </ContextMenuItem>
+                )}
 
                 <ContextMenuSeparator />
 

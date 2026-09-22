@@ -53,6 +53,19 @@ export interface KnowledgeTranscriptImportPanelProps {
   readonly initialVideoIdentity?: string | null;
   /** The card's link title, as a starting point for the transcript's name. */
   readonly initialTitle?: string;
+  /**
+   * The format to start on.
+   *
+   * THE ONE EXCEPTION TO "NEVER GUESS THE FORMAT", AND IT IS NOT A GUESS.
+   * Rule 1 above exists because SNIFFING a paste is unsafe -- a nearly-SRT
+   * paste read as SRT drops the lines that did not fit. Nothing is sniffed
+   * here: the transcript flow SENT the person to YouTube’s transcript panel,
+   * so the format is established by the route they took, not inferred from
+   * bytes. It stays visible and changeable, and a wrong one now fails loudly
+   * -- the panel parser refuses a caption file by name rather than half-
+   * reading it (see knowledgeTranscriptPanelPaste.ts).
+   */
+  readonly initialFormat?: KnowledgeTranscriptFormat;
 }
 
 type Status =
@@ -77,12 +90,13 @@ export function KnowledgeTranscriptImportPanel({
   existing,
   initialVideoIdentity,
   initialTitle,
+  initialFormat,
   onImported,
 }: KnowledgeTranscriptImportPanelProps) {
   const [payload, setPayload] = useState('');
   // NO DEFAULT FORMAT. An empty value cannot be submitted, which is the point:
   // the person says what they pasted.
-  const [format, setFormat] = useState<KnowledgeTranscriptFormat | ''>('');
+  const [format, setFormat] = useState<KnowledgeTranscriptFormat | ''>(initialFormat ?? '');
   const [title, setTitle] = useState(existing?.title ?? initialTitle ?? '');
   const [language, setLanguage] = useState('');
   const [trackKind, setTrackKind] = useState<'human' | 'machine' | 'unknown'>('unknown');

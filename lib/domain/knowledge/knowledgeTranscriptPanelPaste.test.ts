@@ -310,3 +310,64 @@ describe('the other transcript formats are untouched', () => {
     expect(result.value.cues).toEqual([]);
   });
 });
+
+describe('a caption FILE pasted as a panel copy is refused, not half-read', () => {
+  /**
+   * FOUND BY MEASUREMENT, 2026-09-22, against this parser as shipped in Part A.
+   *
+   * Ordinary SRT returned **ok** with two cues whose text was the cue-range
+   * arrow and the end time -- `"--> 00:00:04,000"` -- while the spoken words
+   * were discarded. The range line matched the collapsed `timestamp text`
+   * shape, so the rest of the line became "what was said".
+   *
+   * A success carrying a transcript in which nobody said anything except a row
+   * of timestamps is worse than any failure: every citation built on it
+   * resolves, renders, and quotes punctuation. Part B is what made this
+   * reachable -- it put 'youtube-panel' in the format dropdown, where before
+   * no user could select it.
+   */
+  const SRT = '1\n00:00:01,000 --> 00:00:04,000\nHello there\n\n2\n00:00:05,000 --> 00:00:09,000\nSecond line\n';
+  const VTT = 'WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello there\n\n00:00:05.000 --> 00:00:09.000\nSecond\n';
+
+  it('refuses SRT rather than returning cues made of timestamps', () => {
+    const result = parseKnowledgeTranscript(SRT, 'youtube-panel');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The message must name the fix. "Choose a different format" is one click;
+    // a generic parse failure sends them back to re-copy a transcript that was
+    // never the problem.
+    expect(result.error.message).toContain('SRT');
+    expect(result.error.message).toContain('WebVTT');
+  });
+
+  it('refuses WebVTT, recognised by its header as well as its arrows', () => {
+    const result = parseKnowledgeTranscript(VTT, 'youtube-panel');
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a WEBVTT header even with no cue-range arrow present', () => {
+    expect(parseKnowledgeTranscript('WEBVTT\n\n0:00\nHello\n', 'youtube-panel').ok).toBe(false);
+  });
+
+  it('SRT and VTT still parse correctly under their OWN formats', () => {
+    // The refusal above must not be mistaken for these files being unreadable.
+    // This application parses them properly; the paste was simply labelled
+    // with the wrong format.
+    const srt = parseKnowledgeTranscript(SRT, 'srt');
+    expect(srt.ok).toBe(true);
+    expect(srt.ok && srt.value.cues.map((cue) => cue.text)).toEqual(['Hello there', 'Second line']);
+
+    const vtt = parseKnowledgeTranscript(VTT, 'vtt');
+    expect(vtt.ok).toBe(true);
+    expect(vtt.ok && vtt.value.cues.map((cue) => cue.text)).toEqual(['Hello there', 'Second']);
+  });
+
+  it('does NOT refuse a genuine panel copy whose words contain an arrow-like dash', () => {
+    // The marker is `-->`, which the panel never produces. Ordinary dashes and
+    // punctuation in speech must keep parsing.
+    const panel = '0:00\nWell -- as I was saying -> the point is this\n0:06\nand then we moved on\n';
+    const result = parseKnowledgeTranscript(panel, 'youtube-panel');
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.cues[0].text).toBe('Well -- as I was saying -> the point is this');
+  });
+});

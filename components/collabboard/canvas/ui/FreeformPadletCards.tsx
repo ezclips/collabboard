@@ -57,6 +57,7 @@ import { MediaPostTranscriptAffordance } from '@/components/collabboard/MediaPos
 import { MediaPostTranscriptDialog } from '@/components/collabboard/MediaPostTranscriptDialog';
 import { useBoardTranscriptIndex } from '@/components/collabboard/useBoardTranscriptIndex';
 import { mediaPostCarriesSpokenContent } from '@/lib/domain/knowledge/mediaPostVideoIdentity';
+import { mediaPostOffersTranscriptPaste, mediaPostTranscriptState } from '@/lib/domain/knowledge/boardTranscriptIndex';
 import { NotePostContextMenu } from '@/components/collabboard/menus/NotePostContextMenu';
 import { LinkPostContextMenu } from '@/components/collabboard/menus/LinkPostContextMenu';
 import { TodoPostContextMenu } from '@/components/collabboard/menus/TodoPostContextMenu';
@@ -558,6 +559,30 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     url: string;
     title?: string;
   } | null>(null);
+
+  /**
+   * Start a transcript for one media post: open the video, open the paste box.
+   *
+   * THE TAB IS OPENED HERE, INSIDE THE CLICK HANDLER, and not from an effect
+   * inside the dialog. `window.open` is only honoured during a real user
+   * gesture; called a tick later from a mounted effect it is silently swallowed
+   * by the popup blocker, and the person is left looking at a dialog that told
+   * them to go and copy something from a tab that never opened.
+   *
+   * WHAT WE CANNOT DO, recorded so nobody re-attempts it: open YouTube's
+   * transcript panel, or pre-select its text. Both would mean scripting a page
+   * on another origin, which the same-origin policy forbids outright, and
+   * YouTube publishes no URL parameter that opens the panel. The dialog spells
+   * out the steps instead.
+   */
+  const startTranscriptForPost = React.useCallback(
+    (url: string, title?: string) => {
+      // noopener: the new tab must not get a handle on this window.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTranscriptDialog({ url, title });
+    },
+    [],
+  );
 
   /**
    * PATCH POST-RESIZE-B1: shared box-resize preview for Image / AI posts.
@@ -3933,13 +3958,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         url={linkUrlFromMeta || linkUrl}
                         index={transcriptIndex.entries}
                         indexLoaded={transcriptIndex.loaded}
-                        canEdit={canUseFreeformEditButton}
-                        onAddTranscript={(url) =>
-                          setTranscriptDialog({
-                            url,
-                            title: padlet.metadata?.linkTitle || undefined,
-                          })
-                        }
                       />
                     </div>
                   );
@@ -4465,6 +4483,25 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
               onAddImage={() => addImageToLink(padlet.id)}
               onCopyLinkAddress={() => copyLinkAddress(padlet.id)}
+              {...(() => {
+                // PATCH-156 Part B. The item appears ONLY on a post pointing at
+                // media a transcript can describe, and only once the board's
+                // transcript index has actually been read -- offering "Add
+                // transcript" for a video that already has one is the duplicate
+                // this feature exists to prevent (W1).
+                const url = typeof padlet.metadata?.linkUrl === 'string' ? padlet.metadata.linkUrl : '';
+                if (!url || !mediaPostCarriesSpokenContent(url) || !transcriptIndex.loaded) return {};
+                const state = mediaPostTranscriptState(url, transcriptIndex.entries);
+                if (!mediaPostOffersTranscriptPaste(state)) return {};
+                return {
+                  onAddTranscript: () =>
+                    startTranscriptForPost(url, padlet.metadata?.linkTitle || undefined),
+                  // A retry is a different thing from a first attempt, and the
+                  // menu says which one it is offering.
+                  transcriptActionLabel:
+                    state.kind === 'failed' ? 'Retry transcript' : 'Add transcript',
+                };
+              })()}
             >
               {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table -- Link
                   is selected on mousedown, but its click was never stopped,

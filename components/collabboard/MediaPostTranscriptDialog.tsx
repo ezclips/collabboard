@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import {
   KnowledgeTranscriptImportPanel,
@@ -9,17 +9,34 @@ import {
 import { transcriptImportVideoIdentity } from '@/lib/domain/knowledge/boardTranscriptIndex';
 
 /**
- * Where the paste actually happens, once somebody asked for it.
+ * Where the paste happens, once somebody chose "Add transcript" from a link
+ * post's right-click menu.
  *
- * A DIALOG IS FINE HERE AND A POPUP WAS NOT, and the difference is who started
- * it. This opens because a person clicked "Add transcript" on a specific card;
- * the rejected design opened by itself whenever media was added, which turns
- * dropping ten links into ten interruptions. An interruption you asked for is
- * a workflow. One you did not is an obstacle.
+ * ============================================================================
+ * WHAT THIS FLOW CANNOT DO, AND WHY IT ASKS FOR THREE MANUAL STEPS
+ * ============================================================================
  *
- * It holds no import logic of its own. The panel inside it is the same one that
- * has always done this work -- built in Stage 3b and, until now, mounted
- * nowhere, which is why pasting a transcript was possible only in principle.
+ * The obvious design is: open the video with its transcript panel already
+ * showing, the text already selected, so the person presses copy once. Every
+ * part of that is out of reach from a web page, and it is worth writing down so
+ * it is not attempted again:
+ *
+ *   - WE CANNOT OPEN YOUTUBE'S TRANSCRIPT PANEL. There is no documented URL
+ *     parameter that opens it, and opening it by script would mean running code
+ *     on youtube.com, which the same-origin policy forbids outright.
+ *   - WE CANNOT PRE-SELECT THE TEXT, for the same reason.
+ *   - THERE IS NO COPY BUTTON IN YOUTUBE'S PANEL. Measured 2026-09-22 while
+ *     reading the panel on a 34-minute video: the only way out of it is
+ *     selecting the text and copying. So even a person following perfect
+ *     instructions performs a manual selection.
+ *
+ * A browser extension could do all three, because an extension is allowed on
+ * the page and we are not. That was considered and not taken.
+ *
+ * WHAT WE CAN DO is remove every step on OUR side of the boundary: the video
+ * tab is already open (from the click that opened this), the format is already
+ * chosen, the video is already identified, and the clipboard can be read in one
+ * click on return. That leaves the three steps below, and no more.
  */
 export interface MediaPostTranscriptDialogProps {
   readonly boardId: string;
@@ -38,6 +55,8 @@ export function MediaPostTranscriptDialog({
   onClose,
   onImported,
 }: MediaPostTranscriptDialogProps) {
+  const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
+
   useEffect(() => {
     if (url === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -46,6 +65,43 @@ export function MediaPostTranscriptDialog({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [url, onClose]);
+
+  /**
+   * Read the clipboard into the transcript box.
+   *
+   * ON A CLICK, NEVER ON FOCUS. Reading the clipboard requires a user gesture
+   * and a permission the browser prompts for; doing it automatically when the
+   * tab regains focus would fire a permission prompt the person did not ask
+   * for, and would fail silently in every browser that does not implement
+   * readText for pages at all. A button that says what it will do is both more
+   * honest and more portable -- and Ctrl+V into the box below always works,
+   * which is why this is an accelerator and not the only way in.
+   */
+  const pasteFromClipboard = useCallback(async () => {
+    const box = document.getElementById('transcript-payload') as HTMLTextAreaElement | null;
+    if (!box) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || text.trim().length === 0) {
+        setClipboardNotice('The clipboard is empty. Copy the transcript first, then try again.');
+        return;
+      }
+      // Set through the native setter so React's onChange sees it; assigning
+      // `.value` on a controlled textarea updates the DOM and leaves React's
+      // state behind, and the form would submit the empty string.
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(box, text);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      setClipboardNotice(null);
+    } catch {
+      setClipboardNotice(
+        'This browser would not let the page read the clipboard. Click in the box below and press Ctrl+V instead.',
+      );
+    }
+  }, []);
 
   if (url === null) return null;
 
@@ -61,30 +117,61 @@ export function MediaPostTranscriptDialog({
         aria-label="Add a transcript"
         className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-5 shadow-xl"
         // The backdrop closes; the dialog itself must not, or every click on a
-        // field inside would dismiss the form the person is filling in.
+        // field inside would dismiss the form being filled in.
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold">Add a transcript</h2>
-            <p className="mt-1 text-xs text-gray-600">
-              Open the video, show its transcript, copy it, and paste it below. Choose
-              “Copied from YouTube’s transcript panel” as the format so the timings are
-              kept.
-            </p>
-          </div>
+          <h2 className="text-base font-semibold">Add a transcript</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-gray-500">
             ✕
           </button>
         </div>
 
+        <ol className="mb-3 list-decimal space-y-1 pl-5 text-xs text-gray-700">
+          <li>The video just opened in a new tab. There, click “…more”, then “Show transcript”.</li>
+          <li>Click inside the transcript, select all of it, and copy (Ctrl+C).</li>
+          <li>Come back here and press “Paste transcript”.</li>
+        </ol>
+        <p className="mb-3 text-[11px] text-gray-500">
+          Keep the timestamps switched on — they are what lets a citation open the video
+          at the moment the words were said.
+        </p>
+
+        <div className="mb-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={pasteFromClipboard}
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
+          >
+            Paste transcript
+          </button>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] text-blue-700 underline"
+          >
+            Open the video again
+          </a>
+        </div>
+
+        {clipboardNotice ? (
+          <p role="alert" className="mb-3 text-[11px] text-amber-700">
+            {clipboardNotice}
+          </p>
+        ) : null}
+
         <p className="mb-3 break-all text-[11px] text-gray-500">{url}</p>
 
         <KnowledgeTranscriptImportPanel
           boardId={boardId}
-          // DERIVED FROM THE CARD, and null when this module cannot name the
-          // video with confidence. A wrong identity is worse than none: it is
-          // what the next card would dedupe against.
+          // ESTABLISHED BY THE ROUTE TAKEN, not sniffed from the bytes: this
+          // dialog sent them to YouTube's own panel. Still visible and still
+          // changeable, and a caption file pasted under it is refused by name.
+          initialFormat="youtube-panel"
+          // DERIVED FROM THE CARD, and null when the video cannot be named with
+          // confidence. A wrong identity is worse than none: it is what the
+          // next card would dedupe against.
           initialVideoIdentity={transcriptImportVideoIdentity(url)}
           initialTitle={title}
           onImported={onImported}
