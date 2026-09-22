@@ -1,6 +1,6 @@
 # PATCH-156 — transcript by paste: the YouTube panel format, and an affordance on the card
 
-Status: **draft 2026-09-22 — awaiting owner approval**
+Status: **approved 2026-09-22 — Part A authorized and handed off; Part B NOT authorized (needs four transcript migrations)**
 
 ## Goal
 
@@ -270,3 +270,202 @@ producing zero cues.
 Part A: moderate — small surface, but the density threshold and the derived-end
 convention are judgement calls that must be justified in the file.
 Part B: blocked.
+
+---
+
+# Final Implementation Specification — PART A
+
+**Approved by the owner 2026-09-22. Part A only.** Execute this section EXACTLY.
+Everything above is context. Where this section and the context disagree, this
+section wins; if the disagreement looks like a defect rather than a refinement,
+STOP and report.
+
+**PART B IS NOT AUTHORIZED.** It needs four migrations that are not applied. Do
+not touch a route, a component, an adapter or the repository.
+
+## Read first, before writing anything
+
+- `lib/domain/knowledge/knowledgeTranscriptCues.ts` — the whole file.
+- `lib/domain/knowledge/knowledgeTranscriptImport.ts` — the chunking invariant
+  comment. You are not changing it; you must not break its assumptions.
+
+## Step 1 — `lib/domain/knowledge/knowledgeTranscriptCues.ts`
+
+**1a.** Extend the format union, ADD ONLY:
+
+```ts
+export type KnowledgeTranscriptFormat = 'srt' | 'vtt' | 'plain' | 'youtube-panel';
+```
+
+**1b.** Add ONE OPTIONAL field to `KnowledgeTranscriptParse`:
+
+```ts
+  /**
+   * True when cue END times were DERIVED rather than declared by the source.
+   *
+   * OPTIONAL and `true`-only: absent already means "the source declared them",
+   * and a second way to say it is a second thing to keep in step. SRT and VTT
+   * declare both times; YouTube's panel declares only starts, and a citation's
+   * range must not claim a precision the source never gave it.
+   */
+  readonly endsAreDerived?: true;
+```
+
+**IT MUST BE OPTIONAL.** A required field is a compile-time obligation on every
+existing literal of this type repo-wide, tests included. Making it required is
+how this change turns from small into a day of edits to files you were told not
+to touch.
+
+**1c.** In `parseKnowledgeTranscript`, delegate the new format to the new module.
+Place the branch AFTER the `'plain'` branch and BEFORE the VTT handling:
+
+```ts
+  if (format === 'youtube-panel') return parseYouTubeTranscriptPanel(source);
+```
+
+`'srt'`, `'vtt'` and `'plain'` keep their exact current behaviour. Change nothing
+else in this file.
+
+## Step 2 — `lib/domain/knowledge/knowledgeTranscriptPanelPaste.ts` (new)
+
+Export `parseYouTubeTranscriptPanel(source: string): Result<KnowledgeTranscriptParse, DomainError>`.
+
+**2a. Reuse, do not reimplement.** Call the existing
+`parseKnowledgeTranscriptTimestamp`. It already accepts `m:ss`, `mm:ss` and
+`h:mm:ss` and already rejects `90:00` as a way of writing an hour and a half.
+Writing a second time parser is how the two drift apart.
+
+**2b. Line-based, NOT block-based.** `blocksOf` splits on blank lines; this format
+has none between cues. Normalise line endings the same way (`/\r\n?/g` to `\n`),
+then walk lines.
+
+**2c. Accept BOTH shapes.** Only one is measured; the other may be what a real
+clipboard produces.
+
+- **Triple:** a timestamp line, an accessibility line, then the text line.
+- **Collapsed:** `0:00  text` on one line.
+
+The accessibility line restates the offset in words — `0 seconds`,
+`8 seconds`, `1 minute, 3 seconds`. Recognise and DISCARD it. Recognise it by
+shape (a duration in words, no sentence punctuation), not by an exact list of
+phrasings: it is localised, and this machine renders English while the browser
+locale is German.
+
+A line that is neither a timestamp, an accessibility label, nor empty is TEXT and
+belongs to the cue currently open.
+
+**2d. Panel chrome.** The panel's own header lines (`Transcript`,
+`Search transcript`, and their localised equivalents) appear before the first
+timestamp. Everything before the first timestamp line is discarded. Do not
+maintain a list of header strings.
+
+**2e. Cue ends are DERIVED.**
+
+- Each cue's `endMs` is the NEXT cue's `startMs`.
+- The FINAL cue's end is `startMs` plus the MEDIAN of the derived durations. The
+  median is taken from this transcript's own cues, so it is data, not an invented
+  constant. With one cue only, use 2000 ms and say so in a comment.
+- Set `endsAreDerived: true` on the result.
+- **Verify the final cue is still reachable** by `cuesIntersectingRange` in
+  `knowledgeTranscriptCitation.ts`. A tail cue a citation can never intersect is
+  a silent hole.
+
+**2f. `declaredLanguage` is `null`.** The panel declares no language. Never infer
+one from the text.
+
+**2g. Cue `index` is position from 0**, as the existing type says — never a number
+read from the input.
+
+**2h. Reject a SUMMARY, by density.**
+
+A summary carries a few coarse ranges; a transcript carries a cue every few
+seconds. Reject when the density is implausibly low for the span, with a message
+that NAMES the reason — it must mention that the input looks like a summary
+rather than a transcript. A generic parse failure is a defect here, because the
+user's next action depends on knowing what to do differently.
+
+**Choose the threshold yourself and JUSTIFY IT IN A COMMENT in the file.** Do not
+copy a number from this patch. Two data points bound it:
+
+- measured transcript: 324 cues over ~34 minutes, about one per 6 s
+- rejected summary: 3 ranges over the same ~34 minutes, about one per 11 min
+
+**The rule is density over SPAN, never a cue count.** A legitimate 40-second clip
+with 6 cues must PASS. If your rule cannot pass that, it is the wrong rule.
+
+Do not apply the density rule to input with fewer than 2 cues — density is
+undefined for one cue. Zero cues is a separate, ordinary parse failure.
+
+**2i. Failure messages are specific.** Zero cues found, no timestamp ever found,
+and looks-like-a-summary are three different messages. Use
+`err(domainError('validation', ...))` exactly as the existing file does.
+
+## Step 3 — `lib/domain/knowledge/knowledgeTranscriptPanelPaste.test.ts` (new)
+
+**Fixtures are SYNTHETIC, written in the measured shape. Do not commit copied
+YouTube transcript text.** The owner has ruled out scraping on legal grounds, and
+committing third-party transcript content into the repository is the same
+question wearing different clothes. The shape is what is under test; the words
+are not.
+
+Cover:
+
+1. The triple shape parses: correct cue count, `startMs` values, text.
+2. The collapsed shape parses to the **IDENTICAL** cues. Assert equality against
+   the same expected array used in (1) — not a second hand-written copy, which
+   would let the two drift.
+3. `h:mm:ss` parses.
+4. Panel header lines before the first timestamp are discarded.
+5. Accessibility lines are discarded and never become cue text.
+6. Each cue's `endMs` equals the next cue's `startMs`.
+7. The final cue's end follows 2e, and `cuesIntersectingRange` returns it for a
+   range at its start.
+8. `endsAreDerived` is `true`; for an SRT parse it is **absent** (assert with
+   `Object.prototype.hasOwnProperty.call`, as the existing revision tests do).
+9. `declaredLanguage` is `null`.
+10. **A summary is refused**, and the message names the reason.
+11. **POSITIVE CONTROL: a short legitimate transcript is ACCEPTED** — around
+    40 seconds, 6 cues. Without this test the density rule is satisfied by one
+    that refuses everything.
+12. Malformed input fails with a specific message rather than returning zero cues
+    as a success.
+
+Match the conventions already in the `knowledgeTranscriptCues` tests.
+
+## Verification — paste REAL, COMPLETE output for every command
+
+**Before any edit:**
+
+```
+npx vitest run
+npm run check:boundaries
+```
+
+**After:**
+
+```
+npx vitest run            # failing FILE SET identical to the capture
+npx tsc --noEmit          # exit 0
+npm run check:boundaries  # identical: the same two pre-existing errors
+npm run check:schema      # no NEW failure (one known: transcript_mutation_revision)
+git status --porcelain
+git log --oneline -1
+```
+
+Handoff rule 6 applies: pasted-but-not-run is treated as not run.
+
+## Stop conditions
+
+STOP and report, leaving the tree clean, if:
+
+- making `endsAreDerived` work appears to require editing any file outside the
+  three named here — if it does, you made it required rather than optional
+- an existing test fails and the only fix available is to change that test
+- your density rule cannot both refuse the summary and accept the short clip.
+  **Report that rather than weakening the positive control.** The positive
+  control is the criterion; the threshold is what bends
+- `check:boundaries` gains a third error, or `check:schema` gains any new failure
+
+## Commit
+
+Use the `## Commit` message in this patch file **verbatim**.
