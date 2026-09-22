@@ -8,9 +8,12 @@ That reframing disqualifies the Stage 4 incumbent on shape alone, and surfaces o
 operational fact that 3a could not have measured.
 
 **Recommendation up front: no self-hosted caption library is adoptable for this
-workflow. The choice is between a paid caption service and a user-initiated,
-client-side acquisition — and that choice is the owner's, because the honest
-version of it is not a technical question.** See §5.
+workflow.** §5 originally left two options open — a paid caption service, or
+user-initiated client-side acquisition. **§7 then measured the client-side option
+and closed it**, so the live choice is now between a **paid caption service** and
+**staying with paste-a-transcript**. That choice is the owner's, because the
+honest version of it is not a technical question. Read §5 as written, then §7,
+which supersedes its Option 2.
 
 ---
 
