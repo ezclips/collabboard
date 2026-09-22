@@ -7,6 +7,7 @@ import {
   type KnowledgeTranscriptVersionHandle,
 } from './KnowledgeTranscriptImportPanel';
 import { transcriptImportVideoIdentity } from '@/lib/domain/knowledge/boardTranscriptIndex';
+import { mediaPostVideoIdentity } from '@/lib/domain/knowledge/mediaPostVideoIdentity';
 
 /**
  * Where the paste happens, once somebody chose "Add transcript" from a link
@@ -45,6 +46,28 @@ import { transcriptImportVideoIdentity } from '@/lib/domain/knowledge/boardTrans
  * genuinely buried. The video now opens from a button in here, after the steps
  * have been read, and those steps name BOTH places YouTube puts that control.
  */
+/**
+ * Where "Open the video" should actually go.
+ *
+ * ALWAYS THE ORDINARY WATCH PAGE FOR YOUTUBE, whatever URL the card holds.
+ * Found by the owner: a card linking `youtube.com/shorts/<id>` opened the
+ * Shorts player, which has NO "Show transcript" control at all -- they had to
+ * rewrite the address to `watch?v=<id>` by hand before the button appeared.
+ * The same video on the watch page has it.
+ *
+ * Rebuilt from the canonical identity rather than by string-replacing
+ * "/shorts/", so youtu.be links, embed links and share links with tracking
+ * parameters all land on the same clean page. Anything that is not a canonical
+ * YouTube id keeps its own URL: there is no better page to send it to.
+ */
+export function transcriptSourceUrl(url: string): string {
+  const identity = mediaPostVideoIdentity(url);
+  if (identity !== null && identity.canonical && identity.provider === 'youtube') {
+    return `https://www.youtube.com/watch?v=${identity.identity.slice('yt:'.length)}`;
+  }
+  return url;
+}
+
 export interface MediaPostTranscriptDialogProps {
   readonly boardId: string;
   /** The card's URL. Closed when null. */
@@ -171,7 +194,7 @@ export function MediaPostTranscriptDialog({
               same reason it allowed the old one, and the person has read the
               steps before they land there. */}
           <a
-            href={url}
+            href={transcriptSourceUrl(url)}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white no-underline"

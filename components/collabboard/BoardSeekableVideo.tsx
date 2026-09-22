@@ -34,7 +34,58 @@ export interface BoardSeekableVideoProps {
 }
 
 interface ReactPlayerInstance {
-  seekTo(amount: number, type?: 'seconds' | 'fraction'): void;
+  seekTo(amount: number, type?: 'seconds' | 'fraction', keepPlaying?: boolean): void;
+  getInternalPlayer(key?: string): unknown;
+}
+
+/** The two YouTube IFrame API calls this needs, and nothing else. */
+interface YouTubeInternalPlayer {
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
+  playVideo(): void;
+}
+
+function isYouTubeInternalPlayer(value: unknown): value is YouTubeInternalPlayer {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as YouTubeInternalPlayer).seekTo === 'function'
+    && typeof (value as YouTubeInternalPlayer).playVideo === 'function'
+  );
+}
+
+/**
+ * Seek AND PLAY. Measured on the live board, 2026-09-22.
+ *
+ * ReactPlayer's own `seekTo(n, 'seconds')` defaults `keepPlaying` to false,
+ * and on a video that has not started it then calls `pause()` straight after
+ * the seek. YouTube treats a seek on an unstarted video as "start playing", so
+ * the player was started and stopped in the same instant, from outside the
+ * frame. On the owner's board that produced "This video is unavailable, Error
+ * code 152-18"; driven directly it left the player black and stuck buffering at
+ * 0:47. Four variants were tried against the real Audi video:
+ *
+ *   seekTo then pauseVideo   (the old behaviour)  -> black, buffering, never plays
+ *   seekTo(47, true)                             -> plays from 0:47
+ *   loadVideoById({startSeconds: 47})            -> plays from 0:47
+ *   seekTo(47, true) then playVideo              -> plays from 0:47   <- this one
+ *
+ * The explicit playVideo is what the person asked for -- they clicked a moment
+ * to hear it -- and it does not rely on YouTube's rule that a seek on an
+ * unstarted video happens to start it.
+ *
+ * `allowSeekAhead: true` because nothing is buffered yet on a fresh player, so
+ * the seek MUST be allowed to fetch.
+ */
+export function seekAndPlay(player: ReactPlayerInstance, seconds: number): void {
+  const internal = player.getInternalPlayer();
+  if (isYouTubeInternalPlayer(internal)) {
+    internal.seekTo(seconds, true);
+    internal.playVideo();
+    return;
+  }
+  // Not YouTube (Vimeo goes through here). keepPlaying=true at least removes
+  // the pause that broke YouTube. This path was NOT measured on a live player.
+  player.seekTo(seconds, 'seconds', true);
 }
 
 export function BoardSeekableVideo({ url, disableInteraction = false }: BoardSeekableVideoProps) {
@@ -63,7 +114,9 @@ export function BoardSeekableVideo({ url, disableInteraction = false }: BoardSee
       // ReactPlayer calls onReady again after a source change.
       unregisterRef.current?.();
       unregisterRef.current = registerBoardVideoPlayer(identity, {
-        seekTo: (seconds) => playerRef.current?.seekTo(seconds, 'seconds'),
+        seekTo: (seconds) => {
+          if (playerRef.current) seekAndPlay(playerRef.current, seconds);
+        },
         reveal: () => {
           containerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         },
