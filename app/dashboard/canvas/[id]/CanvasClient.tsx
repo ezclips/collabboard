@@ -151,6 +151,7 @@ import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } fr
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer';
+import { seekBoardVideo } from '@/components/collabboard/boardVideoPlayerRegistry';
 import {
   boardDockClaim,
   type BoardDockSurface,
@@ -2617,7 +2618,26 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
+    readonly transcriptStartMs?: number;
+    readonly videoIdentity?: string;
   }) => {
+    /**
+     * A TRANSCRIPT CITATION SEEKS THE VIDEO ON THIS BOARD, when there is one.
+     *
+     * The reader shows the transcript's TEXT, which is a worse answer to "at
+     * what minute?" than the video itself moving to that minute -- the words
+     * were already in the answer the person just read. So a citation carrying a
+     * moment tries the board first and only falls back to the reader.
+     *
+     * THE FALLBACK IS NOT AN ERROR PATH. The card may be on another board,
+     * deleted, or simply not loaded yet, and `seekBoardVideo` says so by
+     * returning false. Opening the source then is the same thing every other
+     * citation does, so nothing is lost and nothing needs explaining.
+     */
+    if (request.transcriptStartMs !== undefined && request.videoIdentity !== undefined) {
+      if (seekBoardVideo(request.videoIdentity, request.transcriptStartMs)) return;
+    }
+
     requestKnowledgeDocumentOpen({
       documentId: request.knowledgeDocumentId,
       ...(request.pageNumber === undefined ? {} : { pageNumber: request.pageNumber }),

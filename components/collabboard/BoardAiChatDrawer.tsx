@@ -27,6 +27,7 @@ import {
   withBoardAiDraftReadiness,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
+import { formatTranscriptTimestamp } from '@/lib/domain/ai/boardAiTranscriptPassage';
 import type {
   BoardAiChatMessageView,
   BoardAiChatThreadSummary,
@@ -108,6 +109,15 @@ export interface BoardAiChatDrawerProps {
     /** A pageless source's locator: where in its text the citation points. */
     readonly charStart?: number;
     readonly charEnd?: number;
+    /**
+     * A transcript citation's moment, and the video it belongs to.
+     *
+     * Present together or not at all. The host uses them to SEEK a player
+     * already on the board rather than navigate away; a host that does not
+     * know how simply ignores them and opens the source as it always did.
+     */
+    readonly transcriptStartMs?: number;
+    readonly videoIdentity?: string;
   }) => void;
   readonly canSaveAssistantAsNote?: boolean;
   readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
@@ -170,6 +180,13 @@ function visibleCitations(items: readonly BoardAiCitationItem[]): readonly Board
  * never borrows a page it was not given.
  */
 function boardAiCitationLabel(item: BoardAiCitationItem): string {
+  // A TRANSCRIPT SAYS WHEN, exactly as a PDF says WHICH PAGE. Both answer
+  // "where in this source", in the units that source actually has -- and the
+  // moment comes from the server's signed item rather than being recomputed
+  // here, so the chip can never disagree with the answer above it.
+  if (item.transcriptStartMs !== undefined) {
+    return `${item.label} · ${formatTranscriptTimestamp(item.transcriptStartMs)}`;
+  }
   return item.pageNumber === undefined ? item.label : `${item.label} · p. ${item.pageNumber}`;
 }
 
@@ -646,11 +663,49 @@ export default function BoardAiChatDrawer({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (yieldsToEditor) return;
+      // THE CONTEXT MENU IS DISMISSED FIRST, AND THE PRECEDENCE LIVES HERE
+      // rather than in a second listener of its own. Two document-level Escape
+      // handlers would fire in registration order -- which nothing in this file
+      // controls -- so one Escape would sometimes close the menu and sometimes
+      // take the whole conversation with it. That is the same failure the note
+      // above describes for editors, and it is avoided the same way: one chain,
+      // in one place, innermost first.
+      if (contextMenuOpen) {
+        setContextMenuOpen(false);
+        return;
+      }
       onClose();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, yieldsToEditor, onClose]);
+  }, [isOpen, yieldsToEditor, onClose, contextMenuOpen]);
+
+  /**
+   * A click outside the context menu closes it.
+   *
+   * IT USED TO CLOSE ONLY BY PRESSING "Context" AGAIN, which is not where
+   * anyone looks: every other menu on this board dismisses when you click away
+   * from it, so this one read as stuck rather than as modal.
+   *
+   * POINTERDOWN, IN THE CAPTURE PHASE, and both halves matter. Pointerdown
+   * rather than click, so the menu is gone before whatever was clicked reacts
+   * -- on click, a menu overlapping the thing you aimed at swallows the first
+   * press. Capture, so a handler that stops propagation on its own element
+   * cannot leave the menu open behind it.
+   */
+  const contextMenuAreaRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!contextMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const area = contextMenuAreaRef.current;
+      // The trigger button lives inside this area too, so its own toggle still
+      // works: a press on it is never "outside".
+      if (area && event.target instanceof Node && area.contains(event.target)) return;
+      setContextMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [contextMenuOpen]);
 
   /** Clears the surface only. No row is deleted, and none is created yet. */
   const startNewChat = useCallback(() => {
@@ -930,6 +985,8 @@ export default function BoardAiChatDrawer({
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
+    readonly transcriptStartMs?: number;
+    readonly videoIdentity?: string;
   }) => {
     if (!onOpenCitation) return;
     if (goneCitationDocumentIds.has(request.knowledgeDocumentId)) return;
@@ -1330,6 +1387,15 @@ export default function BoardAiChatDrawer({
                             ...(item.charStart !== undefined && item.charEnd !== undefined
                               ? { charStart: item.charStart, charEnd: item.charEnd }
                               : {}),
+                            // BOTH OR NEITHER, again: seeking needs a moment
+                            // AND a video to seek it in, and half of that pair
+                            // is not a weaker request but an unanswerable one.
+                            ...(item.transcriptStartMs !== undefined && item.videoIdentity !== undefined
+                              ? {
+                                  transcriptStartMs: item.transcriptStartMs,
+                                  videoIdentity: item.videoIdentity,
+                                }
+                              : {}),
                           }); }}
                         >
                           <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -1454,6 +1520,7 @@ export default function BoardAiChatDrawer({
             has not already guessed the gesture. */}
         <div
           className={`relative mb-1.5 rounded ${dropActive ? 'bg-blue-50/70 outline-dashed outline-1 outline-offset-2 outline-blue-400' : ''}`}
+          ref={contextMenuAreaRef}
           data-board-ai-context-dropzone="true"
           data-board-ai-context-drop-active={dropActive ? 'true' : undefined}
           onDragOver={handleContextDragOver}

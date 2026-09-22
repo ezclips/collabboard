@@ -9,6 +9,7 @@ import {
   TikTokEmbed,
   TwitterEmbed,
 } from "react-social-media-embed";
+import { BoardSeekableVideo } from "./BoardSeekableVideo";
 
 type EmbedKind =
   | "twitter"
@@ -104,28 +105,12 @@ export default function LinkMediaEmbed({ url, forcedKind, disableInteraction = f
     return <TwitterEmbed url={normalizedUrl} width="100%" />;
   }
 
-  if (kind === "youtube") {
-    // Use ReactPlayer for YouTube - more reliable across different rendering contexts
-    return (
-      <div className={`relative w-full overflow-hidden bg-gray-100 ${disableInteraction ? "pointer-events-none" : ""}`}>
-        <div className="pt-[56.25%]" />
-        <div className="absolute inset-0">
-          <ReactPlayer url={normalizedUrl} controls width="100%" height="100%" />
-        </div>
-      </div>
-    );
-  }
-
-  if (kind === "vimeo") {
-    // Ensure ReactPlayer handles Vimeo
-    return (
-      <div className={`relative w-full overflow-hidden bg-gray-100 ${disableInteraction ? "pointer-events-none" : ""}`}>
-        <div className="pt-[56.25%]" />
-        <div className="absolute inset-0">
-          <ReactPlayer url={normalizedUrl} controls width="100%" height="100%" />
-        </div>
-      </div>
-    );
+  if (kind === "youtube" || kind === "vimeo") {
+    // THE SAME ReactPlayer AS BEFORE, wrapped so a transcript citation can seek
+    // it. Clicking "7:50" beside a Board AI answer moves this player rather
+    // than opening a tab -- which is only possible while the card is mounted,
+    // so the component registers on ready and unregisters on unmount.
+    return <BoardSeekableVideo url={normalizedUrl} disableInteraction={disableInteraction} />;
   }
 
   if (kind === "tiktok") {
