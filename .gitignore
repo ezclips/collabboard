@@ -94,6 +94,7 @@ devserver.out.log
 !.agent/youtube-caption-paths.md
 !.agent/isolated-sql-verification.md
 !.agent/stage4-transcription-engines.md
+!.agent/youtube-link-post-acquisition.md
 
 # Transcription probe MEDIA is never committed. The probe's manifest carries a
 # rightsBasis per clip precisely because the audio is licensed, or consented
