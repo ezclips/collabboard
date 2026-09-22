@@ -139,6 +139,12 @@ everything here passed *around* a difference that hosted will present for real.
 
 **Locally verified, clean, at `571b19b6`. Not applied to hosted.**
 
+**Superseded in part on 2026-09-22 — see Run 3 below.** `20260921120000` HAS
+since been applied to hosted (it fixed a live outage: every PDF card was
+rendering "Page content is not available"). The remaining four were re-verified
+against the new pre-state, because applying that file and the canvas-access trio
+changed what they will meet.
+
 What remains, and what each step answers:
 
 1. **Hosted branch** — the real-ACL pre-state, the one question local cannot
@@ -149,3 +155,111 @@ What remains, and what each step answers:
 
 The local `collabboard-verify` stack is disposable:
 `supabase stop --project-id collabboard-verify --no-backup`.
+
+---
+
+# Run 3 — the four transcript migrations, 2026-09-22
+
+The first two runs verified a rollout of six files against the hosted ACL **as it
+was on 2026-09-21**. Since then the owner applied three of them to hosted
+(`20260921120000` plus the canvas-access trio), so the pre-state changed and the
+remaining four needed verifying against the state they will actually meet.
+
+**Result: fully green.** Disposable stack `collabboard-verify` (db 56322, api
+56321), built from the 2026-07-05 baseline snapshot plus every post-baseline
+migration **except the four under test**. No hosted contact at any point. The
+running local `collabboard` stack was untouched throughout (11 containers, before
+and after).
+
+## What was verified
+
+| Step | Result |
+|---|---|
+| Pre-state UPDATE allowlist on `knowledge_documents` | 21 columns, **including** `content_sha256` |
+| Item 17 apply | `removing content_sha256 from the authenticated UPDATE allowlist` |
+| Item 17 verify | `hash permission verify: ok` |
+| Item 17 repeat-apply | correctly no-op: *"already applied — the other 20 columns are intact"* |
+| **Item 18 adversarial** | **`ALL PASS -- 5 of 5`** |
+| Item 18 apply → verify | `insert permission verify: ok` |
+| Item 18 repeat-apply | correctly no-op |
+| Revision column apply → verify | `transcript mutation revision verify: ok` |
+| Revision repeat-apply | correctly no-op |
+| RPCs apply → verify | **`ALL PASS -- 8 of 8`** |
+| Rollbacks x4, reverse order | all exit 0 |
+| Restoration | UPDATE set **== pre-state** (21 == 21, diff empty); table-wide INSERT restored; revision column gone; RPCs gone; zero test rows |
+
+**The two harness verdicts are recorded separately, each against its own
+denominator** — item 18 adversarial **5 of 5**, transcript RPC verifier **8 of
+8**. Combining them would let a short adversarial run hide behind the verifier's
+count.
+
+### The allowlist comparison passed against the real shape
+
+Item 17 compares the `authenticated` UPDATE allowlist **by name, in both
+directions**, and refuses on any mismatch. It did not refuse. That is the single
+most useful fact in this run: the pre-state this stack reconstructs is a
+*supported* pre-state for these migrations, and the 21 columns it found are
+exactly the set the migration expects.
+
+### The adversarial result means something
+
+Each refusal reports **"refused as intended: `<the specific check>`"**, and cases
+4 and 5 are POSITIVE CONTROLS that pass by **acceptance** — the genuine post-state
+must be a verified no-op, and the supported pre-state must repair. So the harness
+cannot be satisfied by a classifier that refuses everything, which is precisely
+how run 1 scored a worthless `ALL PASS`.
+
+## Three environment shims, none of them a change to any migration
+
+Recorded because a later reader rebuilding this locally will hit all three.
+
+1. **`storage.objects` policy names** — known and previously recorded. The local
+   storage-api creates **no** policies on `storage.objects`, while
+   `20260916160000` expects hosted's six names. The six were created locally as
+   permissive placeholders so the `ALTER POLICY` statements had targets. The
+   migration itself was not modified.
+
+2. **`auth.uid()` in the baseline snapshot is OUT OF DATE — new finding.** The
+   2026-07-05 snapshot carries:
+
+   ```sql
+   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+   ```
+
+   reading only the old dotted claim. Current Supabase — and therefore hosted —
+   coalesces that with the `request.jwt.claims` JSON. Every verifier establishes
+   its probe identity by setting the **JSON** form, so against the snapshot's
+   definition `auth.uid()` returned NULL and the probes failed for a reason that
+   **does not exist on hosted**. Hosted's definition was installed locally (as
+   `supabase_auth_admin`, which owns the function).
+
+   This one is worth remembering: the failure presented as *"the probe identity
+   was not established"*, which reads like a fixture problem, and the verifier's
+   own assertion is what stopped it being mistaken for a privilege result.
+
+3. **Migration ordering in the runner (a defect in the runner, not the repo).**
+   `20260904_create_knowledge_source_highlights.sql` must precede
+   `20260904120000_harden_knowledge_source_highlight_authority.sql`, but ASCII
+   sorts `_` after digits and put them the wrong way round, so the harden ran
+   against a table that did not exist yet. Eight-digit dates are normalised to
+   fourteen before comparing. A second bug was caught in the same fix: the
+   padding replacement `'$1000000_'` would have been read as capture group
+   **`$10`**, so it uses a replacer function instead.
+
+## What this settles, and what it does not
+
+**Settles:** the four migrations apply, repeat-apply as no-ops, refuse the states
+they should refuse, roll back, and restore the pre-state exactly — against a
+reconstruction of the CURRENT hosted shape, including the canvas-access
+migrations applied hours earlier.
+
+**Does not settle:** whether the *real* hosted ACL is byte-for-byte this
+reconstruction. A local stack's pre-state is constructed from migrations; hosted's
+is history. That gap is why item 17 compares by name and refuses rather than
+assuming — if hosted differs, the migration stops and prints both sets rather
+than applying a wrong ACL.
+
+## Status
+
+**Verified clean and rolled back. NOT applied to hosted.** The stack is
+disposable: `npx supabase stop --project-id collabboard-verify --no-backup`.
