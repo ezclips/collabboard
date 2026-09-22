@@ -415,6 +415,32 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
       && charStart !== undefined && stored.charEnd > charStart
       ? stored.charEnd
       : undefined;
+    /**
+     * READ BACK, NOT DROPPED -- and this function dropping them is exactly the
+     * defect this branch fixes.
+     *
+     * The server stored `transcriptStartMs` and `videoIdentity` correctly and
+     * this reader rebuilt every item field by field, so anything it did not
+     * know about vanished on the way to the screen. The chips rendered without
+     * a moment, clicking them opened the reader instead of seeking the video,
+     * and NOTHING FAILED: the envelope parsed, the citation resolved, and the
+     * only sign was an absence. A field-by-field reader is safe against junk
+     * and silently lossy against its own newer writer.
+     *
+     * Narrowed rather than cast, like every field above it. Zero is a VALID
+     * moment -- a passage at the very start of a video -- so the test is
+     * `>= 0`, never truthiness.
+     */
+    const transcriptStartMs =
+      typeof stored.transcriptStartMs === 'number'
+      && Number.isInteger(stored.transcriptStartMs)
+      && stored.transcriptStartMs >= 0
+        ? stored.transcriptStartMs
+        : undefined;
+    const videoIdentity =
+      typeof stored.videoIdentity === 'string' && stored.videoIdentity.trim().length > 0
+        ? stored.videoIdentity
+        : undefined;
 
     let item: BoardAiCitationItem | null = null;
     if (stored.type === 'knowledge-page' && documentId && page !== undefined) {
@@ -434,6 +460,11 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
         ...(page !== undefined ? { pageNumber: page } : {}),
         ...(charStart !== undefined ? { charStart } : {}),
         ...(charEnd !== undefined ? { charEnd } : {}),
+        // BOTH OR NEITHER. Seeking needs a moment AND a video to seek it in;
+        // half the pair is an unanswerable request, not a weaker one.
+        ...(transcriptStartMs !== undefined && videoIdentity !== undefined
+          ? { transcriptStartMs, videoIdentity }
+          : {}),
         label,
       };
     } else if (stored.type === 'knowledge-document' && documentId) {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { boardAiSearchContextBlock, type BoardAiSearchPassage } from './boardAiSearchContext';
-import { boardAiCitationItemFromPassage } from './boardAiChatCitation';
+import {
+  BOARD_AI_CITATION_VERSION,
+  boardAiCitationItemFromPassage,
+  boardAiCitationsFromStored,
+} from './boardAiChatCitation';
 import type { BoardAiSearchResult } from './boardAiSearchContext';
 
 /**
@@ -137,5 +141,94 @@ describe('the citation offers the moment', () => {
         transcriptStartMs: 470_000,
       }),
     ).toBeNull();
+  });
+});
+
+describe('a stored transcript citation survives being read back', () => {
+  /**
+   * THE DEFECT THIS PINS PRODUCED NO ERROR OF ANY KIND.
+   *
+   * The server stored `transcriptStartMs` and `videoIdentity` correctly --
+   * confirmed in the database -- and `boardAiCitationsFromStored` rebuilt every
+   * item FIELD BY FIELD, so the two fields it did not know about were dropped
+   * on the way to the screen. The envelope parsed, the citation resolved, the
+   * chip rendered, and the only symptom was an absence: no timestamp on the
+   * chip, and a click that opened the reader instead of seeking the video.
+   *
+   * A field-by-field reader is safe against junk and silently lossy against its
+   * own newer writer. Anything added to a stored item from here on needs a line
+   * in that function AND a case in this block.
+   */
+  const envelope = (item: Record<string, unknown>) => ({
+    version: BOARD_AI_CITATION_VERSION,
+    items: [item],
+  });
+
+  const storedTranscriptCitation = {
+    type: 'knowledge-selection',
+    knowledgeDocumentId: 'doc-1',
+    charStart: 452,
+    charEnd: 697,
+    transcriptStartMs: 47_000,
+    videoIdentity: 'yt:sAKVRgN11Po',
+    label: 'Audi a2 front bumber removal and ac cooler change tips',
+  };
+
+  it('keeps the moment and the video', () => {
+    const read = boardAiCitationsFromStored(envelope(storedTranscriptCitation));
+    expect(read?.items[0]).toMatchObject({
+      transcriptStartMs: 47_000,
+      videoIdentity: 'yt:sAKVRgN11Po',
+    });
+  });
+
+  it('KEEPS A MOMENT OF ZERO, which is a real moment', () => {
+    // A passage at the very start of a video. A truthiness test here would
+    // drop it and send the reader to the document instead of to 0:00.
+    const read = boardAiCitationsFromStored(
+      envelope({ ...storedTranscriptCitation, transcriptStartMs: 0 }),
+    );
+    expect(read?.items[0]).toMatchObject({ transcriptStartMs: 0 });
+  });
+
+  it('drops BOTH when only one is present, rather than half a request', () => {
+    const noVideo = boardAiCitationsFromStored(
+      envelope({ ...storedTranscriptCitation, videoIdentity: undefined }),
+    );
+    expect(Object.prototype.hasOwnProperty.call(noVideo!.items[0], 'transcriptStartMs')).toBe(false);
+
+    const noMoment = boardAiCitationsFromStored(
+      envelope({ ...storedTranscriptCitation, transcriptStartMs: undefined }),
+    );
+    expect(Object.prototype.hasOwnProperty.call(noMoment!.items[0], 'videoIdentity')).toBe(false);
+  });
+
+  it('refuses junk in either field without losing the citation itself', () => {
+    // The citation still names a real range, so it stays openable -- it simply
+    // offers no moment. Dropping the whole chip would lose more than it saved.
+    const read = boardAiCitationsFromStored(
+      envelope({ ...storedTranscriptCitation, transcriptStartMs: -5, videoIdentity: '   ' }),
+    );
+    expect(read?.items[0]).toMatchObject({ knowledgeDocumentId: 'doc-1', charStart: 452 });
+    expect(Object.prototype.hasOwnProperty.call(read!.items[0], 'transcriptStartMs')).toBe(false);
+  });
+
+  it('leaves an ordinary text citation exactly as it was', () => {
+    const read = boardAiCitationsFromStored(
+      envelope({
+        type: 'knowledge-selection',
+        knowledgeDocumentId: 'doc-2',
+        charStart: 10,
+        charEnd: 40,
+        label: 'A text document',
+      }),
+    );
+    expect(read?.items[0]).toEqual({
+      type: 'knowledge-selection',
+      knowledgeDocumentId: 'doc-2',
+      charStart: 10,
+      charEnd: 40,
+      label: 'A text document',
+    });
   });
 });

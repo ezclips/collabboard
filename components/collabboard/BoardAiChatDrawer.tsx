@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, SendHorizontal, Upload, X } from 'lucide-react';
+import { Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, Play, SendHorizontal, Upload, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import {
@@ -180,14 +180,27 @@ function visibleCitations(items: readonly BoardAiCitationItem[]): readonly Board
  * never borrows a page it was not given.
  */
 function boardAiCitationLabel(item: BoardAiCitationItem): string {
-  // A TRANSCRIPT SAYS WHEN, exactly as a PDF says WHICH PAGE. Both answer
-  // "where in this source", in the units that source actually has -- and the
-  // moment comes from the server's signed item rather than being recomputed
-  // here, so the chip can never disagree with the answer above it.
-  if (item.transcriptStartMs !== undefined) {
-    return `${item.label} · ${formatTranscriptTimestamp(item.transcriptStartMs)}`;
-  }
   return item.pageNumber === undefined ? item.label : `${item.label} · p. ${item.pageNumber}`;
+}
+
+/**
+ * The moment shown beside a transcript citation, or null.
+ *
+ * SEPARATE FROM THE LABEL, AND THAT IS THE POINT. Appending it to the label
+ * string put it inside a `truncate` span, so on a source called "Audi a2 front
+ * bumber removal and ac cooler change tips" the timestamp was the first thing
+ * the ellipsis ate -- the chip looked exactly like an ordinary citation, and
+ * the one piece of information the person had asked for was the one piece CSS
+ * removed. Rendered as its own `shrink-0` element, the long label truncates and
+ * the moment always survives.
+ *
+ * A PDF's page stays in the label because it is short and because a page is not
+ * what anybody asked for; a moment is.
+ */
+function boardAiCitationMoment(item: BoardAiCitationItem): string | null {
+  return item.transcriptStartMs === undefined
+    ? null
+    : formatTranscriptTimestamp(item.transcriptStartMs);
 }
 
 export interface BoardAiDocumentScopedSession {
@@ -1329,6 +1342,7 @@ export default function BoardAiChatDrawer({
                     {citations.map((item) => {
                       const citationKey = boardAiCitationIdentityKey(item);
                       const citationLabel = boardAiCitationLabel(item);
+                      const citationMoment = boardAiCitationMoment(item);
                       const citedDocumentId = item.knowledgeDocumentId;
                       const chipClass = 'inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] leading-none';
                       // THE SOURCE IS GONE. The citation itself is untouched --
@@ -1375,8 +1389,16 @@ export default function BoardAiChatDrawer({
                               ? `${item.charStart}:${item.charEnd}`
                               : ''
                           }
-                          title={`Open ${citationLabel}`}
-                          aria-label={`Open ${citationLabel}`}
+                          title={
+                            citationMoment === null
+                              ? `Open ${citationLabel}`
+                              : `Play ${citationLabel} from ${citationMoment}`
+                          }
+                          aria-label={
+                            citationMoment === null
+                              ? `Open ${citationLabel}`
+                              : `Play ${citationLabel} from ${citationMoment}`
+                          }
                           className={`${chipClass} border-gray-200 text-blue-700 transition hover:border-blue-200 hover:bg-blue-50`}
                           onClick={() => { void openCitation({
                             knowledgeDocumentId: citedDocumentId,
@@ -1398,8 +1420,18 @@ export default function BoardAiChatDrawer({
                               : {}),
                           }); }}
                         >
-                          <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {citationMoment === null ? (
+                            <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          ) : (
+                            <Play className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          )}
                           <span className="truncate">{citationLabel}</span>
+                          {citationMoment === null ? null : (
+                            // shrink-0: the label gives way, the moment never does.
+                            <span className="shrink-0 font-medium tabular-nums">
+                              {citationMoment}
+                            </span>
+                          )}
                         </button>
                       );
                     })}
