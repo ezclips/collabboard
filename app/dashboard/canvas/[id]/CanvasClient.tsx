@@ -2263,7 +2263,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // topic is not. Collapsing them into one message sent people to retry
       // something that will never work.
       if (response.status === 409) throw new Error('retry');
-      return null;
+      // ONLY 404 IS AN ANSWER ABOUT THE BOARD. Every other failure is an answer
+      // about US, and must not be dressed as one about the board.
+      //
+      // This returned null for EVERY non-409 status, and the drawer renders
+      // null as "This board has nothing on that topic yet." So on 2026-09-22 a
+      // 503 -- the compile reading `transcript_mutation_revision` before its
+      // migration was applied -- told the owner his board had nothing on a
+      // topic his board plainly covered: the PDF was ready, chunked, and the
+      // search returned it. The same sentence would have appeared if the
+      // database were on fire.
+      //
+      // The route maps not_found->404, conflict->409, unavailable->503
+      // (lib/server/wiki/boardWikiPageRoute.ts), so 404 is the only status that
+      // means "asked and answered, nothing matched". The rest throw and reach
+      // the drawer's failure message, which says to try again -- true of a 503,
+      // and honest about not knowing.
+      if (response.status === 404) return null;
+      throw new Error(`wiki compile failed: ${response.status}`);
     }
     const body = await response.json();
     return body?.proposal ?? null;
