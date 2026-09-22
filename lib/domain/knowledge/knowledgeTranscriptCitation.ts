@@ -17,6 +17,7 @@
 // citation, where "nearest" means "a moment nobody quoted". This module asks
 // for OWNERSHIP instead, and returns nothing when no cue owns the range.
 
+import { knowledgeTranscriptFormatDerivesCueEnds } from './knowledgeTranscriptCues';
 import type { KnowledgeTranscriptStoredRepresentation } from './knowledgeTranscriptVersion';
 
 /** What opening a transcript citation can offer. */
@@ -36,6 +37,24 @@ export type KnowledgeTranscriptCitationTarget =
       readonly startMs: number;
       readonly endMs: number;
       readonly url: string;
+      /**
+       * True when `endMs` was SYNTHESISED rather than declared by the source.
+       *
+       * `startMs` is always real: every format this application parses states
+       * when a cue begins. `endMs` is not. YouTube's transcript panel gives
+       * starts only, so a panel-pasted cue's end is the next cue's start --
+       * a good estimate, and still an estimate.
+       *
+       * IT TRAVELS WITH THE TIMESTAMP BECAUSE THAT IS THE ONLY PLACE IT CAN BE
+       * ACTED ON. A range whose end is invented looks exactly like one whose
+       * end was declared, and the reader has no way to tell them apart: the
+       * clip plays, the words match, and the last second or two may belong to
+       * a sentence nobody quoted. This is the same shape as the defects
+       * recorded in LESSONS_LEARNED -- a derived value and a source value
+       * converging on one field, after which nothing downstream can separate
+       * them.
+       */
+      readonly endsAreDerived: boolean;
     };
 
 type StoredCue = KnowledgeTranscriptStoredRepresentation['cues'][number];
@@ -175,7 +194,18 @@ export function knowledgeTranscriptCitationTarget(
     return { kind: 'range', reason: 'unsupported-video-identity' };
   }
 
-  return { kind: 'timestamped', startMs: cue.startMs, endMs: cue.endMs, url };
+  // READ FROM THE STORED FORMAT, NOT FROM A NEW STORED FIELD. The
+  // representation already records which parser produced these cues, and
+  // whether that parser declares ends is a property of the format rather than
+  // of the row -- so this needs no migration, no representation version bump,
+  // and answers correctly for every transcript already stored.
+  return {
+    kind: 'timestamped',
+    startMs: cue.startMs,
+    endMs: cue.endMs,
+    url,
+    endsAreDerived: knowledgeTranscriptFormatDerivesCueEnds(representation.format),
+  };
 }
 
 /**

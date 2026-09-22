@@ -32,6 +32,36 @@ import { parseYouTubeTranscriptPanel } from './knowledgeTranscriptPanelPaste';
 
 export type KnowledgeTranscriptFormat = 'srt' | 'vtt' | 'plain' | 'youtube-panel';
 
+/**
+ * Does this format DECLARE when a cue ends, or must the end be synthesised?
+ *
+ * DELIBERATELY AN EXHAUSTIVE `Record`, and that is the whole point of writing
+ * it this way. Adding a member to the union above BREAKS this map at compile
+ * time, so whoever adds the next format has to answer the question rather than
+ * inherit an answer. Two lists in this feature are `readonly Format[]` instead
+ * -- the route's allowlist and the panel's options -- and because an array does
+ * NOT break on widening, `'youtube-panel'` shipped parsed, tested and
+ * unreachable. The contrast is intentional: use a Record wherever silence would
+ * be wrong.
+ *
+ * `'plain'` produces no cues at all, so it has no ends to declare or derive;
+ * `false` is the accurate answer because nothing about it is synthesised.
+ */
+const FORMAT_DERIVES_CUE_ENDS: Record<KnowledgeTranscriptFormat, boolean> = {
+  srt: false,
+  vtt: false,
+  plain: false,
+  // The panel states only when each cue STARTS. Every end is the next cue's
+  // start, and the last one is a median of the rest.
+  'youtube-panel': true,
+};
+
+export function knowledgeTranscriptFormatDerivesCueEnds(
+  format: KnowledgeTranscriptFormat,
+): boolean {
+  return FORMAT_DERIVES_CUE_ENDS[format];
+}
+
 export interface KnowledgeTranscriptCue {
   /** Position in the file, from 0. Not the cue's own numbering, which may lie. */
   readonly index: number;

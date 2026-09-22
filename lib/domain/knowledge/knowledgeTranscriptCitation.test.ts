@@ -257,3 +257,44 @@ describe('the disclosure', () => {
     expect(KNOWLEDGE_TRANSCRIPT_DISCLOSURE).toContain('has not been verified');
   });
 });
+
+describe('a derived cue end is labelled as derived', () => {
+  /**
+   * THE START IS ALWAYS REAL; THE END IS NOT ALWAYS REAL. Every format states
+   * when a cue begins. YouTube's transcript panel states only that -- each end
+   * is the next cue's start, and the last is a median of the rest. A range
+   * whose end was invented looks exactly like one whose end was declared, so
+   * the distinction has to travel with the timestamp rather than be
+   * re-derivable by whoever happens to remember.
+   */
+  it('reports derived ends for a transcript pasted from the panel', () => {
+    const target = knowledgeTranscriptCitationTarget(
+      representation({ format: 'youtube-panel' }),
+      0,
+      5,
+      cited(0, 5),
+    );
+    expect(target.kind).toBe('timestamped');
+    if (target.kind !== 'timestamped') return;
+    expect(target.endsAreDerived).toBe(true);
+    // The START is untouched by any of this: it is what the source said.
+    expect(target.startMs).toBe(1000);
+  });
+
+  it.each(['srt', 'vtt'] as const)('reports declared ends for %s, which states both', (format) => {
+    const target = knowledgeTranscriptCitationTarget(representation({ format }), 0, 5, cited(0, 5));
+    expect(target.kind).toBe('timestamped');
+    if (target.kind !== 'timestamped') return;
+    expect(target.endsAreDerived).toBe(false);
+  });
+
+  it('reads the answer from the STORED format, so transcripts saved before this existed answer correctly', () => {
+    // No migration and no representation version bump: `format` was already
+    // part of every stored representation, and whether a format declares ends
+    // is a property of the format, not of the row.
+    const stored = representation({ format: 'youtube-panel' });
+    expect(stored.representationVersion).toBe(1);
+    const target = knowledgeTranscriptCitationTarget(stored, 6, 11, cited(6, 11));
+    expect(target.kind === 'timestamped' && target.endsAreDerived).toBe(true);
+  });
+});

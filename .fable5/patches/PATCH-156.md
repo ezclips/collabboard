@@ -469,3 +469,112 @@ STOP and report, leaving the tree clean, if:
 ## Commit
 
 Use the `## Commit` message in this patch file **verbatim**.
+
+---
+
+# PART B — AS BUILT (2026-09-22)
+
+**Authorized by the owner 2026-09-22** ("you can apply patch 156 part B"), after
+all four migrations were applied and verified. The blocker recorded above is
+gone: the RPCs resolve, and `check:schema` reports every select executing.
+
+## What was found before anything was built
+
+**Part A shipped unreachable, and nothing said so.** `'youtube-panel'` was in
+the union, had a parser and 20 passing tests, and no user could reach it. Two
+lists decide what actually reaches the parser and NEITHER is an exhaustive map:
+`FORMATS` in the route and `FORMAT_OPTIONS` in the panel are both
+`readonly Format[]`, and widening a union does not break an array. `tsc` was
+clean, the suite was green, the feature was dead.
+
+**`KnowledgeTranscriptImportPanel` was mounted nowhere at all.** Built in Stage
+3b, complete, and imported by no component. Pasting a transcript was possible
+only in principle for the whole of Stage 3b and Part A.
+
+Both are now pinned by `knowledgeTranscriptFormatReachability.source.test.ts`,
+which reads the union from its own declaration and requires every member to be
+both acceptable and offerable. **Verified to fail 2 of 10 against the pre-fix
+lists** — a pin that passes either way is not a pin.
+
+## The decision the rest of Part B rests on
+
+**A transcript is keyed to the VIDEO, not to the post.** `videoIdentity` already
+existed on the stored representation; what was missing was a canonical reading
+of it. `mediaPostVideoIdentity.ts` gives one: `yt:<id>` for every YouTube URL
+shape, `vimeo:`, `tiktok:`, `x:`, `ig:`, and a normalised-URL fallback marked
+`canonical: false`.
+
+Three requirements collapse into consequences of that one decision:
+
+- **W1 (dedupe)** — a second card of the same video finds the transcript,
+  because both cards ask the same question and get the same answer. No extra
+  mechanism.
+- **W7 (URL change)** — nothing detaches, because nothing was ever attached. The
+  card asks, every render, which transcript matches the URL it currently points
+  at. Edit the URL and the answer changes. There is no stale pointer to miss and
+  no edit path that can forget.
+- **Mis-attribution** — reuse demands `canonical: true`; a merely-similar URL is
+  refused. Detaching accepts any doubt. The asymmetry is deliberate and tested:
+  a wrong "same video" attributes one person's transcript to another person's
+  post with nothing on screen looking wrong, while a wrong "different" costs one
+  paste.
+
+## Item by item
+
+- **B1 — DONE.** `MediaPostTranscriptAffordance` renders on media link cards
+  only. Four states, not two: absent offers the paste, processing says so and
+  offers nothing, ready reports the transcript, and **failed says it failed and
+  offers a retry** (W3). Viewers see status and are offered no action.
+- **B2 — DONE.** `MediaPostTranscriptDialog` mounts the existing Stage 3b panel,
+  through the existing import route. `videoIdentity` is prefilled from the card
+  because it is DERIVED; the FORMAT is still asked for, because it is a claim
+  about the clipboard and the panel's refusal to guess it is load-bearing.
+- **B3 — PARTIAL, and stated as such.** The dedupe half is done. The other half
+  — *"a transcript already cited by a wiki page says so on the card"* — is NOT
+  built. It needs a second read over `board_wiki_pages.sources`, and the warning
+  is most useful at REPLACE time rather than on the card: the risk it guards is
+  overwriting a transcript something depends on, which happens in the panel's
+  re-import path, not on the card. **Recommendation: it lands with a replace
+  confirmation, not here.**
+- **B4 (W7) — DONE, by construction.** See above. Pinned in
+  `boardTranscriptIndex.test.ts`, including that a URL edited only for tracking
+  parameters is NOT a change — otherwise a transcript would vanish from a card
+  nobody meaningfully edited.
+- **B5 — HELD.** Freeform only. No drawing-canvas file was touched.
+
+## Taken beyond the listed items, and why
+
+**Derived cue ends now reach the citation.** Part A recorded `endsAreDerived` on
+the parse result, where it died — it was in no stored field and no consumer.
+`KnowledgeTranscriptCitationTarget` now carries `endsAreDerived`, read from the
+stored `format` via an exhaustive `Record` that BREAKS when the union is
+widened. No migration and no representation-version bump: `format` was always
+stored, and whether a format declares ends is a property of the format.
+
+This was not opportunistic. Part B is what makes panel pastes actually happen,
+so it turns a latent gap into a live one. **Scope note:** the field is currently
+latent — the one consumer of a citation target renders `startMs` only, and
+starts are always real. It is there for whoever renders a range.
+
+## Files
+
+Created: `mediaPostVideoIdentity.ts`, `boardTranscriptIndex.ts`,
+`knowledgeTranscriptIndexAdapters.ts`, `knowledgeTranscriptIndexRoute.ts`,
+`app/api/boards/[id]/knowledge/transcripts/route.ts`,
+`MediaPostTranscriptAffordance.tsx`, `MediaPostTranscriptDialog.tsx`,
+`useBoardTranscriptIndex.ts`, plus six test files.
+
+Modified: `knowledgeTranscriptRoute.ts` (allowlist), `KnowledgeTranscriptImportPanel.tsx`
+(options + two optional props), `knowledgeTranscriptCues.ts` (derives-ends map),
+`knowledgeTranscriptCitation.ts` (the field), `FreeformPadletCards.tsx` (wiring
+only — all policy is in the domain, because a 5,800-line file is the last place
+a rule about mis-attributing a transcript should live).
+
+## Still open
+
+- B3's wiki-citation half, above.
+- **The clipboard shape is still unmeasured.** The parser accepts both the
+  triple and the collapsed line because only the panel's RENDERED text was
+  measured. One real copy-paste settles which is real; the parser needs no
+  change if it is the other one, but this remains the one assumption in the
+  feature that nothing has tested against reality.

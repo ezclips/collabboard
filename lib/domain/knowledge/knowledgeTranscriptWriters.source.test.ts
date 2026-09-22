@@ -67,6 +67,14 @@ const DOCUMENT_TOUCHERS = [
   // writes document, representation and chunks in one transaction and
   // validates cue containment against those chunks before doing so.
   'lib/infra/knowledge/knowledgeTranscriptAdapters.ts',
+  // ADDED by PATCH-156 Part B, and it cannot break the invariant for a reason
+  // stronger than care: IT CANNOT WRITE. Its Supabase client interface exposes
+  // exactly `from(...).select(...).eq(...).not(...).order(...)` and nothing
+  // else -- no insert, no update, no delete, no rpc -- so a write from this
+  // file is a compile error rather than a review finding. It reads the board's
+  // transcripts to decorate media cards and deliberately does not select the
+  // cues or the canonical text, so it cannot make them disagree either.
+  'lib/infra/knowledge/knowledgeTranscriptIndexAdapters.ts',
   'lib/server/ai/boardAiChatContext.ts',
   'lib/server/knowledge/knowledgeDocumentDeleteSession.ts',
   'lib/server/wiki/boardWikiSourceVersions.ts',

@@ -35,7 +35,12 @@ export interface KnowledgeTranscriptRouteDependencies {
   }): void;
 }
 
-const FORMATS: readonly KnowledgeTranscriptFormat[] = ['srt', 'vtt', 'plain'];
+// A READONLY ARRAY, WHICH IS WHY THIS LINE HAD TO BE EDITED BY HAND. Widening
+// `KnowledgeTranscriptFormat` does NOT break a `readonly K[]` the way it breaks
+// a `Record<K, V>` -- the compiler stays silent and the new format is simply
+// refused at the boundary. That is exactly how 'youtube-panel' came to ship
+// fully parsed, fully tested, and unreachable by any user.
+const FORMATS: readonly KnowledgeTranscriptFormat[] = ['srt', 'vtt', 'plain', 'youtube-panel'];
 const TRACK_KINDS = ['human', 'machine', 'unknown'] as const;
 
 type TrackKind = (typeof TRACK_KINDS)[number];
@@ -134,7 +139,10 @@ export function createKnowledgeTranscriptPostHandler(deps: KnowledgeTranscriptRo
     // one that never had them.
     if (!isFormat(body.format)) {
       return NextResponse.json(
-        { error: 'Choose the transcript format: SRT, WebVTT, or plain text' },
+        {
+          error:
+            'Choose the transcript format: SRT, WebVTT, a copy of YouTube’s transcript panel, or plain text',
+        },
         { status: 400 },
       );
     }

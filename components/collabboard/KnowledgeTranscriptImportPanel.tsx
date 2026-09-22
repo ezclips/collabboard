@@ -39,6 +39,20 @@ export interface KnowledgeTranscriptImportPanelProps {
   /** Present when re-importing over a transcript the board already has. */
   readonly existing?: KnowledgeTranscriptVersionHandle & { readonly title: string };
   readonly onImported?: (handle: KnowledgeTranscriptVersionHandle) => void;
+  /**
+   * The video, when the import was started from a card that points at one.
+   *
+   * PREFILLED BECAUSE IT IS DERIVED, NOT GUESSED. It comes from the URL of the
+   * card the person clicked, so it is a fact about which card they clicked --
+   * unlike the FORMAT, which is a claim about what is on their clipboard and
+   * which this panel therefore still refuses to assume. Typing `yt:dQw4w9WgXcQ`
+   * by hand is also the step most likely to be skipped or mistyped, and a
+   * transcript with a wrong or missing identity is one nothing can dedupe
+   * against and no card can find again.
+   */
+  readonly initialVideoIdentity?: string | null;
+  /** The card's link title, as a starting point for the transcript's name. */
+  readonly initialTitle?: string;
 }
 
 type Status =
@@ -50,22 +64,29 @@ type Status =
 const FORMAT_OPTIONS: readonly { value: KnowledgeTranscriptFormat; label: string }[] = [
   { value: 'srt', label: 'SubRip (.srt)' },
   { value: 'vtt', label: 'WebVTT (.vtt)' },
+  // KEPT IN STEP WITH `FORMATS` IN knowledgeTranscriptRoute.ts BY HAND. Neither
+  // list is an exhaustive Record, so widening KnowledgeTranscriptFormat breaks
+  // neither of them -- a new format that is added to the union and to nothing
+  // else compiles, tests green, and cannot be chosen or submitted by anyone.
+  { value: 'youtube-panel', label: 'Copied from YouTube’s transcript panel' },
   { value: 'plain', label: 'Plain text (no timings)' },
 ];
 
 export function KnowledgeTranscriptImportPanel({
   boardId,
   existing,
+  initialVideoIdentity,
+  initialTitle,
   onImported,
 }: KnowledgeTranscriptImportPanelProps) {
   const [payload, setPayload] = useState('');
   // NO DEFAULT FORMAT. An empty value cannot be submitted, which is the point:
   // the person says what they pasted.
   const [format, setFormat] = useState<KnowledgeTranscriptFormat | ''>('');
-  const [title, setTitle] = useState(existing?.title ?? '');
+  const [title, setTitle] = useState(existing?.title ?? initialTitle ?? '');
   const [language, setLanguage] = useState('');
   const [trackKind, setTrackKind] = useState<'human' | 'machine' | 'unknown'>('unknown');
-  const [videoIdentity, setVideoIdentity] = useState('');
+  const [videoIdentity, setVideoIdentity] = useState(initialVideoIdentity ?? '');
   const [version, setVersion] = useState<KnowledgeTranscriptVersionHandle | null>(existing ?? null);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 

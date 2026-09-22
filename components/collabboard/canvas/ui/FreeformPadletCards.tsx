@@ -53,6 +53,10 @@ import LinkMediaEmbed, { getLinkEmbedKind } from '@/components/collabboard/LinkM
 import FreeformGraphLayer from '@/components/graph/FreeformGraphLayer';
 import { resolveFreeformPostRenderZIndex } from '@/components/collabboard/canvas/engine/zIndex';
 import { buildYouTubeThumbCandidates, extractYouTubeId } from '@/lib/media/youtubeThumb';
+import { MediaPostTranscriptAffordance } from '@/components/collabboard/MediaPostTranscriptAffordance';
+import { MediaPostTranscriptDialog } from '@/components/collabboard/MediaPostTranscriptDialog';
+import { useBoardTranscriptIndex } from '@/components/collabboard/useBoardTranscriptIndex';
+import { mediaPostCarriesSpokenContent } from '@/lib/domain/knowledge/mediaPostVideoIdentity';
 import { NotePostContextMenu } from '@/components/collabboard/menus/NotePostContextMenu';
 import { LinkPostContextMenu } from '@/components/collabboard/menus/LinkPostContextMenu';
 import { TodoPostContextMenu } from '@/components/collabboard/menus/TodoPostContextMenu';
@@ -522,6 +526,38 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     worldOriginLeft,
     worldOriginTop,
   } = useCanvasConfig();
+
+  /**
+   * PATCH-156 Part B -- the transcript affordance on a media card.
+   *
+   * READ ONCE FOR THE WHOLE BOARD, and only when there is a media card to ask
+   * about: `enabled` is false on the great majority of boards, which have no
+   * video on them at all, and a board with thirty YouTube links still makes
+   * exactly one request rather than thirty identical ones.
+   *
+   * All the policy lives in lib/domain/knowledge/boardTranscriptIndex.ts. What
+   * happens HERE is only the wiring, deliberately -- this file is 5,800 lines
+   * and is the last place a rule about mis-attributing a transcript should be
+   * written down.
+   */
+  const boardHasMediaPosts = React.useMemo(
+    () =>
+      padlets.some(
+        (post) =>
+          post.type === 'link' &&
+          typeof post.metadata?.linkUrl === 'string' &&
+          mediaPostCarriesSpokenContent(post.metadata.linkUrl),
+      ),
+    [padlets],
+  );
+  const transcriptIndex = useBoardTranscriptIndex(
+    canvasId ? canvasId.toString() : null,
+    boardHasMediaPosts,
+  );
+  const [transcriptDialog, setTranscriptDialog] = React.useState<{
+    url: string;
+    title?: string;
+  } | null>(null);
 
   /**
    * PATCH POST-RESIZE-B1: shared box-resize preview for Image / AI posts.
@@ -3887,6 +3923,24 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.metadata.linkCaption}
                         </p>
                       )}
+                      {/* PATCH-156 Part B. Renders nothing unless this link is
+                          media, so an article card is untouched. `linkUrl` is
+                          read fresh on every render, which is what makes W7
+                          hold: edit the URL and the card asks about the new
+                          video, so the previous video's transcript simply
+                          stops matching. Nothing has to remember to detach. */}
+                      <MediaPostTranscriptAffordance
+                        url={linkUrlFromMeta || linkUrl}
+                        index={transcriptIndex.entries}
+                        indexLoaded={transcriptIndex.loaded}
+                        canEdit={canUseFreeformEditButton}
+                        onAddTranscript={(url) =>
+                          setTranscriptDialog({
+                            url,
+                            title: padlet.metadata?.linkTitle || undefined,
+                          })
+                        }
+                      />
                     </div>
                   );
                 })()
@@ -5178,6 +5232,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           reason the toolbar is screen UI: inside the layer it would inherit
           `transform: scale(canvasZoom)` and shrink to an unusable strip at
           10%. It anchors itself from the heading's measured client rect. */}
+      {/* PATCH-156 Part B. A SIBLING OF THE SCALED WORLD LAYER, for the same
+          reason the heading toolbar above is: inside it, the dialog would
+          inherit `transform: scale(canvasZoom)` and render at 10% on a
+          zoomed-out board. It opens only when somebody clicked "Add
+          transcript" on a card -- never when media is added, which would turn
+          dropping ten links into ten interruptions. */}
+      {canvasId && (
+        <MediaPostTranscriptDialog
+          boardId={canvasId.toString()}
+          url={transcriptDialog?.url ?? null}
+          title={transcriptDialog?.title}
+          onClose={() => setTranscriptDialog(null)}
+          onImported={() => {
+            // Re-read the index so the card that opened this stops offering a
+            // paste and starts reporting the transcript it now has.
+            transcriptIndex.refresh();
+            setTranscriptDialog(null);
+          }}
+        />
+      )}
       {selectedSectionHeading && (
         <SectionHeadingToolbar
           padlet={selectedSectionHeading}
