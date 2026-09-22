@@ -56,6 +56,7 @@ function reader(calls: string[], posts: BoardAiSearchPostRow[] = [], chunks: Boa
   return {
     async searchPosts() { calls.push('search'); return ok(posts); },
     async searchChunks() { calls.push('search'); return ok(chunks); },
+    readTranscriptRepresentations: async () => ok(new Map()),
   };
 }
 
@@ -93,7 +94,7 @@ describe('authorization happens BEFORE the privileged search', () => {
     const searched = vi.fn();
     const result = await searchBoardAiContext(
       authClient(calls, false),
-      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); } },
+      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); }, readTranscriptRepresentations: async () => ok(new Map()), },
       BOARD, USER, 'anything', 5000,
     );
 
@@ -110,7 +111,7 @@ describe('authorization happens BEFORE the privileged search', () => {
 
     const result = await searchBoardAiContext(
       throwing,
-      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); } },
+      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); }, readTranscriptRepresentations: async () => ok(new Map()), },
       BOARD, USER, 'anything', 5000,
     );
 
@@ -151,6 +152,7 @@ describe('the merge rule', () => {
       {
         async searchPosts() { return ok([post('p1', 'Weekly plan', 'the oil headlines note')]); },
         async searchChunks() { return { ok: false, error: { code: 'unavailable', message: 'x' } } as never; },
+        readTranscriptRepresentations: async () => ok(new Map()),
       },
       BOARD, USER, 'oil headlines', 5000,
     );
@@ -478,6 +480,7 @@ describe('the search clock is bounded and separate from the generation clock', (
           // Never resolves. The real shape of a seq scan on a large board.
           searchPosts: () => new Promise(() => {}),
           searchChunks: () => new Promise(() => {}),
+          readTranscriptRepresentations: async () => ok(new Map()),
         },
         BOARD, USER, 'oil headlines', 5000,
       );
@@ -542,6 +545,7 @@ describe('the search block itself', () => {
       {
         async searchPosts(_b, _q, limit) { limits.push(limit); return ok([]); },
         async searchChunks(_b, _q, limit) { limits.push(limit); return ok([]); },
+        readTranscriptRepresentations: async () => ok(new Map()),
       },
       BOARD, USER, 'oil headlines', 5000,
     );
@@ -555,6 +559,7 @@ describe('the search block itself', () => {
       {
         async searchPosts(_b, query) { queries.push(query); return ok([]); },
         async searchChunks(_b, query) { queries.push(query); return ok([]); },
+        readTranscriptRepresentations: async () => ok(new Map()),
       },
       BOARD, USER, 'What about the Iran oil headlines & the tankers?', 5000,
     );

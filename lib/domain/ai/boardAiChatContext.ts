@@ -240,6 +240,14 @@ export interface BoardAiCitablePassage {
    */
   readonly charStart?: number;
   readonly charEnd?: number;
+  /**
+   * The moment a transcript passage was spoken, for a citation that can offer
+   * it. Identity, like everything else here: WHERE the words are, never what
+   * they say.
+   */
+  readonly transcriptStartMs?: number;
+  /** The claimed video, so a citation can match it against media on the board. */
+  readonly videoIdentity?: string;
 }
 
 export interface ResolvedBoardAiContextBlock {

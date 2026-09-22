@@ -130,6 +130,17 @@ export interface BoardAiCitationItem {
   readonly padletId?: string;
   readonly charStart?: number;
   readonly charEnd?: number;
+  /**
+   * The moment a cited transcript passage was spoken, in ms.
+   *
+   * OPTIONAL, AND THAT IS LOAD-BEARING FOR EVERY EXISTING PROOF. The provenance
+   * canonicalization drops keys whose value is `undefined` before signing, so
+   * an item without this field produces the exact bytes it always did and every
+   * signature written before this existed still verifies.
+   */
+  readonly transcriptStartMs?: number;
+  /** The claimed video, matched against media on the board to seek it in place. */
+  readonly videoIdentity?: string;
   readonly label: string;
 }
 
@@ -312,6 +323,22 @@ export function boardAiCitationItemFromPassage(
       charEnd: passage.charEnd,
       // No pageNumber. Not omitted as an oversight: this source has no pages,
       // and the resolver now refuses a page cited in a text source outright.
+      //
+      // THE MOMENT, when the passage is a transcript's and a cue vouched for
+      // one. Optional, so a citation without it canonicalizes exactly as it
+      // did before -- `canonicalItem` drops undefined keys, so EVERY PROOF
+      // SIGNED BEFORE THIS FIELD EXISTED STILL VERIFIES, byte for byte.
+      //
+      // And carrying it here rather than deriving it in the browser is what
+      // makes it tamper-evident: the timestamp is inside the signed subject,
+      // so a forged one breaks the proof instead of sending a reader to a
+      // moment the server never vouched for.
+      ...(passage.transcriptStartMs !== undefined
+        ? { transcriptStartMs: passage.transcriptStartMs }
+        : {}),
+      ...(passage.videoIdentity !== undefined
+        ? { videoIdentity: passage.videoIdentity }
+        : {}),
       label,
     };
   }

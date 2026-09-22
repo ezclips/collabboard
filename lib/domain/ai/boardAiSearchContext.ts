@@ -15,6 +15,7 @@ import {
   type ResolvedBoardAiContextBlock,
 } from './boardAiChatContext';
 import { boardAiCitationSourceToken } from './boardAiChatCitation';
+import { formatTranscriptTimestamp } from './boardAiTranscriptPassage';
 
 /** Which index a passage came from. Never merged away; every passage keeps it. */
 /**
@@ -64,6 +65,24 @@ export interface BoardAiSearchPassage {
    */
   readonly charStart?: number;
   readonly charEnd?: number;
+  /**
+   * WHEN these words were spoken, for a passage of a transcript.
+   *
+   * Present only when a cue actually OWNS the passage's characters. Absent
+   * means no time could be vouched for -- the source is not a transcript, has
+   * no cues, or no cue covers this range -- and the passage is then quotable
+   * without a moment, which is the honest outcome.
+   *
+   * IT EXISTS BECAUSE ITS ABSENCE WAS VISIBLE. Asked at what minute a video
+   * discussed a topic, Board AI answered that the text it was given carried no
+   * timestamps and it could not convert the discussion into "minute X". That
+   * was true and correct: the cues were in the document's representation, the
+   * search read the chunks, and nothing joined them.
+   */
+  readonly transcriptStartMs?: number;
+  readonly transcriptEndMs?: number;
+  /** The claimed video, so a citation can match it against media on the board. */
+  readonly videoIdentity?: string;
   /**
    * A post that matched on its TITLE and has no body at all.
    *
@@ -296,8 +315,34 @@ export function dropDuplicateBoardAiSearchPassages(
  * every passage and let the block overrun the room it was given. Raised to 25,
  * which covers the widest token this can produce at the four-slot and
  * ten-passage ceilings.
+ *
+ * CHARGED PER PASSAGE, NOT FLAT, and the flat version is why. Raising this to
+ * 50 for everyone to cover the transcript timestamp over-charged every PDF and
+ * post passage by 25 characters, so fewer of them fitted a fixed budget -- an
+ * existing test that expected two passages in 700 characters got one, which is
+ * a real regression in what the model is given and not a stale expectation.
+ *
+ * So a transcript passage pays for its own origin line and nothing else does.
  */
 const BOARD_AI_SEARCH_PASSAGE_OVERHEAD = 25;
+
+/**
+ * The extra an origin line costs when it names a moment.
+ *
+ * "video transcript at 1:02:03" in place of "PDF text" is 19 more characters
+ * at the widest -- an hours-long video -- and 25 leaves headroom rather than
+ * sitting exactly on the ceiling. Under-counting does not fail loudly here: the
+ * block overruns the room it was given and something downstream is quietly
+ * squeezed.
+ */
+const BOARD_AI_SEARCH_TIMESTAMP_OVERHEAD = 25;
+
+/** What one passage costs beyond its own text and label. */
+function passageOverhead(passage: BoardAiSearchPassage): number {
+  return passage.transcriptStartMs === undefined
+    ? BOARD_AI_SEARCH_PASSAGE_OVERHEAD
+    : BOARD_AI_SEARCH_PASSAGE_OVERHEAD + BOARD_AI_SEARCH_TIMESTAMP_OVERHEAD;
+}
 
 export function boundBoardAiSearchPassages(
   passages: readonly BoardAiSearchPassage[],
@@ -310,7 +355,7 @@ export function boundBoardAiSearchPassages(
       ? `${passage.text.slice(0, BOARD_AI_CONTEXT_MAX_SINGLE_CHARS - 1)}…`
       : passage.text;
     // The label travels into the block too, so it is measured with the text.
-    const cost = text.length + passage.label.length + BOARD_AI_SEARCH_PASSAGE_OVERHEAD;
+    const cost = text.length + passage.label.length + passageOverhead(passage);
     if (spent + cost > availableChars) continue;
     kept.push({ ...passage, text });
     spent += cost;
@@ -372,7 +417,22 @@ export function boardAiSearchContextBlock(
         // missing -- the difference between "this post is empty" and "I was
         // given this post" is the whole reason the row is worth keeping.
         if (passage.titleOnly) return `[${token} | board post, title only and no body: ${passage.label}]`;
-        return `[${token} | ${passage.source === 'post' ? 'board post' : 'PDF text'}: ${passage.label}]\n${passage.text}`;
+        // A TRANSCRIPT PASSAGE SAYS WHEN IT WAS SPOKEN, and that single
+        // addition is what lets the model answer "at what minute". Without it
+        // the model was given words with no clock and correctly refused to
+        // name a minute -- the refusal was the honest answer to a question
+        // the context could not support.
+        //
+        // The START only. The end of a range is derived for some formats, and
+        // a span in the line invites the model to quote it as if the source
+        // had declared both. One number that is always real beats two where
+        // one sometimes is not.
+        const origin = passage.source === 'post'
+          ? 'board post'
+          : passage.transcriptStartMs !== undefined
+            ? `video transcript at ${formatTranscriptTimestamp(passage.transcriptStartMs)}`
+            : 'PDF text';
+        return `[${token} | ${origin}: ${passage.label}]\n${passage.text}`;
       })
       .join('\n\n');
   return {
@@ -399,6 +459,16 @@ export function boardAiSearchContextBlock(
         // it is what locates the passage in a source that has no pages.
         ...(passage.charStart !== undefined && passage.charEnd !== undefined
           ? { charStart: passage.charStart, charEnd: passage.charEnd }
+          : {}),
+        // THE MOMENT, so a citation can offer it without re-deriving it.
+        // Re-deriving would mean the answer and the link computing the same
+        // number by two routes, and the day they disagree the answer cites
+        // 7:50 beside a link that opens at 7:49.
+        ...(passage.transcriptStartMs !== undefined
+          ? { transcriptStartMs: passage.transcriptStartMs }
+          : {}),
+        ...(passage.videoIdentity !== undefined
+          ? { videoIdentity: passage.videoIdentity }
           : {}),
       })),
     }),

@@ -33,6 +33,7 @@ import type {
   BoardAiSearchPostRow,
   BoardAiSearchReader,
 } from '../../server/ai/boardAiChatSearch';
+import type { KnowledgeTranscriptStoredRepresentation } from '../../domain/knowledge/knowledgeTranscriptVersion';
 
 export function createBoardAiSearchReader(): BoardAiSearchReader {
   return {
@@ -62,6 +63,36 @@ export function createBoardAiSearchReader(): BoardAiSearchReader {
         return ok((data ?? []) as readonly BoardAiSearchChunkRow[]);
       } catch {
         return err(domainError('unavailable', 'Could not search this board'));
+      }
+    },
+    async readTranscriptRepresentations(boardId: string, documentIds: readonly string[]) {
+      // SCOPED BY BOARD AS WELL AS BY ID. The ids came from a search of this
+      // board, but a document id is not a capability and this read runs as
+      // service_role -- so the board filter is restated here rather than
+      // inherited from the assumption that the caller got them honestly.
+      //
+      // Only rows that ARE transcripts come back: a null representation means
+      // the document has no cues, which is most of the corpus.
+      try {
+        const { data, error } = await getSupabaseAdmin()
+          .from('knowledge_documents')
+          .select('id, transcript_representation')
+          .eq('board_id', boardId)
+          .in('id', documentIds as string[])
+          .not('transcript_representation', 'is', null);
+        if (error) return err(domainError('unavailable', 'Could not read transcript cues'));
+        const map = new Map<string, KnowledgeTranscriptStoredRepresentation>();
+        for (const row of (data ?? []) as { id: string; transcript_representation: unknown }[]) {
+          const rep = row.transcript_representation;
+          // Narrowed, never cast: it is jsonb, and a row whose cues are not an
+          // array must not reach code that iterates them.
+          if (rep === null || typeof rep !== 'object') continue;
+          if (!Array.isArray((rep as { cues?: unknown }).cues)) continue;
+          map.set(row.id, rep as KnowledgeTranscriptStoredRepresentation);
+        }
+        return ok(map as ReadonlyMap<string, KnowledgeTranscriptStoredRepresentation>);
+      } catch {
+        return err(domainError('unavailable', 'Could not read transcript cues'));
       }
     },
   };

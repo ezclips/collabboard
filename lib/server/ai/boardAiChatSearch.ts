@@ -26,6 +26,8 @@ import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
 import { buildBoardAiSearchQuery } from '../../domain/ai/boardAiSearchQuery';
 import { parseKnowledgeTextSourceLocator } from '../../domain/knowledge/knowledgeTextSourceLocator';
+import { boardAiTranscriptPassageTime } from '../../domain/ai/boardAiTranscriptPassage';
+import type { KnowledgeTranscriptStoredRepresentation } from '../../domain/knowledge/knowledgeTranscriptVersion';
 import {
   boardAiSearchContextBlock,
   boundBoardAiSearchPassages,
@@ -51,6 +53,21 @@ import type { KnowledgeBoardReadAuthorizationClient } from '../knowledge/knowled
 export interface BoardAiSearchReader {
   searchPosts(boardId: string, query: string, limit: number): Promise<Result<readonly BoardAiSearchPostRow[], DomainError>>;
   searchChunks(boardId: string, query: string, limit: number): Promise<Result<readonly BoardAiSearchChunkRow[], DomainError>>;
+  /**
+   * The cue tables for whichever of these documents are transcripts.
+   *
+   * SCOPED BY BOARD as well as by id, like every other read here: a document
+   * id is not a capability, and the search that produced these ids is not a
+   * licence to read a row from somewhere else.
+   *
+   * A FAILURE HERE MUST NOT FAIL THE SEARCH. Timestamps are an enrichment of
+   * an answer that is already useful without them, so the caller treats an
+   * error as 'no times available' and the passages arrive as they always did.
+   */
+  readTranscriptRepresentations(
+    boardId: string,
+    documentIds: readonly string[],
+  ): Promise<Result<ReadonlyMap<string, KnowledgeTranscriptStoredRepresentation>, DomainError>>;
 }
 
 export interface BoardAiSearchPostRow {
@@ -235,6 +252,32 @@ export async function searchBoardAiContext(
       };
     })
     : [];
+  /**
+   * THE JOIN THAT WAS MISSING. A transcript's cues live on the DOCUMENT, and
+   * the search reads CHUNKS, so a passage arrived with a character range and no
+   * clock -- which is why Board AI, asked at what minute a video discussed a
+   * topic, correctly answered that it had been given no timestamps.
+   *
+   * Read for the documents this search actually returned, so the cost is bounded
+   * by the result limit rather than by the size of the board's corpus. A failure
+   * is NOT a failed search: timestamps enrich an answer that is useful without
+   * them, so an error leaves the map empty and every passage arrives exactly as
+   * it did before.
+   */
+  const transcriptDocumentIds = chunks.ok
+    ? [...new Set(chunks.value.map((row) => row.document_id))]
+    : [];
+  let representations: ReadonlyMap<string, KnowledgeTranscriptStoredRepresentation> = new Map();
+  if (transcriptDocumentIds.length > 0) {
+    try {
+      const read = await reader.readTranscriptRepresentations(boardId, transcriptDocumentIds);
+      if (read.ok) representations = read.value;
+    } catch {
+      // Deliberately swallowed, and the only place in this module that is
+      // acceptable: see the note above. The answer still stands.
+    }
+  }
+
   const chunkPassages: readonly BoardAiSearchPassage[] = chunks.ok
     ? chunks.value.map((row) => {
       // A PAGELESS SOURCE CARRIES A CHARACTER RANGE INSTEAD, and it is the
@@ -256,6 +299,23 @@ export async function searchBoardAiContext(
         ...(row.page_start !== null ? { pageNumber: row.page_start, pageStart: row.page_start } : {}),
         ...(row.page_end !== null ? { pageEnd: row.page_end } : {}),
         ...(range !== null ? { charStart: range.charStart, charEnd: range.charEnd } : {}),
+        // LOCATED, NEVER INTERPOLATED. Null whenever no cue owns these
+        // characters, so a passage gets a moment only when one can be vouched
+        // for -- see boardAiTranscriptPassage.ts for why "nearest cue" is the
+        // wrong answer here even though it is the right one for a cursor.
+        ...(() => {
+          const time = boardAiTranscriptPassageTime(
+            representations.get(row.document_id) ?? null,
+            range?.charStart,
+            range?.charEnd,
+          );
+          if (time === null) return {};
+          return {
+            transcriptStartMs: time.startMs,
+            transcriptEndMs: time.endMs,
+            ...(time.videoIdentity !== null ? { videoIdentity: time.videoIdentity } : {}),
+          };
+        })(),
       };
     })
     : [];

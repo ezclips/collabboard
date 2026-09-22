@@ -53,8 +53,18 @@ const DOCUMENT_TOUCHERS = [
   // are pinned with the rest deliberately: the set is what is checked, and a
   // file that starts naming the table is worth noticing either way.
   'lib/domain/ai/boardAiSearchContext.ts',
+  // NAMES both tables in its header only, to explain WHY the join it performs
+  // was missing: the cues live on the document, the search reads the chunks.
+  // It writes nothing and reads nothing -- it is a pure function over a
+  // representation and a character range.
+  'lib/domain/ai/boardAiTranscriptPassage.ts',
   'lib/domain/knowledge/knowledgeIngestion.ts',
   'lib/domain/knowledge/knowledgePersistence.ts',
+  // ADDED by the transcript-timestamp join: it now SELECTS
+  // transcript_representation for the documents a search returned. A read,
+  // board-scoped, and it cannot leave text disagreeing with cues because it
+  // selects neither the text nor anything writable.
+  'lib/infra/ai/boardAiSearchReader.ts',
   'lib/infra/knowledge/knowledgeDeletionAdapters.ts',
   'lib/infra/knowledge/knowledgeIngestionAdapters.ts',
   'lib/infra/knowledge/knowledgeReadAdapters.ts',
@@ -82,6 +92,8 @@ const DOCUMENT_TOUCHERS = [
 
 const CHUNK_TOUCHERS = [
   'app/api/boards/[id]/knowledge/[documentId]/pages/route.ts',
+  // Header comment only; see the note in DOCUMENT_TOUCHERS.
+  'lib/domain/ai/boardAiTranscriptPassage.ts',
   'lib/domain/knowledge/knowledgeTextSourceLocator.ts',
   'lib/infra/ai/boardAiSearchReader.ts',
   'lib/infra/knowledge/knowledgeEmbeddingAdapters.ts',
