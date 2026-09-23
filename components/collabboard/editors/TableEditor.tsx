@@ -141,10 +141,6 @@ type SelectionBox = { left: number; top: number; width: number; height: number }
 const TABLE_ROW_HEADER_WIDTH = 32;
 const TABLE_CELL_WIDTH = 100;
 const TABLE_CELL_HEIGHT = 32;
-const TABLE_VISIBLE_COLUMNS = 3;
-const TABLE_VISIBLE_ROWS = 4;
-const TABLE_VIEWPORT_WIDTH = TABLE_ROW_HEADER_WIDTH + TABLE_CELL_WIDTH * TABLE_VISIBLE_COLUMNS;
-const TABLE_VIEWPORT_HEIGHT = TABLE_CELL_HEIGHT * (TABLE_VISIBLE_ROWS + 1);
 
 export default function TableEditor({
     initialTitle = "",
@@ -977,7 +973,7 @@ export default function TableEditor({
                     <div className="m-2 relative">
                         <div
                             className="rounded-lg overflow-hidden bg-white shadow-lg"
-                            style={{ minHeight: "200px", maxHeight: "450px", width: "400px" }}
+                            style={{ minHeight: "200px", minWidth: "400px", maxHeight: "calc(100vh - 80px)", width: "max-content" }}
                         >
                             {/* Top strip -- Title lives inside it, same as the
                                 canvas card's own top strip, matching every
@@ -1045,11 +1041,9 @@ export default function TableEditor({
                                         ref={tableViewportRef}
                                         className="relative overflow-x-auto overflow-y-auto"
                                         style={{
-                                            width: `${TABLE_VIEWPORT_WIDTH}px`,
-                                            maxWidth: "100%",
-                                            height: `${TABLE_VIEWPORT_HEIGHT}px`,
-                                            maxHeight: `${TABLE_VIEWPORT_HEIGHT}px`,
-                                            scrollbarGutter: "stable both-edges",
+                                            // Grows with the table, up to the window; only past that does it scroll.
+                                            maxWidth: "calc(100vw - 200px)",
+                                            maxHeight: "calc(100vh - 220px)",
                                         }}
                                     >
                                 {/* ✅ Selection outline overlay */}
@@ -1282,7 +1276,6 @@ export default function TableEditor({
                                         title="Click to add a new row"
                                         onClick={addRow}
                                         className="flex h-4 w-full items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
-                                        style={{ maxWidth: `${TABLE_VIEWPORT_WIDTH}px` }}
                                     >
                                         <Plus className="h-3 w-3" aria-hidden="true" />
                                     </button>
