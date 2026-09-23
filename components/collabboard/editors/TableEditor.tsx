@@ -918,12 +918,7 @@ export default function TableEditor({
                 {/* Left Toolbar */}
                 <div className="relative self-start mt-1" ref={toolbarRef}>
                     <div
-                        className="flex flex-col items-center bg-white rounded-lg shadow-lg p-0.5 gap-0.5 flex-shrink-0 overflow-y-auto overflow-x-hidden"
-                        style={{
-                            maxHeight: "240px",
-                            scrollbarWidth: "thin",
-                            scrollbarColor: "#d1d5db transparent",
-                        }}
+                        className="flex flex-col items-center bg-white rounded-lg shadow-lg p-0.5 gap-0.5 flex-shrink-0"
                     >
                         <div className="flex flex-col items-center shrink-0">
                             <button
