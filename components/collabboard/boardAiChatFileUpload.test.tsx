@@ -267,10 +267,17 @@ describe('what the upload path may not do', () => {
     const executable = DRAWER
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/(^|[^:])\/\/.*$/gm, '$1');
-    // Two endpoints, both pre-existing. A third would mean this unit grew a
-    // server surface it was supposed to avoid entirely.
-    const paths = executable.match(/`\/api\/[^`]+`/g) ?? [];
-    expect(new Set(paths).size).toBeLessThanOrEqual(2);
+    // An EXACT allow-list of the drawer's server endpoints. This used to be a
+    // count (at most two), which PATCH-164 outgrew with a deliberate third --
+    // starter questions. A count of three would admit ANY third endpoint; the
+    // list admits only these, so the upload unit still cannot grow a server
+    // surface quietly, and neither can anything else in the drawer.
+    const paths = new Set(executable.match(/`\/api\/[^`]+`/g) ?? []);
+    expect([...paths].sort()).toEqual([
+      '`/api/boards/${encodeURIComponent(boardId)}/ai/chat/starter-questions`',
+      '`/api/boards/${encodeURIComponent(boardId)}/ai/chat`',
+      '`/api/boards/${encodeURIComponent(boardId)}/knowledge`',
+    ].sort());
     expect(executable).toContain('/knowledge');
   });
 });

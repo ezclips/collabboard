@@ -186,17 +186,30 @@ describe('36-42. the provider/model chooser is the existing role preference', ()
     // Asserted on the REQUEST, not on the file: the drawer legitimately reads
     // provider/model off a stored assistant turn to display it. What must not
     // happen is either travelling with a send.
-    const start = drawer.indexOf('body: JSON.stringify(');
-    // Up to the response handling: the whole request body, and nothing after.
-    const body = drawer.slice(start, drawer.indexOf('const payload', start));
+    // EVERY request body the drawer builds, not the first one found. This used
+    // to take the first `body: JSON.stringify(` in the file, which silently
+    // became the PATCH-164 starter-questions request instead of the chat send.
+    // Checking all of them keeps the chat assertion AND covers the new request.
+    const bodies: string[] = [];
+    for (let at = drawer.indexOf('body: JSON.stringify('); at >= 0;
+      at = drawer.indexOf('body: JSON.stringify(', at + 1)) {
+      // Up to the closing of the stringify call's first argument line block:
+      // generous enough for the literal, short of the response handling.
+      bodies.push(drawer.slice(at, at + 400));
+    }
+    expect(bodies.length).toBeGreaterThanOrEqual(2);
+    for (const body of bodies) {
+      expect(body).not.toMatch(/provider|model|apiKey|connectionId/);
+    }
     // D2 lets the body carry `context`, so the shape is no longer one literal.
-    // What it must still carry is only these fields: a message, optionally the
-    // thread it continues, and identity-only context built by the payload
-    // helper -- which is separately proved to strip every display field.
-    expect(body).toContain('message: content');
-    expect(body).toContain('threadId: activeThreadId');
-    expect(body).toContain('context: contextPayload');
-    expect(body).not.toMatch(/provider|model|apiKey|connectionId/);
+    // What the CHAT send must still carry is only these fields: a message,
+    // optionally the thread it continues, and identity-only context built by
+    // the payload helper -- which is separately proved to strip every display
+    // field.
+    const chatBody = bodies.find((body) => body.includes('message: content'));
+    expect(chatBody, 'the chat send body').toBeDefined();
+    expect(chatBody).toContain('threadId: activeThreadId');
+    expect(chatBody).toContain('context: contextPayload');
   });
 });
 

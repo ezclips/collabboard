@@ -63,6 +63,9 @@ function stubChat(options: {
   posted = [];
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    // PATCH-164: the sibling starter-questions route, answered separately so a
+    // document-scoped panel's question fetch is never counted as a chat turn.
+    if (url.endsWith('/starter-questions')) return json({ questions: [] });
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { threadId?: string; message: string };
       posted.push(body as Record<string, unknown>);
@@ -427,6 +430,10 @@ describe('PDF workspace document-scoped mode', () => {
     posted = [];
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      // PATCH-164: the starter-questions route is a SIBLING of the chat route,
+      // and a document-scoped empty panel calls it. It is not a chat turn, so
+      // it is answered separately and never counted as one.
+      if (url.endsWith('/starter-questions')) return json({ questions: [] });
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as {
           threadId?: string;
@@ -1546,5 +1553,159 @@ describe('grounded citations', () => {
     expect(chips()).toHaveLength(1);
     expect(chips()[0].tagName).toBe('SPAN');
     expect(chips()[0].textContent).toContain('Alpha.pdf · p. 4');
+  });
+});
+
+/**
+ * PATCH-164. STARTER QUESTIONS.
+ *
+ * A document-scoped panel that opens empty asks the starter-questions route
+ * once per document, and offers up to three questions. Clicking one asks it
+ * through the ORDINARY chat with the SAME mandatory context. Board-wide drawers
+ * never ask, and any failure leaves the panel exactly as it was.
+ */
+describe('PATCH-164 starter questions', () => {
+  const DOC_S = '77777777-7777-4777-8777-777777777777';
+  const DOC_T = '88888888-8888-4888-8888-888888888888';
+  const QUESTION_A = 'What is the main claim?';
+  const QUESTION_B = 'Why does it matter?';
+
+  /** Routes fetch by URL: the starter-questions route is a SIBLING of chat. */
+  function stubWithStarterQuestions(options: {
+    readonly starter?: (docId: string) => Response | Promise<Response>;
+  } = {}) {
+    const chatPosts: Record<string, unknown>[] = [];
+    const starterCalls: string[] = [];
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/starter-questions')) {
+        const body = JSON.parse(String(init?.body)) as { context?: { items?: { knowledgeDocumentId?: string }[] } };
+        const docId = body.context?.items?.[0]?.knowledgeDocumentId ?? '';
+        starterCalls.push(docId);
+        if (options.starter) return options.starter(docId);
+        return json({
+          questions: docId === DOC_T ? [QUESTION_B] : [QUESTION_A, QUESTION_B],
+        });
+      }
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { message: string };
+        chatPosts.push(body as Record<string, unknown>);
+        return json({
+          threadId: THREAD_A,
+          message: { id: 'a1', role: 'assistant', content: 'answer', provider: 'deepseek', model: 'm', createdAt: 'n' },
+        });
+      }
+      const match = url.match(/threadId=([^&]+)/);
+      if (match) return json({ thread: summary(match[1], 'x'), messages: [] });
+      return json({ threads: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return { chatPosts, starterCalls };
+  }
+
+  const starterButtons = () => all('[data-board-ai-starter-question]');
+
+  /**
+   * The cache lives at MODULE scope so it survives a drawer unmount (that is
+   * what "once per session" means), so each test starts from a clean one.
+   */
+  beforeEach(async () => {
+    const drawer = await import('./BoardAiChatDrawer');
+    drawer.resetStarterQuestionsCache();
+  });
+
+
+  it('a document-scoped empty panel asks once and offers the questions', async () => {
+    const { starterCalls } = stubWithStarterQuestions();
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+
+    expect(starterCalls).toEqual([DOC_S]);
+    const buttons = starterButtons();
+    expect(buttons.map((button) => button.getAttribute('data-board-ai-starter-question')))
+      .toEqual([QUESTION_A, QUESTION_B]);
+    expect(q('[data-board-ai-starter-questions="ready"]')).not.toBeNull();
+  });
+
+  it('clicking a question sends THAT text with the mandatory document context', async () => {
+    const { chatPosts } = stubWithStarterQuestions();
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+
+    await act(async () => { starterButtons()[1].click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(chatPosts).toHaveLength(1);
+    expect(chatPosts[0].message).toBe(QUESTION_B);
+    // The SAME identity-only context the typed path sends: the document is
+    // named, never described.
+    expect(chatPosts[0].context).toEqual({
+      items: [{ type: 'knowledge-page', knowledgeDocumentId: DOC_S, pageNumber: 1 }],
+    });
+  });
+
+  it('does NOT refetch for the same document, and DOES for a different one', async () => {
+    const { starterCalls } = stubWithStarterQuestions();
+
+    // Two mounts of the SAME document share the session cache.
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+    await act(async () => { root!.unmount(); });
+    root = null;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <BoardAiChatDrawer
+          boardId={BOARD_ID}
+          isOpen
+          onClose={vi.fn()}
+          documentScope={{ knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 }}
+        />,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(starterCalls.filter((docId) => docId === DOC_S)).toHaveLength(1);
+  });
+
+  it('a board-wide drawer never asks and never shows them', async () => {
+    const { starterCalls } = stubWithStarterQuestions();
+    await mount();
+    expect(starterCalls).toEqual([]);
+    expect(starterButtons()).toHaveLength(0);
+    expect(q('[data-board-ai-starter-questions="ready"]')).toBeNull();
+  });
+
+  it('a failed request shows NO suggestion UI and leaves the empty state intact', async () => {
+    stubWithStarterQuestions({ starter: () => new Response('nope', { status: 500 }) });
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+
+    expect(starterButtons()).toHaveLength(0);
+    expect(q('[data-board-ai-starter-questions="ready"]')).toBeNull();
+    // The ordinary empty state is exactly as it was.
+    expect(host.textContent).toContain('Your private AI conversation for this PDF.');
+  });
+
+  it('a network error shows NO suggestion UI', async () => {
+    stubWithStarterQuestions({ starter: () => { throw new Error('offline'); } });
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+    expect(starterButtons()).toHaveLength(0);
+    expect(host.textContent).toContain('Your private AI conversation for this PDF.');
+  });
+
+  it('an empty questions list shows NO suggestion UI', async () => {
+    stubWithStarterQuestions({ starter: () => json({ questions: [] }) });
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+    expect(starterButtons()).toHaveLength(0);
+    expect(q('[data-board-ai-starter-questions="ready"]')).toBeNull();
+  });
+
+  it('the typed send path is unchanged: send with no argument uses the draft', async () => {
+    const { chatPosts } = stubWithStarterQuestions();
+    await mount({ documentScope: { knowledgeDocumentId: DOC_S, originalFilename: 'Alpha.pdf', pageNumber: 1 } });
+    await type('a typed question');
+    await click('[data-board-ai-chat-action="send"]');
+    await act(async () => { await Promise.resolve(); });
+
+    expect(chatPosts).toHaveLength(1);
+    expect(chatPosts[0].message).toBe('a typed question');
   });
 });

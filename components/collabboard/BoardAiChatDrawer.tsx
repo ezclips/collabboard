@@ -53,6 +53,31 @@ import type {
  */
 
 const CHAT_PATH = (boardId: string) => `/api/boards/${encodeURIComponent(boardId)}/ai/chat`;
+/**
+ * PATCH-164. The starter-questions route, a SIBLING of the chat route. It is a
+ * read: no thread, no message, nothing written. A document-scoped panel may
+ * call it once per document per session.
+ */
+const STARTER_QUESTIONS_PATH = (boardId: string) =>
+  `/api/boards/${encodeURIComponent(boardId)}/ai/chat/starter-questions`;
+
+/**
+ * PATCH-164. The starter-questions cache, at MODULE scope, so it survives a
+ * drawer unmount: "reopening the same document in the session does not call the
+ * model again" is about the SESSION, and a ref inside the component dies with
+ * the component. Keyed by document id. A failure caches `[]`, so a document that
+ * could not produce questions is not retried on every reopen.
+ */
+const starterQuestionsCache = new Map<string, readonly string[]>();
+
+/**
+ * Forgets every cached question set. Exported ONLY so a test can start from a
+ * clean session: the cache is keyed by document id alone and would otherwise
+ * outlive a test that shares a document id with an earlier one.
+ */
+export function resetStarterQuestionsCache(): void {
+  starterQuestionsCache.clear();
+}
 /** The EXISTING knowledge endpoint: POST uploads a PDF, GET lists with status. */
 const KNOWLEDGE_PATH = (boardId: string) => `/api/boards/${encodeURIComponent(boardId)}/knowledge`;
 /**
@@ -452,6 +477,83 @@ export default function BoardAiChatDrawer({
       [documentId]: updater(current[documentId] ?? EMPTY_DOCUMENT_SESSION),
     }));
   }, [setDocumentSessions]);
+
+  /**
+   * PATCH-164. STARTER QUESTIONS for the document this drawer is scoped to.
+   *
+   * Asked ONCE PER DOCUMENT for the session, from the document's own text, so
+   * reopening the same document does not call the model again. Held in a ref
+   * rather than state because it is a cache, not a render input: the questions
+   * themselves live in state below.
+   *
+   * BOARD-WIDE DRAWERS NEVER ASK. `documentScopeId` is null there, which is
+   * also the check that keeps `mandatoryDocumentContext` null, so this is the
+   * same condition the panel already uses for "is this document-scoped".
+   */
+  const [starterQuestions, setStarterQuestions] = useState<readonly string[] | null>(null);
+  const [starterQuestionsLoading, setStarterQuestionsLoading] = useState(false);
+  const starterQuestionsAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // The request is aborted when the document changes or the drawer unmounts,
+    // so a late answer for a document the user has left cannot land.
+    starterQuestionsAbortRef.current?.abort();
+    starterQuestionsAbortRef.current = null;
+
+    if (!documentScopeId || !mandatoryDocumentContext) {
+      setStarterQuestions(null);
+      setStarterQuestionsLoading(false);
+      return;
+    }
+
+    const cached = starterQuestionsCache.get(documentScopeId);
+    if (cached !== undefined) {
+      setStarterQuestions(cached);
+      setStarterQuestionsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    starterQuestionsAbortRef.current = controller;
+    setStarterQuestions(null);
+    setStarterQuestionsLoading(true);
+
+    (async () => {
+      try {
+        const response = await fetch(STARTER_QUESTIONS_PATH(boardId), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: controller.signal,
+          // The SAME identity-only context shape the chat route takes. The
+          // document is named, never described: no text, title or excerpt.
+          body: JSON.stringify({ context: boardAiDraftContextPayload([mandatoryDocumentContext]) }),
+        });
+        if (controller.signal.aborted) return;
+        if (!response.ok) throw new Error('starter questions unavailable');
+        const payload = await response.json().catch(() => null) as { questions?: unknown } | null;
+        if (controller.signal.aborted) return;
+        const questions = Array.isArray(payload?.questions)
+          ? payload.questions.filter((entry): entry is string => typeof entry === 'string')
+          : [];
+        starterQuestionsCache.set(documentScopeId, questions);
+        setStarterQuestions(questions);
+      } catch {
+        // ANY FAILURE IS SILENT. A suggestion is a courtesy, and its absence
+        // must look exactly like the empty state that was always there -- never
+        // like a fault. The document text still renders; the panel is unharmed.
+        if (controller.signal.aborted) return;
+        setStarterQuestions([]);
+      } finally {
+        if (!controller.signal.aborted) setStarterQuestionsLoading(false);
+      }
+    })();
+
+    return () => { controller.abort(); };
+    // `mandatoryDocumentContext` is derived from `documentScope`, which
+    // `documentScopeId` is derived from: one dependency is enough, and adding
+    // the memo would refetch on every identity change of it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentScopeId, boardId]);
 
   const setActiveThreadId = useCallback((action: React.SetStateAction<ActiveThread>) => {
     if (documentScopeId) {
@@ -1025,8 +1127,12 @@ export default function BoardAiChatDrawer({
     onOpenCitation(request);
   }, [boardId, goneCitationDocumentIds, onOpenCitation]);
 
-  const send = useCallback(async () => {
-    const content = draft.trim();
+  const send = useCallback(async (explicitContent?: string) => {
+    // PATCH-164. A suggested question is sent EXACTLY as if it had been typed
+    // and the send button pressed -- same context, same request, same path --
+    // so this takes the content it should send. The typed path passes nothing
+    // and behaves identically to before.
+    const content = (explicitContent ?? draft).trim();
     if (content.length === 0 || sending) return;
     // The same rule as the disabled button, enforced again here: a keyboard
     // path, a race with a poll, or a future caller must not get past it.
@@ -1302,6 +1408,43 @@ export default function BoardAiChatDrawer({
                 ? 'Only you can see it. This PDF is always attached; optional context is explicit.'
                 : 'Only you can see it. Only items you attach are shared with Board AI.'}
             </p>
+
+            {/*
+              PATCH-164. Suggested questions, DOCUMENT-SCOPED ONLY. Three quiet
+              placeholder lines while they load -- no spinner, and the same
+              height once they resolve, so nothing jumps. Any failure shows
+              nothing at all, which is exactly today's empty state.
+            */}
+            {documentScopeId && starterQuestionsLoading && starterQuestions === null ? (
+              <div data-board-ai-starter-questions="loading" aria-hidden="true" className="mx-auto mt-4 max-w-sm space-y-1.5">
+                {[0, 1, 2].map((index) => (
+                  <p key={index} className="h-3 rounded bg-gray-100" />
+                ))}
+              </div>
+            ) : null}
+
+            {documentScopeId && starterQuestions !== null && starterQuestions.length > 0 ? (
+              <div data-board-ai-starter-questions="ready" className="mx-auto mt-4 max-w-sm text-left">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                  Suggested questions
+                </p>
+                <ul className="mt-1.5 space-y-1">
+                  {starterQuestions.map((question) => (
+                    <li key={question}>
+                      <button
+                        type="button"
+                        data-board-ai-starter-question={question}
+                        onClick={() => { void send(question); }}
+                        className="w-full rounded-md border border-gray-200 px-2.5 py-1.5 text-left text-[11px] text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+                      >
+                        {/* Rendered as TEXT, never HTML: the model wrote it. */}
+                        {question}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
