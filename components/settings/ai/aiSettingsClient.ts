@@ -43,6 +43,7 @@ export const AI_PROVIDER_LABELS: Record<AIProviderType, string> = {
   anthropic: 'Anthropic',
   gemini: 'Google Gemini',
   openrouter: 'OpenRouter',
+  'opencode-go': 'OpenCode Go',
 };
 
 export const AI_ROLE_LABELS: Record<AISettingsRole, string> = {

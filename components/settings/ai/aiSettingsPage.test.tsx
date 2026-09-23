@@ -242,13 +242,13 @@ describe('AI settings: initial load', () => {
 });
 
 describe('AI settings: add provider', () => {
-  it('7. offers exactly the four supported providers, with no DeepSeek or custom option', async () => {
+  it('7. offers exactly the five supported providers, with no DeepSeek or custom option', async () => {
     await render();
     await click(buttonWithText('Add provider'));
     const options = Array.from(
       (findByLabel('Provider') as HTMLSelectElement).querySelectorAll('option'),
     ).map((option) => option.value);
-    expect(options).toEqual(['openai', 'anthropic', 'gemini', 'openrouter']);
+    expect(options).toEqual(['openai', 'anthropic', 'gemini', 'openrouter', 'opencode-go']);
     expect(text().toLowerCase()).not.toContain('deepseek —');
     expect(text().toLowerCase()).not.toContain('custom');
     expect(text().toLowerCase()).not.toContain('base url');

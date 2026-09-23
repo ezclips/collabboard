@@ -31,6 +31,7 @@ export const AI_EXECUTION_PROVIDERS: readonly AIExecutionProvider[] = [
   'anthropic',
   'gemini',
   'openrouter',
+  'opencode-go',
 ];
 
 /**

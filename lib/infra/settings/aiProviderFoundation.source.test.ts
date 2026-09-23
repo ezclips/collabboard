@@ -173,6 +173,28 @@ describe('AI provider BYOK foundation migration', () => {
     expect(domainContract).not.toMatch(/base_?url/i);
   });
 
+  it('the LATEST provider_type CHECK lists exactly the code\'s provider types (PATCH-161)', async () => {
+    // The foundation migration above still says four, and must: it is history.
+    // What the database enforces is whatever the most recent migration touching
+    // this constraint says, so that is the one pinned to AI_PROVIDER_TYPES. A
+    // provider added to the code without a migration -- or the reverse -- makes a
+    // connection that saves in one layer and is refused by the other.
+    const { AI_PROVIDER_TYPES } = await import('../../domain/settings/aiProviderConnection');
+    const dir = path.join(process.cwd(), 'supabase/migrations');
+    const latest = fs.readdirSync(dir)
+      .filter((file) => file.endsWith('.sql'))
+      .sort()
+      .map((file) => fs.readFileSync(path.join(dir, file), 'utf8'))
+      .filter((body) => /provider_type IN \(/.test(body))
+      .pop();
+    expect(latest, 'a migration constraining provider_type').toBeDefined();
+    const listed = [...latest!.matchAll(/provider_type IN \(([^)]*)\)/g)].pop()![1]
+      .split(',')
+      .map((value) => value.trim().replace(/^'|'$/g, ''));
+    expect(listed.sort()).toEqual([...AI_PROVIDER_TYPES].sort());
+    expect(latest).not.toMatch(/base_url|baseurl|endpoint_url/i);
+  });
+
   it('never materialises CollabBoard Default as a provider row', () => {
     expect(sql).not.toMatch(/INSERT INTO/i);
     expect(sql).not.toMatch(/deepseek/i);
