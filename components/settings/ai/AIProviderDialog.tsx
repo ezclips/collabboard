@@ -9,6 +9,7 @@ import {
   type AIProviderType,
 } from '@/lib/domain/settings/aiProviderConnection';
 import { AI_PROVIDER_LABELS, DISPLAY_NAME_LIMIT, MODEL_ID_LIMIT } from './aiSettingsClient';
+import { AI_TIME_BUDGETS } from '@/lib/ai/aiTimeBudgets';
 
 /**
  * The one modal used by every provider action.
@@ -171,6 +172,33 @@ export default function AIProviderDialog({ mode, connection, busy, onSubmit, onC
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-purple-400"
                 />
               </label>
+            )}
+
+            {/*
+              PATCH-163. WHAT COLLABBOARD WILL WAIT FOR, shown where the model is
+              chosen. This was invisible, and it cost a day of failures: thinking
+              models ran past these limits, and on quick actions one spent the
+              whole token budget reasoning and returned no answer. Rendered FROM
+              `AI_TIME_BUDGETS` -- never hardcoded here -- so the numbers have one
+              home and a source test binds them to the server's real deadlines.
+            */}
+            {(mode === 'create' || mode === 'edit') && (
+              <div data-ai-time-budgets="true" className="text-xs text-gray-500">
+                <span className="block font-medium text-gray-600">How long CollabBoard waits for an answer:</span>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {AI_TIME_BUDGETS.map((budget) => (
+                    <li key={budget.feature}>
+                      {budget.feature} — {budget.seconds} s
+                    </li>
+                  ))}
+                </ul>
+                <span className="mt-1 block">
+                  Models that &ldquo;think&rdquo; before answering can run past these limits and fail. For quick
+                  actions, CollabBoard asks DeepSeek and OpenRouter models not to think; other providers are not
+                  asked. Free models are often overloaded and may be refused. Use a text chat model, not an image,
+                  audio or embedding model.
+                </span>
+              </div>
             )}
 
             {/*

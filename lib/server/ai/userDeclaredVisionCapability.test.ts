@@ -176,18 +176,12 @@ describe('T4. adapter declarations', () => {
     }
     // The mirror may name no provider that is not a provider. It used to be
     // asserted EQUAL to the whole list, which only held because every BYOK
-    // provider happened to carry images. OpenCode Go (PATCH-161) is the first
-    // text-only one, so the binding is the per-provider agreement above plus
-    // this subset check -- the equality was a coincidence, not the rule.
+    // provider happened to carry images. That was a coincidence, not the rule:
+    // a provider is free to be text-only, so the binding is the per-provider
+    // agreement above plus this subset check -- NOT equality.
     for (const providerType of IMAGE_CAPABLE_PROVIDER_TYPES) {
       expect(AI_PROVIDER_TYPES, providerType).toContain(providerType);
     }
-  });
-
-  it('12. a text-only provider is offered no image checkbox', () => {
-    expect(aiProviderTypeCarriesImages('opencode-go')).toBe(false);
-    expect(getAIProviderAdapter('opencode-go').carriesImages).toBe(false);
-    expect(IMAGE_CAPABLE_PROVIDER_TYPES).not.toContain('opencode-go');
   });
 });
 

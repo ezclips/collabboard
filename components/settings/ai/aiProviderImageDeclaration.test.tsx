@@ -192,3 +192,47 @@ describe('T3. the image declaration checkbox', () => {
     expect(submitted[0].supportsImages).toBe(false);
   });
 });
+
+/**
+ * PATCH-163. THE TIME-LIMIT NOTE.
+ *
+ * It renders every entry in `AI_TIME_BUDGETS` and nothing else numeric, so the
+ * numbers have one home and cannot be hardcoded into this component. A stale
+ * note is worse than no note: it would tell someone a limit the product does not
+ * honour.
+ */
+describe('PATCH-163: the time-limit note under the model field', () => {
+  it('renders every AI_TIME_BUDGETS entry, from the table', async () => {
+    const { AI_TIME_BUDGETS } = await import('@/lib/ai/aiTimeBudgets');
+    render();
+
+    const note = container.querySelector('[data-ai-time-budgets="true"]');
+    expect(note).not.toBeNull();
+    expect(note!.textContent).toContain('How long CollabBoard waits for an answer:');
+    for (const budget of AI_TIME_BUDGETS) {
+      expect(note!.textContent, budget.feature).toContain(budget.feature);
+      expect(note!.textContent, `${budget.feature} seconds`).toContain(`${budget.seconds} s`);
+    }
+  });
+
+  it('contains no number that is not in the table', async () => {
+    const { AI_TIME_BUDGETS } = await import('@/lib/ai/aiTimeBudgets');
+    render();
+    const note = container.querySelector('[data-ai-time-budgets="true"]');
+    const allowed = new Set(AI_TIME_BUDGETS.map((budget) => String(budget.seconds)));
+
+    // Every integer in the note must be one of the table's values.
+    const numbers = note!.textContent!.match(/\d+/g) ?? [];
+    expect(numbers.length).toBeGreaterThan(0);
+    for (const number of numbers) {
+      expect(allowed.has(number), `unexpected number ${number} in the note`).toBe(true);
+    }
+    // And the count of numbers equals the entries, so none is emitted twice.
+    expect(numbers.length).toBe(AI_TIME_BUDGETS.length);
+  });
+
+  it('is absent in test-model mode, where no model is being chosen', () => {
+    render({ mode: 'test-model' });
+    expect(container.querySelector('[data-ai-time-budgets="true"]')).toBeNull();
+  });
+});

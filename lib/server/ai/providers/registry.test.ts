@@ -5,19 +5,17 @@ import { deepSeekAdapter } from './deepSeek';
 import { AIProviderError } from './errors';
 import { geminiAdapter } from './gemini';
 import { openAIAdapter } from './openAI';
-import { openCodeGoAdapter } from './openCodeGo';
 import { openRouterAdapter } from './openRouter';
 import { getAIProviderAdapter } from './registry';
 import { AI_EXECUTION_PROVIDERS, type AIExecutionProvider } from './types';
 
 describe('AI provider registry', () => {
-  it('resolves exactly the six executable providers', () => {
+  it('resolves exactly the five executable providers', () => {
     expect([...AI_EXECUTION_PROVIDERS].sort()).toEqual([
       'anthropic',
       'deepseek',
       'gemini',
       'openai',
-      'opencode-go',
       'openrouter',
     ]);
   });
@@ -28,7 +26,6 @@ describe('AI provider registry', () => {
     ['anthropic', anthropicAdapter],
     ['gemini', geminiAdapter],
     ['openrouter', openRouterAdapter],
-    ['opencode-go', openCodeGoAdapter],
   ] as const)('maps %s to its adapter', (provider, adapter) => {
     const resolved = getAIProviderAdapter(provider);
     expect(resolved).toBe(adapter);
@@ -36,7 +33,10 @@ describe('AI provider registry', () => {
   });
 
   it('rejects an unknown or torn provider value as invalid_configuration', () => {
-    for (const bogus of ['ollama', 'azure', 'custom', '', 'DEEPSEEK']) {
+    // `opencode-go` is a REMOVED provider (PATCH-163). A stored row that still
+    // names it must fail closed here rather than reach any adapter -- which is
+    // exactly why it is in this list beside the genuinely never-known values.
+    for (const bogus of ['ollama', 'azure', 'custom', '', 'DEEPSEEK', 'opencode-go']) {
       const error = (() => {
         try {
           getAIProviderAdapter(bogus as AIExecutionProvider);

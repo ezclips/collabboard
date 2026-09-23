@@ -12,7 +12,6 @@ import { deepSeekAdapter } from './deepSeek';
 import { aiProviderInvalidConfiguration } from './errors';
 import { geminiAdapter } from './gemini';
 import { openAIAdapter } from './openAI';
-import { openCodeGoAdapter } from './openCodeGo';
 import { openRouterAdapter } from './openRouter';
 import type { AIExecutionProvider, AIProviderAdapter } from './types';
 
@@ -22,7 +21,6 @@ const ADAPTERS: Record<AIExecutionProvider, AIProviderAdapter> = {
   anthropic: anthropicAdapter,
   gemini: geminiAdapter,
   openrouter: openRouterAdapter,
-  'opencode-go': openCodeGoAdapter,
 };
 
 /**

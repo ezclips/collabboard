@@ -12,7 +12,7 @@ import { AI_ROLES, AI_ROLE_CHAT, AI_ROLE_COMPONENT, AI_ROLE_EDIT, AI_ROLE_SOURCE
 
 describe('AI provider domain contract', () => {
   it('ships exactly the five reviewed provider types, and no custom endpoint', () => {
-    expect([...AI_PROVIDER_TYPES]).toEqual(['openai', 'anthropic', 'gemini', 'openrouter', 'opencode-go']);
+    expect([...AI_PROVIDER_TYPES]).toEqual(['openai', 'anthropic', 'gemini', 'openrouter']);
     expect(isAIProviderType('custom')).toBe(false);
     expect(isAIProviderType('deepseek')).toBe(false);
     expect(isAIProviderType('openai')).toBe(true);

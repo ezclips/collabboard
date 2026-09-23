@@ -18,7 +18,7 @@ import { z } from 'zod';
  * design -- it is an SSRF surface and is deferred to a later phase.
  */
 
-export const AI_PROVIDER_TYPES = ['openai', 'anthropic', 'gemini', 'openrouter', 'opencode-go'] as const;
+export const AI_PROVIDER_TYPES = ['openai', 'anthropic', 'gemini', 'openrouter'] as const;
 
 export type AIProviderType = (typeof AI_PROVIDER_TYPES)[number];
 

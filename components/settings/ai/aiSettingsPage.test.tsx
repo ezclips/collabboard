@@ -248,7 +248,7 @@ describe('AI settings: add provider', () => {
     const options = Array.from(
       (findByLabel('Provider') as HTMLSelectElement).querySelectorAll('option'),
     ).map((option) => option.value);
-    expect(options).toEqual(['openai', 'anthropic', 'gemini', 'openrouter', 'opencode-go']);
+    expect(options).toEqual(['openai', 'anthropic', 'gemini', 'openrouter']);
     expect(text().toLowerCase()).not.toContain('deepseek —');
     expect(text().toLowerCase()).not.toContain('custom');
     expect(text().toLowerCase()).not.toContain('base url');
