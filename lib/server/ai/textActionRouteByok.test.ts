@@ -220,9 +220,14 @@ describe('text-action BYOK: preserved request semantics', () => {
     await route.POST(request({ action: 'improve', selectedText: '  exact source words  ' }));
     const call = mocks.generateText.mock.calls[0][0];
     expect(call.user).toBe('exact source words');
+    // The exact key set the adapter receives: the caller's semantics plus the
+    // one provider control the route now sets (PATCH-162's `reasoning`). Still
+    // pinned exhaustively, so an ADDED field -- a board id, a page, a document
+    // -- fails here rather than travelling unnoticed.
     expect(Object.keys(call).sort()).toEqual(
-      ['apiKey', 'maxTokens', 'model', 'signal', 'system', 'temperature', 'user'],
+      ['apiKey', 'maxTokens', 'model', 'reasoning', 'signal', 'system', 'temperature', 'user'],
     );
+    expect(call.reasoning).toBe('off');
   });
 
   it('13. the existing system prompt construction is preserved', async () => {

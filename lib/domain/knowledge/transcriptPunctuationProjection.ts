@@ -78,91 +78,104 @@ function isAllowedMark(character: string): boolean {
 const SENTENCE_END: Record<'.' | '?' | '!', true> = { '.': true, '?': true, '!': true };
 
 /**
- * A word, reduced to what must match between the original and the model.
+ * The characters that may appear INSIDE a word part, from the model.
  *
- * Every character that is not a letter, a digit or an apostrophe is stripped;
- * then lowercased. This is what makes "don't," and "Don't" the same word while
- * "opening's" and "openings" are NOT -- an apostrophe that changes the word is
- * a word change, not punctuation.
+ * A second CLOSED, EXHAUSTIVE `Record`, for the same reason ALLOWED_MARKS is
+ * one: an array widens silently. An apostrophe and a hyphen are SPELLING, not
+ * words -- a transcript is speech, and "kings pawn" and "king's pawn" are the
+ * same spoken words -- so the model may add them BETWEEN letters.
+ *
+ * The apostrophe has two spellings and both are accepted, because a model
+ * reasonably emits either. Hyphen means `-` only; an en or em dash STAYS a
+ * between-word mark, governed by ALLOWED_MARKS above.
  */
-function comparableWord(token: string): string {
-  return token
+const IN_WORD_CHARACTERS: Record<"'" | '\u2019' | '-', true> = {
+  "'": true,
+  '\u2019': true,
+  '-': true,
+};
+
+function isInWordCharacter(character: string): boolean {
+  return Object.prototype.hasOwnProperty.call(IN_WORD_CHARACTERS, character);
+}
+
+function isLetterOrDigit(character: string): boolean {
+  return /[\p{L}\p{N}]/u.test(character);
+}
+
+/**
+ * THE WORD PARTS of a string, in order.
+ *
+ * Split on WHITESPACE AND HYPHENS, so `setup-based` and `setup based` yield the
+ * same two parts -- that equivalence is the whole point of allowing a hyphen.
+ * Each part keeps its ORIGINAL characters; the comparable form is derived
+ * separately below.
+ */
+function wordParts(value: string): readonly string[] {
+  return value
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+/**
+ * A part reduced to what must match: its LETTERS AND DIGITS, lowercased.
+ *
+ * Apostrophes and hyphens are dropped here, so `kings` and `king's` reduce to
+ * `kings`, and `setup`/`based` are the same parts whether or not a hyphen
+ * joined them in the source. A letter changed, added, removed or reordered
+ * still differs, which is what makes this a guarantee rather than a threshold.
+ */
+function comparablePart(part: string): string {
+  return part
     .split('')
-    .filter((character) => /[\p{L}\p{N}']/u.test(character))
+    .filter(isLetterOrDigit)
     .join('')
     .toLowerCase();
 }
 
-/**
- * The tokens of a string, in order, reduced to their comparable form.
- *
- * Empty tokens are dropped, so leading, trailing and repeated whitespace do not
- * change the sequence -- whitespace placement is this module's business, not the
- * model's.
- */
-function comparableWords(value: string): readonly string[] {
+function comparableParts(value: string): readonly string[] {
+  return wordParts(value).map(comparablePart);
+}
+
+/** Whitespace-delimited tokens, hyphen INCLUDED, for reconstruction. */
+function whitespaceTokens(value: string): readonly string[] {
   return value
     .split(/\s+/)
-    .filter((token) => token.length > 0)
-    .map(comparableWord);
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+}
+
+/** The letters and digits of a token, in order, as an array of characters. */
+function letterDigitStream(token: string): readonly string[] {
+  return token.split('').filter(isLetterOrDigit);
 }
 
 /**
- * The model's tokens split into a word and the punctuation run that follows it.
+ * PROJECT the model's punctuation and spelling onto the original words.
  *
- * A token like `miss?` yields `{ word: 'miss', marks: '?' }`; `word` yields
- * `{ word: 'word', marks: '' }`. The marks are KEPT AS THE MODEL WROTE THEM at
- * this stage and filtered later, so the caller can see exactly what was
- * discarded rather than losing it silently here.
- */
-function splitTrailing(value: string): { word: string; marks: string } {
-  let end = value.length;
-  while (end > 0 && !/[\p{L}\p{N}']/u.test(value[end - 1])) end -= 1;
-  return { word: value.slice(0, end), marks: value.slice(end) };
-}
-
-/**
- * The words of a string in their ORIGINAL spelling, stripped of surrounding
- * punctuation but otherwise untouched.
+ * Returns `err` unless the model's LETTER-AND-DIGIT sequence is exactly the
+ * original's: same number of parts, same order, every part equal after
+ * reduction. The error names the first index that differs, because a silent
+ * mismatch is what this whole module exists to prevent.
  *
- * Kept separate from `comparableWords` because the reconstruction needs the
- * real characters, while the comparison needs the comparable form.
- */
-function originalWords(value: string): readonly { raw: string; marks: string }[] {
-  return value
-    .split(/\s+/)
-    .filter((token) => token.length > 0)
-    .map((token) => {
-      const { word, marks } = splitTrailing(token);
-      // A token that is ONLY punctuation cannot be a word; it is dropped, but
-      // such a token would also have produced an empty comparable word and been
-      // filtered there, so the two sequences stay aligned.
-      return { raw: word, marks };
-    })
-    .filter((entry) => entry.raw.length > 0);
-}
-
-/**
- * PROJECT the model's punctuation onto the original words.
- *
- * Returns `err` unless the model's word sequence is exactly the original's:
- * same length, same order, every token equal after reduction. The error names
- * the first index that differs, because a silent mismatch is what this whole
- * module exists to prevent.
+ * ---------------------------------------------------------------- GUARANTEE
+ * Every letter and digit in the output comes from the original, in the same
+ * order, with nothing added, removed, reordered or substituted. The only
+ * characters the model contributes are the allowed punctuation marks, an
+ * apostrophe or hyphen placed between letters, spaces, and the upper/lower case
+ * of a part's first letter.
+ * ---------------------------------------------------------------------------
  */
 export function projectTranscriptPunctuation(
   original: string,
   modelOutput: string,
 ): Result<PunctuationProjection, DomainError> {
-  const originalTokens = originalWords(original);
-  const modelTokens = modelOutput
-    .split(/\s+/)
-    .filter((token) => token.length > 0)
-    .map(splitTrailing)
-    .filter((entry) => entry.word.length > 0);
+  const originalParts = wordParts(original);
+  const modelParts = wordParts(modelOutput);
 
-  const originalComparable = originalTokens.map((entry) => comparableWord(entry.raw));
-  const modelComparable = modelTokens.map((entry) => comparableWord(entry.word));
+  const originalComparable = originalParts.map(comparablePart);
+  const modelComparable = modelParts.map(comparablePart);
 
   if (originalComparable.length !== modelComparable.length) {
     return err(domainError(
@@ -177,50 +190,83 @@ export function projectTranscriptPunctuation(
     if (originalComparable[index] !== modelComparable[index]) {
       return err(domainError(
         'validation',
-        `The model changed the word at position ${index} ("${originalTokens[index].raw}" became`
-          + ` "${modelTokens[index].word}"). The words must not change, so this chunk was not used.`,
+        `The model changed the word at position ${index} ("${originalParts[index]}" became`
+          + ` "${modelParts[index]}"). The words must not change, so this chunk was not used.`,
         { details: { reason: 'word-mismatch', firstDifference: index } },
       ));
     }
   }
 
-  // The sequences match. Rebuild every word from the ORIGINAL characters --
-  // only the first character's case may come from the model.
+  // The sequences match. REBUILD on PARTS (whitespace AND hyphens), because the
+  // model may join `setup based` into `setup-based` -- one whitespace token, two
+  // parts. Pairing on whitespace tokens would misalign them. For every part, the
+  // LETTERS AND DIGITS come from the ORIGINAL part; the model contributes only
+  // its in-word apostrophes/hyphens and its case.
   let text = '';
   let recasedWords = 0;
   let insertedMarks = 0;
 
-  for (let index = 0; index < originalTokens.length; index += 1) {
-    const originalWord = originalTokens[index].raw;
-    const modelWord = modelTokens[index].word;
+  // For each part index, whether the MODEL placed a hyphen before it (as
+  // opposed to a space). One pass over the model string: a part begins at each
+  // letter/digit that follows whitespace or a hyphen, and the separator is
+  // whichever of those it followed.
+  const WAS_HYPHEN_SEPARATED: boolean[] = (() => {
+    const flags: boolean[] = [];
+    let separatorWasHyphen = false;
+    let inPart = false;
+    for (const character of modelOutput) {
+      if (/\s/.test(character)) { inPart = false; separatorWasHyphen = false; continue; }
+      if (character === '-') { inPart = false; separatorWasHyphen = true; continue; }
+      if (!isLetterOrDigit(character)) continue;
+      if (!inPart) { flags.push(separatorWasHyphen); inPart = true; }
+    }
+    return flags;
+  })();
 
-    let word = originalWord;
-    const originalFirst = originalWord[0];
-    const modelFirst = modelWord[0];
+  for (let index = 0; index < originalParts.length; index += 1) {
+    const originalPart = originalParts[index];
+    const modelPart = modelParts[index];
+    const originalStream = letterDigitStream(originalPart);
+    let streamCursor = 0;
+    let rebuilt = '';
+
+    for (const character of modelPart) {
+      if (isLetterOrDigit(character)) {
+        rebuilt += originalStream[streamCursor] ?? '';
+        streamCursor += 1;
+        continue;
+      }
+      // An apostrophe or hyphen BETWEEN letters is spelling and is kept. A mark
+      // after the run is punctuation, taken below.
+      if (isInWordCharacter(character) && streamCursor > 0) rebuilt += character;
+    }
+
+    // The case of the first letter may come from the model; nothing else.
+    const originalFirst = rebuilt[0];
+    const modelFirst = modelPart[0];
     if (originalFirst !== undefined && modelFirst !== undefined
       && originalFirst !== modelFirst
       && originalFirst.toLowerCase() === modelFirst.toLowerCase()) {
-      // The model may capitalise the first letter. NOTHING else: a change to
-      // any later character is a word change and was already rejected above by
-      // the comparison, since the comparison reduces case but keeps letters.
-      word = modelFirst + originalWord.slice(1);
+      rebuilt = modelFirst + rebuilt.slice(1);
       recasedWords += 1;
     }
 
-    if (index > 0) text += ' ';
-    text += word;
+    // THE SEPARATOR before this part: a hyphen when the model joined it with a
+    // hyphen, otherwise a space. Nothing precedes the first part.
+    if (index > 0) text += WAS_HYPHEN_SEPARATED[index] ? '-' : ' ';
+    text += rebuilt;
 
-    // The punctuation run that follows this word, FILTERED to the allowed set.
-    // Anything else -- a bracket, a quote, a stray letter -- is dropped rather
-    // than copied; a disallowed mark is not a refusal, since it cannot change a
-    // word, but it is never allowed into the output.
-    let marks = '';
-    for (const character of modelTokens[index].marks) {
+    // The punctuation TRAILING this part's last letter/digit, filtered to the
+    // allowed set -- EXCEPT a hyphen, which is the separator handled above.
+    let lastLetterIndex = -1;
+    for (let i = modelPart.length - 1; i >= 0; i -= 1) {
+      if (isLetterOrDigit(modelPart[i])) { lastLetterIndex = i; break; }
+    }
+    for (const character of modelPart.slice(lastLetterIndex + 1)) {
       if (!isAllowedMark(character)) continue;
-      marks += character;
+      text += character;
       insertedMarks += 1;
     }
-    text += marks;
   }
 
   return ok({ text, recasedWords, insertedMarks });

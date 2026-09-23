@@ -177,7 +177,19 @@ describe('POST /api/ai/text-action -- success', () => {
     const [, init] = fetchMock.mock.calls[0];
     const sentBody = JSON.parse((init as RequestInit).body as string);
     expect(sentBody.messages).toHaveLength(2);
-    expect(Object.keys(sentBody).sort()).toEqual(['max_tokens', 'messages', 'model', 'temperature']);
+    // The key set is the four the route OWNS plus the one provider control it
+    // now sets (PATCH-162's thinking switch). Pinned exhaustively still, so a
+    // NEW field has to be considered here rather than slipping through -- the
+    // property this test exists for. `thinking` is a provider control and
+    // carries no board, Note, Document or Knowledge content.
+    expect(Object.keys(sentBody).sort()).toEqual(['max_tokens', 'messages', 'model', 'temperature', 'thinking']);
+    // And the content scoping, stated directly rather than by key count.
+    expect(JSON.stringify(sentBody.messages)).toBe(
+      JSON.stringify([
+        { role: 'system', content: sentBody.messages[0].content },
+        { role: 'user', content: 'Bravo' },
+      ]),
+    );
   });
 
   it('shorten and fix-grammar route to their own distinct task instructions', async () => {
@@ -244,5 +256,27 @@ describe('POST /api/ai/text-action -- scope and secret handling', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).not.toContain('DEEPSEEK_API_KEY');
+  });
+});
+
+describe('PATCH-162: the route asks for no thinking', () => {
+  it('15. the outbound provider body carries the DeepSeek thinking switch', async () => {
+    // The route passes `reasoning: 'off'`, and the DeepSeek adapter turns that
+    // into its documented `thinking: { type: 'disabled' }`. Asserted on the
+    // ACTUAL outbound body, so it is the request the provider would receive --
+    // not a claim about the route's source. Without this, a thinking model
+    // spends the whole 1,500-token budget on reasoning and returns no answer.
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { content: 'punctuated.' } }] }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await route.POST(request({ action: 'improve', selectedText: 'hello there' }));
+    expect(res.status).toBe(200);
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const sentBody = JSON.parse(String(init.body));
+    expect(sentBody.thinking).toEqual({ type: 'disabled' });
   });
 });

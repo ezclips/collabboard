@@ -67,6 +67,16 @@ function buildSystemPrompt(action: TextAction, instruction: string | undefined):
  * The 20s timeout stays owned HERE, exactly as it was when this function spoke
  * to DeepSeek directly. Adapters forward the signal and never start a timer of
  * their own, so there is still exactly one clock on this path.
+ *
+ * THINKING IS OFF, and this is the route that needs it most. Every action here
+ * is a FAST EDIT -- improve, shorten, fix grammar, summarize, explain, custom,
+ * and the readable transcript -- sharing one 1,500-token budget and this 20 s
+ * clock. A thinking model spends that budget reasoning and never writes the
+ * answer: measured live, DeepSeek returned finish=length with 6,849 characters
+ * of reasoning and ZERO content, which surfaced as a provider failure; GLM on
+ * OpenRouter reasoned past the timeout. With thinking disabled the same section
+ * took ~3.5 s. Board chat, wiki compilation and component generation are NOT
+ * changed: they have their own budgets and were measured separately.
  */
 async function generateResolvedText(
   userId: UserId,
@@ -90,6 +100,20 @@ async function generateResolvedText(
       user: selectedText,
       maxTokens: 1500,
       temperature: 0.3,
+      // THINKING OFF. This route serves QUICK text actions on a 1,500-token,
+      // 20 s budget, and a thinking model spends the budget before writing an
+      // answer. Measured live on a real 8,653-character transcript:
+      //
+      //   deepseek (CollabBoard Default, deepseek-flash):
+      //     finish=length  contentLen=0  reasoningLen=6849  reasoning_tokens=1500
+      //   openrouter z-ai/glm-5.2:free:
+      //     every section aborted at ~20.3 s -- the timeout below
+      //
+      // With thinking disabled, DeepSeek finished each section in ~3.5 s and GLM
+      // in ~10 s. It is a REQUEST, not a guarantee: DeepSeek and OpenRouter
+      // honour it, and the adapters for the other providers ignore it rather
+      // than guess a parameter nothing measured.
+      reasoning: 'off',
       signal: controller.signal,
     });
   } finally {

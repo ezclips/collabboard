@@ -223,3 +223,22 @@ describe('Gemini adapter', () => {
     expect(serialized).not.toContain(FAKE_KEY);
   });
 });
+
+describe('PATCH-162: reasoning is IGNORED, so the request is unchanged', () => {
+  it('sends the same body with reasoning off as without it', async () => {
+    const withOff = mockFetch(jsonResponse(OK_BODY));
+    await geminiAdapter.generateText({ ...BASE_INPUT, reasoning: 'off' });
+    const bodyOff = String((withOff.mock.calls[0] as unknown as [string, RequestInit])[1].body);
+
+    vi.unstubAllGlobals();
+    const without = mockFetch(jsonResponse(OK_BODY));
+    await geminiAdapter.generateText(BASE_INPUT);
+    const bodyPlain = String((without.mock.calls[0] as unknown as [string, RequestInit])[1].body);
+
+    // No switch was measured for this provider, so NONE is sent: the two
+    // requests are byte-identical.
+    expect(bodyOff).toBe(bodyPlain);
+    expect(bodyOff).not.toContain('reasoning');
+    expect(bodyOff).not.toContain('thinking');
+  });
+});

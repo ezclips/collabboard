@@ -105,3 +105,24 @@ describe('OpenRouter adapter', () => {
     expect(`${(error as Error).message}|${JSON.stringify(error)}`).not.toContain(SECRET_BODY);
   });
 });
+
+describe('PATCH-162: thinking off', () => {
+  const bodyOf = (fetchMock: ReturnType<typeof mockFetch>) =>
+    JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+
+  it('sends reasoning disabled when reasoning is off', async () => {
+    const fetchMock = mockFetch(jsonResponse(OK_BODY));
+
+    await openRouterAdapter.generateText({ ...BASE_INPUT, reasoning: 'off' });
+
+    expect(bodyOf(fetchMock).reasoning).toEqual({ enabled: false });
+  });
+
+  it('sends NO reasoning field when reasoning is absent', async () => {
+    const fetchMock = mockFetch(jsonResponse(OK_BODY));
+
+    await openRouterAdapter.generateText(BASE_INPUT);
+
+    expect(bodyOf(fetchMock)).not.toHaveProperty('reasoning');
+  });
+});

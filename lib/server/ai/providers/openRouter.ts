@@ -19,6 +19,11 @@ export const openRouterAdapter: AIProviderAdapter = {
   // Chat Completions carries image_url parts, and the shared helper builds them.
   carriesImages: true,
   generateText(input: AIGenerateTextInput): Promise<string> {
-    return chatCompletionsGenerateText('openrouter', OPENROUTER_ENDPOINT, input);
+    // THINKING OFF, OpenRouter's documented switch. Measured live: a thinking
+    // model here reasoned past the route's own 20 s timeout and returned
+    // nothing. `reasoning: { enabled: false }` is the request that stops it;
+    // absent, OpenRouter keeps the model's own default.
+    const extraBody = input.reasoning === 'off' ? { reasoning: { enabled: false } } : undefined;
+    return chatCompletionsGenerateText('openrouter', OPENROUTER_ENDPOINT, input, extraBody);
   },
 };

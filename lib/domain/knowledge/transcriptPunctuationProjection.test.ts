@@ -7,19 +7,27 @@ import {
 } from './transcriptPunctuationProjection';
 
 /**
- * THE SAFETY CLAIM OF PATCH-160, AND IT IS TESTED AS A PROPERTY.
+ * THE SAFETY CLAIM, TESTED AS A PROPERTY (PATCH-160, widened by PATCH-162).
  *
  * The model proposes; it never writes. A projection is accepted only when the
- * model's word sequence equals the original's exactly, and the output is
- * rebuilt from the ORIGINAL characters, so:
+ * model's LETTER-AND-DIGIT sequence equals the original's exactly, and the
+ * output is rebuilt from the ORIGINAL characters, so:
  *
- *   every accepted projection's word sequence equals the original's
+ *   every accepted projection's letter and digit stream equals the original's
  *
  * is not a hope, it is the reason the module exists. It is asserted over
  * hundreds of generated cases including adversarial model outputs, because a
  * handful of hand-picked examples is what a threshold-based design would also
  * pass.
+ *
+ * PATCH-162 widened the guarantee from "every character" to "every letter and
+ * digit": an apostrophe or hyphen inside a word is SPELLING, not a word. The
+ * property below is the widened form, and it is still a property.
  */
+
+/** The letters and digits of a string, in order, lowercased. */
+const letterDigitStream = (value: string): string =>
+  value.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 
 /** The words of a string, reduced to their comparable form. */
 const words = (value: string): string[] => value
@@ -114,10 +122,15 @@ describe('capitalisation is taken, other character changes are not', () => {
     expect(result.value.recasedWords).toBe(1);
   });
 
-  it('6b. an apostrophe that changes the word is a WORD CHANGE, refused', () => {
-    // "openings" -> "opening's" is not punctuation; it is a different word.
-    const result = projectTranscriptPunctuation('the openings are wide', "The opening's are wide.");
-    expect(result.ok).toBe(false);
+  it('6b. an apostrophe BETWEEN letters is spelling, and ACCEPTED', () => {
+    // The owner's ruling: a transcript is speech, and "kings pawn" and
+    // "king's pawn" are the same spoken words. The apostrophe is kept, and
+    // every letter is still the original's.
+    const result = projectTranscriptPunctuation('the kings pawn is strong', "The king's pawn is strong.");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.text).toContain("king's");
+    expect(letterDigitStream(result.value.text)).toBe(letterDigitStream('the kings pawn is strong'));
   });
 
   it('6c. altering a NON-first character of a word is refused', () => {
@@ -149,28 +162,37 @@ describe('punctuation outside the allowed set is dropped, never copied', () => {
   });
 });
 
-describe('8. THE PROPERTY: an accepted projection always has the ORIGINAL words', () => {
+describe('8. THE PROPERTY: an accepted projection always has the ORIGINAL letters and digits', () => {
   /**
    * A deterministic generator, so a failure is reproducible. No randomness
    * seed is hidden: the same corpus and the same mutations every run.
    */
-  const VOCAB = ['engine', 'oil', 'filter', "don't", 'thirty', 'five', 'litres', 'check', 'the', 'a', 'is', 'and'];
+  const VOCAB = ['engine', 'oil', 'filter', 'thirty', 'five', 'litres', 'check', 'the', 'a', 'is', 'and', 'setup'];
 
   const makeWords = (length: number, offset: number): string[] =>
     Array.from({ length }, (_, index) => VOCAB[(index * 7 + offset) % VOCAB.length]);
 
   const join = (list: readonly string[]) => list.join(' ');
 
-  /** Model outputs that only ADD punctuation and capitalisation. */
+  /** Model outputs that only ADD punctuation, capitalisation and spelling. */
   const punctuated = (list: readonly string[], cadence: number, sentenceMarks: string) =>
     list
       .map((word, index) => {
         const lead = index === 0 || index % cadence === 0 ? word[0].toUpperCase() + word.slice(1) : word;
-        if ((index + 1) % cadence === 0) return `${lead}${sentenceMarks}`;
-        if (index % 3 === 1) return `${lead},`;
-        return lead;
+        // INSIDE the word, the model may add an APOSTROPHE -- that is PATCH-162's
+        // widening and these outputs must still be accepted.
+        const spelled = index % 4 === 0 && lead.length > 3
+          ? `${lead.slice(0, 2)}'${lead.slice(2)}`
+          : lead;
+        if ((index + 1) % cadence === 0) return `${spelled}${sentenceMarks}`;
+        if (index % 3 === 1) return `${spelled},`;
+        return spelled;
       })
-      .join(' ');
+      .join(' ')
+      // A HYPHEN may join what was a SPACE -- `setup based` -> `setup-based` --
+      // but must not split a word that was whole, or the part count changes and
+      // the correct answer is a refusal.
+      .replace(/(\w) (\w)/g, (whole, left, right) => (right === right.toUpperCase() ? whole : `${left}-${right}`));
 
   it('holds for several hundred generated accept cases', () => {
     let accepted = 0;
@@ -184,25 +206,44 @@ describe('8. THE PROPERTY: an accepted projection always has the ORIGINAL words'
           expect(result.ok, `length=${length} offset=${offset} cadence=${cadence}`).toBe(true);
           if (!result.ok) continue;
           accepted += 1;
-          // THE CLAIM, on every accepted projection.
-          expect(words(result.value.text)).toEqual(words(original));
-          // And stronger: every word character came from the original, so the
-          // lowercase form of the output equals the lowercase original's words.
-          expect(result.value.text.toLowerCase().replace(/[^a-z0-9' ]/g, '').split(/\s+/).filter(Boolean))
-            .toEqual(original.toLowerCase().split(/\s+/).filter(Boolean));
+          // THE CLAIM, on every accepted projection: the letters and digits are
+          // the original's, exactly, in order.
+          expect(letterDigitStream(result.value.text)).toBe(letterDigitStream(original));
         }
       }
     }
     expect(accepted).toBeGreaterThan(500);
   });
 
-  it('holds for several hundred generated ADVERSARIAL cases (all refused)', () => {
+  it('inserted apostrophes and hyphens INSIDE words are accepted', () => {
+    // The owner's real cases.
+    for (const [original, model, spelling] of [
+      ['scholars mate', "scholar's mate", "'"],
+      ['setup based', 'setup-based', '-'],
+      ['kings pawn', "king's pawn", "'"],
+    ] as const) {
+      const result = projectTranscriptPunctuation(original, model);
+      expect(result.ok, `${original} -> ${model}`).toBe(true);
+      if (!result.ok) continue;
+      expect(letterDigitStream(result.value.text)).toBe(letterDigitStream(original));
+      // The model's apostrophe or hyphen survived.
+      expect(result.value.text).toContain(spelling);
+    }
+  });
+
+  it('holds for several hundred generated ADVERSARIAL cases', () => {
     let refused = 0;
+    let acceptedButGuaranteed = 0;
+    const streamOf = (value: string) => letterDigitStream(value);
     for (let length = 2; length <= 30; length += 1) {
       for (let offset = 0; offset < VOCAB.length; offset += 1) {
         const list = makeWords(length, offset);
         const original = join(list);
-        // Mutations that must ALL be refused, one per kind and position.
+        const mutatedList = (index: number, value: string) =>
+          join(list.map((word, i) => (i === index ? value : word)));
+        const first = list[0] ?? 'x';
+        // EVERY mutation must change the LETTER/DIGIT stream, or it is not an
+        // adversary at all -- asserted below before it is used.
         const mutations: readonly string[] = [
           // a dropped word
           join(list.slice(0, Math.floor(length / 2)).concat(list.slice(Math.floor(length / 2) + 1))),
@@ -214,23 +255,38 @@ describe('8. THE PROPERTY: an accepted projection always has the ORIGINAL words'
           join(list.slice(0, 1).concat(['zzz']).concat(list.slice(2))),
           // a truncated word
           join(list.slice(0, -1).concat([(list[list.length - 1] ?? 'x').slice(0, 1)])),
+          // ONE LETTER SUBSTITUTED inside a word
+          mutatedList(0, `${first.slice(0, -1)}z`),
+          // TWO ADJACENT WORDS MERGED without a hyphen -- a word change
+          `${join(list.slice(0, 2)).replace(/\s+/g, '')} ${join(list.slice(2))}`.trim(),
+          // ONE WORD SPLIT in two
+          mutatedList(0, `${first.slice(0, 1)} ${first.slice(1)}`),
           // a summary
           'The speaker discusses the topic at some length.',
         ];
         for (const modelOutput of mutations) {
+          // A mutation that does not change the letter/digit stream is not an
+          // adversary, and this generator must not count it as one -- e.g. the
+          // truncated mutation on a single-character word. Skip only those.
+          if (streamOf(modelOutput) === streamOf(original)) continue;
           const result = projectTranscriptPunctuation(original, modelOutput);
           if (result.ok) {
-            // If it was ACCEPTED, the property must still hold -- which for a
-            // real mutation is impossible, so this branch should never run.
-            expect(words(result.value.text)).toEqual(words(original));
+            // If a mutation was ACCEPTED, the guarantee must still hold. For a
+            // real mutation it cannot, so this counter stays zero -- it is here
+            // so the property is asserted on BOTH branches rather than only
+            // when the call happens to succeed.
+            expect(letterDigitStream(result.value.text)).toBe(letterDigitStream(original));
+            acceptedButGuaranteed += 1;
           } else {
             refused += 1;
           }
         }
       }
     }
-    // Every mutation was refused, and the property never had to be relied on.
+    // Every real mutation was refused, and the guarantee never had to be relied
+    // on for one.
     expect(refused).toBeGreaterThan(500);
+    expect(acceptedButGuaranteed).toBe(0);
   });
 });
 

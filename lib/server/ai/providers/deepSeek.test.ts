@@ -172,3 +172,24 @@ describe('DeepSeek adapter', () => {
     }
   });
 });
+
+describe('PATCH-162: thinking off', () => {
+  const bodyOf = (fetchMock: ReturnType<typeof mockFetch>) =>
+    JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+
+  it('sends thinking disabled when reasoning is off', async () => {
+    const fetchMock = mockFetch(jsonResponse(OK_BODY));
+
+    await deepSeekAdapter.generateText({ ...BASE_INPUT, reasoning: 'off' });
+
+    expect(bodyOf(fetchMock).thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('sends NO thinking field when reasoning is absent', async () => {
+    const fetchMock = mockFetch(jsonResponse(OK_BODY));
+
+    await deepSeekAdapter.generateText(BASE_INPUT);
+
+    expect(bodyOf(fetchMock)).not.toHaveProperty('thinking');
+  });
+});

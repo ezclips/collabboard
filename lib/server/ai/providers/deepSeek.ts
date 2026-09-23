@@ -76,6 +76,13 @@ export const deepSeekAdapter: AIProviderAdapter = {
   // Chat Completions carries image_url parts, and the shared helper builds them.
   carriesImages: true,
   generateText(input: AIGenerateTextInput): Promise<string> {
-    return chatCompletionsGenerateText('deepseek', DEEPSEEK_ENDPOINT, input);
+    // THINKING OFF, DeepSeek's documented switch. This model thinks by default
+    // and spends the completion budget on `reasoning_content` before writing any
+    // `content` -- measured live at 1,500 reasoning tokens and ZERO content on a
+    // 1,500-token budget, which surfaces as a failed call. A quick text action
+    // wants no thinking, so the route asks for none and this adapter honours it.
+    // https://api-docs.deepseek.com/guides/thinking_mode/
+    const extraBody = input.reasoning === 'off' ? { thinking: { type: 'disabled' } } : undefined;
+    return chatCompletionsGenerateText('deepseek', DEEPSEEK_ENDPOINT, input, extraBody);
   },
 };

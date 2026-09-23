@@ -148,8 +148,9 @@ export default function KnowledgeTextSourceView({
    * and the output rebuilt from the original words.
    */
   const PUNCTUATE_INSTRUCTION = 'Add only punctuation (periods, commas, question marks, exclamation '
-    + 'marks, semicolons, colons, em dashes) and capitalisation to this transcript. Do not add, remove, '
-    + 'reorder or change ANY word, number or apostrophe. Return only the punctuated text, with no '
+    + 'marks, semicolons, colons, em dashes), capitalisation, and apostrophes or hyphens within words '
+    + '(for example "kings" may become "king\'s" and "setup based" may become "setup-based"). Do not '
+    + 'add, remove, reorder, merge or split any word. Return only the punctuated text, with no '
     + 'preamble, commentary or quotation.';
 
   /**

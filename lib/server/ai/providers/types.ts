@@ -73,6 +73,20 @@ export interface AIGenerateTextInput {
    * be invisible to it.
    */
   readonly signal?: AbortSignal;
+  /**
+   * `'off'` asks a THINKING model to answer directly instead of reasoning
+   * first. Absent means the provider's own default, which for some models is to
+   * think -- and thinking spends the completion budget before any answer is
+   * written.
+   *
+   * IT IS A REQUEST, NOT A GUARANTEE. An adapter whose provider has no such
+   * switch may IGNORE it, and an adapter that ignores it must say so in its own
+   * file rather than inventing a parameter: an unmeasured switch sent to a
+   * provider is a guess, and a guess on this path is a failed call. Only
+   * DeepSeek and OpenRouter are honoured here, because only those two were
+   * measured; the others are deliberately unchanged.
+   */
+  readonly reasoning?: 'off';
 }
 
 export interface AIProviderAdapter {

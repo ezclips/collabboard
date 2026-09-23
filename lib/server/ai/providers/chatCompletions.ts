@@ -37,6 +37,18 @@ export async function chatCompletionsGenerateText(
   provider: AIExecutionProvider,
   endpoint: string,
   input: AIGenerateTextInput,
+  /**
+   * Provider-specific body fields the CALLER's adapter wants added, e.g. a
+   * thinking switch. ABSENT OR EMPTY MEANS BYTE-IDENTICAL TO BEFORE: the spread
+   * below adds nothing, so a request that carried no extra body serializes
+   * exactly as it always did. That is the same promise the image branch above
+   * makes, kept for the same reason -- a change here must not alter a call that
+   * was already working.
+   *
+   * The shared helper never chooses these fields itself: what to send is a
+   * property of the provider, so it belongs in the adapter, not here.
+   */
+  extraBody?: Record<string, unknown>,
 ): Promise<string> {
   // A plain string when there is no image, so every existing text-only request
   // goes out byte-identical to before. The parts array is used ONLY when the
@@ -80,6 +92,10 @@ export async function chatCompletionsGenerateText(
         ],
         max_tokens: input.maxTokens,
         ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+        // LAST, so an extra field is additive and cannot displace a field the
+        // helper owns. Empty means the object above serializes exactly as
+        // before this parameter existed.
+        ...(extraBody ?? {}),
       }),
     });
   } catch (cause) {

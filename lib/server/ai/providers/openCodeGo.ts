@@ -43,6 +43,9 @@ export const openCodeGoAdapter: AIProviderAdapter = {
   // and it is false because the endpoint's capability is not uniform.
   carriesImages: false,
   generateText(input: AIGenerateTextInput): Promise<string> {
+    // `reasoning` is deliberately IGNORED here: no switch for this provider was
+    // measured, and an unmeasured parameter is a guess. Sending nothing keeps
+    // this request exactly as it was.
     // A non-empty images array is REFUSED, never dropped. Declaring false above
     // is what keeps this from being reached on the normal path; this check is
     // the honest failure for any path that reaches it anyway.

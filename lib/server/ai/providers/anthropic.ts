@@ -79,6 +79,9 @@ export const anthropicAdapter: AIProviderAdapter = {
   provider: 'anthropic',
   carriesImages: true,
   async generateText(input: AIGenerateTextInput): Promise<string> {
+    // `reasoning` is deliberately IGNORED here: no switch for this provider was
+    // measured, and an unmeasured parameter is a guess. Sending nothing keeps
+    // this request exactly as it was.
     let response: Response;
     try {
       response = await fetch(ANTHROPIC_ENDPOINT, {
