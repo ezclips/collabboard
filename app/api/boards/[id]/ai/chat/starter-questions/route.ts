@@ -45,7 +45,7 @@ import { asUserId } from '@/lib/domain/core/ids';
 export const runtime = 'nodejs';
 
 /** How much of the resolved document text reaches the prompt. */
-export const STARTER_QUESTIONS_MAX_DOCUMENT_CHARS = 12_000;
+const STARTER_QUESTIONS_MAX_DOCUMENT_CHARS = 12_000;
 
 /** The route's own budget: a small, fast request. */
 const STARTER_QUESTIONS_TIMEOUT_MS = 15_000;
