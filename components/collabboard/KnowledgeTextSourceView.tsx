@@ -21,6 +21,11 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 
+import { knowledgeTranscriptReadingBlocks }
+  from '@/lib/domain/knowledge/knowledgeTranscriptReadingLayout';
+import type { KnowledgeTranscriptStoredRepresentation }
+  from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
+
 export interface KnowledgeTextSourceHighlight {
   /** Inclusive, in UTF-16 code units of the canonical text. */
   readonly charStart: number;
@@ -44,6 +49,14 @@ export interface KnowledgeTextSourceViewProps {
   readonly highlight?: KnowledgeTextSourceHighlight | null;
   /** Which host is drawing it. Geometry only. */
   readonly presentation: 'workspace' | 'side-panel';
+  /**
+   * PATCH-159. Present ONLY for a transcript, carried from the server row rather
+   * than derived here -- the same rule the PDF reader's prop records: inferring
+   * "transcript" from the text's shape would eventually call a Markdown file a
+   * transcript. `null`/absent means NOT a transcript and renders exactly as
+   * before.
+   */
+  readonly transcriptRepresentation?: KnowledgeTranscriptStoredRepresentation | null;
 }
 
 /**
@@ -79,9 +92,26 @@ export default function KnowledgeTextSourceView({
   error = false,
   highlight,
   presentation,
+  transcriptRepresentation,
 }: KnowledgeTextSourceViewProps) {
   const markRef = useRef<HTMLElement | null>(null);
   const handledRequestRef = useRef<number | null>(null);
+
+  /**
+   * PATCH-159. Reading blocks, for a TRANSCRIPT only.
+   *
+   * THE SAME CONSTRAINT THE FILE ALREADY STATES, now applied to grouping:
+   * offsets index the SOURCE text, so the blocks are a contiguous partition and
+   * the rendered textContent still reconstructs `text` verbatim. Only CSS and
+   * grouping change -- never a character.
+   *
+   * NULL MEANS NOT A TRANSCRIPT, and it is the single flag the render reads.
+   */
+  const isTranscript = transcriptRepresentation != null;
+  const blocks = useMemo(
+    () => (isTranscript && typeof text === 'string' ? knowledgeTranscriptReadingBlocks(text) : null),
+    [isTranscript, text],
+  );
 
   const split = useMemo(
     () => (typeof text === 'string' ? splitKnowledgeTextHighlight(text, highlight) : null),
@@ -159,22 +189,75 @@ export default function KnowledgeTextSourceView({
           view rests on -- offsets index the SOURCE text, and a renderer that
           reorders, drops or inserts characters makes every one of them wrong.
           Stage 1 shows Markdown as its source, and says so by doing it.
+
+          PATCH-159. A TRANSCRIPT is the exception, and it is a different kind
+          of document: speech, not source text. Its line breaks are caption
+          timings rather than authored structure, and monospace is what makes it
+          read like a log. So it renders as reading blocks cut at those line
+          boundaries, with collapsed whitespace -- while the DOM text nodes, and
+          therefore every offset, stay byte-identical. Group and restyle, never
+          rewrite.
         */}
-        <p className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-gray-800">
-          {split === null ? text : (
-            <>
-              {split.before}
-              <mark
-                ref={markRef}
-                data-knowledge-text-source-highlight="true"
-                className="rounded-sm bg-yellow-200 px-0.5 text-gray-900"
-              >
-                {split.marked}
-              </mark>
-              {split.after}
-            </>
-          )}
-        </p>
+        {blocks === null ? (
+          <p className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-gray-800">
+            {split === null ? text : (
+              <>
+                {split.before}
+                <mark
+                  ref={markRef}
+                  data-knowledge-text-source-highlight="true"
+                  className="rounded-sm bg-yellow-200 px-0.5 text-gray-900"
+                >
+                  {split.marked}
+                </mark>
+                {split.after}
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="whitespace-normal break-words text-[15px] leading-7 text-gray-800">
+            {(() => {
+              // The highlight range, clamped PER BLOCK below. Absolute always:
+              // a rebased offset would mark the wrong characters.
+              const markedStart = split === null ? null : highlight!.charStart;
+              const markedEnd = split === null ? null : highlight!.charEnd;
+              // The scroll anchor goes on the FIRST mark only -- the fragment
+              // holding the highlight's true start -- so a citation scrolls to
+              // the start of the quote, not to its second paragraph.
+              let anchored = false;
+              return blocks.map((block, blockIndex) => (
+                <span
+                  key={`block-${block.charStart}`}
+                  data-transcript-reading-block=""
+                  className={blockIndex === blocks.length - 1 ? 'block' : 'block mb-4'}
+                >
+                  {markedStart === null || markedEnd === null
+                    || markedEnd <= block.charStart || markedStart >= block.charEnd
+                    ? text.slice(block.charStart, block.charEnd)
+                    : (() => {
+                      const from = Math.max(markedStart, block.charStart);
+                      const to = Math.min(markedEnd, block.charEnd);
+                      const first = !anchored;
+                      if (first) anchored = true;
+                      return (
+                        <>
+                          {text.slice(block.charStart, from)}
+                          <mark
+                            ref={first ? markRef : undefined}
+                            data-knowledge-text-source-highlight="true"
+                            className="rounded-sm bg-yellow-200 px-0.5 text-gray-900"
+                          >
+                            {text.slice(from, to)}
+                          </mark>
+                          {text.slice(to, block.charEnd)}
+                        </>
+                      );
+                    })()}
+                </span>
+              ));
+            })()}
+          </p>
+        )}
       </article>
     </div>
   );

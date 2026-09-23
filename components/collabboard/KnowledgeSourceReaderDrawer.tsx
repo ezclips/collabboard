@@ -810,6 +810,7 @@ export default function KnowledgeSourceReaderDrawer({
             ? { ...reader.textHighlight, requestId: reader.pageNavigationRequestId }
             : null}
           presentation={host}
+          transcriptRepresentation={reader.transcriptRepresentation}
         />
       );
     }

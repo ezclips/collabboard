@@ -9,8 +9,6 @@ import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowle
 import { useKnowledgeReaderActivePage } from './useKnowledgeReaderActivePage';
 import { KNOWLEDGE_TRANSCRIPT_DISCLOSURE } from '@/lib/domain/knowledge/knowledgeTranscriptCitation';
 import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
-import { knowledgeTranscriptReadingBlocks } from '@/lib/domain/knowledge/knowledgeTranscriptReadingLayout';
-import type { KnowledgeTranscriptReadingBlock } from '@/lib/domain/knowledge/knowledgeTranscriptReadingLayout';
 /**
  * PDF-R6J. One compact icon button, used by every page/document action in the
  * reader.
@@ -403,20 +401,6 @@ function highlightedText(
   sourceSegments: readonly KnowledgeReaderSegment[],
   interaction: PageSourceInteraction,
   preview: { readonly start: number; readonly end: number; readonly color: string } | null,
-  /**
-   * PATCH-157. The slice of `text` this call renders, when a transcript is
-   * split into reading blocks. Defaults to the whole text, in which case the
-   * output is byte-identical to what this function produced before the
-   * parameter existed.
-   *
-   * OFFSETS STAY ABSOLUTE. The segments, matches, preview and React keys are all
-   * in coordinates against the FULL `text`; this only decides which pieces are
-   * emitted. It must never slice the string and rebase, because rebasing is
-   * exactly where an off-by-one would hide -- and a rebased offset would be a
-   * citation pointing at the wrong character. Clamp, never translate.
-   */
-  rangeStart: number = 0,
-  rangeEnd: number = text.length,
 ) {
   const nodes: React.ReactNode[] = [];
   // The arrival ref belongs on the FIRST piece of the requested citation; the
@@ -424,11 +408,7 @@ function highlightedText(
   let navigationAnchored = false;
 
   // Outside a search match the citations decide the cuts.
-  const pushUnmatched = (rawStart: number, rawEnd: number) => {
-    // PATCH-157 clamp: emit only what falls inside this call's range, while
-    // every offset used below stays absolute against the full text.
-    const start = Math.max(rawStart, rangeStart);
-    const end = Math.min(rawEnd, rangeEnd);
+  const pushUnmatched = (start: number, end: number) => {
     if (end <= start) return;
     if (sourceSegments.length === 0) {
       nodes.push(...withPreview(text, start, end, `text-${start}`, preview));
@@ -460,29 +440,7 @@ function highlightedText(
         disguised citation-derived highlight.
       */
       const isArrival = segment.focused;
-      /*
-        PATCH-157. THE REF AND THE EMPHASIS ARE DIFFERENT THINGS, and this file
-        says so above: "the arrival ref belongs on the FIRST piece ... the rest
-        share its emphasis but must not steal the scroll."
-
-        In block mode a focused segment is emitted once per block it crosses, and
-        each of those calls used to claim the ref -- so the ref held the LAST
-        fragment and "jump to source" scrolled to the second paragraph of the
-        quote. `navigationAnchored` cannot catch that: it is per-call, and each
-        block is its own call.
-
-        So the REF is confined to the call that renders the segment's true start:
-        `rangeStart <= segment.start < rangeEnd`. `>= rangeStart` alone is not
-        enough -- it is also true in every block BEFORE the segment.
-
-        THE EMPHASIS STAYS ON EVERY PIECE (`isArrival`), exactly as before this
-        patch: the ring and the navigation marker are shared by all fragments, or
-        a citation cut into several segments would ring only its first and leave
-        the rest plain. That is a visible behaviour of the PDF path too, which
-        this patch must not change.
-      */
-      const anchorHere = isArrival && !navigationAnchored
-        && segment.start >= rangeStart && segment.start < rangeEnd;
+      const anchorHere = isArrival && !navigationAnchored;
       if (anchorHere) navigationAnchored = true;
 
       /*
@@ -556,34 +514,18 @@ function highlightedText(
     pushUnmatched(cursor, match.start);
     const active = match === activeMatch;
     const sources = sourceCountOver(sourceSegments, match.start, match.end);
-    /*
-      PATCH-157. In block mode a match may lie outside this call's range, or
-      straddle its edge. The <mark> is still ONE element covering the whole
-      match when it falls inside; only when the range clips it does the mark
-      carry the clipped characters -- and the absolute offsets keep the key and
-      the slice consistent. The cursor always advances to the match's real end,
-      so the pieces after it stay aligned to the full text.
-    */
-    const markStart = Math.max(match.start, rangeStart);
-    const markEnd = Math.min(match.end, rangeEnd);
-    if (markEnd > markStart) {
-      nodes.push(
-        <mark
-          key={`match-${match.start}`}
-          // PATCH-157. A match straddling a block boundary is emitted once per
-          // block. Only the fragment rendering the match's true start takes the
-          // active ref, or the ref ends up on the LAST fragment and the search
-          // scroll jumps into the middle of the match.
-          ref={active && markStart === match.start ? activeRef : undefined}
-          data-active-match={active ? 'true' : undefined}
-          data-knowledge-source-highlight={sources > 0 ? 'true' : undefined}
-          data-knowledge-source-highlight-count={sources > 0 ? sources : undefined}
-          className={active ? 'rounded bg-blue-300 text-gray-900 ring-2 ring-blue-500' : 'rounded bg-yellow-200 text-gray-900'}
-        >
-          {text.slice(markStart, markEnd)}
-        </mark>,
-      );
-    }
+    nodes.push(
+      <mark
+        key={`match-${match.start}`}
+        ref={active ? activeRef : undefined}
+        data-active-match={active ? 'true' : undefined}
+        data-knowledge-source-highlight={sources > 0 ? 'true' : undefined}
+        data-knowledge-source-highlight-count={sources > 0 ? sources : undefined}
+        className={active ? 'rounded bg-blue-300 text-gray-900 ring-2 ring-blue-500' : 'rounded bg-yellow-200 text-gray-900'}
+      >
+        {text.slice(match.start, match.end)}
+      </mark>,
+    );
     cursor = match.end;
   });
   pushUnmatched(cursor, text.length);
@@ -801,26 +743,6 @@ export default function KnowledgeDocumentDetails({
     () => new Map(documentRows.map((row) => [row.targetPadletId, row.displayText])),
     [documentRows],
   );
-
-  /**
-   * PATCH-157. Reading blocks per page, for a transcript ONLY.
-   *
-   * Computed ONCE here rather than inside the per-page map, both because a hook
-   * cannot be called in a callback and because recomputing block boundaries on
-   * every render would do the same work for nothing.
-   *
-   * NULL MEANS "NOT A TRANSCRIPT", and it is the single flag the render reads --
-   * a PDF page must render exactly as it always has. Block boundaries are the
-   * only thing crossing the domain/render line; the text itself is untouched,
-   * so the root's textContent still reconstructs page.text character for
-   * character.
-   */
-  const transcriptBlocksByPage = useMemo(() => {
-    if (!transcriptRepresentation) return null;
-    const byPage = new Map<number, readonly KnowledgeTranscriptReadingBlock[]>();
-    for (const page of pages) byPage.set(page.pageNumber, knowledgeTranscriptReadingBlocks(page.text));
-    return byPage;
-  }, [transcriptRepresentation, pages]);
 
   /**
    * Whether the requested citation resolved to anything paintable at all. The
@@ -1308,15 +1230,10 @@ export default function KnowledgeDocumentDetails({
             const pageSelection = activeSelection?.pageNumber === page.pageNumber ? activeSelection : null;
             const pageRegion = activeRegion?.pageNumber === page.pageNumber ? activeRegion : null;
             /*
-              PATCH-157. The page's rendered children, computed here so the root
+              The rendered children are hoisted into `pageTextArgs` so the root
               element below gains nothing between its PAGE_TEXT_ROOT attribute
-              and its first text. `highlightedText` is called with the SAME
-              absolute arguments in both paths -- the only difference is that a
-              transcript passes each reading block's range and wraps the result.
-
-              A transcript with no blocks (empty text) falls through to the
-              single ungrouped call, which renders nothing for empty text and is
-              what a non-transcript always did.
+              and its text -- the property the toolbar test's 400-char slice from
+              the first PAGE_TEXT_ROOT occurrence guards.
             */
             const pageTextArgs = [
               page.text,
@@ -1329,7 +1246,6 @@ export default function KnowledgeDocumentDetails({
                 ? { start: pageSelection.charStart, end: pageSelection.charEnd, color: selectionColor }
                 : null,
             ] as const;
-            const blocks = transcriptBlocksByPage?.get(page.pageNumber) ?? [];
             return (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
               {/*
@@ -1366,38 +1282,11 @@ export default function KnowledgeDocumentDetails({
                   onClear={() => setArmedRegion(null)}
                 />
               ) : null}
-              {/*
-                PATCH-157. A TRANSCRIPT reads as paragraphs; a PDF page is
-                untouched. The root element, its tag and the PAGE_TEXT_ROOT
-                attribute stay exactly here -- that attribute IS the coordinate
-                space, so the text's whitespace is collapsed VISUALLY by CSS
-                while the DOM text nodes, and therefore every offset, remain
-                byte-identical. `whitespace-normal` is what lets a cue's newline
-                and YouTube's doubled spaces stop showing without one character
-                being removed from the string.
-
-                The arguments above are hoisted so the root gains nothing between
-                its attribute and its text: the only thing between them is the
-                compact call below, which is what the toolbar test's 400-char
-                slice from the first PAGE_TEXT_ROOT occurrence guards.
-              */}
               <p
                 {...{ [PAGE_TEXT_ROOT]: page.pageNumber }}
-                className={transcriptBlocksByPage
-                  ? 'select-text whitespace-normal text-sm leading-7 text-gray-700 max-w-[68ch]'
-                  : 'select-text whitespace-pre-wrap text-xs leading-5 text-gray-700'}
+                className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700"
               >
-                {blocks.length === 0
-                  ? highlightedText(...pageTextArgs)
-                  : blocks.map((block, blockIndex) => (
-                    <span
-                      key={`block-${block.charStart}`}
-                      data-transcript-reading-block=""
-                      className={blockIndex === blocks.length - 1 ? 'block' : 'block mb-3'}
-                    >
-                      {highlightedText(...pageTextArgs, block.charStart, block.charEnd)}
-                    </span>
-                  ))}
+                {highlightedText(...pageTextArgs)}
               </p>
             </section>
             );

@@ -6,6 +6,10 @@ import { createRoot } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import KnowledgeTextSourceView, { splitKnowledgeTextHighlight } from './KnowledgeTextSourceView';
+import { knowledgeTranscriptReadingBlocks }
+  from '@/lib/domain/knowledge/knowledgeTranscriptReadingLayout';
+import type { KnowledgeTranscriptStoredRepresentation }
+  from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 
 const DOC = '33333333-3333-4333-8333-333333333333';
 const TEXT = 'Alpha paragraph.\n\nBeta paragraph.\n\nAlpha paragraph.';
@@ -150,5 +154,113 @@ describe('splitKnowledgeTextHighlight', () => {
   it('is null without a highlight at all', () => {
     expect(splitKnowledgeTextHighlight(TEXT, null)).toBeNull();
     expect(splitKnowledgeTextHighlight(TEXT, undefined)).toBeNull();
+  });
+});
+
+/**
+ * PATCH-159. THE RENDERER A TRANSCRIPT ACTUALLY REACHES.
+ *
+ * PATCH-157 put the reading layout in the PDF reader, which a transcript never
+ * reaches (the reader routes on kind: a transcript is 'text' and renders here,
+ * while KnowledgeDocumentDetails is reached only for 'pdf'). So this is where
+ * the grouping has to be, and the constraint is the one this file already
+ * states: offsets index the SOURCE text, so the rendered textContent must still
+ * reconstruct `text` verbatim.
+ */
+describe('a transcript reads as paragraphs here, without changing its text', () => {
+  const representation = {
+    representationVersion: 1,
+    videoIdentity: 'yt:dQw4w9WgXcQ',
+    cues: [{ charStart: 0, charEnd: 5, startMs: 1000, endMs: 3000 }],
+    language: null,
+    trackKind: 'machine' as const,
+    format: 'youtube-panel' as const,
+    videoAssociation: 'claimed' as const,
+  } satisfies KnowledgeTranscriptStoredRepresentation;
+
+  // ONE CUE PER LINE and YouTube's doubled spaces -- the shape the complaint
+  // came from. Long enough to produce at least three blocks, asserted below.
+  const TRANSCRIPT = Array.from(
+    { length: 12 },
+    (_, index) => `cue ${index} says a sentence of spoken words long enough to fill the reading measure`,
+  ).join('\n');
+
+  const blockSpans = (host: HTMLElement) =>
+    [...host.querySelectorAll('[data-transcript-reading-block]')];
+
+  it('1. THE GATE: textContent reconstructs the text exactly, across 3+ blocks', () => {
+    // Asserted from the REAL module, so the test fails loudly if the fixture or
+    // the target constant drifts into the one-block case that exercises nothing.
+    expect(knowledgeTranscriptReadingBlocks(TRANSCRIPT).length).toBeGreaterThanOrEqual(3);
+
+    const { host } = render({ text: TRANSCRIPT, transcriptRepresentation: representation });
+    expect(host.textContent).toBe(TRANSCRIPT);
+    // And stated as a length, so a subtle difference cannot hide in the equality.
+    expect(host.textContent!.length).toBe(TRANSCRIPT.length);
+  });
+
+  it('2. emits more than one block, and is NOT monospace', () => {
+    const { host } = render({ text: TRANSCRIPT, transcriptRepresentation: representation });
+    expect(blockSpans(host).length).toBeGreaterThan(1);
+    const paragraph = host.querySelector('p')!;
+    expect(paragraph.className).not.toContain('font-mono');
+    expect(paragraph.className).toContain('whitespace-normal');
+  });
+
+  it('3. WITHOUT a transcript: zero blocks, mono and pre-wrap kept, text verbatim', () => {
+    const { host } = render({ text: TRANSCRIPT, transcriptRepresentation: null });
+    expect(blockSpans(host).length).toBe(0);
+    const paragraph = host.querySelector('p')!;
+    expect(paragraph.className).toContain('font-mono');
+    expect(paragraph.className).toContain('whitespace-pre-wrap');
+    expect(host.textContent).toBe(TRANSCRIPT);
+  });
+
+  it('4. a highlight inside ONE block renders exactly one mark with the right text', () => {
+    // Derived from a REAL block boundary, not hardcoded.
+    const blocks = knowledgeTranscriptReadingBlocks(TRANSCRIPT);
+    const inFirst = TRANSCRIPT.slice(blocks[0].charStart, blocks[0].charEnd);
+    const wordAt = inFirst.indexOf('sentence');
+    const charStart = blocks[0].charStart + wordAt;
+    const charEnd = charStart + 'sentence'.length;
+
+    const { host } = render({
+      text: TRANSCRIPT,
+      transcriptRepresentation: representation,
+      highlight: { charStart, charEnd, requestId: 1 },
+    });
+
+    const marks = host.querySelectorAll('[data-knowledge-text-source-highlight]');
+    expect(marks.length).toBe(1);
+    expect(marks[0].textContent).toBe('sentence');
+    expect(host.textContent).toBe(TRANSCRIPT);
+  });
+
+  it('5. a highlight STRADDLING a boundary renders in more than one block, verbatim', () => {
+    const blocks = knowledgeTranscriptReadingBlocks(TRANSCRIPT);
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    // Cross the FIRST boundary: from inside block 0 into block 1.
+    const charStart = blocks[0].charEnd - 20;
+    const charEnd = blocks[1].charStart + 20;
+    expect(charStart).toBeLessThan(blocks[0].charEnd);
+    expect(charEnd).toBeGreaterThan(blocks[0].charEnd);
+
+    const { host } = render({
+      text: TRANSCRIPT,
+      transcriptRepresentation: representation,
+      highlight: { charStart, charEnd, requestId: 1 },
+    });
+
+    const marks = host.querySelectorAll('[data-knowledge-text-source-highlight]');
+    expect(marks.length).toBeGreaterThan(1);
+    // The marks together are exactly the cited range -- clamped per block,
+    // absolute throughout.
+    expect([...marks].map((mark) => mark.textContent).join(''))
+      .toBe(TRANSCRIPT.slice(charStart, charEnd));
+    // And the blocks it renders in are more than one.
+    const blocksWithMarks = blockSpans(host).filter((span) => span.querySelector('mark') !== null);
+    expect(blocksWithMarks.length).toBeGreaterThan(1);
+    // The gate still holds with the highlight present.
+    expect(host.textContent).toBe(TRANSCRIPT);
   });
 });
