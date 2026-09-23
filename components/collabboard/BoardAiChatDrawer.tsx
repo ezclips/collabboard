@@ -1218,7 +1218,19 @@ export default function BoardAiChatDrawer({
       }`}
     >
       <header className="flex shrink-0 items-center gap-1.5 border-b border-gray-200 px-3 py-2">
-        <span className="text-sm font-semibold text-gray-800">{mandatoryDocumentContext ? 'PDF AI' : 'Board AI'}</span>
+        {/*
+          NO TITLE IN THE DOCUMENT-SCOPED PANE. Inside the PDF reader the host
+          already prints the document's name and an "AI" heading directly
+          above this header, so "PDF AI" was a third naming of the same thing
+          -- and in that narrow column it wrapped to two lines, reading as a
+          stray tile rather than a title. The aside keeps its aria-label, so
+          the pane is still announced as "PDF AI chat" to a screen reader.
+          The standalone board drawer has no such heading above it and keeps
+          its own.
+        */}
+        {mandatoryDocumentContext ? null : (
+          <span className="text-sm font-semibold text-gray-800">Board AI</span>
+        )}
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
           <BoardAiChatModelChooser disabled={sending} onError={setError} />
           <button
