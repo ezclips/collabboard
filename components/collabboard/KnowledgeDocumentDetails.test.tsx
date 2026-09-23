@@ -57,6 +57,7 @@ import { buildKnowledgeSourceBacklinkIndex } from '@/lib/domain/knowledge/knowle
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import { KNOWLEDGE_SOURCE_NOTE_TOP_STRIP_COLORS } from '@/lib/domain/knowledge/knowledgeSourceNoteColorChoice';
 import { knowledgeSelectionSaveIdentity } from '@/components/collabboard/knowledgeSourceTextSelection';
+import { knowledgeTranscriptReadingBlocks } from '@/lib/domain/knowledge/knowledgeTranscriptReadingLayout';
 import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 const pages = [
@@ -3418,5 +3419,389 @@ describe('the transcript disclosure on the source header', () => {
     // than "unknown, so warn anyway".
     const element = mountWith({});
     expect(element.textContent).not.toContain('User-provided transcript');
+  });
+});
+
+/**
+ * PATCH-157. A transcript reads as paragraphs, and the text is UNTOUCHED.
+ *
+ * The gate is not the visual layout -- it is that the page text root's
+ * `textContent` still reconstructs `page.text` character for character. Every
+ * offset in this reader (selections, highlights, citations, and the cue mapping
+ * that turns a cited passage into a moment in a video) is a coordinate into
+ * that exact string, so a block that dropped, duplicated or reordered one
+ * character would silently move every coordinate after it.
+ */
+describe('a transcript renders as reading blocks without changing its text', () => {
+  const representation = {
+    representationVersion: 1,
+    videoIdentity: 'yt:dQw4w9WgXcQ',
+    cues: [{ charStart: 0, charEnd: 5, startMs: 1000, endMs: 3000 }],
+    language: null,
+    trackKind: 'machine' as const,
+    format: 'youtube-panel' as const,
+    videoAssociation: 'claimed' as const,
+  };
+
+  // THE SHAPE THE COMPLAINT CAME FROM: one cue per line, and YouTube's doubled
+  // spaces inside a line. Both must survive in the DOM text.
+  //
+  // SHORT ON PURPOSE -- 304 characters, which is ONE block at the 450 target.
+  // It is kept as the single-block case; the straddle tests below use a long
+  // fixture so the multi-block path is genuinely exercised.
+  const transcriptText = [
+    'if you\'re looking for openings  advice you\'ve come to the right place',
+    'throughout the course of this video we\'re going  to cover basic intermediate and',
+    'advanced opening',
+    'concepts and so whatever your current rating  level is you\'re going to get something',
+    'out of it',
+    '',
+    'and then a later cue after an empty line',
+  ].join('\n');
+
+  const transcriptPages = [{ pageNumber: 1, text: transcriptText }];
+
+  /*
+    A LONG fixture, for the tests that must cross a real block boundary. The
+    blocks are COMPUTED from it below -- never assumed -- so if the target
+    constant or this fixture ever drifts back to one block, the assertions fail
+    loudly instead of quietly testing nothing.
+  */
+  const longTranscriptText = [
+    // A DISTINCT opening line, so a search term inside the first block is
+    // genuinely unique to it and the "exactly one block" assertion means
+    // something.
+    'uniquefirstcue this opening sentence contains a distinctive marker word',
+    ...Array.from(
+      { length: 14 },
+      (_, index) => `cue ${index} in this transcript carries a full sentence of spoken words so the reading blocks are reached`,
+    ),
+  ].join('\n');
+  const longTranscriptPages = [{ pageNumber: 1, text: longTranscriptText }];
+
+  const pageTextRoot = (element: HTMLElement): HTMLElement => {
+    const root = element.querySelector('[data-knowledge-page-text-root]');
+    expect(root).not.toBeNull();
+    return root as HTMLElement;
+  };
+
+  const readingBlocksOf = (text: string) => knowledgeTranscriptReadingBlocks(text);
+  const blockSpans = (element: HTMLElement) => [...element.querySelectorAll('[data-transcript-reading-block]')];
+
+  it('6. THE GATE: the root textContent reconstructs page.text exactly', () => {
+    const element = mountWith({
+      transcriptRepresentation: representation,
+      pageCount: 1,
+      pages: transcriptPages,
+    });
+    const root = pageTextRoot(element);
+    // Character for character: every \n, every doubled space.
+    expect(root.textContent).toBe(transcriptText);
+    // And stated as a length too, so a subtle difference cannot hide in the
+    // equality above if a future matcher is changed.
+    expect(root.textContent!.length).toBe(transcriptText.length);
+  });
+
+  it('6b. THE GATE holds for the LONG fixture that spans several blocks', () => {
+    const element = mountWith({
+      transcriptRepresentation: representation,
+      pageCount: 1,
+      pages: longTranscriptPages,
+    });
+    expect(readingBlocksOf(longTranscriptText).length).toBeGreaterThanOrEqual(3);
+    expect(pageTextRoot(element).textContent).toBe(longTranscriptText);
+  });
+
+  it('7. it emits more than one reading block', () => {
+    // Long enough to exceed the 450-character block target, so the grouping is
+    // actually exercised -- a six-line fixture would legitimately be one block.
+    const longText = Array.from(
+      { length: 12 },
+      (_, index) => `cue number ${index} says something reasonably long so the block target is reached`,
+    ).join('\n');
+    const element = mountWith({
+      transcriptRepresentation: representation,
+      pageCount: 1,
+      pages: [{ pageNumber: 1, text: longText }],
+    });
+    const blocks = element.querySelectorAll('[data-transcript-reading-block]');
+    expect(blocks.length).toBeGreaterThan(1);
+    // And the gate holds for this text too.
+    expect(pageTextRoot(element).textContent).toBe(longText);
+  });
+
+  it('8. a non-transcript emits ZERO blocks and keeps whitespace-pre-wrap', () => {
+    const element = mountWith({ transcriptRepresentation: null, pageCount: 2, pages });
+    expect(element.querySelectorAll('[data-transcript-reading-block]').length).toBe(0);
+    const root = pageTextRoot(element);
+    expect(root.className).toContain('whitespace-pre-wrap');
+    // And its own text is verbatim, unchanged from today.
+    expect(root.textContent).toBe(pages[0].text);
+  });
+
+  it('a document with no representation prop behaves as a non-transcript', () => {
+    const element = mountWith({ pageCount: 2, pages });
+    expect(element.querySelectorAll('[data-transcript-reading-block]').length).toBe(0);
+    expect(pageTextRoot(element).textContent).toBe(pages[0].text);
+  });
+
+  it('the SHORT fixture really is the single-block case', () => {
+    // Pinned so the straddle tests below cannot silently become one-block tests
+    // if the target constant changes.
+    expect(readingBlocksOf(transcriptText)).toHaveLength(1);
+    const element = mountWith({
+      transcriptRepresentation: representation,
+      pageCount: 1,
+      pages: transcriptPages,
+    });
+    expect(blockSpans(element)).toHaveLength(1);
+    expect(pageTextRoot(element).textContent).toBe(transcriptText);
+  });
+
+  /**
+   * A term that lands inside ONE block, taken from a real block's own text.
+   * A SEARCH QUERY IS SINGLE-LINE -- a real `input[type=search]` strips newlines
+   * -- so a search match can never straddle a block boundary through the UI. The
+   * `<mark>` straddle handling remains as defensive code, but it cannot be
+   * reached this way and is not asserted as if it were.
+   */
+  const termInsideFirstBlock = (text: string) => {
+    const blocks = readingBlocksOf(text);
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    const inBlock = text.slice(blocks[0].charStart, blocks[0].charEnd);
+    // UNIQUE to this block, or the match would legitimately appear in every
+    // block and the "exactly one block" assertion would be testing nothing.
+    const unique = inBlock.split(/\s+/).find((candidate) => candidate.length >= 3 && !text.slice(blocks[0].charEnd).includes(candidate));
+    expect(unique).toBeDefined();
+    return unique!;
+  };
+
+  it('9. a search match inside a MULTI-block transcript renders its mark and stays in one block, text verbatim', async () => {
+    const term = termInsideFirstBlock(longTranscriptText);
+    const element = mountWith({
+      transcriptRepresentation: representation,
+      pageCount: 1,
+      pages: longTranscriptPages,
+    });
+    const searchButton = element.querySelector('[data-knowledge-viewer-action="search"]');
+    expect(searchButton).not.toBeNull();
+    act(() => { (searchButton as HTMLButtonElement).click(); });
+    const input = element.querySelector('input[type="search"]');
+    expect(input).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, term);
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+
+    const marks = element.querySelectorAll('mark');
+    expect(marks.length).toBeGreaterThan(0);
+    // A single-line query matches inside one block, so the mark sits in exactly
+    // one of the MULTIPLE blocks this fixture produces.
+    const blocksWithMarks = blockSpans(element).filter((span) => span.querySelector('mark') !== null);
+    expect(blocksWithMarks).toHaveLength(1);
+    expect(blockSpans(element).length).toBeGreaterThanOrEqual(3);
+    // The gate still holds with the mark present.
+    expect(pageTextRoot(element).textContent).toBe(longTranscriptText);
+  });
+
+  it('9b. a search match inside the SHORT single-block transcript still renders, text verbatim', async () => {
+    const element = mountWith({
+      transcriptRepresentation: representation,
+      pageCount: 1,
+      pages: transcriptPages,
+    });
+    const searchButton = element.querySelector('[data-knowledge-viewer-action="search"]');
+    act(() => { (searchButton as HTMLButtonElement).click(); });
+    const input = element.querySelector('input[type="search"]');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'openings');
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+
+    expect(element.querySelectorAll('mark').length).toBeGreaterThan(0);
+    expect(blockSpans(element)).toHaveLength(1);
+    expect(pageTextRoot(element).textContent).toBe(transcriptText);
+  });
+
+  /*
+    A transcript mount with an explicit pages set and explicit highlights.
+    The shared helpers hardcode their pages and none carries the transcript
+    prop, so the straddle tests own a small local one. The painting uses the
+    SAME real provider and index builders as `mountInteractive`, so the segment
+    is derived exactly as the app derives it.
+  */
+  const mountTranscript = (
+    documentPages: readonly { pageNumber: number; text: string }[],
+    references: readonly SourceReference[],
+    highlights: readonly KnowledgeSourceHighlight[],
+    props: Partial<React.ComponentProps<typeof KnowledgeDocumentDetails>> = {},
+  ) => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(
+        <KnowledgeSourceReferenceProvider
+          index={buildKnowledgeSourceReferenceIndex(references)}
+          backlinks={buildKnowledgeSourceBacklinkIndex(references, [{ ...notePost('note-a', 'Note') }])}
+          highlights={knowledgeStandaloneHighlightIndexOf(highlights)}
+          onDeleteHighlight={() => {}}
+        >
+          <KnowledgeDocumentDetails
+            documentId={DOC_ID}
+            originalFilename="talk.txt"
+            pageCount={documentPages.length}
+            pages={documentPages}
+            loading={false}
+            error={false}
+            transcriptRepresentation={representation}
+            onBack={vi.fn()}
+            onOpenBacklinkTarget={vi.fn()}
+            {...props}
+          />
+        </KnowledgeSourceReferenceProvider>,
+      );
+    });
+    return host!;
+  };
+
+  it('10. a highlight segment spanning a block boundary renders in MORE THAN ONE block, text verbatim', () => {
+    const blocks = readingBlocksOf(longTranscriptText);
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    // A segment that genuinely crosses the first boundary: from inside block 0
+    // into block 1.
+    const charStart = blocks[0].charEnd - 20;
+    const charEnd = blocks[1].charStart + 20;
+    expect(charStart).toBeLessThan(blocks[0].charEnd);
+    expect(charEnd).toBeGreaterThan(blocks[0].charEnd);
+
+    const reference = {
+      id: 'ref-span',
+      sourceDocumentId: DOC_ID,
+      pageStart: 1,
+      pageEnd: 1,
+      charStart,
+      charEnd,
+      quoteText: longTranscriptText.slice(charStart, charEnd),
+      kind: 'text',
+    } as unknown as SourceReference;
+
+    const container = mountTranscript(
+      longTranscriptPages,
+      [reference],
+      [highlightFor(reference)],
+      { initialPageNumber: 1 },
+    );
+
+    // The painted run crosses a boundary, so it appears in more than one block.
+    const blocksWithHighlight = blockSpans(container)
+      .filter((span) => span.querySelector('[data-knowledge-source-highlight="true"]') !== null);
+    expect(blocksWithHighlight.length).toBeGreaterThan(1);
+    expect(pageTextRoot(container).textContent).toBe(longTranscriptText);
+  });
+
+  it('11. a focused citation straddling a boundary shares emphasis but SCROLLS to the first fragment', () => {
+    const blocks = readingBlocksOf(longTranscriptText);
+    const charStart = blocks[0].charEnd - 20;
+    const charEnd = blocks[1].charStart + 20;
+
+    const reference = {
+      id: 'ref-span',
+      sourceDocumentId: DOC_ID,
+      pageStart: 1,
+      pageEnd: 1,
+      charStart,
+      charEnd,
+      quoteText: longTranscriptText.slice(charStart, charEnd),
+      kind: 'text',
+    } as unknown as SourceReference;
+
+    (HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    const container = mountTranscript(
+      longTranscriptPages,
+      [reference],
+      [highlightFor(reference)],
+      {
+        initialPageNumber: 1,
+        initialSourceReferenceId: 'ref-span',
+        initialSourceRequestId: 1,
+      },
+    );
+
+    // (a) THE EMPHASIS IS SHARED. The focused run crosses a boundary, so it is
+    // emitted once per block, and BOTH fragments carry the ring and the
+    // navigation marker -- the original behaviour, which this patch must not
+    // narrow. Only the SCROLL is confined.
+    const anchored = container.querySelectorAll('[data-knowledge-source-navigation-target="true"]');
+    expect(anchored.length).toBeGreaterThanOrEqual(2);
+    const ringed = container.querySelectorAll('.ring-sky-400');
+    expect(ringed.length).toBeGreaterThanOrEqual(2);
+    // The run really does span more than one block, so "first" below is a real
+    // choice rather than the only option.
+    const firstBlock = blockSpans(container)[0];
+    expect(firstBlock.querySelector('[data-knowledge-source-navigation-target="true"]')).not.toBeNull();
+
+    // (b) THE SCROLL LANDS ON THE FIRST FRAGMENT ONLY. Asserted on the actual
+    // scrollIntoView call, not on the ref (which is invisible in the DOM).
+    const scrolled = scrolledElements();
+    expect(scrolled.length).toBeGreaterThan(0);
+    const scrolledToArrival = scrolled.filter(
+      (element) => element.getAttribute('data-knowledge-source-navigation-target') === 'true',
+    );
+    expect(scrolledToArrival.length).toBeGreaterThan(0);
+    // Every element the arrival scrolled to is inside the FIRST block.
+    for (const element of scrolledToArrival) {
+      expect(firstBlock.contains(element), 'arrival scrolled to a later block').toBe(true);
+    }
+    expect(pageTextRoot(container).textContent).toBe(longTranscriptText);
+  });
+
+  it('12. REGRESSION GUARD (PDF path): a citation split into two segments rings BOTH', () => {
+    // ON A PDF PAGE, no transcript. The requested citation focuses a wide range
+    // that a SECOND, separate highlight cuts through -- so the renderer emits
+    // more than one focused piece. All of them must ring and carry the
+    // navigation marker: a transcript-only fix must not narrow the shared
+    // emphasis, which is behaviour the PDF path had before this patch.
+    const wideRef = {
+      id: 'ref-wide',
+      sourceDocumentId: DOC_ID,
+      pageStart: 1,
+      pageEnd: 1,
+      charStart: 0,
+      charEnd: 30,
+      quoteText: pages[0].text.slice(0, 30),
+      kind: 'text',
+    } as unknown as SourceReference;
+    const innerRef = {
+      id: 'ref-inner',
+      sourceDocumentId: DOC_ID,
+      pageStart: 1,
+      pageEnd: 1,
+      charStart: 4,
+      charEnd: 10,
+      quoteText: pages[0].text.slice(4, 10),
+      kind: 'text',
+    } as unknown as SourceReference;
+
+    const { container } = mountInteractive(
+      [wideRef, innerRef],
+      [notePost('note-a', 'Citing Note')],
+      { initialPageNumber: 1, initialSourceReferenceId: 'ref-wide', initialSourceRequestId: 1 },
+    );
+
+    const anchored = container.querySelectorAll('[data-knowledge-source-navigation-target="true"]');
+    const ringed = container.querySelectorAll('.ring-sky-400');
+    // Shared emphasis: more than one piece is emphasised.
+    expect(anchored.length).toBeGreaterThanOrEqual(2);
+    expect(ringed.length).toBeGreaterThanOrEqual(2);
+    // No transcript blocks on a PDF page.
+    expect(container.querySelectorAll('[data-transcript-reading-block]').length).toBe(0);
+    // The gate for the PDF path: text unchanged.
+    expect(pageTextRoot(container).textContent).toBe(pages[0].text);
   });
 });
