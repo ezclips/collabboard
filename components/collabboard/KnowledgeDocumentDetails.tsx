@@ -1222,7 +1222,7 @@ export default function KnowledgeDocumentDetails({
           onMouseUp={(event) => settleSelectionFrom(event.target)}
           onKeyUp={(event) => settleSelectionFrom(event.target)}
           onDragStart={suppressNativePageTextDrag}
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1 pl-1 [scrollbar-gutter:stable_both-edges]"
         >
           {pages.map((page, pageIndex) => {
             // Only the page the selection actually lives on offers the exact
@@ -1262,6 +1262,10 @@ export default function KnowledgeDocumentDetails({
               The area-selection overlay measures the IMAGE as rendered and
               stores normalized coordinates, so a narrower page changes where a
               region is drawn on screen and not what it means.
+
+              The bottom toolbar and the page's "Notes on this page" list use
+              the same max-w-4xl column, so their left edge lines up with the
+              page's left edge rather than with the pane's.
             */
             return (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
@@ -1322,7 +1326,7 @@ export default function KnowledgeDocumentDetails({
       */}
       <div
         data-knowledge-viewer-toolbar="true"
-        className="mt-2 flex flex-none items-center gap-1 border-t border-gray-100 pt-2"
+        className="mx-auto w-full max-w-4xl mt-2 flex flex-none items-center gap-1 border-t border-gray-100 pt-2"
       >
         {/*
           PDF-R6J-C2. Search is an icon with a popover instead of a permanent
@@ -1550,12 +1554,16 @@ export default function KnowledgeDocumentDetails({
         the same `onOpenBacklinkTarget` the document list uses, so no edit
         authority is consulted here or below it.
       */}
-      <UsedInNotes
-        scope="page"
-        rows={activePageRows}
-        onOpen={onOpenBacklinkTarget}
-        onShowOnBoard={onRevealBacklinkTargetOnBoard}
-      />
+      {/* The same reading column as the page and the toolbar above, so the
+          list starts where the PDF starts instead of at the pane's edge. */}
+      <div className="mx-auto w-full max-w-4xl">
+        <UsedInNotes
+          scope="page"
+          rows={activePageRows}
+          onOpen={onOpenBacklinkTarget}
+          onShowOnBoard={onRevealBacklinkTargetOnBoard}
+        />
+      </div>
 
       {/*
         Text Phase 1 -- the ONE floating selection toolbar, a SIBLING of the
