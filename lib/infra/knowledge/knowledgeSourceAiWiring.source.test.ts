@@ -36,7 +36,8 @@ describe('PDF Source AI Phase 1 wiring', () => {
     // Every AI route directory, pinned by name: a new one added for this
     // feature would grow this list, and this test would catch it.
     const routes = readdirSync(resolve(process.cwd(), 'app/api/ai')).sort();
-    expect(routes).toEqual(['classify-intent', 'convert-component', 'generate-component', 'save-generated-component', 'text-action']);
+    // table-fill: PATCH-166, a table column fill; it is not reachable from the PDF Source AI panel, which the fetch assertion above still pins to text-action.
+    expect(routes).toEqual(['classify-intent', 'convert-component', 'generate-component', 'save-generated-component', 'table-fill', 'text-action']);
   });
 
   it('the request body carries ONLY action/selectedText/instruction -- no page, board or PDF context', () => {

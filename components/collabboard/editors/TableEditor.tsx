@@ -40,6 +40,8 @@ import {
     type TableGrid,
 } from "@/lib/domain/canvas/tableStructure";
 import { TableAxisMenu, type TableAxisAction } from "../menus/TableAxisMenu";
+import TableFillPanel from "./TableFillPanel";
+import { applyTableFillValues, type TableFillValue } from "@/lib/domain/ai/tableFill";
 
 // Comment interface
 interface PadletComment {
@@ -273,6 +275,21 @@ export default function TableEditor({
     const [axisMenu, setAxisMenu] = useState<
         { axis: 'row' | 'column'; index: number; x: number; y: number } | null
     >(null);
+
+    /**
+     * PATCH-166. The "Fill with AI…" panel and the suggestions it produced.
+     *
+     * `fillTarget` is the column the panel is open for; `fillSuggestions` is
+     * what came back, awaiting Accept or Discard. While suggestions are pending
+     * the table is LOCKED (`fillLocked`): cell inputs are read-only and the
+     * grips, "+" bars and right-click menu do nothing, so the row indices the
+     * values refer to cannot shift underneath them. Accept or Discard unlocks.
+     */
+    const [fillTarget, setFillTarget] = useState<number | null>(null);
+    const [fillSuggestions, setFillSuggestions] = useState<
+        { column: number; values: readonly TableFillValue[] } | null
+    >(null);
+    const fillLocked = fillSuggestions !== null;
 
     // Submenu states
     const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
@@ -646,8 +663,9 @@ export default function TableEditor({
     }), [rows, columns, cellStyles]);
 
     const addRow = useCallback(() => {
+        if (fillLocked) return;
         applyGrid(insertRow(currentGrid(), rows.length));
-    }, [applyGrid, currentGrid, rows.length]);
+    }, [applyGrid, currentGrid, rows.length, fillLocked]);
 
     const addRowAbove = useCallback(() => {
         if (!selectedCell) return;
@@ -662,8 +680,9 @@ export default function TableEditor({
     }, [applyGrid, currentGrid, selectedCell]);
 
     const addColumn = useCallback(() => {
+        if (fillLocked) return;
         applyGrid(insertColumn(currentGrid(), columns.length));
-    }, [applyGrid, currentGrid, columns.length]);
+    }, [applyGrid, currentGrid, columns.length, fillLocked]);
 
     const addColumnLeft = useCallback(() => {
         if (!selectedCell) return;
@@ -721,6 +740,11 @@ export default function TableEditor({
                 setSelectedCell(null);
                 setSelectionRange(null);
                 break;
+            case 'fill-ai':
+                // Column-only (the row menu never reports it): open the panel
+                // for this column. Nothing is written until the user accepts.
+                setFillTarget(index);
+                break;
         }
         setAxisMenu(null);
     }, [applyGrid, axisMenu, currentGrid]);
@@ -756,6 +780,42 @@ export default function TableEditor({
         const first = values[0];
         return values.every((value) => value === first) ? (first ?? null) : null;
     }, [axisMenu, columns, rows, cellStyles]);
+
+    /** Values by row for the pending suggestions, so a cell lookup is O(1). */
+    const fillValueByRow = useMemo(() => {
+        const map = new Map<number, string>();
+        for (const entry of fillSuggestions?.values ?? []) map.set(entry.row, entry.value);
+        return map;
+    }, [fillSuggestions]);
+
+    const handleFillSuggestions = useCallback((values: readonly TableFillValue[]) => {
+        setFillSuggestions((current) => {
+            // Anchor the values to the column the panel was open for, so a
+            // later change cannot mislabel them.
+            if (fillTarget === null) return current;
+            return { column: fillTarget, values };
+        });
+    }, [fillTarget]);
+
+    const closeFillPanel = useCallback(() => setFillTarget(null), []);
+
+    /**
+     * ACCEPT ALL: one pure update through `applyTableFillValues`, which changes
+     * only the target column and leaves every cell style untouched.
+     */
+    const acceptFillSuggestions = useCallback(() => {
+        if (!fillSuggestions) return;
+        const grid = currentGrid();
+        const nextRows = applyTableFillValues(
+            { rows: grid.rows, columns: grid.columns },
+            fillSuggestions.column,
+            fillSuggestions.values,
+        );
+        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles });
+        setFillSuggestions(null);
+    }, [applyGrid, currentGrid, fillSuggestions]);
+
+    const discardFillSuggestions = useCallback(() => setFillSuggestions(null), []);
 
     const handleCut = useCallback(() => {
         if (!selectedCell) return;
@@ -802,6 +862,8 @@ export default function TableEditor({
     };
 
     const handleSaveAndClose = () => {
+        // PATCH-166: pending AI suggestions are dropped on save, never written.
+        setFillSuggestions(null);
         onSave({
             title,
             content: JSON.stringify({
@@ -956,6 +1018,26 @@ export default function TableEditor({
                                 />
                             </div>
 
+                            {/* PATCH-166. The suggestions bar: how many AI
+                                values are waiting, and the two ways to resolve
+                                them. Present only while suggestions are pending. */}
+                            {fillSuggestions && (
+                                <div
+                                    data-table-fill-bar=""
+                                    className="flex items-center gap-2 border-b border-purple-100 bg-purple-50 px-2 py-1 text-xs text-purple-700"
+                                >
+                                    <span>{fillSuggestions.values.length} AI suggestions</span>
+                                    <span className="text-purple-300" aria-hidden="true">·</span>
+                                    <button type="button" onClick={acceptFillSuggestions} className="font-medium hover:underline">
+                                        Accept all
+                                    </button>
+                                    <span className="text-purple-300" aria-hidden="true">·</span>
+                                    <button type="button" onClick={discardFillSuggestions} className="hover:underline">
+                                        Discard
+                                    </button>
+                                </div>
+                            )}
+
                             {/*
                               PATCH-165. The "+" bars: OUTSIDE the scrolling
                               viewport, so they are reachable no matter where the
@@ -1040,6 +1122,7 @@ export default function TableEditor({
                                                                 aria-label={`Column ${columns[i]} options`}
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
+                                                                    if (fillLocked) return;
                                                                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                                     setAxisMenu({ axis: 'column', index: i, x: rect.left, y: rect.bottom });
                                                                 }}
@@ -1079,6 +1162,7 @@ export default function TableEditor({
                                                             data-table-row-handle={row.index}
                                                             aria-label={`Row ${row.index + 1} options`}
                                                             onClick={(e) => {
+                                                                if (fillLocked) return;
                                                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                                 setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
                                                             }}
@@ -1095,6 +1179,10 @@ export default function TableEditor({
 
                                                     const isActive = selectedCell?.row === row.index && selectedCell?.col === colIndex;
                                                     const inRange = isCellSelected(row.index, colIndex);
+                                                    // PATCH-166. A pending suggestion for THIS cell, if any.
+                                                    const fillValue = fillSuggestions?.column === colIndex
+                                                        ? fillValueByRow.get(row.index)
+                                                        : undefined;
 
                                                     return (
                                                         <td
@@ -1119,6 +1207,7 @@ export default function TableEditor({
                                                             onMouseDown={(e) => handleCellMouseDown(row.index, colIndex, e)}
                                                             onMouseEnter={() => handleCellMouseEnter(row.index, colIndex)}
                                                             onContextMenu={(e) => {
+                                                                if (fillLocked) return;
                                                                 e.preventDefault();
                                                                 setContextMenu({ x: e.clientX, y: e.clientY, isOpen: true });
                                                                 if (!isCellSelected(row.index, colIndex)) handleCellMouseDown(row.index, colIndex);
@@ -1131,9 +1220,23 @@ export default function TableEditor({
                                                                 line up with the table's own cell borders. */}
                                                             {isActive && <div className="absolute inset-0 pointer-events-none ring-2 ring-purple-500 ring-inset" />}
 
+                                                            {/* PATCH-166. The AI suggestion, shown IN the cell but
+                                                                never written: the real cell text below is untouched.
+                                                                Purple italic on a light purple ground, marked so the
+                                                                test suite can find it. */}
+                                                            {fillValue !== undefined && (
+                                                                <span
+                                                                    data-table-fill-suggestion=""
+                                                                    className="pointer-events-none absolute inset-0 z-10 flex items-center overflow-hidden bg-purple-100/70 px-2 text-sm italic text-purple-700"
+                                                                >
+                                                                    <span className="truncate">{fillValue}</span>
+                                                                </span>
+                                                            )}
+
                                                             <input
                                                                 type="text"
                                                                 value={(cell.getValue() as string) || ""}
+                                                                readOnly={fillLocked}
                                                                 onChange={(e) => handleCellChange(row.index, colIndex, e.target.value)}
                                                                 className="w-full h-full px-2 text-sm bg-transparent border-none outline-none selection:bg-purple-200"
                                                                 style={{
@@ -1505,6 +1608,27 @@ export default function TableEditor({
                         onAlign={applyAxisAlign}
                         colors={CELL_COLORS}
                     />
+                )}
+
+                {/* PATCH-166. The "Fill with AI…" panel, anchored beside the
+                    table card. It owns only the request; the editor owns the
+                    suggestions and the lock. */}
+                {fillTarget !== null && (
+                    <div
+                        className="fixed z-[100]"
+                        style={{
+                            top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
+                            left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                        }}
+                    >
+                        <TableFillPanel
+                            columns={columns}
+                            targetColumn={fillTarget}
+                            rows={rows}
+                            onSuggestions={handleFillSuggestions}
+                            onClose={closeFillPanel}
+                        />
+                    </div>
                 )}
 
             </div>

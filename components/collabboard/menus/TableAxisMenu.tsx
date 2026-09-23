@@ -13,6 +13,7 @@ import {
     Copy,
     Eraser,
     Palette,
+    Sparkles,
     Trash2,
 } from "lucide-react";
 import {
@@ -47,7 +48,8 @@ export type TableAxisAction =
     | 'insert-after'
     | 'duplicate'
     | 'clear'
-    | 'delete';
+    | 'delete'
+    | 'fill-ai';
 
 export interface TableAxisMenuProps {
     readonly axis: TableAxis;
@@ -182,6 +184,21 @@ export function TableAxisMenu({
                     </PositionedContextMenuItem>
                 </PositionedContextMenuSubContent>
             </PositionedContextMenuSub>
+
+            {/*
+              PATCH-166. Fill with AI is a COLUMN action only: the row menu has
+              no equivalent, because an instruction applies to a column, row by
+              row. Placed after Align and before the separator that opens the
+              structural group.
+            */}
+            {!isRow && (
+                <PositionedContextMenuItem onSelect={() => onAction('fill-ai')}>
+                    <span className="flex w-full items-center gap-2">
+                        {itemIcon(Sparkles)}
+                        Fill with AI…
+                    </span>
+                </PositionedContextMenuItem>
+            )}
 
             <PositionedContextMenuSeparator />
 
