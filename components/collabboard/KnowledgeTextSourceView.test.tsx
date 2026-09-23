@@ -3,7 +3,7 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import KnowledgeTextSourceView, { splitKnowledgeTextHighlight } from './KnowledgeTextSourceView';
 import { knowledgeTranscriptReadingBlocks }
@@ -36,6 +36,15 @@ function render(props: Partial<React.ComponentProps<typeof KnowledgeTextSourceVi
   });
   return { host, root };
 }
+
+/**
+ * PATCH-160. The element that IS a transcript's text, as distinct from the
+ * container, which now also holds the readable toggle's chrome. The verbatim
+ * gate is about the text, so it measures this and not the whole pane. A
+ * NON-transcript has no such element -- its whole pane is the text.
+ */
+const transcriptText = (host: HTMLElement) =>
+  host.querySelector('[data-knowledge-transcript-text]') as HTMLElement | null;
 
 describe('the range is applied by INDEX, never by searching', () => {
   it('marks exactly the cited characters', () => {
@@ -194,9 +203,9 @@ describe('a transcript reads as paragraphs here, without changing its text', () 
     expect(knowledgeTranscriptReadingBlocks(TRANSCRIPT).length).toBeGreaterThanOrEqual(3);
 
     const { host } = render({ text: TRANSCRIPT, transcriptRepresentation: representation });
-    expect(host.textContent).toBe(TRANSCRIPT);
+    expect(transcriptText(host)?.textContent).toBe(TRANSCRIPT);
     // And stated as a length, so a subtle difference cannot hide in the equality.
-    expect(host.textContent!.length).toBe(TRANSCRIPT.length);
+    expect(transcriptText(host)!.textContent.length).toBe(TRANSCRIPT.length);
   });
 
   it('2. emits more than one block, and is NOT monospace', () => {
@@ -213,7 +222,9 @@ describe('a transcript reads as paragraphs here, without changing its text', () 
     const paragraph = host.querySelector('p')!;
     expect(paragraph.className).toContain('font-mono');
     expect(paragraph.className).toContain('whitespace-pre-wrap');
-    expect(host.textContent).toBe(TRANSCRIPT);
+    // A non-transcript has NO transcript-text element, so the whole pane is the
+    // text and the paragraph is what is measured.
+    expect(paragraph.textContent).toBe(TRANSCRIPT);
   });
 
   it('4. a highlight inside ONE block renders exactly one mark with the right text', () => {
@@ -233,7 +244,7 @@ describe('a transcript reads as paragraphs here, without changing its text', () 
     const marks = host.querySelectorAll('[data-knowledge-text-source-highlight]');
     expect(marks.length).toBe(1);
     expect(marks[0].textContent).toBe('sentence');
-    expect(host.textContent).toBe(TRANSCRIPT);
+    expect(transcriptText(host)?.textContent).toBe(TRANSCRIPT);
   });
 
   it('5. a highlight STRADDLING a boundary renders in more than one block, verbatim', () => {
@@ -261,6 +272,162 @@ describe('a transcript reads as paragraphs here, without changing its text', () 
     const blocksWithMarks = blockSpans(host).filter((span) => span.querySelector('mark') !== null);
     expect(blocksWithMarks.length).toBeGreaterThan(1);
     // The gate still holds with the highlight present.
-    expect(host.textContent).toBe(TRANSCRIPT);
+    expect(transcriptText(host)?.textContent).toBe(TRANSCRIPT);
+  });
+});
+
+/**
+ * PATCH-160. THE READABLE VIEW, and the two things that make it safe.
+ *
+ * The model is asked to punctuate; its TEXT is discarded and the output is
+ * rebuilt from the ORIGINAL words by the domain module. These tests drive the
+ * component: what it sends, what a refused chunk looks like, and that switching
+ * back is the canonical text verbatim.
+ */
+describe('a transcript can be made readable, with the words guaranteed', () => {
+  const representation = {
+    representationVersion: 1,
+    videoIdentity: 'yt:dQw4w9WgXcQ',
+    cues: [{ charStart: 0, charEnd: 5, startMs: 1000, endMs: 3000 }],
+    language: null,
+    trackKind: 'machine' as const,
+    format: 'youtube-panel' as const,
+    videoAssociation: 'claimed' as const,
+  };
+  const SPOKEN = 'hello there how are you today i hope the engine is fine';
+
+  /** Records every request body, so the tests can assert what is NOT sent. */
+  let sentBodies: unknown[] = [];
+
+  const stubAi = (responder: (body: unknown) => Response) => {
+    sentBodies = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      sentBodies.push(body);
+      return responder(body);
+    }));
+  };
+
+  /**
+   * The faithful-model response: punctuation added, words untouched. It appends
+   * a mark to the LAST word of the chunk rather than adding a sentence, so the
+   * word sequence is identical and projection accepts.
+   */
+  const punctuating = (body: unknown) => {
+    const selected = (body as { selectedText?: string }).selectedText ?? '';
+    const words = selected.split(/\s+/).filter(Boolean);
+    const punctuated = words
+      .map((word, index) => (index === words.length - 1 ? `${word}.` : index === 0 ? word : `${word},`))
+      .join(' ');
+    return new Response(JSON.stringify({ text: punctuated }), { status: 200 });
+  };
+
+  const toggle = (host: HTMLElement) =>
+    host.querySelector('[data-knowledge-transcript-readable-toggle="true"]') as HTMLButtonElement | null;
+
+  const click = (element: Element) => act(() => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  const settle = async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  };
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('11. NO transcript representation means NO button at all', () => {
+    const { host } = render({ text: SPOKEN, transcriptRepresentation: null });
+    expect(toggle(host)).toBeNull();
+    // No transcript-text element either: a non-transcript renders as it always
+    // did, with the whole pane as its text.
+    expect(host.textContent).toBe(SPOKEN);
+  });
+
+  it('12. posts each chunk with ONLY the four fields, and no ids or offsets', async () => {
+    stubAi(punctuating);
+    const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    expect(sentBodies.length).toBeGreaterThan(0);
+    for (const body of sentBodies) {
+      // EXACTLY these four keys -- assert the key set, so an added field fails.
+      expect(Object.keys(body as object).sort()).toEqual(['action', 'instruction', 'purpose', 'selectedText']);
+      // And none of the forbidden content, by name.
+      const serialized = JSON.stringify(body);
+      for (const forbidden of ['documentId', 'boardId', 'charStart', 'charEnd', 'cues', 'offset', 'videoIdentity']) {
+        expect(serialized).not.toContain(forbidden);
+      }
+      expect((body as { action: string }).action).toBe('custom');
+      expect((body as { purpose: string }).purpose).toBe('source-ai');
+    }
+  });
+
+  it('13. a REFUSED chunk renders its RAW text and the notice names the count', async () => {
+    // The model changes a word, so projection refuses the chunk.
+    stubAi(() => new Response(JSON.stringify({ text: 'completely different words entirely here' }), { status: 200 }));
+    const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    expect(host.querySelector('[data-knowledge-transcript-readable="true"]')).not.toBeNull();
+    const notice = host.querySelector('[data-knowledge-transcript-readable-partial="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain('1 of 1');
+    // The raw wording survived, because the model's text was discarded.
+    expect(transcriptText(host)?.textContent).toContain('hello there how are you today');
+  });
+
+  it('14. ALL chunks refused still shows the raw transcript; never a silent success', async () => {
+    stubAi(() => new Response(JSON.stringify({ text: 'a summary of the passage' }), { status: 200 }));
+    const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    // It does NOT look like a successful readable result: the notice says every
+    // chunk kept its wording.
+    const notice = host.querySelector('[data-knowledge-transcript-readable-partial="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain('1 of 1');
+    expect(transcriptText(host)?.textContent).toContain(SPOKEN);
+  });
+
+  it('15. toggling back to As spoken restores the canonical text verbatim', async () => {
+    stubAi(punctuating);
+    const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+    // In readable mode the text differs (punctuation added).
+    expect(transcriptText(host)?.textContent).not.toBe(SPOKEN);
+
+    click(toggle(host)!);
+    expect(toggle(host)!.getAttribute('data-knowledge-transcript-readable-state')).toBe('as-spoken');
+    // VERBATIM, character for character.
+    expect(transcriptText(host)?.textContent).toBe(SPOKEN);
+  });
+
+  it('16. a highlight DISABLES the toggle and shows the raw view', () => {
+    stubAi(punctuating);
+    const { host } = render({
+      text: SPOKEN,
+      transcriptRepresentation: representation,
+      highlight: { charStart: 0, charEnd: 5, requestId: 1 },
+    });
+    const control = toggle(host)!;
+    expect(control.disabled).toBe(true);
+    expect(host.querySelector('[data-knowledge-transcript-readable-forced="true"]')).not.toBeNull();
+    // And the raw transcript is what is rendered.
+    expect(transcriptText(host)?.textContent).toContain(SPOKEN);
+  });
+
+  it('17. a FAILED request leaves the raw text on screen and says so', async () => {
+    stubAi(() => new Response('nope', { status: 500 }));
+    const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    expect(host.querySelector('[data-knowledge-transcript-readable-status="error"]')).not.toBeNull();
+    // The raw text is still there -- never a blank pane.
+    expect(transcriptText(host)?.textContent).toContain(SPOKEN);
   });
 });
