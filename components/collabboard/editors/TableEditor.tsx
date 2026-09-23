@@ -12,6 +12,7 @@ import {
     AlignRight,
     Plus,
     Grid,
+    GripVertical,
     MessageSquare,
     ChevronRight,
     Check,
@@ -25,6 +26,20 @@ import TextFormattingButtons from "./TextFormattingButtons";
 import { nextTextAlign } from "./textAlignCycle";
 import CommentPopup from "./CommentPopup";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
+import {
+    clearColumn,
+    clearRow,
+    deleteColumn as deleteColumnAt,
+    deleteRow as deleteRowAt,
+    duplicateColumn,
+    duplicateRow,
+    insertColumn,
+    insertRow,
+    setColumnStyle,
+    setRowStyle,
+    type TableGrid,
+} from "@/lib/domain/canvas/tableStructure";
+import { TableAxisMenu, type TableAxisAction } from "../menus/TableAxisMenu";
 
 // Comment interface
 interface PadletComment {
@@ -249,6 +264,15 @@ export default function TableEditor({
 
     // Context Menu state
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; isOpen: boolean } | null>(null);
+
+    /**
+     * PATCH-165. The row/column handle menu: WHICH axis, WHICH index, and where
+     * to open it. One piece of state rather than two, so a row menu and a
+     * column menu can never both be open.
+     */
+    const [axisMenu, setAxisMenu] = useState<
+        { axis: 'row' | 'column'; index: number; x: number; y: number } | null
+    >(null);
 
     // Submenu states
     const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
@@ -601,62 +625,137 @@ export default function TableEditor({
     };
 
     // Add row/column
-    const addRow = useCallback(() => setRows((prev) => [...prev, Array(columns.length).fill("")]), [columns.length]);
+    //
+    // EVERY STRUCTURAL CHANGE GOES THROUGH ONE PURE RESULT. `rows`, `columns`
+    // and `cellStyles` are three states describing ONE table, and `cellStyles`
+    // is keyed by position -- so changing two of them by hand (which is what
+    // this file used to do) leaves a style on the cell that has moved, not the
+    // cell it belonged to. `applyGrid` is the only writer, and every handler
+    // below builds a `TableGrid`, mutates nothing, and hands the result here.
+    const applyGrid = useCallback((next: TableGrid) => {
+        setRows(next.rows.map((row) => [...row]));
+        setColumns([...next.columns]);
+        setCellStyles({ ...next.cellStyles });
+    }, []);
+
+    /** The CURRENT table as one value, built fresh from the three states. */
+    const currentGrid = useCallback((): TableGrid => ({
+        rows,
+        columns,
+        cellStyles,
+    }), [rows, columns, cellStyles]);
+
+    const addRow = useCallback(() => {
+        applyGrid(insertRow(currentGrid(), rows.length));
+    }, [applyGrid, currentGrid, rows.length]);
 
     const addRowAbove = useCallback(() => {
         if (!selectedCell) return;
-        const newRow = Array(columns.length).fill("");
-        setRows((prev) => [...prev.slice(0, selectedCell.row), newRow, ...prev.slice(selectedCell.row)]);
+        applyGrid(insertRow(currentGrid(), selectedCell.row));
         setContextMenu(null);
-    }, [selectedCell, columns.length]);
+    }, [applyGrid, currentGrid, selectedCell]);
 
     const addRowBelow = useCallback(() => {
         if (!selectedCell) return;
-        const newRow = Array(columns.length).fill("");
-        setRows((prev) => [...prev.slice(0, selectedCell.row + 1), newRow, ...prev.slice(selectedCell.row + 1)]);
+        applyGrid(insertRow(currentGrid(), selectedCell.row + 1));
         setContextMenu(null);
-    }, [selectedCell, columns.length]);
+    }, [applyGrid, currentGrid, selectedCell]);
 
     const addColumn = useCallback(() => {
-        const nextCol = String.fromCharCode(65 + columns.length);
-        setColumns((prev) => [...prev, nextCol]);
-        setRows((prev) => prev.map((row) => [...row, ""]));
-    }, [columns.length]);
+        applyGrid(insertColumn(currentGrid(), columns.length));
+    }, [applyGrid, currentGrid, columns.length]);
 
     const addColumnLeft = useCallback(() => {
         if (!selectedCell) return;
-        const newColName = String.fromCharCode(65 + columns.length);
-        setColumns((prev) => [...prev.slice(0, selectedCell.col), newColName, ...prev.slice(selectedCell.col)]);
-        setRows((prev) =>
-            prev.map((row) => [...row.slice(0, selectedCell.col), "", ...row.slice(selectedCell.col)])
-        );
+        applyGrid(insertColumn(currentGrid(), selectedCell.col));
         setContextMenu(null);
-    }, [selectedCell, columns.length]);
+    }, [applyGrid, currentGrid, selectedCell]);
 
     const addColumnRight = useCallback(() => {
         if (!selectedCell) return;
-        const newColName = String.fromCharCode(65 + columns.length);
-        setColumns((prev) => [...prev.slice(0, selectedCell.col + 1), newColName, ...prev.slice(selectedCell.col + 1)]);
-        setRows((prev) =>
-            prev.map((row) => [...row.slice(0, selectedCell.col + 1), "", ...row.slice(selectedCell.col + 1)])
-        );
+        applyGrid(insertColumn(currentGrid(), selectedCell.col + 1));
         setContextMenu(null);
-    }, [selectedCell, columns.length]);
+    }, [applyGrid, currentGrid, selectedCell]);
 
     const deleteRow = useCallback(() => {
         if (!selectedCell || rows.length <= 1) return;
-        setRows((prev) => prev.filter((_, i) => i !== selectedCell.row));
+        applyGrid(deleteRowAt(currentGrid(), selectedCell.row));
         setSelectedCell(null);
         setContextMenu(null);
-    }, [selectedCell, rows.length]);
+    }, [applyGrid, currentGrid, selectedCell, rows.length]);
 
     const deleteColumn = useCallback(() => {
         if (!selectedCell || columns.length <= 1) return;
-        setColumns((prev) => prev.filter((_, i) => i !== selectedCell.col));
-        setRows((prev) => prev.map((row) => row.filter((_, i) => i !== selectedCell.col)));
+        applyGrid(deleteColumnAt(currentGrid(), selectedCell.col));
         setSelectedCell(null);
         setContextMenu(null);
-    }, [selectedCell, columns.length]);
+    }, [applyGrid, currentGrid, selectedCell, columns.length]);
+
+    /**
+     * PATCH-165. One place that turns a handle-menu choice into a pure grid
+     * result, for the row/column the menu was opened on. The menu reports WHAT
+     * was chosen; the mapping to the structure module lives here, so the menu
+     * cannot reach the data model and there is still exactly one writer
+     * (`applyGrid`).
+     */
+    const applyAxisAction = useCallback((action: TableAxisAction) => {
+        if (!axisMenu) return;
+        const grid = currentGrid();
+        const { axis, index } = axisMenu;
+        switch (action) {
+            case 'insert-before':
+                applyGrid(axis === 'row' ? insertRow(grid, index) : insertColumn(grid, index));
+                break;
+            case 'insert-after':
+                applyGrid(axis === 'row' ? insertRow(grid, index + 1) : insertColumn(grid, index + 1));
+                break;
+            case 'duplicate':
+                applyGrid(axis === 'row' ? duplicateRow(grid, index) : duplicateColumn(grid, index));
+                break;
+            case 'clear':
+                applyGrid(axis === 'row' ? clearRow(grid, index) : clearColumn(grid, index));
+                break;
+            case 'delete':
+                applyGrid(axis === 'row' ? deleteRowAt(grid, index) : deleteColumnAt(grid, index));
+                // The deleted axis may have held the selected cell.
+                setSelectedCell(null);
+                setSelectionRange(null);
+                break;
+        }
+        setAxisMenu(null);
+    }, [applyGrid, axisMenu, currentGrid]);
+
+    const applyAxisColor = useCallback((bg: string | undefined) => {
+        if (!axisMenu) return;
+        const grid = currentGrid();
+        applyGrid(axisMenu.axis === 'row'
+            ? setRowStyle(grid, axisMenu.index, { bg })
+            : setColumnStyle(grid, axisMenu.index, { bg }));
+        // No explicit close: choosing a swatch closes the positioned menu itself.
+    }, [applyGrid, axisMenu, currentGrid]);
+
+    const applyAxisAlign = useCallback((align: 'left' | 'center' | 'right') => {
+        if (!axisMenu) return;
+        const grid = currentGrid();
+        applyGrid(axisMenu.axis === 'row'
+            ? setRowStyle(grid, axisMenu.index, { align })
+            : setColumnStyle(grid, axisMenu.index, { align }));
+    }, [applyGrid, axisMenu, currentGrid]);
+
+    /**
+     * The shared alignment of every cell on the axis, or null when they
+     * disagree -- so the menu shows a checkmark only for a value the WHOLE row
+     * or column actually has.
+     */
+    const axisMenuSharedAlign = useMemo(() => {
+        if (!axisMenu) return null;
+        const { axis, index } = axisMenu;
+        const values = axis === 'row'
+            ? columns.map((_, col) => cellStyles[`${index}-${col}`]?.align)
+            : rows.map((_, row) => cellStyles[`${row}-${index}`]?.align);
+        const first = values[0];
+        return values.every((value) => value === first) ? (first ?? null) : null;
+    }, [axisMenu, columns, rows, cellStyles]);
 
     const handleCut = useCallback(() => {
         if (!selectedCell) return;
@@ -857,18 +956,25 @@ export default function TableEditor({
                                 />
                             </div>
 
-                            {/* Table viewport */}
-                            <div
-                                ref={tableViewportRef}
-                                className="relative overflow-x-auto overflow-y-auto"
-                                style={{
-                                    width: `${TABLE_VIEWPORT_WIDTH}px`,
-                                    maxWidth: "100%",
-                                    height: `${TABLE_VIEWPORT_HEIGHT}px`,
-                                    maxHeight: `${TABLE_VIEWPORT_HEIGHT}px`,
-                                    scrollbarGutter: "stable both-edges",
-                                }}
-                            >
+                            {/*
+                              PATCH-165. The "+" bars: OUTSIDE the scrolling
+                              viewport, so they are reachable no matter where the
+                              table is scrolled. A row bar below, a column bar to
+                              the right. Quiet by default, darker on hover.
+                            */}
+                            <div className="flex items-stretch">
+                                <div className="flex flex-col">
+                                    <div
+                                        ref={tableViewportRef}
+                                        className="relative overflow-x-auto overflow-y-auto"
+                                        style={{
+                                            width: `${TABLE_VIEWPORT_WIDTH}px`,
+                                            maxWidth: "100%",
+                                            height: `${TABLE_VIEWPORT_HEIGHT}px`,
+                                            maxHeight: `${TABLE_VIEWPORT_HEIGHT}px`,
+                                            scrollbarGutter: "stable both-edges",
+                                        }}
+                                    >
                                 {/* ✅ Selection outline overlay */}
                                 {selectionBox && (
                                     <div
@@ -910,7 +1016,7 @@ export default function TableEditor({
                                                 {headerGroup.headers.map((header, i) => (
                                                     <th
                                                         key={header.id}
-                                                        className={`border border-gray-300 text-xs font-medium text-center cursor-pointer hover:bg-gray-200 transition-colors ${selectedCell?.col === i ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"
+                                                        className={`group/col border border-gray-300 text-xs font-medium text-center cursor-pointer hover:bg-gray-200 transition-colors ${selectedCell?.col === i ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"
                                                             }`}
                                                         style={{
                                                             width: `${TABLE_CELL_WIDTH}px`,
@@ -920,7 +1026,28 @@ export default function TableEditor({
                                                         }}
                                                         onClick={(e) => handleColumnHeaderClick(i, e)}
                                                     >
-                                                        {flexRender(header.column.columnDef.header, header.getContext())}
+                                                        <span className="relative flex h-full items-center justify-center">
+                                                            {flexRender(header.column.columnDef.header, header.getContext())}
+                                                            {/*
+                                                              PATCH-165. The column handle. stopPropagation
+                                                              so opening THIS menu does not also run the
+                                                              header click's column selection -- clicking the
+                                                              letter elsewhere still selects the column.
+                                                            */}
+                                                            <button
+                                                                type="button"
+                                                                data-table-column-handle={i}
+                                                                aria-label={`Column ${columns[i]} options`}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                                    setAxisMenu({ axis: 'column', index: i, x: rect.left, y: rect.bottom });
+                                                                }}
+                                                                className={`absolute left-1 top-1/2 -translate-y-1/2 rounded border border-gray-300 bg-white p-0.5 text-gray-500 shadow-sm hover:bg-gray-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'opacity-100' : 'opacity-0 group-hover/col:opacity-100 focus:opacity-100'}`}
+                                                            >
+                                                                <GripVertical className="h-3 w-3" aria-hidden="true" />
+                                                            </button>
+                                                        </span>
                                                     </th>
                                                 ))}
                                             </tr>
@@ -929,7 +1056,7 @@ export default function TableEditor({
 
                                     <tbody>
                                         {table.getRowModel().rows.map((row) => (
-                                            <tr key={row.id}>
+                                            <tr key={row.id} className="group/row">
                                                 <td
                                                     className="bg-gray-100 border border-gray-300 text-xs text-center text-gray-500 font-medium select-none"
                                                     style={{
@@ -938,7 +1065,28 @@ export default function TableEditor({
                                                         height: `${TABLE_CELL_HEIGHT}px`,
                                                     }}
                                                 >
-                                                    {row.index + 1}
+                                                    {/*
+                                                      PATCH-165. The row handle,
+                                                      in the row-number cell. The
+                                                      number stays visible; the grip
+                                                      reveals on row hover, or while
+                                                      THIS row's menu is open.
+                                                    */}
+                                                    <span className="relative flex h-full w-full items-center justify-center">
+                                                        {row.index + 1}
+                                                        <button
+                                                            type="button"
+                                                            data-table-row-handle={row.index}
+                                                            aria-label={`Row ${row.index + 1} options`}
+                                                            onClick={(e) => {
+                                                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                                setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
+                                                            }}
+                                                            className={`absolute inset-0 flex items-center justify-center rounded bg-gray-100 text-gray-500 hover:bg-gray-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}
+                                                        >
+                                                            <GripVertical className="h-3 w-3" aria-hidden="true" />
+                                                        </button>
+                                                    </span>
                                                 </td>
 
                                                 {row.getVisibleCells().map((cell, colIndex) => {
@@ -1026,6 +1174,33 @@ export default function TableEditor({
                                         ))}
                                     </tbody>
                                 </table>
+                                    </div>
+
+                                    {/* The row "+" bar: below the viewport, always reachable. */}
+                                    <button
+                                        type="button"
+                                        data-table-add-row="true"
+                                        aria-label="Add row"
+                                        title="Click to add a new row"
+                                        onClick={addRow}
+                                        className="flex h-4 w-full items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+                                        style={{ maxWidth: `${TABLE_VIEWPORT_WIDTH}px` }}
+                                    >
+                                        <Plus className="h-3 w-3" aria-hidden="true" />
+                                    </button>
+                                </div>
+
+                                {/* The column "+" bar: beside the viewport, always reachable. */}
+                                <button
+                                    type="button"
+                                    data-table-add-column="true"
+                                    aria-label="Add column"
+                                    title="Click to add a new column"
+                                    onClick={addColumn}
+                                    className="flex w-4 shrink-0 items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+                                >
+                                    <Plus className="h-3 w-3" aria-hidden="true" />
+                                </button>
                             </div>
 
                             {/* Caption */}
@@ -1313,6 +1488,22 @@ export default function TableEditor({
                         onAlignChange={(align, vertical) => {
                             applyStyleToSelection({ align, verticalAlign: vertical });
                         }}
+                    />
+                )}
+
+                {/* PATCH-165. The row/column handle menu, opened from a grip. */}
+                {axisMenu && (
+                    <TableAxisMenu
+                        axis={axisMenu.axis}
+                        isOpen
+                        position={{ x: axisMenu.x, y: axisMenu.y }}
+                        onClose={() => setAxisMenu(null)}
+                        canDelete={axisMenu.axis === 'row' ? rows.length > 1 : columns.length > 1}
+                        currentAlign={axisMenuSharedAlign}
+                        onAction={applyAxisAction}
+                        onColor={applyAxisColor}
+                        onAlign={applyAxisAlign}
+                        colors={CELL_COLORS}
                     />
                 )}
 
