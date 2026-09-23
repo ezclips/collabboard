@@ -1246,8 +1246,26 @@ export default function KnowledgeDocumentDetails({
                 ? { start: pageSelection.charStart, end: pageSelection.charEnd, color: selectionColor }
                 : null,
             ] as const;
+            /*
+              A READING COLUMN, NOT THE WHOLE WINDOW.
+
+              The page used to stretch to whatever width the host had, so on a
+              full-screen workspace a PDF page was blown up across ~1900px and
+              its body text set lines nobody can track. Capped and centred
+              instead, the way every document reader does it.
+
+              `max-w-` only CAPS, so the docked drawer -- already narrower than
+              this -- is unaffected, and no host has to know about it. The cap
+              lives on the page rather than on the scroll container so the
+              scrollbar stays at the edge of the pane instead of moving inward.
+
+              The area-selection overlay measures the IMAGE as rendered and
+              stores normalized coordinates, so a narrower page changes where a
+              region is drawn on screen and not what it means.
+            */
             return (
             <section key={page.pageNumber} data-page-number={page.pageNumber}>
+            <div className="mx-auto w-full max-w-4xl">
               {/*
                 PDF-R6K. No page chrome at all.
                 --
@@ -1288,6 +1306,7 @@ export default function KnowledgeDocumentDetails({
               >
                 {highlightedText(...pageTextArgs)}
               </p>
+            </div>
             </section>
             );
           })}
