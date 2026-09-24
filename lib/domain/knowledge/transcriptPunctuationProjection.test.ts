@@ -404,3 +404,194 @@ describe('10. readableTranscriptParagraphs', () => {
     expect(readableTranscriptParagraphs(text, 5)).toHaveLength(1);
   });
 });
+
+describe('PATCH-179: a space may move, a letter may not', () => {
+  const accepted = (original: string, model: string) => {
+    const result = projectTranscriptPunctuation(original, model);
+    expect(result.ok, `${original} -> ${model}`).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    return result.value;
+  };
+
+  it('the chess captions: a moved space and an added apostrophe are accepted', () => {
+    // "queen spawn" (captions) against "queen's pawn" (the model) -- the letters
+    // are IDENTICAL, so this is now accepted, and the output is the model's.
+    const value = accepted(
+      'they play kings pawn queen spawn is that',
+      "They play king's pawn, queen's pawn, is that",
+    );
+    expect(value.text).toBe("They play king's pawn, queen's pawn, is that");
+    // Every letter is the original's.
+    expect(letterDigitStream(value.text)).toBe(letterDigitStream('they play kings pawn queen spawn is that'));
+    expect(value.resegmentedParts).toBeGreaterThan(0);
+  });
+
+  it('theorybased -> Theory-based is accepted', () => {
+    expect(accepted('theorybased openings', 'Theory-based openings').text).toBe('Theory-based openings');
+  });
+
+  it('setupbased -> setup based is accepted', () => {
+    expect(accepted('setupbased', 'setup based').text).toBe('setup based');
+  });
+
+  it('THE ACCEPTED RISK: "now here" -> "nowhere" is accepted', () => {
+    // The owner accepted this: a moved space can change meaning. The letters are
+    // still exactly the captions' letters, and "As spoken" always shows them.
+    expect(accepted('now here', 'nowhere').text).toBe('nowhere');
+  });
+
+  it('four regrouped parts is boundary-shift-too-wide', () => {
+    const result = projectTranscriptPunctuation('a b c d', 'abcd');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result.error.details as { reason?: string }).reason).toBe('boundary-shift-too-wide');
+    expect(firstDifferenceOf(result.error.details)).toBe(0);
+    expect(result.error.message).toContain('regrouped too many words at position 0');
+  });
+
+  it('a whole stream regrouped with no shared boundary is boundary-shift-too-wide', () => {
+    const result = projectTranscriptPunctuation('ab cd ef gh', 'a bc de fg h');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result.error.details as { reason?: string }).reason).toBe('boundary-shift-too-wide');
+  });
+
+  it('a changed letter is still refused (word-mismatch)', () => {
+    const result = projectTranscriptPunctuation('night', 'knight');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result.error.details as { reason?: string }).reason).toBe('word-mismatch');
+  });
+
+  it('an added or removed word is still refused (word-count-mismatch)', () => {
+    const added = projectTranscriptPunctuation('the quick brown fox', 'the quick brown red fox');
+    expect(added.ok).toBe(false);
+    if (!added.ok) expect((added.error.details as { reason?: string }).reason).toBe('word-count-mismatch');
+    const removed = projectTranscriptPunctuation('the quick brown fox', 'the quick fox');
+    expect(removed.ok).toBe(false);
+    if (!removed.ok) expect((removed.error.details as { reason?: string }).reason).toBe('word-count-mismatch');
+  });
+
+  it('two words swapped is refused when the letters coincide with a change', () => {
+    // 'pawn queen' vs 'queen pawn': the stream changes (pawnqueen vs queenpawn),
+    // and the counts match, so it is a word-mismatch at the first part.
+    const result = projectTranscriptPunctuation('pawn queen', 'queen pawn');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect((result.error.details as { reason?: string }).reason).toBe('word-mismatch');
+  });
+
+  it('CASE: only a part first letter may be recased', () => {
+    // The original is lowercase; the model recases a NON-first letter, which is
+    // not allowed, so the output keeps the original's lowercase 'p'.
+    const value = accepted('iphone', 'iPhone');
+    expect(value.text).toBe('iphone');
+  });
+});
+
+describe('PATCH-179: THE PROPERTY, over 3,000 seeded cases', () => {
+  const VOCAB = ['engine', 'oil', 'filter', 'thirty', 'five', 'litres', 'check', 'the', 'a', 'is', 'and', 'setup', 'kings'];
+
+  /** A deterministic LCG: the same 3,000 cases every run, no hidden seed. */
+  function rng(seed: number) {
+    let state = seed >>> 0;
+    return () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0x1_0000_0000;
+    };
+  }
+
+  const alnumCase = (value: string) => value.replace(/[^\p{L}\p{N}]/gu, '');
+  const alnumLower = (value: string) => alnumCase(value).toLowerCase();
+
+  /** The alnum-stream offsets that begin a model part (whitespace/hyphen separated). */
+  const partStartOffsetsOf = (modelOutput: string): Set<number> => {
+    const starts = new Set<number>();
+    let inPart = false;
+    let offset = 0;
+    for (const character of modelOutput) {
+      if (/\s/.test(character)) { inPart = false; continue; }
+      if (character === '-') { inPart = false; continue; }
+      if (!/[^\p{L}\p{N}]/u.test(character)) {
+        if (!inPart) { starts.add(offset); inPart = true; }
+        offset += 1;
+      }
+    }
+    return starts;
+  };
+
+  it('every accepted case has the original letters, and case only at part-first letters', () => {
+    const random = rng(20260924);
+    let acceptCount = 0;
+    let changedLetterCount = 0;
+
+    for (let iteration = 0; iteration < 3_000; iteration += 1) {
+      const length = 1 + Math.floor(random() * 8);
+      const list = Array.from({ length }, () => VOCAB[Math.floor(random() * VOCAB.length)]);
+
+      // A model transform. AT MOST ONE boundary move (merge, split or hyphen)
+      // keeps every region within three parts, as the rule requires.
+      let words = [...list];
+      const boundaryOp = Math.floor(random() * 4); // 0 none, 1 merge, 2 split, 3 hyphen
+      const opAt = Math.floor(random() * Math.max(1, words.length - 1));
+      if (boundaryOp === 1 && words.length >= 2) {
+        words = [...words.slice(0, opAt), words[opAt] + words[opAt + 1], ...words.slice(opAt + 2)];
+      } else if (boundaryOp === 2 && words[opAt] && words[opAt].length > 2) {
+        const at = 1 + Math.floor(random() * (words[opAt].length - 1));
+        words = [...words.slice(0, opAt), words[opAt].slice(0, at), words[opAt].slice(at), ...words.slice(opAt + 1)];
+      }
+
+      // Recast some first letters.
+      words = words.map((word) => (random() < 0.3 ? word[0].toUpperCase() + word.slice(1) : word));
+
+      // Sometimes move a space via a hyphen instead (still a boundary move, and
+      // only when no other boundary move was made).
+      let joined = words.join(' ');
+      if (boundaryOp === 3 && words.length >= 2 && random() < 0.8) {
+        joined = joined.replace(/(\w) (\w)/, '$1-$2');
+      }
+
+      // Add apostrophes/hyphens INSIDE a word (apostrophe keeps the boundary).
+      if (random() < 0.3) joined = joined.replace(/(\w{2})(\w)/, "$1'$2");
+
+      // Add punctuation marks after some words.
+      if (random() < 0.5) joined = `${joined}.`;
+
+      // SOMETIMES change a letter -- those must be refused.
+      const changesLetter = random() < 0.3;
+      if (changesLetter) {
+        const target = VOCAB[Math.floor(random() * VOCAB.length)];
+        const replacement = `${target.slice(0, -1)}q`;
+        joined = joined.replace(target, replacement);
+      }
+
+      const original = list.join(' ');
+      const result = projectTranscriptPunctuation(original, joined);
+
+      if (changesLetter && alnumLower(joined) !== alnumLower(original)) {
+        // A letter was changed: refused, and the guarantee never relied on.
+        expect(result.ok, `changed letter accepted: ${original} -> ${joined}`).toBe(false);
+        changedLetterCount += 1;
+        continue;
+      }
+      if (!result.ok) continue;
+
+      acceptCount += 1;
+      // 1. The letters and digits are the original's, exactly.
+      expect(alnumLower(result.value.text)).toBe(alnumLower(original));
+      // 2. Every letter's CASE equals the original's, except a part's first.
+      const starts = partStartOffsetsOf(joined);
+      const outputCase = alnumCase(result.value.text);
+      const originalCase = alnumCase(original);
+      expect(outputCase.length).toBe(originalCase.length);
+      for (let offset = 0; offset < outputCase.length; offset += 1) {
+        if (starts.has(offset)) continue;
+        expect(outputCase[offset]).toBe(originalCase[offset]);
+      }
+    }
+
+    // The corpus is real: most cases were accepted, and letters really changed.
+    expect(acceptCount).toBeGreaterThan(500);
+    expect(changedLetterCount).toBeGreaterThan(100);
+  });
+});

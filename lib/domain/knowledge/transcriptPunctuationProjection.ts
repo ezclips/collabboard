@@ -21,15 +21,32 @@
 // and both would pass real corruption.
 //
 // So the model never writes the text. It returns punctuated text, WE DISCARD
-// ITS TEXT, and rebuild the output by walking the ORIGINAL words and taking
-// only: (a) the punctuation it placed after each word, and (b) the casing of a
-// word's FIRST letter. Every other character of every word provably came from
-// the original. A model output whose word sequence does not match the original
-// EXACTLY -- same length, same order, every token equal -- is refused outright.
+// ITS TEXT, and rebuild the output from the ORIGINAL letters and digits, in
+// order, taking only: (a) the punctuation it placed after each word, and (b) the
+// casing of a word's FIRST letter. Every letter and digit provably came from the
+// original, in the same order, with nothing added, removed, reordered or
+// substituted.
 //
-// That is strictly stronger than "generate, verify, accept or reject": harmless
-// drift is repaired, real corruption is refused, and no threshold exists to be
-// tuned past.
+// ============================================================================
+// PATCH-179 -- THE LETTERS ARE THE RULE, NOT THE BOUNDARIES
+// ============================================================================
+//
+// PATCH-162's rule was always "every letter and digit unchanged, in order". The
+// projection was stricter than that: it also froze WHERE the word boundaries
+// fell, so the captions' "queen spawn" against the model's "queen's pawn" -- the
+// SAME letters, `queenspawn` both ways -- was refused. The owner decided a
+// boundary may move.
+//
+// WHAT IS GUARANTEED NOW. The two LETTER STREAMS (letters and digits only,
+// lowercased) must be identical in every way; only then may boundaries differ,
+// and only LOCALLY -- every region between two shared boundaries holds at most
+// three original parts and at most three model parts. The output is built from
+// the MODEL's segmentation, but every letter and digit is taken from the
+// ORIGINAL stream at the same global offset, so no letter can be invented.
+//
+// THE ACCEPTED RISK, STATED: a moved space can change meaning ("now here"
+// versus "nowhere"). The letters are still exactly what the captions said, and
+// "As spoken" always shows the original captions.
 
 import { domainError, type DomainError } from '../core/errors';
 import { err, ok, type Result } from '../core/result';
@@ -40,6 +57,11 @@ export interface PunctuationProjection {
   /** Words whose capitalisation the model changed. Diagnostics only. */
   readonly recasedWords: number;
   readonly insertedMarks: number;
+  /**
+   * PATCH-179. How many MODEL parts fall inside a region whose boundaries the
+   * model moved. Diagnostics only -- nothing reads it but tests.
+   */
+  readonly resegmentedParts: number;
 }
 
 /**
@@ -161,19 +183,51 @@ function letterDigitStream(token: string): readonly string[] {
 }
 
 /**
- * PROJECT the model's punctuation and spelling onto the original words.
+ * The LETTERS AND DIGITS of a set of parts, concatenated, with their ORIGINAL
+ * case. Length equals `comparableStream`'s, so offsets are interchangeable.
+ */
+function letterStream(parts: readonly string[]): string {
+  return parts.map((part) => letterDigitStream(part).join('')).join('');
+}
+
+/** The comparable (letters/digits only, lowercased) stream of a set of parts. */
+function comparableStream(parts: readonly string[]): string {
+  return parts.map(comparablePart).join('');
+}
+
+/** The letter offset where each part starts: 0, then the running total. */
+function partStartOffsets(parts: readonly string[]): number[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (const part of parts) {
+    starts.push(offset);
+    offset += comparablePart(part).length;
+  }
+  return starts;
+}
+
+/** The letters/digits of each part, preserving case, for slicing. */
+function casePreservingStream(parts: readonly string[]): string {
+  return letterStream(parts);
+}
+
+/**
+ * PROJECT the model's punctuation and spelling onto the original LETTERS.
  *
- * Returns `err` unless the model's LETTER-AND-DIGIT sequence is exactly the
- * original's: same number of parts, same order, every part equal after
- * reduction. The error names the first index that differs, because a silent
- * mismatch is what this whole module exists to prevent.
+ * The two LETTER STREAMS (letters and digits only, lowercased) must be
+ * identical. When they are, the boundaries between parts may differ, but only
+ * LOCALLY: every region between two shared boundaries must hold at most three
+ * original parts and at most three model parts. A stream that differs is
+ * refused -- `word-count-mismatch` when the part counts differ, otherwise
+ * `word-mismatch` at the first differing part. A region that regroups too many
+ * words is refused as `boundary-shift-too-wide`.
  *
  * ---------------------------------------------------------------- GUARANTEE
  * Every letter and digit in the output comes from the original, in the same
- * order, with nothing added, removed, reordered or substituted. The only
- * characters the model contributes are the allowed punctuation marks, an
- * apostrophe or hyphen placed between letters, spaces, and the upper/lower case
- * of a part's first letter.
+ * order, with nothing added, removed, reordered or substituted. The model
+ * contributes only punctuation, in-word apostrophes and hyphens, the case of a
+ * part's first letter, and WHERE SPACES FALL, within at most three neighbouring
+ * words.
  * ---------------------------------------------------------------------------
  */
 export function projectTranscriptPunctuation(
@@ -186,31 +240,100 @@ export function projectTranscriptPunctuation(
   const originalComparable = originalParts.map(comparablePart);
   const modelComparable = modelParts.map(comparablePart);
 
-  if (originalComparable.length !== modelComparable.length) {
-    return err(domainError(
-      'validation',
-      `The model returned ${modelComparable.length} words where the transcript has ${originalComparable.length}.`
-        + ' The words must not change, so this chunk was not used.',
-      { details: { reason: 'word-count-mismatch', firstDifference: -1 } },
-    ));
-  }
-
-  for (let index = 0; index < originalComparable.length; index += 1) {
-    if (originalComparable[index] !== modelComparable[index]) {
+  // 1. THE LETTERS ARE THE RULE. `comparableStream` is letters and digits only,
+  //    lowercased, so a moved space (which changes no letter) is invisible here
+  //    and a changed letter is not.
+  const originalStream = comparableStream(originalParts);
+  const modelStream = comparableStream(modelParts);
+  if (originalStream !== modelStream) {
+    // The reason depends on the shape of the difference, not on the letters.
+    if (originalComparable.length !== modelComparable.length) {
       return err(domainError(
         'validation',
-        `The model changed the word at position ${index} ("${originalParts[index]}" became`
-          + ` "${modelParts[index]}"). The words must not change, so this chunk was not used.`,
-        { details: { reason: 'word-mismatch', firstDifference: index } },
+        `The model returned ${modelComparable.length} words where the transcript has ${originalComparable.length}.`
+          + ' The words must not change, so this chunk was not used.',
+        { details: { reason: 'word-count-mismatch', firstDifference: -1 } },
       ));
     }
+    for (let index = 0; index < originalComparable.length; index += 1) {
+      if (originalComparable[index] !== modelComparable[index]) {
+        return err(domainError(
+          'validation',
+          `The model changed the word at position ${index} ("${originalParts[index]}" became`
+            + ` "${modelParts[index]}"). The words must not change, so this chunk was not used.`,
+          { details: { reason: 'word-mismatch', firstDifference: index } },
+        ));
+      }
+    }
+    // Unreachable when the streams differ, but a refusal is the honest default.
+    return err(domainError('validation', 'The words must not change, so this chunk was not used.', {
+      details: { reason: 'word-mismatch', firstDifference: -1 },
+    }));
   }
 
-  // The sequences match. REBUILD on PARTS (whitespace AND hyphens), because the
-  // model may join `setup based` into `setup-based` -- one whitespace token, two
-  // parts. Pairing on whitespace tokens would misalign them. For every part, the
-  // LETTERS AND DIGITS come from the ORIGINAL part; the model contributes only
-  // its in-word apostrophes/hyphens and its case.
+  // 2. THE BOUNDARIES ARE ONLY PROVISIONALLY EQUAL. The streams match; where the
+  //    parts divide them may now differ, so long as no region regroups too much.
+  const originalStarts = partStartOffsets(originalParts);
+  const modelStarts = partStartOffsets(modelParts);
+  const modelStartSet = new Set(modelStarts);
+  // Shared boundaries (offset 0 excluded) split the stream into regions.
+  const shared = originalStarts.slice(1).filter((offset) => modelStartSet.has(offset));
+  const regionBounds = [0, ...shared, originalStream.length];
+
+  let resegmentedParts = 0;
+  for (let region = 0; region < regionBounds.length - 1; region += 1) {
+    const from = regionBounds[region];
+    const to = regionBounds[region + 1];
+    const originalInRegion = originalStarts.filter((offset) => offset >= from && offset < to).length;
+    const modelInRegion = modelStarts.filter((offset) => offset >= from && offset < to).length;
+    // Non-trivial when the interior boundaries differ -- by POSITION, not merely
+    // by count: a single boundary shifted one letter is still a regrouping.
+    const originalInterior = originalStarts.filter((offset) => offset > from && offset < to);
+    const modelInterior = modelStarts.filter((offset) => offset > from && offset < to);
+    const trivial = originalInRegion === modelInRegion
+      && originalInterior.length === modelInterior.length
+      && originalInterior.every((offset, index) => offset === modelInterior[index]);
+    if (trivial) continue;
+    if (originalInRegion > 3 || modelInRegion > 3) {
+      // The original part index where this region begins.
+      const originalPartIndex = originalStarts.indexOf(from);
+      return err(domainError(
+        'validation',
+        `The model regrouped too many words at position ${originalPartIndex}.`
+          + ' The words must not change, so this chunk was not used.',
+        { details: { reason: 'boundary-shift-too-wide', firstDifference: originalPartIndex } },
+      ));
+    }
+    resegmentedParts += modelInRegion;
+  }
+
+  // The output is built from the MODEL's segmentation, but every letter and
+  // digit is taken from the ORIGINAL stream at the same global offset: slice the
+  // original's case-preserving stream at the MODEL's boundaries into "virtual
+  // original parts", then reuse the one rebuild loop below.
+  const originalLetters = casePreservingStream(originalParts);
+  const virtualOriginalParts = modelStarts.map((start, index) => (
+    originalLetters.slice(start, modelStarts[index + 1] ?? originalLetters.length)
+  ));
+
+  return ok(rebuildFromParts(virtualOriginalParts, modelParts, modelOutput, resegmentedParts));
+}
+
+/**
+ * REBUILD the output from paired `(originalLettersForPart, modelPart)`s.
+ *
+ * The ONE rebuild loop, shared by the common case (parts align) and the
+ * resegmented case (virtual original parts sliced at the model's boundaries).
+ * For every pair the LETTERS AND DIGITS come from the original part; the model
+ * contributes only its in-word apostrophes/hyphens, the separator, its trailing
+ * marks, and the case of the part's first letter.
+ */
+function rebuildFromParts(
+  originalParts: readonly string[],
+  modelParts: readonly string[],
+  modelOutput: string,
+  resegmentedParts: number,
+): PunctuationProjection {
   let text = '';
   let recasedWords = 0;
   let insertedMarks = 0;
@@ -278,7 +401,7 @@ export function projectTranscriptPunctuation(
     }
   }
 
-  return ok({ text, recasedWords, insertedMarks });
+  return { text, recasedWords, insertedMarks, resegmentedParts };
 }
 
 /**
