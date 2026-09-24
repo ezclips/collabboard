@@ -2,6 +2,11 @@ import { domainError } from '../../domain/core/errors';
 import type { DomainError } from '../../domain/core/errors';
 import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
+import {
+  browserUploadKindLabel,
+  browserUploadLimit,
+  tooLargeMessage,
+} from '../../domain/storage/uploadLimits';
 import { createBrowserSupabaseClient } from './browserClient';
 
 export interface StorageUploadOptions {
@@ -50,6 +55,16 @@ export class SupabaseStorageGateway implements StorageGateway {
     file: File,
     options?: StorageUploadOptions,
   ): Promise<Result<void, DomainError>> {
+    // PATCH-180. Refuse an oversized browser upload BEFORE touching Supabase.
+    // This is the early, clear message; the bucket's own `file_size_limit` is
+    // the enforcement that holds even for a caller that skips this gateway.
+    const limit = browserUploadLimit(bucket, file.type);
+    if (limit !== null && file.size > limit) {
+      return err(domainError(
+        'validation',
+        tooLargeMessage(file.size, limit, browserUploadKindLabel(bucket, file.type)),
+      ));
+    }
     try {
       const { error } = await this.client.storage.from(bucket).upload(path, file, options);
       if (error) {

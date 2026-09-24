@@ -15,6 +15,7 @@
 import { domainError } from '../core/errors';
 import type { DomainError } from '../core/errors';
 import { err, ok, type Result } from '../core/result';
+import { tooLargeMessage, UPLOAD_LIMITS } from '../storage/uploadLimits';
 
 import {
   canonicalizeDecodedKnowledgeText,
@@ -124,6 +125,16 @@ export function validateKnowledgeTextSource(
 
   if (candidate.bytes.byteLength === 0) {
     return err(domainError('validation', 'The selected file is empty'));
+  }
+
+  // Defence in depth: the route refuses an oversized upload before reading the
+  // body, and this refuses it again for any caller reaching ingestion directly.
+  if (candidate.bytes.byteLength > UPLOAD_LIMITS.knowledgeText) {
+    return err(domainError(
+      'validation',
+      tooLargeMessage(candidate.bytes.byteLength, UPLOAD_LIMITS.knowledgeText, 'documents'),
+      { details: { reason: 'file-too-large', limit: UPLOAD_LIMITS.knowledgeText } },
+    ));
   }
 
   const canonical = candidate.extraction === undefined

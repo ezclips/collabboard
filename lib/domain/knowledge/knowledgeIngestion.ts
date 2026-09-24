@@ -3,6 +3,7 @@ import type { DomainError } from '../core/errors';
 import { domainError } from '../core/errors';
 import type { Result } from '../core/result';
 import { err, ok } from '../core/result';
+import { tooLargeMessage, UPLOAD_LIMITS } from '../storage/uploadLimits';
 import type { KnowledgeDocument } from './knowledgePersistence';
 
 /**
@@ -60,11 +61,10 @@ export interface ValidatedKnowledgePdf {
  * caller-controlled, so neither is trusted on its own -- the %PDF- magic
  * number is checked as well.
  *
- * NOTE (reported, not invented): this repository has no established
- * PDF/document upload size policy. `MAX_IMPORT_FILE_BYTES` (25MB) is the
- * workspace-bundle import cap and `MAX_DRAWING_IMPORT_BYTES` (25MB) the
- * Excalidraw scene cap; neither is a document-upload product limit. Rather
- * than invent one, P4 enforces no maximum and the policy gap is reported.
+ * NOTE: the upload size policy lives in `lib/domain/storage/uploadLimits.ts`.
+ * A PDF over `UPLOAD_LIMITS.knowledgePdf` is refused here too (defence in
+ * depth): the route refuses it before reading the body, and this validator
+ * refuses it again for any caller that reaches ingestion by another path.
  */
 export function validateKnowledgePdf(
   candidate: KnowledgePdfCandidate,
@@ -84,6 +84,14 @@ export function validateKnowledgePdf(
 
   if (candidate.bytes.byteLength === 0) {
     return err(domainError('validation', 'The selected file is empty'));
+  }
+
+  if (candidate.bytes.byteLength > UPLOAD_LIMITS.knowledgePdf) {
+    return err(domainError(
+      'validation',
+      tooLargeMessage(candidate.bytes.byteLength, UPLOAD_LIMITS.knowledgePdf, 'PDFs'),
+      { details: { reason: 'file-too-large', limit: UPLOAD_LIMITS.knowledgePdf } },
+    ));
   }
 
   if (!hasPdfMagic(candidate.bytes)) {

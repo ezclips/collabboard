@@ -16,6 +16,49 @@ import {
   type KnowledgeTextChunkHasher,
   type KnowledgeTextUploadDeps,
 } from '@/lib/domain/knowledge/knowledgeTextUpload';
+import {
+  KNOWLEDGE_UPLOADS_PER_HOUR,
+  MB,
+  tooLargeMessage,
+  UPLOAD_LIMITS,
+} from '@/lib/domain/storage/uploadLimits';
+
+/**
+ * PATCH-180. At most this many Knowledge uploads per user per rolling hour.
+ *
+ * The same in-memory fixed-window shape the AI routes use, and for the same
+ * reason: every upload starts the extraction worker, so a burst is real work,
+ * not just a row. Its per-instance scope is pre-existing debt, not addressed
+ * here. Kept at MODULE scope so the count survives across handler calls (the
+ * route factory is invoked once per module load).
+ */
+const uploadRateLimitMap = new Map<string, { count: number; windowStart: number }>();
+const UPLOAD_RATE_WINDOW_MS = 60 * 60 * 1000;
+
+function checkUploadRateLimit(userId: string): boolean {
+  const now = Date.now();
+  const entry = uploadRateLimitMap.get(userId);
+  if (!entry || now - entry.windowStart > UPLOAD_RATE_WINDOW_MS) {
+    uploadRateLimitMap.set(userId, { count: 1, windowStart: now });
+    return true;
+  }
+  if (entry.count >= KNOWLEDGE_UPLOADS_PER_HOUR) return false;
+  entry.count += 1;
+  return true;
+}
+
+/**
+ * The size limit and label for a chosen file, decided ONCE before the bytes are
+ * read. The same PDF-or-text routing the handler uses below, read here as a
+ * size question rather than a validation one.
+ */
+function sizeLimitForFile(file: File): { limit: number; label: string } {
+  const source = { filename: file.name, mimeType: file.type };
+  if (isKnowledgeDocxCandidate(source) || isKnowledgeTextCandidate(source)) {
+    return { limit: UPLOAD_LIMITS.knowledgeText, label: 'documents' };
+  }
+  return { limit: UPLOAD_LIMITS.knowledgePdf, label: 'PDFs' };
+}
 
 export interface KnowledgeUploadRouteContext {
   readonly params: Promise<{ id: string }>;
@@ -103,6 +146,25 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // PATCH-180. Per USER, before the body is read: an over-quota caller cannot
+    // make the server buffer a multi-megabyte upload just to be told no.
+    if (!checkUploadRateLimit(userId)) {
+      return NextResponse.json({ error: 'Too many uploads. Try again in a while.' }, { status: 429 });
+    }
+
+    // PATCH-180. The DECLARED size, before `formData()` reads the body into
+    // memory. The +1 MB is multipart overhead, so a file that is exactly at the
+    // limit is not refused for the boundary text around it. The body is not
+    // parsed to check this, so the number is the client's own claim -- which is
+    // why the authoritative `file.size` check below follows it.
+    const declaredLength = Number(request.headers.get('content-length'));
+    if (Number.isFinite(declaredLength) && declaredLength > UPLOAD_LIMITS.knowledgePdf + MB) {
+      return NextResponse.json(
+        { error: 'This file is too large. The limit is 50 MB.' },
+        { status: 413 },
+      );
+    }
+
     let formData: FormData;
     try {
       formData = await request.formData();
@@ -113,6 +175,15 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
     const file = formData.get('file');
     if (!isUploadFile(file)) {
       return NextResponse.json({ error: 'A file is required' }, { status: 400 });
+    }
+
+    // PATCH-180. The ACTUAL size, before `arrayBuffer()` reads the file whole.
+    const sizeGate = sizeLimitForFile(file);
+    if (file.size > sizeGate.limit) {
+      return NextResponse.json(
+        { error: tooLargeMessage(file.size, sizeGate.limit, sizeGate.label) },
+        { status: 413 },
+      );
     }
 
     let bytes: Uint8Array;

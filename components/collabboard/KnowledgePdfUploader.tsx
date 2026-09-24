@@ -12,6 +12,7 @@ import { useParams } from 'next/navigation';
 
 import { KNOWLEDGE_TEXT_ACCEPT } from '@/lib/domain/knowledge/knowledgeTextIngestion';
 import { KNOWLEDGE_DOCX_ACCEPT } from '@/lib/domain/knowledge/knowledgeDocxSource';
+import { tooLargeMessage, UPLOAD_LIMITS } from '@/lib/domain/storage/uploadLimits';
 
 export type KnowledgePdfProcessingStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
 
@@ -362,6 +363,22 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
     // FormData or request. Silent: a refusal is not an error to report.
     if (!mayInitiateNow()) return;
     if (!boardId || busy) return;
+
+    /*
+      PATCH-180. The size limit, checked BEFORE the request so an oversized file
+      never leaves the browser. A PDF is recognised the way this uploader always
+      recognises one -- the picker offers `application/pdf,.pdf`; anything else it
+      offers is a text source (.docx/.md/.txt), which has its own limit. The
+      server checks the same numbers again, and the bucket enforces too.
+    */
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const limit = isPdf ? UPLOAD_LIMITS.knowledgePdf : UPLOAD_LIMITS.knowledgeText;
+    const label = isPdf ? 'PDFs' : 'documents';
+    if (file.size > limit) {
+      setNotice({ tone: 'error', message: tooLargeMessage(file.size, limit, label) });
+      if (inputRef.current) inputRef.current.value = '';
+      return;
+    }
 
     abortRef.current?.abort();
     const controller = new AbortController();

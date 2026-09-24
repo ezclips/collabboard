@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { KnowledgeIngestionDeps } from '@/lib/domain/knowledge/knowledgeIngestion';
 import type { KnowledgeDocument } from '@/lib/domain/knowledge/knowledgePersistence';
+import { MB, tooLargeMessage, UPLOAD_LIMITS } from '@/lib/domain/storage/uploadLimits';
 import { createKnowledgeUploadPostHandler } from './knowledgeUploadRoute';
 import type { KnowledgeTextIngestionWiring } from './knowledgeUploadRoute';
 
@@ -293,5 +294,104 @@ describe('Stage 1 text sources reach the text path, and only they do', () => {
     // itself ready and can never be found.
     expect(state.deleteDocument).toHaveBeenCalledOnce();
     expect(state.remove).toHaveBeenCalledOnce();
+  });
+});
+
+describe('PATCH-180: upload size and rate limits', () => {
+  function handlerFor(userId: string) {
+    const state = ingestionDeps();
+    const text = textDeps();
+    const post = createKnowledgeUploadPostHandler({
+      getAuthenticatedUserId: async () => userId,
+      createIngestionDeps: () => state.deps,
+      createTextIngestionDeps: () => text.wiring,
+    });
+    return { post, state, text };
+  }
+
+  /** A fake Request, so the Content-Length gate can be proven BEFORE formData. */
+  function requestWithDeclaredLength(contentLength: string) {
+    const formData = vi.fn();
+    return {
+      headers: new Headers({ 'content-length': contentLength }),
+      formData,
+    } as unknown as Request;
+  }
+
+  /**
+   * A fake Request carrying a fake upload file, so `size` and `arrayBuffer` can
+   * be observed directly. `isUploadFile` needs only name/type/arrayBuffer.
+   */
+  function requestWithFile(file: { name: string; type: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> }) {
+    return {
+      headers: new Headers(),
+      formData: async () => ({ get: () => file }),
+    } as unknown as Request;
+  }
+
+  const fakeFile = (
+    over: Partial<{ name: string; type: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> }> = {},
+  ) => ({
+    name: 'smoke.pdf',
+    type: 'application/pdf',
+    size: 12,
+    arrayBuffer: vi.fn(async () => pdfFile().arrayBuffer()),
+    ...over,
+  });
+
+  it('a declared Content-Length over the limit is 413, and formData is never called', async () => {
+    const { post } = handlerFor('declared-length-user');
+    const request = requestWithDeclaredLength(String(UPLOAD_LIMITS.knowledgePdf + MB + 1));
+
+    const response = await post(request, context());
+
+    expect(response.status).toBe(413);
+    expect((await response.json()).error).toBe('This file is too large. The limit is 50 MB.');
+    expect((request as unknown as { formData: ReturnType<typeof vi.fn> }).formData).not.toHaveBeenCalled();
+  });
+
+  it('a 51 MB PDF file.size is 413 with the exact message, and arrayBuffer is never called', async () => {
+    const { post, state } = handlerFor('big-pdf-user');
+    const file = fakeFile({ size: 51 * MB });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(413);
+    expect((await response.json()).error).toBe(tooLargeMessage(51 * MB, UPLOAD_LIMITS.knowledgePdf, 'PDFs'));
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+    expect(state.upload).not.toHaveBeenCalled();
+  });
+
+  it('a 21 MB text source is 413 with the documents message', async () => {
+    const { post } = handlerFor('big-text-user');
+    const file = fakeFile({ name: 'notes.txt', type: 'text/plain', size: 21 * MB });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(413);
+    expect((await response.json()).error)
+      .toBe(tooLargeMessage(21 * MB, UPLOAD_LIMITS.knowledgeText, 'documents'));
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it('a 49 MB PDF passes the size gate and reaches ingestion', async () => {
+    const { post, state } = handlerFor('under-limit-pdf-user');
+    const file = fakeFile({ size: 49 * MB });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(201);
+    expect(file.arrayBuffer).toHaveBeenCalledTimes(1);
+    expect(state.insertDocument).toHaveBeenCalledOnce();
+  });
+
+  it('the 30th upload in an hour passes and the 31st is 429', async () => {
+    const { post } = handlerFor('rate-limit-user');
+    for (let index = 0; index < 30; index += 1) {
+      expect((await post(postRequest(pdfFile()), context())).status).toBe(201);
+    }
+    const over = await post(postRequest(pdfFile()), context());
+    expect(over.status).toBe(429);
+    expect((await over.json()).error).toBe('Too many uploads. Try again in a while.');
   });
 });

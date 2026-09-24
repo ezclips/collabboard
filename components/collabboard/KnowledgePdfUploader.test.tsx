@@ -12,6 +12,7 @@ import KnowledgePdfUploader, {
   type KnowledgePdfUploaderHandle,
 } from './KnowledgePdfUploader';
 import { buildCanvasToolbarGroups } from './canvas/ui/canvasToolbarRegistry';
+import { MB, tooLargeMessage, UPLOAD_LIMITS } from '@/lib/domain/storage/uploadLimits';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const DOCUMENT_ID = '33333333-3333-4333-8333-333333333333';
@@ -1088,5 +1089,63 @@ describe('CORRECTION_1: late failures and replaced probes', () => {
 
     act(() => { h.root.unmount(); });
     h.restore();
+  });
+});
+
+describe('PATCH-180: an oversized file is refused before it is sent', () => {
+  it('a PDF over the limit shows the message and makes no fetch', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const fetchMock = vi.fn(async () => jsonResponse({ documents: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(<KnowledgePdfUploader />);
+    });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    // Only name/type/size are read: the size gate refuses before any bytes are
+    // needed, so no real 51 MB buffer is allocated.
+    const oversized = { name: 'huge.pdf', type: 'application/pdf', size: 51 * MB } as unknown as File;
+    Object.defineProperty(input, 'files', { value: [oversized], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(tooLargeMessage(51 * MB, UPLOAD_LIMITS.knowledgePdf, 'PDFs'));
+    expect(fetchMock, 'no request is made for an oversized file').not.toHaveBeenCalled();
+
+    act(() => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('a text source over its own limit is refused with the documents label', async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const fetchMock = vi.fn(async () => jsonResponse({ documents: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(<KnowledgePdfUploader />);
+    });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const oversized = { name: 'huge.md', type: 'text/markdown', size: 21 * MB } as unknown as File;
+    Object.defineProperty(input, 'files', { value: [oversized], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(tooLargeMessage(21 * MB, UPLOAD_LIMITS.knowledgeText, 'documents'));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    act(() => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
   });
 });

@@ -5,6 +5,7 @@ import {
   isKnowledgeTextCandidate,
   validateKnowledgeTextSource,
 } from './knowledgeTextIngestion';
+import { tooLargeMessage, UPLOAD_LIMITS } from '../storage/uploadLimits';
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
 const candidate = (filename: string, mimeType: string, text: string | Uint8Array) => ({
@@ -86,6 +87,23 @@ describe('the decode IS the validation', () => {
   it('refuses an empty upload and a blank filename', () => {
     expect(refusal(candidate('notes.txt', 'text/plain', new Uint8Array())).message).toMatch(/empty/);
     expect(refusal(candidate('   ', 'text/plain', 'body')).message).toMatch(/filename is required/);
+  });
+});
+
+describe('PATCH-180: the text-source size limit', () => {
+  it('refuses a source over the limit with a validation error and the message', () => {
+    const over = new Uint8Array(UPLOAD_LIMITS.knowledgeText + 1).fill(0x61);
+    const error = refusal(candidate('huge.txt', 'text/plain', over));
+    expect(error.code).toBe('validation');
+    expect(error.message).toBe(
+      tooLargeMessage(UPLOAD_LIMITS.knowledgeText + 1, UPLOAD_LIMITS.knowledgeText, 'documents'),
+    );
+  });
+
+  it('accepts a source of exactly the limit', () => {
+    const exact = new Uint8Array(UPLOAD_LIMITS.knowledgeText).fill(0x61);
+    const value = accepted(candidate('exact.txt', 'text/plain', exact));
+    expect(value.fileSizeBytes).toBe(UPLOAD_LIMITS.knowledgeText);
   });
 });
 
