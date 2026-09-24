@@ -227,33 +227,33 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
     await tick();
   }
 
-  it('Color sets bg on every cell of the row, and None removes it', async () => {
+  it('Color selects the whole row and opens the standard Cell color panel, applying to every cell', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
 
-    // Colour every cell of row 0 with a palette swatch.
     click(rowHandle(c, 0));
     await tick();
-    await openSubmenu('Color');
-    const swatch = menuEls().find((el) => el.getAttribute('aria-label') === '#dbeafe');
-    expect(swatch, 'no #dbeafe swatch in the Color submenu').not.toBeUndefined();
-    click(swatch!); // a swatch closes the menu itself
-
-    let saved = savedContent(onSave, c);
-    expect(saved.cellStyles['0-0'].bg).toBe('#dbeafe');
-    expect(saved.cellStyles['0-1'].bg).toBe('#dbeafe');
-    expect(saved.cellStyles['0-2'].bg).toBe('#dbeafe');
-
-    // Re-open and choose None: the bg key is REMOVED, not set to a string.
-    const second = tableEditor({ ...saved });
-    click(rowHandle(second.c, 0));
+    // PATCH-171: Color is a plain item now -- no swatch submenu.
+    click(menuItem('Color'));
     await tick();
-    await openSubmenu('Color');
-    const none = menuEls().find((el) => el.getAttribute('aria-label') === 'None');
-    expect(none, 'no None swatch').not.toBeUndefined();
-    click(none!);
 
-    const savedAgain = savedContent(second.onSave, second.c);
-    expect(savedAgain.cellStyles['0-0']).toBeUndefined();
+    // The whole row is selected (the same look a row-number click gives)...
+    const cells = c.querySelectorAll('tbody tr')[0].querySelectorAll('td');
+    for (let col = 1; col <= 3; col += 1) {
+      expect(cells[col].className, `col ${col}`).toContain('bg-purple-100/40');
+    }
+    // ...and the standard picker is open: its hex input.
+    expect(c.querySelector('input[maxlength="6"]')).not.toBeNull();
+
+    // Drive the picker through one of its default-color swatches.
+    const swatch = Array.from(c.querySelectorAll('button'))
+      .find((el) => el.getAttribute('title') === '#4c6ef5');
+    expect(swatch, 'no #4c6ef5 swatch in the standard picker').not.toBeUndefined();
+    click(swatch!);
+
+    const saved = savedContent(onSave, c);
+    expect(saved.cellStyles['0-0'].bg).toBe('#4c6ef5');
+    expect(saved.cellStyles['0-1'].bg).toBe('#4c6ef5');
+    expect(saved.cellStyles['0-2'].bg).toBe('#4c6ef5');
   });
 
   it('Align sets align on every cell of the row, and the menu shows a checkmark only for a shared value', async () => {
@@ -267,6 +267,52 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
     expect(saved.cellStyles['0-0'].align).toBe('center');
     expect(saved.cellStyles['0-1'].align).toBe('center');
     expect(saved.cellStyles['0-2'].align).toBe('center');
+  });
+
+  it('Color in the column menu selects the column and opens Cell color', async () => {
+    const { c, onSave } = tableEditor(THREE_BY_THREE);
+    click(columnHandle(c, 1));
+    await tick();
+    click(menuItem('Color'));
+    await tick();
+
+    // The whole column (index 1) is selected: data cell td[2] of every row.
+    for (const row of Array.from(c.querySelectorAll('tbody tr'))) {
+      expect(row.querySelectorAll('td')[2].className).toContain('bg-purple-100/40');
+    }
+    expect(c.querySelector('input[maxlength="6"]')).not.toBeNull();
+
+    const swatch = Array.from(c.querySelectorAll('button'))
+      .find((el) => el.getAttribute('title') === '#4c6ef5');
+    expect(swatch, 'no #4c6ef5 swatch in the standard picker').not.toBeUndefined();
+    click(swatch!);
+
+    const saved = savedContent(onSave, c);
+    expect(saved.cellStyles['0-1'].bg).toBe('#4c6ef5');
+    expect(saved.cellStyles['1-1'].bg).toBe('#4c6ef5');
+    expect(saved.cellStyles['2-1'].bg).toBe('#4c6ef5');
+  });
+
+  it('the row and column menu buttons are corner triangles, not six-dot grips', () => {
+    const { c } = tableEditor(THREE_BY_THREE);
+    const rowButton = c.querySelector<HTMLElement>('[data-table-row-handle="0"]')!;
+    const columnButton = c.querySelector<HTMLElement>('[data-table-column-handle="0"]')!;
+    for (const button of [rowButton, columnButton]) {
+      expect(button.querySelector('.lucide-grip-vertical')).toBeNull();
+      expect(button.querySelector('svg')).not.toBeNull();
+      // Anchored to the top-right corner.
+      expect(button.className).toContain('right');
+      expect(button.className).toContain('top-0');
+    }
+    // The column button is inset clear of the PATCH-170 resize strip.
+    expect(columnButton.className).toContain('right-1.5');
+
+    // The row-number cell is p-0 and relative, and the triangle is anchored to
+    // that cell's OWN corner, so its edges touch the cell borders.
+    const rowNumberCell = c.querySelectorAll('tbody tr')[0].querySelectorAll('td')[0] as HTMLElement;
+    expect(rowNumberCell.className).toContain('p-0');
+    expect(rowNumberCell.className).toContain('relative');
+    expect(rowButton.parentElement).toBe(rowNumberCell);
   });
 });
 

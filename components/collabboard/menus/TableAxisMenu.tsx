@@ -25,7 +25,6 @@ import {
     PositionedContextMenuSub,
     PositionedContextMenuSubContent,
     PositionedContextMenuSubTrigger,
-    PositionedContextMenuSwatch,
 } from '@/components/ui/context-menu';
 
 /**
@@ -53,7 +52,8 @@ export type TableAxisAction =
     | 'delete'
     | 'fill-ai'
     | 'fit-width'
-    | 'distribute-widths';
+    | 'distribute-widths'
+    | 'color';
 
 export interface TableAxisMenuProps {
     readonly axis: TableAxis;
@@ -69,11 +69,7 @@ export interface TableAxisMenuProps {
      */
     readonly currentAlign: 'left' | 'center' | 'right' | null;
     readonly onAction: (action: TableAxisAction) => void;
-    /** `undefined` means "None": removes the colour rather than setting one. */
-    readonly onColor: (bg: string | undefined) => void;
     readonly onAlign: (align: 'left' | 'center' | 'right') => void;
-    /** The swatches, passed in so the palette has ONE definition (the editor's). */
-    readonly colors: readonly string[];
 }
 
 export function TableAxisMenu({
@@ -84,9 +80,7 @@ export function TableAxisMenu({
     canDelete,
     currentAlign,
     onAction,
-    onColor,
     onAlign,
-    colors,
 }: TableAxisMenuProps) {
     if (!isOpen) return null;
 
@@ -132,30 +126,17 @@ export function TableAxisMenu({
 
             <PositionedContextMenuSeparator />
 
-            <PositionedContextMenuSub>
-                <PositionedContextMenuSubTrigger>
-                    <span className="flex w-full items-center gap-2">
-                        {itemIcon(Palette)}
-                        Color
-                    </span>
-                </PositionedContextMenuSubTrigger>
-                <PositionedContextMenuSubContent className="min-w-[180px]">
-                    <PositionedContextMenuSwatch
-                        color="#ffffff"
-                        label="None"
-                        selected={false}
-                        onSelect={() => onColor(undefined)}
-                    />
-                    {colors.map((color) => (
-                        <PositionedContextMenuSwatch
-                            key={color}
-                            color={color}
-                            label={color}
-                            onSelect={() => onColor(color)}
-                        />
-                    ))}
-                </PositionedContextMenuSubContent>
-            </PositionedContextMenuSub>
+            {/*
+              PATCH-171. Color is a plain item now: it selects the whole axis and
+              opens the editor's standard Cell color panel, rather than a
+              bespoke column of swatches.
+            */}
+            <PositionedContextMenuItem onSelect={() => onAction('color')}>
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(Palette)}
+                    Color
+                </span>
+            </PositionedContextMenuItem>
 
             <PositionedContextMenuSub>
                 <PositionedContextMenuSubTrigger>

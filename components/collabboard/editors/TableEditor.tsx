@@ -12,7 +12,6 @@ import {
     AlignRight,
     Plus,
     Grid,
-    GripVertical,
     MessageSquare,
     ChevronRight,
     Check,
@@ -88,30 +87,6 @@ interface TableTool {
     submenu?: string;
     active?: boolean;
 }
-
-// Color palette matching other editors
-const CELL_COLORS = [
-    "#ffffff",
-    "#fee2e2",
-    "#ffedd5",
-    "#fef3c7",
-    "#dcfce7",
-    "#dbeafe",
-    "#e0e7ff",
-    "#f3e8ff",
-    "#fce7f3",
-    "#ffe4e6",
-    "#f87171",
-    "#fb923c",
-    "#fbbf24",
-    "#34d399",
-    "#60a5fa",
-    "#818cf8",
-    "#a78bfa",
-    "#f472b6",
-    "#fb7185",
-    "#94a3b8",
-];
 
 // Formula options
 const FORMULAS = ["SUM", "IF", "MIN", "MAX", "COUNT", "AVERAGE"];
@@ -901,18 +876,24 @@ export default function TableEditor({
                 // Column-only: every column gets the current average.
                 if (axis === 'column') distributeWidths();
                 break;
+            case 'color':
+                // PATCH-171. Select the whole axis -- exactly a header click
+                // without Shift -- then open the toolbar's standard Cell color
+                // panel for that selection. The panel applies `bg` itself.
+                if (fillLocked) break;
+                if (axis === 'row') {
+                    setSelectionRange({ start: { row: index, col: 0 }, end: { row: index, col: columns.length - 1 } });
+                    setSelectedCell({ row: index, col: 0 });
+                } else {
+                    setSelectionRange({ start: { row: 0, col: index }, end: { row: rows.length - 1, col: index } });
+                    setSelectedCell({ row: 0, col: index });
+                }
+                setToolbarMode('inside');
+                setActiveSubmenu('cellColor');
+                break;
         }
         setAxisMenu(null);
-    }, [applyGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths]);
-
-    const applyAxisColor = useCallback((bg: string | undefined) => {
-        if (!axisMenu) return;
-        const grid = currentGrid();
-        applyGrid(axisMenu.axis === 'row'
-            ? setRowStyle(grid, axisMenu.index, { bg })
-            : setColumnStyle(grid, axisMenu.index, { bg }));
-        // No explicit close: choosing a swatch closes the positioned menu itself.
-    }, [applyGrid, axisMenu, currentGrid]);
+    }, [applyGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths, fillLocked, columns.length, rows.length]);
 
     const applyAxisAlign = useCallback((align: 'left' | 'center' | 'right') => {
         if (!axisMenu) return;
@@ -1310,19 +1291,28 @@ export default function TableEditor({
                                                               header click's column selection -- clicking the
                                                               letter elsewhere still selects the column.
                                                             */}
+                                                            {/*
+                                                              PATCH-171. A corner triangle, not a six-dot grip:
+                                                              six dots read as "drag me". Anchored at the cell's
+                                                              top-right, inset 6px so it never covers the PATCH-170
+                                                              resize strip, which is the rightmost 6px.
+                                                            */}
                                                             <button
                                                                 type="button"
                                                                 data-table-column-handle={i}
                                                                 aria-label={`Column ${columns[i]} options`}
+                                                                title="Column options"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     if (fillLocked) return;
                                                                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                                     setAxisMenu({ axis: 'column', index: i, x: rect.left, y: rect.bottom });
                                                                 }}
-                                                                className={`absolute left-1 top-1/2 -translate-y-1/2 rounded border border-gray-300 bg-white p-0.5 text-gray-500 shadow-sm hover:bg-gray-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'opacity-100' : 'opacity-0 group-hover/col:opacity-100 focus:opacity-100'}`}
+                                                                className={`absolute right-1.5 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'text-purple-600 opacity-100' : 'text-gray-400 hover:text-gray-600 opacity-0 group-hover/col:opacity-100 focus:opacity-100'}`}
                                                             >
-                                                                <GripVertical className="h-3 w-3" aria-hidden="true" />
+                                                                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                                                                    <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />
+                                                                </svg>
                                                             </button>
                                                         </span>
                                                         {/*
@@ -1360,7 +1350,7 @@ export default function TableEditor({
                                         {table.getRowModel().rows.map((row) => (
                                             <tr key={row.id} className="group/row">
                                                 <td
-                                                    className={`border border-gray-300 text-xs text-center font-medium select-none cursor-pointer transition-colors ${rowFullySelected(row.index) ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
+                                                    className={`relative border border-gray-300 p-0 text-xs text-center font-medium select-none cursor-pointer transition-colors ${rowFullySelected(row.index) ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
                                                     style={{
                                                         width: `${TABLE_ROW_HEADER_WIDTH}px`,
                                                         minWidth: `${TABLE_ROW_HEADER_WIDTH}px`,
@@ -1374,28 +1364,34 @@ export default function TableEditor({
                                                     {/*
                                                       PATCH-169. The row NUMBER is the
                                                       select target, mirroring the column
-                                                      letter. The grip is a small button at
-                                                      the cell's LEFT edge, so it no longer
-                                                      covers the number; it reveals on row
+                                                      letter. PATCH-171: the menu button is a
+                                                      corner triangle at the cell's top-right,
+                                                      not a six-dot grip; it reveals on row
                                                       hover, focus, or while its menu is open.
+                                                      The cell is p-0 and relative so the
+                                                      triangle is anchored to the cell's OWN
+                                                      corner and touches its border lines.
                                                     */}
-                                                    <span className="relative flex h-full w-full items-center justify-center">
+                                                    <span className="flex h-full w-full items-center justify-center">
                                                         {row.index + 1}
-                                                        <button
-                                                            type="button"
-                                                            data-table-row-handle={row.index}
-                                                            aria-label={`Row ${row.index + 1} options`}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                if (fillLocked) return;
-                                                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                                                setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
-                                                            }}
-                                                            className={`absolute left-0.5 top-1/2 -translate-y-1/2 rounded border border-gray-300 bg-white p-0.5 text-gray-500 shadow-sm hover:bg-gray-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}
-                                                        >
-                                                            <GripVertical className="h-3 w-3" aria-hidden="true" />
-                                                        </button>
                                                     </span>
+                                                    <button
+                                                        type="button"
+                                                        data-table-row-handle={row.index}
+                                                        aria-label={`Row ${row.index + 1} options`}
+                                                        title="Row options"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (fillLocked) return;
+                                                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                            setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
+                                                        }}
+                                                        className={`absolute right-0 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'text-purple-600 opacity-100' : 'text-gray-400 hover:text-gray-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}
+                                                    >
+                                                        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                                                            <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />
+                                                        </svg>
+                                                    </button>
                                                 </td>
 
                                                 {row.getVisibleCells().map((cell, colIndex) => {
@@ -1862,9 +1858,7 @@ export default function TableEditor({
                         canDelete={axisMenu.axis === 'row' ? rows.length > 1 : columns.length > 1}
                         currentAlign={axisMenuSharedAlign}
                         onAction={applyAxisAction}
-                        onColor={applyAxisColor}
                         onAlign={applyAxisAlign}
-                        colors={CELL_COLORS}
                     />
                 )}
 
