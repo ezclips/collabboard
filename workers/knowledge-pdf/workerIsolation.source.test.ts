@@ -28,6 +28,17 @@ const PDFJS_ALLOWED_IMPORTERS = [
   path.join('workers', 'knowledge-pdf', 'pdfPageRaster.ts'),
 ] as const;
 
+/**
+ * PATCH-177. The ONE browser-side PDF.js importer: the reader's selectable text
+ * layer. Admitted by name, exactly like the worker allowlist, so a second
+ * browser importer still fails here. It parses a file any board member may have
+ * uploaded in every other viewer's browser, so it is admitted only LOCKED DOWN
+ * (no eval, no XFA, no installed fonts -- pinned below) and it may carry none of
+ * the worker's execution surface.
+ */
+const BROWSER_PDFJS_IMPORTER = path.join('components', 'collabboard', 'knowledgePdfDocumentCache.ts');
+const isBrowserPdfjsImporter = (file: string) => path.relative(repoRoot, file) === BROWSER_PDFJS_IMPORTER;
+
 describe('Knowledge PDF worker isolation', () => {
   it('keeps the worker executable out of Next.js and browser source trees', () => {
     const webFiles = [
@@ -37,19 +48,33 @@ describe('Knowledge PDF worker isolation', () => {
     for (const file of webFiles) {
       const source = fs.readFileSync(file, 'utf8');
       expect(source, file).not.toMatch(workerMarker);
-      expect(source, file).not.toMatch(/(?:from|require\()\s*['"][^'"]*(?:pdfjs-dist|child_process)/i);
+      expect(source, file).not.toMatch(/(?:from|require\()\s*['"][^'"]*child_process/i);
+      if (!isBrowserPdfjsImporter(file)) {
+        expect(source, file).not.toMatch(/(?:from|require\()\s*['"][^'"]*pdfjs-dist/i);
+      }
       expect(source, file).not.toContain('process.env.OPENDATALOADER_JAVA_BIN');
     }
   });
 
-  it('admits no first-party PDF.js importer in app, components, lib or hooks', () => {
+  it('admits exactly ONE first-party PDF.js importer in app, components, lib or hooks', () => {
+    const importers: string[] = [];
     for (const root of ['app', 'components', 'lib', 'hooks']) {
       const directory = path.join(repoRoot, root);
       if (!fs.existsSync(directory)) continue;
       for (const file of sourceFiles(directory)) {
-        expect(fs.readFileSync(file, 'utf8'), file).not.toMatch(pdfjsImport);
+        if (pdfjsImport.test(fs.readFileSync(file, 'utf8'))) importers.push(path.relative(repoRoot, file));
       }
     }
+    expect(importers).toEqual([BROWSER_PDFJS_IMPORTER]);
+  });
+
+  it('the browser importer loads PDF.js locked down, text-only, and never the Node build', () => {
+    const source = fs.readFileSync(path.join(repoRoot, BROWSER_PDFJS_IMPORTER), 'utf8');
+    expect(source).toContain('isEvalSupported: false');
+    expect(source).toContain('enableXfa: false');
+    expect(source).toContain('disableFontFace: true');
+    expect(source).not.toContain('pdfjs-dist/legacy');
+    expect(source).not.toMatch(/child_process|OPENDATALOADER/);
   });
 
   it('imports PDF.js from exactly the two worker-owned modules', () => {

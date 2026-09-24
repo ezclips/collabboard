@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
+import KnowledgePdfPageTextLayer from '@/components/collabboard/KnowledgePdfPageTextLayer';
 import {
   displayRegionToSourceRegion,
   isCanonicalPageRotation,
@@ -48,6 +49,12 @@ export interface KnowledgeDocumentPageRegionSelectorProps {
   readonly onClear: () => void;
   /** P6J-F9-D. One explicitly navigated SOURCE-space region, or null. Suppressed whenever `enabled`. */
   readonly highlightRegion?: NormalizedPageRegion | null;
+  /**
+   * PATCH-177. Draw the invisible selectable text layer (KnowledgePdfPageTextLayer) over the image so text can
+   * be selected on the page itself. Off while `enabled` (area selection), so the
+   * crosshair drag works unchanged.
+   */
+  readonly textLayerEnabled?: boolean;
 }
 
 /** Raster rounding shifts the aspect by ~1/(2*natural); a transposition doubles it. */
@@ -88,6 +95,7 @@ export default function KnowledgeDocumentPageRegionSelector({
   boardId, documentId, pageNumber, originalFilename,
   widthPoints, heightPoints, rotation,
   enabled, armedRegion, onArm, onClear, highlightRegion = null,
+  textLayerEnabled = false,
 }: KnowledgeDocumentPageRegionSelectorProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [overlay, setOverlay] = useState<PageImageContentBox | null>(null);
@@ -263,6 +271,18 @@ export default function KnowledgeDocumentPageRegionSelector({
         originalFilename={originalFilename} widthPoints={widthPoints}
         heightPoints={heightPoints} rotation={rotation}
       />
+      {/* PATCH-177. The invisible selectable text layer, over the image and
+          under the area-selection hit layer, and only when area selection is
+          off so the crosshair drag is untouched. */}
+      {textLayerEnabled && !enabled && overlay !== null ? (
+        <KnowledgePdfPageTextLayer
+          boardId={boardId}
+          documentId={documentId}
+          pageNumber={pageNumber}
+          rotation={rotation}
+          box={overlay}
+        />
+      ) : null}
       {enabled && overlay !== null ? (
         <div
           data-knowledge-region-layer={pageNumber}

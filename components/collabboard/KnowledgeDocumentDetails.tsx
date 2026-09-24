@@ -52,6 +52,7 @@ import {
   useKnowledgeStandaloneHighlights,
 } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import KnowledgeDocumentPageRegionSelector from '@/components/collabboard/KnowledgeDocumentPageRegionSelector';
+import { matchLayerSelectionToPageText } from '@/lib/domain/knowledge/knowledgePageLayerSelection';
 import { normalizeStorableRegion } from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
 import type { KnowledgePageRotation, NormalizedPageRegion }
   from '@/lib/domain/knowledge/knowledgePageRegionGeometry';
@@ -233,6 +234,14 @@ interface ArmedPageRegion {
  * this attribute is what the suppression handler tests for.
  */
 const CLIP_CHIP = 'data-knowledge-clip-chip';
+
+/**
+ * PATCH-177. The pdf.js text layer's own attribute. A selection whose endpoints
+ * both sit inside one of these is a LAYER selection: its words are matched back
+ * into the stored page text, because the layer's offsets and the page text's
+ * offsets are different coordinate spaces.
+ */
+const PAGE_TEXT_LAYER = 'data-knowledge-page-text-layer';
 
 /**
  * A source opened from a semantic result arrives with no pageCount, so counting
@@ -630,6 +639,13 @@ export default function KnowledgeDocumentDetails({
   // a new selection, a new document, or the selection going stale.
   const [selectionColor, setSelectionColor] = useState<string | null>(null);
   const [selectionRect, setSelectionRect] = useState<{ top: number; left: number; bottom: number } | null>(null);
+  /**
+   * PATCH-177. A transient notice when a selection made on the PDF page could
+   * not be matched back to the stored page text. Cleared on any new selection,
+   * and after 4 s on its own.
+   */
+  const [layerSelectionMiss, setLayerSelectionMiss] = useState(false);
+  const layerMissTimerRef = useRef<NodeJS.Timeout | null>(null);
   // One mode and one armed rectangle: two armed pages would offer two confirm
   // buttons for one intent.
   const [regionMode, setRegionMode] = useState(false);
@@ -893,6 +909,7 @@ export default function KnowledgeDocumentDetails({
     setTargetChoice(null);
     setRegionMode(false);
     setArmedRegion(null);
+    setLayerSelectionMiss(false);
   }, [documentId]);
 
   // Re-proved against the rendered pages, as activeSelection is.
@@ -1030,6 +1047,79 @@ export default function KnowledgeDocumentDetails({
   }, [initialSourceRequestId, loading, pages, matches.length, requestedSourceResolved]);
 
   /**
+   * PATCH-177. The pdf.js text-layer element a node sits in, if any, proven to
+   * be inside THIS reader's pages container (so a layer from another surface is
+   * never mistaken for this one's).
+   */
+  const layerRootOf = (node: Node | null): HTMLElement | null => {
+    if (node === null) return null;
+    const element = node instanceof Element ? node : node.parentElement ?? null;
+    const root = element?.closest(`[${PAGE_TEXT_LAYER}]`) ?? null;
+    const container = pagesContainerRef.current;
+    return root instanceof HTMLElement && container !== null && container.contains(root) ? root : null;
+  };
+
+  /** Shows the "couldn't match" notice for 4 s, or until the next selection. */
+  const showLayerSelectionMiss = () => {
+    setLayerSelectionMiss(true);
+    if (layerMissTimerRef.current) clearTimeout(layerMissTimerRef.current);
+    layerMissTimerRef.current = setTimeout(() => setLayerSelectionMiss(false), 4_000);
+  };
+
+  const clearLayerSelectionMiss = () => {
+    if (layerMissTimerRef.current) {
+      clearTimeout(layerMissTimerRef.current);
+      layerMissTimerRef.current = null;
+    }
+    setLayerSelectionMiss(false);
+  };
+
+  /**
+   * A selection made on the PDF's own text layer, matched back into the stored
+   * page text. Returns the capture a layer selection resolves to -- a real
+   * selection, or null when the words cannot be found exactly.
+   */
+  const captureLayerSelection = (range: Range): CapturedPageSelection | null => {
+    const container = pagesContainerRef.current;
+    if (container === null) return null;
+    const startRoot = layerRootOf(range.startContainer);
+    const endRoot = layerRootOf(range.endContainer);
+
+    // A selection that touches a layer but does not sit wholly in one is not an
+    // exact span: it can span a layer and the text paragraph, or two layers.
+    if (startRoot === null && endRoot === null) return null;
+    if (startRoot === null || endRoot === null || startRoot !== endRoot) {
+      return null;
+    }
+
+    const pageNumber = Number(startRoot.getAttribute(PAGE_TEXT_LAYER));
+    const page = pages.find((candidate) => candidate.pageNumber === pageNumber);
+    if (!page) return null;
+
+    const selectedText = range.toString();
+    const totalLength = startRoot.textContent?.length ?? 0;
+    // Where the selection starts, as a fraction of the layer's own text --
+    // measured from the layer's start exactly the way captureExactSelection
+    // measures, so the hint means the same thing the offsets do.
+    const measure = startRoot.ownerDocument.createRange();
+    measure.selectNodeContents(startRoot);
+    measure.setEnd(range.startContainer, range.startOffset);
+    const charsBefore = measure.toString().length;
+    const positionHint = totalLength > 0 ? charsBefore / totalLength : 0;
+
+    const matched = matchLayerSelectionToPageText(page.text, selectedText, positionHint);
+    if (matched === null) return null;
+    return {
+      pageNumber,
+      charStart: matched.charStart,
+      charEnd: matched.charEnd,
+      // The STORED text, not the layer's: the reader's rule is that the offsets
+      // describe exactly the canonical page text.
+      selectedText: page.text.slice(matched.charStart, matched.charEnd),
+    };
+  };
+
+  /**
    * The selection is captured when the user finishes making it, NOT when they
    * click the action: a click's own mousedown collapses the browser selection,
    * so reading it in the click handler would find nothing. Buttons are excluded
@@ -1038,17 +1128,59 @@ export default function KnowledgeDocumentDetails({
    */
   const settleSelectionFrom = (target: EventTarget | null) => {
     if (target instanceof Element && target.closest('button')) return;
+
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    const range = selection && !selection.isCollapsed && selection.rangeCount === 1
+      ? selection.getRangeAt(0)
+      : null;
+
+    /*
+      PATCH-177. A selection made on the PDF's text layer is matched back into
+      the stored page text, because the layer's coordinates are not the page
+      text's. Everything below the capture is shared with the text-view path, so
+      the toolbar, its position and every action are exactly the same.
+    */
+    if (range !== null) {
+      const startLayer = layerRootOf(range.startContainer);
+      const endLayer = layerRootOf(range.endContainer);
+      if (startLayer !== null || endLayer !== null) {
+        if (startLayer === null || endLayer === null || startLayer !== endLayer) {
+          // A selection that spans a layer and anything outside it.
+          setCapturedSelection(null);
+        } else {
+          const captured = captureLayerSelection(range);
+          setCapturedSelection(captured);
+          // An accidental drag over a space or one letter is not worth a
+          // warning: the matcher refuses it silently (fewer than 2 characters).
+          if (captured === null && range.toString().replace(/\s/g, '').length >= 2) showLayerSelectionMiss();
+          else clearLayerSelectionMiss();
+        }
+        // Position the toolbar from the live range, exactly as the text path
+        // does, so the chip appears beside what was selected on the page.
+        // jsdom's Range has no getBoundingClientRect at all -- guarded, since
+        // this is positioning only.
+        setSelectionRect(
+          typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : null,
+        );
+        setSelectionColor(null);
+        return;
+      }
+    }
+
+    clearLayerSelectionMiss();
     setCapturedSelection(captureExactSelection(pagesContainerRef.current, pages));
     // Best-effort positioning only, read separately from the pure capture
     // above: a prior color choice belongs to the selection that is ending,
     // never to whatever comes next.
-    const selection = typeof window === 'undefined' ? null : window.getSelection();
-    const range = selection && !selection.isCollapsed && selection.rangeCount === 1 ? selection.getRangeAt(0) : null;
-    // jsdom's Range has no getBoundingClientRect at all (not even a zero
-    // rect) -- guarded rather than assumed, since this is positioning only.
     setSelectionRect(range && typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : null);
     setSelectionColor(null);
   };
+
+  // The layer-miss notice clears itself on unmount, so no timer outlives the
+  // reader.
+  useEffect(() => () => {
+    if (layerMissTimerRef.current) clearTimeout(layerMissTimerRef.current);
+  }, []);
 
   /**
    * A drag-selection ends wherever the pointer happens to be, which is very
@@ -1297,6 +1429,7 @@ export default function KnowledgeDocumentDetails({
                   heightPoints={page.heightPoints}
                   rotation={page.rotation}
                   enabled={regionMode && onCreateNoteFromPage !== undefined}
+                  textLayerEnabled={Boolean(boardId && documentId)}
                   armedRegion={pageRegion?.region ?? null}
                   highlightRegion={arrivalRegion?.pageNumber === page.pageNumber ? arrivalRegion.region : null}
                   onArm={(region, appliedRotation) =>
@@ -1328,6 +1461,17 @@ export default function KnowledgeDocumentDetails({
         data-knowledge-viewer-toolbar="true"
         className="mx-auto w-full max-w-4xl mt-2 flex flex-none items-center gap-1 border-t border-gray-100 pt-2"
       >
+        {/* PATCH-177. A selection made on the PDF page that could not be found
+            in the stored page text. Transient: 4 s, or the next selection. */}
+        {layerSelectionMiss ? (
+          <p
+            data-knowledge-layer-selection-miss="true"
+            role="status"
+            className="mr-1 flex-none text-[11px] text-amber-700"
+          >
+            Couldn&apos;t match this to the page text. Select it in the text below instead.
+          </p>
+        ) : null}
         {/*
           PDF-R6J-C2. Search is an icon with a popover instead of a permanent
           field. The field was the widest thing in the reader and was present
