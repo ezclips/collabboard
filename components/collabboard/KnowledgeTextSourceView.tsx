@@ -30,7 +30,6 @@ import {
   readableTranscriptParagraphs,
   transcriptPunctuationChunks,
 } from '@/lib/domain/knowledge/transcriptPunctuationProjection';
-import { AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
 
 export interface KnowledgeTextSourceHighlight {
   /** Inclusive, in UTF-16 code units of the canonical text. */
@@ -142,58 +141,61 @@ export default function KnowledgeTextSourceView({
   useEffect(() => () => { readableAbortRef.current?.abort(); }, []);
 
   /**
-   * THE INSTRUCTION IS A REQUEST, NOT THE GUARANTEE, and it says so here so a
-   * later reader does not mistake the prompt for the safety property. The
-   * guarantee is `projectTranscriptPunctuation`: the model's text is discarded
-   * and the output rebuilt from the original words.
+   * PATCH-178. The batch route's own limits, mirrored so the client batches
+   * correctly: twelve passages per request, and 50 s per batch.
    */
-  const PUNCTUATE_INSTRUCTION = 'Add only punctuation (periods, commas, question marks, exclamation '
-    + 'marks, semicolons, colons, em dashes), capitalisation, and apostrophes or hyphens within words '
-    + '(for example "kings" may become "king\'s" and "setup based" may become "setup-based"). Do not '
-    + 'add, remove, reorder, merge or split any word. Return only the punctuated text, with no '
-    + 'preamble, commentary or quotation.';
+  const PASSAGES_PER_BATCH = 12;
+  const BATCH_TIMEOUT_MS = 50_000;
 
   /**
-   * One chunk, punctuated and PROJECTED. Mirrors KnowledgeSourceAIPanel's
-   * request shape exactly -- the same route, the same role, the same abort and
-   * generation guard -- rather than inventing a second one.
+   * One passage's outcome, in the shape the row state uses.
    *
-   * The four fields are the whole body: no document id, no board id, no cue
-   * data and no offsets go with this request.
-   *
-   * THE THREE OUTCOMES ARE DISTINCT, deliberately: a REFUSED chunk (the model
-   * changed the words) renders raw with a count, while a FAILED request (non-200,
-   * network, timeout) is a different thing and is reported as one. Collapsing
-   * them would present an outage as a partial result.
+   * A REFUSED passage (the server's projection refused AND its retry refused)
+   * renders raw, as does a FAILED one (the request or the model call failed) --
+   * both become `null` below. The distinction is kept only long enough to tell
+   * an OUTAGE (every passage failed) from a partial result.
    */
-  const punctuateChunk = async (
-    chunk: string,
+  type PassageOutcome =
+    | { status: 'projected'; text: string }
+    | { status: 'refused' }
+    | { status: 'failed' };
+
+  /**
+   * ONE BATCH, punctuated by the batch route and RE-PROJECTED here.
+   *
+   * The server already projected every passage through the same
+   * `projectTranscriptPunctuation`, so this second pass can only agree -- but it
+   * runs anyway, so everything that reaches the screen has been projected IN
+   * THIS FILE too. A batch that fails is all `failed`; it never invalidates the
+   * other batches.
+   */
+  const punctuateBatch = async (
+    passages: readonly string[],
     signal: AbortSignal,
-  ): Promise<{ status: 'projected'; text: string } | { status: 'refused' } | { status: 'failed' }> => {
-    const timer = setTimeout(() => readableAbortRef.current?.abort(), 30_000);
+  ): Promise<PassageOutcome[]> => {
+    const failedAll = (): PassageOutcome[] => passages.map(() => ({ status: 'failed' }));
     try {
-      const res = await fetch('/api/ai/text-action', {
+      const res = await fetch('/api/ai/transcript-punctuate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
-        body: JSON.stringify({
-          action: 'custom',
-          selectedText: chunk,
-          instruction: PUNCTUATE_INSTRUCTION,
-          purpose: AI_ROLE_SOURCE,
-        }),
+        body: JSON.stringify({ passages }),
       });
-      if (!res.ok) return { status: 'failed' };
+      if (!res.ok) return failedAll();
       const parsed = await res.json().catch(() => null);
-      if (!parsed || typeof parsed.text !== 'string') return { status: 'failed' };
-      const projected = projectTranscriptPunctuation(chunk, parsed.text);
-      // A REFUSED chunk renders its RAW text -- visibly, with the count shown
-      // by the caller. It never invalidates the rest.
-      return projected.ok ? { status: 'projected', text: projected.value.text } : { status: 'refused' };
+      const results = parsed && Array.isArray(parsed.results) ? parsed.results : null;
+      if (results === null || results.length !== passages.length) return failedAll();
+      return passages.map((passage, index): PassageOutcome => {
+        const outcome = results[index];
+        if (!outcome || outcome.status !== 'projected' || typeof outcome.text !== 'string') {
+          return { status: outcome?.status === 'refused' ? 'refused' : 'failed' };
+        }
+        // SECOND CHECK: re-project the server's text against this passage.
+        const projected = projectTranscriptPunctuation(passage, outcome.text);
+        return projected.ok ? { status: 'projected', text: projected.value.text } : { status: 'refused' };
+      });
     } catch {
-      return { status: 'failed' };
-    } finally {
-      clearTimeout(timer);
+      return failedAll();
     }
   };
 
@@ -205,13 +207,24 @@ export default function KnowledgeTextSourceView({
     const generation = ++readableGenerationRef.current;
     setReadablePhase('loading');
     const chunks = transcriptPunctuationChunks(text);
+    const passages = chunks.map((chunk) => text.slice(chunk.charStart, chunk.charEnd));
     try {
-      const outcomes = await Promise.all(
-        chunks.map((chunk) => punctuateChunk(text.slice(chunk.charStart, chunk.charEnd), controller.signal)),
-      );
-      if (readableGenerationRef.current !== generation) return;
-      // EVERY chunk failed the request itself: that is an outage, not a partial
-      // result, so the raw text stays and the error is stated.
+      // ONE BATCH AT A TIME, in order: a 60-minute video is ~6 requests, not 60.
+      const outcomes: PassageOutcome[] = [];
+      for (let start = 0; start < passages.length; start += PASSAGES_PER_BATCH) {
+        const batch = passages.slice(start, start + PASSAGES_PER_BATCH);
+        const timer = setTimeout(() => controller.abort(), BATCH_TIMEOUT_MS);
+        let batchOutcomes: PassageOutcome[];
+        try {
+          batchOutcomes = await punctuateBatch(batch, controller.signal);
+        } finally {
+          clearTimeout(timer);
+        }
+        if (readableGenerationRef.current !== generation) return;
+        outcomes.push(...batchOutcomes);
+      }
+      // EVERY passage failed the request itself: that is an outage, not a
+      // partial result, so the raw text stays and the error is stated.
       if (outcomes.length > 0 && outcomes.every((outcome) => outcome.status === 'failed')) {
         setReadablePhase('error');
         return;

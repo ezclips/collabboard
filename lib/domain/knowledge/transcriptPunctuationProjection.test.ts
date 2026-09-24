@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   projectTranscriptPunctuation,
   readableTranscriptParagraphs,
+  TRANSCRIPT_PUNCTUATION_CHUNK_CHARS,
   transcriptPunctuationChunks,
 } from './transcriptPunctuationProjection';
 
@@ -336,6 +337,34 @@ describe('9. transcriptPunctuationChunks: the partition invariant', () => {
     for (const chunk of transcriptPunctuationChunks(text, 10).slice(0, -1)) {
       expect(text[chunk.charEnd - 1]).toBe('\n');
     }
+  });
+
+  it('with NO size argument, no passage exceeds 900 characters unless one line does', () => {
+    // A default-sized transcript: every cue well under the limit, so the
+    // default must split it into several 900-character passages.
+    const cue = 'a spoken line of transcript words that is comfortably under the limit';
+    const text = Array.from({ length: 60 }, (_, index) => `${cue} ${index}`).join('\n');
+    expect(text.length).toBeGreaterThan(TRANSCRIPT_PUNCTUATION_CHUNK_CHARS * 2);
+
+    const chunks = transcriptPunctuationChunks(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      const slice = text.slice(chunk.charStart, chunk.charEnd);
+      // Either it fits the default, or it is a SINGLE line longer than it.
+      if (slice.length > TRANSCRIPT_PUNCTUATION_CHUNK_CHARS) {
+        expect(slice.trimEnd().includes('\n')).toBe(false);
+        expect(text[chunk.charEnd - 1] === '\n' || chunk.charEnd === text.length).toBe(true);
+      }
+    }
+    // A line longer than the default still stands alone and is never split.
+    const longLine = 'z'.repeat(TRANSCRIPT_PUNCTUATION_CHUNK_CHARS + 50);
+    const withLong = `short first line\n${longLine}\nafter`;
+    const longChunks = transcriptPunctuationChunks(withLong);
+    const holding = longChunks.find(
+      (chunk) => chunk.charStart < withLong.indexOf(longLine) + longLine.length
+        && chunk.charEnd > withLong.indexOf(longLine),
+    )!;
+    expect(withLong.slice(holding.charStart, holding.charEnd)).toContain(longLine);
   });
 });
 

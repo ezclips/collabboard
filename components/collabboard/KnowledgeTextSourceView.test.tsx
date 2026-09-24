@@ -3,11 +3,15 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import KnowledgeTextSourceView, { splitKnowledgeTextHighlight } from './KnowledgeTextSourceView';
 import { knowledgeTranscriptReadingBlocks }
   from '@/lib/domain/knowledge/knowledgeTranscriptReadingLayout';
+import { transcriptPunctuationChunks }
+  from '@/lib/domain/knowledge/transcriptPunctuationProjection';
 import type { KnowledgeTranscriptStoredRepresentation }
   from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 
@@ -309,17 +313,21 @@ describe('a transcript can be made readable, with the words guaranteed', () => {
   };
 
   /**
-   * The faithful-model response: punctuation added, words untouched. It appends
-   * a mark to the LAST word of the chunk rather than adding a sentence, so the
-   * word sequence is identical and projection accepts.
+   * The faithful-model response for a whole batch: punctuation added, words
+   * untouched. It appends a mark to the LAST word of each passage rather than
+   * adding a sentence, so the word sequence is identical and the projection
+   * accepts.
    */
   const punctuating = (body: unknown) => {
-    const selected = (body as { selectedText?: string }).selectedText ?? '';
-    const words = selected.split(/\s+/).filter(Boolean);
-    const punctuated = words
-      .map((word, index) => (index === words.length - 1 ? `${word}.` : index === 0 ? word : `${word},`))
-      .join(' ');
-    return new Response(JSON.stringify({ text: punctuated }), { status: 200 });
+    const passages = (body as { passages?: string[] }).passages ?? [];
+    const results = passages.map((passage) => {
+      const words = passage.split(/\s+/).filter(Boolean);
+      const punctuated = words
+        .map((word, index) => (index === words.length - 1 ? `${word}.` : index === 0 ? word : `${word},`))
+        .join(' ');
+      return { status: 'projected', text: punctuated };
+    });
+    return new Response(JSON.stringify({ results }), { status: 200 });
   };
 
   const toggle = (host: HTMLElement) =>
@@ -343,7 +351,7 @@ describe('a transcript can be made readable, with the words guaranteed', () => {
     expect(host.textContent).toBe(SPOKEN);
   });
 
-  it('12. posts each chunk with ONLY the four fields, and no ids or offsets', async () => {
+  it('12. posts each batch with ONLY a passages array, and no ids or offsets', async () => {
     stubAi(punctuating);
     const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
     click(toggle(host)!);
@@ -351,21 +359,21 @@ describe('a transcript can be made readable, with the words guaranteed', () => {
 
     expect(sentBodies.length).toBeGreaterThan(0);
     for (const body of sentBodies) {
-      // EXACTLY these four keys -- assert the key set, so an added field fails.
-      expect(Object.keys(body as object).sort()).toEqual(['action', 'instruction', 'purpose', 'selectedText']);
+      // EXACTLY this one key -- assert the key set, so an added field fails.
+      expect(Object.keys(body as object).sort()).toEqual(['passages']);
       // And none of the forbidden content, by name.
       const serialized = JSON.stringify(body);
       for (const forbidden of ['documentId', 'boardId', 'charStart', 'charEnd', 'cues', 'offset', 'videoIdentity']) {
         expect(serialized).not.toContain(forbidden);
       }
-      expect((body as { action: string }).action).toBe('custom');
-      expect((body as { purpose: string }).purpose).toBe('source-ai');
     }
   });
 
   it('13. a REFUSED chunk renders its RAW text and the notice names the count', async () => {
-    // The model changes a word, so projection refuses the chunk.
-    stubAi(() => new Response(JSON.stringify({ text: 'completely different words entirely here' }), { status: 200 }));
+    // The server says every passage was refused.
+    stubAi((body) => new Response(JSON.stringify({
+      results: ((body as { passages: string[] }).passages).map(() => ({ status: 'refused' })),
+    }), { status: 200 }));
     const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
     click(toggle(host)!);
     await settle();
@@ -379,7 +387,9 @@ describe('a transcript can be made readable, with the words guaranteed', () => {
   });
 
   it('14. ALL chunks refused still shows the raw transcript; never a silent success', async () => {
-    stubAi(() => new Response(JSON.stringify({ text: 'a summary of the passage' }), { status: 200 }));
+    stubAi((body) => new Response(JSON.stringify({
+      results: ((body as { passages: string[] }).passages).map(() => ({ status: 'refused' })),
+    }), { status: 200 }));
     const { host } = render({ text: SPOKEN, transcriptRepresentation: representation });
     click(toggle(host)!);
     await settle();
@@ -429,5 +439,73 @@ describe('a transcript can be made readable, with the words guaranteed', () => {
     expect(host.querySelector('[data-knowledge-transcript-readable-status="error"]')).not.toBeNull();
     // The raw text is still there -- never a blank pane.
     expect(transcriptText(host)?.textContent).toContain(SPOKEN);
+  });
+
+  it('18. a ~2,500-character transcript is ONE batch of 3 passages or fewer', async () => {
+    // 900-character default passages: ~2,500 characters is at most three.
+    const line = 'a spoken line of transcript words here';
+    const transcript = Array.from({ length: 60 }, (_, index) => `${line} ${index}`).join('\n');
+    expect(transcript.length).toBeGreaterThan(2_000);
+    expect(transcript.length).toBeLessThan(3_000);
+    expect(transcriptPunctuationChunks(transcript).length).toBeLessThanOrEqual(3);
+
+    stubAi(punctuating);
+    const { host } = render({ text: transcript, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    expect(sentBodies).toHaveLength(1);
+    expect((sentBodies[0] as { passages: string[] }).passages.length).toBeLessThanOrEqual(3);
+  });
+
+  it('19. more than 12 passages is sent as 2 batches, in order', async () => {
+    // Thirteen passages: one over the twelve-per-batch limit.
+    const transcript = Array.from({ length: 13 }, (_, index) => `${'w'.repeat(950)} ${index}`).join('\n');
+    expect(transcriptPunctuationChunks(transcript).length).toBe(13);
+
+    stubAi(punctuating);
+    const { host } = render({ text: transcript, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    expect(sentBodies).toHaveLength(2);
+    expect((sentBodies[0] as { passages: string[] }).passages).toHaveLength(12);
+    expect((sentBodies[1] as { passages: string[] }).passages).toHaveLength(1);
+    // THE ORDER: the first batch carries the first twelve passages, and the
+    // second carries the last one -- the same slices the chunks describe.
+    const chunks = transcriptPunctuationChunks(transcript);
+    const expected = chunks.map((chunk) => transcript.slice(chunk.charStart, chunk.charEnd));
+    const sentPassages = sentBodies.flatMap((body) => (body as { passages: string[] }).passages);
+    expect(sentPassages).toEqual(expected);
+  });
+
+  it('20. a failed batch leaves its passages raw while the other batch is readable', async () => {
+    const transcript = Array.from({ length: 13 }, (_, index) => `${'w'.repeat(950)} ${index}`).join('\n');
+    let call = 0;
+    stubAi((body) => {
+      call += 1;
+      // The FIRST batch fails; the second succeeds.
+      if (call === 1) return new Response('nope', { status: 500 });
+      return punctuating(body);
+    });
+    const { host } = render({ text: transcript, transcriptRepresentation: representation });
+    click(toggle(host)!);
+    await settle();
+
+    // Not an outage: only the first (12-passage) batch failed.
+    expect(host.querySelector('[data-knowledge-transcript-readable-status="error"]')).toBeNull();
+    expect(host.querySelector('[data-knowledge-transcript-readable="true"]')).not.toBeNull();
+    const notice = host.querySelector('[data-knowledge-transcript-readable-partial="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain('12 of 13');
+  });
+
+  it('21. the component no longer references text-action', () => {
+    const source = readFileSync(
+      path.resolve(process.cwd(), 'components/collabboard/KnowledgeTextSourceView.tsx'),
+      'utf8',
+    );
+    expect(source).not.toContain('text-action');
+    expect(source).toContain('/api/ai/transcript-punctuate');
   });
 });

@@ -43,6 +43,15 @@ export interface PunctuationProjection {
 }
 
 /**
+ * PATCH-178. How long a punctuated passage may be by default.
+ *
+ * Smaller than the 3,000 this was: one misheard word used to cost a whole third
+ * of a video its readable form, and the smaller the passage, the smaller that
+ * loss. ~900 characters is about ten passages for the chess transcript.
+ */
+export const TRANSCRIPT_PUNCTUATION_CHUNK_CHARS = 900;
+
+/**
  * The punctuation a model may place between words.
  *
  * A CLOSED, EXHAUSTIVE SET DECLARED AS A `Record`, deliberately, and the reason
@@ -291,7 +300,7 @@ export function projectTranscriptPunctuation(
  */
 export function transcriptPunctuationChunks(
   text: string,
-  maxChars: number = 3000,
+  maxChars: number = TRANSCRIPT_PUNCTUATION_CHUNK_CHARS,
 ): readonly { charStart: number; charEnd: number }[] {
   if (text.length === 0) return [];
 

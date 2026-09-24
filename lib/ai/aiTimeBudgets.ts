@@ -34,6 +34,7 @@ export interface AITimeBudget {
  *   app/api/ai/table-fill/route.ts          setTimeout(..., 25_000)
  *   app/api/ai/table-plan/route.ts          setTimeout(..., 25_000)
  *   app/api/boards/[id]/ai/table-from-document/route.ts  setTimeout(..., 60_000)
+ *   app/api/ai/transcript-punctuate/route.ts setTimeout(..., 45_000)
  */
 export const AI_TIME_BUDGETS: readonly AITimeBudget[] = [
   { feature: 'Source AI and Edit & Rewrite (quick actions)', seconds: 20 },
@@ -44,4 +45,5 @@ export const AI_TIME_BUDGETS: readonly AITimeBudget[] = [
   { feature: 'Table fill with AI', seconds: 25 },
   { feature: 'Edit table with AI', seconds: 25 },
   { feature: 'Table from a document', seconds: 60 },
+  { feature: 'Readable transcript', seconds: 45 },
 ];

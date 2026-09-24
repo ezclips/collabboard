@@ -87,6 +87,13 @@ describe('AI_TIME_BUDGETS is bound to the server deadlines', () => {
     expect(Number((match![1]).replace(/_/g, '')) / 1000).toBe(budgetFor('Table from a document'));
   });
 
+  it('the transcript-punctuate route waits 45 s, as the table says', () => {
+    const source = read('app/api/ai/transcript-punctuate/route.ts');
+    const match = /setTimeout\(\s*\(\)\s*=>\s*controller\.abort\(\),\s*([\d_]+)\s*\)/.exec(source);
+    expect(match, 'no abort timeout found in the transcript-punctuate route').not.toBeNull();
+    expect(Number((match![1]).replace(/_/g, '')) / 1000).toBe(budgetFor('Readable transcript'));
+  });
+
   it('the table names every feature exactly once, with a positive whole-second budget', () => {
     const features = AI_TIME_BUDGETS.map((budget) => budget.feature);
     expect(new Set(features).size).toBe(features.length);
