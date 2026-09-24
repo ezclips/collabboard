@@ -3368,6 +3368,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
          * Every other box type keeps its exact pinned height.
          */
         const isPdfPlacementCard = !!readKnowledgePdfPlacement(padlet);
+        // Decided HERE, outside the top strip, which stays free of post-type
+        // lists (knowledgePdfCard test 37): the strip only reads the flag.
+        const isTableCard = padlet.type === 'table';
         /**
          * Before the card has ever been resized there is no manual height to
          * cap it, and a converted document is arbitrarily long -- a 200-page
@@ -3517,7 +3520,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               const isAIPost = padlet.type === 'ai-component';
               const showModalEditButton = canUseFreeformEditButton && !isLineMode && !isGraphConnectMode;
               const showContainerExpand = isContainer && (expandableContainers[padlet.id] ?? false);
-              const isTablePost = padlet.type === 'table';
+              const isTablePost = isTableCard;
               const showTableExpand = isTablePost && tableCardHasMore(padlet.content);
               const showAIExpand = isAIPost;
               const showExpandButton = showContainerExpand || showAIExpand || showTableExpand;
