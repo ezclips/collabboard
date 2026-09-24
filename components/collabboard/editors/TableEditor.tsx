@@ -1308,7 +1308,7 @@ export default function TableEditor({
                                                                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                                     setAxisMenu({ axis: 'column', index: i, x: rect.left, y: rect.bottom });
                                                                 }}
-                                                                className={`absolute right-1.5 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'text-purple-600 opacity-100' : 'text-gray-400 hover:text-gray-600 opacity-0 group-hover/col:opacity-100 focus:opacity-100'}`}
+                                                                className={`absolute right-0 top-0 z-30 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'text-purple-600 opacity-100' : 'text-gray-400 hover:text-gray-600 opacity-0 group-hover/col:opacity-100 focus:opacity-100'}`}
                                                             >
                                                                 <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
                                                                     <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />

@@ -304,8 +304,11 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
       expect(button.className).toContain('right');
       expect(button.className).toContain('top-0');
     }
-    // The column button is inset clear of the PATCH-170 resize strip.
-    expect(columnButton.className).toContain('right-1.5');
+    // The column button sits IN the corner, touching the border (owner, after PATCH-171),
+    // layered above the PATCH-170 resize strip (z-20), which keeps the rest of the edge.
+    expect(columnButton.className).toContain('right-0');
+    expect(columnButton.className).toContain('z-30');
+    expect(c.querySelector<HTMLElement>('[data-table-column-resize="0"]')!.className).toContain('z-20');
 
     // The row-number cell is p-0 and relative, and the triangle is anchored to
     // that cell's OWN corner, so its edges touch the cell borders.
