@@ -6,6 +6,7 @@ import {
   DEFAULT_COLUMN_WIDTH,
   deleteColumn,
   deleteRow,
+  deleteRowsWhere,
   distributeColumnWidths,
   duplicateColumn,
   duplicateRow,
@@ -112,6 +113,38 @@ describe('deleteRow', () => {
 
   it('does not mutate a deeply frozen input', () => {
     expect(() => deleteRow(frozen(), 0)).not.toThrow();
+  });
+});
+
+describe('PATCH-175: deleteRowsWhere', () => {
+  it('removes the matching rows and re-keys the styles of the survivors', () => {
+    const result = deleteRowsWhere(baseGrid(), (_row, index) => index === 1);
+    expect(result.rows).toEqual([['a0', 'b0', 'c0'], ['a2', 'b2', 'c2']]);
+    // '1-1' is gone; '2-2' moves up to '1-2', exactly as deleteRow does it.
+    expect(result.cellStyles).toEqual({
+      '0-0': { bg: '#fee2e2' },
+      '1-2': { bg: '#dbeafe' },
+    });
+  });
+
+  it('removes several rows at once and keeps the rest in order', () => {
+    const result = deleteRowsWhere(baseGrid(), (row) => (row[0] ?? '') !== 'a1');
+    expect(result.rows).toEqual([['a1', 'b1', 'c1']]);
+    expect(result.cellStyles).toEqual({ '0-1': { bg: '#dcfce7', bold: true } });
+  });
+
+  it('NEVER leaves zero rows: keeping the first row when all match', () => {
+    const result = deleteRowsWhere(baseGrid(), () => true);
+    expect(result.rows).toHaveLength(1);
+  });
+
+  it('returns the same grid when nothing matches', () => {
+    const grid = baseGrid();
+    expect(deleteRowsWhere(grid, () => false)).toBe(grid);
+  });
+
+  it('does not mutate a deeply frozen input', () => {
+    expect(() => deleteRowsWhere(frozen(), (_row, index) => index === 0)).not.toThrow();
   });
 });
 

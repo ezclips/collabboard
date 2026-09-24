@@ -258,6 +258,47 @@ export function deleteRow(grid: TableGrid, index: number): TableGrid {
   return withWidths(grid, { rows, columns: grid.columns, cellStyles });
 }
 
+/**
+ * PATCH-175. The grid without the rows a predicate accepts.
+ *
+ * Runs the predicate against EACH row as it was when this call began (row and
+ * its index), then rebuilds the table from the survivors: text, style keys and
+ * everything else move together, exactly as `deleteRow` does it. NEVER LEAVES
+ * ZERO ROWS: if the predicate accepts every row, the FIRST row is kept (empty
+ * of text, styles kept) so a table always has something to render -- matching
+ * the one-row floor `deleteRow` enforces.
+ */
+export function deleteRowsWhere(
+  grid: TableGrid,
+  predicate: (row: readonly string[], index: number) => boolean,
+): TableGrid {
+  const kept: number[] = [];
+  for (let row = 0; row < grid.rows.length; row += 1) {
+    if (predicate(grid.rows[row], row)) continue;
+    kept.push(row);
+  }
+  // Nothing matched: the same grid object, so a caller can rely on identity.
+  if (kept.length === grid.rows.length) return grid;
+  // Everything matched: keep ONE row (the first), emptied of text but with its
+  // styles, so a table always has a row to render -- the deleteRow floor.
+  if (kept.length === 0) {
+    const rows = [grid.columns.map(() => '')];
+    const cellStyles = stylesFrom(styleEntries(grid).flatMap((entry) => (
+      entry.row === 0 ? [{ ...entry, row: 0 }] : []
+    )));
+    return withWidths(grid, { rows, columns: grid.columns, cellStyles });
+  }
+
+  const rows = kept.map((oldIndex) => [...grid.rows[oldIndex]]);
+  const newIndexByOld = new Map<number, number>();
+  kept.forEach((oldIndex, newIndex) => newIndexByOld.set(oldIndex, newIndex));
+  const cellStyles = stylesFrom(styleEntries(grid).flatMap((entry) => {
+    const nextRow = newIndexByOld.get(entry.row);
+    return nextRow === undefined ? [] : [{ ...entry, row: nextRow }];
+  }));
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles });
+}
+
 /** The grid with row `index` copied (text AND styles) at `index + 1`. */
 export function duplicateRow(grid: TableGrid, index: number): TableGrid {
   if (index < 0 || index >= grid.rows.length) return grid;

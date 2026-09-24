@@ -17,6 +17,7 @@ import {
     Check,
     Search,
     Sparkles,
+    WandSparkles,
     X,
 } from "lucide-react";
 import { useReactTable, getCoreRowModel, ColumnDef } from "@tanstack/react-table";
@@ -58,6 +59,7 @@ import TableFillPanel from "./TableFillPanel";
 import TableRowFillPanel from "./TableRowFillPanel";
 import TableAskAIPanel from "./TableAskAIPanel";
 import TableFindReplacePanel from "./TableFindReplacePanel";
+import TableAIEditPanel from "./TableAIEditPanel";
 import { type TableFillCell, type TableFillValue } from "@/lib/domain/ai/tableFill";
 import {
     formatSummary,
@@ -329,6 +331,15 @@ export default function TableEditor({
     const [replacedMessage, setReplacedMessage] = useState<string | null>(null);
 
     /**
+     * PATCH-175. Whether the "Edit with AI" panel is open, and the DRAFT it is
+     * previewing. While a draft exists the table is locked exactly as pending
+     * fill suggestions lock it, so the draft always matches the table it was
+     * built from.
+     */
+    const [aiEditOpen, setAiEditOpen] = useState(false);
+    const [aiEditPreview, setAiEditPreview] = useState<TableGrid | null>(null);
+
+    /**
      * PATCH-172. The column whose title is being edited inline, its working
      * value, and the duplicate-title hint shown under the input.
      */
@@ -378,7 +389,7 @@ export default function TableEditor({
     const [fillTarget, setFillTarget] = useState<number | null>(null);
     const [fillRow, setFillRow] = useState<number | null>(null);
     const [fillSuggestions, setFillSuggestions] = useState<readonly TableFillCell[] | null>(null);
-    const fillLocked = fillSuggestions !== null;
+    const fillLocked = fillSuggestions !== null || aiEditPreview !== null;
 
     /**
      * PATCH-173/174. The snapshot an Undo offers to restore, and the message the
@@ -1035,6 +1046,8 @@ export default function TableEditor({
                 setAskAI(null);
                 setFillRow(null);
                 // The toolbar's own panels open in the same spot; one panel at a time.
+                setAiEditOpen(false);
+                setAiEditPreview(null);
                 setActiveSubmenu(null);
                 setFillTarget(index);
                 break;
@@ -1043,6 +1056,8 @@ export default function TableEditor({
                 // panel. Nothing is written until the user accepts.
                 setAskAI(null);
                 setFillTarget(null);
+                setAiEditOpen(false);
+                setAiEditPreview(null);
                 setActiveSubmenu(null);
                 setFillRow(index);
                 break;
@@ -1232,6 +1247,37 @@ export default function TableEditor({
         setReplacedMessage(null);
     }, []);
 
+    /**
+     * PATCH-175. The "Edit with AI" panel. Opening it closes every other panel
+     * and the toolbar submenu: one panel at a time, as the AI panels do.
+     */
+    const openAIEdit = useCallback(() => {
+        setActiveSubmenu(null);
+        setFillTarget(null);
+        setFillRow(null);
+        setAskAI(null);
+        setFindPanelOpen(false);
+        setAiEditOpen(true);
+    }, []);
+
+    const closeAIEdit = useCallback(() => {
+        setAiEditOpen(false);
+        setAiEditPreview(null);
+    }, []);
+
+    /**
+     * APPLY the AI plan's draft through `applyUndoableGrid`, the one path sort
+     * and replace use, so Undo is offered for ten seconds.
+     */
+    const applyAIEdit = useCallback((draft: TableGrid, stepCount: number) => {
+        applyUndoableGrid(
+            draft,
+            `Applied ${stepCount} AI change${stepCount === 1 ? '' : 's'}`,
+        );
+        setAiEditOpen(false);
+        setAiEditPreview(null);
+    }, [applyUndoableGrid]);
+
     /** PATCH-174. Ctrl/Cmd+F opens Find while the table editor is open. */
     useEffect(() => {
         if (!isOpen) return;
@@ -1239,6 +1285,8 @@ export default function TableEditor({
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
                 e.preventDefault();
                 setFindPanelOpen(true);
+                setAiEditOpen(false);
+                setAiEditPreview(null);
             }
         };
         window.addEventListener('keydown', onKeyDown);
@@ -1278,6 +1326,8 @@ export default function TableEditor({
         setFillRow(null);
         setContextMenu(null);
         // The toolbar's own panels open in the same spot; one panel at a time.
+        setAiEditOpen(false);
+        setAiEditPreview(null);
         setActiveSubmenu(null);
         setAskAI({ text, truncated, cellCount });
     }, [selectionRange, selectedCell, rows, columns, normalizeRange]);
@@ -1393,7 +1443,8 @@ export default function TableEditor({
         { id: "cellColor", icon: Palette, label: "Cell color", submenu: "cellColor" },
         { id: "formula", icon: Hash, label: "Formula", submenu: "formula" },
         { id: "alignment", icon: AlignLeft, label: "Alignment", submenu: "alignment" },
-        { id: "find", icon: Search, label: "Find", onClick: () => { setActiveSubmenu(null); setFindPanelOpen(true); } },
+        { id: "find", icon: Search, label: "Find", onClick: () => { setActiveSubmenu(null); setAiEditOpen(false); setAiEditPreview(null); setFindPanelOpen(true); } },
+        { id: "aiEdit", icon: WandSparkles, label: "Edit with AI", onClick: openAIEdit },
         { id: "addColumn", icon: Grid, label: "Add column", onClick: addColumn },
         { id: "addRow", icon: Plus, label: "Add row", onClick: addRow },
     ];
@@ -2382,6 +2433,26 @@ export default function TableEditor({
                             }}
                             onReplaceAll={handleReplaceAll}
                             onClose={closeFindPanel}
+                        />
+                    </div>
+                )}
+
+                {/* PATCH-175. The "Edit with AI" panel, same placement and
+                    one-panel-at-a-time rule. It owns the request and the draft;
+                    the editor owns the one writer and the Undo. */}
+                {aiEditOpen && (
+                    <div
+                        className="fixed z-[100]"
+                        style={{
+                            top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
+                            left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                        }}
+                    >
+                        <TableAIEditPanel
+                            grid={currentGrid()}
+                            onApply={applyAIEdit}
+                            onPreview={setAiEditPreview}
+                            onClose={closeAIEdit}
                         />
                     </div>
                 )}

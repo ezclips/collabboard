@@ -32,6 +32,7 @@ export interface AITimeBudget {
  *   app/api/ai/classify-intent/route.ts     timeoutMs: 10_000
  *   lib/server/ai/boardWikiCompilation.ts   WIKI_COMPILE_TIMEOUT_MS = 60_000
  *   app/api/ai/table-fill/route.ts          setTimeout(..., 25_000)
+ *   app/api/ai/table-plan/route.ts          setTimeout(..., 25_000)
  */
 export const AI_TIME_BUDGETS: readonly AITimeBudget[] = [
   { feature: 'Source AI and Edit & Rewrite (quick actions)', seconds: 20 },
@@ -40,4 +41,5 @@ export const AI_TIME_BUDGETS: readonly AITimeBudget[] = [
   { feature: 'Auto mode classifier', seconds: 10 },
   { feature: 'Board wiki', seconds: 60 },
   { feature: 'Table fill with AI', seconds: 25 },
+  { feature: 'Edit table with AI', seconds: 25 },
 ];
