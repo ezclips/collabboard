@@ -86,6 +86,12 @@ const DOCUMENT_TOUCHERS = [
   // cues or the canonical text, so it cannot make them disagree either.
   'lib/infra/knowledge/knowledgeTranscriptIndexAdapters.ts',
   'lib/server/ai/boardAiChatContext.ts',
+  // ADDED by PATCH-176 (table from a document), and it CANNOT WRITE: its client
+  // interface exposes only `from(...).select(...)` with eq/is/gte/lte/order --
+  // no insert, update, delete or rpc -- so a write here is a compile error. It
+  // reads a ready document's pages or chunks, board-scoped, through the caller's
+  // own client, to show them to the model; it never touches cues.
+  'lib/server/ai/tableFromDocumentSource.ts',
   'lib/server/knowledge/knowledgeDocumentDeleteSession.ts',
   'lib/server/wiki/boardWikiSourceVersions.ts',
 ];
@@ -100,6 +106,8 @@ const CHUNK_TOUCHERS = [
   'lib/infra/knowledge/knowledgeSemanticSearchAdapters.ts',
   'lib/infra/knowledge/knowledgeTextIngestionAdapters.ts',
   'lib/server/ai/boardAiChatContext.ts',
+  // PATCH-176: read-only; see the note in DOCUMENT_TOUCHERS.
+  'lib/server/ai/tableFromDocumentSource.ts',
 ];
 
 describe('transcript consistency: the writers that exist', () => {

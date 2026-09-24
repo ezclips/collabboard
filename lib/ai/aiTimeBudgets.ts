@@ -33,6 +33,7 @@ export interface AITimeBudget {
  *   lib/server/ai/boardWikiCompilation.ts   WIKI_COMPILE_TIMEOUT_MS = 60_000
  *   app/api/ai/table-fill/route.ts          setTimeout(..., 25_000)
  *   app/api/ai/table-plan/route.ts          setTimeout(..., 25_000)
+ *   app/api/boards/[id]/ai/table-from-document/route.ts  setTimeout(..., 60_000)
  */
 export const AI_TIME_BUDGETS: readonly AITimeBudget[] = [
   { feature: 'Source AI and Edit & Rewrite (quick actions)', seconds: 20 },
@@ -42,4 +43,5 @@ export const AI_TIME_BUDGETS: readonly AITimeBudget[] = [
   { feature: 'Board wiki', seconds: 60 },
   { feature: 'Table fill with AI', seconds: 25 },
   { feature: 'Edit table with AI', seconds: 25 },
+  { feature: 'Table from a document', seconds: 60 },
 ];

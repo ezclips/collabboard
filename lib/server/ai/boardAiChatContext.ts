@@ -141,7 +141,7 @@ const bounded = (text: string): string =>
  * who can read two boards still cannot pull board Y's PDF into board X's
  * conversation, because the row simply is not there for this query.
  */
-async function readDocument(
+export async function readDocument(
   client: BoardAiContextSupabaseClient,
   boardId: string,
   documentId: string,
@@ -199,7 +199,7 @@ async function readPages(
  * stitchKnowledgeTextRange re-checks that on the way out anyway, and returns
  * nothing rather than a fragment if a row is missing.
  */
-async function readTextChunks(
+export async function readTextChunks(
   client: BoardAiContextSupabaseClient,
   documentId: string,
 ): Promise<Result<KnowledgeStoredTextChunk[], DomainError>> {

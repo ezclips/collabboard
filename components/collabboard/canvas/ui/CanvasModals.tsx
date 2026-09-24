@@ -276,6 +276,7 @@ export default function CanvasModals({
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
           currentUserName={user?.email?.split('@')[0] || 'You'}
+          boardId={canvasId}
         />
       </div>
 

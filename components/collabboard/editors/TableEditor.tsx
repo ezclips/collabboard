@@ -17,6 +17,7 @@ import {
     Check,
     Search,
     Sparkles,
+    FileInput,
     WandSparkles,
     X,
 } from "lucide-react";
@@ -60,6 +61,7 @@ import TableRowFillPanel from "./TableRowFillPanel";
 import TableAskAIPanel from "./TableAskAIPanel";
 import TableFindReplacePanel from "./TableFindReplacePanel";
 import TableAIEditPanel from "./TableAIEditPanel";
+import TableFromDocumentPanel from "./TableFromDocumentPanel";
 import { type TableFillCell, type TableFillValue } from "@/lib/domain/ai/tableFill";
 import {
     formatSummary,
@@ -128,6 +130,11 @@ interface TableEditorProps {
     accessMode?: CommentAccessMode;
     currentUserId?: string;
     currentUserName?: string;
+    /**
+     * PATCH-176. The board this table lives on, so "From a document" can list
+     * the board's sources. ABSENT means the tool is not offered at all.
+     */
+    boardId?: string;
 }
 
 type CellStyle = {
@@ -195,6 +202,7 @@ export default function TableEditor({
     accessMode = 'manage',
     currentUserId = 'anon',
     currentUserName = 'You',
+    boardId,
 }: TableEditorProps) {
     // Toolbar mode state
     const [toolbarMode, setToolbarMode] = useState<TableToolbarMode>("outside");
@@ -340,6 +348,13 @@ export default function TableEditor({
     const [aiEditPreview, setAiEditPreview] = useState<TableGrid | null>(null);
 
     /**
+     * PATCH-176. Whether the "From a document" panel is open, and the DRAFT it
+     * is previewing. The lock works exactly as the AI-edit draft's does.
+     */
+    const [fromDocumentOpen, setFromDocumentOpen] = useState(false);
+    const [fromDocumentPreview, setFromDocumentPreview] = useState<TableGrid | null>(null);
+
+    /**
      * PATCH-172. The column whose title is being edited inline, its working
      * value, and the duplicate-title hint shown under the input.
      */
@@ -389,7 +404,7 @@ export default function TableEditor({
     const [fillTarget, setFillTarget] = useState<number | null>(null);
     const [fillRow, setFillRow] = useState<number | null>(null);
     const [fillSuggestions, setFillSuggestions] = useState<readonly TableFillCell[] | null>(null);
-    const fillLocked = fillSuggestions !== null || aiEditPreview !== null;
+    const fillLocked = fillSuggestions !== null || aiEditPreview !== null || fromDocumentPreview !== null;
 
     /**
      * PATCH-173/174. The snapshot an Undo offers to restore, and the message the
@@ -398,6 +413,8 @@ export default function TableEditor({
     const [undoOffer, setUndoOffer] = useState<{
         message: string;
         rows: readonly (readonly string[])[];
+        /** PATCH-176: the AI table changes columns, so they must be undone too. */
+        columns: readonly string[];
         cellStyles: Readonly<Record<string, CellStyle>>;
         columnWidths: readonly number[];
         columnSummaries: readonly (ColumnSummary | null)[];
@@ -833,6 +850,7 @@ export default function TableEditor({
         const snapshot = {
             message,
             rows: grid.rows.map((row) => [...row]),
+            columns: [...grid.columns],
             cellStyles: { ...grid.cellStyles },
             columnWidths: [...grid.columnWidths ?? []],
             columnSummaries: [...grid.columnSummaries ?? []],
@@ -1048,6 +1066,8 @@ export default function TableEditor({
                 // The toolbar's own panels open in the same spot; one panel at a time.
                 setAiEditOpen(false);
                 setAiEditPreview(null);
+                setFromDocumentOpen(false);
+                setFromDocumentPreview(null);
                 setActiveSubmenu(null);
                 setFillTarget(index);
                 break;
@@ -1058,6 +1078,8 @@ export default function TableEditor({
                 setFillTarget(null);
                 setAiEditOpen(false);
                 setAiEditPreview(null);
+                setFromDocumentOpen(false);
+                setFromDocumentPreview(null);
                 setActiveSubmenu(null);
                 setFillRow(index);
                 break;
@@ -1190,6 +1212,7 @@ export default function TableEditor({
     const undoLastChange = useCallback(() => {
         if (!undoOffer) return;
         setRows(undoOffer.rows.map((row) => [...row]));
+        setColumns([...undoOffer.columns]);
         setCellStyles({ ...undoOffer.cellStyles });
         setColumnWidths([...undoOffer.columnWidths]);
         setColumnSummaries([...undoOffer.columnSummaries]);
@@ -1257,6 +1280,8 @@ export default function TableEditor({
         setFillRow(null);
         setAskAI(null);
         setFindPanelOpen(false);
+        setFromDocumentOpen(false);
+        setFromDocumentPreview(null);
         setAiEditOpen(true);
     }, []);
 
@@ -1278,6 +1303,35 @@ export default function TableEditor({
         setAiEditPreview(null);
     }, [applyUndoableGrid]);
 
+    /**
+     * PATCH-176. The "From a document" panel, same one-panel-at-a-time rule.
+     */
+    const openFromDocument = useCallback(() => {
+        setActiveSubmenu(null);
+        setFillTarget(null);
+        setFillRow(null);
+        setAskAI(null);
+        setFindPanelOpen(false);
+        setAiEditOpen(false);
+        setAiEditPreview(null);
+        setFromDocumentOpen(true);
+    }, []);
+
+    const closeFromDocument = useCallback(() => {
+        setFromDocumentOpen(false);
+        setFromDocumentPreview(null);
+    }, []);
+
+    /**
+     * APPLY the document table through `applyUndoableGrid`, so Undo restores
+     * the old table exactly as it does after a sort or a replace.
+     */
+    const applyFromDocument = useCallback((draft: TableGrid, filename: string) => {
+        applyUndoableGrid(draft, `Created from ${filename}`);
+        setFromDocumentOpen(false);
+        setFromDocumentPreview(null);
+    }, [applyUndoableGrid]);
+
     /** PATCH-174. Ctrl/Cmd+F opens Find while the table editor is open. */
     useEffect(() => {
         if (!isOpen) return;
@@ -1287,6 +1341,8 @@ export default function TableEditor({
                 setFindPanelOpen(true);
                 setAiEditOpen(false);
                 setAiEditPreview(null);
+                setFromDocumentOpen(false);
+                setFromDocumentPreview(null);
             }
         };
         window.addEventListener('keydown', onKeyDown);
@@ -1328,6 +1384,8 @@ export default function TableEditor({
         // The toolbar's own panels open in the same spot; one panel at a time.
         setAiEditOpen(false);
         setAiEditPreview(null);
+        setFromDocumentOpen(false);
+        setFromDocumentPreview(null);
         setActiveSubmenu(null);
         setAskAI({ text, truncated, cellCount });
     }, [selectionRange, selectedCell, rows, columns, normalizeRange]);
@@ -1443,8 +1501,9 @@ export default function TableEditor({
         { id: "cellColor", icon: Palette, label: "Cell color", submenu: "cellColor" },
         { id: "formula", icon: Hash, label: "Formula", submenu: "formula" },
         { id: "alignment", icon: AlignLeft, label: "Alignment", submenu: "alignment" },
-        { id: "find", icon: Search, label: "Find", onClick: () => { setActiveSubmenu(null); setAiEditOpen(false); setAiEditPreview(null); setFindPanelOpen(true); } },
+        { id: "find", icon: Search, label: "Find", onClick: () => { setActiveSubmenu(null); setAiEditOpen(false); setAiEditPreview(null); setFromDocumentOpen(false); setFromDocumentPreview(null); setFindPanelOpen(true); } },
         { id: "aiEdit", icon: WandSparkles, label: "Edit with AI", onClick: openAIEdit },
+        ...(boardId ? [{ id: "fromDocument", icon: FileInput, label: "From a document", onClick: openFromDocument }] : []),
         { id: "addColumn", icon: Grid, label: "Add column", onClick: addColumn },
         { id: "addRow", icon: Plus, label: "Add row", onClick: addRow },
     ];
@@ -2453,6 +2512,26 @@ export default function TableEditor({
                             onApply={applyAIEdit}
                             onPreview={setAiEditPreview}
                             onClose={closeAIEdit}
+                        />
+                    </div>
+                )}
+
+                {/* PATCH-176. The "From a document" panel, same placement and
+                    one-panel-at-a-time rule. */}
+                {fromDocumentOpen && boardId && (
+                    <div
+                        className="fixed z-[100]"
+                        style={{
+                            top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
+                            left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                        }}
+                    >
+                        <TableFromDocumentPanel
+                            boardId={boardId}
+                            currentTableHasText={rows.some((row) => row.some((cell) => cell.trim().length > 0))}
+                            onApply={applyFromDocument}
+                            onPreview={setFromDocumentPreview}
+                            onClose={closeFromDocument}
                         />
                     </div>
                 )}
