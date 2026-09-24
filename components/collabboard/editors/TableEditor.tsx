@@ -41,7 +41,9 @@ import {
 } from "@/lib/domain/canvas/tableStructure";
 import { TableAxisMenu, type TableAxisAction } from "../menus/TableAxisMenu";
 import TableFillPanel from "./TableFillPanel";
+import TableAskAIPanel from "./TableAskAIPanel";
 import { applyTableFillValues, type TableFillValue } from "@/lib/domain/ai/tableFill";
+import { tableSelectionText } from "@/lib/domain/ai/tableAskAI";
 
 // Comment interface
 interface PadletComment {
@@ -287,6 +289,16 @@ export default function TableEditor({
     >(null);
     const fillLocked = fillSuggestions !== null;
 
+    /**
+     * PATCH-168. The "Ask AI…" panel and the selection text captured when it was
+     * opened. `askAI` holds the captured text and count so moving the selection
+     * afterwards cannot change what was asked; the insert target is read live
+     * from `selectedCell` so the answer lands where the user is looking.
+     */
+    const [askAI, setAskAI] = useState<
+        { text: string; truncated: boolean; cellCount: number } | null
+    >(null);
+
     // Submenu states
     const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
     const [pinnedTextStyle, setPinnedTextStyle] = useState(false);
@@ -529,7 +541,9 @@ export default function TableEditor({
         const isMultiCell = minRow !== maxRow || minCol !== maxCol;
 
         // Check if any selected cell has text
-        if (isMultiCell && !pinnedTextStyle && activeSubmenu !== "textStyle") {
+        // Not while an AI panel is open: it occupies the same spot, one panel at a time.
+        const aiPanelOpen = askAI !== null || fillTarget !== null;
+        if (isMultiCell && !pinnedTextStyle && !aiPanelOpen && activeSubmenu !== "textStyle") {
             let hasText = false;
             for (let r = minRow; r <= maxRow && !hasText; r++) {
                 for (let c = minCol; c <= maxCol && !hasText; c++) {
@@ -543,7 +557,7 @@ export default function TableEditor({
                 setActiveSubmenu("textStyle");
             }
         }
-    }, [isSelectingCells, selectionRange, normalizeRange, rows, pinnedTextStyle, activeSubmenu]);
+    }, [isSelectingCells, selectionRange, normalizeRange, rows, pinnedTextStyle, activeSubmenu, askAI, fillTarget]);
 
     // Handle cell mouse down (Start Selection)
     const handleCellMouseDown = (rowIndex: number, colIndex: number, e?: React.MouseEvent) => {
@@ -739,6 +753,9 @@ export default function TableEditor({
             case 'fill-ai':
                 // Column-only (the row menu never reports it): open the panel
                 // for this column. Nothing is written until the user accepts.
+                setAskAI(null);
+                // The toolbar's own panels open in the same spot; one panel at a time.
+                setActiveSubmenu(null);
                 setFillTarget(index);
                 break;
         }
@@ -812,6 +829,48 @@ export default function TableEditor({
     }, [applyGrid, currentGrid, fillSuggestions]);
 
     const discardFillSuggestions = useCallback(() => setFillSuggestions(null), []);
+
+    /** The active cell's current text, so the Ask AI panel can label its insert. */
+    const activeCellHasText = selectedCell
+        ? (rows[selectedCell.row]?.[selectedCell.col] ?? '').trim().length > 0
+        : false;
+
+    /**
+     * PATCH-168. Capture the selection as text NOW, then open the panel. Opening
+     * it closes the Fill with AI panel: two AI panels cannot be open at once.
+     */
+    const openAskAI = useCallback(() => {
+        const range = selectionRange
+            ? normalizeRange(selectionRange)
+            : selectedCell
+                ? { minRow: selectedCell.row, maxRow: selectedCell.row, minCol: selectedCell.col, maxCol: selectedCell.col }
+                : null;
+        if (!range) return;
+        const { text, truncated } = tableSelectionText({ rows, columns }, range);
+        const cellCount = (range.maxRow - range.minRow + 1) * (range.maxCol - range.minCol + 1);
+        setFillTarget(null);
+        setContextMenu(null);
+        // The toolbar's own panels open in the same spot; one panel at a time.
+        setActiveSubmenu(null);
+        setAskAI({ text, truncated, cellCount });
+    }, [selectionRange, selectedCell, rows, columns, normalizeRange]);
+
+    const closeAskAI = useCallback(() => setAskAI(null), []);
+
+    /**
+     * INSERT the answer into the CURRENTLY selected cell through `applyGrid`,
+     * the single writer: only that cell's text changes, every style is kept.
+     */
+    const insertAskAIAnswer = useCallback((value: string) => {
+        if (!selectedCell) return;
+        const grid = currentGrid();
+        const nextRows = grid.rows.map((row, r) => (
+            r === selectedCell.row
+                ? row.map((cell, c) => (c === selectedCell.col ? value : cell))
+                : [...row]
+        ));
+        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles });
+    }, [applyGrid, currentGrid, selectedCell]);
 
     const handleCut = useCallback(() => {
         if (!selectedCell) return;
@@ -1242,6 +1301,10 @@ export default function TableEditor({
                                                                     // This allows native browser text selection to work
                                                                     e.stopPropagation();
 
+                                                                    // A RIGHT-click inside the current selection keeps it, so the
+                                                                    // cell menu (and Ask AI) acts on every selected cell, not one.
+                                                                    if (e.button === 2 && isCellSelected(row.index, colIndex)) return;
+
                                                                     // Manually focus the cell without starting drag
                                                                     setSelectedCell({ row: row.index, col: colIndex });
                                                                     setSelectionRange({
@@ -1565,6 +1628,7 @@ export default function TableEditor({
                         isOpen={contextMenu.isOpen}
                         position={{ x: contextMenu.x, y: contextMenu.y }}
                         onClose={() => setContextMenu(null)}
+                        onAskAI={openAskAI}
                         onCut={handleCut}
                         onCopy={handleCopy}
                         onPaste={handlePaste}
@@ -1615,6 +1679,29 @@ export default function TableEditor({
                             rows={rows}
                             onSuggestions={handleFillSuggestions}
                             onClose={closeFillPanel}
+                        />
+                    </div>
+                )}
+
+                {/* PATCH-168. The "Ask AI…" panel, anchored beside the table
+                    card. It owns only the request; the editor owns the insert,
+                    and the table stays editable while it is open. */}
+                {askAI && (
+                    <div
+                        className="fixed z-[100]"
+                        style={{
+                            top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
+                            left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                        }}
+                    >
+                        <TableAskAIPanel
+                            text={askAI.text}
+                            truncated={askAI.truncated}
+                            cellCount={askAI.cellCount}
+                            activeCell={selectedCell}
+                            activeCellHasText={activeCellHasText}
+                            onInsert={insertAskAIAnswer}
+                            onClose={closeAskAI}
                         />
                     </div>
                 )}

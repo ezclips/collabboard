@@ -16,6 +16,7 @@ import {
     ClipboardPaste,
     Copy,
     Scissors,
+    Sparkles,
     Trash2,
 } from "lucide-react";
 import {
@@ -42,6 +43,9 @@ interface TableCellContextMenuProps {
     position: { x: number; y: number };
     onClose: () => void;
 
+    // AI
+    onAskAI?: () => void;
+
     // Actions
     onCut?: () => void;
     onCopy?: () => void;
@@ -64,6 +68,7 @@ export function TableCellContextMenu({
     isOpen,
     position,
     onClose,
+    onAskAI,
     onCut,
     onCopy,
     onPaste,
@@ -103,6 +108,20 @@ export function TableCellContextMenu({
             className="z-[9999] min-w-[200px]"
             onClick={(e) => e.stopPropagation()}
         >
+            {/*
+              PATCH-168. Ask AI is its own group at the very top: it is about the
+              selected cells as a whole, not about one of the structural edits
+              below.
+            */}
+            <PositionedContextMenuItem onSelect={() => onAskAI?.()}>
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(Sparkles)}
+                    Ask AI…
+                </span>
+            </PositionedContextMenuItem>
+
+            <PositionedContextMenuSeparator />
+
             <PositionedContextMenuItem onSelect={() => onCut?.()}>
                 <span className="flex w-full items-center gap-2">
                     {itemIcon(Scissors)}

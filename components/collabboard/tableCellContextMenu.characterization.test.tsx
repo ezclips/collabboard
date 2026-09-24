@@ -163,6 +163,7 @@ function renderMenu(props: Record<string, any> = {}) {
 }
 
 const ROOT_ACTIONS = [
+  'Ask AI…',
   'Cut',
   'Copy',
   'Paste',
@@ -227,12 +228,12 @@ describe('TableCellContextMenu', () => {
     expect(openSubSurface().textContent ?? '').not.toMatch(SHORTCUT_TEXT);
   });
 
-  it('renders exactly three separators between the four root groups', () => {
+  it('renders exactly four separators between the five root groups', () => {
     renderMenu();
     const separators = surface().querySelectorAll(
       '[data-slot="context-menu-separator"], .border-t',
     );
-    expect(separators).toHaveLength(3);
+    expect(separators).toHaveLength(4);
   });
 
   it('honors the externally supplied x/y coordinates', () => {
@@ -336,6 +337,25 @@ describe('TableCellContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('Ask AI… fires onAskAI and nothing else', () => {
+    const handlers = {
+      onAskAI: vi.fn(),
+      onCut: vi.fn(), onCopy: vi.fn(), onPaste: vi.fn(),
+      onAddRowAbove: vi.fn(), onAddRowBelow: vi.fn(),
+      onAddColumnLeft: vi.fn(), onAddColumnRight: vi.fn(),
+      onDeleteRow: vi.fn(), onDeleteColumn: vi.fn(),
+      onAlignChange: vi.fn(),
+    };
+    const onClose = vi.fn();
+    renderMenu({ ...handlers, onClose });
+    click(rowByLabel('Ask AI…'));
+    expect(handlers.onAskAI).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    for (const [name, fn] of Object.entries(handlers)) {
+      if (name !== 'onAskAI') expect(fn, `${name} should not fire`).not.toHaveBeenCalled();
+    }
+  });
+
   it('styles Delete row / Delete column as destructive and nothing else', () => {
     renderMenu();
     const destructive = rows().filter(
@@ -387,8 +407,8 @@ describe('TableCellContextMenu', () => {
     expect(
       openSubSurface().querySelectorAll('[data-slot="context-menu-separator"]'),
     ).toHaveLength(1);
-    // The root keeps exactly its own three; the submenu's is portaled away.
-    expect(surface().querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(3);
+    // The root keeps exactly its own four; the submenu's is portaled away.
+    expect(surface().querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(4);
   });
 
   it('checkmarks Left and Top by default when no alignment is set', () => {
@@ -569,7 +589,7 @@ describe('TableCellContextMenu shared-shell adoption', () => {
     renderMenu();
     const el = surface();
     expect(el.querySelectorAll('[data-slot="context-menu-item"]').length).toBeGreaterThan(0);
-    expect(el.querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(3);
+    expect(el.querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(4);
   });
 
   it('reserves no right-side shortcut column on its rows', () => {
