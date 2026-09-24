@@ -94,8 +94,17 @@ function savedContent(onSave: ReturnType<typeof vi.fn>, container: HTMLElement) 
 
 const cellAt = (c: HTMLElement, row: number, col: number) =>
   c.querySelectorAll('tbody tr')[row].querySelectorAll('td')[col + 1]; // td[0] is the row-number cell
-const columnHandle = (c: HTMLElement, index: number) =>
-  c.querySelector<HTMLButtonElement>(`[data-table-column-handle="${index}"]`)!;
+const columnHeaderCell = (c: HTMLElement, col: number) =>
+  c.querySelectorAll('thead th')[col + 1] as HTMLElement;
+
+/** PATCH-172. The column menu opens by RIGHT-clicking the column header now. */
+function contextMenu(el: Element) {
+  act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); });
+}
+async function openColumnMenu(c: HTMLElement, col: number) {
+  contextMenu(columnHeaderCell(c, col));
+  await tick();
+}
 
 /** Drags a rectangular selection, the way the editor's own mouse handlers do. */
 function selectRange(c: HTMLElement, startRow: number, startCol: number, endRow: number, endCol: number) {
@@ -280,8 +289,7 @@ describe('PATCH-168 -- errors and empty selections', () => {
 describe('PATCH-168 -- the two AI panels are mutually exclusive', () => {
   it('opening Ask AI closes an open Fill with AI panel', async () => {
     const { c } = tableEditor(ASK_GRID);
-    click(columnHandle(c, 2));
-    await tick();
+    await openColumnMenu(c, 2);
     click(menuItem('Fill with AI…'));
     await tick();
     expect(c.querySelector('[data-table-fill-panel]')).not.toBeNull();
@@ -296,8 +304,7 @@ describe('PATCH-168 -- the two AI panels are mutually exclusive', () => {
     await openAskAI(c, 0, 0);
     expect(c.querySelector('[data-table-ask-ai-panel]')).not.toBeNull();
 
-    click(columnHandle(c, 2));
-    await tick();
+    await openColumnMenu(c, 2);
     click(menuItem('Fill with AI…'));
     await tick();
     expect(c.querySelector('[data-table-ask-ai-panel]')).toBeNull();

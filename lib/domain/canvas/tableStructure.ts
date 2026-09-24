@@ -308,6 +308,33 @@ export function clearColumn(grid: TableGrid, index: number): TableGrid {
   return withWidths(grid, { rows, columns: grid.columns, cellStyles: { ...grid.cellStyles } });
 }
 
+/** PATCH-172. How long a column title may be. */
+export const MAX_COLUMN_TITLE_LENGTH = 60;
+
+export type RenameColumnResult =
+  | { readonly grid: TableGrid }
+  | { readonly error: 'empty' | 'duplicate' };
+
+/**
+ * PATCH-172. Rename one column.
+ *
+ * TITLES ARE THE EXISTING `columns` ARRAY -- no new field, no migration; an old
+ * table keeps A/B/C until renamed. The title is trimmed and capped at 60
+ * characters BY TRUNCATION (not rejection); an empty one is refused ('empty')
+ * so the caller cancels, and one that matches ANOTHER column case-insensitively
+ * and trimmed is refused ('duplicate'). Widths and styles are untouched.
+ */
+export function renameColumn(grid: TableGrid, index: number, title: string): RenameColumnResult {
+  if (index < 0 || index >= grid.columns.length) return { grid };
+  const capped = title.trim().slice(0, MAX_COLUMN_TITLE_LENGTH);
+  if (capped.length === 0) return { error: 'empty' };
+  const key = capped.toLowerCase();
+  const duplicate = grid.columns.some((name, i) => i !== index && name.trim().toLowerCase() === key);
+  if (duplicate) return { error: 'duplicate' };
+  const columns = grid.columns.map((name, i) => (i === index ? capped : name));
+  return { grid: withWidths(grid, { rows: grid.rows, columns, cellStyles: grid.cellStyles }) };
+}
+
 /**
  * Merge `patch` into every cell style of a row.
  *

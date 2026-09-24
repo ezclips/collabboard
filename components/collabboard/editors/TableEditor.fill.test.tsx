@@ -92,15 +92,27 @@ function savedContent(onSave: ReturnType<typeof vi.fn>, container: HTMLElement) 
   return JSON.parse(onSave.mock.calls[0][0].content);
 }
 
-const rowHandle = (c: HTMLElement, index: number) =>
-  c.querySelector<HTMLButtonElement>(`[data-table-row-handle="${index}"]`)!;
-const columnHandle = (c: HTMLElement, index: number) =>
-  c.querySelector<HTMLButtonElement>(`[data-table-column-handle="${index}"]`)!;
+const rowNumberCell = (c: HTMLElement, index: number) =>
+  c.querySelectorAll('tbody tr')[index].querySelectorAll('td')[0] as HTMLElement;
+const columnHeaderCell = (c: HTMLElement, col: number) =>
+  c.querySelectorAll('thead th')[col + 1] as HTMLElement;
+
+/** PATCH-172. Menus open by RIGHT-clicking the header/row number now. */
+function contextMenu(el: Element) {
+  act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); });
+}
+async function openRowMenu(c: HTMLElement, index: number) {
+  contextMenu(rowNumberCell(c, index));
+  await tick();
+}
+async function openColumnMenu(c: HTMLElement, col: number) {
+  contextMenu(columnHeaderCell(c, col));
+  await tick();
+}
 
 /** Opens the column menu for `column` and the Fill with AI panel. */
 async function openFillPanel(c: HTMLElement, column: number) {
-  click(columnHandle(c, column));
-  await tick();
+  await openColumnMenu(c, column);
   click(menuItem('Fill with AI…'));
   await tick();
   return c.querySelector<HTMLElement>('[data-table-fill-panel]')!;
@@ -122,15 +134,13 @@ function stubFillResponse(values: Array<{ row: number; value: string }>) {
 describe('PATCH-166 -- where the action lives', () => {
   it('the column menu shows "Fill with AI…"', async () => {
     const { c } = tableEditor(FILL_GRID);
-    click(columnHandle(c, 2));
-    await tick();
+    await openColumnMenu(c, 2);
     expect(menuLabels()).toContain('Fill with AI…');
   });
 
   it('the row menu does NOT show "Fill with AI…"', async () => {
     const { c } = tableEditor(FILL_GRID);
-    click(rowHandle(c, 0));
-    await tick();
+    await openRowMenu(c, 0);
     expect(menuLabels()).not.toContain('Fill with AI…');
     // The row menu is intact.
     expect(menuLabels()).toContain('Duplicate');
@@ -182,8 +192,7 @@ describe('PATCH-166 -- review before anything is written', () => {
     expect(Array.from(c.querySelectorAll<HTMLInputElement>('td input')).every((i) => i.readOnly)).toBe(true);
 
     // Grips are inert: opening a row menu does nothing.
-    click(rowHandle(c, 0));
-    await tick();
+    await openRowMenu(c, 0);
     expect(surfaces()).toHaveLength(0);
   });
 
@@ -242,8 +251,7 @@ describe('PATCH-166 -- errors', () => {
     // Nothing locked: no suggestions, inputs writable, grips still work.
     expect(c.querySelectorAll('[data-table-fill-suggestion]')).toHaveLength(0);
     expect(Array.from(c.querySelectorAll<HTMLInputElement>('td input')).every((i) => i.readOnly)).toBe(false);
-    click(rowHandle(c, 0));
-    await tick();
+    await openRowMenu(c, 0);
     expect(menuLabels()).toContain('Duplicate');
   });
 

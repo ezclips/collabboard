@@ -107,10 +107,23 @@ function savedContent(onSave: ReturnType<typeof vi.fn>, container: HTMLElement) 
 
 const columnHeader = (c: HTMLElement, col: number) =>
   c.querySelectorAll('thead th')[col + 1] as HTMLElement;
-const columnHandle = (c: HTMLElement, col: number) =>
-  c.querySelector<HTMLButtonElement>(`[data-table-column-handle="${col}"]`)!;
 const columnResizeHandle = (c: HTMLElement, col: number) =>
   c.querySelector<HTMLElement>(`[data-table-column-resize="${col}"]`)!;
+const rowNumberCell = (c: HTMLElement, index: number) =>
+  c.querySelectorAll('tbody tr')[index].querySelectorAll('td')[0] as HTMLElement;
+
+/** PATCH-172. Menus open by RIGHT-clicking the header/row number now. */
+function contextMenu(el: Element) {
+  act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); });
+}
+async function openRowMenu(c: HTMLElement, index: number) {
+  contextMenu(rowNumberCell(c, index));
+  await tick();
+}
+async function openColumnMenu(c: HTMLElement, col: number) {
+  contextMenu(columnHeader(c, col));
+  await tick();
+}
 
 /** The browser's pointer sequence for a drag: down on the handle, move/up on window. */
 function pointerDrag(handle: Element, dx: number) {
@@ -192,16 +205,14 @@ describe('PATCH-170 -- fit to content and keyboard', () => {
 describe('PATCH-170 -- the column menu', () => {
   it('shows Fit to content and Distribute columns evenly', async () => {
     const { c } = tableEditor(THREE_BY_THREE);
-    click(columnHandle(c, 1));
-    await tick();
+    await openColumnMenu(c, 1);
     expect(menuLabels()).toContain('Fit to content');
     expect(menuLabels()).toContain('Distribute columns evenly');
   });
 
   it('the row menu does NOT show them', async () => {
     const { c } = tableEditor(THREE_BY_THREE);
-    click(c.querySelector<HTMLButtonElement>('[data-table-row-handle="0"]')!);
-    await tick();
+    await openRowMenu(c, 0);
     expect(menuLabels()).not.toContain('Fit to content');
     expect(menuLabels()).not.toContain('Distribute columns evenly');
     expect(menuLabels()).toContain('Duplicate');
@@ -212,16 +223,14 @@ describe('PATCH-170 -- the column menu', () => {
       ...THREE_BY_THREE,
       rows: [['a longer cell value', 'b0', 'c0'], ['a1', 'b1', 'c1'], ['a2', 'b2', 'c2']],
     });
-    click(columnHandle(c, 0));
-    await tick();
+    await openColumnMenu(c, 0);
     click(menuItem('Fit to content'));
     expect(savedContent(onSave, c).columnWidths).toEqual([167, 100, 100]);
   });
 
   it('Distribute columns evenly sets every column to the average', async () => {
     const { c, onSave } = tableEditor({ ...THREE_BY_THREE, columnWidths: [80, 120, 200] });
-    click(columnHandle(c, 0));
-    await tick();
+    await openColumnMenu(c, 0);
     click(menuItem('Distribute columns evenly'));
     // floor((80 + 120 + 200) / 3) = 133.
     expect(savedContent(onSave, c).columnWidths).toEqual([133, 133, 133]);
@@ -231,8 +240,7 @@ describe('PATCH-170 -- the column menu', () => {
 describe('PATCH-170 -- widths survive structural edits', () => {
   it('inserting a column left of a sized column moves its width with it', async () => {
     const { c, onSave } = tableEditor({ ...THREE_BY_THREE, columnWidths: [100, 180, 100] });
-    click(columnHandle(c, 1));
-    await tick();
+    await openColumnMenu(c, 1);
     click(menuItem('Insert left'));
     expect(savedContent(onSave, c).columnWidths).toEqual([100, 100, 180, 100]);
   });
@@ -247,8 +255,7 @@ describe('PATCH-170 -- locked while AI fill suggestions are pending', () => {
     )));
 
     // Open Fill with AI for column C and generate, so the table locks.
-    click(columnHandle(c, 2));
-    await tick();
+    await openColumnMenu(c, 2);
     click(menuItem('Fill with AI…'));
     await tick();
     const panel = c.querySelector<HTMLElement>('[data-table-fill-panel]')!;

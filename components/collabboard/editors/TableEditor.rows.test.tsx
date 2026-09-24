@@ -153,7 +153,9 @@ describe('PATCH-169 -- select a row by its number', () => {
     });
     expect(numberText()).toContain('2');
 
-    click(rowGrip(c, 1));
+    // PATCH-172: a mouse click on the triangle now selects; opening the menu
+    // without selecting is a KEYBOARD activation (a click with detail 0).
+    click(rowGrip(c, 1), { detail: 0 });
     await tick();
     expect(menuLabels()).toContain('Insert above');
     expect(rowHeader(c, 1).className).not.toContain('bg-purple-100');

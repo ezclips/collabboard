@@ -15,6 +15,7 @@ import {
     Eraser,
     MoveHorizontal,
     Palette,
+    Pencil,
     Sparkles,
     Trash2,
 } from "lucide-react";
@@ -53,7 +54,8 @@ export type TableAxisAction =
     | 'fill-ai'
     | 'fit-width'
     | 'distribute-widths'
-    | 'color';
+    | 'color'
+    | 'rename';
 
 export interface TableAxisMenuProps {
     readonly axis: TableAxis;
@@ -111,6 +113,22 @@ export function TableAxisMenu({
             className="z-[9999] min-w-[210px]"
             onClick={(e) => e.stopPropagation()}
         >
+            {/*
+              PATCH-172. Rename is the FIRST item of the COLUMN menu, its own
+              group. The row menu has no equivalent -- a row has no title.
+            */}
+            {!isRow && (
+                <>
+                    <PositionedContextMenuItem onSelect={() => onAction('rename')}>
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(Pencil)}
+                            Rename
+                        </span>
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuSeparator />
+                </>
+            )}
+
             <PositionedContextMenuItem onSelect={() => onAction('insert-before')}>
                 <span className="flex w-full items-center gap-2">
                     {itemIcon(InsertBeforeIcon)}

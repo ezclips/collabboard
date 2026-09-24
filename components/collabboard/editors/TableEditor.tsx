@@ -17,7 +17,7 @@ import {
     Check,
     X,
 } from "lucide-react";
-import { useReactTable, getCoreRowModel, flexRender, ColumnDef } from "@tanstack/react-table";
+import { useReactTable, getCoreRowModel, ColumnDef } from "@tanstack/react-table";
 import { ColorPickerContent } from "../ColorPicker";
 import { TableCellContextMenu } from "../menus/TableCellContextMenu";
 import * as Popover from "@radix-ui/react-popover";
@@ -38,9 +38,11 @@ import {
     fitColumnWidth,
     insertColumn,
     insertRow,
+    MAX_COLUMN_TITLE_LENGTH,
     MAX_COLUMN_WIDTH,
     MIN_COLUMN_WIDTH,
     normalizeColumnWidths,
+    renameColumn,
     setColumnStyle,
     setRowStyle,
     type TableGrid,
@@ -258,6 +260,14 @@ export default function TableEditor({
     });
     /** The column currently being dragged, so its resize line stays lit. */
     const [resizingColumn, setResizingColumn] = useState<number | null>(null);
+
+    /**
+     * PATCH-172. The column whose title is being edited inline, its working
+     * value, and the duplicate-title hint shown under the input.
+     */
+    const [editingColumn, setEditingColumn] = useState<number | null>(null);
+    const [renameValue, setRenameValue] = useState('');
+    const [renameError, setRenameError] = useState<string | null>(null);
 
     // Title's own style, independent of any cell's -- `activeStyleTarget`
     // tracks whether the Text style panel is currently formatting the
@@ -831,6 +841,42 @@ export default function TableEditor({
     }, [fillLocked]);
 
     /**
+     * PATCH-172. Inline column-title editing. The header swaps to an input while
+     * `editingColumn` is the index; Enter or blur commits through the pure
+     * `renameColumn` helper, Escape cancels, and a refused title keeps the input
+     * open (a duplicate shows the hint; empty just cancels).
+     */
+    const startRenameColumn = useCallback((index: number) => {
+        if (fillLocked) return;
+        setEditingColumn(index);
+        setRenameValue(columns[index] ?? '');
+        setRenameError(null);
+    }, [columns, fillLocked]);
+
+    const cancelRenameColumn = useCallback(() => {
+        setEditingColumn(null);
+        setRenameError(null);
+    }, []);
+
+    const commitRenameColumn = useCallback(() => {
+        if (editingColumn === null) return;
+        const result = renameColumn(currentGrid(), editingColumn, renameValue);
+        if ('error' in result) {
+            if (result.error === 'duplicate') {
+                setRenameError('Another column has this title');
+            } else {
+                // Empty: cancel, keeping the old title.
+                setEditingColumn(null);
+                setRenameError(null);
+            }
+            return;
+        }
+        applyGrid(result.grid);
+        setEditingColumn(null);
+        setRenameError(null);
+    }, [applyGrid, currentGrid, editingColumn, renameValue]);
+
+    /**
      * PATCH-165. One place that turns a handle-menu choice into a pure grid
      * result, for the row/column the menu was opened on. The menu reports WHAT
      * was chosen; the mapping to the structure module lives here, so the menu
@@ -891,9 +937,13 @@ export default function TableEditor({
                 setToolbarMode('inside');
                 setActiveSubmenu('cellColor');
                 break;
+            case 'rename':
+                // Column-only: start the inline title edit.
+                if (axis === 'column') startRenameColumn(index);
+                break;
         }
         setAxisMenu(null);
-    }, [applyGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths, fillLocked, columns.length, rows.length]);
+    }, [applyGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths, fillLocked, columns.length, rows.length, startRenameColumn]);
 
     const applyAxisAlign = useCallback((align: 'left' | 'center' | 'right') => {
         if (!axisMenu) return;
@@ -1282,38 +1332,84 @@ export default function TableEditor({
                                                             height: `${TABLE_CELL_HEIGHT}px`,
                                                         }}
                                                         onClick={(e) => handleColumnHeaderClick(i, e)}
+                                                        onDoubleClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (fillLocked) return;
+                                                            startRenameColumn(i);
+                                                        }}
+                                                        onContextMenu={(e) => {
+                                                            // PATCH-172. Right-click opens THIS column's menu at
+                                                            // the pointer, after selecting the column -- the one
+                                                            // way every table menu opens now.
+                                                            if (fillLocked) return;
+                                                            e.preventDefault();
+                                                            handleColumnHeaderClick(i, e);
+                                                            setAxisMenu({ axis: 'column', index: i, x: e.clientX, y: e.clientY });
+                                                        }}
                                                     >
-                                                        <span className="relative flex h-full items-center justify-center">
-                                                            {flexRender(header.column.columnDef.header, header.getContext())}
+                                                        <span className="relative flex h-full w-full items-center justify-center">
+                                                            {/* PATCH-172. Double-click (or Rename) swaps the
+                                                                header for an inline title input. */}
+                                                            {editingColumn === i ? (
+                                                                <input
+                                                                    data-table-rename=""
+                                                                    aria-label="Column title"
+                                                                    autoFocus
+                                                                    // Select the old title, so typing replaces it (found live).
+                                                                    onFocus={(e) => e.currentTarget.select()}
+                                                                    value={renameValue}
+                                                                    maxLength={MAX_COLUMN_TITLE_LENGTH}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    onChange={(e) => { setRenameValue(e.target.value); setRenameError(null); }}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            commitRenameColumn();
+                                                                        } else if (e.key === 'Escape') {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            cancelRenameColumn();
+                                                                        }
+                                                                    }}
+                                                                    onBlur={commitRenameColumn}
+                                                                    className="w-full min-w-0 rounded border border-blue-400 bg-white px-1 text-center text-xs outline-none"
+                                                                />
+                                                            ) : (
+                                                                <span className="block max-w-full truncate px-1" title={columns[i]}>
+                                                                    {columns[i]}
+                                                                </span>
+                                                            )}
                                                             {/*
-                                                              PATCH-165. The column handle. stopPropagation
-                                                              so opening THIS menu does not also run the
-                                                              header click's column selection -- clicking the
-                                                              letter elsewhere still selects the column.
-                                                            */}
-                                                            {/*
-                                                              PATCH-171. A corner triangle, not a six-dot grip:
-                                                              six dots read as "drag me". Anchored at the cell's
-                                                              top-right, inset 6px so it never covers the PATCH-170
-                                                              resize strip, which is the rightmost 6px.
+                                                              PATCH-171/172. The corner triangle. It no longer
+                                                              opens on a MOUSE click (that selects, like the
+                                                              header does); a keyboard activation -- a click
+                                                              with detail 0 -- still opens the menu here.
                                                             */}
                                                             <button
                                                                 type="button"
                                                                 data-table-column-handle={i}
                                                                 aria-label={`Column ${columns[i]} options`}
+                                                                aria-haspopup="menu"
                                                                 title="Column options"
                                                                 onClick={(e) => {
+                                                                    if (e.detail !== 0) return; // a mouse click selects via the header
                                                                     e.stopPropagation();
                                                                     if (fillLocked) return;
                                                                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                                     setAxisMenu({ axis: 'column', index: i, x: rect.left, y: rect.bottom });
                                                                 }}
-                                                                className={`absolute right-0 top-0 z-30 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'text-purple-600 opacity-100' : 'text-gray-400 hover:text-gray-600 opacity-0 group-hover/col:opacity-100 focus:opacity-100'}`}
+                                                                className={`absolute right-0 top-0 z-30 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'column' && axisMenu.index === i ? 'text-purple-600 opacity-100' : 'text-gray-400 opacity-0 group-hover/col:opacity-40 hover:opacity-70 focus:opacity-40'}`}
                                                             >
                                                                 <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
                                                                     <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />
                                                                 </svg>
                                                             </button>
+                                                            {renameError && editingColumn === i && (
+                                                                <span className="absolute left-0 top-full z-40 whitespace-nowrap rounded bg-white px-1 text-[10px] text-red-600 shadow">
+                                                                    {renameError}
+                                                                </span>
+                                                            )}
                                                         </span>
                                                         {/*
                                                           PATCH-170. The resize handle on the RIGHT edge: a
@@ -1360,17 +1456,24 @@ export default function TableEditor({
                                                         if (fillLocked) return;
                                                         handleRowHeaderClick(row.index, e);
                                                     }}
+                                                    onContextMenu={(e) => {
+                                                        // PATCH-172. Right-click opens this row's menu
+                                                        // at the pointer, after selecting the row.
+                                                        if (fillLocked) return;
+                                                        e.preventDefault();
+                                                        handleRowHeaderClick(row.index, e);
+                                                        setAxisMenu({ axis: 'row', index: row.index, x: e.clientX, y: e.clientY });
+                                                    }}
                                                 >
                                                     {/*
-                                                      PATCH-169. The row NUMBER is the
-                                                      select target, mirroring the column
-                                                      letter. PATCH-171: the menu button is a
-                                                      corner triangle at the cell's top-right,
-                                                      not a six-dot grip; it reveals on row
-                                                      hover, focus, or while its menu is open.
-                                                      The cell is p-0 and relative so the
-                                                      triangle is anchored to the cell's OWN
-                                                      corner and touches its border lines.
+                                                      PATCH-169. The row NUMBER is the select
+                                                      target, mirroring the column letter.
+                                                      PATCH-171/172: the menu button is a corner
+                                                      triangle at the cell's top-right; it no
+                                                      longer opens on a mouse click (that selects
+                                                      via the cell), only on a keyboard activation
+                                                      (detail 0). The cell is p-0 and relative so
+                                                      the triangle touches the cell's border lines.
                                                     */}
                                                     <span className="flex h-full w-full items-center justify-center">
                                                         {row.index + 1}
@@ -1379,14 +1482,16 @@ export default function TableEditor({
                                                         type="button"
                                                         data-table-row-handle={row.index}
                                                         aria-label={`Row ${row.index + 1} options`}
+                                                        aria-haspopup="menu"
                                                         title="Row options"
                                                         onClick={(e) => {
+                                                            if (e.detail !== 0) return; // a mouse click selects via the cell
                                                             e.stopPropagation();
                                                             if (fillLocked) return;
                                                             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                             setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
                                                         }}
-                                                        className={`absolute right-0 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'text-purple-600 opacity-100' : 'text-gray-400 hover:text-gray-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}
+                                                        className={`absolute right-0 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'text-purple-600 opacity-100' : 'text-gray-400 opacity-0 group-hover/row:opacity-40 hover:opacity-70 focus:opacity-40'}`}
                                                     >
                                                         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
                                                             <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />
@@ -1409,7 +1514,7 @@ export default function TableEditor({
                                                         <td
                                                             key={cell.id}
                                                             ref={(el) => setCellRef(row.index, colIndex, el)}
-                                                            className={`border border-gray-300 p-0 relative ${inRange ? "bg-purple-100/40" : ""
+                                                            className={`group/cell border border-gray-300 p-0 relative ${inRange ? "bg-purple-100/40" : ""
                                                                 } ${isActive ? "z-10" : "hover:bg-gray-50"}`}
                                                             style={{
                                                                 width: `${columnWidthAt(colIndex)}px`,
@@ -1442,6 +1547,19 @@ export default function TableEditor({
                                                                 ranges, since its computed pixel offsets don't
                                                                 line up with the table's own cell borders. */}
                                                             {isActive && <div className="absolute inset-0 pointer-events-none ring-2 ring-purple-500 ring-inset" />}
+
+                                                            {/* PATCH-172. A faint corner-triangle cue, matching the
+                                                                row/column menu buttons. Purely a hint: aria-hidden and
+                                                                pointer-events-none. Shown on cell hover and when active. */}
+                                                            <span
+                                                                data-table-cell-triangle=""
+                                                                aria-hidden="true"
+                                                                className={`pointer-events-none absolute right-0 top-0 z-10 text-gray-400 ${isActive ? 'opacity-40' : 'opacity-0 group-hover/cell:opacity-40'}`}
+                                                            >
+                                                                <svg width="10" height="10" viewBox="0 0 10 10">
+                                                                    <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />
+                                                                </svg>
+                                                            </span>
 
                                                             {/* PATCH-166. The AI suggestion, shown IN the cell but
                                                                 never written: the real cell text below is untouched.

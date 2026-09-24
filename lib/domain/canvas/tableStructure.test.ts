@@ -12,8 +12,10 @@ import {
   fitColumnWidth,
   insertColumn,
   insertRow,
+  MAX_COLUMN_TITLE_LENGTH,
   nextColumnName,
   normalizeColumnWidths,
+  renameColumn,
   setColumnStyle,
   setRowStyle,
   type TableGrid,
@@ -406,5 +408,43 @@ describe('PATCH-170: fitColumnWidth', () => {
 
   it('clamps to 600 for long content', () => {
     expect(fitColumnWidth(['x'.repeat(500)], 'C')).toBe(600);
+  });
+});
+
+describe('PATCH-172: renameColumn', () => {
+  it('renames the named column, trimmed', () => {
+    const result = renameColumn(baseGrid(), 1, '  Oil capacity  ');
+    if (!('grid' in result)) throw new Error('expected a rename');
+    expect(result.grid.columns).toEqual(['A', 'Oil capacity', 'C']);
+  });
+
+  it('caps a title at 60 characters by truncation', () => {
+    const result = renameColumn(baseGrid(), 0, 'x'.repeat(80));
+    if (!('grid' in result)) throw new Error('expected a rename');
+    expect(result.grid.columns[0]).toBe('x'.repeat(MAX_COLUMN_TITLE_LENGTH));
+  });
+
+  it('refuses an empty title', () => {
+    expect(renameColumn(baseGrid(), 0, '   ')).toEqual({ error: 'empty' });
+  });
+
+  it('refuses a title another column already has, case-insensitively', () => {
+    expect(renameColumn(baseGrid(), 0, 'b')).toEqual({ error: 'duplicate' });
+    expect(renameColumn(baseGrid(), 0, ' B ')).toEqual({ error: 'duplicate' });
+    // Keeping a column's OWN name is not a duplicate.
+    expect('grid' in renameColumn(baseGrid(), 1, 'B')).toBe(true);
+  });
+
+  it('leaves widths and styles untouched', () => {
+    const grid: TableGrid = { ...baseGrid(), columnWidths: [80, 120, 200] };
+    const result = renameColumn(grid, 1, 'Oil');
+    if (!('grid' in result)) throw new Error('expected a rename');
+    expect(result.grid.columnWidths).toEqual([80, 120, 200]);
+    expect(result.grid.cellStyles).toEqual(baseGrid().cellStyles);
+  });
+
+  it('an out-of-range column is a no-op', () => {
+    const grid = baseGrid();
+    expect(renameColumn(grid, 9, 'Nope')).toEqual({ grid });
   });
 });

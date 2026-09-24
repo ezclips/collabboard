@@ -41,8 +41,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function click(el: Element) {
-  act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+function click(el: Element, init: MouseEventInit = {}) {
+  act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init })); });
 }
 function tick() {
   return act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
@@ -87,16 +87,31 @@ function savedContent(onSave: ReturnType<typeof vi.fn>, container: HTMLElement) 
   return JSON.parse(onSave.mock.calls[0][0].content);
 }
 
-const rowHandle = (c: HTMLElement, index: number) =>
-  c.querySelector<HTMLButtonElement>(`[data-table-row-handle="${index}"]`)!;
 const columnHandle = (c: HTMLElement, index: number) =>
   c.querySelector<HTMLButtonElement>(`[data-table-column-handle="${index}"]`)!;
+const rowNumberCell = (c: HTMLElement, index: number) =>
+  c.querySelectorAll('tbody tr')[index].querySelectorAll('td')[0] as HTMLElement;
+const columnHeaderCell = (c: HTMLElement, col: number) =>
+  c.querySelectorAll('thead th')[col + 1] as HTMLElement;
+
+function contextMenu(el: Element, init: MouseEventInit = {}) {
+  act(() => { el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, ...init })); });
+}
+
+/** PATCH-172. The ONE way a row/column menu opens: right-click on the header. */
+async function openRowMenu(c: HTMLElement, index: number) {
+  contextMenu(rowNumberCell(c, index));
+  await tick();
+}
+async function openColumnMenu(c: HTMLElement, col: number) {
+  contextMenu(columnHeaderCell(c, col));
+  await tick();
+}
 
 describe('PATCH-165 -- the handle menus', () => {
   it('a row grip opens a menu with exactly the row items, in order', async () => {
     const { c } = tableEditor(THREE_BY_THREE);
-    click(rowHandle(c, 1));
-    await tick();
+    await openRowMenu(c, 1);
     const labels = menuLabels();
     expect(labels).toContain('Insert above');
     expect(labels).toContain('Insert below');
@@ -112,8 +127,7 @@ describe('PATCH-165 -- the handle menus', () => {
 
   it('a column grip opens a menu with the column items, in order', async () => {
     const { c } = tableEditor(THREE_BY_THREE);
-    click(columnHandle(c, 1));
-    await tick();
+    await openColumnMenu(c, 1);
     const labels = menuLabels();
     expect(labels).toContain('Insert left');
     expect(labels).toContain('Insert right');
@@ -126,8 +140,7 @@ describe('PATCH-165 -- the handle menus', () => {
     // Sanity: the colour starts on row index 1.
     expect(THREE_BY_THREE.cellStyles['1-1']).toEqual({ bg: '#dcfce7' });
 
-    click(rowHandle(c, 1));
-    await tick();
+    await openRowMenu(c, 1);
     click(menuItem('Insert above'));
 
     const saved = savedContent(onSave, c);
@@ -164,8 +177,7 @@ describe('PATCH-165 -- the handle menus', () => {
 
   it('Duplicate copies text and style into the row below', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
-    click(rowHandle(c, 1));
-    await tick();
+    await openRowMenu(c, 1);
     click(menuItem('Duplicate'));
 
     const saved = savedContent(onSave, c);
@@ -177,8 +189,7 @@ describe('PATCH-165 -- the handle menus', () => {
 
   it('Clear contents empties the text and KEEPS the style', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
-    click(rowHandle(c, 1));
-    await tick();
+    await openRowMenu(c, 1);
     click(menuItem('Clear contents'));
 
     const saved = savedContent(onSave, c);
@@ -188,8 +199,7 @@ describe('PATCH-165 -- the handle menus', () => {
 
   it('Delete removes the row and its styles', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
-    click(rowHandle(c, 1));
-    await tick();
+    await openRowMenu(c, 1);
     click(menuItem('Delete'));
 
     const saved = savedContent(onSave, c);
@@ -200,8 +210,7 @@ describe('PATCH-165 -- the handle menus', () => {
   it('Delete is ABSENT from the row menu when there is only one row', async () => {
     const one: object = { rows: [['only']], columns: ['A'], cellStyles: {}, caption: '', titleStyle: {} };
     const { c } = tableEditor(one);
-    click(rowHandle(c, 0));
-    await tick();
+    await openRowMenu(c, 0);
     expect(menuLabels()).not.toContain('Delete');
     // The rest of the menu is intact.
     expect(menuLabels()).toContain('Duplicate');
@@ -210,8 +219,7 @@ describe('PATCH-165 -- the handle menus', () => {
   it('Delete is ABSENT from the column menu when there is only one column (the mirror)', async () => {
     const one: object = { rows: [['x'], ['y']], columns: ['A'], cellStyles: {}, caption: '', titleStyle: {} };
     const { c } = tableEditor(one);
-    click(columnHandle(c, 0));
-    await tick();
+    await openColumnMenu(c, 0);
     expect(menuLabels()).not.toContain('Delete');
     expect(menuLabels()).toContain('Duplicate');
   });
@@ -230,8 +238,7 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
   it('Color selects the whole row and opens the standard Cell color panel, applying to every cell', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
 
-    click(rowHandle(c, 0));
-    await tick();
+    await openRowMenu(c, 0);
     // PATCH-171: Color is a plain item now -- no swatch submenu.
     click(menuItem('Color'));
     await tick();
@@ -258,8 +265,7 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
 
   it('Align sets align on every cell of the row, and the menu shows a checkmark only for a shared value', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
-    click(rowHandle(c, 0));
-    await tick();
+    await openRowMenu(c, 0);
     await openSubmenu('Align');
     click(menuItem('Center'));
 
@@ -271,8 +277,7 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
 
   it('Color in the column menu selects the column and opens Cell color', async () => {
     const { c, onSave } = tableEditor(THREE_BY_THREE);
-    click(columnHandle(c, 1));
-    await tick();
+    await openColumnMenu(c, 1);
     click(menuItem('Color'));
     await tick();
 
@@ -319,35 +324,62 @@ describe('PATCH-165 -- color and align on the whole axis', () => {
   });
 });
 
-describe('PATCH-165 -- the column grip does not change selection', () => {
-  it('clicking a column grip does NOT select the column the header click would', async () => {
-    const { c, onSave } = tableEditor(THREE_BY_THREE);
-    // Click the header LETTER of column 2 (index 1) directly: this selects it.
-    const headerOne = c.querySelectorAll('thead th')[2] as HTMLElement; // th[0] is the corner
-    click(headerOne);
-    // Now open the COLUMN grip of a DIFFERENT column (index 2) and pick Duplicate.
-    click(columnHandle(c, 2));
+describe('PATCH-172 -- every table menu opens with a right-click', () => {
+  it('right-clicking a column header prevents the browser menu, selects the column and opens its menu', async () => {
+    const { c } = tableEditor(THREE_BY_THREE);
+    const header = columnHeaderCell(c, 1);
+    let prevented = false;
+    act(() => {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      header.dispatchEvent(event);
+      prevented = event.defaultPrevented;
+    });
     await tick();
-    // The menu is open for column 2. Selecting Duplicate must not have run the
-    // header click's selection for column 2.
-    click(menuItem('Duplicate'));
-
-    const saved = savedContent(onSave, c);
-    // The duplicate landed on column index 2's copy (index 3), named uniquely.
-    expect(saved.columns).toEqual(['A', 'B', 'C', 'D']);
-    expect(saved.rows[0]).toEqual(['a0', 'b0', 'c0', 'c0']);
+    expect(prevented).toBe(true);
+    expect(menuLabels()).toContain('Insert left');
+    expect(header.className).toContain('bg-purple-100');
   });
 
-  it('the grip opens its menu WITHOUT selecting the column; the header letter still selects it', async () => {
+  it('right-clicking a row number prevents the browser menu, selects the row and opens its menu', async () => {
     const { c } = tableEditor(THREE_BY_THREE);
-    const headerOf = (col: number) => c.querySelectorAll('thead th')[col + 1] as HTMLElement; // th[0] is the corner
-    click(columnHandle(c, 2));
+    const rowNumber = rowNumberCell(c, 1);
+    let prevented = false;
+    act(() => {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      rowNumber.dispatchEvent(event);
+      prevented = event.defaultPrevented;
+    });
+    await tick();
+    expect(prevented).toBe(true);
+    expect(menuLabels()).toContain('Insert above');
+    expect(rowNumber.className).toContain('bg-purple-100');
+  });
+
+  it('a mouse click on a triangle selects and opens NO menu; keyboard activation opens it', async () => {
+    const { c } = tableEditor(THREE_BY_THREE);
+    const triangle = columnHandle(c, 1);
+    // A real mouse click has detail >= 1: it behaves as a click on the header.
+    click(triangle, { detail: 1 });
+    await tick();
+    expect(surfaces()).toHaveLength(0);
+    expect(columnHeaderCell(c, 1).className).toContain('bg-purple-100');
+
+    // Keyboard activation arrives as a click with detail 0.
+    click(triangle, { detail: 0 });
     await tick();
     expect(menuLabels()).toContain('Insert left');
-    expect(headerOf(2).className).not.toContain('bg-purple-100');
-    // Control: the header click itself still selects, so the assertion above can fail.
-    click(headerOf(1));
-    expect(headerOf(1).className).toContain('bg-purple-100');
+  });
+
+  it('every body cell has an aria-hidden corner-triangle cue', () => {
+    const { c } = tableEditor(THREE_BY_THREE);
+    const dataCells = Array.from(c.querySelectorAll('tbody tr'))
+      .flatMap((tr) => Array.from(tr.querySelectorAll('td')).slice(1));
+    expect(dataCells).toHaveLength(9);
+    for (const td of dataCells) {
+      const cue = td.querySelector('[data-table-cell-triangle]');
+      expect(cue, 'a body cell has no triangle cue').not.toBeNull();
+      expect(cue!.getAttribute('aria-hidden')).toBe('true');
+    }
   });
 });
 
@@ -365,8 +397,7 @@ describe('PATCH-165 -- the "+" bars', () => {
     // B, not D. Driving the delete through the handle menu keeps this test on
     // the surface this patch owns, and makes the deleted column unambiguous.
     const { c, onSave } = tableEditor(THREE_BY_THREE);
-    click(columnHandle(c, 1));
-    await tick();
+    await openColumnMenu(c, 1);
     click(menuItem('Delete'));
     await tick();
 
