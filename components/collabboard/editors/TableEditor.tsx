@@ -1262,7 +1262,7 @@ export default function TableEditor({
                     under the pointer (found live: a double-click's second click landed on a cell). */}
                 <div className="relative self-start mt-1 h-0" ref={toolbarRef}>
                     <div
-                        className="flex flex-col items-center bg-white rounded-lg shadow-lg p-0.5 gap-0.5 flex-shrink-0"
+                        className="flex w-[52px] flex-col items-center bg-white rounded-lg shadow-lg p-0.5 gap-0.5 flex-shrink-0"
                     >
                         <div className="flex flex-col items-center shrink-0">
                             <button
@@ -1573,7 +1573,7 @@ export default function TableEditor({
                                         {table.getRowModel().rows.map((row) => (
                                             <tr key={row.id} className="group/row">
                                                 <td
-                                                    className={`relative border border-gray-300 p-0 text-xs text-center font-medium select-none cursor-pointer transition-colors ${rowFullySelected(row.index) ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
+                                                    className={`group/rownum relative border border-gray-300 p-0 text-xs text-center font-medium select-none cursor-pointer transition-colors ${rowFullySelected(row.index) ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
                                                     style={{
                                                         width: `${TABLE_ROW_HEADER_WIDTH}px`,
                                                         minWidth: `${TABLE_ROW_HEADER_WIDTH}px`,
@@ -1618,7 +1618,7 @@ export default function TableEditor({
                                                             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                             setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
                                                         }}
-                                                        className={`absolute right-0 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'text-purple-600 opacity-100' : 'text-gray-400 opacity-0 group-hover/row:opacity-40 hover:opacity-70 focus:opacity-40'}`}
+                                                        className={`absolute right-0 top-0 z-10 flex h-4 w-4 items-start justify-end focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'text-purple-600 opacity-100' : 'text-gray-400 opacity-0 group-hover/rownum:opacity-40 hover:opacity-70 focus:opacity-40'}`}
                                                     >
                                                         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
                                                             <path d="M10 0 L10 10 L0 0 Z" fill="currentColor" />
