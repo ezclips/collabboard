@@ -4043,6 +4043,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       bold?: boolean;
                       italic?: boolean;
                       underline?: boolean;
+                      // PATCH-169. Relative to the card's own base size.
+                      size?: 'h1' | 'h2' | 'small';
                     };
                     // Parse table data from content
                     let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle> } = {};
@@ -4088,7 +4090,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                         style={{
                                           backgroundColor: style.bg || undefined,
                                           textAlign: style.align || 'left',
-                                          fontWeight: style.bold ? 'bold' : undefined,
+                                          // PATCH-169. Same sizes as the editor, relative
+                                          // to the card's own smaller base.
+                                          fontSize: style.size === 'h1' ? '1.3em' : style.size === 'h2' ? '1.15em' : style.size === 'small' ? '0.85em' : undefined,
+                                          fontWeight: style.bold ? 'bold' : style.size === 'h1' ? 700 : style.size === 'h2' ? 600 : undefined,
                                           fontStyle: style.italic ? 'italic' : undefined,
                                           textDecoration: style.underline ? 'underline' : undefined,
                                         }}

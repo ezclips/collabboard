@@ -23,6 +23,7 @@ import { ColorPickerContent } from "../ColorPicker";
 import { TableCellContextMenu } from "../menus/TableCellContextMenu";
 import * as Popover from "@radix-ui/react-popover";
 import TextFormattingButtons from "./TextFormattingButtons";
+import { headingStyles } from "./TextStylePopup";
 import { nextTextAlign } from "./textAlignCycle";
 import CommentPopup from "./CommentPopup";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
@@ -109,6 +110,12 @@ const CELL_COLORS = [
 // Formula options
 const FORMULAS = ["SUM", "IF", "MIN", "MAX", "COUNT", "AVERAGE"];
 
+/**
+ * PATCH-169. The Text style sizes that fit a single-line table cell, in the
+ * order `TextStylePopup` lists them. `normal` is ABSENT, not a stored value.
+ */
+const TABLE_CELL_TEXT_SIZES = ['h1', 'h2', 'normal', 'small'] as const;
+
 interface TableEditorProps {
     initialTitle?: string;
     initialContent?: string;
@@ -134,6 +141,8 @@ type CellStyle = {
     underline?: boolean;
     strikethrough?: boolean;
     color?: string;
+    // PATCH-169. Absent is normal text; `normal` is never stored.
+    size?: 'h1' | 'h2' | 'small';
 };
 
 type CellCoord = { row: number; col: number };
@@ -387,6 +396,16 @@ export default function TableEditor({
         [normalizeRange, selectionRange, selectedCell]
     );
 
+    /** PATCH-169. True when the selection covers this ENTIRE row. */
+    const rowFullySelected = useCallback(
+        (rowIndex: number) => {
+            if (!selectionRange) return false;
+            const { minRow, maxRow, minCol, maxCol } = normalizeRange(selectionRange);
+            return rowIndex >= minRow && rowIndex <= maxRow && minCol === 0 && maxCol === columns.length - 1;
+        },
+        [normalizeRange, selectionRange, columns.length]
+    );
+
     // ====== NEW: compute selection outline box ======
     const recomputeSelectionBox = useCallback(() => {
         const viewport = tableViewportRef.current;
@@ -512,17 +531,32 @@ export default function TableEditor({
         setCellStyles((prev) => {
             const next = { ...prev };
 
+            // A value of `undefined` REMOVES the key -- that is how "Normal text"
+            // clears `size` without ever storing a `normal` value. A style that
+            // ends up empty is dropped entirely, exactly as the structure module
+            // does. (Nothing else passes `undefined` today.)
+            const mergeAt = (key: string) => {
+                const merged: CellStyle = { ...next[key] };
+                for (const [name, value] of Object.entries(style)) {
+                    if (value === undefined) {
+                        delete (merged as Record<string, unknown>)[name];
+                    } else {
+                        (merged as Record<string, unknown>)[name] = value;
+                    }
+                }
+                if (Object.keys(merged).length === 0) delete next[key];
+                else next[key] = merged;
+            };
+
             if (selectionRange) {
                 const { minRow, maxRow, minCol, maxCol } = normalizeRange(selectionRange);
                 for (let r = minRow; r <= maxRow; r++) {
                     for (let c = minCol; c <= maxCol; c++) {
-                        const key = `${r}-${c}`;
-                        next[key] = { ...next[key], ...style };
+                        mergeAt(`${r}-${c}`);
                     }
                 }
             } else if (selectedCell) {
-                const key = `${selectedCell.row}-${selectedCell.col}`;
-                next[key] = { ...next[key], ...style };
+                mergeAt(`${selectedCell.row}-${selectedCell.col}`);
             }
 
             return next;
@@ -531,33 +565,9 @@ export default function TableEditor({
         setContextMenu(null);
     };
 
-    // Auto-show Text Style panel when multi-cell selection with text is completed
-    useEffect(() => {
-        // Only trigger when selection just ended (isSelectingCells became false)
-        if (isSelectingCells) return;
-        if (!selectionRange) return;
-
-        const { minRow, maxRow, minCol, maxCol } = normalizeRange(selectionRange);
-        const isMultiCell = minRow !== maxRow || minCol !== maxCol;
-
-        // Check if any selected cell has text
-        // Not while an AI panel is open: it occupies the same spot, one panel at a time.
-        const aiPanelOpen = askAI !== null || fillTarget !== null;
-        if (isMultiCell && !pinnedTextStyle && !aiPanelOpen && activeSubmenu !== "textStyle") {
-            let hasText = false;
-            for (let r = minRow; r <= maxRow && !hasText; r++) {
-                for (let c = minCol; c <= maxCol && !hasText; c++) {
-                    if (rows[r] && rows[r][c] && rows[r][c].trim() !== "") {
-                        hasText = true;
-                    }
-                }
-            }
-
-            if (hasText) {
-                setActiveSubmenu("textStyle");
-            }
-        }
-    }, [isSelectingCells, selectionRange, normalizeRange, rows, pinnedTextStyle, activeSubmenu, askAI, fillTarget]);
+    // PATCH-169. Selecting cells (drag, column letter, row number) no longer
+    // auto-opens Text style. It opens when text inside a cell is highlighted
+    // (`checkTextHighlight`, below) or from the toolbar's Text style button.
 
     // Handle cell mouse down (Start Selection)
     const handleCellMouseDown = (rowIndex: number, colIndex: number, e?: React.MouseEvent) => {
@@ -614,6 +624,26 @@ export default function TableEditor({
         } else {
             setSelectionRange({ start: { row: 0, col: colIndex }, end: { row: rows.length - 1, col: colIndex } });
             setSelectedCell({ row: 0, col: colIndex });
+        }
+        setToolbarMode("inside");
+        setActiveSubmenu(null);
+    };
+
+    /**
+     * PATCH-169. The exact mirror of `handleColumnHeaderClick`, for a row: it
+     * selects the WHOLE row (every column). With Shift and an existing range it
+     * extends from the range's start row to this row, all columns.
+     */
+    const handleRowHeaderClick = (rowIndex: number, e: React.MouseEvent) => {
+        if (e.shiftKey && selectionRange) {
+            const startRow = selectionRange.start.row;
+            setSelectionRange({
+                start: { row: startRow, col: 0 },
+                end: { row: rowIndex, col: columns.length - 1 },
+            });
+        } else {
+            setSelectionRange({ start: { row: rowIndex, col: 0 }, end: { row: rowIndex, col: columns.length - 1 } });
+            setSelectedCell({ row: rowIndex, col: 0 });
         }
         setToolbarMode("inside");
         setActiveSubmenu(null);
@@ -1189,19 +1219,24 @@ export default function TableEditor({
                                         {table.getRowModel().rows.map((row) => (
                                             <tr key={row.id} className="group/row">
                                                 <td
-                                                    className="bg-gray-100 border border-gray-300 text-xs text-center text-gray-500 font-medium select-none"
+                                                    className={`border border-gray-300 text-xs text-center font-medium select-none cursor-pointer transition-colors ${rowFullySelected(row.index) ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
                                                     style={{
                                                         width: `${TABLE_ROW_HEADER_WIDTH}px`,
                                                         minWidth: `${TABLE_ROW_HEADER_WIDTH}px`,
                                                         height: `${TABLE_CELL_HEIGHT}px`,
                                                     }}
+                                                    onClick={(e) => {
+                                                        if (fillLocked) return;
+                                                        handleRowHeaderClick(row.index, e);
+                                                    }}
                                                 >
                                                     {/*
-                                                      PATCH-165. The row handle,
-                                                      in the row-number cell. The
-                                                      number stays visible; the grip
-                                                      reveals on row hover, or while
-                                                      THIS row's menu is open.
+                                                      PATCH-169. The row NUMBER is the
+                                                      select target, mirroring the column
+                                                      letter. The grip is a small button at
+                                                      the cell's LEFT edge, so it no longer
+                                                      covers the number; it reveals on row
+                                                      hover, focus, or while its menu is open.
                                                     */}
                                                     <span className="relative flex h-full w-full items-center justify-center">
                                                         {row.index + 1}
@@ -1210,11 +1245,12 @@ export default function TableEditor({
                                                             data-table-row-handle={row.index}
                                                             aria-label={`Row ${row.index + 1} options`}
                                                             onClick={(e) => {
+                                                                e.stopPropagation();
                                                                 if (fillLocked) return;
                                                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                                                 setAxisMenu({ axis: 'row', index: row.index, x: rect.right, y: rect.top });
                                                             }}
-                                                            className={`absolute inset-0 flex items-center justify-center rounded bg-gray-100 text-gray-500 hover:bg-gray-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}
+                                                            className={`absolute left-0.5 top-1/2 -translate-y-1/2 rounded border border-gray-300 bg-white p-0.5 text-gray-500 shadow-sm hover:bg-gray-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 ${axisMenu?.axis === 'row' && axisMenu.index === row.index ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}
                                                         >
                                                             <GripVertical className="h-3 w-3" aria-hidden="true" />
                                                         </button>
@@ -1247,10 +1283,12 @@ export default function TableEditor({
                                                                 backgroundColor: style?.bg,
                                                                 textAlign: style?.align || "left",
                                                                 verticalAlign: style?.verticalAlign || "top",
-                                                                fontWeight: style?.bold ? "bold" : "normal",
+                                                                // PATCH-169. Absent size stays 14px; bold wins the weight.
+                                                                fontSize: style?.size === 'h1' ? '18px' : style?.size === 'h2' ? '16px' : style?.size === 'small' ? '12px' : '14px',
+                                                                fontWeight: style?.bold ? "bold" : style?.size === 'h1' ? 700 : style?.size === 'h2' ? 600 : "normal",
                                                                 fontStyle: style?.italic ? "italic" : "normal",
                                                                 textDecoration: [style?.underline && "underline", style?.strikethrough && "line-through"].filter(Boolean).join(" ") || "none",
-                                                                color: style?.color || "inherit",
+                                                                color: style?.color || (style?.size === 'small' ? "#6b7280" : "inherit"),
                                                             }}
                                                             onMouseDown={(e) => handleCellMouseDown(row.index, colIndex, e)}
                                                             onMouseEnter={() => handleCellMouseEnter(row.index, colIndex)}
@@ -1289,6 +1327,7 @@ export default function TableEditor({
                                                                 className="w-full h-full px-2 text-sm bg-transparent border-none outline-none selection:bg-purple-200"
                                                                 style={{
                                                                     textAlign: "inherit",
+                                                                    fontSize: "inherit",
                                                                     fontWeight: "inherit",
                                                                     fontStyle: "inherit",
                                                                     textDecoration: "inherit",
@@ -1554,12 +1593,38 @@ export default function TableEditor({
                                     <div className="px-3 pt-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider truncate">
                                         {isTitleTarget ? 'Editing: Post name' : 'Editing: Cell'}
                                     </div>
+                                    {/* PATCH-169. The same font-size list every other
+                                        Text style panel shows, restricted to the four
+                                        that fit a single-line cell. Cell only: the Post
+                                        name has no size of its own. */}
+                                    {!isTitleTarget && (
+                                        <div className="p-3 pb-0 space-y-1">
+                                            {headingStyles
+                                                .filter((s) => (TABLE_CELL_TEXT_SIZES as readonly string[]).includes(s.level))
+                                                .map((style) => {
+                                                    const currentSize = currentCellStyle.size ?? 'normal';
+                                                    return (
+                                                        <button
+                                                            key={style.level}
+                                                            type="button"
+                                                            onClick={() => applyStyleToSelection({ size: style.level === 'normal' ? undefined : (style.level as CellStyle['size']) })}
+                                                            className={`w-full h-8 px-2 rounded flex items-center justify-between transition-all ${currentSize === style.level ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
+                                                        >
+                                                            <span className={`flex items-center gap-2 leading-none truncate ${style.className}`}>{style.label}</span>
+                                                            <span className="flex items-center gap-2">
+                                                                {currentSize === style.level && <span className="text-blue-500">✓</span>}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })}
+                                        </div>
+                                    )}
                                     {/* Formatting buttons -- same grid every Text style
-                                        panel shows, between the (absent here) font-size
-                                        section and the color picker below. Bullet
-                                        list/Numbered list/Code are inert: a single-line
-                                        cell or title input can't hold them. Align cycles
-                                        the active target's left/center/right style. */}
+                                        panel shows, between the font-size section above
+                                        and the color picker below. Bullet list/Numbered
+                                        list/Code are inert: a single-line cell or title
+                                        input can't hold them. Align cycles the active
+                                        target's left/center/right style. */}
                                     <div className="p-3 border-b border-gray-100">
                                         <TextFormattingButtons
                                             onBold={() => toggle("bold")}

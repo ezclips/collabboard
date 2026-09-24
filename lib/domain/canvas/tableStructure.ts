@@ -27,6 +27,11 @@ export type TableCellStyle = {
   underline?: boolean;
   strikethrough?: boolean;
   color?: string;
+  /**
+   * PATCH-169. Text size for a single-line cell. ABSENT is normal text, so
+   * existing tables are unchanged and a `normal` value is never stored.
+   */
+  size?: 'h1' | 'h2' | 'small';
 };
 
 export type TableGrid = {

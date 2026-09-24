@@ -23,7 +23,12 @@ interface TextStylePopupProps extends TextFormattingButtonsProps {
 }
 
 
-const headingStyles = [
+/**
+ * The Text style panel's size list, in order. Exported (PATCH-169) so the table
+ * cell panel can offer the same four single-line sizes WITHOUT copying the
+ * labels/classNames; its values and this popup's behaviour are unchanged.
+ */
+export const headingStyles = [
     { level: 'h1' as const, label: 'Large heading', shortcut: '⌘1', className: 'text-lg font-bold' },
     { level: 'h2' as const, label: 'Normal heading', shortcut: '⌘2', className: 'text-base font-semibold' },
     { level: 'normal' as const, label: 'Normal text', shortcut: '⌘0', className: 'text-sm' },

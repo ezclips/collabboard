@@ -304,3 +304,26 @@ describe('invalid and out-of-range style keys are dropped', () => {
     expect(result.cellStyles).toEqual({ '0-0': { bg: '#000' } });
   });
 });
+
+describe('PATCH-169: a text size is part of the style and moves with its cell', () => {
+  it('keeps `size` on the cell it belonged to through insert, delete and duplicate', () => {
+    const grid: TableGrid = {
+      rows: [['a', 'b'], ['c', 'd']],
+      columns: ['A', 'B'],
+      cellStyles: { '1-1': { size: 'h1' } },
+    };
+
+    // Insert above row 1: the styled cell moves down to row 2.
+    const inserted = insertRow(grid, 1);
+    expect(inserted.cellStyles['2-1']).toEqual({ size: 'h1' });
+    expect(inserted.cellStyles['1-1']).toBeUndefined();
+
+    // Delete row 0: the styled cell moves up to row 0.
+    expect(deleteRow(grid, 0).cellStyles['0-1']).toEqual({ size: 'h1' });
+
+    // Duplicate row 1: both the original and its copy carry the size.
+    const duplicated = duplicateRow(grid, 1);
+    expect(duplicated.cellStyles['1-1']).toEqual({ size: 'h1' });
+    expect(duplicated.cellStyles['2-1']).toEqual({ size: 'h1' });
+  });
+});
