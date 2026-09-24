@@ -76,3 +76,19 @@ describe('PATCH-174 -- the canvas table card shows the summary footer', () => {
     expect(branch).toContain('formatSummary(');
   });
 });
+
+describe('the table card can expand to show every row (owner report, 2026-09-24)', () => {
+  it('offers the shared Expand button when the table has more than the 3x3 preview', () => {
+    expect(source).toContain("const showTableExpand = isTablePost && tableCardHasMore(padlet.content);");
+    expect(source).toContain('showContainerExpand || showAIExpand || showTableExpand');
+    expect(source).toContain('setExpandedTables(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }))');
+  });
+
+  it('shows every row and column once expanded, and the "rows x columns" hint only when collapsed', () => {
+    const branch = tableCardBranch();
+    expect(branch).toContain('const displayRows = tableExpanded ? rows : rows.slice(0, TABLE_CARD_PREVIEW_SIZE);');
+    expect(branch).toContain('const displayCols = tableExpanded ? columns : columns.slice(0, TABLE_CARD_PREVIEW_SIZE);');
+    expect(branch).toContain('row.slice(0, displayCols.length)');
+    expect(branch).toContain('{!tableExpanded && (rows.length > TABLE_CARD_PREVIEW_SIZE');
+  });
+});

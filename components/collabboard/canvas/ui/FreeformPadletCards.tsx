@@ -103,6 +103,25 @@ const isKnowledgeSourceClipEligibleNote = (padlet: Padlet) =>
 // gesture's clamps (see lib/domain/canvas/postResizePolicy.ts).
 const IMAGE_RESIZE_MIN_WIDTH = getPostResizeConstraints({ type: 'image' })?.minWidth ?? 100;
 
+/** The table card previews this many rows and columns until it is expanded. */
+const TABLE_CARD_PREVIEW_SIZE = 3;
+
+/**
+ * Whether a table post has more than the card previews, so the card offers an
+ * Expand button (the same one groups and AI posts have). Unparseable content
+ * previews nothing extra, so it offers none.
+ */
+function tableCardHasMore(content: string | null | undefined): boolean {
+  try {
+    const data = JSON.parse(content || '{}') as { rows?: unknown; columns?: unknown };
+    const rowCount = Array.isArray(data.rows) ? data.rows.length : 0;
+    const columnCount = Array.isArray(data.columns) ? data.columns.length : 3;
+    return rowCount > TABLE_CARD_PREVIEW_SIZE || columnCount > TABLE_CARD_PREVIEW_SIZE;
+  } catch {
+    return false;
+  }
+}
+
 function getFreeformImageDisplayCaption(padlet: Padlet): string {
   const caption = typeof padlet.metadata?.caption === 'string' ? padlet.metadata.caption.trim() : '';
   if (!caption) return '';
@@ -955,6 +974,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   // interaction state; it is not persisted metadata.
   const [containerManualMinRequiredWidths, setContainerManualMinRequiredWidths] = React.useState<Record<string, number>>({});
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
+  // Table cards: show every row and column instead of the 3x3 preview. Not
+  // persisted, like expandedContainers/expandedAIPosts.
+  const [expandedTables, setExpandedTables] = React.useState<Record<string, boolean>>({});
   /**
    * PDF-C1. The PDF card's controls live in the post's own top strip, so the
    * view state they toggle has to live here with the strip -- same per-padlet
@@ -3495,11 +3517,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               const isAIPost = padlet.type === 'ai-component';
               const showModalEditButton = canUseFreeformEditButton && !isLineMode && !isGraphConnectMode;
               const showContainerExpand = isContainer && (expandableContainers[padlet.id] ?? false);
+              const isTablePost = padlet.type === 'table';
+              const showTableExpand = isTablePost && tableCardHasMore(padlet.content);
               const showAIExpand = isAIPost;
-              const showExpandButton = showContainerExpand || showAIExpand;
+              const showExpandButton = showContainerExpand || showAIExpand || showTableExpand;
               const isContainerExpanded = expandedContainers[padlet.id] ?? false;
               const isAIPostExpanded = expandedAIPosts[padlet.id] ?? false;
-              const isExpanded = isContainer ? isContainerExpanded : isAIPostExpanded;
+              const isExpanded = isContainer ? isContainerExpanded : isTablePost ? (expandedTables[padlet.id] ?? false) : isAIPostExpanded;
               return (
                 <div
                   /*
@@ -3609,6 +3633,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                 setExpandedContainers(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
                               } else if (isAIPost) {
                                 setExpandedAIPosts(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
+                              } else if (isTablePost) {
+                                setExpandedTables(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
                               }
                             }}
                             className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-colors"
@@ -4059,8 +4085,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     const rows = tableData.rows || [];
                     const columns = tableData.columns || ['A', 'B', 'C'];
                     const cellStyles = tableData.cellStyles || {};
-                    const displayRows = rows.slice(0, 3); // Show first 3 rows
-                    const displayCols = columns.slice(0, 3); // Show first 3 columns
+                    // The 3x3 preview, or everything once the card is expanded.
+                    const tableExpanded = expandedTables[padlet.id] ?? false;
+                    const displayRows = tableExpanded ? rows : rows.slice(0, TABLE_CARD_PREVIEW_SIZE);
+                    const displayCols = tableExpanded ? columns : columns.slice(0, TABLE_CARD_PREVIEW_SIZE);
 
                     // PATCH-170. Proportional widths from the saved column widths,
                     // over the columns the card shows. Absent/invalid => no colgroup,
@@ -4106,7 +4134,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             <tbody>
                               {displayRows.length > 0 ? displayRows.map((row, ri) => (
                                 <tr key={ri} className="border-t border-gray-200">
-                                  {row.slice(0, 3).map((cell, ci) => {
+                                  {row.slice(0, displayCols.length).map((cell, ci) => {
                                     const style = getCellStyle(ri, ci);
                                     return (
                                       <td
@@ -4140,7 +4168,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                 </tr>
                               )) : (
                                 <tr>
-                                  <td colSpan={3} className="px-1 py-2 text-center text-gray-400">
+                                  <td colSpan={displayCols.length} className="px-1 py-2 text-center text-gray-400">
                                     Empty table
                                   </td>
                                 </tr>
@@ -4174,7 +4202,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           </table>
                         </div>
                         {/* Show more indicator */}
-                        {(rows.length > 3 || columns.length > 3) && (
+                        {!tableExpanded && (rows.length > TABLE_CARD_PREVIEW_SIZE || columns.length > TABLE_CARD_PREVIEW_SIZE) && (
                           <p className="text-[9px] text-gray-400">
                             {rows.length} rows × {columns.length} columns
                           </p>
