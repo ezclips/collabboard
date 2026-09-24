@@ -10,8 +10,10 @@ import {
     AlignLeft,
     AlignRight,
     Check,
+    Columns3,
     Copy,
     Eraser,
+    MoveHorizontal,
     Palette,
     Sparkles,
     Trash2,
@@ -49,7 +51,9 @@ export type TableAxisAction =
     | 'duplicate'
     | 'clear'
     | 'delete'
-    | 'fill-ai';
+    | 'fill-ai'
+    | 'fit-width'
+    | 'distribute-widths';
 
 export interface TableAxisMenuProps {
     readonly axis: TableAxis;
@@ -198,6 +202,29 @@ export function TableAxisMenu({
                         Fill with AI…
                     </span>
                 </PositionedContextMenuItem>
+            )}
+
+            {/*
+              PATCH-170. Column width tools, their own group. Column-only: a row
+              has no width. `Fit to content` fits THIS column; `Distribute`
+              applies to every column.
+            */}
+            {!isRow && (
+                <>
+                    <PositionedContextMenuSeparator />
+                    <PositionedContextMenuItem onSelect={() => onAction('fit-width')}>
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(MoveHorizontal)}
+                            Fit to content
+                        </span>
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuItem onSelect={() => onAction('distribute-widths')}>
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(Columns3)}
+                            Distribute columns evenly
+                        </span>
+                    </PositionedContextMenuItem>
+                </>
             )}
 
             <PositionedContextMenuSeparator />

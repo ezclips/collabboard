@@ -3,13 +3,17 @@ import { describe, expect, it } from 'vitest';
 import {
   clearColumn,
   clearRow,
+  DEFAULT_COLUMN_WIDTH,
   deleteColumn,
   deleteRow,
+  distributeColumnWidths,
   duplicateColumn,
   duplicateRow,
+  fitColumnWidth,
   insertColumn,
   insertRow,
   nextColumnName,
+  normalizeColumnWidths,
   setColumnStyle,
   setRowStyle,
   type TableGrid,
@@ -325,5 +329,82 @@ describe('PATCH-169: a text size is part of the style and moves with its cell', 
     const duplicated = duplicateRow(grid, 1);
     expect(duplicated.cellStyles['1-1']).toEqual({ size: 'h1' });
     expect(duplicated.cellStyles['2-1']).toEqual({ size: 'h1' });
+  });
+});
+
+describe('PATCH-170: column widths stay aligned with columns', () => {
+  const widthGrid = (): TableGrid => ({ ...baseGrid(), columnWidths: [80, 120, 200] });
+
+  it('insertColumn inserts the default width at the position', () => {
+    expect(insertColumn(widthGrid(), 1).columnWidths).toEqual([80, DEFAULT_COLUMN_WIDTH, 120, 200]);
+  });
+
+  it('deleteColumn removes that entry', () => {
+    expect(deleteColumn(widthGrid(), 1).columnWidths).toEqual([80, 200]);
+  });
+
+  it('duplicateColumn copies the source column width', () => {
+    expect(duplicateColumn(widthGrid(), 1).columnWidths).toEqual([80, 120, 120, 200]);
+  });
+
+  it('row and style operations leave widths unchanged', () => {
+    expect(insertRow(widthGrid(), 1).columnWidths).toEqual([80, 120, 200]);
+    expect(deleteRow(widthGrid(), 1).columnWidths).toEqual([80, 120, 200]);
+    expect(duplicateRow(widthGrid(), 1).columnWidths).toEqual([80, 120, 200]);
+    expect(clearRow(widthGrid(), 1).columnWidths).toEqual([80, 120, 200]);
+    expect(setRowStyle(widthGrid(), 0, { bold: true }).columnWidths).toEqual([80, 120, 200]);
+    expect(setColumnStyle(widthGrid(), 0, { bold: true }).columnWidths).toEqual([80, 120, 200]);
+  });
+
+  it('an absent width list stays absent', () => {
+    expect(insertColumn(baseGrid(), 1).columnWidths).toBeUndefined();
+    expect(deleteColumn(baseGrid(), 1).columnWidths).toBeUndefined();
+    expect(insertRow(baseGrid(), 1).columnWidths).toBeUndefined();
+    expect(duplicateColumn(baseGrid(), 1).columnWidths).toBeUndefined();
+    expect(setColumnStyle(baseGrid(), 0, { bold: true }).columnWidths).toBeUndefined();
+  });
+});
+
+describe('PATCH-170: normalizeColumnWidths', () => {
+  it('missing, wrong length or any non-finite entry means every column is 100', () => {
+    expect(normalizeColumnWidths(undefined, 3)).toEqual([100, 100, 100]);
+    expect(normalizeColumnWidths([80, 120], 3)).toEqual([100, 100, 100]);
+    expect(normalizeColumnWidths([80, Number.NaN, 120], 3)).toEqual([100, 100, 100]);
+    expect(normalizeColumnWidths([80, Number.POSITIVE_INFINITY, 120], 3)).toEqual([100, 100, 100]);
+    expect(normalizeColumnWidths('nope', 2)).toEqual([100, 100]);
+  });
+
+  it('clamps each entry to 60..600', () => {
+    expect(normalizeColumnWidths([10, 300, 9999], 3)).toEqual([60, 300, 600]);
+  });
+});
+
+describe('PATCH-170: distributeColumnWidths', () => {
+  it('gives every column the floor of the average, clamped', () => {
+    expect(distributeColumnWidths([100, 200, 150])).toEqual([150, 150, 150]);
+    // floor(301 / 3) = 100
+    expect(distributeColumnWidths([100, 100, 101])).toEqual([100, 100, 100]);
+    // An average below the minimum clamps up.
+    expect(distributeColumnWidths([60, 60, 61])).toEqual([60, 60, 60]);
+    // An average above the maximum clamps down.
+    expect(distributeColumnWidths([600, 600, 601])).toEqual([600, 600, 600]);
+    expect(distributeColumnWidths([])).toEqual([]);
+  });
+});
+
+describe('PATCH-170: fitColumnWidth', () => {
+  it('is at least 60 for short content', () => {
+    expect(fitColumnWidth(['a', 'bb'], 'C')).toBe(60);
+  });
+
+  it('grows with the longest text or the header', () => {
+    // 10 characters: ceil(75) + 24 = 99.
+    expect(fitColumnWidth(['0123456789'], 'C')).toBe(99);
+    // The header is the longest input.
+    expect(fitColumnWidth(['a'], '0123456789')).toBe(99);
+  });
+
+  it('clamps to 600 for long content', () => {
+    expect(fitColumnWidth(['x'.repeat(500)], 'C')).toBe(600);
   });
 });

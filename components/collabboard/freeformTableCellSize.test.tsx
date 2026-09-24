@@ -42,3 +42,16 @@ describe('PATCH-169 -- the canvas table card renders cell text sizes', () => {
     );
   });
 });
+
+describe('PATCH-170 -- the canvas table card shows column widths proportionally', () => {
+  it('emits a colgroup with percentage widths, gated on the saved widths', () => {
+    const branch = tableCardBranch();
+    expect(branch).toContain('columnWidths');
+    expect(branch).toContain('<colgroup>');
+    expect(branch).toContain('width: `${(width / displayWidthTotal) * 100}%`');
+    // Present only when widths were saved: the colgroup is behind `useWidths`,
+    // and `table-layout: fixed` rides with it.
+    expect(branch).toContain('{useWidths && (');
+    expect(branch).toContain("style={useWidths ? { tableLayout: 'fixed' } : undefined}");
+  });
+});

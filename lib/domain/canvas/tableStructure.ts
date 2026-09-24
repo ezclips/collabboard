@@ -39,7 +39,76 @@ export type TableGrid = {
   readonly columns: readonly string[];
   /** Keyed `${row}-${col}`. */
   readonly cellStyles: Readonly<Record<string, TableCellStyle>>;
+  /**
+   * PATCH-170. Pixel width per column, aligned index-for-index with `columns`.
+   * ABSENT means every column is `DEFAULT_COLUMN_WIDTH`; every function here
+   * keeps it aligned when present and leaves it absent when absent.
+   */
+  readonly columnWidths?: readonly number[];
 };
+
+/** The width bounds, and the width an untouched column has. */
+export const MIN_COLUMN_WIDTH = 60;
+export const MAX_COLUMN_WIDTH = 600;
+export const DEFAULT_COLUMN_WIDTH = 100;
+
+function clampColumnWidth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_COLUMN_WIDTH;
+  return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, value));
+}
+
+/**
+ * PATCH-170. The usable widths for a table of `columnCount` columns.
+ *
+ * Missing, the wrong length, or carrying any non-finite entry means the table
+ * predates widths (or is corrupt), so every column is 100. Otherwise each width
+ * is clamped to 60..600.
+ */
+export function normalizeColumnWidths(widths: unknown, columnCount: number): number[] {
+  const fallback = () => Array.from({ length: columnCount }, () => DEFAULT_COLUMN_WIDTH);
+  if (!Array.isArray(widths) || widths.length !== columnCount) return fallback();
+  if (!widths.every((width) => typeof width === 'number' && Number.isFinite(width))) return fallback();
+  return widths.map((width) => clampColumnWidth(width as number));
+}
+
+/** PATCH-170. Every column gets the current average (rounded down), clamped. */
+export function distributeColumnWidths(widths: readonly number[]): number[] {
+  if (widths.length === 0) return [];
+  const total = widths.reduce((sum, width) => sum + (Number.isFinite(width) ? width : 0), 0);
+  const average = clampColumnWidth(Math.floor(total / widths.length));
+  return widths.map(() => average);
+}
+
+/**
+ * PATCH-170. A width that fits `texts` and the header.
+ *
+ * A CHARACTER-COUNT estimate on purpose: `ceil(longest × 7.5) + 24`, clamped to
+ * the same 60..600 as every other width. Measuring real glyphs would need a
+ * canvas context and would not be deterministic in a test.
+ */
+export function fitColumnWidth(texts: readonly string[], headerText: string): number {
+  let longest = headerText.length;
+  for (const text of texts) longest = Math.max(longest, text.length);
+  return clampColumnWidth(Math.ceil(longest * 7.5) + 24);
+}
+
+/**
+ * The returned grid, carrying `columnWidths` only when the input had them.
+ * Row and style functions use this so an untouched table stays byte-identical.
+ */
+function withWidths(
+  source: TableGrid,
+  parts: Pick<TableGrid, 'rows' | 'columns' | 'cellStyles'>,
+): TableGrid {
+  return source.columnWidths === undefined
+    ? { rows: parts.rows, columns: parts.columns, cellStyles: parts.cellStyles }
+    : {
+      rows: parts.rows,
+      columns: parts.columns,
+      cellStyles: parts.cellStyles,
+      columnWidths: source.columnWidths,
+    };
+}
 
 /** A parsed, in-range style key. */
 interface StyleEntry {
@@ -114,7 +183,7 @@ export function insertRow(grid: TableGrid, at: number): TableGrid {
   const cellStyles = stylesFrom(styleEntries(grid).map((entry) => (
     entry.row >= position ? { ...entry, row: entry.row + 1 } : entry
   )));
-  return { rows, columns: grid.columns, cellStyles };
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles });
 }
 
 /**
@@ -133,7 +202,7 @@ export function deleteRow(grid: TableGrid, index: number): TableGrid {
     if (entry.row === index) return [];
     return [entry.row > index ? { ...entry, row: entry.row - 1 } : entry];
   }));
-  return { rows, columns: grid.columns, cellStyles };
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles });
 }
 
 /** The grid with row `index` copied (text AND styles) at `index + 1`. */
@@ -151,14 +220,14 @@ export function duplicateRow(grid: TableGrid, index: number): TableGrid {
     }
     return [entry.row > index ? { ...entry, row: entry.row + 1 } : entry];
   }));
-  return { rows, columns: grid.columns, cellStyles };
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles });
 }
 
 /** The grid with row `index` emptied. STYLES ARE KEPT. */
 export function clearRow(grid: TableGrid, index: number): TableGrid {
   if (index < 0 || index >= grid.rows.length) return grid;
   const rows = grid.rows.map((row, r) => (r === index ? row.map(() => '') : row));
-  return { rows, columns: grid.columns, cellStyles: { ...grid.cellStyles } };
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles: { ...grid.cellStyles } });
 }
 
 /** The grid with an empty column inserted at `at`, named `nextColumnName`. */
@@ -177,7 +246,14 @@ export function insertColumn(grid: TableGrid, at: number): TableGrid {
   const cellStyles = stylesFrom(styleEntries(grid).map((entry) => (
     entry.col >= position ? { ...entry, col: entry.col + 1 } : entry
   )));
-  return { rows, columns, cellStyles };
+  if (grid.columnWidths === undefined) return { rows, columns, cellStyles };
+  const widths = normalizeColumnWidths(grid.columnWidths, grid.columns.length);
+  return {
+    rows,
+    columns,
+    cellStyles,
+    columnWidths: [...widths.slice(0, position), DEFAULT_COLUMN_WIDTH, ...widths.slice(position)],
+  };
 }
 
 /** Mirror of deleteRow: no-op at one column. */
@@ -190,7 +266,9 @@ export function deleteColumn(grid: TableGrid, index: number): TableGrid {
     if (entry.col === index) return [];
     return [entry.col > index ? { ...entry, col: entry.col - 1 } : entry];
   }));
-  return { rows, columns, cellStyles };
+  if (grid.columnWidths === undefined) return { rows, columns, cellStyles };
+  const widths = normalizeColumnWidths(grid.columnWidths, grid.columns.length);
+  return { rows, columns, cellStyles, columnWidths: widths.filter((_, c) => c !== index) };
 }
 
 /** Mirror of duplicateRow: the copy gets `nextColumnName`. */
@@ -212,14 +290,22 @@ export function duplicateColumn(grid: TableGrid, index: number): TableGrid {
     }
     return [entry.col > index ? { ...entry, col: entry.col + 1 } : entry];
   }));
-  return { rows, columns, cellStyles };
+  if (grid.columnWidths === undefined) return { rows, columns, cellStyles };
+  const widths = normalizeColumnWidths(grid.columnWidths, grid.columns.length);
+  return {
+    rows,
+    columns,
+    cellStyles,
+    // The copy carries the SOURCE column's width.
+    columnWidths: [...widths.slice(0, index + 1), widths[index], ...widths.slice(index + 1)],
+  };
 }
 
 /** Mirror of clearRow: text cleared, styles kept. */
 export function clearColumn(grid: TableGrid, index: number): TableGrid {
   if (index < 0 || index >= grid.columns.length) return grid;
   const rows = grid.rows.map((row) => row.map((cell, c) => (c === index ? '' : cell)));
-  return { rows, columns: grid.columns, cellStyles: { ...grid.cellStyles } };
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles: { ...grid.cellStyles } });
 }
 
 /**
@@ -236,7 +322,7 @@ export function setRowStyle(grid: TableGrid, index: number, patch: Partial<Table
   for (let col = 0; col < grid.columns.length; col += 1) {
     mergeStyleAt(next, index, col, patch);
   }
-  return { rows: grid.rows, columns: grid.columns, cellStyles: next };
+  return withWidths(grid, { rows: grid.rows, columns: grid.columns, cellStyles: next });
 }
 
 /** Mirror of setRowStyle across a column. */
@@ -246,7 +332,7 @@ export function setColumnStyle(grid: TableGrid, index: number, patch: Partial<Ta
   for (let row = 0; row < grid.rows.length; row += 1) {
     mergeStyleAt(next, row, index, patch);
   }
-  return { rows: grid.rows, columns: grid.columns, cellStyles: next };
+  return withWidths(grid, { rows: grid.rows, columns: grid.columns, cellStyles: next });
 }
 
 function mergeStyleAt(

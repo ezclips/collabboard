@@ -30,12 +30,18 @@ import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canva
 import {
     clearColumn,
     clearRow,
+    DEFAULT_COLUMN_WIDTH,
     deleteColumn as deleteColumnAt,
     deleteRow as deleteRowAt,
+    distributeColumnWidths,
     duplicateColumn,
     duplicateRow,
+    fitColumnWidth,
     insertColumn,
     insertRow,
+    MAX_COLUMN_WIDTH,
+    MIN_COLUMN_WIDTH,
+    normalizeColumnWidths,
     setColumnStyle,
     setRowStyle,
     type TableGrid,
@@ -150,8 +156,12 @@ type SelectionRange = { start: CellCoord; end: CellCoord };
 type SelectionBox = { left: number; top: number; width: number; height: number } | null;
 
 const TABLE_ROW_HEADER_WIDTH = 32;
-const TABLE_CELL_WIDTH = 100;
 const TABLE_CELL_HEIGHT = 32;
+
+/** PATCH-170. A column width clamped to the shared 60..600 bounds. */
+function clampColumnWidth(value: number): number {
+    return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, value));
+}
 
 export default function TableEditor({
     initialTitle = "",
@@ -254,6 +264,25 @@ export default function TableEditor({
         } catch { /* ignore */ }
         return {};
     });
+
+    /**
+     * PATCH-170. Pixel width per column, aligned with `columns`. It is a fourth
+     * part of the one table value -- `applyGrid`/`currentGrid` carry it -- so a
+     * structural change can never leave widths misaligned. A table nobody
+     * resized stays all-100 and is saved WITHOUT the key.
+     */
+    const [columnWidths, setColumnWidths] = useState<number[]>(() => {
+        try {
+            if (initialContent) {
+                const parsed = JSON.parse(initialContent);
+                const columnCount = Array.isArray(parsed.columns) ? parsed.columns.length : 3;
+                return normalizeColumnWidths(parsed.columnWidths, columnCount);
+            }
+        } catch { /* ignore */ }
+        return normalizeColumnWidths(undefined, 3);
+    });
+    /** The column currently being dragged, so its resize line stays lit. */
+    const [resizingColumn, setResizingColumn] = useState<number | null>(null);
 
     // Title's own style, independent of any cell's -- `activeStyleTarget`
     // tracks whether the Text style panel is currently formatting the
@@ -693,14 +722,18 @@ export default function TableEditor({
         setRows(next.rows.map((row) => [...row]));
         setColumns([...next.columns]);
         setCellStyles({ ...next.cellStyles });
+        // Widths ride with the same result; normalize so a structural change
+        // always leaves them aligned with the new column count.
+        setColumnWidths(normalizeColumnWidths(next.columnWidths, next.columns.length));
     }, []);
 
-    /** The CURRENT table as one value, built fresh from the three states. */
+    /** The CURRENT table as one value, built fresh from the four states. */
     const currentGrid = useCallback((): TableGrid => ({
         rows,
         columns,
         cellStyles,
-    }), [rows, columns, cellStyles]);
+        columnWidths,
+    }), [rows, columns, cellStyles, columnWidths]);
 
     const addRow = useCallback(() => {
         if (fillLocked) return;
@@ -751,6 +784,77 @@ export default function TableEditor({
     }, [applyGrid, currentGrid, selectedCell, columns.length]);
 
     /**
+     * PATCH-170. Column widths.
+     *
+     * A drag is owned by a window listener, not the 6px handle, so the pointer
+     * may leave the strip without ending the drag. The handle's pointerdown
+     * stops propagation so it never also selects the column or starts a cell
+     * selection. Every width edit is a plain `setColumnWidths` -- no structural
+     * change -- so it does not go through `applyGrid`.
+     */
+    const columnWidthAt = useCallback(
+        (index: number) => columnWidths[index] ?? DEFAULT_COLUMN_WIDTH,
+        [columnWidths],
+    );
+
+    const setColumnWidth = useCallback((index: number, width: number) => {
+        setColumnWidths((prev) => prev.map((w, i) => (i === index ? clampColumnWidth(width) : w)));
+    }, []);
+
+    const resizeRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
+
+    const startColumnResize = (index: number, e: React.PointerEvent) => {
+        e.stopPropagation();
+        if (fillLocked) return;
+        const handle = e.currentTarget as HTMLElement;
+        // Capture so the drag survives the pointer leaving the 6px strip. jsdom
+        // does not implement it, hence the guard.
+        if (typeof handle.setPointerCapture === 'function') {
+            try { handle.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
+        }
+        resizeRef.current = { index, startX: e.clientX, startWidth: columnWidthAt(index) };
+        setResizingColumn(index);
+    };
+
+    useEffect(() => {
+        const onMove = (e: PointerEvent) => {
+            const state = resizeRef.current;
+            if (!state) return;
+            setColumnWidth(state.index, state.startWidth + (e.clientX - state.startX));
+        };
+        const onUp = () => {
+            if (!resizeRef.current) return;
+            resizeRef.current = null;
+            setResizingColumn(null);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        return () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+        };
+    }, [setColumnWidth]);
+
+    /** Fit one column to its longest cell text (or its header). */
+    const fitColumnToContent = useCallback((index: number) => {
+        if (fillLocked) return;
+        const texts = rows.map((row) => row[index] ?? '');
+        setColumnWidth(index, fitColumnWidth(texts, columns[index] ?? ''));
+    }, [rows, columns, fillLocked, setColumnWidth]);
+
+    /** Every column gets the current average width. */
+    const distributeWidths = useCallback(() => {
+        if (fillLocked) return;
+        setColumnWidths((prev) => distributeColumnWidths(prev));
+    }, [fillLocked]);
+
+    /** ArrowLeft/ArrowRight on a focused handle change the width by 10px. */
+    const nudgeColumnWidth = useCallback((index: number, delta: number) => {
+        if (fillLocked) return;
+        setColumnWidths((prev) => prev.map((w, i) => (i === index ? clampColumnWidth(w + delta) : w)));
+    }, [fillLocked]);
+
+    /**
      * PATCH-165. One place that turns a handle-menu choice into a pure grid
      * result, for the row/column the menu was opened on. The menu reports WHAT
      * was chosen; the mapping to the structure module lives here, so the menu
@@ -788,9 +892,17 @@ export default function TableEditor({
                 setActiveSubmenu(null);
                 setFillTarget(index);
                 break;
+            case 'fit-width':
+                // Column-only: fit THIS column to its content.
+                if (axis === 'column') fitColumnToContent(index);
+                break;
+            case 'distribute-widths':
+                // Column-only: every column gets the current average.
+                if (axis === 'column') distributeWidths();
+                break;
         }
         setAxisMenu(null);
-    }, [applyGrid, axisMenu, currentGrid]);
+    }, [applyGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths]);
 
     const applyAxisColor = useCallback((bg: string | undefined) => {
         if (!axisMenu) return;
@@ -854,7 +966,7 @@ export default function TableEditor({
             fillSuggestions.column,
             fillSuggestions.values,
         );
-        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles });
+        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles, columnWidths: grid.columnWidths });
         setFillSuggestions(null);
     }, [applyGrid, currentGrid, fillSuggestions]);
 
@@ -899,7 +1011,7 @@ export default function TableEditor({
                 ? row.map((cell, c) => (c === selectedCell.col ? value : cell))
                 : [...row]
         ));
-        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles });
+        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles, columnWidths: grid.columnWidths });
     }, [applyGrid, currentGrid, selectedCell]);
 
     const handleCut = useCallback(() => {
@@ -961,6 +1073,9 @@ export default function TableEditor({
                 titleStyle,
                 commentTitle,
                 commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
+                // PATCH-170. Only saved when a column was actually resized, so an
+                // untouched table keeps byte-identical content.
+                columnWidths: columnWidths.some((width) => width !== DEFAULT_COLUMN_WIDTH) ? columnWidths : undefined,
             }),
             isCollapsed,
         });
@@ -1157,7 +1272,7 @@ export default function TableEditor({
                                 <table
                                     className="border-collapse"
                                     style={{
-                                        userSelect: isSelectingCells ? "none" : "auto",
+                                        userSelect: isSelectingCells || resizingColumn !== null ? "none" : "auto",
                                         width: "max-content",
                                         minWidth: "100%",
                                     }}
@@ -1176,12 +1291,12 @@ export default function TableEditor({
                                                 {headerGroup.headers.map((header, i) => (
                                                     <th
                                                         key={header.id}
-                                                        className={`group/col border border-gray-300 text-xs font-medium text-center cursor-pointer hover:bg-gray-200 transition-colors ${selectedCell?.col === i ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"
+                                                        className={`group/col relative border border-gray-300 text-xs font-medium text-center cursor-pointer hover:bg-gray-200 transition-colors ${selectedCell?.col === i ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"
                                                             }`}
                                                         style={{
-                                                            width: `${TABLE_CELL_WIDTH}px`,
-                                                            minWidth: `${TABLE_CELL_WIDTH}px`,
-                                                            maxWidth: `${TABLE_CELL_WIDTH}px`,
+                                                            width: `${columnWidthAt(i)}px`,
+                                                            minWidth: `${columnWidthAt(i)}px`,
+                                                            maxWidth: `${columnWidthAt(i)}px`,
                                                             height: `${TABLE_CELL_HEIGHT}px`,
                                                         }}
                                                         onClick={(e) => handleColumnHeaderClick(i, e)}
@@ -1209,6 +1324,31 @@ export default function TableEditor({
                                                                 <GripVertical className="h-3 w-3" aria-hidden="true" />
                                                             </button>
                                                         </span>
+                                                        {/*
+                                                          PATCH-170. The resize handle on the RIGHT edge: a
+                                                          6px strip, lit blue on hover and while dragging.
+                                                          stopPropagation on pointerdown so it never selects
+                                                          the column or starts a cell selection.
+                                                        */}
+                                                        <div
+                                                            data-table-column-resize={i}
+                                                            role="separator"
+                                                            aria-label={`Resize column ${columns[i]}`}
+                                                            tabIndex={0}
+                                                            onPointerDown={(e) => startColumnResize(i, e)}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            onDoubleClick={(e) => {
+                                                                e.stopPropagation();
+                                                                fitColumnToContent(i);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                nudgeColumnWidth(i, e.key === 'ArrowRight' ? 10 : -10);
+                                                            }}
+                                                            className={`absolute right-0 top-0 z-20 h-full w-1.5 cursor-col-resize select-none ${resizingColumn === i ? 'bg-blue-500' : 'bg-transparent hover:bg-blue-500'}`}
+                                                        />
                                                     </th>
                                                 ))}
                                             </tr>
@@ -1275,9 +1415,9 @@ export default function TableEditor({
                                                             className={`border border-gray-300 p-0 relative ${inRange ? "bg-purple-100/40" : ""
                                                                 } ${isActive ? "z-10" : "hover:bg-gray-50"}`}
                                                             style={{
-                                                                width: `${TABLE_CELL_WIDTH}px`,
-                                                                minWidth: `${TABLE_CELL_WIDTH}px`,
-                                                                maxWidth: `${TABLE_CELL_WIDTH}px`,
+                                                                width: `${columnWidthAt(colIndex)}px`,
+                                                                minWidth: `${columnWidthAt(colIndex)}px`,
+                                                                maxWidth: `${columnWidthAt(colIndex)}px`,
                                                                 height: `${TABLE_CELL_HEIGHT}px`,
                                                                 userSelect: isSelectingCells ? "none" : "auto", // Fix userSelect
                                                                 backgroundColor: style?.bg,

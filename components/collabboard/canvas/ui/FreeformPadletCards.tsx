@@ -4047,7 +4047,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       size?: 'h1' | 'h2' | 'small';
                     };
                     // Parse table data from content
-                    let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle> } = {};
+                    let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle>; columnWidths?: number[] } = {};
                     try {
                       tableData = JSON.parse(padlet.content || '{}');
                     } catch {
@@ -4059,6 +4059,18 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     const displayRows = rows.slice(0, 3); // Show first 3 rows
                     const displayCols = columns.slice(0, 3); // Show first 3 columns
 
+                    // PATCH-170. Proportional widths from the saved column widths,
+                    // over the columns the card shows. Absent/invalid => no colgroup,
+                    // exactly as before.
+                    const savedWidths = Array.isArray(tableData.columnWidths)
+                      && tableData.columnWidths.length === columns.length
+                      && tableData.columnWidths.every((w) => typeof w === 'number' && Number.isFinite(w) && w > 0)
+                      ? tableData.columnWidths
+                      : null;
+                    const displayWidths = savedWidths ? savedWidths.slice(0, displayCols.length) : null;
+                    const displayWidthTotal = displayWidths ? displayWidths.reduce((sum, w) => sum + w, 0) : 0;
+                    const useWidths = displayWidths !== null && displayWidthTotal > 0;
+
                     // Helper to get cell style
                     const getCellStyle = (rowIndex: number, colIndex: number): CellStyle => {
                       const key = `${rowIndex}-${colIndex}`;
@@ -4068,7 +4080,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     return (
                       <>
                         <div className="overflow-hidden rounded border border-gray-200">
-                          <table className="w-full text-[9px]">
+                          <table
+                            className="w-full text-[9px]"
+                            style={useWidths ? { tableLayout: 'fixed' } : undefined}
+                          >
+                            {useWidths && (
+                              <colgroup>
+                                {displayWidths!.map((width, i) => (
+                                  <col key={i} style={{ width: `${(width / displayWidthTotal) * 100}%` }} />
+                                ))}
+                              </colgroup>
+                            )}
                             <thead>
                               <tr className="bg-gray-100">
                                 {displayCols.map((col, i) => (
