@@ -14,6 +14,7 @@ import { resizeImageOuterBoxToAspect } from '@/lib/domain/canvas/imageResizeGeom
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { resolveCropResetSource } from '@/lib/infra/collabboard/imageDurableContent';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
+import { formatSummary, summarizeColumn } from '@/lib/domain/canvas/tableNumbers';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
@@ -4049,7 +4050,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       aiFilled?: true;
                     };
                     // Parse table data from content
-                    let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle>; columnWidths?: number[] } = {};
+                    let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle>; columnWidths?: number[]; columnSummaries?: (string | null)[] } = {};
                     try {
                       tableData = JSON.parse(padlet.content || '{}');
                     } catch {
@@ -4145,6 +4146,31 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                 </tr>
                               )}
                             </tbody>
+                            {/* PATCH-174. The summary footer, only when some column has
+                                a summary. Computed with the same pure functions the
+                                editor uses. */}
+                            {(() => {
+                              const summaries = tableData.columnSummaries;
+                              if (!Array.isArray(summaries) || summaries.length !== columns.length) return null;
+                              if (!summaries.some((s) => s !== null && s !== undefined)) return null;
+                              return (
+                                <tfoot>
+                                  <tr className="border-t border-gray-200 bg-gray-50 text-gray-500">
+                                    {displayCols.map((_, ci) => {
+                                      const kind = summaries[ci];
+                                      const text = kind
+                                        ? formatSummary(kind as 'sum' | 'average' | 'count' | 'min' | 'max', summarizeColumn(rows.map((r) => r[ci] ?? ''), kind as 'sum' | 'average' | 'count' | 'min' | 'max'))
+                                        : '';
+                                      return (
+                                        <td key={ci} className="px-1 py-0.5 border-r border-gray-200 truncate">
+                                          {text}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                </tfoot>
+                              );
+                            })()}
                           </table>
                         </div>
                         {/* Show more indicator */}

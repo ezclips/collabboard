@@ -18,6 +18,8 @@
  * to an unrelated cell, which is the class of bug this module exists to end.
  */
 
+import { parseCellNumber, type ColumnSummary } from './tableNumbers';
+
 export type TableCellStyle = {
   bg?: string;
   align?: 'left' | 'center' | 'right';
@@ -50,6 +52,12 @@ export type TableGrid = {
    * keeps it aligned when present and leaves it absent when absent.
    */
   readonly columnWidths?: readonly number[];
+  /**
+   * PATCH-174. The summary shown under each column, aligned with `columns`
+   * exactly like `columnWidths`. ABSENT means no summaries; every function here
+   * keeps it aligned when present and leaves it absent when absent.
+   */
+  readonly columnSummaries?: readonly (ColumnSummary | null)[];
 };
 
 /** The width bounds, and the width an untouched column has. */
@@ -98,21 +106,61 @@ export function fitColumnWidth(texts: readonly string[], headerText: string): nu
 }
 
 /**
- * The returned grid, carrying `columnWidths` only when the input had them.
- * Row and style functions use this so an untouched table stays byte-identical.
+ * The returned grid, carrying BOTH optional per-column arrays (`columnWidths`,
+ * `columnSummaries`) only when the input had them, so an untouched table stays
+ * byte-identical.
  */
 function withWidths(
   source: TableGrid,
   parts: Pick<TableGrid, 'rows' | 'columns' | 'cellStyles'>,
 ): TableGrid {
-  return source.columnWidths === undefined
-    ? { rows: parts.rows, columns: parts.columns, cellStyles: parts.cellStyles }
-    : {
-      rows: parts.rows,
-      columns: parts.columns,
-      cellStyles: parts.cellStyles,
-      columnWidths: source.columnWidths,
-    };
+  return buildGrid(parts, source.columnWidths, source.columnSummaries);
+}
+
+/** Build a grid, attaching each optional array only when it is present. */
+function buildGrid(
+  parts: Pick<TableGrid, 'rows' | 'columns' | 'cellStyles'>,
+  columnWidths: readonly number[] | undefined,
+  columnSummaries: readonly (ColumnSummary | null)[] | undefined,
+): TableGrid {
+  return {
+    rows: parts.rows,
+    columns: parts.columns,
+    cellStyles: parts.cellStyles,
+    ...(columnWidths !== undefined ? { columnWidths } : {}),
+    ...(columnSummaries !== undefined ? { columnSummaries } : {}),
+  };
+}
+
+function insertAt<T>(list: readonly T[], index: number, value: T): T[] {
+  return [...list.slice(0, index), value, ...list.slice(index)];
+}
+
+function removeAt<T>(list: readonly T[], index: number): T[] {
+  return list.filter((_, i) => i !== index);
+}
+
+function duplicateAt<T>(list: readonly T[], index: number): T[] {
+  return [...list.slice(0, index + 1), list[index], ...list.slice(index + 1)];
+}
+
+const COLUMN_SUMMARY_KINDS: readonly ColumnSummary[] = ['sum', 'average', 'count', 'min', 'max'];
+
+/**
+ * PATCH-174. The usable summaries for a table of `columnCount` columns.
+ *
+ * Missing, the wrong length, or an unrecognised entry means "no summary": an
+ * entry that is not one of the five kinds becomes `null`.
+ */
+export function normalizeColumnSummaries(
+  summaries: unknown,
+  columnCount: number,
+): (ColumnSummary | null)[] {
+  const fallback = () => Array.from({ length: columnCount }, () => null);
+  if (!Array.isArray(summaries) || summaries.length !== columnCount) return fallback();
+  return summaries.map((entry) => (
+    (COLUMN_SUMMARY_KINDS as readonly unknown[]).includes(entry) ? (entry as ColumnSummary) : null
+  ));
 }
 
 /** A parsed, in-range style key. */
@@ -251,14 +299,13 @@ export function insertColumn(grid: TableGrid, at: number): TableGrid {
   const cellStyles = stylesFrom(styleEntries(grid).map((entry) => (
     entry.col >= position ? { ...entry, col: entry.col + 1 } : entry
   )));
-  if (grid.columnWidths === undefined) return { rows, columns, cellStyles };
-  const widths = normalizeColumnWidths(grid.columnWidths, grid.columns.length);
-  return {
-    rows,
-    columns,
-    cellStyles,
-    columnWidths: [...widths.slice(0, position), DEFAULT_COLUMN_WIDTH, ...widths.slice(position)],
-  };
+  const widths = grid.columnWidths === undefined
+    ? undefined
+    : insertAt(normalizeColumnWidths(grid.columnWidths, grid.columns.length), position, DEFAULT_COLUMN_WIDTH);
+  const summaries = grid.columnSummaries === undefined
+    ? undefined
+    : insertAt(normalizeColumnSummaries(grid.columnSummaries, grid.columns.length), position, null);
+  return buildGrid({ rows, columns, cellStyles }, widths, summaries);
 }
 
 /** Mirror of deleteRow: no-op at one column. */
@@ -271,9 +318,13 @@ export function deleteColumn(grid: TableGrid, index: number): TableGrid {
     if (entry.col === index) return [];
     return [entry.col > index ? { ...entry, col: entry.col - 1 } : entry];
   }));
-  if (grid.columnWidths === undefined) return { rows, columns, cellStyles };
-  const widths = normalizeColumnWidths(grid.columnWidths, grid.columns.length);
-  return { rows, columns, cellStyles, columnWidths: widths.filter((_, c) => c !== index) };
+  const widths = grid.columnWidths === undefined
+    ? undefined
+    : removeAt(normalizeColumnWidths(grid.columnWidths, grid.columns.length), index);
+  const summaries = grid.columnSummaries === undefined
+    ? undefined
+    : removeAt(normalizeColumnSummaries(grid.columnSummaries, grid.columns.length), index);
+  return buildGrid({ rows, columns, cellStyles }, widths, summaries);
 }
 
 /** Mirror of duplicateRow: the copy gets `nextColumnName`. */
@@ -295,15 +346,14 @@ export function duplicateColumn(grid: TableGrid, index: number): TableGrid {
     }
     return [entry.col > index ? { ...entry, col: entry.col + 1 } : entry];
   }));
-  if (grid.columnWidths === undefined) return { rows, columns, cellStyles };
-  const widths = normalizeColumnWidths(grid.columnWidths, grid.columns.length);
-  return {
-    rows,
-    columns,
-    cellStyles,
-    // The copy carries the SOURCE column's width.
-    columnWidths: [...widths.slice(0, index + 1), widths[index], ...widths.slice(index + 1)],
-  };
+  // The copy carries the SOURCE column's width and summary.
+  const widths = grid.columnWidths === undefined
+    ? undefined
+    : duplicateAt(normalizeColumnWidths(grid.columnWidths, grid.columns.length), index);
+  const summaries = grid.columnSummaries === undefined
+    ? undefined
+    : duplicateAt(normalizeColumnSummaries(grid.columnSummaries, grid.columns.length), index);
+  return buildGrid({ rows, columns, cellStyles }, widths, summaries);
 }
 
 /** Mirror of clearRow: text cleared, styles kept. */
@@ -387,4 +437,151 @@ function mergeStyleAt(
     return;
   }
   styles[key] = merged;
+}
+
+/**
+ * PATCH-174. Sort the rows by one column.
+ *
+ * If EVERY non-empty cell in the column parses as a number, the sort is numeric
+ * (so `9` is after `10`); otherwise it is a text sort with natural numeric
+ * collation. EMPTY CELLS ALWAYS GO LAST, in both directions, and the sort is
+ * STABLE for equal keys. Whole rows move with their `cellStyles` (re-keyed,
+ * including `size` and `aiFilled`). Columns, widths and summaries are unchanged.
+ */
+export function sortRowsByColumn(grid: TableGrid, col: number, direction: 'asc' | 'desc'): TableGrid {
+  if (col < 0 || col >= grid.columns.length) return grid;
+
+  const cellText = (rowIndex: number) => (grid.rows[rowIndex]?.[col] ?? '').trim();
+  const parsed = grid.rows.map((_, rowIndex) => parseCellNumber(cellText(rowIndex)));
+  const allNumeric = grid.rows.every((_, rowIndex) => (
+    cellText(rowIndex) === '' || parsed[rowIndex] !== null
+  ));
+  const sign = direction === 'asc' ? 1 : -1;
+
+  const order = grid.rows.map((_, index) => index).sort((a, b) => {
+    const aText = cellText(a);
+    const bText = cellText(b);
+    const aEmpty = aText.length === 0;
+    const bEmpty = bText.length === 0;
+    // Empties last, in both directions; equal keys keep their order.
+    if (aEmpty || bEmpty) {
+      if (aEmpty && bEmpty) return a - b;
+      return aEmpty ? 1 : -1;
+    }
+    const comparison = allNumeric
+      ? parsed[a]!.value - parsed[b]!.value
+      : aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+    return comparison !== 0 ? comparison * sign : a - b;
+  });
+
+  const rows = order.map((oldIndex) => [...grid.rows[oldIndex]]);
+  const newIndexByOld = new Map<number, number>();
+  order.forEach((oldIndex, newIndex) => newIndexByOld.set(oldIndex, newIndex));
+  const cellStyles = stylesFrom(styleEntries(grid).map((entry) => (
+    { ...entry, row: newIndexByOld.get(entry.row)! }
+  )));
+  return withWidths(grid, { rows, columns: grid.columns, cellStyles });
+}
+
+export interface FindRange {
+  readonly minRow: number;
+  readonly maxRow: number;
+  readonly minCol: number;
+  readonly maxCol: number;
+}
+
+export interface FindReplaceOptions {
+  readonly find: string;
+  readonly replace: string;
+  readonly matchCase?: boolean;
+  readonly wholeCell?: boolean;
+  /** When given, only cells inside this normalized range are considered. */
+  readonly range?: FindRange;
+}
+
+/** The matching half of a find/replace query (no replacement text). */
+type MatchOptions = Pick<FindReplaceOptions, 'find' | 'matchCase' | 'wholeCell' | 'range'>;
+
+function cellMatches(text: string, options: MatchOptions): boolean {
+  if (options.find.length === 0) return false;
+  if (options.wholeCell) {
+    return options.matchCase
+      ? text.trim() === options.find
+      : text.trim().toLowerCase() === options.find.toLowerCase();
+  }
+  return options.matchCase
+    ? text.includes(options.find)
+    : text.toLowerCase().includes(options.find.toLowerCase());
+}
+
+function inRange(options: MatchOptions, row: number, col: number): boolean {
+  const range = options.range;
+  if (!range) return true;
+  return row >= range.minRow && row <= range.maxRow && col >= range.minCol && col <= range.maxCol;
+}
+
+/** PATCH-174. The `${row}-${col}` keys of cells that match `find`. */
+export function findMatchingCells(grid: TableGrid, options: MatchOptions): string[] {
+  const keys: string[] = [];
+  for (let row = 0; row < grid.rows.length; row += 1) {
+    for (let col = 0; col < grid.columns.length; col += 1) {
+      if (!inRange(options, row, col)) continue;
+      const text = grid.rows[row]?.[col] ?? '';
+      if (text.length === 0) continue;
+      if (cellMatches(text, options)) keys.push(`${row}-${col}`);
+    }
+  }
+  return keys;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * PATCH-174. Replace `find` in every matching cell.
+ *
+ * A plain substring is replaced throughout the cell (case-insensitively unless
+ * `matchCase`); `wholeCell` replaces the cell's whole content. `replaced` counts
+ * CELLS changed. `aiFilled` is cleared on every changed cell -- the text is no
+ * longer the AI's.
+ */
+export function replaceInTable(
+  grid: TableGrid,
+  options: FindReplaceOptions,
+): { grid: TableGrid; replaced: number } {
+  if (options.find.length === 0) return { grid, replaced: 0 };
+
+  const nextRows = grid.rows.map((row, rowIndex) => row.map((cell, colIndex) => {
+    if (!inRange(options, rowIndex, colIndex)) return cell;
+    if (!cellMatches(cell, options)) return cell;
+    if (options.wholeCell) return options.replace;
+    return cell.replace(
+      new RegExp(escapeRegExp(options.find), options.matchCase ? 'g' : 'gi'),
+      options.replace,
+    );
+  }));
+
+  const changed: string[] = [];
+  for (let row = 0; row < grid.rows.length; row += 1) {
+    for (let col = 0; col < grid.columns.length; col += 1) {
+      if ((grid.rows[row]?.[col] ?? '') !== (nextRows[row]?.[col] ?? '')) changed.push(`${row}-${col}`);
+    }
+  }
+  if (changed.length === 0) return { grid, replaced: 0 };
+
+  const nextStyles: Record<string, TableCellStyle> = { ...grid.cellStyles };
+  for (const key of changed) {
+    const cell = nextStyles[key];
+    if (!cell?.aiFilled) continue;
+    const merged: TableCellStyle = { ...cell };
+    delete (merged as Record<string, unknown>).aiFilled;
+    if (Object.keys(merged).length === 0) delete nextStyles[key];
+    else nextStyles[key] = merged;
+  }
+
+  return {
+    grid: buildGrid({ rows: nextRows, columns: grid.columns, cellStyles: nextStyles }, grid.columnWidths, grid.columnSummaries),
+    replaced: changed.length,
+  };
 }

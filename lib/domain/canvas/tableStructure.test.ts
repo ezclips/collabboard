@@ -10,14 +10,18 @@ import {
   duplicateColumn,
   duplicateRow,
   fitColumnWidth,
+  findMatchingCells,
   insertColumn,
   insertRow,
   MAX_COLUMN_TITLE_LENGTH,
   nextColumnName,
+  normalizeColumnSummaries,
   normalizeColumnWidths,
   renameColumn,
+  replaceInTable,
   setColumnStyle,
   setRowStyle,
+  sortRowsByColumn,
   type TableGrid,
 } from './tableStructure';
 
@@ -446,5 +450,139 @@ describe('PATCH-172: renameColumn', () => {
   it('an out-of-range column is a no-op', () => {
     const grid = baseGrid();
     expect(renameColumn(grid, 9, 'Nope')).toEqual({ grid });
+  });
+});
+
+describe('PATCH-174: sortRowsByColumn', () => {
+  const sortGrid = (): TableGrid => ({
+    rows: [
+      ['10 L', 'ten'],
+      ['9 L', 'nine'],
+      ['', 'empty'],
+      ['2 L', 'two'],
+    ],
+    columns: ['Volume', 'Label'],
+    cellStyles: { '0-1': { bg: '#dcfce7', aiFilled: true } },
+  });
+
+  it('sorts a numeric column ascending, empties last', () => {
+    expect(sortRowsByColumn(sortGrid(), 0, 'asc').rows).toEqual([
+      ['2 L', 'two'], ['9 L', 'nine'], ['10 L', 'ten'], ['', 'empty'],
+    ]);
+  });
+
+  it('sorts the same column descending, empties STILL last', () => {
+    expect(sortRowsByColumn(sortGrid(), 0, 'desc').rows).toEqual([
+      ['10 L', 'ten'], ['9 L', 'nine'], ['2 L', 'two'], ['', 'empty'],
+    ]);
+  });
+
+  it('moves each row\'s styles with it', () => {
+    const result = sortRowsByColumn(sortGrid(), 0, 'asc');
+    // Old row 0 ('10 L') is now row 2, carrying its style.
+    expect(result.cellStyles['2-1']).toEqual({ bg: '#dcfce7', aiFilled: true });
+    expect(result.cellStyles['0-1']).toBeUndefined();
+  });
+
+  it('falls back to a natural text sort when a cell does not parse', () => {
+    const grid: TableGrid = {
+      rows: [['banana'], ['apple'], [''], ['Cherry']],
+      columns: ['Fruit'],
+      cellStyles: {},
+    };
+    expect(sortRowsByColumn(grid, 0, 'asc').rows).toEqual([['apple'], ['banana'], ['Cherry'], ['']]);
+  });
+
+  it('is stable for equal keys', () => {
+    const grid: TableGrid = {
+      rows: [['a', '1'], ['a', '2'], ['b', '3']],
+      columns: ['X', 'Y'],
+      cellStyles: {},
+    };
+    expect(sortRowsByColumn(grid, 0, 'asc').rows).toEqual([['a', '1'], ['a', '2'], ['b', '3']]);
+  });
+
+  it('leaves widths and summaries untouched', () => {
+    const grid: TableGrid = { ...sortGrid(), columnWidths: [80, 120], columnSummaries: ['sum', null] };
+    const result = sortRowsByColumn(grid, 0, 'asc');
+    expect(result.columnWidths).toEqual([80, 120]);
+    expect(result.columnSummaries).toEqual(['sum', null]);
+  });
+});
+
+describe('PATCH-174: replaceInTable', () => {
+  const replaceGrid = (): TableGrid => ({
+    rows: [['cat', 'Cat', 'concat'], ['dog', 'cat', '']],
+    columns: ['A', 'B', 'C'],
+    cellStyles: { '0-0': { aiFilled: true }, '1-1': { aiFilled: true } },
+  });
+
+  it('replaces every occurrence, case-insensitively, and counts changed cells', () => {
+    const { grid, replaced } = replaceInTable(replaceGrid(), { find: 'cat', replace: 'X' });
+    expect(grid.rows).toEqual([['X', 'X', 'conX'], ['dog', 'X', '']]);
+    expect(replaced).toBe(4);
+  });
+
+  it('clears aiFilled only on the cells it changed', () => {
+    const { grid } = replaceInTable(replaceGrid(), { find: 'cat', replace: 'X' });
+    // Both AI-filled cells changed: the marker goes, and the empty style with it.
+    expect(grid.cellStyles['0-0']).toBeUndefined();
+    expect(grid.cellStyles['1-1']).toBeUndefined();
+  });
+
+  it('honours matchCase', () => {
+    const { grid, replaced } = replaceInTable(replaceGrid(), { find: 'cat', replace: 'X', matchCase: true });
+    expect(grid.rows).toEqual([['X', 'Cat', 'conX'], ['dog', 'X', '']]);
+    expect(replaced).toBe(3);
+  });
+
+  it('wholeCell replaces the whole cell only when it matches exactly', () => {
+    const { grid, replaced } = replaceInTable(replaceGrid(), { find: 'cat', replace: 'X', wholeCell: true });
+    expect(grid.rows).toEqual([['X', 'X', 'concat'], ['dog', 'X', '']]);
+    expect(replaced).toBe(3);
+  });
+
+  it('honours the range', () => {
+    const { grid, replaced } = replaceInTable(replaceGrid(), {
+      find: 'cat', replace: 'X', range: { minRow: 0, maxRow: 0, minCol: 0, maxCol: 2 },
+    });
+    expect(grid.rows).toEqual([['X', 'X', 'conX'], ['dog', 'cat', '']]);
+    expect(replaced).toBe(3);
+  });
+
+  it('findMatchingCells reports the matching keys', () => {
+    expect(findMatchingCells(replaceGrid(), { find: 'cat' }).sort()).toEqual(['0-0', '0-1', '0-2', '1-1']);
+  });
+
+  it('an empty find is a no-op', () => {
+    const grid = replaceGrid();
+    expect(replaceInTable(grid, { find: '', replace: 'X' })).toEqual({ grid, replaced: 0 });
+    expect(findMatchingCells(grid, { find: '' })).toEqual([]);
+  });
+});
+
+describe('PATCH-174: column summaries stay aligned with columns', () => {
+  it('normalizes missing, wrong length and unknown entries to null', () => {
+    expect(normalizeColumnSummaries(undefined, 2)).toEqual([null, null]);
+    expect(normalizeColumnSummaries(['sum'], 2)).toEqual([null, null]);
+    expect(normalizeColumnSummaries(['sum', 'nope'], 2)).toEqual(['sum', null]);
+  });
+
+  it('insert, delete and duplicate keep summaries aligned', () => {
+    const grid: TableGrid = {
+      rows: [['a', 'b', 'c']],
+      columns: ['A', 'B', 'C'],
+      cellStyles: {},
+      columnSummaries: ['sum', null, 'count'],
+    };
+    expect(insertColumn(grid, 1).columnSummaries).toEqual(['sum', null, null, 'count']);
+    expect(deleteColumn(grid, 1).columnSummaries).toEqual(['sum', 'count']);
+    // The copy carries the source column's summary.
+    expect(duplicateColumn(grid, 1).columnSummaries).toEqual(['sum', null, null, 'count']);
+  });
+
+  it('an absent summary list stays absent', () => {
+    expect(insertColumn(baseGrid(), 1).columnSummaries).toBeUndefined();
+    expect(deleteColumn(baseGrid(), 1).columnSummaries).toBeUndefined();
   });
 });

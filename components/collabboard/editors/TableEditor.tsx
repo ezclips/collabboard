@@ -15,6 +15,7 @@ import {
     MessageSquare,
     ChevronRight,
     Check,
+    Search,
     Sparkles,
     X,
 } from "lucide-react";
@@ -36,14 +37,18 @@ import {
     distributeColumnWidths,
     duplicateColumn,
     duplicateRow,
+    findMatchingCells,
     fitColumnWidth,
     insertColumn,
     insertRow,
     MAX_COLUMN_TITLE_LENGTH,
     MAX_COLUMN_WIDTH,
     MIN_COLUMN_WIDTH,
+    normalizeColumnSummaries,
     normalizeColumnWidths,
     renameColumn,
+    replaceInTable,
+    sortRowsByColumn,
     setColumnStyle,
     setRowStyle,
     type TableGrid,
@@ -52,7 +57,13 @@ import { TableAxisMenu, type TableAxisAction } from "../menus/TableAxisMenu";
 import TableFillPanel from "./TableFillPanel";
 import TableRowFillPanel from "./TableRowFillPanel";
 import TableAskAIPanel from "./TableAskAIPanel";
+import TableFindReplacePanel from "./TableFindReplacePanel";
 import { type TableFillCell, type TableFillValue } from "@/lib/domain/ai/tableFill";
+import {
+    formatSummary,
+    summarizeColumn,
+    type ColumnSummary,
+} from "@/lib/domain/canvas/tableNumbers";
 import { tableSelectionText } from "@/lib/domain/ai/tableAskAI";
 
 // Comment interface
@@ -295,6 +306,29 @@ export default function TableEditor({
     const [resizingColumn, setResizingColumn] = useState<number | null>(null);
 
     /**
+     * PATCH-174. The summary under each column, aligned with `columns` like
+     * `columnWidths`. A table nobody summarized stays all-null and is saved
+     * WITHOUT the key.
+     */
+    const [columnSummaries, setColumnSummaries] = useState<(ColumnSummary | null)[]>(() => {
+        try {
+            if (initialContent) {
+                const parsed = JSON.parse(initialContent);
+                const columnCount = Array.isArray(parsed.columns) ? parsed.columns.length : 3;
+                return normalizeColumnSummaries(parsed.columnSummaries, columnCount);
+            }
+        } catch { /* ignore */ }
+        return normalizeColumnSummaries(undefined, 3);
+    });
+
+    /** PATCH-174. Whether the Find & replace panel is open, and its query. */
+    const [findPanelOpen, setFindPanelOpen] = useState(false);
+    const [findQuery, setFindQuery] = useState({
+        find: '', replace: '', matchCase: false, wholeCell: false, onlyInSelection: false,
+    });
+    const [replacedMessage, setReplacedMessage] = useState<string | null>(null);
+
+    /**
      * PATCH-172. The column whose title is being edited inline, its working
      * value, and the duplicate-title hint shown under the input.
      */
@@ -347,13 +381,15 @@ export default function TableEditor({
     const fillLocked = fillSuggestions !== null;
 
     /**
-     * PATCH-173. The snapshot Accept all offers to undo, and the toast that shows
-     * it. Cleared after 10 s, or as soon as any other change is made.
+     * PATCH-173/174. The snapshot an Undo offers to restore, and the message the
+     * toast shows. Cleared after 10 s, or as soon as any other change is made.
      */
-    const [undoFill, setUndoFill] = useState<{
+    const [undoOffer, setUndoOffer] = useState<{
+        message: string;
         rows: readonly (readonly string[])[];
         cellStyles: Readonly<Record<string, CellStyle>>;
-        count: number;
+        columnWidths: readonly number[];
+        columnSummaries: readonly (ColumnSummary | null)[];
     } | null>(null);
     const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -588,7 +624,7 @@ export default function TableEditor({
         }
         if (!selectedCell && !selectionRange) return;
         // PATCH-173: a style change is a change, so it drops the undo offer.
-        setUndoFill(null);
+        setUndoOffer(null);
 
         setCellStyles((prev) => {
             const next = { ...prev };
@@ -739,7 +775,7 @@ export default function TableEditor({
     // Handle cell change
     const handleCellChange = (rowIndex: number, colIndex: number, value: string) => {
         // PATCH-173: a hand edit clears the AI marker and the undo offer.
-        setUndoFill(null);
+        setUndoOffer(null);
         setRows((prev) =>
             prev.map((row, r) => (r === rowIndex ? row.map((cell, c) => (c === colIndex ? value : cell)) : row))
         );
@@ -755,23 +791,44 @@ export default function TableEditor({
     // cell it belonged to. `applyGrid` is the only writer, and every handler
     // below builds a `TableGrid`, mutates nothing, and hands the result here.
     const applyGrid = useCallback((next: TableGrid) => {
-        // PATCH-173: any structural/style/title change drops the undo offer.
-        setUndoFill(null);
+        // PATCH-173/174: any structural/style/title change drops the undo offer.
+        setUndoOffer(null);
         setRows(next.rows.map((row) => [...row]));
         setColumns([...next.columns]);
         setCellStyles({ ...next.cellStyles });
         // Widths ride with the same result; normalize so a structural change
         // always leaves them aligned with the new column count.
         setColumnWidths(normalizeColumnWidths(next.columnWidths, next.columns.length));
+        setColumnSummaries(normalizeColumnSummaries(next.columnSummaries, next.columns.length));
     }, []);
 
-    /** The CURRENT table as one value, built fresh from the four states. */
+    /** The CURRENT table as one value, built fresh from the five states. */
     const currentGrid = useCallback((): TableGrid => ({
         rows,
         columns,
         cellStyles,
         columnWidths,
-    }), [rows, columns, cellStyles, columnWidths]);
+        columnSummaries,
+    }), [rows, columns, cellStyles, columnWidths, columnSummaries]);
+
+    /**
+     * PATCH-174. Apply a result and offer to undo it for ten seconds. The
+     * snapshot is the table BEFORE `next`, so Undo can never overwrite later
+     * work: it is cleared by any other change (`applyGrid`, a hand edit, a width
+     * edit) and by the 10-second timer.
+     */
+    const applyUndoableGrid = useCallback((next: TableGrid, message: string) => {
+        const grid = currentGrid();
+        const snapshot = {
+            message,
+            rows: grid.rows.map((row) => [...row]),
+            cellStyles: { ...grid.cellStyles },
+            columnWidths: [...grid.columnWidths ?? []],
+            columnSummaries: [...grid.columnSummaries ?? []],
+        };
+        applyGrid(next);
+        setUndoOffer(snapshot);
+    }, [applyGrid, currentGrid]);
 
     const addRow = useCallback(() => {
         if (fillLocked) return;
@@ -837,7 +894,7 @@ export default function TableEditor({
 
     const setColumnWidth = useCallback((index: number, width: number) => {
         // PATCH-173: a width change is a change, so it drops the undo offer.
-        setUndoFill(null);
+        setUndoOffer(null);
         setColumnWidths((prev) => prev.map((w, i) => (i === index ? clampColumnWidth(width) : w)));
     }, []);
 
@@ -885,14 +942,14 @@ export default function TableEditor({
     /** Every column gets the current average width. */
     const distributeWidths = useCallback(() => {
         if (fillLocked) return;
-        setUndoFill(null);
+        setUndoOffer(null);
         setColumnWidths((prev) => distributeColumnWidths(prev));
     }, [fillLocked]);
 
     /** ArrowLeft/ArrowRight on a focused handle change the width by 10px. */
     const nudgeColumnWidth = useCallback((index: number, delta: number) => {
         if (fillLocked) return;
-        setUndoFill(null);
+        setUndoOffer(null);
         setColumnWidths((prev) => prev.map((w, i) => (i === index ? clampColumnWidth(w + delta) : w)));
     }, [fillLocked]);
 
@@ -1016,9 +1073,33 @@ export default function TableEditor({
                 // Column-only: start the inline title edit.
                 if (axis === 'column') startRenameColumn(index);
                 break;
+            case 'sort-asc':
+            case 'sort-desc': {
+                // Column-only, and locked like every other edit. Undoable.
+                if (axis !== 'column' || fillLocked) break;
+                const direction = action === 'sort-asc' ? 'asc' : 'desc';
+                applyUndoableGrid(
+                    sortRowsByColumn(grid, index, direction),
+                    `Sorted by ${columns[index] ?? ''}`,
+                );
+                break;
+            }
+            case 'summary-none':
+            case 'summary-sum':
+            case 'summary-average':
+            case 'summary-count':
+            case 'summary-min':
+            case 'summary-max': {
+                if (axis !== 'column' || fillLocked) break;
+                const kind = action === 'summary-none' ? null : action.replace('summary-', '') as ColumnSummary;
+                const nextSummaries = normalizeColumnSummaries(grid.columnSummaries, grid.columns.length);
+                nextSummaries[index] = kind;
+                applyGrid({ ...grid, columnSummaries: nextSummaries });
+                break;
+            }
         }
         setAxisMenu(null);
-    }, [applyGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths, fillLocked, columns.length, rows.length, startRenameColumn]);
+    }, [applyGrid, applyUndoableGrid, axisMenu, currentGrid, fitColumnToContent, distributeWidths, fillLocked, columns, rows.length, startRenameColumn]);
 
     const applyAxisAlign = useCallback((align: 'left' | 'center' | 'right') => {
         if (!axisMenu) return;
@@ -1081,34 +1162,99 @@ export default function TableEditor({
             const key = `${cell.row}-${cell.col}`;
             nextStyles[key] = { ...nextStyles[key], aiFilled: true };
         }
-        const snapshot = {
-            rows: grid.rows.map((row) => [...row]),
-            cellStyles: { ...grid.cellStyles },
-            count: fillSuggestions.length,
-        };
-        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: nextStyles, columnWidths: grid.columnWidths });
+        applyUndoableGrid(
+            { rows: nextRows, columns: grid.columns, cellStyles: nextStyles, columnWidths: grid.columnWidths, columnSummaries: grid.columnSummaries },
+            `Filled ${fillSuggestions.length} cells`,
+        );
         setFillSuggestions(null);
-        setUndoFill(snapshot);
-    }, [applyGrid, currentGrid, fillSuggestions]);
+    }, [applyUndoableGrid, currentGrid, fillSuggestions]);
 
     const discardFillSuggestions = useCallback(() => setFillSuggestions(null), []);
 
-    /** PATCH-173. Undo an Accept all, restoring the snapshot exactly. */
-    const undoFillAccept = useCallback(() => {
-        if (!undoFill) return;
-        setRows(undoFill.rows.map((row) => [...row]));
-        setCellStyles({ ...undoFill.cellStyles });
-        setUndoFill(null);
-    }, [undoFill]);
+    /** PATCH-173/174. Undo the last offered change, restoring the snapshot. */
+    const undoLastChange = useCallback(() => {
+        if (!undoOffer) return;
+        setRows(undoOffer.rows.map((row) => [...row]));
+        setCellStyles({ ...undoOffer.cellStyles });
+        setColumnWidths([...undoOffer.columnWidths]);
+        setColumnSummaries([...undoOffer.columnSummaries]);
+        setUndoOffer(null);
+    }, [undoOffer]);
 
     // The undo offer expires after 10 s (or on the next change, above).
     useEffect(() => {
-        if (undoFill === null) return;
-        undoTimerRef.current = setTimeout(() => setUndoFill(null), 10_000);
+        if (undoOffer === null) return;
+        undoTimerRef.current = setTimeout(() => setUndoOffer(null), 10_000);
         return () => {
             if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
         };
-    }, [undoFill]);
+    }, [undoOffer]);
+
+    /**
+     * PATCH-174. Find & replace. The editor owns the query; matching and
+     * replacing are the pure helpers.
+     */
+    const findRange = useMemo(() => {
+        if (!findQuery.onlyInSelection || !selectionRange) return undefined;
+        return normalizeRange(selectionRange);
+    }, [findQuery.onlyInSelection, selectionRange, normalizeRange]);
+
+    /** The `${row}-${col}` keys of cells matching the current Find text. */
+    const findMatchKeys = useMemo(() => {
+        if (findQuery.find.length === 0) return [] as string[];
+        return findMatchingCells(currentGrid(), {
+            find: findQuery.find,
+            matchCase: findQuery.matchCase,
+            wholeCell: findQuery.wholeCell,
+            range: findRange,
+        });
+    }, [findQuery, findRange, currentGrid]);
+
+    const handleReplaceAll = useCallback(() => {
+        if (fillLocked || findQuery.find.length === 0) return;
+        const result = replaceInTable(currentGrid(), {
+            find: findQuery.find,
+            replace: findQuery.replace,
+            matchCase: findQuery.matchCase,
+            wholeCell: findQuery.wholeCell,
+            range: findRange,
+        });
+        if (result.replaced === 0) {
+            setReplacedMessage('No cells changed.');
+            return;
+        }
+        applyUndoableGrid(result.grid, `Replaced in ${result.replaced} cells`);
+        setReplacedMessage(`Replaced in ${result.replaced} cells`);
+    }, [applyUndoableGrid, currentGrid, fillLocked, findQuery, findRange]);
+
+    const closeFindPanel = useCallback(() => {
+        setFindPanelOpen(false);
+        setReplacedMessage(null);
+    }, []);
+
+    /** PATCH-174. Ctrl/Cmd+F opens Find while the table editor is open. */
+    useEffect(() => {
+        if (!isOpen) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                setFindPanelOpen(true);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [isOpen]);
+
+    /** PATCH-174. The footer text for each column, or null when it has no summary. */
+    const columnFooterTexts = useMemo(() => {
+        if (!columnSummaries.some((summary) => summary !== null)) return null;
+        return columns.map((_, col) => {
+            const kind = columnSummaries[col];
+            if (!kind) return '';
+            const texts = rows.map((row) => row[col] ?? '');
+            return formatSummary(kind, summarizeColumn(texts, kind));
+        });
+    }, [columnSummaries, columns, rows]);
 
     /** The active cell's current text, so the Ask AI panel can label its insert. */
     const activeCellHasText = selectedCell
@@ -1217,6 +1363,8 @@ export default function TableEditor({
                 // PATCH-170. Only saved when a column was actually resized, so an
                 // untouched table keeps byte-identical content.
                 columnWidths: columnWidths.some((width) => width !== DEFAULT_COLUMN_WIDTH) ? columnWidths : undefined,
+                // PATCH-174. Only saved when a summary was set.
+                columnSummaries: columnSummaries.some((summary) => summary !== null) ? columnSummaries : undefined,
             }),
             isCollapsed,
         });
@@ -1245,6 +1393,7 @@ export default function TableEditor({
         { id: "cellColor", icon: Palette, label: "Cell color", submenu: "cellColor" },
         { id: "formula", icon: Hash, label: "Formula", submenu: "formula" },
         { id: "alignment", icon: AlignLeft, label: "Alignment", submenu: "alignment" },
+        { id: "find", icon: Search, label: "Find", onClick: () => { setActiveSubmenu(null); setFindPanelOpen(true); } },
         { id: "addColumn", icon: Grid, label: "Add column", onClick: addColumn },
         { id: "addRow", icon: Plus, label: "Add row", onClick: addRow },
     ];
@@ -1377,16 +1526,16 @@ export default function TableEditor({
                                 </div>
                             )}
 
-                            {/* PATCH-173. After Accept all, an Undo is offered for
-                                ten seconds (or until any other change is made). */}
-                            {undoFill && (
+                            {/* PATCH-173/174. After a change worth undoing, an Undo
+                                is offered for ten seconds (or until any other change). */}
+                            {undoOffer && (
                                 <div
                                     data-table-undo-bar=""
                                     className="flex items-center gap-2 border-b border-green-100 bg-green-50 px-2 py-1 text-xs text-green-800"
                                 >
-                                    <span>Filled {undoFill.count} cells</span>
+                                    <span>{undoOffer.message}</span>
                                     <span className="text-green-300" aria-hidden="true">·</span>
-                                    <button type="button" onClick={undoFillAccept} className="font-medium hover:underline">
+                                    <button type="button" onClick={undoLastChange} className="font-medium hover:underline">
                                         Undo
                                     </button>
                                 </div>
@@ -1634,11 +1783,14 @@ export default function TableEditor({
                                                     const inRange = isCellSelected(row.index, colIndex);
                                                     // PATCH-166/173. A pending suggestion for THIS cell, if any.
                                                     const fillValue = fillValueByCell.get(`${row.index}-${colIndex}`);
+                                                    // PATCH-174. A find match, marked for the highlight.
+                                                    const findMatch = findMatchKeys.includes(key);
 
                                                     return (
                                                         <td
                                                             key={cell.id}
                                                             ref={(el) => setCellRef(row.index, colIndex, el)}
+                                                            data-table-find-match={findMatch ? '' : undefined}
                                                             className={`group/cell border border-gray-300 p-0 relative ${inRange ? "bg-purple-100/40" : ""
                                                                 } ${isActive ? "z-10" : "hover:bg-gray-50"}`}
                                                             style={{
@@ -1672,6 +1824,10 @@ export default function TableEditor({
                                                                 ranges, since its computed pixel offsets don't
                                                                 line up with the table's own cell borders. */}
                                                             {isActive && <div className="absolute inset-0 pointer-events-none ring-2 ring-purple-500 ring-inset" />}
+
+                                                            {/* PATCH-174. A yellow inset outline on every cell the
+                                                                current Find text matches. */}
+                                                            {findMatch && <div className="absolute inset-0 pointer-events-none ring-2 ring-yellow-300 ring-inset" />}
 
                                                             {/* PATCH-172. A faint corner-triangle cue, matching the
                                                                 row/column menu buttons. Purely a hint: aria-hidden and
@@ -1761,6 +1917,24 @@ export default function TableEditor({
                                             </tr>
                                         ))}
                                     </tbody>
+                                    {/* PATCH-174. The summary footer, shown only when some
+                                        column has a summary. Not editable, not part of `rows`. */}
+                                    {columnFooterTexts && (
+                                        <tfoot data-table-footer="">
+                                            <tr className="bg-gray-50 text-xs text-gray-500">
+                                                <td className="border border-gray-300 p-0" style={{ width: `${TABLE_ROW_HEADER_WIDTH}px` }} />
+                                                {columns.map((_, col) => (
+                                                    <td
+                                                        key={col}
+                                                        className="border border-gray-300 px-2 py-0.5 text-left truncate"
+                                                        style={{ width: `${columnWidthAt(col)}px`, maxWidth: `${columnWidthAt(col)}px` }}
+                                                    >
+                                                        {columnFooterTexts[col]}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        </tfoot>
+                                    )}
                                 </table>
                                     </div>
 
@@ -2115,6 +2289,7 @@ export default function TableEditor({
                         canDelete={axisMenu.axis === 'row' ? rows.length > 1 : columns.length > 1}
                         currentAlign={axisMenuSharedAlign}
                         onAction={applyAxisAction}
+                        currentSummary={axisMenu.axis === 'column' ? columnSummaries[axisMenu.index] ?? null : null}
                         onAlign={applyAxisAlign}
                     />
                 )}
@@ -2179,6 +2354,34 @@ export default function TableEditor({
                             activeCellHasText={activeCellHasText}
                             onInsert={insertAskAIAnswer}
                             onClose={closeAskAI}
+                        />
+                    </div>
+                )}
+
+                {/* PATCH-174. The Find & replace panel, same placement. */}
+                {findPanelOpen && (
+                    <div
+                        className="fixed z-[100]"
+                        style={{
+                            top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
+                            left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                        }}
+                    >
+                        <TableFindReplacePanel
+                            find={findQuery.find}
+                            replace={findQuery.replace}
+                            matchCase={findQuery.matchCase}
+                            wholeCell={findQuery.wholeCell}
+                            onlyInSelection={findQuery.onlyInSelection}
+                            selectionAvailable={selectionRange !== null}
+                            matchCount={findMatchKeys.length}
+                            replacedMessage={replacedMessage}
+                            onChange={(next) => {
+                                setFindQuery((prev) => ({ ...prev, ...next }));
+                                setReplacedMessage(null);
+                            }}
+                            onReplaceAll={handleReplaceAll}
+                            onClose={closeFindPanel}
                         />
                     </div>
                 )}

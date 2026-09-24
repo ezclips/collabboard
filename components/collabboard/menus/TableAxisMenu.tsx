@@ -2,10 +2,12 @@
 
 import React from 'react';
 import {
+    ArrowDownAZ,
     ArrowDownToLine,
     ArrowLeftToLine,
     ArrowRightToLine,
     ArrowUpToLine,
+    ArrowUpZA,
     AlignCenter,
     AlignLeft,
     AlignRight,
@@ -16,6 +18,7 @@ import {
     MoveHorizontal,
     Palette,
     Pencil,
+    Sigma,
     Sparkles,
     Trash2,
 } from "lucide-react";
@@ -56,7 +59,18 @@ export type TableAxisAction =
     | 'distribute-widths'
     | 'color'
     | 'rename'
-    | 'fill-row-ai';
+    | 'fill-row-ai'
+    | 'sort-asc'
+    | 'sort-desc'
+    | 'summary-none'
+    | 'summary-sum'
+    | 'summary-average'
+    | 'summary-count'
+    | 'summary-min'
+    | 'summary-max';
+
+/** PATCH-174. The column-summary kinds the Summary submenu offers (plus None). */
+export type TableSummaryKind = 'sum' | 'average' | 'count' | 'min' | 'max';
 
 export interface TableAxisMenuProps {
     readonly axis: TableAxis;
@@ -73,6 +87,8 @@ export interface TableAxisMenuProps {
     readonly currentAlign: 'left' | 'center' | 'right' | null;
     readonly onAction: (action: TableAxisAction) => void;
     readonly onAlign: (align: 'left' | 'center' | 'right') => void;
+    /** PATCH-174. This column's current summary, for the checkmark. */
+    readonly currentSummary?: TableSummaryKind | null;
 }
 
 export function TableAxisMenu({
@@ -84,6 +100,7 @@ export function TableAxisMenu({
     currentAlign,
     onAction,
     onAlign,
+    currentSummary = null,
 }: TableAxisMenuProps) {
     if (!isOpen) return null;
 
@@ -238,6 +255,53 @@ export function TableAxisMenu({
                             Distribute columns evenly
                         </span>
                     </PositionedContextMenuItem>
+                </>
+            )}
+
+            {/*
+              PATCH-174. Sort and Summary, their own group. Column-only: a row
+              has no order or total of its own. `Sort` orders the whole table by
+              this column; `Summary` shows a total under it.
+            */}
+            {!isRow && (
+                <>
+                    <PositionedContextMenuSeparator />
+                    <PositionedContextMenuItem onSelect={() => onAction('sort-asc')}>
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(ArrowDownAZ)}
+                            Sort A → Z
+                        </span>
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuItem onSelect={() => onAction('sort-desc')}>
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(ArrowUpZA)}
+                            Sort Z → A
+                        </span>
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuSub>
+                        <PositionedContextMenuSubTrigger>
+                            <span className="flex w-full items-center gap-2">
+                                {itemIcon(Sigma)}
+                                Summary
+                            </span>
+                        </PositionedContextMenuSubTrigger>
+                        <PositionedContextMenuSubContent className="min-w-[150px]">
+                            <PositionedContextMenuItem onSelect={() => onAction('summary-none')}>
+                                <span className="flex w-full items-center gap-2">
+                                    None
+                                    {currentSummary === null && checkmark}
+                                </span>
+                            </PositionedContextMenuItem>
+                            {([['summary-sum', 'Sum'], ['summary-average', 'Average'], ['summary-count', 'Count'], ['summary-min', 'Min'], ['summary-max', 'Max']] as const).map(([action, label]) => (
+                                <PositionedContextMenuItem key={action} onSelect={() => onAction(action)}>
+                                    <span className="flex w-full items-center gap-2">
+                                        {label}
+                                        {currentSummary === label.toLowerCase() && checkmark}
+                                    </span>
+                                </PositionedContextMenuItem>
+                            ))}
+                        </PositionedContextMenuSubContent>
+                    </PositionedContextMenuSub>
                 </>
             )}
 

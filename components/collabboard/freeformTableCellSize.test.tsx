@@ -65,3 +65,14 @@ describe('PATCH-173 -- the canvas table card marks AI-filled cells', () => {
     expect(branch).toContain('aria-label="Filled by AI"');
   });
 });
+
+describe('PATCH-174 -- the canvas table card shows the summary footer', () => {
+  it('renders a footer row only when a column has a summary', () => {
+    const branch = tableCardBranch();
+    expect(branch).toContain('columnSummaries');
+    expect(branch).toContain('summaries.some((s) => s !== null && s !== undefined)');
+    expect(branch).toContain('<tfoot>');
+    // The cell text comes from the same pure formatter the editor uses.
+    expect(branch).toContain('formatSummary(');
+  });
+});
