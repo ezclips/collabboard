@@ -528,10 +528,11 @@ export default function TableEditor({
         }
     }, [pinnedTextStyle, activeSubmenu]);
 
-    // Update outline when selection changes, on scroll, and on resize
+    // Update outline when selection changes, on scroll, and on resize -- including a
+    // column resize, which moves every cell right of it (PATCH-170 follow-up).
     useEffect(() => {
         recomputeSelectionBox();
-    }, [recomputeSelectionBox, rows, columns, cellStyles]);
+    }, [recomputeSelectionBox, rows, columns, cellStyles, columnWidths]);
 
     useEffect(() => {
         const viewport = tableViewportRef.current;
