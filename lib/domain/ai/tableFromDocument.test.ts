@@ -64,8 +64,11 @@ describe('tableFromDocumentSchema', () => {
     }).success).toBe(false);
   });
 
-  it('rejects a message over 200 chars', () => {
-    expect(tableFromDocumentSchema.safeParse({ ...VALID, message: 'x'.repeat(201) }).success).toBe(false);
+  it('shortens a message over 200 chars instead of rejecting the table (live, 2026-09-24)', () => {
+    const long = tableFromDocumentSchema.safeParse({ ...VALID, message: 'x'.repeat(201) });
+    expect(long.success && long.data.message.length).toBe(200);
+    expect(long.success && long.data.message.endsWith('…')).toBe(true);
+    expect(tableFromDocumentSchema.safeParse({ ...VALID, message: 'x'.repeat(2001) }).success).toBe(false);
   });
 });
 

@@ -20,6 +20,8 @@
 
 import { z } from 'zod';
 
+import { aiShortMessageSchema } from './aiShortMessage';
+
 import {
   deleteColumn,
   deleteRowsWhere,
@@ -89,7 +91,7 @@ const deleteRowsWhereSchema = z
 
 export const tablePlanSchema = z
   .object({
-    message: z.string().max(200),
+    message: aiShortMessageSchema,
     steps: z.array(z.discriminatedUnion('action', [
       z.object({
         action: z.literal('sortRows'),

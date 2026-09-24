@@ -15,6 +15,8 @@
 
 import { z } from 'zod';
 
+import { aiShortMessageSchema } from './aiShortMessage';
+
 import { DEFAULT_COLUMN_WIDTH, type TableGrid } from '@/lib/domain/canvas/tableStructure';
 
 /** How many columns a proposed table may have. */
@@ -32,7 +34,7 @@ const columnTitleSchema = z.string().trim().min(1).max(60);
 
 export const tableFromDocumentSchema = z
   .object({
-    message: z.string().max(200),
+    message: aiShortMessageSchema,
     columns: z.array(columnTitleSchema).min(1).max(TABLE_FROM_DOCUMENT_MAX_COLUMNS),
     rows: z
       .array(z.array(z.string().max(TABLE_FROM_DOCUMENT_MAX_CELL_CHARS)))

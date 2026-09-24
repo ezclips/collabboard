@@ -116,6 +116,12 @@ describe('parseTablePlanResponse', () => {
     expect(parseTablePlanResponse(`Sure! ${JSON.stringify(plan)} Hope that helps.`)?.steps).toHaveLength(1);
   });
 
+  it('shortens an over-long message instead of rejecting the plan', () => {
+    const long = parseTablePlanResponse(JSON.stringify({ ...plan, message: 'x'.repeat(300) }));
+    expect(long?.message).toHaveLength(200);
+    expect(long?.steps).toHaveLength(1);
+  });
+
   it('returns null for garbage', () => {
     expect(parseTablePlanResponse('I cannot do that.')).toBeNull();
     expect(parseTablePlanResponse('')).toBeNull();
