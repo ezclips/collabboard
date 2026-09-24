@@ -140,7 +140,7 @@ describe('PATCH-165 -- the handle menus', () => {
     expect(saved.cellStyles['1-1']).toBeUndefined();
   });
 
-  it('REGRESSION via the RIGHT-CLICK path: Add Row Above moves row 1\'s style to row 2', async () => {
+  it('REGRESSION via the RIGHT-CLICK path: Insert row above moves row 1\'s style to row 2', async () => {
     // The old bug: the right-click menu changed rows but not cellStyles, so the
     // colour stayed on the OLD row index. This drives the same action through
     // the cell context menu, which must now move the style too.
@@ -151,7 +151,7 @@ describe('PATCH-165 -- the handle menus', () => {
       firstCell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     });
     await tick();
-    click(menuItem('Add Row Above'));
+    click(menuItem('Insert row above'));
 
     const saved = savedContent(onSave, c);
     // A row is prepended, so the old row 0 text is now row 1.

@@ -138,7 +138,7 @@ function click(el: HTMLElement) {
 }
 
 function alignmentTrigger(): HTMLElement {
-  return rowByLabel('Change Alignment...');
+  return rowByLabel('Align');
 }
 
 function openAlignmentSubmenu() {
@@ -166,13 +166,13 @@ const ROOT_ACTIONS = [
   'Cut',
   'Copy',
   'Paste',
-  'Add Row Above',
-  'Add Row Below',
-  'Add Column Left',
-  'Add Column Right',
-  'Delete Row',
-  'Delete Column',
-  'Change Alignment...',
+  'Insert row above',
+  'Insert row below',
+  'Insert column left',
+  'Insert column right',
+  'Delete row',
+  'Delete column',
+  'Align',
 ];
 
 /**
@@ -188,6 +188,32 @@ describe('TableCellContextMenu', () => {
   it('preserves its root action set and order', () => {
     renderMenu();
     expect(rowLabels()).toEqual(ROOT_ACTIONS);
+  });
+
+  it('gives every root item and alignment item exactly one leading icon before its label', () => {
+    renderMenu();
+    openAlignmentSubmenu();
+
+    const allRows = rows();
+    const labels = rowLabels();
+    expect(allRows.length).toBeGreaterThan(0);
+
+    for (let index = 0; index < allRows.length; index += 1) {
+      const span = allRows[index].querySelector('span.flex.items-center.gap-2');
+      expect(span, `row "${labels[index]}" has no label span`).not.toBeNull();
+
+      // Count the svgs that appear BEFORE the row's label text. The trailing
+      // checkmark (and the submenu trigger's chevron) come after the label, so
+      // only the leading icon is counted.
+      let leading = 0;
+      for (const node of Array.from(span!.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim().length > 0) break;
+        if (node instanceof SVGElement) leading += 1;
+      }
+      expect(leading, `row "${labels[index]}" leading icons`).toBe(1);
+      // The icon precedes the label, so the span's first element is the icon svg.
+      expect(span!.firstElementChild?.tagName.toLowerCase()).toBe('svg');
+    }
   });
 
   it('displays no keyboard-shortcut hints on any row, root or submenu', () => {
@@ -260,9 +286,9 @@ describe('TableCellContextMenu', () => {
   });
 
   it.each([
-    ['Add Row Above', 'onAddRowAbove'],
-    ['Add Row Below', 'onAddRowBelow'],
-    ['Delete Row', 'onDeleteRow'],
+    ['Insert row above', 'onAddRowAbove'],
+    ['Insert row below', 'onAddRowBelow'],
+    ['Delete row', 'onDeleteRow'],
   ])('row operation "%s" invokes %s with no arguments and closes', (label, prop) => {
     const handler = vi.fn();
     const onClose = vi.fn();
@@ -275,9 +301,9 @@ describe('TableCellContextMenu', () => {
   });
 
   it.each([
-    ['Add Column Left', 'onAddColumnLeft'],
-    ['Add Column Right', 'onAddColumnRight'],
-    ['Delete Column', 'onDeleteColumn'],
+    ['Insert column left', 'onAddColumnLeft'],
+    ['Insert column right', 'onAddColumnRight'],
+    ['Delete column', 'onDeleteColumn'],
   ])('column operation "%s" invokes %s with no arguments and closes', (label, prop) => {
     const handler = vi.fn();
     const onClose = vi.fn();
@@ -296,7 +322,7 @@ describe('TableCellContextMenu', () => {
       onDeleteRow: vi.fn(), onDeleteColumn: vi.fn(),
     };
     renderMenu(handlers);
-    click(rowByLabel('Delete Column'));
+    click(rowByLabel('Delete column'));
     expect(handlers.onDeleteColumn).toHaveBeenCalledTimes(1);
     for (const [name, fn] of Object.entries(handlers)) {
       if (name !== 'onDeleteColumn') expect(fn, `${name} should not fire`).not.toHaveBeenCalled();
@@ -306,18 +332,18 @@ describe('TableCellContextMenu', () => {
   it('still closes when the matching callback prop is omitted', () => {
     const onClose = vi.fn();
     renderMenu({ onClose });
-    click(rowByLabel('Add Row Above'));
+    click(rowByLabel('Insert row above'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('styles Delete Row / Delete Column as destructive and nothing else', () => {
+  it('styles Delete row / Delete column as destructive and nothing else', () => {
     renderMenu();
     const destructive = rows().filter(
       (el) => el.className.includes('text-red-600') || el.getAttribute('data-variant') === 'destructive',
     );
     expect(destructive.map((el) => rowLabels()[rows().indexOf(el)])).toEqual([
-      'Delete Row',
-      'Delete Column',
+      'Delete row',
+      'Delete column',
     ]);
   });
 
@@ -335,9 +361,9 @@ describe('TableCellContextMenu', () => {
     expect(subSurface()).not.toBeNull();
   });
 
-  it('keeps Change Alignment... last in the root menu', () => {
+  it('keeps Align last in the root menu', () => {
     renderMenu();
-    expect(rowLabels()[rowLabels().length - 1]).toBe('Change Alignment...');
+    expect(rowLabels()[rowLabels().length - 1]).toBe('Align');
   });
 
   it('hides the alignment submenu until it is opened', () => {
@@ -368,19 +394,20 @@ describe('TableCellContextMenu', () => {
   it('checkmarks Left and Top by default when no alignment is set', () => {
     renderMenu();
     openAlignmentSubmenu();
-    expect(rowByLabel('Left').querySelector('svg')).not.toBeNull();
-    expect(rowByLabel('Top').querySelector('svg')).not.toBeNull();
-    expect(rowByLabel('Center').querySelector('svg')).toBeNull();
-    expect(rowByLabel('Middle').querySelector('svg')).toBeNull();
+    // Scoped to the trailing checkmark slot: every row now has a leading icon.
+    expect(rowByLabel('Left').querySelector('span.ml-auto svg')).not.toBeNull();
+    expect(rowByLabel('Top').querySelector('span.ml-auto svg')).not.toBeNull();
+    expect(rowByLabel('Center').querySelector('span.ml-auto svg')).toBeNull();
+    expect(rowByLabel('Middle').querySelector('span.ml-auto svg')).toBeNull();
   });
 
   it('checkmarks the supplied current horizontal and vertical alignment', () => {
     renderMenu({ currentAlign: 'right', currentVerticalAlign: 'bottom' });
     openAlignmentSubmenu();
-    expect(rowByLabel('Right').querySelector('svg')).not.toBeNull();
-    expect(rowByLabel('Bottom').querySelector('svg')).not.toBeNull();
-    expect(rowByLabel('Left').querySelector('svg')).toBeNull();
-    expect(rowByLabel('Top').querySelector('svg')).toBeNull();
+    expect(rowByLabel('Right').querySelector('span.ml-auto svg')).not.toBeNull();
+    expect(rowByLabel('Bottom').querySelector('span.ml-auto svg')).not.toBeNull();
+    expect(rowByLabel('Left').querySelector('span.ml-auto svg')).toBeNull();
+    expect(rowByLabel('Top').querySelector('span.ml-auto svg')).toBeNull();
   });
 
   it.each([
@@ -460,7 +487,7 @@ describe('TableCellContextMenu', () => {
     expect(document.activeElement).toBe(rowByLabel('Left'));
   });
 
-  it('closes the submenu on ArrowLeft and returns focus to Change Alignment...', () => {
+  it('closes the submenu on ArrowLeft and returns focus to Align', () => {
     renderMenu();
     key(alignmentTrigger(), 'ArrowRight');
     openSubSurface();
@@ -576,8 +603,8 @@ describe('TableCellContextMenu shared-shell adoption', () => {
 
   it('marks the two delete rows with the shared destructive variant', () => {
     renderMenu();
-    expect(rowByLabel('Delete Row').getAttribute('data-variant')).toBe('destructive');
-    expect(rowByLabel('Delete Column').getAttribute('data-variant')).toBe('destructive');
+    expect(rowByLabel('Delete row').getAttribute('data-variant')).toBe('destructive');
+    expect(rowByLabel('Delete column').getAttribute('data-variant')).toBe('destructive');
     expect(rowByLabel('Cut').getAttribute('data-variant')).toBe('default');
   });
 

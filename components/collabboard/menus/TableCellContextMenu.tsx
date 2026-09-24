@@ -1,7 +1,23 @@
 "use client";
 
 import React from 'react';
-import { Check } from "lucide-react";
+import {
+    AlignCenter,
+    AlignLeft,
+    AlignRight,
+    AlignVerticalJustifyCenter,
+    AlignVerticalJustifyEnd,
+    AlignVerticalJustifyStart,
+    ArrowDownToLine,
+    ArrowLeftToLine,
+    ArrowRightToLine,
+    ArrowUpToLine,
+    Check,
+    ClipboardPaste,
+    Copy,
+    Scissors,
+    Trash2,
+} from "lucide-react";
 import {
     PositionedContextMenu,
     PositionedContextMenuItem,
@@ -10,6 +26,16 @@ import {
     PositionedContextMenuSubContent,
     PositionedContextMenuSubTrigger,
 } from '@/components/ui/context-menu';
+
+/**
+ * The right-click menu for ONE cell.
+ *
+ * PATCH-167: it now reads and looks like the row/column handle menu
+ * (`TableAxisMenu`) -- an icon on every item and sentence-case wording. The
+ * actions, order, groups, separators, callbacks, destructive variant and
+ * alignment/checkmark rules are unchanged; only the labels and the leading
+ * icons differ.
+ */
 
 interface TableCellContextMenuProps {
     isOpen: boolean;
@@ -59,6 +85,9 @@ export function TableCellContextMenu({
             <Check className="w-3.5 h-3.5" />
         </span>
     );
+    const itemIcon = (Icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>) => (
+        <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500" aria-hidden={true} />
+    );
 
     return (
         <PositionedContextMenu
@@ -75,37 +104,64 @@ export function TableCellContextMenu({
             onClick={(e) => e.stopPropagation()}
         >
             <PositionedContextMenuItem onSelect={() => onCut?.()}>
-                Cut
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(Scissors)}
+                    Cut
+                </span>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onCopy?.()}>
-                Copy
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(Copy)}
+                    Copy
+                </span>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onPaste?.()}>
-                Paste
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(ClipboardPaste)}
+                    Paste
+                </span>
             </PositionedContextMenuItem>
 
             <PositionedContextMenuSeparator />
 
             <PositionedContextMenuItem onSelect={() => onAddRowAbove?.()}>
-                Add Row Above
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(ArrowUpToLine)}
+                    Insert row above
+                </span>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onAddRowBelow?.()}>
-                Add Row Below
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(ArrowDownToLine)}
+                    Insert row below
+                </span>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onAddColumnLeft?.()}>
-                Add Column Left
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(ArrowLeftToLine)}
+                    Insert column left
+                </span>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onAddColumnRight?.()}>
-                Add Column Right
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(ArrowRightToLine)}
+                    Insert column right
+                </span>
             </PositionedContextMenuItem>
 
             <PositionedContextMenuSeparator />
 
             <PositionedContextMenuItem variant="destructive" onSelect={() => onDeleteRow?.()}>
-                Delete Row
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(Trash2)}
+                    Delete row
+                </span>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem variant="destructive" onSelect={() => onDeleteColumn?.()}>
-                Delete Column
+                <span className="flex w-full items-center gap-2">
+                    {itemIcon(Trash2)}
+                    Delete column
+                </span>
             </PositionedContextMenuItem>
 
             <PositionedContextMenuSeparator />
@@ -118,27 +174,39 @@ export function TableCellContextMenu({
               */}
             <PositionedContextMenuSub>
                 <PositionedContextMenuSubTrigger>
-                    Change Alignment...
+                    <span className="flex w-full items-center gap-2">
+                        {itemIcon(AlignLeft)}
+                        Align
+                    </span>
                 </PositionedContextMenuSubTrigger>
 
                 <PositionedContextMenuSubContent className="min-w-[150px]">
                     <PositionedContextMenuItem
                         onSelect={() => onAlignChange?.("left", currentVerticalAlign)}
                     >
-                        Left
-                        {(currentAlign === "left" || !currentAlign) && checkmark}
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(AlignLeft)}
+                            Left
+                            {(currentAlign === "left" || !currentAlign) && checkmark}
+                        </span>
                     </PositionedContextMenuItem>
                     <PositionedContextMenuItem
                         onSelect={() => onAlignChange?.("center", currentVerticalAlign)}
                     >
-                        Center
-                        {currentAlign === "center" && checkmark}
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(AlignCenter)}
+                            Center
+                            {currentAlign === "center" && checkmark}
+                        </span>
                     </PositionedContextMenuItem>
                     <PositionedContextMenuItem
                         onSelect={() => onAlignChange?.("right", currentVerticalAlign)}
                     >
-                        Right
-                        {currentAlign === "right" && checkmark}
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(AlignRight)}
+                            Right
+                            {currentAlign === "right" && checkmark}
+                        </span>
                     </PositionedContextMenuItem>
 
                     <PositionedContextMenuSeparator />
@@ -146,20 +214,29 @@ export function TableCellContextMenu({
                     <PositionedContextMenuItem
                         onSelect={() => onAlignChange?.(currentAlign, "top")}
                     >
-                        Top
-                        {(currentVerticalAlign === "top" || !currentVerticalAlign) && checkmark}
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(AlignVerticalJustifyStart)}
+                            Top
+                            {(currentVerticalAlign === "top" || !currentVerticalAlign) && checkmark}
+                        </span>
                     </PositionedContextMenuItem>
                     <PositionedContextMenuItem
                         onSelect={() => onAlignChange?.(currentAlign, "middle")}
                     >
-                        Middle
-                        {currentVerticalAlign === "middle" && checkmark}
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(AlignVerticalJustifyCenter)}
+                            Middle
+                            {currentVerticalAlign === "middle" && checkmark}
+                        </span>
                     </PositionedContextMenuItem>
                     <PositionedContextMenuItem
                         onSelect={() => onAlignChange?.(currentAlign, "bottom")}
                     >
-                        Bottom
-                        {currentVerticalAlign === "bottom" && checkmark}
+                        <span className="flex w-full items-center gap-2">
+                            {itemIcon(AlignVerticalJustifyEnd)}
+                            Bottom
+                            {currentVerticalAlign === "bottom" && checkmark}
+                        </span>
                     </PositionedContextMenuItem>
                 </PositionedContextMenuSubContent>
             </PositionedContextMenuSub>
