@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyTableFillValues,
+  buildRowFillItems,
   buildTableFillItems,
   parseTableFillResponse,
+  rowFillInstruction,
   TABLE_FILL_MAX_INPUT_CHARS,
+  TABLE_FILL_MAX_INSTRUCTION_CHARS,
   TABLE_FILL_MAX_ITEMS,
   TABLE_FILL_MAX_TOTAL_CHARS,
   TABLE_FILL_MAX_VALUE_CHARS,
@@ -182,5 +185,87 @@ describe('applyTableFillValues', () => {
 
   it('an out-of-range target column returns the rows unchanged', () => {
     expect(applyTableFillValues(GRID, 9, [{ row: 0, value: 'x' }])).toEqual(GRID.rows);
+  });
+});
+
+describe('buildRowFillItems', () => {
+  const CAR = {
+    rows: [['Toyota', 'Corolla', '', '', '']],
+    columns: ['Brand', 'Model', 'Oil capacity', 'Tank capacity', 'Coolant capacity'],
+  };
+
+  it('targets the row empty cells, one item per cell keyed by column index', () => {
+    const { items, skippedForLimit, defaultTitleCount } = buildRowFillItems(CAR, 0, false);
+    expect(items).toEqual([
+      { row: 2, input: 'Brand: Toyota | Model: Corolla | Find: Oil capacity' },
+      { row: 3, input: 'Brand: Toyota | Model: Corolla | Find: Tank capacity' },
+      { row: 4, input: 'Brand: Toyota | Model: Corolla | Find: Coolant capacity' },
+    ]);
+    expect(skippedForLimit).toBe(false);
+    expect(defaultTitleCount).toBe(0);
+  });
+
+  it('with replaceExisting, also targets the filled cells', () => {
+    const { items } = buildRowFillItems(CAR, 0, true);
+    expect(items.map((item) => item.row)).toEqual([0, 1, 2, 3, 4]);
+    // A filled cell's input is described by the OTHER filled cells.
+    expect(items[0].input).toBe('Model: Corolla | Find: Brand');
+  });
+
+  it('never targets the row\'s only non-empty cell', () => {
+    const one = { rows: [['Toyota', '', '']], columns: ['Brand', 'Oil', 'Tank'] };
+    const { items } = buildRowFillItems(one, 0, true);
+    // Column 0 is the only filled cell, so it is skipped; the rest are targets.
+    expect(items.map((item) => item.row)).toEqual([1, 2]);
+    expect(items[0].input).toBe('Brand: Toyota | Find: Oil');
+  });
+
+  it('a row with no text yields no items', () => {
+    const empty = { rows: [['', '']], columns: ['A', 'B'] };
+    expect(buildRowFillItems(empty, 0, true)).toEqual({
+      items: [], skippedForLimit: false, defaultTitleCount: 0,
+    });
+  });
+
+  it('counts targets whose title is still a default letter name', () => {
+    const grid = { rows: [['x', '', '']], columns: ['A', 'B', 'Notes'] };
+    // Targets are B and Notes; only B is still a default name.
+    expect(buildRowFillItems(grid, 0, false).defaultTitleCount).toBe(1);
+    // Renamed B -> no default names left.
+    const renamed = { rows: [['x', '', '']], columns: ['A', 'Oil', 'Notes'] };
+    expect(buildRowFillItems(renamed, 0, false).defaultTitleCount).toBe(0);
+  });
+
+  it('caps at 40 items and reports skippedForLimit', () => {
+    const columns = Array.from({ length: 45 }, (_, index) => `Col ${index}`);
+    const row = ['x', ...Array.from({ length: 44 }, () => '')];
+    const grid = { rows: [row], columns };
+    const { items, skippedForLimit } = buildRowFillItems(grid, 0, false);
+    expect(items).toHaveLength(TABLE_FILL_MAX_ITEMS);
+    expect(skippedForLimit).toBe(true);
+  });
+
+  it('truncates an input at the per-item cap', () => {
+    const grid = { rows: [['x'.repeat(TABLE_FILL_MAX_INPUT_CHARS + 500), '']], columns: ['Notes', 'Target'] };
+    const { items } = buildRowFillItems(grid, 0, false);
+    expect(items[0].input.length).toBe(TABLE_FILL_MAX_INPUT_CHARS);
+  });
+});
+
+describe('rowFillInstruction', () => {
+  it('states the Find: rule and the no-guess rule', () => {
+    const instruction = rowFillInstruction();
+    expect(instruction).toContain("after 'Find:'");
+    expect(instruction).toMatch(/empty string/i);
+    expect(instruction).toMatch(/Do not guess/i);
+  });
+
+  it('appends an optional extra as "Also:"', () => {
+    expect(rowFillInstruction('Use litres')).toContain('Also: Use litres');
+    expect(rowFillInstruction('  Use litres  ')).toContain('Also: Use litres');
+  });
+
+  it('keeps the whole instruction within the route limit, even for a long extra', () => {
+    expect(rowFillInstruction('x'.repeat(1000)).length).toBeLessThanOrEqual(TABLE_FILL_MAX_INSTRUCTION_CHARS);
   });
 });

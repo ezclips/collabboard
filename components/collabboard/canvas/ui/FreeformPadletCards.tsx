@@ -4045,6 +4045,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       underline?: boolean;
                       // PATCH-169. Relative to the card's own base size.
                       size?: 'h1' | 'h2' | 'small';
+                      // PATCH-173. Cells the AI filled show a small sparkle.
+                      aiFilled?: true;
                     };
                     // Parse table data from content
                     let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle>; columnWidths?: number[] } = {};
@@ -4108,7 +4110,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                     return (
                                       <td
                                         key={ci}
-                                        className="px-1 py-0.5 border-r border-gray-200 truncate max-w-[50px]"
+                                        className="relative px-1 py-0.5 border-r border-gray-200 truncate max-w-[50px]"
                                         style={{
                                           backgroundColor: style.bg || undefined,
                                           textAlign: style.align || 'left',
@@ -4121,6 +4123,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                         }}
                                       >
                                         {cell || '-'}
+                                        {/* PATCH-173. The AI marker, scaled down. */}
+                                        {style.aiFilled && (
+                                          <span
+                                            className="pointer-events-none absolute bottom-0 right-0 text-gray-400"
+                                            aria-label="Filled by AI"
+                                            title="Filled by AI"
+                                          >
+                                            <Sparkles className="h-2 w-2" aria-hidden="true" />
+                                          </span>
+                                        )}
                                       </td>
                                     );
                                   })}

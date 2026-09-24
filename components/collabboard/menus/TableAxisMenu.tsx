@@ -55,7 +55,8 @@ export type TableAxisAction =
     | 'fit-width'
     | 'distribute-widths'
     | 'color'
-    | 'rename';
+    | 'rename'
+    | 'fill-row-ai';
 
 export interface TableAxisMenuProps {
     readonly axis: TableAxis;
@@ -187,6 +188,20 @@ export function TableAxisMenu({
                     </PositionedContextMenuItem>
                 </PositionedContextMenuSubContent>
             </PositionedContextMenuSub>
+
+            {/*
+              PATCH-173. Fill row with AI is a ROW action only: it fills that
+              row's empty cells from each column's title. Placed after Align,
+              before the separator that opens the structural group.
+            */}
+            {isRow && (
+                <PositionedContextMenuItem onSelect={() => onAction('fill-row-ai')}>
+                    <span className="flex w-full items-center gap-2">
+                        {itemIcon(Sparkles)}
+                        Fill row with AI…
+                    </span>
+                </PositionedContextMenuItem>
+            )}
 
             {/*
               PATCH-166. Fill with AI is a COLUMN action only: the row menu has

@@ -213,3 +213,106 @@ export function applyTableFillValues(
     return row.map((cell, col) => (col === targetColumn ? value : cell));
   });
 }
+
+/**
+ * PATCH-173. One pending suggestion, addressed by CELL rather than by row. The
+ * column fill keys it by `(row, targetColumn)`; the row fill by `(targetRow,
+ * col)`. Accept all, Discard and the lock all work on this one shape.
+ */
+export interface TableFillCell {
+  readonly row: number;
+  readonly col: number;
+  readonly value: string;
+}
+
+export interface TableRowFillItems {
+  readonly items: readonly TableFillItem[];
+  /** True when a cell was left out because a limit was reached. */
+  readonly skippedForLimit: boolean;
+  /** Targets whose column title is still a default letter name. */
+  readonly defaultTitleCount: number;
+}
+
+/** A column title that is still the default A, B, …, Z, AA, … name. */
+const DEFAULT_COLUMN_TITLE = /^[A-Z]{1,3}$/;
+
+/**
+ * PATCH-173. WHAT TO SEND to fill a whole ROW, one item PER TARGET CELL.
+ *
+ * The requested `row` key of each item is its COLUMN index (the route treats
+ * `row` as an opaque key). A target's input describes the item from the row's
+ * other non-empty cells and names the field it is asking for after 'Find:'.
+ *
+ * A ROW MUST KEEP AT LEAST ONE FILLED CELL to describe the item, so a column
+ * that is the row's ONLY non-empty source is never a target; a row with no text
+ * at all yields no items. `defaultTitleCount` reports targets whose column
+ * title is still a default letter name, so the panel can warn about that.
+ */
+export function buildRowFillItems(
+  grid: TableFillGrid,
+  rowIndex: number,
+  replaceExisting: boolean,
+): TableRowFillItems {
+  const cells = grid.rows[rowIndex];
+  if (!cells) return { items: [], skippedForLimit: false, defaultTitleCount: 0 };
+
+  const nonEmpty: number[] = [];
+  for (let col = 0; col < grid.columns.length; col += 1) {
+    if ((cells[col] ?? '').trim().length > 0) nonEmpty.push(col);
+  }
+  if (nonEmpty.length === 0) return { items: [], skippedForLimit: false, defaultTitleCount: 0 };
+
+  const targets: number[] = [];
+  for (let col = 0; col < grid.columns.length; col += 1) {
+    const hasText = (cells[col] ?? '').trim().length > 0;
+    if (!replaceExisting && hasText) continue;
+    // The row's only non-empty cell cannot be filled: nothing would describe it.
+    if (hasText && nonEmpty.length === 1) continue;
+    targets.push(col);
+  }
+
+  const defaultTitleCount = targets.filter((col) => DEFAULT_COLUMN_TITLE.test(grid.columns[col] ?? '')).length;
+
+  const items: TableFillItem[] = [];
+  let totalChars = 0;
+  let skippedForLimit = false;
+  for (const col of targets) {
+    const parts = nonEmpty
+      .filter((source) => source !== col)
+      .map((source) => `${grid.columns[source] ?? ''}: ${(cells[source] ?? '').trim()}`);
+    const input = [...parts, `Find: ${grid.columns[col] ?? ''}`].join(' | ');
+    const bounded = input.slice(0, TABLE_FILL_MAX_INPUT_CHARS);
+    if (items.length >= TABLE_FILL_MAX_ITEMS
+      || totalChars + bounded.length > TABLE_FILL_MAX_TOTAL_CHARS) {
+      skippedForLimit = true;
+      break;
+    }
+    items.push({ row: col, input: bounded });
+    totalChars += bounded.length;
+  }
+
+  return { items, skippedForLimit, defaultTitleCount };
+}
+
+/** How long the optional extra instruction for a row fill may be. */
+export const ROW_FILL_MAX_EXTRA_CHARS = 150;
+
+const ROW_FILL_BASE_INSTRUCTION = [
+  "Each input describes one item and names one field after 'Find:'.",
+  "Answer with only that field's value for that item, with its unit if it has one.",
+  'If you are not confident, answer an empty string. Do not guess.',
+].join(' ');
+
+/**
+ * PATCH-173. The instruction for a row fill. The optional `extra` is appended
+ * as ` Also: {extra}`, capped so the WHOLE instruction stays within the route's
+ * 300-character instruction limit.
+ */
+export function rowFillInstruction(extra?: string): string {
+  const trimmed = (extra ?? '').trim();
+  if (trimmed.length === 0) return ROW_FILL_BASE_INSTRUCTION;
+  const prefix = ' Also: ';
+  const room = TABLE_FILL_MAX_INSTRUCTION_CHARS - ROW_FILL_BASE_INSTRUCTION.length - prefix.length;
+  if (room <= 0) return ROW_FILL_BASE_INSTRUCTION;
+  return ROW_FILL_BASE_INSTRUCTION + prefix + trimmed.slice(0, room);
+}

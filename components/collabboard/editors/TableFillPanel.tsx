@@ -206,17 +206,33 @@ export default function TableFillPanel({
       {detailLabel && (
         <div className="mb-2">
           <label className="mb-1 block text-xs text-gray-500" htmlFor="table-fill-detail">{detailLabel}</label>
-          <input
-            id="table-fill-detail"
-            data-table-fill-detail=""
-            type="text"
-            value={detail}
-            disabled={isGenerating}
-            maxLength={TABLE_FILL_MAX_INSTRUCTION_CHARS}
-            placeholder={detailPlaceholder}
-            onChange={(e) => setDetail(e.target.value.slice(0, TABLE_FILL_MAX_INSTRUCTION_CHARS))}
-            className="w-full rounded border border-gray-200 px-2 py-1 text-sm outline-none"
-          />
+          {/* PATCH-173. A custom instruction is multi-line; Categories and
+              Language stay single-line. */}
+          {preset === 'custom' ? (
+            <textarea
+              id="table-fill-detail"
+              data-table-fill-detail=""
+              rows={3}
+              value={detail}
+              disabled={isGenerating}
+              maxLength={TABLE_FILL_MAX_INSTRUCTION_CHARS}
+              placeholder={detailPlaceholder}
+              onChange={(e) => setDetail(e.target.value.slice(0, TABLE_FILL_MAX_INSTRUCTION_CHARS))}
+              className="w-full resize-y rounded border border-gray-200 px-2 py-1 text-sm outline-none"
+            />
+          ) : (
+            <input
+              id="table-fill-detail"
+              data-table-fill-detail=""
+              type="text"
+              value={detail}
+              disabled={isGenerating}
+              maxLength={TABLE_FILL_MAX_INSTRUCTION_CHARS}
+              placeholder={detailPlaceholder}
+              onChange={(e) => setDetail(e.target.value.slice(0, TABLE_FILL_MAX_INSTRUCTION_CHARS))}
+              className="w-full rounded border border-gray-200 px-2 py-1 text-sm outline-none"
+            />
+          )}
         </div>
       )}
 

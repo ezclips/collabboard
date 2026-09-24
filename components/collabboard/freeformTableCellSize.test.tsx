@@ -55,3 +55,13 @@ describe('PATCH-170 -- the canvas table card shows column widths proportionally'
     expect(branch).toContain("style={useWidths ? { tableLayout: 'fixed' } : undefined}");
   });
 });
+
+describe('PATCH-173 -- the canvas table card marks AI-filled cells', () => {
+  it('renders the sparkle only when the cell is `aiFilled`', () => {
+    const branch = tableCardBranch();
+    expect(branch).toContain('aiFilled?: true');
+    // The marker is gated on the field and labelled for assistive tech.
+    expect(branch).toContain('{style.aiFilled && (');
+    expect(branch).toContain('aria-label="Filled by AI"');
+  });
+});

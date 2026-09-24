@@ -32,6 +32,11 @@ export type TableCellStyle = {
    * existing tables are unchanged and a `normal` value is never stored.
    */
   size?: 'h1' | 'h2' | 'small';
+  /**
+   * PATCH-173. Set on cells the AI filled, so the editor can show a sparkle
+   * until someone edits the text. Removed as soon as the cell is hand-edited.
+   */
+  aiFilled?: true;
 };
 
 export type TableGrid = {

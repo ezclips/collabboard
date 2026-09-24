@@ -15,6 +15,7 @@ import {
     MessageSquare,
     ChevronRight,
     Check,
+    Sparkles,
     X,
 } from "lucide-react";
 import { useReactTable, getCoreRowModel, ColumnDef } from "@tanstack/react-table";
@@ -49,8 +50,9 @@ import {
 } from "@/lib/domain/canvas/tableStructure";
 import { TableAxisMenu, type TableAxisAction } from "../menus/TableAxisMenu";
 import TableFillPanel from "./TableFillPanel";
+import TableRowFillPanel from "./TableRowFillPanel";
 import TableAskAIPanel from "./TableAskAIPanel";
-import { applyTableFillValues, type TableFillValue } from "@/lib/domain/ai/tableFill";
+import { type TableFillCell, type TableFillValue } from "@/lib/domain/ai/tableFill";
 import { tableSelectionText } from "@/lib/domain/ai/tableAskAI";
 
 // Comment interface
@@ -126,6 +128,8 @@ type CellStyle = {
     color?: string;
     // PATCH-169. Absent is normal text; `normal` is never stored.
     size?: 'h1' | 'h2' | 'small';
+    // PATCH-173. Set on cells the AI filled; removed when hand-edited.
+    aiFilled?: true;
 };
 
 type CellCoord = { row: number; col: number };
@@ -138,6 +142,35 @@ const TABLE_CELL_HEIGHT = 32;
 /** PATCH-170. A column width clamped to the shared 60..600 bounds. */
 function clampColumnWidth(value: number): number {
     return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, value));
+}
+
+/**
+ * PATCH-173. The cell styles with `aiFilled` removed from one cell. A style that
+ * becomes empty is dropped, as elsewhere; the SAME object is returned when
+ * there is nothing to strip, so a caller can bail out of a render.
+ */
+function withoutAiFilled(
+    styles: Readonly<Record<string, CellStyle>>,
+    key: string,
+): Record<string, CellStyle> {
+    const cell = styles[key];
+    if (!cell?.aiFilled) return styles as Record<string, CellStyle>;
+    const merged: CellStyle = { ...cell };
+    delete (merged as Record<string, unknown>).aiFilled;
+    const next: Record<string, CellStyle> = { ...styles };
+    if (Object.keys(merged).length === 0) delete next[key];
+    else next[key] = merged;
+    return next;
+}
+
+/** In-place variant for a fresh copy being built (Clear contents). */
+function stripAiFilledInPlace(styles: Record<string, CellStyle>, key: string): void {
+    const cell = styles[key];
+    if (!cell?.aiFilled) return;
+    const merged: CellStyle = { ...cell };
+    delete (merged as Record<string, unknown>).aiFilled;
+    if (Object.keys(merged).length === 0) delete styles[key];
+    else styles[key] = merged;
 }
 
 export default function TableEditor({
@@ -298,19 +331,31 @@ export default function TableEditor({
     >(null);
 
     /**
-     * PATCH-166. The "Fill with AI…" panel and the suggestions it produced.
+     * PATCH-166/173. The Fill panels and the suggestions they produced.
      *
-     * `fillTarget` is the column the panel is open for; `fillSuggestions` is
-     * what came back, awaiting Accept or Discard. While suggestions are pending
-     * the table is LOCKED (`fillLocked`): cell inputs are read-only and the
-     * grips, "+" bars and right-click menu do nothing, so the row indices the
-     * values refer to cannot shift underneath them. Accept or Discard unlocks.
+     * `fillTarget` is the COLUMN the column-fill panel is open for; `fillRow`
+     * is the ROW the row-fill panel is open for. `fillSuggestions` is a flat
+     * list of CELLS awaiting Accept or Discard -- the column fill keys each by
+     * `(row, targetColumn)`, the row fill by `(targetRow, col)`. While they are
+     * pending the table is LOCKED (`fillLocked`): cell inputs are read-only and
+     * the grips, "+" bars and right-click menu do nothing, so the row/column
+     * indices the values refer to cannot shift underneath them.
      */
     const [fillTarget, setFillTarget] = useState<number | null>(null);
-    const [fillSuggestions, setFillSuggestions] = useState<
-        { column: number; values: readonly TableFillValue[] } | null
-    >(null);
+    const [fillRow, setFillRow] = useState<number | null>(null);
+    const [fillSuggestions, setFillSuggestions] = useState<readonly TableFillCell[] | null>(null);
     const fillLocked = fillSuggestions !== null;
+
+    /**
+     * PATCH-173. The snapshot Accept all offers to undo, and the toast that shows
+     * it. Cleared after 10 s, or as soon as any other change is made.
+     */
+    const [undoFill, setUndoFill] = useState<{
+        rows: readonly (readonly string[])[];
+        cellStyles: Readonly<Record<string, CellStyle>>;
+        count: number;
+    } | null>(null);
+    const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     /**
      * PATCH-168. The "Ask AI…" panel and the selection text captured when it was
@@ -542,6 +587,8 @@ export default function TableEditor({
             return;
         }
         if (!selectedCell && !selectionRange) return;
+        // PATCH-173: a style change is a change, so it drops the undo offer.
+        setUndoFill(null);
 
         setCellStyles((prev) => {
             const next = { ...prev };
@@ -691,9 +738,12 @@ export default function TableEditor({
 
     // Handle cell change
     const handleCellChange = (rowIndex: number, colIndex: number, value: string) => {
+        // PATCH-173: a hand edit clears the AI marker and the undo offer.
+        setUndoFill(null);
         setRows((prev) =>
             prev.map((row, r) => (r === rowIndex ? row.map((cell, c) => (c === colIndex ? value : cell)) : row))
         );
+        setCellStyles((prev) => withoutAiFilled(prev, `${rowIndex}-${colIndex}`));
     };
 
     // Add row/column
@@ -705,6 +755,8 @@ export default function TableEditor({
     // cell it belonged to. `applyGrid` is the only writer, and every handler
     // below builds a `TableGrid`, mutates nothing, and hands the result here.
     const applyGrid = useCallback((next: TableGrid) => {
+        // PATCH-173: any structural/style/title change drops the undo offer.
+        setUndoFill(null);
         setRows(next.rows.map((row) => [...row]));
         setColumns([...next.columns]);
         setCellStyles({ ...next.cellStyles });
@@ -784,6 +836,8 @@ export default function TableEditor({
     );
 
     const setColumnWidth = useCallback((index: number, width: number) => {
+        // PATCH-173: a width change is a change, so it drops the undo offer.
+        setUndoFill(null);
         setColumnWidths((prev) => prev.map((w, i) => (i === index ? clampColumnWidth(width) : w)));
     }, []);
 
@@ -831,12 +885,14 @@ export default function TableEditor({
     /** Every column gets the current average width. */
     const distributeWidths = useCallback(() => {
         if (fillLocked) return;
+        setUndoFill(null);
         setColumnWidths((prev) => distributeColumnWidths(prev));
     }, [fillLocked]);
 
     /** ArrowLeft/ArrowRight on a focused handle change the width by 10px. */
     const nudgeColumnWidth = useCallback((index: number, delta: number) => {
         if (fillLocked) return;
+        setUndoFill(null);
         setColumnWidths((prev) => prev.map((w, i) => (i === index ? clampColumnWidth(w + delta) : w)));
     }, [fillLocked]);
 
@@ -897,9 +953,19 @@ export default function TableEditor({
             case 'duplicate':
                 applyGrid(axis === 'row' ? duplicateRow(grid, index) : duplicateColumn(grid, index));
                 break;
-            case 'clear':
-                applyGrid(axis === 'row' ? clearRow(grid, index) : clearColumn(grid, index));
+            case 'clear': {
+                const cleared = axis === 'row' ? clearRow(grid, index) : clearColumn(grid, index);
+                // PATCH-173: Clear contents also drops the AI marker from every
+                // cell it empties.
+                const clearedStyles: Record<string, CellStyle> = { ...cleared.cellStyles };
+                if (axis === 'row') {
+                    for (let c = 0; c < grid.columns.length; c += 1) stripAiFilledInPlace(clearedStyles, `${index}-${c}`);
+                } else {
+                    for (let r = 0; r < grid.rows.length; r += 1) stripAiFilledInPlace(clearedStyles, `${r}-${index}`);
+                }
+                applyGrid({ ...cleared, cellStyles: clearedStyles });
                 break;
+            }
             case 'delete':
                 applyGrid(axis === 'row' ? deleteRowAt(grid, index) : deleteColumnAt(grid, index));
                 // The deleted axis may have held the selected cell.
@@ -910,9 +976,18 @@ export default function TableEditor({
                 // Column-only (the row menu never reports it): open the panel
                 // for this column. Nothing is written until the user accepts.
                 setAskAI(null);
+                setFillRow(null);
                 // The toolbar's own panels open in the same spot; one panel at a time.
                 setActiveSubmenu(null);
                 setFillTarget(index);
+                break;
+            case 'fill-row-ai':
+                // Row-only (the column menu never reports it): open the row fill
+                // panel. Nothing is written until the user accepts.
+                setAskAI(null);
+                setFillTarget(null);
+                setActiveSubmenu(null);
+                setFillRow(index);
                 break;
             case 'fit-width':
                 // Column-only: fit THIS column to its content.
@@ -968,41 +1043,72 @@ export default function TableEditor({
         return values.every((value) => value === first) ? (first ?? null) : null;
     }, [axisMenu, columns, rows, cellStyles]);
 
-    /** Values by row for the pending suggestions, so a cell lookup is O(1). */
-    const fillValueByRow = useMemo(() => {
-        const map = new Map<number, string>();
-        for (const entry of fillSuggestions?.values ?? []) map.set(entry.row, entry.value);
+    /** Pending suggestion value for each cell, so a lookup is O(1). */
+    const fillValueByCell = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const cell of fillSuggestions ?? []) map.set(`${cell.row}-${cell.col}`, cell.value);
         return map;
     }, [fillSuggestions]);
 
-    const handleFillSuggestions = useCallback((values: readonly TableFillValue[]) => {
-        setFillSuggestions((current) => {
-            // Anchor the values to the column the panel was open for, so a
-            // later change cannot mislabel them.
-            if (fillTarget === null) return current;
-            return { column: fillTarget, values };
-        });
+    /** Column fill: the panel's values, keyed by ROW, all in the target column. */
+    const handleColumnFillSuggestions = useCallback((values: readonly TableFillValue[]) => {
+        if (fillTarget === null) return;
+        setFillSuggestions(values.map((value) => ({ row: value.row, col: fillTarget, value: value.value })));
     }, [fillTarget]);
 
+    /** Row fill: the panel already addressed every value by its cell. */
+    const handleRowFillSuggestions = useCallback((cells: readonly TableFillCell[]) => {
+        setFillSuggestions(cells);
+    }, []);
+
     const closeFillPanel = useCallback(() => setFillTarget(null), []);
+    const closeRowFillPanel = useCallback(() => setFillRow(null), []);
 
     /**
-     * ACCEPT ALL: one pure update through `applyTableFillValues`, which changes
-     * only the target column and leaves every cell style untouched.
+     * ACCEPT ALL: one pure update writes every suggested cell and marks each one
+     * `aiFilled`; a snapshot of the table BEFORE it is kept so Undo can restore.
      */
     const acceptFillSuggestions = useCallback(() => {
         if (!fillSuggestions) return;
         const grid = currentGrid();
-        const nextRows = applyTableFillValues(
-            { rows: grid.rows, columns: grid.columns },
-            fillSuggestions.column,
-            fillSuggestions.values,
-        );
-        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles, columnWidths: grid.columnWidths });
+        const byCell = new Map(fillSuggestions.map((cell) => [`${cell.row}-${cell.col}`, cell.value]));
+        const nextRows = grid.rows.map((row, r) => row.map((cell, c) => {
+            const key = `${r}-${c}`;
+            return byCell.has(key) ? byCell.get(key)! : cell;
+        }));
+        const nextStyles: Record<string, CellStyle> = { ...grid.cellStyles };
+        for (const cell of fillSuggestions) {
+            const key = `${cell.row}-${cell.col}`;
+            nextStyles[key] = { ...nextStyles[key], aiFilled: true };
+        }
+        const snapshot = {
+            rows: grid.rows.map((row) => [...row]),
+            cellStyles: { ...grid.cellStyles },
+            count: fillSuggestions.length,
+        };
+        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: nextStyles, columnWidths: grid.columnWidths });
         setFillSuggestions(null);
+        setUndoFill(snapshot);
     }, [applyGrid, currentGrid, fillSuggestions]);
 
     const discardFillSuggestions = useCallback(() => setFillSuggestions(null), []);
+
+    /** PATCH-173. Undo an Accept all, restoring the snapshot exactly. */
+    const undoFillAccept = useCallback(() => {
+        if (!undoFill) return;
+        setRows(undoFill.rows.map((row) => [...row]));
+        setCellStyles({ ...undoFill.cellStyles });
+        setUndoFill(null);
+    }, [undoFill]);
+
+    // The undo offer expires after 10 s (or on the next change, above).
+    useEffect(() => {
+        if (undoFill === null) return;
+        undoTimerRef.current = setTimeout(() => setUndoFill(null), 10_000);
+        return () => {
+            if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        };
+    }, [undoFill]);
 
     /** The active cell's current text, so the Ask AI panel can label its insert. */
     const activeCellHasText = selectedCell
@@ -1023,6 +1129,7 @@ export default function TableEditor({
         const { text, truncated } = tableSelectionText({ rows, columns }, range);
         const cellCount = (range.maxRow - range.minRow + 1) * (range.maxCol - range.minCol + 1);
         setFillTarget(null);
+        setFillRow(null);
         setContextMenu(null);
         // The toolbar's own panels open in the same spot; one panel at a time.
         setActiveSubmenu(null);
@@ -1043,7 +1150,9 @@ export default function TableEditor({
                 ? row.map((cell, c) => (c === selectedCell.col ? value : cell))
                 : [...row]
         ));
-        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: grid.cellStyles, columnWidths: grid.columnWidths });
+        // The inserted text is no longer the AI's, so its marker goes.
+        const nextStyles = withoutAiFilled(grid.cellStyles, `${selectedCell.row}-${selectedCell.col}`);
+        applyGrid({ rows: nextRows, columns: grid.columns, cellStyles: nextStyles, columnWidths: grid.columnWidths });
     }, [applyGrid, currentGrid, selectedCell]);
 
     const handleCut = useCallback(() => {
@@ -1148,7 +1257,10 @@ export default function TableEditor({
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50" onClick={handleOverlayClick}>
             <div className="flex items-start gap-2" onClick={(e) => e.stopPropagation()}>
                 {/* Left Toolbar */}
-                <div className="relative self-start mt-1" ref={toolbarRef}>
+                {/* h-0: the toolbar hangs down from the top without adding to the editor's height,
+                    so switching between its 3-tool and 8-tool modes never re-centres the table
+                    under the pointer (found live: a double-click's second click landed on a cell). */}
+                <div className="relative self-start mt-1 h-0" ref={toolbarRef}>
                     <div
                         className="flex flex-col items-center bg-white rounded-lg shadow-lg p-0.5 gap-0.5 flex-shrink-0"
                     >
@@ -1253,7 +1365,7 @@ export default function TableEditor({
                                     data-table-fill-bar=""
                                     className="flex items-center gap-2 border-b border-purple-100 bg-purple-50 px-2 py-1 text-xs text-purple-700"
                                 >
-                                    <span>{fillSuggestions.values.length} AI suggestions</span>
+                                    <span>{fillSuggestions.length} AI suggestions</span>
                                     <span className="text-purple-300" aria-hidden="true">·</span>
                                     <button type="button" onClick={acceptFillSuggestions} className="font-medium hover:underline">
                                         Accept all
@@ -1261,6 +1373,21 @@ export default function TableEditor({
                                     <span className="text-purple-300" aria-hidden="true">·</span>
                                     <button type="button" onClick={discardFillSuggestions} className="hover:underline">
                                         Discard
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* PATCH-173. After Accept all, an Undo is offered for
+                                ten seconds (or until any other change is made). */}
+                            {undoFill && (
+                                <div
+                                    data-table-undo-bar=""
+                                    className="flex items-center gap-2 border-b border-green-100 bg-green-50 px-2 py-1 text-xs text-green-800"
+                                >
+                                    <span>Filled {undoFill.count} cells</span>
+                                    <span className="text-green-300" aria-hidden="true">·</span>
+                                    <button type="button" onClick={undoFillAccept} className="font-medium hover:underline">
+                                        Undo
                                     </button>
                                 </div>
                             )}
@@ -1505,10 +1632,8 @@ export default function TableEditor({
 
                                                     const isActive = selectedCell?.row === row.index && selectedCell?.col === colIndex;
                                                     const inRange = isCellSelected(row.index, colIndex);
-                                                    // PATCH-166. A pending suggestion for THIS cell, if any.
-                                                    const fillValue = fillSuggestions?.column === colIndex
-                                                        ? fillValueByRow.get(row.index)
-                                                        : undefined;
+                                                    // PATCH-166/173. A pending suggestion for THIS cell, if any.
+                                                    const fillValue = fillValueByCell.get(`${row.index}-${colIndex}`);
 
                                                     return (
                                                         <td
@@ -1571,6 +1696,20 @@ export default function TableEditor({
                                                                     className="pointer-events-none absolute inset-0 z-10 flex items-center overflow-hidden bg-purple-100/70 px-2 text-sm italic text-purple-700"
                                                                 >
                                                                     <span className="truncate">{fillValue}</span>
+                                                                </span>
+                                                            )}
+
+                                                            {/* PATCH-173. The AI marker: a sparkle in the
+                                                                bottom-right (the menu triangle holds the top-
+                                                                right), until someone edits this cell's text. */}
+                                                            {style?.aiFilled && (
+                                                                <span
+                                                                    data-table-ai-filled=""
+                                                                    aria-label="Filled by AI"
+                                                                    title="Filled by AI"
+                                                                    className="pointer-events-none absolute bottom-0 right-0 z-10 text-gray-400"
+                                                                >
+                                                                    <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
                                                                 </span>
                                                             )}
 
@@ -1995,8 +2134,28 @@ export default function TableEditor({
                             columns={columns}
                             targetColumn={fillTarget}
                             rows={rows}
-                            onSuggestions={handleFillSuggestions}
+                            onSuggestions={handleColumnFillSuggestions}
                             onClose={closeFillPanel}
+                        />
+                    </div>
+                )}
+
+                {/* PATCH-173. The "Fill row with AI…" panel, same placement and
+                    one-panel-at-a-time rule as the others. */}
+                {fillRow !== null && (
+                    <div
+                        className="fixed z-[100]"
+                        style={{
+                            top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
+                            left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                        }}
+                    >
+                        <TableRowFillPanel
+                            columns={columns}
+                            rowIndex={fillRow}
+                            rows={rows}
+                            onSuggestions={handleRowFillSuggestions}
+                            onClose={closeRowFillPanel}
                         />
                     </div>
                 )}
