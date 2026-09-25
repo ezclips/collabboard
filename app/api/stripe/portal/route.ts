@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
+import { canManageWorkspaceBilling } from "@/lib/server/billing/stripeBilling";
 import { getStripeAdmin } from "@/lib/stripe/admin";
 import { resolveCurrentWorkspace } from "@/lib/workspace/context";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -39,6 +40,13 @@ export async function POST(request: Request) {
     const workspace = await resolveCurrentWorkspace(supabase, user, supabaseAdmin);
     if (!workspace) {
       return NextResponse.json({ error: "No active workspace" }, { status: 400 });
+    }
+
+    if (!(await canManageWorkspaceBilling(supabase, workspace.workspaceId, user.id))) {
+      return NextResponse.json(
+        { error: "Only a workspace owner or admin can manage billing." },
+        { status: 403 },
+      );
     }
 
     const { data: customerRow } = await supabaseAdmin

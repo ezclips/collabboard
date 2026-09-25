@@ -38,6 +38,16 @@ describe('formatBytes', () => {
     expect(formatBytes(MB)).toBe('1.0 MB');
   });
 
+  it('shows whole gigabytes without a trailing .0, and one decimal otherwise', () => {
+    expect(formatBytes(1024 * MB)).toBe('1 GB');
+    expect(formatBytes(1.5 * 1024 * MB)).toBe('1.5 GB');
+    expect(formatBytes(2 * 1024 * MB)).toBe('2 GB');
+  });
+
+  it('keeps the MB unit just below a gigabyte', () => {
+    expect(formatBytes(1023.9 * MB)).toBe('1023.9 MB');
+  });
+
   it('is safe for zero and nonsense', () => {
     expect(formatBytes(0)).toBe('0 KB');
     expect(formatBytes(-1)).toBe('0 KB');

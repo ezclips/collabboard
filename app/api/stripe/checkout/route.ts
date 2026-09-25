@@ -1,120 +1,80 @@
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-
+import { createCheckoutHandler } from "@/lib/server/billing/checkoutRoute";
+import {
+  canManageWorkspaceBilling,
+  findLivePaidSubscription,
+  getBillingActor,
+  resolveActorWorkspace,
+} from "@/lib/server/billing/stripeBilling";
 import { getStripeAdmin } from "@/lib/stripe/admin";
-import { getStripePriceId, parseCheckoutRequest } from "@/lib/stripe/client";
-import { resolveCurrentWorkspace } from "@/lib/workspace/context";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getStripePriceId } from "@/lib/stripe/client";
 
-export async function POST(request: Request) {
-  try {
+export const runtime = "nodejs";
+
+export const POST = createCheckoutHandler({
+  getAuthenticatedSession: getBillingActor,
+  resolveWorkspace: resolveActorWorkspace,
+  canManageWorkspaceBilling: (actor, workspaceId) =>
+    canManageWorkspaceBilling(actor.supabase, workspaceId, actor.userId),
+  findLivePaidSubscription: (actor, workspaceId) =>
+    findLivePaidSubscription(actor.supabaseAdmin, workspaceId),
+  getStripePriceId,
+  ensureCustomer: async (actor, workspace) => {
     const stripeAdmin = getStripeAdmin();
-    const supabaseAdmin = getSupabaseAdmin();
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
-    const authHeader = request.headers.get("authorization");
-    const accessToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    let {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user && accessToken) {
-      const {
-        data: { user: tokenUser },
-        error,
-      } = await supabaseAdmin.auth.getUser(accessToken);
-
-      if (error) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-
-      user = tokenUser;
-    }
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await request.json().catch(() => ({}));
-    const parsed = parseCheckoutRequest(body);
-    if (!parsed.ok) {
-      return NextResponse.json({ error: parsed.error }, { status: 400 });
-    }
-    const { plan, interval } = parsed;
-
-    const workspace = await resolveCurrentWorkspace(supabase, user, supabaseAdmin);
-    if (!workspace) {
-      return NextResponse.json({ error: "No active workspace" }, { status: 400 });
-    }
-
-    const priceId = getStripePriceId(plan, interval);
-    if (!priceId) {
-      return NextResponse.json({ error: "Unknown pricing configuration" }, { status: 400 });
-    }
-
-    const { data: customerRow } = await supabaseAdmin
+    const { data: customerRow } = await actor.supabaseAdmin
       .from("customers")
       .select("id, stripe_customer_id")
       .eq("workspace_id", workspace.workspaceId)
       .maybeSingle();
 
-    let stripeCustomerId = customerRow?.stripe_customer_id ?? null;
+    const existing = customerRow as { stripe_customer_id?: string | null } | null;
+    let stripeCustomerId = existing?.stripe_customer_id ?? null;
 
     if (!stripeCustomerId) {
       const customer = await stripeAdmin.customers.create({
-        email: user.email || undefined,
+        email: actor.email || undefined,
         name: workspace.workspaceName,
         metadata: {
           workspaceId: workspace.workspaceId,
-          userId: user.id,
+          userId: actor.userId,
         },
       });
 
       stripeCustomerId = customer.id;
 
-      await supabaseAdmin.from("customers").upsert({
+      await actor.supabaseAdmin.from("customers").upsert({
         workspace_id: workspace.workspaceId,
         stripe_customer_id: customer.id,
-        email: user.email || null,
+        email: actor.email || null,
         name: workspace.workspaceName,
       });
     }
 
-    const origin = request.headers.get("origin") || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-
-    const session = await stripeAdmin.checkout.sessions.create({
+    return stripeCustomerId;
+  },
+  createCheckoutSession: async (actor, input) => {
+    const session = await getStripeAdmin().checkout.sessions.create({
       mode: "subscription",
-      customer: stripeCustomerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/dashboard/settings/billing?checkout=success`,
-      cancel_url: `${origin}/dashboard/settings/billing?checkout=cancelled`,
+      customer: input.customerId,
+      line_items: [{ price: input.priceId, quantity: 1 }],
+      success_url: `${input.origin}/dashboard/settings/billing?checkout=success`,
+      cancel_url: `${input.origin}/dashboard/settings/billing?checkout=cancelled`,
       allow_promotion_codes: true,
       metadata: {
-        workspaceId: workspace.workspaceId,
-        userId: user.id,
-        plan,
-        interval,
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        plan: input.plan,
+        interval: input.interval,
       },
       subscription_data: {
         metadata: {
-          workspaceId: workspace.workspaceId,
-          userId: user.id,
-          plan,
-          interval,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          plan: input.plan,
+          interval: input.interval,
         },
       },
     });
 
-    return NextResponse.json({ url: session.url });
-  } catch (error) {
-    console.error("Stripe checkout error:", error);
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Failed to create checkout session",
-      },
-      { status: 500 },
-    );
-  }
-}
+    return { url: session.url };
+  },
+});

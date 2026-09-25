@@ -18,6 +18,9 @@
 /** One mebibyte, the unit Storage reports sizes in. */
 export const MB = 1024 * 1024;
 
+/** One gibibyte. PATCH-184: the first plan limit to reach GB. */
+const GB = 1024 * MB;
+
 /**
  * The limits, as decided by the owner.
  *
@@ -40,7 +43,8 @@ export const UPLOAD_LIMITS = {
 export const KNOWLEDGE_UPLOADS_PER_HOUR = 30;
 
 /**
- * "72.4 MB" / "850 KB": one decimal for MB, none for KB.
+ * "1.5 GB" / "72.4 MB" / "850 KB": one decimal above a kilobyte, and a whole
+ * gigabyte loses its trailing ".0" ("1 GB", not "1.0 GB").
  *
  * Sizes are shown to a person deciding what to do about a refusal, so the unit
  * is chosen to keep the number short: whole kilobytes below a megabyte, and one
@@ -50,7 +54,8 @@ export const KNOWLEDGE_UPLOADS_PER_HOUR = 30;
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 KB';
   if (bytes < MB) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / MB).toFixed(1)} MB`;
+  if (bytes < GB) return `${(bytes / MB).toFixed(1)} MB`;
+  return `${(bytes / GB).toFixed(1).replace(/\.0$/, '')} GB`;
 }
 
 /** The user-facing refusal, naming the file's size and the limit it broke. */

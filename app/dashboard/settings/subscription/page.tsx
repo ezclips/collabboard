@@ -7,11 +7,14 @@ import { toast } from 'sonner';
 import { getPermissionContext } from '@/lib/auth/permissions';
 import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
 import type { PlanId } from '@/lib/domain/billing/plans';
+import { effectivePlanId, formatPlanPrice } from '@/lib/domain/billing/plans';
 import { formatBytes } from '@/lib/domain/storage/uploadLimits';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole } from '@/types/permissions';
 
 type BillingInterval = 'monthly' | 'yearly';
+
+const CONFIRM_MESSAGE = 'Your plan changes now. The price difference is settled on your next invoice.';
 
 function planFeatures(planId: PlanId): string[] {
     const { limits } = PLANS[planId];
@@ -30,8 +33,8 @@ function planFeatures(planId: PlanId): string[] {
 const plans = PLAN_ORDER.map((id) => ({
     id,
     name: PLANS[id].name,
-    monthlyLabel: `$${PLANS[id].priceUsd.monthly} /month`,
-    yearlyLabel: `$${PLANS[id].priceUsd.yearly} /year`,
+    monthlyLabel: `${formatPlanPrice(PLANS[id].price.monthly)} /month`,
+    yearlyLabel: `${formatPlanPrice(PLANS[id].price.yearly)} /year`,
     description: PLANS[id].tagline,
     features: planFeatures(id)
 }));
@@ -40,11 +43,17 @@ export default function SubscriptionPage() {
     const { supabase } = useSupabase();
     const [loading, setLoading] = useState(true);
     const [upgrading, setUpgrading] = useState(false);
+    const [changing, setChanging] = useState(false);
     const [openingPortal, setOpeningPortal] = useState(false);
     const [currentPlan, setCurrentPlan] = useState<PlanId>('free');
     const [billingInterval, setBillingInterval] = useState<BillingInterval>('monthly');
     const [subscriptionStatus, setSubscriptionStatus] = useState<string>('free');
     const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
+    const [pendingPlan, setPendingPlan] = useState<PlanId | null>(null);
+    const [cardError, setCardError] = useState<{ plan: PlanId; message: string } | null>(null);
+
+    const onPaidPlan = effectivePlanId(currentPlan, subscriptionStatus) !== 'free';
+    const canManageBilling = workspaceRole === 'owner' || workspaceRole === 'admin';
 
     useEffect(() => {
         void loadSubscription();
@@ -83,6 +92,7 @@ export default function SubscriptionPage() {
     const handleUpgrade = async (plan: PlanId) => {
         if (plan === 'free') return;
 
+        setCardError(null);
         try {
             setUpgrading(true);
             // getSession() already refreshes an expired token internally; an
@@ -100,7 +110,16 @@ export default function SubscriptionPage() {
                 body: JSON.stringify({ plan, interval: billingInterval }),
             });
 
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
+            // A stale page can still offer Upgrade while a subscription exists.
+            if (response.status === 409 && data.code === 'already_subscribed') {
+                setCardError({
+                    plan,
+                    message: data.error || 'This workspace already has a subscription.'
+                });
+                await loadSubscription();
+                return;
+            }
             if (!response.ok || !data.url) {
                 throw new Error(data.error || 'Failed to create checkout session');
             }
@@ -108,9 +127,46 @@ export default function SubscriptionPage() {
             window.location.href = data.url;
         } catch (err) {
             console.error('Error upgrading:', err);
+            setCardError({
+                plan,
+                message: err instanceof Error ? err.message : 'Failed to start checkout'
+            });
             toast.error('Failed to start checkout');
         } finally {
             setUpgrading(false);
+        }
+    };
+
+    const confirmChangePlan = async (plan: PlanId) => {
+        setCardError(null);
+        try {
+            setChanging(true);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+                throw new Error('No active session. Please sign in again.');
+            }
+            const response = await fetch('/api/stripe/change-plan', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ plan, interval: billingInterval }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to change the plan');
+            }
+            setPendingPlan(null);
+            await loadSubscription();
+        } catch (err) {
+            console.error('Error changing plan:', err);
+            setCardError({
+                plan,
+                message: err instanceof Error ? err.message : 'Failed to change the plan'
+            });
+        } finally {
+            setChanging(false);
         }
     };
 
@@ -125,7 +181,7 @@ export default function SubscriptionPage() {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${session.access_token}` },
             });
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
             if (!response.ok || !data.url) {
                 throw new Error(data.error || 'Failed to open billing portal');
             }
@@ -133,7 +189,7 @@ export default function SubscriptionPage() {
             window.location.href = data.url;
         } catch (err) {
             console.error('Error opening portal:', err);
-            toast.error('Failed to open billing portal');
+            toast.error(err instanceof Error ? err.message : 'Failed to open billing portal');
         } finally {
             setOpeningPortal(false);
         }
@@ -164,7 +220,7 @@ export default function SubscriptionPage() {
                         <span className="ml-3 text-sm text-purple-600">Status: {subscriptionStatus}</span>
                     </div>
                 </div>
-                {currentPlan !== 'free' && (
+                {currentPlan !== 'free' && canManageBilling && (
                     <button
                         onClick={handleOpenPortal}
                         disabled={openingPortal}
@@ -226,15 +282,51 @@ export default function SubscriptionPage() {
                                 ))}
                             </ul>
 
-                            {!isCurrent && plan.id !== 'free' ? (
-                                <button
-                                    onClick={() => handleUpgrade(plan.id)}
-                                    disabled={upgrading}
-                                    className="w-full py-2 rounded-lg font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
-                                >
-                                    {upgrading ? 'Starting checkout...' : 'Upgrade'}
-                                </button>
+                            {!isCurrent && plan.id !== 'free' && canManageBilling && pendingPlan === plan.id ? (
+                                <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+                                    <p className="text-xs text-gray-700 mb-3">{CONFIRM_MESSAGE}</p>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => confirmChangePlan(plan.id)}
+                                            disabled={changing}
+                                            className="flex-1 py-2 rounded-lg font-medium text-sm bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-60"
+                                        >
+                                            {changing ? 'Changing...' : 'Confirm'}
+                                        </button>
+                                        <button
+                                            onClick={() => setPendingPlan(null)}
+                                            disabled={changing}
+                                            className="flex-1 py-2 rounded-lg font-medium text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : !isCurrent && plan.id !== 'free' && canManageBilling ? (
+                                onPaidPlan ? (
+                                    <button
+                                        onClick={() => {
+                                            setCardError(null);
+                                            setPendingPlan(plan.id);
+                                        }}
+                                        className="w-full py-2 rounded-lg font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
+                                    >
+                                        {`Switch to ${plan.name}`}
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => handleUpgrade(plan.id)}
+                                        disabled={upgrading}
+                                        className="w-full py-2 rounded-lg font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
+                                    >
+                                        {upgrading ? 'Starting checkout...' : 'Upgrade'}
+                                    </button>
+                                )
                             ) : null}
+
+                            {cardError?.plan === plan.id && (
+                                <p className="text-xs text-red-600 mt-3">{cardError.message}</p>
+                            )}
                         </div>
                     );
                 })}

@@ -23,9 +23,18 @@ export interface PlanLimits {
 export interface PlanDefinition {
   readonly id: PlanId;
   readonly name: string; // "Free" | "Pro" | "Premium"
-  readonly priceUsd: { readonly monthly: number; readonly yearly: number };
+  readonly price: { readonly monthly: number; readonly yearly: number };
   readonly tagline: string; // one short line for the plan card
   readonly limits: PlanLimits;
+}
+
+/** PATCH-184. Stripe charges CHF, so the screens must say so. */
+export const PLAN_CURRENCY = 'CHF' as const;
+
+/** "CHF 9" / "CHF 9.50" / "CHF 190": no decimals when whole, two otherwise. */
+export function formatPlanPrice(amount: number): string {
+  const value = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+  return `${PLAN_CURRENCY} ${value}`;
 }
 
 const GB = 1024 * MB;
@@ -44,7 +53,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
   free: {
     id: 'free',
     name: 'Free',
-    priceUsd: { monthly: 0, yearly: 0 },
+    price: { monthly: 0, yearly: 0 },
     tagline: 'Three boards and a taste of AI',
     limits: {
       boards: 3,
@@ -59,7 +68,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
   pro: {
     id: 'pro',
     name: 'Pro',
-    priceUsd: { monthly: 9, yearly: 90 },
+    price: { monthly: 9, yearly: 90 },
     tagline: 'Unlimited boards, files and documents',
     limits: {
       boards: null,
@@ -74,7 +83,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
   premium: {
     id: 'premium',
     name: 'Premium',
-    priceUsd: { monthly: 19, yearly: 190 },
+    price: { monthly: 19, yearly: 190 },
     tagline: 'Premium AI models and the largest limits',
     limits: {
       boards: null,

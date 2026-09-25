@@ -7,9 +7,12 @@ import { toast } from 'sonner';
 import { getBoardLimitForEntitlements, getPermissionContext } from '@/lib/auth/permissions';
 import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
 import type { PlanId } from '@/lib/domain/billing/plans';
+import { effectivePlanId, formatPlanPrice } from '@/lib/domain/billing/plans';
 import { formatBytes } from '@/lib/domain/storage/uploadLimits';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole, SubscriptionStatus } from '@/types/permissions';
+
+const CONFIRM_MESSAGE = 'Your plan changes now. The price difference is settled on your next invoice.';
 
 function planFeatures(planId: PlanId): string[] {
     const { limits } = PLANS[planId];
@@ -30,8 +33,8 @@ const plans = PLAN_ORDER.map((id) => ({
     name: PLANS[id].name,
     tagline: PLANS[id].tagline,
     features: planFeatures(id),
-    priceMonthly: `$${PLANS[id].priceUsd.monthly} /month`,
-    priceYearly: PLANS[id].priceUsd.yearly > 0 ? `$${PLANS[id].priceUsd.yearly} /year` : ''
+    priceMonthly: `${formatPlanPrice(PLANS[id].price.monthly)} /month`,
+    priceYearly: PLANS[id].price.yearly > 0 ? `${formatPlanPrice(PLANS[id].price.yearly)} /year` : ''
 }));
 
 export default function BillingPage() {
@@ -43,6 +46,12 @@ export default function BillingPage() {
     const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
     const [openingPortal, setOpeningPortal] = useState(false);
     const [startingCheckout, setStartingCheckout] = useState(false);
+    const [changing, setChanging] = useState(false);
+    const [pendingPlan, setPendingPlan] = useState<PlanId | null>(null);
+    const [cardError, setCardError] = useState<{ plan: PlanId; message: string } | null>(null);
+
+    const onPaidPlan = effectivePlanId(currentPlan, currentStatus) !== 'free';
+    const canManageBilling = workspaceRole === 'owner' || workspaceRole === 'admin';
 
     useEffect(() => {
         void loadBillingData();
@@ -89,20 +98,21 @@ export default function BillingPage() {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${session.access_token}` },
             });
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
             if (!response.ok || !data.url) {
                 throw new Error(data.error || 'Failed to open billing portal');
             }
             window.location.href = data.url;
         } catch (err) {
             console.error('Error opening billing portal:', err);
-            toast.error('Failed to open billing portal');
+            toast.error(err instanceof Error ? err.message : 'Failed to open billing portal');
         } finally {
             setOpeningPortal(false);
         }
     };
 
     const startCheckout = async (planId: PlanId) => {
+        setCardError(null);
         try {
             setStartingCheckout(true);
             const { data: { session } } = await supabase.auth.getSession();
@@ -117,16 +127,62 @@ export default function BillingPage() {
                 },
                 body: JSON.stringify({ plan: planId, interval: 'monthly' }),
             });
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
+            // A stale page can still offer Upgrade while a subscription exists.
+            if (response.status === 409 && data.code === 'already_subscribed') {
+                setCardError({
+                    plan: planId,
+                    message: data.error || 'This workspace already has a subscription.'
+                });
+                await loadBillingData();
+                return;
+            }
             if (!response.ok || !data.url) {
                 throw new Error(data.error || 'Failed to start checkout');
             }
             window.location.href = data.url;
         } catch (err) {
             console.error('Error starting checkout:', err);
+            setCardError({
+                plan: planId,
+                message: err instanceof Error ? err.message : 'Failed to start checkout'
+            });
             toast.error('Failed to start checkout');
         } finally {
             setStartingCheckout(false);
+        }
+    };
+
+    const confirmChangePlan = async (planId: PlanId) => {
+        setCardError(null);
+        try {
+            setChanging(true);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+                throw new Error('No active session. Please sign in again.');
+            }
+            const response = await fetch('/api/stripe/change-plan', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ plan: planId, interval: 'monthly' }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to change the plan');
+            }
+            setPendingPlan(null);
+            await loadBillingData();
+        } catch (err) {
+            console.error('Error changing plan:', err);
+            setCardError({
+                plan: planId,
+                message: err instanceof Error ? err.message : 'Failed to change the plan'
+            });
+        } finally {
+            setChanging(false);
         }
     };
 
@@ -152,7 +208,7 @@ export default function BillingPage() {
                 {plans.map((plan) => {
                     const isCurrent = currentPlan === plan.id;
                     return (
-                        <div key={plan.id} className="px-6 py-5 flex items-center justify-between">
+                        <div key={plan.id} className="px-6 py-5 flex items-center justify-between gap-6">
                             <div className="flex items-center gap-8">
                                 <div className="w-24">
                                     <span className="font-semibold text-gray-900">{plan.name}</span>
@@ -172,14 +228,44 @@ export default function BillingPage() {
                                     )}
                                 </div>
 
-                                <div className="w-36 text-right">
+                                <div className="w-56 text-right">
                                     {isCurrent ? (
                                         <div className="text-sm text-purple-600">
                                             {plan.id === 'free'
                                                 ? `${boardsUsed} / ${getBoardLimitForEntitlements({ plan: currentPlan, status: currentStatus })} boards`
                                                 : `Status: ${currentStatus}`}
                                         </div>
-                                    ) : plan.id !== 'free' ? (
+                                    ) : plan.id === 'free' || !canManageBilling ? null : pendingPlan === plan.id ? (
+                                        <div>
+                                            <p className="text-xs text-gray-600 mb-2">{CONFIRM_MESSAGE}</p>
+                                            <div className="flex items-center justify-end gap-2">
+                                                <button
+                                                    onClick={() => confirmChangePlan(plan.id)}
+                                                    disabled={changing}
+                                                    className="px-4 py-2 bg-purple-600 text-white rounded-full font-medium text-xs hover:bg-purple-700 transition-colors disabled:opacity-60"
+                                                >
+                                                    {changing ? 'Changing...' : 'Confirm'}
+                                                </button>
+                                                <button
+                                                    onClick={() => setPendingPlan(null)}
+                                                    disabled={changing}
+                                                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-full font-medium text-xs hover:bg-gray-200 transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : onPaidPlan ? (
+                                        <button
+                                            onClick={() => {
+                                                setCardError(null);
+                                                setPendingPlan(plan.id);
+                                            }}
+                                            className="px-5 py-2 bg-purple-600 text-white rounded-full font-medium text-sm hover:bg-purple-700 transition-colors"
+                                        >
+                                            {`Switch to ${plan.name}`}
+                                        </button>
+                                    ) : (
                                         <button
                                             onClick={() => startCheckout(plan.id)}
                                             disabled={startingCheckout}
@@ -187,7 +273,11 @@ export default function BillingPage() {
                                         >
                                             {startingCheckout ? 'Starting...' : 'Upgrade'}
                                         </button>
-                                    ) : null}
+                                    )}
+
+                                    {cardError?.plan === plan.id && (
+                                        <p className="text-xs text-red-600 mt-2">{cardError.message}</p>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -195,7 +285,7 @@ export default function BillingPage() {
                 })}
             </div>
 
-            {currentPlan !== 'free' && (
+            {currentPlan !== 'free' && canManageBilling && (
                 <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6">
                     <p className="text-gray-600">Manage payment methods, invoices, and subscription changes in Stripe.</p>
                     <button

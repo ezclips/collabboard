@@ -156,12 +156,34 @@ describe('parseCheckoutRequest', () => {
   });
 });
 
-describe('the checkout route uses parseCheckoutRequest', () => {
-  it('route.ts calls it instead of defaulting the plan', () => {
+describe('the plan routes parse their body with parseCheckoutRequest', () => {
+  it('the checkout factory calls it, and the app route delegates to the factory', () => {
+    const factory = readFileSync(
+      resolve(__dirname, '../server/billing/checkoutRoute.ts'),
+      'utf8',
+    );
+    expect(factory).toContain('parseCheckoutRequest');
+
     const route = readFileSync(
       resolve(__dirname, '../../app/api/stripe/checkout/route.ts'),
       'utf8',
     );
-    expect(route).toContain('parseCheckoutRequest');
+    expect(route).toContain('createCheckoutHandler');
+    expect(route).toContain('@/lib/server/billing/checkoutRoute');
+  });
+
+  it('the change-plan factory calls it, and the app route delegates to the factory', () => {
+    const factory = readFileSync(
+      resolve(__dirname, '../server/billing/changePlanRoute.ts'),
+      'utf8',
+    );
+    expect(factory).toContain('parseCheckoutRequest');
+
+    const route = readFileSync(
+      resolve(__dirname, '../../app/api/stripe/change-plan/route.ts'),
+      'utf8',
+    );
+    expect(route).toContain('createChangePlanHandler');
+    expect(route).toContain('@/lib/server/billing/changePlanRoute');
   });
 });

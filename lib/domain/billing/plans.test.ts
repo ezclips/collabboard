@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   PAID_PLAN_IDS,
   PLANS,
+  PLAN_CURRENCY,
   PLAN_ORDER,
   effectivePlanId,
+  formatPlanPrice,
   isPlanId,
   planIncludes,
   planLimits,
@@ -19,8 +21,8 @@ describe('PRICING.md §3 — every plan, value by value', () => {
   it('Free', () => {
     expect(PLANS.free.id).toBe('free');
     expect(PLANS.free.name).toBe('Free');
-    expect(PLANS.free.priceUsd.monthly).toBe(0);
-    expect(PLANS.free.priceUsd.yearly).toBe(0);
+    expect(PLANS.free.price.monthly).toBe(0);
+    expect(PLANS.free.price.yearly).toBe(0);
     expect(PLANS.free.limits.boards).toBe(3);
     expect(PLANS.free.limits.fileSizeBytes).toBe(20 * MB);
     expect(PLANS.free.limits.processedDocuments).toBe(5);
@@ -33,8 +35,8 @@ describe('PRICING.md §3 — every plan, value by value', () => {
   it('Pro', () => {
     expect(PLANS.pro.id).toBe('pro');
     expect(PLANS.pro.name).toBe('Pro');
-    expect(PLANS.pro.priceUsd.monthly).toBe(9);
-    expect(PLANS.pro.priceUsd.yearly).toBe(90);
+    expect(PLANS.pro.price.monthly).toBe(9);
+    expect(PLANS.pro.price.yearly).toBe(90);
     expect(PLANS.pro.limits.boards).toBeNull();
     expect(PLANS.pro.limits.fileSizeBytes).toBe(250 * MB);
     expect(PLANS.pro.limits.processedDocuments).toBeNull();
@@ -47,8 +49,8 @@ describe('PRICING.md §3 — every plan, value by value', () => {
   it('Premium', () => {
     expect(PLANS.premium.id).toBe('premium');
     expect(PLANS.premium.name).toBe('Premium');
-    expect(PLANS.premium.priceUsd.monthly).toBe(19);
-    expect(PLANS.premium.priceUsd.yearly).toBe(190);
+    expect(PLANS.premium.price.monthly).toBe(19);
+    expect(PLANS.premium.price.yearly).toBe(190);
     expect(PLANS.premium.limits.boards).toBeNull();
     expect(PLANS.premium.limits.fileSizeBytes).toBe(1024 * MB);
     expect(PLANS.premium.limits.processedDocuments).toBeNull();
@@ -158,12 +160,22 @@ describe('planLimits', () => {
   });
 });
 
+describe('formatPlanPrice', () => {
+  it('shows the CHF amount, two decimals only when needed', () => {
+    expect(PLAN_CURRENCY).toBe('CHF');
+    expect(formatPlanPrice(9)).toBe('CHF 9');
+    expect(formatPlanPrice(9.5)).toBe('CHF 9.50');
+    expect(formatPlanPrice(0)).toBe('CHF 0');
+    expect(formatPlanPrice(190)).toBe('CHF 190');
+  });
+});
+
 describe('the objects are frozen', () => {
   it('PLANS plus every nested object, and the id lists', () => {
     expect(Object.isFrozen(PLANS)).toBe(true);
     for (const id of PLAN_ORDER) {
       expect(Object.isFrozen(PLANS[id])).toBe(true);
-      expect(Object.isFrozen(PLANS[id].priceUsd)).toBe(true);
+      expect(Object.isFrozen(PLANS[id].price)).toBe(true);
       expect(Object.isFrozen(PLANS[id].limits)).toBe(true);
     }
     expect(Object.isFrozen(PLAN_ORDER)).toBe(true);

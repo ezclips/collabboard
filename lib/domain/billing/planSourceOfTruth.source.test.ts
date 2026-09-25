@@ -45,12 +45,20 @@ describe('PATCH-183: one source of truth for plans', () => {
     }
   });
 
-  it('the webhook reads the reverse mapping from the Stripe client', () => {
-    const webhook = readFileSync(
-      join(ROOT, 'app/api/webhooks/stripe/route.ts'),
+  it('the webhook delegates to the one sync module, which is the one price mapper', () => {
+    // PATCH-184 moved the sync out of the route: the chain
+    // webhook -> stripeBilling -> client.ts's planForStripePrice stays pinned.
+    const webhook = readFileSync(join(ROOT, 'app/api/webhooks/stripe/route.ts'), 'utf8');
+    expect(webhook).toContain('@/lib/server/billing/stripeBilling');
+    expect(webhook).toContain('upsertSubscriptionFromStripe');
+    expect(webhook).not.toContain('resolvePlanFromPrice');
+
+    const stripeBilling = readFileSync(
+      join(ROOT, 'lib/server/billing/stripeBilling.ts'),
       'utf8',
     );
-    expect(webhook).toContain('planForStripePrice');
-    expect(webhook).not.toContain('resolvePlanFromPrice');
+    expect(stripeBilling).toContain('planForStripePrice');
+    // Imported from lib/stripe/client.ts, never redefined here.
+    expect(stripeBilling).not.toMatch(/function\s+planForStripePrice\b/);
   });
 });
