@@ -64,6 +64,15 @@ export function tooLargeMessage(sizeBytes: number, limitBytes: number, kindLabel
 }
 
 /**
+ * PATCH-185. The refusal when the PLAN's own size limit -- not the server's
+ * technical cap -- is what the file broke, so the sentence can name the plan
+ * and point at an upgrade.
+ */
+export function planLimitMessage(sizeBytes: number, limitBytes: number, planName: string): string {
+  return `This file is ${formatBytes(sizeBytes)}. The limit on the ${planName} plan is ${formatBytes(limitBytes)}. Upgrade for larger files.`;
+}
+
+/**
  * Which browser-upload limit applies to a bucket + MIME type.
  *
  * `null` means THIS PATCH SETS NO LIMIT for that combination -- an unknown

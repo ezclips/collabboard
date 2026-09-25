@@ -10,6 +10,10 @@ import {
 } from '@/lib/infra/knowledge/knowledgeIngestionAdapters';
 import { SupabaseKnowledgeTextRepository } from '@/lib/infra/knowledge/knowledgeTextIngestionAdapters';
 import { SupabaseKnowledgeDocumentReadRepository } from '@/lib/infra/knowledge/knowledgeReadAdapters';
+import {
+  countWorkspaceKnowledgeDocuments,
+  resolveBoardPlan,
+} from '@/lib/server/billing/boardPlan';
 import { createKnowledgeListGetHandler } from '@/lib/server/knowledge/knowledgeListRoute';
 import { createKnowledgeUploadPostHandler } from '@/lib/server/knowledge/knowledgeUploadRoute';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
@@ -93,5 +97,23 @@ export const POST = createKnowledgeUploadPostHandler({
       },
       hashChunk: (text: string) => createHash('sha256').update(text, 'utf8').digest('hex'),
     };
+  },
+
+  // PATCH-185. Read with the ADMIN client: the uploader may be a contributor
+  // who cannot read the owner's subscription row, and the owner's plan applies
+  // anyway. An unlimited plan is never counted.
+  async resolvePlanForBoard(boardId) {
+    const adminClient = getSupabaseAdmin();
+    const plan = await resolveBoardPlan(adminClient as never, boardId);
+
+    if (plan.limits.processedDocuments === null) {
+      return { plan, documentCount: null };
+    }
+
+    const documentCount = plan.workspaceId
+      ? await countWorkspaceKnowledgeDocuments(adminClient as never, plan.workspaceId)
+      : 0;
+
+    return { plan, documentCount };
   },
 });

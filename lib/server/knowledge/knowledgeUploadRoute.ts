@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { PLANS } from '@/lib/domain/billing/plans';
 import type { DomainError } from '@/lib/domain/core/errors';
 import { asBoardId, asUserId } from '@/lib/domain/core/ids';
 import {
@@ -19,9 +20,11 @@ import {
 import {
   KNOWLEDGE_UPLOADS_PER_HOUR,
   MB,
+  planLimitMessage,
   tooLargeMessage,
   UPLOAD_LIMITS,
 } from '@/lib/domain/storage/uploadLimits';
+import type { BoardPlan } from '@/lib/server/billing/boardPlan';
 
 /**
  * PATCH-180. At most this many Knowledge uploads per user per rolling hour.
@@ -51,13 +54,32 @@ function checkUploadRateLimit(userId: string): boolean {
  * The size limit and label for a chosen file, decided ONCE before the bytes are
  * read. The same PDF-or-text routing the handler uses below, read here as a
  * size question rather than a validation one.
+ *
+ * PATCH-185. The effective limit is the PLAN's per-file size capped by the
+ * server's own technical maximum: the upload passes through server memory, so
+ * no plan can accept 250 MB or 1 GB yet (PATCH-186 adds direct-to-storage
+ * uploads). `planIsBinding` records WHICH of the two refused the file, so the
+ * message can say "on the Free plan" only when the plan is what a user must
+ * change.
  */
-function sizeLimitForFile(file: File): { limit: number; label: string } {
+function sizeLimitForFile(
+  file: File,
+  plan: BoardPlan,
+): { limit: number; label: string; planIsBinding: boolean } {
   const source = { filename: file.name, mimeType: file.type };
-  if (isKnowledgeDocxCandidate(source) || isKnowledgeTextCandidate(source)) {
-    return { limit: UPLOAD_LIMITS.knowledgeText, label: 'documents' };
-  }
-  return { limit: UPLOAD_LIMITS.knowledgePdf, label: 'PDFs' };
+  const technical =
+    isKnowledgeDocxCandidate(source) || isKnowledgeTextCandidate(source)
+      ? { limit: UPLOAD_LIMITS.knowledgeText, label: 'documents' }
+      : { limit: UPLOAD_LIMITS.knowledgePdf, label: 'PDFs' };
+
+  const planLimit = plan.limits.fileSizeBytes;
+  const planIsBinding = planLimit < technical.limit;
+
+  return {
+    limit: planIsBinding ? planLimit : technical.limit,
+    label: technical.label,
+    planIsBinding,
+  };
 }
 
 export interface KnowledgeUploadRouteContext {
@@ -80,6 +102,15 @@ export interface KnowledgeUploadRouteDependencies {
   getAuthenticatedUserId(): Promise<string | null>;
   createIngestionDeps(): KnowledgeIngestionDeps;
   createTextIngestionDeps(): KnowledgeTextIngestionWiring;
+  /**
+   * PATCH-185. The plan of the workspace that OWNS the board, plus its
+   * document count. `documentCount` is null when the plan's
+   * `processedDocuments` is null (unlimited), so an unlimited plan never pays
+   * for a count it does not use.
+   */
+  resolvePlanForBoard(
+    boardId: string,
+  ): Promise<{ plan: BoardPlan; documentCount: number | null }>;
 }
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
@@ -165,6 +196,42 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       );
     }
 
+    const { id: boardId } = await context.params;
+
+    // PATCH-185 PRIVACY, ACCEPTED. The owner's plan is resolved BEFORE the
+    // ingestion path checks board access, because the plan must be known before
+    // the body is read. A caller without access to the board therefore learns at
+    // most "this board's owner is on <plan>" from a refusal message -- no ids
+    // and no amounts. The board authorization that follows is unchanged.
+    let planForBoard: { plan: BoardPlan; documentCount: number | null };
+    try {
+      planForBoard = await deps.resolvePlanForBoard(boardId);
+    } catch {
+      return NextResponse.json(
+        { error: 'Knowledge upload is temporarily unavailable' },
+        { status: 503 },
+      );
+    }
+
+    // PATCH-185. The document allowance, counted across the owner's workspace.
+    // Checked BEFORE formData() so an over-quota caller cannot make the server
+    // buffer an upload just to be refused.
+    const documentLimit = planForBoard.plan.limits.processedDocuments;
+    if (
+      planForBoard.documentCount !== null &&
+      documentLimit !== null &&
+      planForBoard.documentCount >= documentLimit
+    ) {
+      const planName = PLANS[planForBoard.plan.planId].name;
+      return NextResponse.json(
+        {
+          error: `The ${planName} plan includes ${documentLimit} documents. Upgrade to add more.`,
+          code: 'plan_limit_documents',
+        },
+        { status: 403 },
+      );
+    }
+
     let formData: FormData;
     try {
       formData = await request.formData();
@@ -177,9 +244,22 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       return NextResponse.json({ error: 'A file is required' }, { status: 400 });
     }
 
-    // PATCH-180. The ACTUAL size, before `arrayBuffer()` reads the file whole.
-    const sizeGate = sizeLimitForFile(file);
+    // PATCH-180/185. The ACTUAL size, before `arrayBuffer()` reads the file
+    // whole. The plan's own limit may be the binding one; if so, the refusal
+    // names the plan and carries a `plan_limit_file_size` code the client turns
+    // into an upgrade link. Otherwise it is the pre-existing technical message.
+    const sizeGate = sizeLimitForFile(file, planForBoard.plan);
     if (file.size > sizeGate.limit) {
+      if (sizeGate.planIsBinding) {
+        const planName = PLANS[planForBoard.plan.planId].name;
+        return NextResponse.json(
+          {
+            error: planLimitMessage(file.size, sizeGate.limit, planName),
+            code: 'plan_limit_file_size',
+          },
+          { status: 413 },
+        );
+      }
       return NextResponse.json(
         { error: tooLargeMessage(file.size, sizeGate.limit, sizeGate.label) },
         { status: 413 },
@@ -193,7 +273,6 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       return NextResponse.json({ error: 'Could not read the uploaded file' }, { status: 400 });
     }
 
-    const { id: boardId } = await context.params;
     const source = { filename: file.name, mimeType: file.type, bytes };
 
     try {

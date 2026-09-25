@@ -92,6 +92,11 @@ const DOCUMENT_TOUCHERS = [
   // reads a ready document's pages or chunks, board-scoped, through the caller's
   // own client, to show them to the model; it never touches cues.
   'lib/server/ai/tableFromDocumentSource.ts',
+  // ADDED by PATCH-185 (plan limits), and it only COUNTS: one
+  // `select('id', { count: 'exact', head: true })` over the workspace's boards,
+  // excluding failed rows, to enforce the Free plan's document allowance. It
+  // reads no text, no cues and no transcript, and writes nothing.
+  'lib/server/billing/boardPlan.ts',
   'lib/server/knowledge/knowledgeDocumentDeleteSession.ts',
   'lib/server/wiki/boardWikiSourceVersions.ts',
 ];

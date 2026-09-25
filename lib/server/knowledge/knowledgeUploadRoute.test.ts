@@ -1,13 +1,57 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PLANS } from '@/lib/domain/billing/plans';
 import type { KnowledgeIngestionDeps } from '@/lib/domain/knowledge/knowledgeIngestion';
 import type { KnowledgeDocument } from '@/lib/domain/knowledge/knowledgePersistence';
-import { MB, tooLargeMessage, UPLOAD_LIMITS } from '@/lib/domain/storage/uploadLimits';
+import {
+  MB,
+  planLimitMessage,
+  tooLargeMessage,
+  UPLOAD_LIMITS,
+} from '@/lib/domain/storage/uploadLimits';
+import type { BoardPlan } from '@/lib/server/billing/boardPlan';
 import { createKnowledgeUploadPostHandler } from './knowledgeUploadRoute';
 import type { KnowledgeTextIngestionWiring } from './knowledgeUploadRoute';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
 const DOCUMENT_ID = '33333333-3333-4333-8333-333333333333';
+
+// PATCH-185. The existing PATCH-180 tests measure the TECHNICAL cap, so the
+// shared helper defaults to Pro (250 MB plan size -> the 50 MB server cap binds,
+// unlimited documents). Free cases set Free explicitly.
+const PRO_PLAN: BoardPlan = {
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  planId: 'pro',
+  limits: PLANS.pro.limits,
+};
+const FREE_PLAN: BoardPlan = {
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  planId: 'free',
+  limits: PLANS.free.limits,
+};
+
+function planDep(plan: BoardPlan = PRO_PLAN, documentCount: number | null = null) {
+  return {
+    resolvePlanForBoard: vi.fn(async () => ({ plan, documentCount })),
+  };
+}
+
+function handlerFor(
+  userId: string,
+  plan: BoardPlan = PRO_PLAN,
+  documentCount: number | null = null,
+) {
+  const state = ingestionDeps();
+  const text = textDeps();
+  const resolvePlanForBoard = vi.fn(async () => ({ plan, documentCount }));
+  const post = createKnowledgeUploadPostHandler({
+    getAuthenticatedUserId: async () => userId,
+    createIngestionDeps: () => state.deps,
+    createTextIngestionDeps: () => text.wiring,
+    resolvePlanForBoard,
+  });
+  return { post, state, text, resolvePlanForBoard };
+}
 
 function document(filename: string): KnowledgeDocument {
   return {
@@ -111,6 +155,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
       getAuthenticatedUserId: async () => null,
       createIngestionDeps,
       createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
     });
 
     const response = await post(postRequest(pdfFile()), context());
@@ -125,6 +170,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
       getAuthenticatedUserId: async () => USER_ID,
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
     });
 
     const response = await post(postRequest(), context());
@@ -144,6 +190,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
       getAuthenticatedUserId: async () => USER_ID,
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
     });
 
     const response = await post(postRequest(pdfFile(undefined, 'image/png', 'photo.png')), context());
@@ -159,6 +206,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
       getAuthenticatedUserId: async () => USER_ID,
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
     });
 
     const response = await post(
@@ -176,6 +224,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
       getAuthenticatedUserId: async () => USER_ID,
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
     });
 
     const response = await post(postRequest(pdfFile()), context());
@@ -191,6 +240,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
       getAuthenticatedUserId: async () => USER_ID,
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
     });
 
     const response = await post(postRequest(pdfFile()), context());
@@ -222,6 +272,7 @@ describe('Stage 1 text sources reach the text path, and only they do', () => {
       getAuthenticatedUserId: async () => USER_ID,
       createIngestionDeps: () => pdf.deps,
       createTextIngestionDeps: () => text.wiring,
+      ...planDep(),
     });
     return { post, text, pdf };
   }
@@ -298,17 +349,6 @@ describe('Stage 1 text sources reach the text path, and only they do', () => {
 });
 
 describe('PATCH-180: upload size and rate limits', () => {
-  function handlerFor(userId: string) {
-    const state = ingestionDeps();
-    const text = textDeps();
-    const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => userId,
-      createIngestionDeps: () => state.deps,
-      createTextIngestionDeps: () => text.wiring,
-    });
-    return { post, state, text };
-  }
-
   /** A fake Request, so the Content-Length gate can be proven BEFORE formData. */
   function requestWithDeclaredLength(contentLength: string) {
     const formData = vi.fn();
@@ -393,5 +433,158 @@ describe('PATCH-180: upload size and rate limits', () => {
     const over = await post(postRequest(pdfFile()), context());
     expect(over.status).toBe(429);
     expect((await over.json()).error).toBe('Too many uploads. Try again in a while.');
+  });
+});
+
+describe("PATCH-185: the board owner's plan decides size and document limits", () => {
+  type SizedFile = {
+    name: string;
+    type: string;
+    size: number;
+    arrayBuffer: ReturnType<typeof vi.fn>;
+  };
+
+  function sizedFile(over: {
+    name: string;
+    type: string;
+    size: number;
+    arrayBuffer?: () => Promise<ArrayBuffer>;
+  }): SizedFile {
+    return {
+      name: over.name,
+      type: over.type,
+      size: over.size,
+      arrayBuffer: vi.fn(over.arrayBuffer ?? (async () => pdfFile().arrayBuffer())),
+    };
+  }
+
+  function requestWithFile(file: SizedFile): Request {
+    return {
+      headers: new Headers(),
+      formData: async () => ({ get: () => file }),
+    } as unknown as Request;
+  }
+
+  /** formData is a spy, so a refusal before the body is read is observable. */
+  function requestBeforeBody() {
+    const formData = vi.fn();
+    return {
+      request: { headers: new Headers(), formData } as unknown as Request,
+      formData,
+    };
+  }
+
+  const textBytes = () =>
+    new TextEncoder().encode(
+      'Alpha.\n\nBeta paragraph with enough text to be worth indexing.',
+    ).buffer;
+
+  it('Free: a 21 MB PDF is refused with the plan message and code, before any bytes are read', async () => {
+    const { post } = handlerFor('free-pdf-user', FREE_PLAN, 0);
+    const file = sizedFile({ name: 'big.pdf', type: 'application/pdf', size: 21 * MB });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: planLimitMessage(21 * MB, PLANS.free.limits.fileSizeBytes, 'Free'),
+      code: 'plan_limit_file_size',
+    });
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it('Pro: a 49 MB PDF passes the size gate (the technical cap binds, not the plan)', async () => {
+    const { post } = handlerFor('pro-49-user', PRO_PLAN, null);
+    const file = sizedFile({ name: 'ok.pdf', type: 'application/pdf', size: 49 * MB });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(201);
+    expect(file.arrayBuffer).toHaveBeenCalledTimes(1);
+  });
+
+  it("Pro: a 51 MB PDF is refused with today's technical message and no code", async () => {
+    const { post } = handlerFor('pro-51-user', PRO_PLAN, null);
+    const file = sizedFile({ name: 'huge.pdf', type: 'application/pdf', size: 51 * MB });
+
+    const response = await post(requestWithFile(file), context());
+    const body = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(body.error).toBe(tooLargeMessage(51 * MB, UPLOAD_LIMITS.knowledgePdf, 'PDFs'));
+    expect(body.code).toBeUndefined();
+  });
+
+  it('Free with 5 documents is refused BEFORE formData() is called', async () => {
+    const { post } = handlerFor('free-5-docs', FREE_PLAN, 5);
+    const { request, formData } = requestBeforeBody();
+
+    const response = await post(request, context());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: 'The Free plan includes 5 documents. Upgrade to add more.',
+      code: 'plan_limit_documents',
+    });
+    expect(formData).not.toHaveBeenCalled();
+  });
+
+  it('Free with 4 documents passes', async () => {
+    const { post } = handlerFor('free-4-docs', FREE_PLAN, 4);
+    const file = sizedFile({ name: 'ok.pdf', type: 'application/pdf', size: 12 });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(201);
+  });
+
+  it('Pro with documentCount null passes, and the plan is resolved exactly once', async () => {
+    const { post, resolvePlanForBoard } = handlerFor('pro-unlimited', PRO_PLAN, null);
+    const file = sizedFile({ name: 'ok.pdf', type: 'application/pdf', size: 12 });
+
+    const response = await post(requestWithFile(file), context());
+
+    expect(response.status).toBe(201);
+    expect(resolvePlanForBoard).toHaveBeenCalledTimes(1);
+    expect(resolvePlanForBoard).toHaveBeenCalledWith(BOARD_ID);
+  });
+
+  it('a plan-resolution failure is 503 and formData() is never called', async () => {
+    const { request, formData } = requestBeforeBody();
+    const post = createKnowledgeUploadPostHandler({
+      getAuthenticatedUserId: async () => USER_ID,
+      createIngestionDeps: () => ingestionDeps().deps,
+      createTextIngestionDeps: () => textDeps().wiring,
+      resolvePlanForBoard: async () => {
+        throw new Error('db down');
+      },
+    });
+
+    const response = await post(request, context());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Knowledge upload is temporarily unavailable',
+    });
+    expect(formData).not.toHaveBeenCalled();
+  });
+
+  it('Free: a 20 MB text source passes and a 21 MB one is refused with the technical message', async () => {
+    const { post } = handlerFor('free-text-user', FREE_PLAN, 0);
+
+    const ok = sizedFile({
+      name: 'notes.txt',
+      type: 'text/plain',
+      size: 20 * MB,
+      arrayBuffer: async () => textBytes(),
+    });
+    expect((await post(requestWithFile(ok), context())).status).toBe(201);
+
+    const over = sizedFile({ name: 'notes.txt', type: 'text/plain', size: 21 * MB });
+    const refused = await post(requestWithFile(over), context());
+    expect(refused.status).toBe(413);
+    expect((await refused.json()).error).toBe(
+      tooLargeMessage(21 * MB, UPLOAD_LIMITS.knowledgeText, 'documents'),
+    );
   });
 });

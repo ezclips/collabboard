@@ -1149,3 +1149,76 @@ describe('PATCH-180: an oversized file is refused before it is sent', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('PATCH-185: a plan-limit refusal shows its message and a plans link', () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllGlobals();
+  });
+
+  async function mountWithResponse(body: unknown, status: number) {
+    globalThis.fetch = vi.fn(async () => jsonResponse(body, status)) as unknown as typeof globalThis.fetch;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<KnowledgePdfUploader />); });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['%PDF-1.7\n%%EOF'], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return { container, root };
+  }
+
+  it('a 403 plan_limit_documents shows the server text and the See plans link', async () => {
+    const { container, root } = await mountWithResponse({
+      error: 'The Free plan includes 5 documents. Upgrade to add more.',
+      code: 'plan_limit_documents',
+    }, 403);
+
+    expect(container.textContent).toContain(
+      'The Free plan includes 5 documents. Upgrade to add more.',
+    );
+    const link = container.querySelector('a[href="/dashboard/settings/billing"]');
+    expect(link?.textContent).toContain('See plans');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('a 413 plan_limit_file_size shows the server text and the See plans link', async () => {
+    const { container, root } = await mountWithResponse({
+      error:
+        'This file is 32.0 MB. The limit on the Free plan is 20.0 MB. Upgrade for larger files.',
+      code: 'plan_limit_file_size',
+    }, 413);
+
+    expect(container.textContent).toContain('The limit on the Free plan is 20.0 MB.');
+    expect(container.querySelector('a[href="/dashboard/settings/billing"]')).not.toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('a 403 WITHOUT a plan_limit_ code still hides its body and shows no link', async () => {
+    const { container, root } = await mountWithResponse({
+      error: 'SUPABASE_SERVICE_ROLE_KEY leaked internal detail',
+    }, 403);
+
+    expect(container.textContent).toContain('You do not have permission to add files to this board.');
+    expect(container.textContent).not.toContain('SUPABASE');
+    expect(container.querySelector('a[href="/dashboard/settings/billing"]')).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});

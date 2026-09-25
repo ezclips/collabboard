@@ -6,6 +6,7 @@ import {
   formatBytes,
   KNOWLEDGE_UPLOADS_PER_HOUR,
   MB,
+  planLimitMessage,
   tooLargeMessage,
   UPLOAD_LIMITS,
 } from './uploadLimits';
@@ -59,6 +60,13 @@ describe('tooLargeMessage', () => {
   it('is the exact sentence the user reads', () => {
     expect(tooLargeMessage(72.4 * MB, 50 * MB, 'PDFs'))
       .toBe('This file is 72.4 MB. The limit for PDFs is 50.0 MB.');
+  });
+});
+
+describe('planLimitMessage', () => {
+  it('is the exact sentence the user reads', () => {
+    expect(planLimitMessage(32 * MB, 20 * MB, 'Free'))
+      .toBe('This file is 32.0 MB. The limit on the Free plan is 20.0 MB. Upgrade for larger files.');
   });
 });
 

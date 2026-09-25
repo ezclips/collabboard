@@ -149,7 +149,12 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 type UploadNotice = {
   tone: 'info' | 'success' | 'error';
   message: string;
+  /** PATCH-185. Set when the server refused on a plan limit, so a link shows. */
+  showPlansLink?: boolean;
 };
+
+/** The code prefix our upload route puts on a plan-limit refusal. */
+const PLAN_LIMIT_CODE_PREFIX = 'plan_limit_';
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_ATTEMPTS = 60;
@@ -159,19 +164,46 @@ function apiPath(boardId: string) {
   return `/api/boards/${encodeURIComponent(boardId)}/knowledge`;
 }
 
-function uploadErrorMessage(status: number, serverMessage?: string) {
-  // A 400 now carries the server's own reason -- "The selected file is empty",
-  // "This file is not valid UTF-8 text" -- and those say what to do about it in
-  // a way "Choose a valid file" cannot. Only a 400 is trusted this way: the
-  // other statuses are generic by design and must not become a channel for
-  // whatever an intermediary put in an error body.
+function boundedServerMessage(serverMessage?: string): string | undefined {
+  const trimmed = (serverMessage ?? '').trim().slice(0, 200);
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function uploadErrorMessage(status: number, serverMessage?: string, code?: string) {
+  // PATCH-185. Only a `plan_limit_` refusal is trusted to name the plan and
+  // point at an upgrade -- those two sentences are authored by OUR route. A 400
+  // still carries the server's own actionable reason, as before.
+  if (typeof code === 'string' && code.startsWith(PLAN_LIMIT_CODE_PREFIX)) {
+    const planMessage = boundedServerMessage(serverMessage);
+    if (planMessage) return planMessage;
+  }
+  // Every OTHER status stays generic by design: an error body written by an
+  // intermediary -- or by a handler that stringified a driver error -- must
+  // never reach the screen.
   if (status === 400) {
-    const trimmed = (serverMessage ?? '').trim().slice(0, 200);
-    return trimmed.length > 0 ? trimmed : 'Choose a valid file.';
+    return boundedServerMessage(serverMessage) ?? 'Choose a valid file.';
   }
   if (status === 401) return 'Sign in to upload a file.';
   if (status === 403) return 'You do not have permission to add files to this board.';
   return 'Upload is temporarily unavailable. Please try again.';
+}
+
+/**
+ * PATCH-185. The upload failure, carrying the server's `code` so the caller can
+ * decide whether to offer the plans link. `showPlansLink` is derived here in one
+ * place rather than re-checked at every catch.
+ */
+export class KnowledgeUploadError extends Error {
+  readonly code?: string;
+  readonly showPlansLink: boolean;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'KnowledgeUploadError';
+    this.code = code;
+    this.showPlansLink =
+      typeof code === 'string' && code.startsWith(PLAN_LIMIT_CODE_PREFIX);
+  }
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -203,9 +235,10 @@ export async function uploadKnowledgePdf(
   }
 
   if (!response.ok) {
-    const body = await safeJson(response) as { error?: unknown } | null;
+    const body = await safeJson(response) as { error?: unknown; code?: unknown } | null;
     const reason = typeof body?.error === 'string' ? body.error : undefined;
-    throw new Error(uploadErrorMessage(response.status, reason));
+    const code = typeof body?.code === 'string' ? body.code : undefined;
+    throw new KnowledgeUploadError(uploadErrorMessage(response.status, reason, code), code);
   }
 
   const payload = await safeJson(response) as Partial<KnowledgePdfUploadResult> | null;
@@ -460,6 +493,7 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
           message: error instanceof Error
             ? error.message
             : 'PDF upload is temporarily unavailable. Please try again.',
+          showPlansLink: error instanceof KnowledgeUploadError && error.showPlansLink,
         });
       }
     } finally {
@@ -512,7 +546,19 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
                 : 'border-slate-200 text-slate-700'
           }`}
         >
-          {notice.message}
+          {notice.tone === 'error' && notice.showPlansLink ? (
+            <>
+              {notice.message}{' '}
+              <a
+                href="/dashboard/settings/billing"
+                className="underline font-medium"
+              >
+                See plans
+              </a>
+            </>
+          ) : (
+            notice.message
+          )}
         </div>
       ) : null}
     </>
