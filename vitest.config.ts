@@ -16,6 +16,10 @@ export default defineConfig({
       // green. lib/ai held no test files at all until this was added.
       'lib/ai/*.test.ts',
       'lib/domain/**/*.test.ts',
+      // PATCH-183: the permissions layer's plan tests.
+      'lib/auth/**/*.test.ts',
+      // PATCH-183: the Stripe plan-mapping tests.
+      'lib/stripe/**/*.test.ts',
       'lib/infra/**/*.test.ts',
       'lib/server/**/*.test.ts',
       'scripts/harness/**/*.test.ts',

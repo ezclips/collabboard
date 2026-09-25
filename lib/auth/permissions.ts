@@ -1,10 +1,16 @@
 import type { User } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  effectivePlanId,
+  isPlanId,
+  planIncludes,
+  planLimits,
+  PLANS,
+} from "@/lib/domain/billing/plans";
 import { resolveCurrentWorkspace } from "@/lib/workspace/context";
 import type {
   AuthContext,
-  BillingPlan,
   BoardPermission,
   EntitlementsContext,
   GlobalRole,
@@ -29,7 +35,7 @@ const legacyBoardPermissionRank: Record<LegacyBoardPermission, number> = {
   admin: 5,
 };
 
-export const FREE_PLAN_BOARD_LIMIT = 3;
+export const FREE_PLAN_BOARD_LIMIT = PLANS.free.limits.boards;
 
 export function mapLegacyToBoardPermission(
   permission: string | null | undefined,
@@ -113,22 +119,24 @@ export async function getWorkspaceEntitlements(
     .maybeSingle();
 
   return {
-    plan: ((data?.plan as BillingPlan | undefined) ?? "free"),
+    plan: isPlanId(data?.plan) ? data.plan : "free",
     status: normalizeSubscriptionStatus(data?.status),
   };
 }
 
 export function hasProEntitlements(entitlements: EntitlementsContext): boolean {
-  return (
-    entitlements.plan === "pro" &&
-    ["active", "trialing", "past_due"].includes(entitlements.status)
-  );
+  return planIncludes(effectivePlanId(entitlements.plan, entitlements.status), "pro");
+}
+
+export function hasPremiumEntitlements(entitlements: EntitlementsContext): boolean {
+  return planIncludes(effectivePlanId(entitlements.plan, entitlements.status), "premium");
 }
 
 export function getBoardLimitForEntitlements(
   entitlements: EntitlementsContext,
 ): number | "unlimited" {
-  return hasProEntitlements(entitlements) ? "unlimited" : FREE_PLAN_BOARD_LIMIT;
+  const limits = planLimits(effectivePlanId(entitlements.plan, entitlements.status));
+  return limits.boards === null ? "unlimited" : limits.boards;
 }
 
 export function canCreateBoardForEntitlements(

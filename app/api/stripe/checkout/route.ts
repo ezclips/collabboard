@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
 import { getStripeAdmin } from "@/lib/stripe/admin";
-import { getStripePriceId } from "@/lib/stripe/client";
+import { getStripePriceId, parseCheckoutRequest } from "@/lib/stripe/client";
 import { resolveCurrentWorkspace } from "@/lib/workspace/context";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -38,8 +38,11 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const plan = typeof body.plan === "string" ? body.plan : "pro";
-    const interval = body.interval === "yearly" ? "yearly" : "monthly";
+    const parsed = parseCheckoutRequest(body);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const { plan, interval } = parsed;
 
     const workspace = await resolveCurrentWorkspace(supabase, user, supabaseAdmin);
     if (!workspace) {

@@ -5,40 +5,39 @@ import { Check, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getBoardLimitForEntitlements, getPermissionContext } from '@/lib/auth/permissions';
+import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
+import type { PlanId } from '@/lib/domain/billing/plans';
+import { formatBytes } from '@/lib/domain/storage/uploadLimits';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole, SubscriptionStatus } from '@/types/permissions';
 
-interface PlanTier {
-    id: 'free' | 'pro';
-    name: string;
-    features: string[];
-    priceMonthly: string;
-    priceYearly: string;
-    yearlySavings?: string;
+function planFeatures(planId: PlanId): string[] {
+    const { limits } = PLANS[planId];
+    return [
+        limits.boards === null ? 'Unlimited boards' : `${limits.boards} boards`,
+        `${formatBytes(limits.fileSizeBytes)} per file`,
+        `${limits.pagesPerPdf} pages per PDF`,
+        limits.processedDocuments === null
+            ? 'Unlimited Knowledge documents'
+            : `${limits.processedDocuments} Knowledge documents`,
+        `${limits.monthlyAiCredits} AI credits / month`,
+        ...(limits.modelTier === 'premium' ? ['Premium AI models'] : [])
+    ];
 }
 
-const plans: PlanTier[] = [
-    {
-        id: 'pro',
-        name: 'Pro',
-        features: ['Unlimited boards', 'Workspace billing', 'Advanced collaboration'],
-        priceMonthly: '$9.99 /month',
-        priceYearly: '$99 /year',
-        yearlySavings: 'Save 17%'
-    },
-    {
-        id: 'free',
-        name: 'Free',
-        features: ['Basic collaboration', 'Workspace access'],
-        priceMonthly: 'Free',
-        priceYearly: ''
-    }
-];
+const plans = PLAN_ORDER.map((id) => ({
+    id,
+    name: PLANS[id].name,
+    tagline: PLANS[id].tagline,
+    features: planFeatures(id),
+    priceMonthly: `$${PLANS[id].priceUsd.monthly} /month`,
+    priceYearly: PLANS[id].priceUsd.yearly > 0 ? `$${PLANS[id].priceUsd.yearly} /year` : ''
+}));
 
 export default function BillingPage() {
     const { supabase } = useSupabase();
     const [loading, setLoading] = useState(true);
-    const [currentPlan, setCurrentPlan] = useState<'free' | 'pro'>('free');
+    const [currentPlan, setCurrentPlan] = useState<PlanId>('free');
     const [currentStatus, setCurrentStatus] = useState<SubscriptionStatus>('free');
     const [boardsUsed, setBoardsUsed] = useState(0);
     const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
@@ -103,7 +102,7 @@ export default function BillingPage() {
         }
     };
 
-    const startCheckout = async () => {
+    const startCheckout = async (planId: PlanId) => {
         try {
             setStartingCheckout(true);
             const { data: { session } } = await supabase.auth.getSession();
@@ -116,7 +115,7 @@ export default function BillingPage() {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${session.access_token}`,
                 },
-                body: JSON.stringify({ plan: 'pro', interval: 'monthly' }),
+                body: JSON.stringify({ plan: planId, interval: 'monthly' }),
             });
             const data = await response.json();
             if (!response.ok || !data.url) {
@@ -159,21 +158,17 @@ export default function BillingPage() {
                                     <span className="font-semibold text-gray-900">{plan.name}</span>
                                     {isCurrent && <Check className="w-4 h-4 text-purple-600 inline ml-1" />}
                                 </div>
-                                <div className="text-gray-600 text-sm">{plan.features.join(' · ')}</div>
+                                <div className="text-gray-600 text-sm">
+                                    <div className="text-gray-900 font-medium">{plan.tagline}</div>
+                                    <div>{plan.features.join(' · ')}</div>
+                                </div>
                             </div>
 
                             <div className="flex items-center gap-8">
                                 <div className="text-right">
                                     <div className="text-gray-900">{plan.priceMonthly}</div>
                                     {plan.priceYearly && (
-                                        <div className="text-sm text-gray-500">
-                                            {plan.priceYearly}
-                                            {plan.yearlySavings && (
-                                                <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-yellow-200 text-yellow-800 rounded">
-                                                    {plan.yearlySavings}
-                                                </span>
-                                            )}
-                                        </div>
+                                        <div className="text-sm text-gray-500">{plan.priceYearly}</div>
                                     )}
                                 </div>
 
@@ -184,15 +179,15 @@ export default function BillingPage() {
                                                 ? `${boardsUsed} / ${getBoardLimitForEntitlements({ plan: currentPlan, status: currentStatus })} boards`
                                                 : `Status: ${currentStatus}`}
                                         </div>
-                                    ) : (
+                                    ) : plan.id !== 'free' ? (
                                         <button
-                                            onClick={startCheckout}
+                                            onClick={() => startCheckout(plan.id)}
                                             disabled={startingCheckout}
                                             className="px-5 py-2 bg-pink-500 text-white rounded-full font-medium text-sm hover:bg-pink-600 transition-colors"
                                         >
                                             {startingCheckout ? 'Starting...' : 'Upgrade'}
                                         </button>
-                                    )}
+                                    ) : null}
                                 </div>
                             </div>
                         </div>

@@ -1,3 +1,7 @@
+import type { PlanId } from "@/lib/domain/billing/plans";
+
+export type { PlanId };
+
 export type GlobalRole = "platform_admin" | "user";
 
 export type WorkspaceRole = "owner" | "admin" | "member" | "readonly";
@@ -9,7 +13,7 @@ export type BoardPermission =
   | "commenter"
   | "reader";
 
-export type BillingPlan = "free" | "pro";
+export type BillingPlan = PlanId;
 
 export type SubscriptionStatus =
   | "active"

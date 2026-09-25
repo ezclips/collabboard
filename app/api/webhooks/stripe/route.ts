@@ -1,6 +1,8 @@
 import Stripe from "stripe";
 
+import type { PlanId } from "@/lib/domain/billing/plans";
 import { getStripeAdmin } from "@/lib/stripe/admin";
+import { planForStripePrice } from "@/lib/stripe/client";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -11,7 +13,7 @@ type StripeSubscriptionRow = {
   stripe_subscription_id: string;
   stripe_price_id?: string | null;
   stripe_product_id?: string | null;
-  plan: "free" | "pro";
+  plan: PlanId;
   status?: string | null;
   cancel_at_period_end: boolean;
   current_period_start?: string | null;
@@ -24,15 +26,6 @@ type StripeSubscriptionRow = {
 
 function toIsoOrNull(value?: number | null) {
   return value ? new Date(value * 1000).toISOString() : null;
-}
-
-function resolvePlanFromPrice(priceId?: string | null): "free" | "pro" {
-  if (!priceId) return "free";
-  const known = [
-    process.env.STRIPE_PRICE_PRO_MONTHLY,
-    process.env.STRIPE_PRICE_PRO_YEARLY,
-  ].filter(Boolean);
-  return known.includes(priceId) ? "pro" : "free";
 }
 
 async function recordWebhookEvent(event: Stripe.Event) {
@@ -125,7 +118,7 @@ async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription) {
     stripe_price_id: firstItem?.price?.id || null,
     stripe_product_id:
       typeof firstItem?.price?.product === "string" ? firstItem.price.product : null,
-    plan: resolvePlanFromPrice(firstItem?.price?.id || null),
+    plan: planForStripePrice(firstItem?.price?.id || null),
     status: subscription.status,
     cancel_at_period_end: subscription.cancel_at_period_end,
     current_period_start: toIsoOrNull((subscription as any).current_period_start),

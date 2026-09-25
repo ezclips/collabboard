@@ -5,55 +5,43 @@ import { Check, CreditCard, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getPermissionContext } from '@/lib/auth/permissions';
+import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
+import type { PlanId } from '@/lib/domain/billing/plans';
+import { formatBytes } from '@/lib/domain/storage/uploadLimits';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole } from '@/types/permissions';
 
-type BillingPlan = 'free' | 'pro';
 type BillingInterval = 'monthly' | 'yearly';
 
-interface Plan {
-    id: BillingPlan;
-    name: string;
-    monthlyLabel: string;
-    yearlyLabel: string;
-    description: string;
-    features: string[];
+function planFeatures(planId: PlanId): string[] {
+    const { limits } = PLANS[planId];
+    return [
+        limits.boards === null ? 'Unlimited boards' : `${limits.boards} boards`,
+        `${formatBytes(limits.fileSizeBytes)} per file`,
+        `${limits.pagesPerPdf} pages per PDF`,
+        limits.processedDocuments === null
+            ? 'Unlimited Knowledge documents'
+            : `${limits.processedDocuments} Knowledge documents`,
+        `${limits.monthlyAiCredits} AI credits / month`,
+        ...(limits.modelTier === 'premium' ? ['Premium AI models'] : [])
+    ];
 }
 
-const plans: Plan[] = [
-    {
-        id: 'free',
-        name: 'Free',
-        monthlyLabel: '$0 /month',
-        yearlyLabel: '$0 /year',
-        description: 'Basic access for personal use',
-        features: [
-            'Workspace access',
-            'Basic collaboration',
-            'Standard support'
-        ]
-    },
-    {
-        id: 'pro',
-        name: 'Pro',
-        monthlyLabel: '$9.99 /month',
-        yearlyLabel: '$99.00 /year',
-        description: 'Paid workspace plan with advanced features',
-        features: [
-            'Unlimited boards',
-            'Advanced collaboration',
-            'Priority support',
-            'Billing portal access'
-        ]
-    }
-];
+const plans = PLAN_ORDER.map((id) => ({
+    id,
+    name: PLANS[id].name,
+    monthlyLabel: `$${PLANS[id].priceUsd.monthly} /month`,
+    yearlyLabel: `$${PLANS[id].priceUsd.yearly} /year`,
+    description: PLANS[id].tagline,
+    features: planFeatures(id)
+}));
 
 export default function SubscriptionPage() {
     const { supabase } = useSupabase();
     const [loading, setLoading] = useState(true);
     const [upgrading, setUpgrading] = useState(false);
     const [openingPortal, setOpeningPortal] = useState(false);
-    const [currentPlan, setCurrentPlan] = useState<BillingPlan>('free');
+    const [currentPlan, setCurrentPlan] = useState<PlanId>('free');
     const [billingInterval, setBillingInterval] = useState<BillingInterval>('monthly');
     const [subscriptionStatus, setSubscriptionStatus] = useState<string>('free');
     const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
@@ -92,7 +80,7 @@ export default function SubscriptionPage() {
         }
     };
 
-    const handleUpgrade = async (plan: BillingPlan) => {
+    const handleUpgrade = async (plan: PlanId) => {
         if (plan === 'free') return;
 
         try {
@@ -238,17 +226,15 @@ export default function SubscriptionPage() {
                                 ))}
                             </ul>
 
-                            <button
-                                onClick={() => !isCurrent && handleUpgrade(plan.id)}
-                                disabled={isCurrent || upgrading}
-                                className={`w-full py-2 rounded-lg font-medium transition-colors ${
-                                    isCurrent
-                                        ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
-                                        : 'bg-purple-600 text-white hover:bg-purple-700'
-                                }`}
-                            >
-                                {isCurrent ? 'Current Plan' : upgrading ? 'Starting checkout...' : 'Upgrade'}
-                            </button>
+                            {!isCurrent && plan.id !== 'free' ? (
+                                <button
+                                    onClick={() => handleUpgrade(plan.id)}
+                                    disabled={upgrading}
+                                    className="w-full py-2 rounded-lg font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
+                                >
+                                    {upgrading ? 'Starting checkout...' : 'Upgrade'}
+                                </button>
+                            ) : null}
                         </div>
                     );
                 })}
