@@ -398,3 +398,74 @@ describe('N1/N2. a mid-flight user switch cannot leak the previous user\'s pages
     expect(cache!.read(DOC_A)).not.toBeNull();
   });
 });
+
+/**
+ * PATCH-181. The SUMMARY: a card loads it on mount, and a document the reader
+ * already loaded satisfies it with no request.
+ */
+describe('PATCH-181. summaries, derived from the full entry when it exists', () => {
+  const summaryBody = (documentId: string, filename: string) => ({
+    document: { id: documentId, originalFilename: filename, pageCount: 2, kind: 'pdf' },
+    pages: [
+      { pageNumber: 1, widthPoints: 612, heightPoints: 792, rotation: 0 },
+      { pageNumber: 2, widthPoints: 595, heightPoints: 842, rotation: 90 },
+    ],
+    snippet: `${filename} page 1`,
+  });
+  const summaryUrl = (documentId: string) =>
+    `/api/boards/${BOARD_ID}/knowledge/${documentId}/pages?view=summary`;
+  const summaryCalls = (documentId: string) =>
+    fetchMock.mock.calls.map(([input]) => String(input)).filter((u) => u === summaryUrl(documentId));
+
+  it('loadSummary shares in-flight requests for the same document', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      String(input) === summaryUrl(DOC_A)
+        ? jsonResponse(summaryBody(DOC_A, 'a.pdf'))
+        : jsonResponse({}, 404)
+    ));
+    await mountProvider();
+
+    const [one, two, three] = await act(async () => Promise.all([
+      cache!.loadSummary(BOARD_ID, DOC_A),
+      cache!.loadSummary(BOARD_ID, DOC_A),
+      cache!.loadSummary(BOARD_ID, DOC_A),
+    ]));
+    expect(summaryCalls(DOC_A), 'one request for three consumers').toHaveLength(1);
+    for (const result of [one, two, three]) {
+      expect(result.status).toBe('ready');
+      if (result.status === 'ready') {
+        expect(result.entry.snippet).toBe('a.pdf page 1');
+        // Page metadata only: no page text is carried.
+        expect(result.entry.pages.every((page) => page.text === '')).toBe(true);
+      }
+    }
+  });
+
+  it('a cached FULL entry satisfies readSummary with NO fetch', async () => {
+    await mountProvider();
+    await act(async () => { await cache!.load(BOARD_ID, DOC_A); });
+    const readsBefore = pagesCalls().length;
+
+    const summary = cache!.readSummary(DOC_A);
+    expect(summary).not.toBeNull();
+    // Derived from the full pages: page metadata (no text) and a snippet.
+    expect(summary!.pages).toHaveLength(3);
+    expect(summary!.pages.every((page) => page.text === '')).toBe(true);
+    expect(summary!.snippet).toBe(`${DOC_A}.pdf page 1`);
+    // No summary request was made: a full entry is enough.
+    expect(summaryCalls(DOC_A)).toHaveLength(0);
+    expect(pagesCalls(), 'reading costs no request').toHaveLength(readsBefore);
+  });
+
+  it('a user change clears summaries', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      String(input) === summaryUrl(DOC_A) ? jsonResponse(summaryBody(DOC_A, 'a.pdf')) : jsonResponse({}, 404)
+    ));
+    await mountProvider();
+    await act(async () => { await cache!.loadSummary(BOARD_ID, DOC_A); });
+    expect(cache!.readSummary(DOC_A)).not.toBeNull();
+
+    await act(async () => { auth.listener?.('SIGNED_IN', { user: { id: 'user-2' } }); });
+    expect(cache!.readSummary(DOC_A), 'private summary must not cross users').toBeNull();
+  });
+});

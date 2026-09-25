@@ -5,7 +5,10 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
   knowledgeETagMatches,
   knowledgePagesETag,
+  knowledgePagesSummaryETag,
 } from '@/lib/domain/knowledge/knowledgePdfRenderPolicy';
+import { KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS } from '@/lib/domain/knowledge/knowledgeTextCardExcerpt';
+import { safeTextCutIndex } from '@/lib/domain/knowledge/knowledgeTextCanonical';
 
 /** Private, and revalidated every time, so authorization never goes stale. */
 const PAGES_CACHEABLE = 'private, max-age=0, must-revalidate';
@@ -83,8 +86,23 @@ export async function GET(
      * above -- to run each time. No durable browser copy of document text is
      * created anywhere.
      */
+    /**
+     * PATCH-181. The SUMMARY representation: page count, page sizes and a short
+     * snippet (or a text source's excerpt), and NO page text. A canvas card
+     * needs only these to show one page picture and a page count, so it asks
+     * for the summary rather than the text of every page.
+     *
+     * A DIFFERENT representation with a DIFFERENT validator, deliberately: the
+     * same bytes under one ETag would let a browser holding the full body answer
+     * 304 to a summary request and be handed the wrong shape.
+     */
+    const isSummary = new URL(request.url).searchParams.get('view') === 'summary';
+
     const etag = typeof document.content_sha256 === 'string'
-      ? knowledgePagesETag(document.content_sha256, typeof document.page_count === 'number' ? document.page_count : null)
+      ? (isSummary ? knowledgePagesSummaryETag : knowledgePagesETag)(
+        document.content_sha256,
+        typeof document.page_count === 'number' ? document.page_count : null,
+      )
       : null;
     if (etag !== null && knowledgeETagMatches(request.headers.get('if-none-match'), etag)) {
       // Authorization already ran; a 304 is only ever reached through it.
@@ -141,6 +159,7 @@ export async function GET(
         cursor = chunk.char_end;
       }
 
+      const stitched = ordered.map((chunk) => chunk.text).join('');
       return NextResponse.json(
         {
           document: {
@@ -158,7 +177,73 @@ export async function GET(
           },
           // Empty by construction, and present so one client shape reads both.
           pages: [],
-          text: ordered.map((chunk) => chunk.text).join(''),
+          // Summary serves only the card's excerpt; the full read serves all of
+          // it. The cut is SURROGATE-SAFE (never between a character's halves),
+          // because a lone half at the end of a pre-cut excerpt renders as a
+          // replacement glyph and cannot be repaired downstream.
+          text: isSummary
+            ? stitched.slice(0, safeTextCutIndex(stitched, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS))
+            : stitched,
+          ...(isSummary
+            ? { textTruncated: stitched.length > safeTextCutIndex(stitched, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS) }
+            : {}),
+          // The FULL stitched length, so a card's footer can state the same
+          // character count it always did even though the excerpt is short.
+          ...(isSummary ? { textLength: stitched.length } : {}),
+        },
+        {
+          status: 200,
+          headers: etag === null
+            ? { 'Cache-Control': 'no-store' }
+            : { ETag: etag, 'Cache-Control': PAGES_CACHEABLE },
+        },
+      );
+    }
+
+    if (isSummary) {
+      // METADATA ONLY: every page's number and persisted geometry, no text.
+      const { data: pageMeta, error: pageMetaError } = await adminClient
+        .from('knowledge_pages')
+        .select('page_number, width_points, height_points, rotation')
+        .eq('document_id', document.id)
+        .order('page_number', { ascending: true });
+      if (pageMetaError) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+
+      // The snippet, read in its OWN minimal query: the first page whose text is
+      // non-empty. Selecting text here -- one page, ordered then limited -- is
+      // what keeps the summary from fetching the text of EVERY page, which is
+      // the whole cost this mode removes.
+      const { data: snippetRows, error: snippetError } = await adminClient
+        .from('knowledge_pages')
+        .select('text')
+        .eq('document_id', document.id)
+        .neq('text', '')
+        .order('page_number', { ascending: true })
+        .limit(1);
+      if (snippetError) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      const snippetText = (snippetRows ?? [])[0]?.text;
+      const snippet = typeof snippetText === 'string' && snippetText.trim().length > 0
+        ? snippetText.trim().slice(0, 90)
+        : null;
+
+      return NextResponse.json(
+        {
+          document: {
+            id: document.id,
+            originalFilename: document.original_filename,
+            pageCount: document.page_count,
+            kind: document.kind,
+          },
+          pages: (pageMeta ?? []).map((page: {
+            page_number: number;
+            width_points: number | null; height_points: number | null; rotation: number | null;
+          }) => ({
+            pageNumber: page.page_number,
+            widthPoints: page.width_points,
+            heightPoints: page.height_points,
+            rotation: page.rotation,
+          })),
+          snippet,
         },
         {
           status: 200,

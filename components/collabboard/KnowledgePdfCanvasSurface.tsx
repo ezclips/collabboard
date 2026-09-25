@@ -7,6 +7,8 @@ import { useKnowledgePageRenderRepair } from '@/components/collabboard/useKnowle
 import {
   useKnowledgePageCache,
   fetchKnowledgeReadyPages,
+  fetchKnowledgeReadySummary,
+  type KnowledgeReadyPagesSummary,
 } from '@/components/collabboard/KnowledgePageCache';
 import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
@@ -39,13 +41,14 @@ import { KNOWLEDGE_TEXT_KIND } from '@/lib/domain/knowledge/knowledgeTextIngesti
 import { safeTextCutIndex } from '@/lib/domain/knowledge/knowledgeTextCanonical';
 
 /**
- * How much of a text source the card previews.
+ * PATCH-181. How much of a text source the card previews.
  *
- * A card is a preview, not a reader: enough to recognise the document and
- * decide whether to open it. Named rather than inlined so the one place that
- * decides "how much" is findable, the way the page card's snippet length is.
+ * Shared with the SUMMARY route, which now serves the excerpt, so the cut the
+ * route makes and the cut the card makes cannot drift. Re-exported here for
+ * the existing importers.
  */
-export const KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS = 600;
+import { KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS } from '@/lib/domain/knowledge/knowledgeTextCardExcerpt';
+export { KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS };
 
 /**
  * PDF-C1 -- the ONE canvas rendering of a Knowledge document placement.
@@ -531,32 +534,30 @@ export default function KnowledgePdfCanvasSurface({
    */
   const pageCache = useKnowledgePageCache();
   /**
-   * Seeded from the cache, so a card remounting onto a document this session
-   * already knows paints its text on the FIRST render -- there is no null
-   * state to flash, and `documentLoading` below is false from the start.
+   * PATCH-181. The SUMMARY a card paints from: page metadata, a snippet and a
+   * text source's excerpt, WITHOUT the text of every page. Seeded from the
+   * cache, so a card remounting onto a document this session already read
+   * paints on the FIRST render with no request.
    */
-  const [pages, setPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(
-    () => pageCache?.read(documentId)?.pages ?? null,
+  const [summary, setSummary] = useState<KnowledgeReadyPagesSummary | null>(
+    () => pageCache?.readSummary(documentId) ?? null,
   );
   /**
-   * What this source IS, and -- for a pageless one -- its canonical text.
-   *
-   * Read from the same /pages answer the pages come from, because a card that
-   * inferred "text" from an empty page list would present a PDF whose
-   * extraction produced nothing as a text document with no words in it. The
-   * row's kind is the only thing that can tell those two apart.
+   * The FULL pages, needed only for the parsed-text view. Seeded from the cache
+   * so a document the READER already loaded shows its text with no request.
    */
-  const [sourceKind, setSourceKind] = useState<string>(
-    () => pageCache?.read(documentId)?.kind ?? 'pdf',
-  );
-  const [sourceText, setSourceText] = useState<string | null>(
-    () => pageCache?.read(documentId)?.text ?? null,
+  const [fullPages, setFullPages] = useState<readonly KnowledgeDocumentDetailPage[] | null>(
+    () => pageCache?.read(documentId)?.pages ?? null,
   );
   const [pagesFailed, setPagesFailed] = useState(false);
   /** A 409 was seen: extraction is still finishing, so the wait is expected. */
   const [pagesPreparing, setPagesPreparing] = useState(false);
   /** Bumped only by a 409, which is what re-runs the effect for another try. */
   const [pagesAttempt, setPagesAttempt] = useState(0);
+  /** The full-text load's own failure latch, so a fetch is attempted once. */
+  const [fullFailed, setFullFailed] = useState(false);
+  /** Bumped by a 409 on the full read, so its retry cannot stack. */
+  const [fullAttempt, setFullAttempt] = useState(0);
   const [imagelessPages, setImagelessPages] = useState<ReadonlySet<number>>(() => new Set());
   /**
    * PDF-C1 single-page preview. The canvas object is a strong preview and page
@@ -572,7 +573,7 @@ export default function KnowledgePdfCanvasSurface({
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
-    if (!isReady || collapsed || pages || pagesFailed || !boardId) return;
+    if (!isReady || collapsed || summary || pagesFailed || !boardId) return;
     // The attempt counter is the loop bound. Past it the card stops asking and
     // keeps the preparing state: nothing observed says the document failed, so
     // claiming it did would be the same false terminal this patch removes.
@@ -580,12 +581,12 @@ export default function KnowledgePdfCanvasSurface({
     let cancelled = false;
     let retryTimer = 0;
     (async () => {
-      // The SAME `/pages` read, now shared: a request already in flight for
-      // this document is joined rather than duplicated, and a Ready answer is
-      // remembered for every other view of the same document.
+      // PATCH-181. The SUMMARY, not the full text of every page. A request
+      // already in flight for this document is joined rather than duplicated,
+      // and a Ready answer is remembered for every other view of it.
       const result = pageCache
-        ? await pageCache.load(boardId, documentId)
-        : await fetchKnowledgeReadyPages(boardId, documentId);
+        ? await pageCache.loadSummary(boardId, documentId)
+        : await fetchKnowledgeReadySummary(boardId, documentId);
       if (cancelled) return;
       // 409 is "not ready yet", the one status that must never latch, and the
       // one the cache deliberately refuses to store. Only the timer advances
@@ -604,12 +605,43 @@ export default function KnowledgePdfCanvasSurface({
         return;
       }
       setPagesPreparing(false);
-      setPages(result.entry.pages);
-      setSourceKind(result.entry.kind);
-      setSourceText(result.entry.text ?? null);
+      setSummary(result.entry);
     })();
     return () => { cancelled = true; window.clearTimeout(retryTimer); };
-  }, [isReady, collapsed, pages, pagesFailed, pagesAttempt, boardId, documentId]);
+  }, [isReady, collapsed, summary, pagesFailed, pagesAttempt, boardId, documentId, pageCache]);
+
+  /**
+   * PATCH-181. The FULL pages load ONLY when the card needs the text: the view
+   * switched to `text`. A document the reader already loaded has `fullPages`
+   * seeded from the cache, so this issues no request in that case.
+   */
+  useEffect(() => {
+    if (!isReady || collapsed || view !== 'text' || !boardId) return;
+    if (fullPages || fullFailed) return;
+    if (fullAttempt >= PAGES_RETRY_LIMIT) return;
+    let cancelled = false;
+    let retryTimer = 0;
+    (async () => {
+      const result = pageCache
+        ? await pageCache.load(boardId, documentId)
+        : await fetchKnowledgeReadyPages(boardId, documentId);
+      if (cancelled) return;
+      if (result.status === 'preparing') {
+        // The document is ready (the summary arrived), so this is rare; retry
+        // on the same bounded timer rather than latching a failure.
+        retryTimer = window.setTimeout(() => {
+          if (!cancelled) setFullAttempt((attempt) => attempt + 1);
+        }, PAGES_RETRY_DELAY_MS);
+        return;
+      }
+      if (result.status === 'failed') {
+        setFullFailed(true);
+        return;
+      }
+      setFullPages(result.entry.pages);
+    })();
+    return () => { cancelled = true; window.clearTimeout(retryTimer); };
+  }, [isReady, collapsed, view, fullPages, fullFailed, fullAttempt, boardId, documentId, pageCache]);
 
   /**
    * PDF-R1. A missing derivative is now a recoverable state, not a silent
@@ -645,7 +677,13 @@ export default function KnowledgePdfCanvasSurface({
    * elapsed time or poll count would be invented. So the truthful narrow form
    * is a non-numeric state that disappears the moment content is available.
    */
-  const documentLoading = isReady && !collapsed && !pages && !pagesFailed;
+  const documentLoading = isReady && !collapsed && !summary && !pagesFailed;
+  /**
+   * PATCH-181. The full text is loading in the parsed-text view: the card has
+   * its summary, the "T" button was pressed, and the full page text has not
+   * arrived. Rendered with the SAME non-numeric loading state.
+   */
+  const textContentLoading = isReady && !collapsed && view === 'text' && !fullPages && !fullFailed;
 
   /**
    * A PAGELESS source, by its own kind rather than by what it lacks.
@@ -657,7 +695,15 @@ export default function KnowledgePdfCanvasSurface({
    * -- which is the one affordance decision this stage already made for the
    * reader and is simply honoured here too.
    */
-  const isTextSource = sourceKind === KNOWLEDGE_TEXT_KIND;
+  const isTextSource = (summary?.kind ?? 'pdf') === KNOWLEDGE_TEXT_KIND;
+  /** A text source's excerpt, from the summary (or derived from a full entry). */
+  const sourceText = summary?.text ?? null;
+  /**
+   * The FULL canonical length, when the summary knows it. The excerpt is short,
+   * so counting its characters would understate a truncated source; the route
+   * and the cache both carry the real length.
+   */
+  const sourceLength = summary?.textLength ?? (sourceText !== null ? sourceText.length : null);
   /**
    * The excerpt: the beginning of the canonical text, never a summary and
    * never a middle. A card that started somewhere else would be showing a
@@ -683,14 +729,16 @@ export default function KnowledgePdfCanvasSurface({
     ? sourceText.slice(0, safeTextCutIndex(sourceText, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS))
     : null;
 
-  const snippet = pages?.find((page) => page.text.trim().length > 0)?.text.trim().slice(0, 90) ?? null;
+  const snippet = summary?.snippet ?? null;
 
   /**
    * The navigator's range comes from the pages actually in hand, not from the
    * document's declared pageCount: a page this client cannot render is one it
-   * must not offer to navigate to.
+   * must not offer to navigate to. PATCH-181: this is the SUMMARY's page
+   * metadata, which is all the navigator and the page image need.
    */
-  const pageTotal = pages?.length ?? 0;
+  const summaryPages = summary?.pages ?? null;
+  const pageTotal = summaryPages?.length ?? 0;
   /**
    * Clamped on read rather than corrected in an effect. Pages arrive after the
    * first render, and a document can be replaced under a longer-lived card, so
@@ -698,17 +746,26 @@ export default function KnowledgePdfCanvasSurface({
    * intermediate render where the index points past the end.
    */
   const pageNumber = pageTotal > 0 ? Math.min(Math.max(currentPage, 1), pageTotal) : 1;
-  const currentPageData = pages && pageTotal > 0 ? pages[pageNumber - 1] : null;
+  /**
+   * The page actually rendered. In TEXT view this is the FULL page, because the
+   * paragraph needs `text`; the summary's page carries geometry only. In page
+   * view the summary page is enough -- the image needs number and geometry.
+   */
+  const currentPageData = pageTotal > 0
+    ? (view === 'text'
+      ? (fullPages?.[pageNumber - 1] ?? summaryPages?.[pageNumber - 1])
+      : summaryPages?.[pageNumber - 1]) ?? null
+    : null;
   const canPagePrevious = pageNumber > 1;
   const canPageNext = pageNumber < pageTotal;
   /** Movement is clamped here too, so no caller can push the page out of range. */
   const goToPage = useCallback((next: number) => {
     setCurrentPage((current) => {
-      const total = pages?.length ?? 0;
+      const total = summary?.pages.length ?? 0;
       if (total <= 0) return current;
       return Math.min(Math.max(next, 1), total);
     });
-  }, [pages]);
+  }, [summary]);
 
   /**
    * The SAME citations the reader paints, and the same note colours, resolved
@@ -749,8 +806,11 @@ export default function KnowledgePdfCanvasSurface({
    * not match that page's canonical string.
    */
   const handleSelectionSettled = useCallback(() => {
-    setCapturedSelection(captureExactSelection(pageTextContainerRef.current, pages ?? []));
-  }, [pages]);
+    // The FULL pages: only the text view renders a PAGE_TEXT_ROOT paragraph, and
+    // its text comes from the full page, so the capture must be proved against
+    // exactly that string.
+    setCapturedSelection(captureExactSelection(pageTextContainerRef.current, fullPages ?? []));
+  }, [fullPages]);
 
   /**
    * A selection belongs to the page and representation it was made in. Paging
@@ -769,12 +829,12 @@ export default function KnowledgePdfCanvasSurface({
     createNoteFromPage(buildSelectionSourceRequest(
       documentId,
       originalFilename,
-      pages ?? [],
+      fullPages ?? [],
       capturedSelection,
       null,
     ));
     setCapturedSelection(null);
-  }, [createNoteFromPage, capturedSelection, documentId, originalFilename, pages]);
+  }, [createNoteFromPage, capturedSelection, documentId, originalFilename, fullPages]);
 
   /** The pager's two arrows: the toolbar's disabled convention, one place. */
   const pagerButton = (enabled: boolean) =>
@@ -934,16 +994,22 @@ export default function KnowledgePdfCanvasSurface({
                       thing this card must not do is misrepresent how much of
                       the source the reader has seen.
                     */}
-                    {sourceText !== null && sourceText.length > textExcerpt.length ? (
+                    {sourceText !== null && (summary?.textTruncated === true || sourceText.length > textExcerpt.length) ? (
                       <span className="text-gray-400">… </span>
                     ) : null}
                   </p>
                 )}
                 <div className="shrink-0 select-none text-[8px] text-gray-400">
-                  {sourceText === null || !hasTextToPreview
+                  {sourceText === null || !hasTextToPreview || sourceLength === null
                     ? originalFilename
-                    : `${originalFilename} · ${sourceText.length.toLocaleString()} characters`}
+                    : `${originalFilename} · ${sourceLength.toLocaleString()} characters`}
                 </div>
+              </div>
+            ) : textContentLoading ? (
+              /* PATCH-181. The full text is loading for the parsed-text view.
+                 The same non-numeric state the initial summary load uses. */
+              <div data-knowledge-pdf-loading="true" className="px-1 py-2 text-[10px] italic text-gray-400">
+                Loading document…
               </div>
             ) : currentPageData ? (
               /*

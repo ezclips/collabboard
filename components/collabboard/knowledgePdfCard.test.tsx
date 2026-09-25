@@ -12,6 +12,7 @@ import KnowledgePdfCanvasSurface, {
   KnowledgePdfOpenProvider,
 } from './KnowledgePdfCanvasSurface';
 import { buildKnowledgeSourceNoteDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import { safeTextCutIndex } from '@/lib/domain/knowledge/knowledgeTextCanonical';
 
 /**
  * PDF-C1 Step 1 -- the Freeform PDF object is a DOCUMENT, not an upload
@@ -35,6 +36,51 @@ const POST_CARD = read('components/collabboard/PostCardContent.tsx');
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const DOC_ID = '33333333-3333-4333-8333-333333333333';
 const PAGES_URL = `/api/boards/${BOARD_ID}/knowledge/${DOC_ID}/pages`;
+/**
+ * PATCH-181. The card loads the SUMMARY on mount and the full text only for its
+ * parsed-text view. These stubs answer BOTH URLs; only the stubs change -- no
+ * assertion and no test behaviour is touched.
+ */
+const SUMMARY_URL = `${PAGES_URL}?view=summary`;
+const isPagesUrl = (url: unknown): boolean =>
+  String(url) === PAGES_URL || String(url) === SUMMARY_URL;
+
+/**
+ * The summary of a full page payload: the same document, page metadata with no
+ * page text, the first non-empty snippet, and (for a text source) the excerpt.
+ * This is what the server's `?view=summary` returns, so the card sees a
+ * faithful body rather than the full one.
+ */
+function asSummary(payload: {
+  document: unknown;
+  pages?: Array<Record<string, unknown>>;
+  text?: string;
+}): Record<string, unknown> {
+  const pages = payload.pages ?? [];
+  const firstWithText = pages.find(
+    (page) => typeof page.text === 'string' && (page.text as string).trim().length > 0,
+  );
+  return {
+    document: payload.document,
+    pages: pages.map((page) => ({
+      pageNumber: page.pageNumber,
+      widthPoints: page.widthPoints,
+      heightPoints: page.heightPoints,
+      rotation: page.rotation,
+    })),
+    // A text source's excerpt, with the flag that says it was cut. The cut is
+    // surrogate-safe, mirroring the server, so a summary body never ends a
+    // character's second half.
+    ...(typeof payload.text === 'string'
+      ? {
+        text: payload.text.slice(0, safeTextCutIndex(payload.text, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS)),
+        textTruncated: payload.text.length > safeTextCutIndex(payload.text, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS),
+        textLength: payload.text.length,
+      }
+      : {}),
+    snippet: firstWithText ? (firstWithText.text as string).trim().slice(0, 90) : null,
+  };
+}
 
 function pagePayload(count: number) {
   return {
@@ -52,9 +98,13 @@ function pagePayload(count: number) {
 /** Serves page content; anything else is an empty 200, as the app's own stub does. */
 function stubPages(count = 3, ok = true) {
   const fetchMock = vi.fn(async (url: string) => {
-    if (String(url) === PAGES_URL) {
+    if (isPagesUrl(url)) {
+      const payload = pagePayload(count);
       return ok
-        ? new Response(JSON.stringify(pagePayload(count)), { status: 200, headers: { 'content-type': 'application/json' } })
+        ? new Response(
+          JSON.stringify(String(url) === SUMMARY_URL ? asSummary(payload) : payload),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
         : new Response('{}', { status: 500, headers: { 'content-type': 'application/json' } });
     }
     return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
@@ -280,7 +330,7 @@ describe('13-15. loading is truthful and never a percentage', () => {
     let release: (value: Response) => void = () => {};
     const pending = new Promise<Response>((resolve) => { release = resolve; });
     vi.stubGlobal('fetch', vi.fn(async (url: string) =>
-      String(url) === PAGES_URL ? pending : new Response('{}', { status: 200 })));
+      isPagesUrl(url) ? pending : new Response('{}', { status: 200 })));
 
     const host = await card();
     expect(host.querySelector('[data-knowledge-pdf-loading]'), 'loading shows while pending').not.toBeNull();
@@ -995,17 +1045,31 @@ describe('PDF-C1 page switcher', () => {
     expect(indicator(host)).toBe('2 / 3');
   });
 
-  it('17-18. paging issues no request and retriggers no processing', async () => {
+  it('17-18. paging issues no request and retriggers no processing (text view loads the full pages once, PATCH-181)', async () => {
     const fetchMock = stubPages(3);
     const host = await card();
+    const fullCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === PAGES_URL).length;
     const before = fetchMock.mock.calls.length;
+
+    // PAGING adds nothing, before the text view.
     await step(next(host));
     await step(next(host));
     await step(prev(host));
+    expect(fetchMock.mock.calls.length, 'paging issues no request').toBe(before);
+
+    // The FIRST T click loads the full pages exactly once -- and it is the FULL
+    // URL, not the summary.
     await act(async () => { action(host, 'parsed-content')!.click(); });
     await step(prev(host));
-    // Every page arrived in the single cached payload; paging is an index.
-    expect(fetchMock.mock.calls.length, 'no request of any kind').toBe(before);
+    expect(fetchMock.mock.calls.length, 'the T click adds exactly one request').toBe(before + 1);
+    expect(fullCalls(), 'and it is the full /pages URL').toBe(1);
+
+    // PAGING while in text view adds nothing either.
+    await step(next(host));
+    await step(prev(host));
+    expect(fetchMock.mock.calls.length, 'text-view paging issues no request').toBe(before + 1);
+
+    // Retriggers no processing.
     expect(host.textContent).not.toContain('Preparing document');
     expect(host.textContent).not.toContain('Loading document');
   });
@@ -1506,15 +1570,19 @@ describe('PDF-R6M contained preview and pinned pager', () => {
   /** Pages of a chosen shape, so portrait and landscape are real inputs. */
   const stubShapedPages = (count: number, widthPoints: number, heightPoints: number) => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (String(url) !== PAGES_URL) return new Response('{}', { status: 200 });
-      return new Response(JSON.stringify({
+      if (!isPagesUrl(url)) return new Response('{}', { status: 200 });
+      const payload = {
         document: { id: DOC_ID, originalFilename: 'lesson.pdf', pageCount: count },
         pages: Array.from({ length: count }, (_, index) => ({
           pageNumber: index + 1,
           text: `Text of page ${index + 1}. Neutral synthetic content.`,
           widthPoints, heightPoints, rotation: 0,
         })),
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      };
+      return new Response(
+        JSON.stringify(String(url) === SUMMARY_URL ? asSummary(payload) : payload),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
   };
@@ -1840,12 +1908,16 @@ describe('Stage 1. a text source previews its text', () => {
 
   function stubText(body: { kind?: string; text?: string | null } = {}) {
     const fetchMock = vi.fn(async (url: string) => {
-      if (String(url) === PAGES_URL) {
-        return new Response(JSON.stringify({
+      if (isPagesUrl(url)) {
+        const payload = {
           document: { id: DOC_ID, originalFilename: 'loom-notes.md', pageCount: null, kind: body.kind ?? 'text' },
-          pages: [],
+          pages: [] as Array<Record<string, unknown>>,
           ...(body.text === undefined ? { text: TEXT } : (body.text === null ? {} : { text: body.text })),
-        }), { status: 200, headers: { 'content-type': 'application/json' } });
+        };
+        return new Response(
+          JSON.stringify(String(url) === SUMMARY_URL ? asSummary(payload) : payload),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
       }
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     });
@@ -1871,6 +1943,18 @@ describe('Stage 1. a text source previews its text', () => {
     const excerpt = host.querySelector('[data-knowledge-pdf-text-excerpt="true"]')!;
     expect(TEXT.startsWith(excerpt.textContent!.replace(/…\s*$/, ''))).toBe(true);
     expect(excerpt.textContent!.length).toBeLessThan(TEXT.length);
+  });
+
+  it('a truncated summary shows the FULL character count in the footer', async () => {
+    // The excerpt is short, but the footer states the whole source's length from
+    // the summary's `textLength` -- the same count the card showed before
+    // PATCH-181, when it held the full text.
+    const full = 'z'.repeat(5000);
+    stubText({ text: full });
+    const host = await card();
+    const excerpt = host.querySelector('[data-knowledge-pdf-text-excerpt="true"]');
+    expect(excerpt!.textContent!.length).toBeLessThan(5000);
+    expect(host.textContent).toContain(`lesson.pdf · ${(5000).toLocaleString()} characters`);
   });
 
   it('says when it has been truncated, rather than looking complete', async () => {
@@ -1977,11 +2061,17 @@ describe('Stage 1. a text source previews its text', () => {
   });
 
   it('a PDF with no pages still says the PAGE is unavailable', async () => {
-    const fetchMock = vi.fn(async (url: string) => (String(url) === PAGES_URL
-      ? new Response(JSON.stringify({
-        document: { id: DOC_ID, originalFilename: 'broken.pdf', pageCount: 2, kind: 'pdf' },
-        pages: [],
-      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    const fetchMock = vi.fn(async (url: string) => (isPagesUrl(url)
+      ? (() => {
+        const payload = {
+          document: { id: DOC_ID, originalFilename: 'broken.pdf', pageCount: 2, kind: 'pdf' },
+          pages: [] as Array<Record<string, unknown>>,
+        };
+        return new Response(
+          JSON.stringify(String(url) === SUMMARY_URL ? asSummary(payload) : payload),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      })()
       : new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })));
     vi.stubGlobal('fetch', fetchMock);
     const host = await card();

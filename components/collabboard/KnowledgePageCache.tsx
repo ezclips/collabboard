@@ -41,6 +41,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useSupabase } from '@/lib/supabase-provider';
 import type { KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
+import { KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS } from '@/lib/domain/knowledge/knowledgeTextCardExcerpt';
+import { safeTextCutIndex } from '@/lib/domain/knowledge/knowledgeTextCanonical';
 
 /**
  * How long a cached Ready answer is served without revalidating. `/pages` for a
@@ -79,6 +81,31 @@ export interface KnowledgeReadyPages {
 }
 
 /**
+ * PATCH-181. The SUMMARY of a Ready document: everything a canvas card needs
+ * to draw one page picture and a page count, and NOTHING that costs the text of
+ * every page.
+ *
+ * `pages` carries page number and geometry only (text is always the empty
+ * string); `snippet` is the opening of the first page that has any text; `text`
+ * is a text source's excerpt. A full entry can derive one of these with no
+ * request, which is what makes opening a card that the reader already read free.
+ */
+export interface KnowledgeReadyPagesSummary {
+  readonly documentId: string;
+  readonly originalFilename: string;
+  readonly pageCount: number | null;
+  readonly kind: string;
+  readonly pages: readonly KnowledgeDocumentDetailPage[];
+  readonly snippet: string | null;
+  readonly text?: string;
+  readonly textTruncated?: boolean;
+  /** PATCH-181. The FULL canonical length, so a footer can state it. */
+  readonly textLength?: number;
+  readonly transcriptRepresentation?: KnowledgeTranscriptStoredRepresentation | null;
+  readonly loadedAt: number;
+}
+
+/**
  * Deliberately three outcomes, not a nullable success. 'preparing' is the 409
  * that means extraction has not finished -- a normal lifecycle state that each
  * consumer still retries with its OWN policy, because the card and the reader
@@ -89,13 +116,30 @@ export type KnowledgePagesLoad =
   | { readonly status: 'preparing' }
   | { readonly status: 'failed' };
 
+/** PATCH-181: the same three outcomes for a SUMMARY read. */
+export type KnowledgeSummaryLoad =
+  | { readonly status: 'ready'; readonly entry: KnowledgeReadyPagesSummary }
+  | { readonly status: 'preparing' }
+  | { readonly status: 'failed' };
+
 export interface KnowledgePageCache {
   /** Last known-good pages for this document, or null. Never a failure. */
   readonly read: (documentId: string) => KnowledgeReadyPages | null;
+  /**
+   * PATCH-181. The last known-good SUMMARY, or null.
+   *
+   * A FULL entry satisfies this read: if the reader has already loaded the
+   * document's pages, the summary is DERIVED from them -- page metadata and a
+   * snippet, or an excerpt -- with no request. Only when neither exists does a
+   * card need to fetch.
+   */
+  readonly readSummary: (documentId: string) => KnowledgeReadyPagesSummary | null;
   /** True when a cached entry is old enough to revalidate behind the content. */
   readonly isStale: (entry: KnowledgeReadyPages) => boolean;
   /** One `/pages` read, shared with any identical request already in flight. */
   readonly load: (boardId: string, documentId: string) => Promise<KnowledgePagesLoad>;
+  /** One `/pages?view=summary` read, shared the same way, in its own map. */
+  readonly loadSummary: (boardId: string, documentId: string) => Promise<KnowledgeSummaryLoad>;
   readonly isPageImageless: (documentId: string, pageNumber: number) => boolean;
   readonly markPageImageless: (documentId: string, pageNumber: number) => void;
   /**
@@ -120,6 +164,9 @@ interface Store {
   scope: string | null;
   readonly entries: Map<string, KnowledgeReadyPages>;
   readonly inFlight: Map<string, Promise<KnowledgePagesLoad>>;
+  /** PATCH-181: the summary representation, in its own maps. */
+  readonly summaries: Map<string, KnowledgeReadyPagesSummary>;
+  readonly inFlightSummary: Map<string, Promise<KnowledgeSummaryLoad>>;
   readonly imageless: Map<string, Set<number>>;
 }
 
@@ -127,6 +174,8 @@ const newStore = (scope: string | null): Store => ({
   scope,
   entries: new Map(),
   inFlight: new Map(),
+  summaries: new Map(),
+  inFlightSummary: new Map(),
   imageless: new Map(),
 });
 
@@ -194,6 +243,80 @@ export function isKnowledgeDetailPage(value: unknown): value is KnowledgeDocumen
 }
 
 /**
+ * PATCH-181. A summary page: number and geometry, and NO text (always the empty
+ * string here). Kept distinct from `isKnowledgeDetailPage` because the summary
+ * deliberately omits `text`, so the full-page guard would reject every row.
+ */
+function summaryPage(value: unknown): KnowledgeDocumentDetailPage | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.pageNumber !== 'number') return null;
+  return {
+    pageNumber: record.pageNumber,
+    // Never the network's text: the summary carries none, and the empty string
+    // is what makes a card show the loading state in text view rather than an
+    // empty paragraph.
+    text: '',
+    widthPoints: typeof record.widthPoints === 'number' ? record.widthPoints : null,
+    heightPoints: typeof record.heightPoints === 'number' ? record.heightPoints : null,
+    rotation: typeof record.rotation === 'number' ? record.rotation : null,
+  };
+}
+
+/**
+ * The ONE `fetch(` in this file. Both representations are read here, so the
+ * endpoint has exactly one home in the client; the URL is built once, and the
+ * `?view=summary` query is added only for the summary.
+ */
+function requestKnowledgePages(
+  boardId: string,
+  documentId: string,
+  view: 'full' | 'summary',
+): Promise<Response> {
+  const base = `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`;
+  return fetch(view === 'summary' ? `${base}?view=summary` : base);
+}
+
+/**
+ * The ONE `/pages?view=summary` request implementation in the client. Symmetric
+ * with `fetchKnowledgeReadyPages`: the provider shares and remembers its result,
+ * and a surface rendered without the provider calls this same function.
+ */
+export async function fetchKnowledgeReadySummary(
+  boardId: string,
+  documentId: string,
+): Promise<KnowledgeSummaryLoad> {
+  try {
+    const response = await requestKnowledgePages(boardId, documentId, 'summary');
+    if (response.status === 409) return { status: 'preparing' };
+    const payload = await response.json().catch(() => null) as
+      { pages?: unknown; document?: unknown; snippet?: unknown; text?: unknown; textTruncated?: unknown; textLength?: unknown } | null;
+    if (!response.ok || !payload || !Array.isArray(payload.pages)) return { status: 'failed' };
+    return {
+      status: 'ready',
+      entry: {
+        documentId,
+        ...knowledgeDocumentMetadata(payload.document),
+        pages: payload.pages
+          .map(summaryPage)
+          .filter((page): page is KnowledgeDocumentDetailPage => page !== null),
+        snippet: typeof payload.snippet === 'string' && payload.snippet.length > 0
+          ? payload.snippet
+          : null,
+        ...(typeof payload.text === 'string' ? { text: payload.text } : {}),
+        ...(payload.textTruncated === true ? { textTruncated: true } : {}),
+        ...(typeof payload.textLength === 'number' && Number.isInteger(payload.textLength) && payload.textLength >= 0
+          ? { textLength: payload.textLength }
+          : {}),
+        loadedAt: Date.now(),
+      },
+    };
+  } catch {
+    return { status: 'failed' };
+  }
+}
+
+/**
  * The ONE `/pages` request implementation in the client. The provider shares
  * and remembers its result; a surface rendered without the provider calls this
  * same function directly, so there has never been -- and must never be -- a
@@ -204,9 +327,7 @@ export async function fetchKnowledgeReadyPages(
   documentId: string,
 ): Promise<KnowledgePagesLoad> {
   try {
-    const response = await fetch(
-      `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/pages`,
-    );
+    const response = await requestKnowledgePages(boardId, documentId, 'full');
     // Never a stored answer: still extracting is a state, not content.
     if (response.status === 409) return { status: 'preparing' };
     const payload = await response.json().catch(() => null) as
@@ -271,6 +392,43 @@ export function KnowledgePageCacheProvider({ children }: { children: React.React
     [],
   );
 
+  /**
+   * PATCH-181. A full entry satisfies a summary read, derived here so the card
+   * can paint immediately from pages the reader already loaded -- no request.
+   * The derivation mirrors what the summary route would return: page metadata
+   * with no text, a snippet from the first page that has any, and an excerpt.
+   */
+  const readSummary = useCallback((documentId: string): KnowledgeReadyPagesSummary | null => {
+    const store = storeRef.current;
+    const full = store.entries.get(documentId);
+    if (full) {
+      const snippetPage = full.pages.find((page) => page.text.trim().length > 0);
+      return {
+        documentId: full.documentId,
+        originalFilename: full.originalFilename,
+        pageCount: full.pageCount,
+        kind: full.kind,
+        // Geometry only: the summary never carries page text.
+        pages: full.pages.map((page) => ({ ...page, text: '' })),
+        snippet: snippetPage ? snippetPage.text.trim().slice(0, 90) : null,
+        ...(typeof full.text === 'string'
+          ? { text: full.text.slice(0, safeTextCutIndex(full.text, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS)) }
+          : {}),
+        ...(typeof full.text === 'string'
+          && full.text.length > safeTextCutIndex(full.text, KNOWLEDGE_TEXT_CARD_EXCERPT_CHARS)
+          ? { textTruncated: true }
+          : {}),
+        // The full length, from the entry that holds the whole text.
+        ...(typeof full.text === 'string' ? { textLength: full.text.length } : {}),
+        ...(full.transcriptRepresentation !== undefined
+          ? { transcriptRepresentation: full.transcriptRepresentation }
+          : {}),
+        loadedAt: full.loadedAt,
+      };
+    }
+    return store.summaries.get(documentId) ?? null;
+  }, []);
+
   const isStale = useCallback(
     (entry: KnowledgeReadyPages) => Date.now() - entry.loadedAt > KNOWLEDGE_PAGES_FRESH_MS,
     [],
@@ -315,6 +473,36 @@ export function KnowledgePageCacheProvider({ children }: { children: React.React
     return request;
   }, []);
 
+  /**
+   * PATCH-181. One summary read, shared in the SAME way as the full read but in
+   * its own maps -- the two representations have different validators and must
+   * never satisfy one another's in-flight lookup.
+   */
+  const loadSummary = useCallback(async (boardId: string, documentId: string): Promise<KnowledgeSummaryLoad> => {
+    const store = storeRef.current;
+    const inFlight = store.inFlightSummary.get(documentId);
+    if (inFlight) return inFlight;
+
+    const request = (async (): Promise<KnowledgeSummaryLoad> => {
+      try {
+        const result = await fetchKnowledgeReadySummary(boardId, documentId);
+        // The same scope guard as `load`: a store swap means the answer belongs
+        // to a session that no longer exists here, so it is reported as a plain
+        // failure and stored nowhere.
+        if (storeRef.current !== store) return { status: 'failed' };
+        if (result.status === 'ready') {
+          store.summaries.set(documentId, result.entry);
+        }
+        return result;
+      } finally {
+        store.inFlightSummary.delete(documentId);
+      }
+    })();
+
+    store.inFlightSummary.set(documentId, request);
+    return request;
+  }, []);
+
   const isPageImageless = useCallback(
     (documentId: string, pageNumber: number) =>
       storeRef.current.imageless.get(documentId)?.has(pageNumber) ?? false,
@@ -338,8 +526,8 @@ export function KnowledgePageCacheProvider({ children }: { children: React.React
   }, []);
 
   const value = useMemo<KnowledgePageCache>(
-    () => ({ read, isStale, load, isPageImageless, markPageImageless, clearPageImageless }),
-    [read, isStale, load, isPageImageless, markPageImageless, clearPageImageless],
+    () => ({ read, readSummary, isStale, load, loadSummary, isPageImageless, markPageImageless, clearPageImageless }),
+    [read, readSummary, isStale, load, loadSummary, isPageImageless, markPageImageless, clearPageImageless],
   );
 
   return <Context.Provider value={value}>{children}</Context.Provider>;

@@ -573,17 +573,33 @@ describe('10. a still-extracting document recovers without a remount', () => {
   const pagesUrl = `/api/boards/${BOARD_ID}/knowledge/${DOC_ID}/pages`;
   const PAGE = { pageNumber: 1, text: 'Extracted page one.', widthPoints: 1, heightPoints: 1, rotation: 0 };
 
+  /**
+   * PATCH-181 adjustment: the card now loads `/pages?view=summary` on mount and
+   * the full `/pages` only when T is pressed, so BOTH URLs are answered here and
+   * `pageReads` counts either. Every existing assertion is unchanged.
+   */
+  const summaryUrl = `${pagesUrl}?view=summary`;
+
   /** 409 for the first `conflicts` page reads, then a normal 200 payload. */
   function stubPages(conflicts: number) {
     let seen = 0;
     const fetchMock = vi.fn(async (url: string) => {
-      if (String(url) === pagesUrl) {
+      const target = String(url);
+      if (target === pagesUrl || target === summaryUrl) {
         seen += 1;
         if (seen <= conflicts) {
           return new Response(JSON.stringify({ error: 'Knowledge document is not ready' }),
             { status: 409, headers: { 'content-type': 'application/json' } });
         }
-        return new Response(JSON.stringify({ document: { id: DOC_ID }, pages: [PAGE] }),
+        const body = target === summaryUrl
+          // Summary pages: number and geometry, and NO text.
+          ? {
+            document: { id: DOC_ID },
+            pages: [{ pageNumber: 1, widthPoints: PAGE.widthPoints, heightPoints: PAGE.heightPoints, rotation: PAGE.rotation }],
+            snippet: PAGE.text,
+          }
+          : { document: { id: DOC_ID }, pages: [PAGE] };
+        return new Response(JSON.stringify(body),
           { status: 200, headers: { 'content-type': 'application/json' } });
       }
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
@@ -593,7 +609,7 @@ describe('10. a still-extracting document recovers without a remount', () => {
   }
 
   const pageReads = (m: ReturnType<typeof vi.fn>) =>
-    m.mock.calls.filter(([url]) => String(url) === pagesUrl).length;
+    m.mock.calls.filter(([url]) => String(url).includes('/pages')).length;
 
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -691,8 +707,16 @@ describe('10. a still-extracting document recovers without a remount', () => {
         // The route refuses: the document cannot be prepared right now.
         return new Response(JSON.stringify({ error: 'Unavailable' }), { status: 503 });
       }
-      if (String(url) === pagesUrl) {
-        return new Response(JSON.stringify({ document: { id: DOC_ID }, pages: [PAGE] }),
+      if (String(url) === pagesUrl || String(url) === summaryUrl) {
+        // PATCH-181: answer the summary too, so the card gets its page metadata.
+        const body = String(url) === summaryUrl
+          ? {
+            document: { id: DOC_ID },
+            pages: [{ pageNumber: 1, widthPoints: PAGE.widthPoints, heightPoints: PAGE.heightPoints, rotation: PAGE.rotation }],
+            snippet: PAGE.text,
+          }
+          : { document: { id: DOC_ID }, pages: [PAGE] };
+        return new Response(JSON.stringify(body),
           { status: 200, headers: { 'content-type': 'application/json' } });
       }
       return new Response('{}', { status: 200 });
@@ -728,8 +752,16 @@ describe('10. a still-extracting document recovers without a remount', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
-      if (String(url) === pagesUrl) {
-        return new Response(JSON.stringify({ document: { id: DOC_ID }, pages: [PAGE] }),
+      if (String(url) === pagesUrl || String(url) === summaryUrl) {
+        // PATCH-181: answer the summary too, so the card gets its page metadata.
+        const body = String(url) === summaryUrl
+          ? {
+            document: { id: DOC_ID },
+            pages: [{ pageNumber: 1, widthPoints: PAGE.widthPoints, heightPoints: PAGE.heightPoints, rotation: PAGE.rotation }],
+            snippet: PAGE.text,
+          }
+          : { document: { id: DOC_ID }, pages: [PAGE] };
+        return new Response(JSON.stringify(body),
           { status: 200, headers: { 'content-type': 'application/json' } });
       }
       return new Response('{}', { status: 200 });
@@ -786,5 +818,98 @@ describe('10. a still-extracting document recovers without a remount', () => {
     const host = surface('ready');
     await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
     expect(host.textContent ?? '').not.toMatch(/\d+\s*%/);
+  });
+});
+
+/**
+ * PATCH-181. The card loads a SUMMARY on mount and the full page text only when
+ * the parsed-text view is opened.
+ */
+describe('PATCH-181: the card loads page text only when it is needed', () => {
+  const base = `/api/boards/${BOARD_ID}/knowledge/${DOC_ID}/pages`;
+  const summaryUrl = `${base}?view=summary`;
+  const fullUrl = base;
+  const SUMMARY_PAGE = { pageNumber: 1, widthPoints: 612, heightPoints: 792, rotation: 0 };
+  const FULL_PAGE = { pageNumber: 1, text: 'The parsed words of page one.', widthPoints: 612, heightPoints: 792, rotation: 0 };
+
+  /** Records every request; serves the two representations distinctly. */
+  function stubBoth() {
+    const fetchMock = vi.fn(async (url: string) => {
+      const target = String(url);
+      if (target.includes('/render-pages')) return new Response('{}', { status: 200 });
+      if (target === summaryUrl) {
+        return new Response(JSON.stringify({
+          document: { id: DOC_ID, originalFilename: 'lesson.pdf', pageCount: 1, kind: 'pdf' },
+          pages: [SUMMARY_PAGE],
+          snippet: 'The parsed words of page one.',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (target === fullUrl) {
+        return new Response(JSON.stringify({
+          document: { id: DOC_ID, originalFilename: 'lesson.pdf', pageCount: 1, kind: 'pdf' },
+          pages: [FULL_PAGE],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const calls = (m: ReturnType<typeof vi.fn>, exact: string) =>
+    m.mock.calls.filter(([url]) => String(url) === exact).length;
+
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it('mounting fetches the SUMMARY and never the full /pages', async () => {
+    const fetchMock = stubBoth();
+    const host = surface('ready');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(calls(fetchMock, summaryUrl)).toBe(1);
+    expect(calls(fetchMock, fullUrl), 'no full-text request on mount').toBe(0);
+    // The navigator and the page image come from the summary.
+    expect(host.querySelector('[data-knowledge-pdf-page-indicator="true"]')?.textContent).toContain('1 / 1');
+    expect(host.querySelector('img')).not.toBeNull();
+  });
+
+  it('opening Parsed text fetches the full /pages once and renders the page text', async () => {
+    const fetchMock = stubBoth();
+    const host = surface('ready');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host.querySelector('[data-knowledge-pdf-page-text="true"]')).toBeNull();
+
+    const textButton = host.querySelector('[data-knowledge-pdf-action="parsed-content"]') as HTMLButtonElement;
+    expect(textButton).not.toBeNull();
+    await act(async () => { textButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(calls(fetchMock, fullUrl), 'exactly one full request').toBe(1);
+    const paragraph = host.querySelector('[data-knowledge-pdf-page-text="true"]');
+    expect(paragraph).not.toBeNull();
+    expect(paragraph!.textContent).toContain('The parsed words of page one.');
+  });
+
+  it('a text source shows the summary excerpt without any full request', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url) === summaryUrl) {
+        return new Response(JSON.stringify({
+          document: { id: DOC_ID, originalFilename: 'notes.md', pageCount: null, kind: 'text' },
+          pages: [],
+          text: 'An excerpt of the transcript.',
+          textTruncated: true,
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const host = surface('ready');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    const excerpt = host.querySelector('[data-knowledge-pdf-text-excerpt="true"]');
+    expect(excerpt).not.toBeNull();
+    expect(excerpt!.textContent).toContain('An excerpt of the transcript.');
+    expect(calls(fetchMock, fullUrl), 'a text source needs no full read').toBe(0);
   });
 });

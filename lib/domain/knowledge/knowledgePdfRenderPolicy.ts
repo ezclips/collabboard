@@ -120,6 +120,24 @@ export function knowledgePagesETag(
 }
 
 /**
+ * PATCH-181. The validator for the SUMMARY representation of the same document.
+ *
+ * The summary carries less than the full page set (no page text), so it must
+ * NOT share the full ETag -- otherwise a browser holding the full body would
+ * answer 304 to a summary request and be handed the wrong representation.
+ * Same shape, a distinct suffix.
+ */
+export function knowledgePagesSummaryETag(
+  contentSha256: string,
+  pageCount: number | null,
+): string | null {
+  if (typeof contentSha256 !== 'string' || !SHA256.test(contentSha256)) return null;
+  const pages = pageCount === null ? 'null' : String(pageCount);
+  if (!/^(?:null|[0-9]{1,9})$/.test(pages)) return null;
+  return `"${contentSha256}:pages-summary:${pages}"`;
+}
+
+/**
  * Whether a conditional request already holds this exact representation.
  *
  * Handles the comma-separated list form and the weak-validator prefix, and

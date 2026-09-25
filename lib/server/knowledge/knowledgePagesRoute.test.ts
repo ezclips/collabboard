@@ -30,9 +30,17 @@ function query<T>(result: Lookup<T>) {
   const filters: Array<[string, string]> = [];
   const selects: string[] = [];
   let ordered: { column: string; ascending: boolean } | null = null;
-  const builder = {
+  // A THENABLE builder, like the real PostgREST chain: order()/limit()/neq()
+  // return the builder, and awaiting it resolves to the configured result.
+  // PATCH-181's summary snippet query is `.eq().neq().order().limit(1)`.
+  const builder: Record<string, unknown> = {};
+  Object.assign(builder, {
     eq: vi.fn((column: string, value: string) => {
       filters.push([column, value]);
+      return builder;
+    }),
+    neq: vi.fn((column: string, value: string) => {
+      filters.push([`neq:${column}`, value]);
       return builder;
     }),
     // The pageless branch selects chunks with `.is('page_start', null)`, which
@@ -41,12 +49,24 @@ function query<T>(result: Lookup<T>) {
       filters.push([column, String(value)]);
       return builder;
     }),
-    order: vi.fn(async (column: string, options: { ascending: boolean }) => {
+    order: vi.fn((column: string, options: { ascending: boolean }) => {
       ordered = { column, ascending: options.ascending };
-      return result;
+      return builder;
     }),
+    limit: vi.fn(() => builder),
     maybeSingle: vi.fn(async () => result),
-  };
+    then: (resolve: (value: Lookup<T>) => unknown) => {
+      // Apply any recorded neq filters, so the summary's `.neq('text','')`
+      // snippet query really excludes empty page text -- the property under test.
+      let data = result.data;
+      for (const [column, value] of filters) {
+        if (!column.startsWith('neq:') || !Array.isArray(data)) continue;
+        const key = column.slice('neq:'.length);
+        data = (data as Record<string, unknown>[]).filter((row) => String(row[key]) !== value) as T;
+      }
+      return Promise.resolve({ data, error: result.error }).then(resolve);
+    },
+  });
   return {
     filters,
     selects,
@@ -59,7 +79,7 @@ function configure(options: {
   user?: { id: string } | null;
   owner?: Lookup<{ id: string } | null>;
   member?: Lookup<boolean | null>;
-  document?: Lookup<{ id: string; original_filename: string; page_count: number | null; processing_status: string; kind?: string } | null>;
+  document?: Lookup<{ id: string; original_filename: string; page_count: number | null; processing_status: string; kind?: string; content_sha256?: string } | null>;
   chunks?: Lookup<{ chunk_index: number; char_start: number; char_end: number; text: string }[] | null>;
   pages?: Lookup<{
     page_number: number; text: string;
@@ -247,7 +267,10 @@ describe('Knowledge extracted pages route', () => {
   it('C1: adds no second query and no geometry recomputation', () => {
     const source = readFileSync(resolve(process.cwd(), 'app/api/boards/[id]/knowledge/[documentId]/pages/route.ts'), 'utf8');
     expect(source).not.toMatch(/pdfjs|getViewport|normalizeRotation|widthPx|heightPx/);
-    expect(source.match(/\.from\('knowledge_pages'\)/g) ?? []).toHaveLength(1);
+    // PATCH-181: THREE knowledge_pages reads now -- the full list, the summary's
+    // metadata-only list, and the summary's one-page snippet -- and still no
+    // geometry recomputation. Pinned so an unbounded fourth read is a failure.
+    expect(source.match(/\.from\('knowledge_pages'\)/g) ?? []).toHaveLength(3);
   });
 
   it('does not use the legacy permission path or expose unsafe fields', () => {
@@ -397,5 +420,122 @@ describe('Knowledge pages route: a source with no pages', () => {
     });
     const response = await route.GET(new Request('http://localhost'), context());
     expect(response.status).toBe(409);
+  });
+});
+
+/**
+ * PATCH-181 -- the SUMMARY mode. Same route, same authorization, less text.
+ * A canvas card asks for `?view=summary` so it does not download the text of
+ * every page to draw one picture and a page count.
+ */
+describe('Knowledge pages route: the summary view', () => {
+  const summaryRequest = (etag?: string) => new Request(
+    'http://localhost?view=summary',
+    etag ? { headers: { 'if-none-match': etag } } : undefined,
+  );
+  const SHA = 'a'.repeat(64);
+  const withSha = (over: Record<string, unknown> = {}) => ({
+    data: {
+      id: DOCUMENT_ID,
+      original_filename: 'EMG_checklist.pdf',
+      page_count: 2,
+      processing_status: 'ready',
+      kind: 'pdf',
+      content_sha256: SHA,
+      ...over,
+    },
+    error: null,
+  });
+
+  it('a PDF summary carries page metadata with NO text, and the first non-empty snippet', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: withSha(),
+      pages: {
+        data: [
+          { page_number: 1, text: '', width_points: 612, height_points: 792, rotation: 0 },
+          { page_number: 2, text: '  The first real words.  ', width_points: 595, height_points: 842, rotation: 90 },
+        ],
+        error: null,
+      },
+    });
+    const response = await route.GET(summaryRequest(), context());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.pages).toEqual([
+      { pageNumber: 1, widthPoints: 612, heightPoints: 792, rotation: 0 },
+      { pageNumber: 2, widthPoints: 595, heightPoints: 842, rotation: 90 },
+    ]);
+    // No page object carries text at all.
+    for (const page of payload.pages) expect(page).not.toHaveProperty('text');
+    expect(payload.snippet).toBe('The first real words.');
+    // The metadata query selected no text column.
+    expect(state.pagesQuery.selects.some((s) => s.includes('width_points') && !s.includes('text'))).toBe(true);
+  });
+
+  it('a PDF with no non-empty page has snippet null', async () => {
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: withSha(),
+      pages: {
+        data: [{ page_number: 1, text: '', width_points: 1, height_points: 1, rotation: 0 }],
+        error: null,
+      },
+    });
+    const response = await route.GET(summaryRequest(), context());
+    expect((await response.json()).snippet).toBeNull();
+  });
+
+  it('a text summary is the excerpt, with textTruncated true or false', async () => {
+    const long = 'x'.repeat(1500);
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: withSha({ original_filename: 'notes.md', page_count: null, kind: 'text' }),
+      chunks: { data: [{ chunk_index: 0, char_start: 0, char_end: long.length, text: long }], error: null },
+    });
+    const truncated = await (await route.GET(summaryRequest(), context())).json();
+    expect(truncated.text).toHaveLength(600);
+    expect(truncated.textTruncated).toBe(true);
+    expect(truncated.pages).toEqual([]);
+
+    const short = 'just a short note';
+    state = configure({
+      owner: { data: { id: BOARD_ID }, error: null },
+      document: withSha({ original_filename: 'notes.md', page_count: null, kind: 'text' }),
+      chunks: { data: [{ chunk_index: 0, char_start: 0, char_end: short.length, text: short }], error: null },
+    });
+    const whole = await (await route.GET(summaryRequest(), context())).json();
+    expect(whole.text).toBe(short);
+    expect(whole.textTruncated).toBe(false);
+  });
+
+  it('the summary ETag differs from the full one, and a matching If-None-Match is 304', async () => {
+    state = configure({ owner: { data: { id: BOARD_ID }, error: null }, document: withSha() });
+    const full = await route.GET(new Request('http://localhost'), context());
+    const summary = await route.GET(summaryRequest(), context());
+
+    const fullEtag = full.headers.get('etag');
+    const summaryEtag = summary.headers.get('etag');
+    expect(fullEtag).not.toBeNull();
+    expect(summaryEtag).not.toBeNull();
+    expect(summaryEtag).not.toBe(fullEtag);
+    // The full ETag must NOT satisfy a summary request, or a browser would be
+    // handed the wrong representation on a 304.
+    expect((await route.GET(summaryRequest(fullEtag!), context())).status).toBe(200);
+    expect((await route.GET(summaryRequest(summaryEtag!), context())).status).toBe(304);
+  });
+
+  it('WITHOUT ?view=summary the full shape is unchanged', async () => {
+    state = configure({ owner: { data: { id: BOARD_ID }, error: null }, document: withSha() });
+    const payload = await (await route.GET(new Request('http://localhost'), context())).json();
+    expect(payload.pages[0]).toHaveProperty('text');
+    expect(payload).not.toHaveProperty('snippet');
+    expect(payload).not.toHaveProperty('textTruncated');
+  });
+
+  it('refuses a non-member in summary mode exactly as in full mode', async () => {
+    state = configure({ document: withSha(), member: { data: false, error: null } });
+    expect((await route.GET(summaryRequest(), context())).status).toBe(403);
   });
 });
