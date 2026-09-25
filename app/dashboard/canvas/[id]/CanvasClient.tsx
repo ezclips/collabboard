@@ -114,6 +114,7 @@ import {
   resolveCropResetSource,
 } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
+import { storeEditedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
   KNOWLEDGE_SOURCE_CLIP_COLOR_HINT,
@@ -10768,9 +10769,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                        * Metadata is spread, never rebuilt, so unrelated keys and
                        * `source` (PDF-area provenance) survive untouched.
                        */
+                      // PATCH-182: move the finished picture out of the post
+                      // and into Storage first. A PDF-area post goes to the
+                      // private route; an ordinary post to padlet-files. If
+                      // that fails the original data URL is kept, so the save
+                      // behaves exactly as it did before.
+                      const drawn = await storeEditedImage({
+                        boardId: drawingPadlet.board_id,
+                        padletId: drawingPadlet.id,
+                        metadata: drawingPadlet.metadata,
+                        variant: 'drawing',
+                        dataUrl,
+                      });
+                      // The upload can take a while, and authority may have
+                      // been revoked in between, so it is asked again before
+                      // anything is persisted.
+                      if (!canEditBoardContentRef.current) return;
                       const metadata = {
                         ...drawingPadlet.metadata,
-                        drawing: dataUrl,
+                        drawing: drawn.url,
                         drawingPaths: paths,
                         drawingText: textElements,
                       };
@@ -10778,7 +10795,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         mayContinue: canEditBoardContentProbe,
                         padletId: drawingPadlet.id,
                         libraryItemId: (drawingPadlet as { library_item_id?: string | null }).library_item_id ?? null,
-                        imageUrl: dataUrl,
+                        imageUrl: drawn.url,
+                        // A PDF-area post stores its picture as a private
+                        // file; that board-scoped URL must not become the
+                        // Library object's picture (it dies with the card), so
+                        // the Library keeps the original data URL. Every other
+                        // post simply gets the stored public URL.
+                        libraryImageUrl: drawn.stored === 'private-file' ? dataUrl : drawn.url,
                         metadata,
                         title: drawingPadlet.title,
                         width: drawingPadlet.width,
@@ -10876,9 +10899,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                        * source; a later crop preserves it unchanged.
                        */
                       const originalImageUrl = deriveCropOriginalImageUrl(cropPadlet.metadata);
+                      // PATCH-182: the cropped picture is moved out of the post
+                      // and into Storage first -- the private route for a
+                      // PDF-area post, padlet-files otherwise. On any failure
+                      // the original data URL is kept.
+                      const cropped = await storeEditedImage({
+                        boardId: cropPadlet.board_id,
+                        padletId: cropPadlet.id,
+                        metadata: cropPadlet.metadata,
+                        variant: 'base',
+                        dataUrl: croppedDataUrl,
+                      });
+                      // The upload can take a while; ask again before writing.
+                      if (!canEditBoardContentRef.current) return;
                       const metadata = {
                         ...cropPadlet.metadata,
-                        imageUrl: croppedDataUrl,
+                        imageUrl: cropped.url,
                         drawing: null,
                         drawingPaths: null,
                         drawingText: null,
@@ -10889,7 +10925,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         padletId: cropPadlet.id,
                         libraryItemId: (cropPadlet as { library_item_id?: string | null }).library_item_id ?? null,
                         syncLibrary: false,
-                        imageUrl: croppedDataUrl,
+                        imageUrl: cropped.url,
                         metadata,
                         title: cropPadlet.title,
                         width: cropPadlet.width,

@@ -290,16 +290,31 @@ function buildOnSave(source: string, deps: Record<string, unknown>) {
 describe('CORRECTION_2: the direct draw and crop callbacks answer to live authority', () => {
   type Recorder = {
     helperCalls: unknown[];
+    stored: unknown[];
     modeSets: string[];
     refreshes: number;
     errors: string[];
   };
 
-  function deps(ref: { current: boolean }, log: Recorder, outcome = 'complete') {
+  function deps(
+    ref: { current: boolean },
+    log: Recorder,
+    outcome = 'complete',
+    onStore: (ref: { current: boolean }) => Promise<{ url: string; stored: string }> = async () => ({
+      url: 'https://stored.test/edit.png',
+      stored: 'public-file',
+    }),
+  ) {
     return {
       canEditBoardContentRef: ref,
       canEditBoardContentProbe: () => ref.current,
       supabase: {},
+      // PATCH-182: the arm now moves the picture to Storage first. Modelled
+      // here so the extracted callback runs with the dependency it really uses.
+      storeEditedImage: async (input: unknown) => {
+        log.stored.push(input);
+        return onStore(ref);
+      },
       persistDurableImageContent: async (_client: unknown, payload: unknown) => {
         log.helperCalls.push(payload);
         return outcome;
@@ -320,14 +335,14 @@ describe('CORRECTION_2: the direct draw and crop callbacks answer to live author
     };
   }
 
-  const recorder = (): Recorder => ({ helperCalls: [], modeSets: [], refreshes: 0, errors: [] });
+  const recorder = (): Recorder => ({ helperCalls: [], stored: [], modeSets: [], refreshes: 0, errors: [] });
 
-  const CASES: ReadonlyArray<readonly [string, string, unknown[]]> = [
-    ['draw-on-image', "'Failed to save drawing:'", [ANNOTATED, [], []]],
-    ['crop-image', "'Failed to save cropped image:'", [ANNOTATED]],
+  const CASES: ReadonlyArray<readonly [string, string, unknown[], 'drawing' | 'base']> = [
+    ['draw-on-image', "'Failed to save drawing:'", [ANNOTATED, [], []], 'drawing'],
+    ['crop-image', "'Failed to save cropped image:'", [ANNOTATED], 'base'],
   ];
 
-  for (const [name, marker, args] of CASES) {
+  for (const [name, marker, args, variant] of CASES) {
     it(`${name}: a callback retained from an authorized render refuses after revocation`, async () => {
       const ref = { current: true };
       const log = recorder();
@@ -337,6 +352,10 @@ describe('CORRECTION_2: the direct draw and crop callbacks answer to live author
       await onSave(...args);
       expect(log.errors, `${name} harness did not fall into the catch`).toEqual([]);
       expect(log.helperCalls, `${name} positive control reaches the helper`).toHaveLength(1);
+      // PATCH-182: the placement adopts the STORED url, and the editor's variant
+      // is what was handed to Storage.
+      expect((log.helperCalls[0] as { imageUrl?: string }).imageUrl).toBe('https://stored.test/edit.png');
+      expect((log.stored[0] as { variant?: string }).variant).toBe(variant);
       expect(log.refreshes, `${name} refreshes once authorized`).toBe(1);
 
       ref.current = false;
@@ -346,6 +365,26 @@ describe('CORRECTION_2: the direct draw and crop callbacks answer to live author
       expect(log.modeSets.length, 'zero further callback state effect')
         .toBe(log.modeSets.length);
       expect(log.refreshes, 'zero further refresh').toBe(1);
+    });
+
+    it(`${name}: authority revoked DURING the store stops before persistence`, async () => {
+      // PATCH-182 §2.5: the upload can take a while, so the arm asks again
+      // before persisting. A revocation that lands mid-store must write nothing.
+      const ref = { current: true };
+      const log = recorder();
+      const onStore = async (liveRef: { current: boolean }) => {
+        liveRef.current = false;
+        return { url: 'https://stored.test/edit.png', stored: 'public-file' };
+      };
+      const onSave = buildOnSave(extractOnSave(marker), deps(ref, log, 'complete', onStore));
+
+      await onSave(...args);
+
+      expect(log.errors, `${name} harness did not fall into the catch`).toEqual([]);
+      expect(log.stored, 'the store was attempted').toHaveLength(1);
+      expect(log.helperCalls, 'zero persist after authority was revoked mid-store').toHaveLength(0);
+      expect(log.modeSets, 'zero editor state change').toEqual([]);
+      expect(log.refreshes, 'zero refresh for a write that never happened').toBe(0);
     });
 
     it(`${name}: a denied helper result produces no state change and no refresh`, async () => {

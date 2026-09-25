@@ -46,6 +46,15 @@ export interface DurableImageContentInput {
   /** The authoritative saved representation -- what both surfaces render. */
   readonly imageUrl: string;
   /**
+   * PATCH-182. What the linked Library row should show, when that must differ
+   * from the placement's own `imageUrl`. A PDF-area post's board-scoped private
+   * URL dies with the card and is not reachable by the Library's owner-scoped
+   * route, so the Library keeps its existing picture while the placement gets
+   * the stored one. Defaults to `imageUrl` -- unchanged for every caller that
+   * omits it.
+   */
+  readonly libraryImageUrl?: string;
+  /**
    * The post's full metadata AFTER the edit. Passed in whole and stored as
    * given: callers preserve their own unrelated keys, which is what keeps
    * `source` (PDF-area provenance) intact through a drawing save.
@@ -125,6 +134,10 @@ export async function persistDurableImageContent(
   const linkedLibraryItemId = (input.syncLibrary ?? true) ? (input.libraryItemId ?? null) : null;
   if (!linkedLibraryItemId) return 'complete';
 
+  // The placement's own URL is the default; only a caller that must keep a
+  // different durable picture (a PDF-area post) overrides it.
+  const libraryImageUrl = input.libraryImageUrl ?? input.imageUrl;
+
   const durable = await client
     .from('library_items')
     .update({
@@ -134,10 +147,10 @@ export async function persistDurableImageContent(
         type: 'image',
         width: input.width ?? 300,
         height: input.height ?? 200,
-        file_url: input.imageUrl,
+        file_url: libraryImageUrl,
         metadata: input.metadata,
       },
-      thumbnail_url: input.imageUrl,
+      thumbnail_url: libraryImageUrl,
       updated_at: savedAt,
     })
     .eq('id', linkedLibraryItemId);

@@ -520,7 +520,8 @@ describe('the crop arm is wired to the durable authority', () => {
   it('saves through persistDurableImageContent, not a metadata-only command', () => {
     expect(cropArm).toContain('persistDurableImageContent');
     expect(cropArm).toContain('libraryItemId');
-    expect(cropArm).toContain('imageUrl: croppedDataUrl');
+    expect(cropArm).toContain('imageUrl: cropped.url');
+    expect(cropArm).toContain('storeEditedImage');
     expect(cropArm).not.toContain('updatePostMetadataBestEffort');
   });
 

@@ -53,6 +53,56 @@ export function knowledgePdfAreaImageUrl(boardId: string, padletId: string): str
 }
 
 /**
+ * PATCH-182 -- the EDITED variants of an area crop: the flattened Draw-on-top
+ * composite (`drawing`) and the cropped base (`base`).
+ *
+ * PRIVACY STILL APPLIES. An edited area picture is as private as the PDF it
+ * came from, so both variants live in the SAME private bucket beside the
+ * original `{padletId}.webp` and are addressed only by the board route that
+ * re-authorises every request. They are PNG because the editors always produce
+ * PNG; the untouched original crop stays WebP.
+ */
+export type KnowledgePdfAreaImageVariant = 'drawing' | 'base';
+
+function isKnownVariant(value: unknown): value is KnowledgePdfAreaImageVariant {
+  return value === 'drawing' || value === 'base';
+}
+
+/**
+ * `board-derived/{boardId}/pdf-areas/{padletId}.{variant}.png`, or null.
+ *
+ * Derived ENTIRELY from validated ids and a closed variant set -- exactly like
+ * the original path, so nothing user-supplied and no filename reaches it.
+ */
+export function knowledgePdfAreaImageVariantPath(
+  boardId: string,
+  padletId: string,
+  variant: KnowledgePdfAreaImageVariant,
+): string | null {
+  if (typeof boardId !== 'string' || !UUID.test(boardId)) return null;
+  if (typeof padletId !== 'string' || !UUID.test(padletId)) return null;
+  if (!isKnownVariant(variant)) return null;
+  return `board-derived/${boardId}/pdf-areas/${padletId}.${variant}.png`;
+}
+
+/**
+ * The edited variant's card address. `v` only makes a new save a new `src`;
+ * the server ignores it. Same-origin and relative, for the same reason the
+ * original's address is.
+ */
+export function knowledgePdfAreaImageVariantUrl(
+  boardId: string,
+  padletId: string,
+  variant: KnowledgePdfAreaImageVariant,
+  version: number,
+): string | null {
+  if (typeof boardId !== 'string' || !UUID.test(boardId)) return null;
+  if (typeof padletId !== 'string' || !UUID.test(padletId)) return null;
+  if (!isKnownVariant(variant)) return null;
+  return `/api/boards/${boardId}/padlets/${padletId}/image?variant=${variant}&v=${version}`;
+}
+
+/**
  * The DURABLE object's address, for the surfaces that outlive a placement.
  *
  * A Library Image survives deletion of the card it was cut from, but the board

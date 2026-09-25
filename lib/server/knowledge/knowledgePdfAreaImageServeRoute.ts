@@ -3,8 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   KNOWLEDGE_PDF_AREA_IMAGE_CONTENT_TYPE,
   knowledgePdfAreaImagePath,
+  knowledgePdfAreaImageVariantPath,
   parseKnowledgePdfAreaProvenance,
   type KnowledgePdfAreaProvenance,
+  type KnowledgePdfAreaImageVariant,
 } from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
 import { knowledgePdfAreaProvenanceMatches } from '../../domain/knowledge/knowledgePdfAreaLibraryPlacement';
 import { createKnowledgePdfAreaDurableReuseLookup } from './knowledgePdfAreaLibraryReuseRoute';
@@ -96,6 +98,11 @@ async function attempt<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T } 
   }
 }
 
+/** PATCH-182. Only the two edited variants; anything else is not addressable. */
+function parseVariant(value: string | null): KnowledgePdfAreaImageVariant | null {
+  return value === 'drawing' || value === 'base' ? value : null;
+}
+
 /**
  * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE -- the durable object a REUSED placement
  * is entitled to, or nothing.
@@ -176,7 +183,7 @@ export function createKnowledgePdfAreaImageServeHandler(
   deps: KnowledgePdfAreaImageServeDependencies,
 ) {
   return async function GET(
-    _request: Request,
+    request: Request,
     context: KnowledgePdfAreaImageServeContext,
   ): Promise<NextResponse> {
     const sessionAttempt = await attempt(() => deps.getAuthenticatedSession());
@@ -185,6 +192,12 @@ export function createKnowledgePdfAreaImageServeHandler(
     if (!session) return unauthorized();
 
     const { id: boardId, padletId } = await context.params;
+
+    // PATCH-182. The query string is read, never trusted: only a known variant
+    // selects the edited-object branch below. Everything else -- including an
+    // unknown value -- falls through to the byte-for-byte original behaviour
+    // when absent, and is refused when present.
+    const variantParam = new URL(request.url).searchParams.get('variant');
 
     const allowedAttempt = await attempt(() => session.canReadBoard(boardId));
     if (!allowedAttempt.ok) return unavailable();
@@ -200,6 +213,38 @@ export function createKnowledgePdfAreaImageServeHandler(
     // Without it this route would serve any object named after any padlet id.
     const placementProvenance = parseKnowledgePdfAreaProvenance(padlet.metadata);
     if (placementProvenance === null) return notFound();
+
+    // PATCH-182. An EDITED variant -- the Draw-on-top composite or the cropped
+    // base -- is a separate private object beside the original crop. It is
+    // served ONLY when a known variant is asked for, and it has NO durable
+    // fallback: a reused placement's edited variant is not a durable object.
+    if (variantParam !== null) {
+      const variant = parseVariant(variantParam);
+      if (variant === null) return notFound();
+      const variantPath = knowledgePdfAreaImageVariantPath(boardId, padletId, variant);
+      if (variantPath === null) return notFound();
+      const variantAttempt = await attempt(() => session.downloadAreaImage(variantPath));
+      if (!variantAttempt.ok) return unavailable();
+      const variantDownload = variantAttempt.value;
+      if (variantDownload.kind === 'missing') return notFound();
+      if (variantDownload.kind === 'unavailable') return unavailable();
+      const variantBytes = variantDownload.bytes;
+      return new NextResponse(
+        variantBytes.buffer.slice(
+          variantBytes.byteOffset,
+          variantBytes.byteOffset + variantBytes.byteLength,
+        ) as ArrayBuffer,
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/png',
+            // `private` keeps it out of shared caches; `no-store` means a
+            // revoked collaborator's browser has nothing left to re-display.
+            'Cache-Control': 'private, no-store',
+          },
+        },
+      );
+    }
 
     // Re-derived, never read from stored metadata: a stored path would be a
     // client-writable field pointed at someone else's private object.

@@ -113,6 +113,42 @@ describe('persistDurableImageContent', () => {
     expect(placement.values.updated_at).toBe(durable.values.updated_at);
   });
 
+  it('2b. PATCH-182: libraryImageUrl reaches the Library row while the placement keeps imageUrl', async () => {
+    const { client, writes } = fakeClient();
+    const PLACEMENT_URL = '/api/boards/board-1/padlets/post-1/image?variant=drawing&v=1';
+    await persistDurableImageContent(client, {
+      mayContinue: () => true,
+      padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: PLACEMENT_URL,
+      libraryImageUrl: COMPOSITE,
+      metadata: metadataAfterDraw(pdfAreaMetadata()),
+      title: 'Slide', width: 320, height: 144,
+    });
+
+    const [placement, durable] = writes;
+    // The placement gets the stored private URL...
+    expect(placement.values.file_url).toBe(PLACEMENT_URL);
+    // ...while the durable Library object keeps the original data URL.
+    const content = durable.values.content as Record<string, unknown>;
+    expect(content.file_url).toBe(COMPOSITE);
+    expect(durable.values.thumbnail_url).toBe(COMPOSITE);
+  });
+
+  it('2c. PATCH-182: when libraryImageUrl is omitted, both get imageUrl', async () => {
+    const { client, writes } = fakeClient();
+    await persistDurableImageContent(client, {
+      mayContinue: () => true,
+      padletId: 'post-1', libraryItemId: 'lib-1', imageUrl: COMPOSITE,
+      metadata: metadataAfterDraw(pdfAreaMetadata()),
+      title: 'Slide', width: 320, height: 144,
+    });
+
+    const [placement, durable] = writes;
+    const content = durable.values.content as Record<string, unknown>;
+    expect(placement.values.file_url).toBe(COMPOSITE);
+    expect(content.file_url).toBe(COMPOSITE);
+    expect(durable.values.thumbnail_url).toBe(COMPOSITE);
+  });
+
   it('3. carries PDF-area provenance and unrelated metadata through untouched', async () => {
     const before = pdfAreaMetadata();
     const { client, writes } = fakeClient();
@@ -226,7 +262,9 @@ describe('the Freeform Draw arm is wired to the shared authority', () => {
   it('8. saves through persistDurableImageContent, not a metadata-only write', () => {
     expect(drawArm).toContain('persistDurableImageContent');
     expect(drawArm).toContain('libraryItemId');
-    expect(drawArm).toContain('imageUrl: dataUrl');
+    // PATCH-182: the stored URL is what the placement adopts, not the raw data
+    // URL -- the picture itself no longer lives in the post.
+    expect(drawArm).toContain('imageUrl: drawn.url');
     // The defect: the drawing arm's own metadata-only command.
     expect(drawArm).not.toContain('updatePostMetadataBestEffort');
   });

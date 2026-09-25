@@ -60,6 +60,16 @@ async function run(sess: KnowledgePdfAreaImageServeSession | null, ctx = context
   return handler(request(), ctx);
 }
 
+/** PATCH-182: run an explicit request (the variant branch reads its URL). */
+async function runWithRequest(
+  sess: KnowledgePdfAreaImageServeSession | null,
+  req: Request,
+  ctx = context(),
+) {
+  const handler = createKnowledgePdfAreaImageServeHandler({ getAuthenticatedSession: async () => sess });
+  return handler(req, ctx);
+}
+
 describe('D1-D5: every read is re-authorised, which is what makes revocation real', () => {
   it('D1: unauthenticated is 401', async () => {
     expect((await run(null)).status).toBe(401);
@@ -440,3 +450,82 @@ describe('D28-D31: the entitlement is bound to the board it was granted on', () 
     }
   });
 });
+
+/**
+ * PATCH-182 -- the EDITED-variant branch.
+ *
+ * `?variant=drawing|base` serves the private PNG the editors saved beside the
+ * original crop. It is the same access control as the original: board read,
+ * board-scoped padlet, provenance gate. It has NO durable fallback, and an
+ * unknown variant is refused rather than treated as "no variant".
+ */
+describe('PATCH-182: the edited-variant branch', () => {
+  const VARIANT_PATH = `board-derived/${BOARD_ID}/pdf-areas/${PADLET_ID}.drawing.png`;
+  const VARIANT_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]);
+
+  const requestWithVariant = (variant: string) =>
+    new Request(`http://localhost/api/boards/${BOARD_ID}/padlets/${PADLET_ID}/image?variant=${variant}`);
+
+  it('E1: without a variant, the direct branch is byte-for-byte today\'s behaviour', async () => {
+    const sess = session();
+    const response = await run(sess);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/webp');
+    expect(sess.downloadAreaImage).toHaveBeenCalledWith(OBJECT_PATH);
+    // No variant path was ever asked for.
+    expect(sess.downloadAreaImage).not.toHaveBeenCalledWith(VARIANT_PATH);
+  });
+
+  it('E2: variant=drawing serves the variant object as a private PNG', async () => {
+    const sess = session({
+      downloadAreaImage: vi.fn(async (objectPath: string) => (
+        objectPath === VARIANT_PATH
+          ? { kind: 'ok' as const, bytes: VARIANT_BYTES }
+          : { kind: 'missing' as const }
+      )),
+    });
+    const response = await runWithRequest(sess, requestWithVariant('drawing'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(VARIANT_BYTES);
+    expect(sess.downloadAreaImage).toHaveBeenCalledWith(VARIANT_PATH);
+  });
+
+  it('E3: a missing variant object is 404, and the durable lookup is NOT called', async () => {
+    const sess = session({
+      downloadAreaImage: vi.fn(async () => ({ kind: 'missing' as const })),
+    });
+    expect((await runWithRequest(sess, requestWithVariant('base'))).status).toBe(404);
+    expect(sess.findPlacementMapping).not.toHaveBeenCalled();
+    expect(sess.findMappedLibraryItem).not.toHaveBeenCalled();
+  });
+
+  it('E4: variant=drawing for a non-PDF-area padlet is 404', async () => {
+    const sess = session({ findPadlet: vi.fn(async () => row({ metadata: {} })) });
+    expect((await runWithRequest(sess, requestWithVariant('drawing'))).status).toBe(404);
+    expect(sess.downloadAreaImage).not.toHaveBeenCalled();
+  });
+
+  it('E5: an unknown variant is 404, not treated as no variant', async () => {
+    for (const variant of ['original', 'DRAWING', '', 'base.png', 'drawing.png']) {
+      const sess = session();
+      expect((await runWithRequest(sess, requestWithVariant(variant))).status, variant).toBe(404);
+      expect(sess.downloadAreaImage).not.toHaveBeenCalled();
+    }
+  });
+
+  it('E6: no read access is 403, and the variant is never touched', async () => {
+    const sess = session({ canReadBoard: vi.fn(async () => false) });
+    expect((await runWithRequest(sess, requestWithVariant('drawing'))).status).toBe(403);
+    expect(sess.downloadAreaImage).not.toHaveBeenCalled();
+  });
+
+  it('E7: an unavailable variant store is 503, never an empty image', async () => {
+    const sess = session({
+      downloadAreaImage: vi.fn(async () => ({ kind: 'unavailable' as const })),
+    });
+    expect((await runWithRequest(sess, requestWithVariant('drawing'))).status).toBe(503);
+  });
+});
+
