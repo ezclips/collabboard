@@ -1108,3 +1108,42 @@ describe('removing one document', () => {
     expect(removeButton(container)).not.toBeNull();
   });
 });
+
+// PATCH-186. A failed document shows WHY only when the worker refused it for
+// the plan's page limit; every other failure keeps today's plain status.
+describe('PATCH-186: the plan page-limit refusal on a failed document', () => {
+  const PLAN_MESSAGE =
+    'Page limit: This PDF has 612 pages. The Free plan allows 50 pages per PDF.';
+
+  it('shows the plan message (without the prefix) plus a See plans link', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      documents: [doc({ processingStatus: 'failed', planLimitError: PLAN_MESSAGE })],
+    }));
+    const container = await renderList();
+
+    const notice = container.querySelector('[data-knowledge-document-plan-limit="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(
+      'This PDF has 612 pages. The Free plan allows 50 pages per PDF.',
+    );
+    expect(notice!.textContent).not.toContain('Page limit:');
+    const link = notice!.querySelector('a[href="/dashboard/settings/billing"]');
+    expect(link?.textContent).toContain('See plans');
+  });
+
+  it('shows no plan notice, and no other error text, for any other failure', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      documents: [doc({
+        processingStatus: 'failed',
+        // A server that (wrongly) sent a raw worker error must still not leak it.
+        planLimitError: null,
+        processingError: 'Extraction failed at parser stage',
+      })],
+    }));
+    const container = await renderList();
+
+    expect(container.querySelector('[data-knowledge-document-plan-limit="true"]')).toBeNull();
+    expect(container.textContent).not.toContain('Extraction failed');
+    expect(container.textContent).not.toContain('See plans');
+  });
+});

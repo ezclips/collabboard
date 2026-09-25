@@ -6,6 +6,7 @@ import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
 } from '@/components/collabboard/KnowledgePdfUploader';
+import { PLAN_PAGE_LIMIT_PREFIX } from '@/lib/domain/billing/plans';
 
 const STATUS_LABELS: Record<KnowledgePdfProcessingStatus, string> = {
   uploaded: 'Uploaded',
@@ -39,6 +40,8 @@ interface KnowledgeListEntry {
   pageCount: number | null;
   processingStatus: KnowledgePdfProcessingStatus | null;
   statusLabel: string | null;
+  /** PATCH-186. The plan page-limit refusal, or null. Server-decided. */
+  planLimitError: string | null;
 }
 
 type ListPhase = 'loading' | 'loaded' | 'error';
@@ -77,6 +80,9 @@ function toEntry(value: unknown): KnowledgeListEntry | null {
     statusLabel: isProcessingStatus(record.processingStatus)
       ? STATUS_LABELS[record.processingStatus]
       : null,
+    planLimitError: typeof record.planLimitError === 'string' && record.planLimitError.length > 0
+      ? record.planLimitError
+      : null,
   };
 }
 
@@ -87,6 +93,13 @@ function metadataLine(entry: KnowledgeListEntry): string | null {
   }
   if (entry.statusLabel !== null) parts.push(entry.statusLabel);
   return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/** PATCH-186. The refusal text without its fixed storage prefix. */
+function planLimitText(message: string): string {
+  return message.startsWith(PLAN_PAGE_LIMIT_PREFIX)
+    ? message.slice(PLAN_PAGE_LIMIT_PREFIX.length)
+    : message;
 }
 
 function originalPdfPath(boardId: string, documentId: string) {
@@ -483,6 +496,17 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                   )}
                 {metadata !== null ? (
                   <p className="text-[11px] text-gray-500">{metadata}</p>
+                ) : null}
+                {entry.planLimitError !== null ? (
+                  <p
+                    data-knowledge-document-plan-limit="true"
+                    className="text-[11px] text-red-600"
+                  >
+                    {planLimitText(entry.planLimitError)}{' '}
+                    <a href="/dashboard/settings/billing" className="font-medium underline underline-offset-2">
+                      See plans
+                    </a>
+                  </p>
                 ) : null}
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   {entry.processingStatus === 'ready' ? (

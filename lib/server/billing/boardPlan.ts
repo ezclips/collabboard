@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// Relative imports (not the '@/...' alias) so the isolated Knowledge worker,
+// which bundles this module with esbuild and has no path alias, can reuse it.
 import {
   effectivePlanId,
   PLANS,
   type PlanId,
   type PlanLimits,
-} from "@/lib/domain/billing/plans";
+} from "../../domain/billing/plans";
 
 /**
  * PATCH-185. The plan that applies to a board: the plan of the workspace that

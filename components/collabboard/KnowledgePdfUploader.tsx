@@ -24,6 +24,12 @@ export interface KnowledgePdfSummary {
   fileSizeBytes: number;
   pageCount: number | null;
   processingStatus: KnowledgePdfProcessingStatus;
+  /**
+   * PATCH-186. The plan page-limit refusal, when the worker refused the PDF for
+   * too many pages. Null for every other error. The card shows it and links to
+   * the plans.
+   */
+  planLimitError?: string | null;
   createdAt: string;
   updatedAt: string;
 }

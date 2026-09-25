@@ -27,6 +27,7 @@ function item(
     fileSizeBytes: 1234,
     pageCount,
     processingStatus,
+    planLimitError: null,
     createdAt: '2026-08-21T00:00:00.000Z',
     updatedAt: '2026-08-21T00:01:00.000Z',
   };
@@ -97,10 +98,36 @@ describe('P6B Knowledge PDF board list/status HTTP boundary', () => {
         'fileSizeBytes',
         'pageCount',
         'processingStatus',
+        'planLimitError',
         'createdAt',
         'updatedAt',
       ].sort(),
     );
+  });
+
+  it('PATCH-186: sends planLimitError only when the stored error is the plan refusal', async () => {
+    const planMessage =
+      'Page limit: This PDF has 612 pages. The Free plan allows 50 pages per PDF.';
+    const base = item('10000000-0000-4000-8000-000000000005', 'failed', null);
+
+    const listDocumentsByBoardId = vi.fn(async () => ({
+      ok: true as const,
+      value: [
+        { ...base, id: '20000000-0000-4000-8000-000000000001' as typeof base.id, planLimitError: planMessage },
+        { ...base, id: '20000000-0000-4000-8000-000000000002' as typeof base.id, planLimitError: null },
+      ],
+    }));
+    const get = createKnowledgeListGetHandler({
+      getAuthenticatedSession: async () => ({ canViewBoard: async () => true }),
+      createRepository: () => ({ listDocumentsByBoardId }),
+    });
+
+    const response = await get(getRequest(), context());
+    const payload = await response.json();
+
+    expect(payload.documents[0].planLimitError).toBe(planMessage);
+    // The non-plan failure's text never travels: the mapper sent null.
+    expect(payload.documents[1].planLimitError).toBeNull();
   });
 
   it('maps a board-permission lookup failure to 503 rather than granting access', async () => {

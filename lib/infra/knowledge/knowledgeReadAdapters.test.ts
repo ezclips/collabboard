@@ -7,7 +7,10 @@ import {
 
 const BOARD_ID = asBoardId('11111111-1111-4111-8111-111111111111');
 
-function readClient(options?: { error?: { message: string } | null }) {
+function readClient(options?: {
+  error?: { message: string } | null;
+  processingError?: string | null;
+}) {
   const seen: {
     table?: string;
     columns?: string;
@@ -41,6 +44,7 @@ function readClient(options?: { error?: { message: string } | null }) {
                             file_size_bytes: 4567,
                             page_count: 12,
                             processing_status: 'ready',
+                            processing_error: options?.processingError ?? null,
                             created_at: '2026-08-21T00:00:00.000Z',
                             updated_at: '2026-08-21T00:02:00.000Z',
                           },
@@ -72,10 +76,12 @@ describe('P6B SupabaseKnowledgeDocumentReadRepository', () => {
     expect(seen.order).toEqual({ column: 'created_at', ascending: false });
 
     expect(seen.columns).toContain('processing_status');
+    // PATCH-186: processing_error IS selected now, but only to derive the
+    // plan page-limit refusal. Every OTHER worker internal stays off the wire.
+    expect(seen.columns).toContain('processing_error');
     for (const forbidden of [
       'storage_path',
       'content_sha256',
-      'processing_error',
       'parser_name',
       'parser_version',
       'parser_options_hash',
@@ -92,10 +98,26 @@ describe('P6B SupabaseKnowledgeDocumentReadRepository', () => {
         fileSizeBytes: 4567,
         pageCount: 12,
         processingStatus: 'ready',
+        planLimitError: null,
         createdAt: '2026-08-21T00:00:00.000Z',
         updatedAt: '2026-08-21T00:02:00.000Z',
       },
     ]);
+  });
+
+  it('PATCH-186: keeps a plan page-limit refusal, and nulls every other processing error', async () => {
+    const planMessage =
+      'Page limit: This PDF has 612 pages. The Free plan allows 50 pages per PDF.';
+
+    const plan = await new SupabaseKnowledgeDocumentReadRepository(
+      readClient({ processingError: planMessage }).client,
+    ).listDocumentsByBoardId(BOARD_ID);
+    expect(plan.ok && plan.value[0].planLimitError).toBe(planMessage);
+
+    const other = await new SupabaseKnowledgeDocumentReadRepository(
+      readClient({ processingError: 'Extraction failed at parser stage: /tmp/secret' }).client,
+    ).listDocumentsByBoardId(BOARD_ID);
+    expect(other.ok && other.value[0].planLimitError).toBeNull();
   });
 
   it('maps Supabase list failure to unavailable', async () => {

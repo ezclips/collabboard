@@ -5,13 +5,17 @@ import {
   PLANS,
   PLAN_CURRENCY,
   PLAN_ORDER,
+  PLAN_PAGE_LIMIT_PREFIX,
   effectivePlanId,
   formatPlanPrice,
   isPlanId,
+  isPlanPageLimitError,
   planIncludes,
   planLimits,
+  planPageLimitError,
   statusGrantsPlan,
 } from './plans';
+import { sanitizeKnowledgeProcessingError } from '../knowledge/knowledgeExtraction';
 
 // Deliberately independent of the module's own MB constant: if the source's
 // unit were wrong, this assertion would still catch it.
@@ -157,6 +161,31 @@ describe('planLimits', () => {
     expect(planLimits('free')).toBe(PLANS.free.limits);
     expect(planLimits('pro')).toBe(PLANS.pro.limits);
     expect(planLimits('premium')).toBe(PLANS.premium.limits);
+  });
+});
+
+describe('planPageLimitError', () => {
+  it('is the exact stored refusal text', () => {
+    expect(planPageLimitError(612, 50, 'Free')).toBe(
+      'Page limit: This PDF has 612 pages. The Free plan allows 50 pages per PDF.',
+    );
+    expect(PLAN_PAGE_LIMIT_PREFIX).toBe('Page limit: ');
+  });
+
+  it('is recognised by isPlanPageLimitError, and nothing else is', () => {
+    expect(isPlanPageLimitError(planPageLimitError(612, 50, 'Free'))).toBe(true);
+    expect(isPlanPageLimitError('Extraction failed')).toBe(false);
+    expect(isPlanPageLimitError(null)).toBe(false);
+    expect(isPlanPageLimitError(undefined)).toBe(false);
+    expect(isPlanPageLimitError(42)).toBe(false);
+  });
+
+  it('passes sanitizeKnowledgeProcessingError unchanged', () => {
+    const message = planPageLimitError(612, 50, 'Free');
+    expect(sanitizeKnowledgeProcessingError(message)).toBe(message);
+    // No URL, token or secret construct for the sanitizer to touch.
+    expect(message).not.toMatch(/[a-z][a-z0-9+.-]*:\/\//i);
+    expect(message.length).toBeLessThanOrEqual(500);
   });
 });
 

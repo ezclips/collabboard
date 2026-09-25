@@ -25,6 +25,7 @@ import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
 } from '@/components/collabboard/KnowledgePdfUploader';
+import { PLAN_PAGE_LIMIT_PREFIX } from '@/lib/domain/billing/plans';
 /**
  * PDF-C1 Text -- the reader's OWN exact-span contract, imported rather than
  * re-derived. The card captures a selection with it and hands the resulting
@@ -469,8 +470,17 @@ export default function KnowledgePdfCanvasSurface({
   const openDocument = useKnowledgePdfOpen();
   const reportStatus = useKnowledgePdfStatusReporter();
   const [status, setStatus] = useState<KnowledgePdfProcessingStatus>(processingStatus);
+  /**
+   * PATCH-186. The plan page-limit refusal, once the status poll has seen it.
+   * Null for every other failure, so nothing else is ever shown.
+   */
+  const [planLimitError, setPlanLimitError] = useState<string | null>(null);
 
   useEffect(() => setStatus(processingStatus), [processingStatus]);
+
+  /** The refusal, without its fixed storage prefix. */
+  const planLimitText = (message: string) =>
+    message.startsWith(PLAN_PAGE_LIMIT_PREFIX) ? message.slice(PLAN_PAGE_LIMIT_PREFIX.length) : message;
 
   /**
    * A board reopened while a document was still processing has a stale
@@ -486,6 +496,8 @@ export default function KnowledgePdfCanvasSurface({
         const found = documents.find((item) => item.id === documentId);
         if (cancelled || !found || !TERMINAL(found.processingStatus)) return;
         setStatus(found.processingStatus);
+        // PATCH-186. Only the plan page-limit refusal, decided server-side.
+        setPlanLimitError(typeof found.planLimitError === 'string' ? found.planLimitError : null);
         // Exactly once per resolution: this runs only while `status` is
         // non-terminal, and setStatus re-runs the effect straight into the
         // terminal early-return above, so the interval is gone before a second
@@ -947,7 +959,19 @@ export default function KnowledgePdfCanvasSurface({
             onMouseUp={handleSelectionSettled}
             onKeyUp={handleSelectionSettled}
           >
-            {!isReady ? (
+            {!isReady && planLimitError ? (
+              /* PATCH-186. The plan page-limit refusal: the reason, plus a link
+                 to the plans. Every other failure keeps the generic label. */
+              <div
+                data-knowledge-pdf-plan-limit="true"
+                className="px-1 py-2 text-[10px] text-red-600"
+              >
+                {planLimitText(planLimitError)}{' '}
+                <a href="/dashboard/settings/billing" className="font-medium underline">
+                  See plans
+                </a>
+              </div>
+            ) : !isReady ? (
               <div className="px-1 py-2 text-[10px] text-gray-500">{STATUS_LABEL[status]}</div>
             ) : documentLoading ? (
               /* The one loading indicator, in the body where it is visible

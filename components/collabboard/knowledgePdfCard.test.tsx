@@ -2079,3 +2079,96 @@ describe('Stage 1. a text source previews its text', () => {
     expect(host.querySelector('[data-knowledge-pdf-text-source="true"]')).toBeNull();
   });
 });
+
+// ============================================================================
+// PATCH-186: the plan page-limit refusal shown on a failed card
+// ============================================================================
+describe('PATCH-186 plan page-limit refusal', () => {
+  const PLAN_MESSAGE =
+    'Page limit: This PDF has 612 pages. The Free plan allows 50 pages per PDF.';
+
+  /**
+   * A card mounted non-terminal, whose status poll then reports terminal
+   * `failed`. A failed placement arrives the same way: the poll is what moves
+   * the card to a terminal state, so mounting it already `failed` would
+   * (correctly) never poll and never learn WHY it failed.
+   */
+  async function failedCardWith(planLimitError: string | null) {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (isPagesUrl(url)) {
+        return new Response(JSON.stringify(pagePayload(1)), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      // The board document list the card polls for terminal status.
+      return new Response(
+        JSON.stringify({
+          documents: [{
+            id: DOC_ID,
+            boardId: BOARD_ID,
+            originalFilename: 'lesson.pdf',
+            mimeType: 'application/pdf',
+            fileSizeBytes: 12,
+            pageCount: null,
+            processingStatus: 'failed',
+            planLimitError,
+            createdAt: '2026-08-21T00:00:00.000Z',
+            updatedAt: '2026-08-21T00:00:02.000Z',
+          }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <KnowledgePdfOpenProvider onOpenDocument={vi.fn()}>
+          <KnowledgePdfCanvasSurface
+            boardId={BOARD_ID}
+            documentId={DOC_ID}
+            originalFilename="lesson.pdf"
+            processingStatus="uploaded"
+          />
+        </KnowledgePdfOpenProvider>,
+      );
+    });
+    // The status poll is a 4s interval; drive one tick, then let its fetch
+    // resolve and React commit the terminal state it reported.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+      await Promise.resolve();
+    });
+    mounted.push({ root, host });
+    return host;
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('shows the plan message without the prefix, plus a See plans link', async () => {
+    const host = await failedCardWith(PLAN_MESSAGE);
+
+    const notice = host.querySelector('[data-knowledge-pdf-plan-limit="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(
+      'This PDF has 612 pages. The Free plan allows 50 pages per PDF.',
+    );
+    expect(notice!.textContent).not.toContain('Page limit:');
+    expect(notice!.querySelector('a[href="/dashboard/settings/billing"]')?.textContent)
+      .toContain('See plans');
+  });
+
+  it('shows the generic failed state and no link when there is no plan refusal', async () => {
+    const host = await failedCardWith(null);
+
+    expect(host.querySelector('[data-knowledge-pdf-plan-limit="true"]')).toBeNull();
+    expect(host.textContent).toContain('Processing failed');
+    expect(host.textContent).not.toContain('See plans');
+  });
+});

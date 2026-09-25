@@ -18,6 +18,8 @@ import type {
   KnowledgeExtractionRepository,
   KnowledgePageGeometryInput,
 } from '../../lib/domain/knowledge/knowledgeExtraction';
+import { PLANS, planPageLimitError } from '../../lib/domain/billing/plans';
+import { resolveBoardPlan } from '../../lib/server/billing/boardPlan';
 import { DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS } from '../../lib/domain/knowledge/knowledgeExtraction';
 import { normalizeOpenDataLoaderPdf } from '../../lib/infra/knowledge/openDataLoaderPdfNormalizer';
 import { buildKnowledgeChunks } from '../../lib/domain/knowledge/knowledgeChunking';
@@ -98,6 +100,13 @@ export interface KnowledgePdfWorkerDependencies {
   readonly parserOptionsHash: string;
   readonly parserName: string;
   readonly parserVersion: string;
+  /**
+   * PATCH-186. The pages-per-PDF limit of the plan of the workspace that OWNS
+   * the board, and that plan's name for the refusal message. A throw means the
+   * plan cannot be read, and the pipeline fails closed (never processes as if
+   * unlimited).
+   */
+  readonly pagesLimitForBoard: (boardId: string) => Promise<{ limit: number; planName: string }>;
   readonly leaseTtlSeconds?: number;
   readonly heartbeatIntervalMs?: number;
   readonly maxParserJsonBytes?: number;
@@ -598,6 +607,28 @@ export async function processKnowledgePdfDocument(
     stage = 'geometry';
     const geometry = await deps.geometry(originalBytes);
     assertLease();
+
+    /*
+      PATCH-186. The page limit, checked right after `geometry` measured the
+      pages and BEFORE the expensive parser runs. Each page is extracted, drawn
+      and indexed, so an over-limit PDF is refused before any of that is spent.
+
+      RETRY FINDING: `failed` documents are not listed by
+      list_knowledge_processing_candidates, so the dispatcher never rediscovers
+      one and a page-limit failure is not retried automatically. The claim RPC
+      DOES accept a `failed` row and has no attempt cap, so a MANUAL re-run
+      re-claims it -- and failing again at the page limit is then the correct
+      outcome. Deliberately no SQL or claim change here.
+
+      Fail closed: a plan that cannot be read raises and goes through the
+      existing failure path; the document is never processed as if unlimited.
+    */
+    const pageCount = geometry.length;
+    const { limit, planName } = await deps.pagesLimitForBoard(job.boardId);
+    if (pageCount > limit) {
+      throw new KnowledgePdfWorkerError('page-limit', planPageLimitError(pageCount, limit, planName));
+    }
+
     tempDirectory = await fs.mkdtemp(path.join(deps.tempRoot ?? os.tmpdir(), 'collabboard-knowledge-pdf-'));
     const inputPath = path.join(tempDirectory, 'source.pdf');
     const outputDir = path.join(tempDirectory, 'output');
@@ -843,6 +874,13 @@ export function createKnowledgePdfWorkerFromEnvironment(
     parserName: OPENDATALOADER_PARSER_NAME,
     parserVersion: OPENDATALOADER_PDF_VERSION,
     parserOptionsHash: openDataLoaderOptionsHash(OPENDATALOADER_PARSER_CONFIGURATION),
+    // PATCH-186. The board owner's plan, read with the SAME admin client the
+    // rest of the worker uses. `resolveBoardPlan` throws on a read error, which
+    // the pipeline treats as fail-closed.
+    pagesLimitForBoard: async (boardId) => {
+      const plan = await resolveBoardPlan(client as never, boardId);
+      return { limit: plan.limits.pagesPerPdf, planName: PLANS[plan.planId].name };
+    },
     leaseTtlSeconds,
     heartbeatIntervalMs,
   };

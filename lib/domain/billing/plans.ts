@@ -107,6 +107,21 @@ export function isPlanId(value: unknown): value is PlanId {
   return value === 'free' || value === 'pro' || value === 'premium';
 }
 
+/**
+ * PATCH-186. The stored, user-facing page-limit refusal. A fixed shape so the
+ * UI can recognise it and never show any other processing error.
+ */
+export const PLAN_PAGE_LIMIT_PREFIX = 'Page limit: ';
+
+export function planPageLimitError(pageCount: number, limit: number, planName: string): string {
+  return `${PLAN_PAGE_LIMIT_PREFIX}This PDF has ${pageCount} pages. The ${planName} plan allows ${limit} pages per PDF.`;
+}
+
+/** True only for the page-limit refusal, by its fixed prefix. */
+export function isPlanPageLimitError(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith(PLAN_PAGE_LIMIT_PREFIX);
+}
+
 /** A subscription status that grants its plan: active, trialing, past_due. Anything else → Free. */
 export function statusGrantsPlan(status: string | null | undefined): boolean {
   return status === 'active' || status === 'trialing' || status === 'past_due';

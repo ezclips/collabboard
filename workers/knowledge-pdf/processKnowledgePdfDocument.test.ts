@@ -175,10 +175,21 @@ function deps(
     parserOptionsHash: 'options-hash',
     parserName: 'opendataloader-pdf',
     parserVersion: '2.5.0',
+    // PATCH-186. Default: a Pro-sized limit, so existing cases are unaffected.
+    pagesLimitForBoard: async () => ({ limit: 500, planName: 'Pro' }),
     tempRoot: root,
     rasterizePages,
   };
 }
+
+/** N synthetic pages of geometry, for the page-limit cases. */
+const geometryOf = (pageCount: number): KnowledgePdfWorkerDependencies['geometry'] =>
+  async () => Array.from({ length: pageCount }, (_, index) => ({
+    pageNumber: index + 1,
+    widthPoints: 612,
+    heightPoints: 792,
+    rotation: 0,
+  }));
 
 describe('processKnowledgePdfDocument', () => {
   it('runs one document end-to-end, preserves raw JSON, and cleans its temp directory', async () => {
@@ -826,4 +837,117 @@ describe('processKnowledgePdfDocument -- optional page derivatives', () => {
     expect(repository.status).toBe('ready');
   });
 
+});
+
+describe('PATCH-186: the page limit per PDF', () => {
+  it('51 pages on a Free board (limit 50) fails with EXACTLY the plan message, and the parser never runs', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    let parserCalled = false;
+    const parser: KnowledgePdfParser = {
+      run: async () => {
+        parserCalled = true;
+        throw new Error('must not run');
+      },
+    };
+
+    const result = await processKnowledgePdfDocument(
+      {
+        ...deps(repository, storage, parser),
+        geometry: geometryOf(51),
+        pagesLimitForBoard: async () => ({ limit: 50, planName: 'Free' }),
+      },
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toBe(
+      'Page limit: This PDF has 51 pages. The Free plan allows 50 pages per PDF.',
+    );
+    expect(parserCalled).toBe(false);
+    expect(repository.failures).toEqual([result.error]);
+    expect(repository.status).toBe('failed');
+  });
+
+  it('a page count AT the limit proceeds and the parser runs', async () => {
+    // The fixture is a 2-page document, so limiting to exactly 2 pages proves
+    // the boundary is `>` and not `>=` -- and that the parser then runs.
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    const result = await processKnowledgePdfDocument(
+      {
+        ...deps(repository, storage),
+        pagesLimitForBoard: async () => ({ limit: 2, planName: 'Free' }),
+      },
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('ready');
+    expect(repository.completions).toHaveLength(1);
+  });
+
+  it('a page count well under a paid limit proceeds', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    const result = await processKnowledgePdfDocument(
+      {
+        ...deps(repository, storage),
+        pagesLimitForBoard: async () => ({ limit: 500, planName: 'Pro' }),
+      },
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('ready');
+  });
+
+  it('a plan that cannot be read fails the attempt, and the parser never runs', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    let parserCalled = false;
+    const parser: KnowledgePdfParser = {
+      run: async () => {
+        parserCalled = true;
+        throw new Error('must not run');
+      },
+    };
+
+    const result = await processKnowledgePdfDocument(
+      {
+        ...deps(repository, storage, parser),
+        geometry: geometryOf(2),
+        pagesLimitForBoard: async () => {
+          throw new Error('plan read failed');
+        },
+      },
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.status).not.toBe('ready');
+    expect(parserCalled).toBe(false);
+    expect(repository.status).toBe('failed');
+  });
+
+  it('measures the page geometry BEFORE consulting the plan limit', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    const order: string[] = [];
+
+    await processKnowledgePdfDocument(
+      {
+        ...deps(repository, storage),
+        geometry: async () => {
+          order.push('geometry');
+          return [{ pageNumber: 1, widthPoints: 612, heightPoints: 792, rotation: 0 }];
+        },
+        pagesLimitForBoard: async () => {
+          order.push('plan');
+          return { limit: 50, planName: 'Free' };
+        },
+      },
+      DOCUMENT,
+    );
+
+    expect(order).toEqual(['geometry', 'plan']);
+  });
 });

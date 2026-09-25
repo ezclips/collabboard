@@ -2,6 +2,7 @@ import type { DomainError } from '../../domain/core/errors';
 import { domainError } from '../../domain/core/errors';
 import type { BoardId, KnowledgeDocumentId } from '../../domain/core/ids';
 import { err, ok, type Result } from '../../domain/core/result';
+import { isPlanPageLimitError } from '../../domain/billing/plans';
 import type { KnowledgeDocumentProcessingStatus } from '../../domain/knowledge/knowledgePersistence';
 
 interface SupabaseErrorLike {
@@ -15,6 +16,7 @@ interface KnowledgeDocumentListRow {
   readonly file_size_bytes: number;
   readonly page_count: number | null;
   readonly processing_status: string;
+  readonly processing_error: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -26,6 +28,12 @@ export interface KnowledgeDocumentListItem {
   readonly fileSizeBytes: number;
   readonly pageCount: number | null;
   readonly processingStatus: KnowledgeDocumentProcessingStatus;
+  /**
+   * PATCH-186. The plan page-limit refusal, and NOTHING else. Decided here on
+   * the SERVER: any other `processing_error` becomes null, so no other worker
+   * error text newly leaves the server. The UI shows this and links to plans.
+   */
+  readonly planLimitError: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -57,7 +65,7 @@ export interface KnowledgeDocumentReadRepository {
 }
 
 const SAFE_LIST_COLUMNS =
-  'id, board_id, original_filename, file_size_bytes, page_count, processing_status, created_at, updated_at';
+  'id, board_id, original_filename, file_size_bytes, page_count, processing_status, processing_error, created_at, updated_at';
 
 function mapListRow(row: KnowledgeDocumentListRow): KnowledgeDocumentListItem {
   return {
@@ -67,6 +75,9 @@ function mapListRow(row: KnowledgeDocumentListRow): KnowledgeDocumentListItem {
     fileSizeBytes: Number(row.file_size_bytes),
     pageCount: row.page_count === null ? null : Number(row.page_count),
     processingStatus: row.processing_status as KnowledgeDocumentProcessingStatus,
+    // The ONLY worker error text ever sent to a client, and only when it is the
+    // plan page-limit refusal. Everything else is null.
+    planLimitError: isPlanPageLimitError(row.processing_error) ? row.processing_error : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

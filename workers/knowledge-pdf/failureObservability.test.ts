@@ -317,6 +317,8 @@ function workerDeps(
     parserOptionsHash: 'options-hash',
     parserName: 'opendataloader-pdf',
     parserVersion: '2.5.0',
+    // PATCH-186. A Pro-sized limit, so these observability cases are unchanged.
+    pagesLimitForBoard: async () => ({ limit: 500, planName: 'Pro' }),
     rasterizePages: async () => ({ pages: [], skipped: [] }),
   };
 }
