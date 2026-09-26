@@ -38,7 +38,7 @@ Before marking code complete:
 
 ## Security Review Triggers
 
-**STOP and use security-reviewer agent when:**
+**Review these with extra care:**
 
 - Authentication or authorization code
 - User input handling
@@ -57,19 +57,6 @@ Before marking code complete:
 | MEDIUM | Maintainability concern | **INFO** - Consider fixing |
 | LOW | Style or minor suggestion | **NOTE** - Optional |
 
-## Agent Usage
-
-Use these agents for code review:
-
-| Agent | Purpose |
-|-------|---------|
-| **code-reviewer** | General code quality, patterns, best practices |
-| **security-reviewer** | Security vulnerabilities, OWASP Top 10 |
-| **typescript-reviewer** | TypeScript/JavaScript specific issues |
-| **python-reviewer** | Python specific issues |
-| **go-reviewer** | Go specific issues |
-| **rust-reviewer** | Rust specific issues |
-
 ## Review Workflow
 
 ```
@@ -78,7 +65,6 @@ Use these agents for code review:
 3. Review code quality checklist
 4. Run relevant tests
 5. Verify coverage >= 80%
-6. Use appropriate agent for detailed review
 ```
 
 ## Common Issues to Catch
@@ -121,4 +107,3 @@ This rule works with:
 - [testing.md](testing.md) - Test coverage requirements
 - [security.md](security.md) - Security checklist
 - [git-workflow.md](git-workflow.md) - Commit standards
-- [agents.md](agents.md) - Agent delegation

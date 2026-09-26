@@ -22,8 +22,7 @@ Before ANY commit:
 ## Security Response Protocol
 
 If security issue found:
-1. STOP immediately
-2. Use **security-reviewer** agent
-3. Fix CRITICAL issues before continuing
-4. Rotate any exposed secrets
-5. Review entire codebase for similar issues
+1. Stop the current task
+2. Fix CRITICAL issues before continuing
+3. Rotate any exposed secrets
+4. Review the entire codebase for similar issues
