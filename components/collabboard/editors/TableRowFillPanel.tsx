@@ -10,6 +10,7 @@ import {
   type TableFillCell,
   type TableFillValue,
 } from '@/lib/domain/ai/tableFill';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 
 /**
  * PATCH-173. The "Fill row with AI…" panel.
@@ -29,6 +30,8 @@ export interface TableRowFillPanelProps {
   readonly columns: readonly string[];
   readonly rowIndex: number;
   readonly rows: readonly (readonly string[])[];
+  /** PATCH-188. The board this fill runs on; the owner's plan pays. */
+  readonly boardId?: string;
   /** Reports the candidate cells upward; never writes the grid. */
   readonly onSuggestions: (cells: readonly TableFillCell[]) => void;
   readonly onClose: () => void;
@@ -38,13 +41,14 @@ export default function TableRowFillPanel({
   columns,
   rowIndex,
   rows,
+  boardId,
   onSuggestions,
   onClose,
 }: TableRowFillPanelProps) {
   const [extra, setExtra] = useState('');
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; planLimit: boolean } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
 
@@ -64,7 +68,7 @@ export default function TableRowFillPanel({
   const handleGenerate = async () => {
     const builtNow = buildRowFillItems({ rows, columns }, rowIndex, replaceExisting);
     if (builtNow.items.length === 0) {
-      setError('There is nothing to fill in this row.');
+      setError({ message: 'There is nothing to fill in this row.', planLimit: false });
       return;
     }
 
@@ -86,17 +90,25 @@ export default function TableRowFillPanel({
           detail: rowFillInstruction(extra),
           // The route treats `row` as an opaque key; here it is the column index.
           items: builtNow.items,
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          ...(boardId ? { boardId } : {}),
         }),
       });
       if (generationRef.current !== generation) return;
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
+        const planLimit = planLimitFromResponse(response.status, body);
+        if (planLimit) {
+          setIsGenerating(false);
+          setError({ message: planLimit.message, planLimit: true });
+          return;
+        }
         const message = body && typeof body.error === 'string'
           ? body.error
           : 'The AI request failed. Please try again.';
         setIsGenerating(false);
-        setError(message);
+        setError({ message, planLimit: false });
         return;
       }
 
@@ -105,7 +117,7 @@ export default function TableRowFillPanel({
       const values: TableFillValue[] = body && Array.isArray(body.values) ? body.values : [];
       setIsGenerating(false);
       if (values.length === 0) {
-        setError("No suggestions came back. Try again, or change the instruction.");
+        setError({ message: "No suggestions came back. Try again, or change the instruction.", planLimit: false });
         return;
       }
       // Map the response's column keys back to this row's cells.
@@ -113,7 +125,7 @@ export default function TableRowFillPanel({
     } catch {
       if (generationRef.current !== generation) return;
       setIsGenerating(false);
-      setError("The AI didn't answer in time.");
+      setError({ message: "The AI didn't answer in time.", planLimit: false });
     } finally {
       clearTimeout(timer);
     }
@@ -182,7 +194,13 @@ export default function TableRowFillPanel({
         Also replace cells that already have text
       </label>
 
-      {error && <div role="alert" className="mb-2 text-xs text-red-600">{error}</div>}
+      {error && (
+        <div role="alert" className="mb-2 text-xs text-red-600">
+          {error.planLimit
+            ? <PlanLimitNotice message={error.message} />
+            : error.message}
+        </div>
+      )}
 
       <div className="flex justify-end gap-2">
         <button

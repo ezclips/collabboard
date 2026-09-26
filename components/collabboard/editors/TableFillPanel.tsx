@@ -9,6 +9,7 @@ import {
   type TableFillSource,
   type TableFillValue,
 } from '@/lib/domain/ai/tableFill';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 
 /**
  * PATCH-166. The "Fill with AI…" panel.
@@ -39,6 +40,8 @@ export interface TableFillPanelProps {
   readonly columns: readonly string[];
   readonly targetColumn: number;
   readonly rows: readonly (readonly string[])[];
+  /** PATCH-188. The board this fill runs on; the owner's plan pays. */
+  readonly boardId?: string;
   /** Reports the accepted-candidate values upward; never writes the grid. */
   readonly onSuggestions: (values: readonly TableFillValue[]) => void;
   readonly onClose: () => void;
@@ -62,6 +65,7 @@ export default function TableFillPanel({
   columns,
   targetColumn,
   rows,
+  boardId,
   onSuggestions,
   onClose,
 }: TableFillPanelProps) {
@@ -70,7 +74,7 @@ export default function TableFillPanel({
   const [source, setSource] = useState<TableFillSource>('row');
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; planLimit: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
@@ -109,7 +113,7 @@ export default function TableFillPanel({
       replaceExisting,
     );
     if (built.items.length === 0) {
-      setError('There is nothing to work from in the chosen column.');
+      setError({ message: 'There is nothing to work from in the chosen column.', planLimit: false });
       return;
     }
 
@@ -131,17 +135,25 @@ export default function TableFillPanel({
           preset,
           detail: preset === 'summarize' ? undefined : detail.trim(),
           items: built.items,
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          ...(boardId ? { boardId } : {}),
         }),
       });
       if (generationRef.current !== generation) return;
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
+        const planLimit = planLimitFromResponse(response.status, body);
+        if (planLimit) {
+          setIsGenerating(false);
+          setError({ message: planLimit.message, planLimit: true });
+          return;
+        }
         const message = body && typeof body.error === 'string'
           ? body.error
           : 'The AI request failed. Please try again.';
         setIsGenerating(false);
-        setError(message);
+        setError({ message, planLimit: false });
         return;
       }
 
@@ -153,7 +165,7 @@ export default function TableFillPanel({
       // nothing: handing an empty list on would lock the table over zero
       // suggestions.
       if (values.length === 0) {
-        setError("No suggestions came back. Try again, or change the instruction.");
+        setError({ message: "No suggestions came back. Try again, or change the instruction.", planLimit: false });
         return;
       }
       onSuggestions(values);
@@ -163,7 +175,7 @@ export default function TableFillPanel({
     } catch {
       if (generationRef.current !== generation) return;
       setIsGenerating(false);
-      setError("The AI didn't answer in time.");
+      setError({ message: "The AI didn't answer in time.", planLimit: false });
     } finally {
       clearTimeout(timer);
     }
@@ -262,7 +274,13 @@ export default function TableFillPanel({
         Also replace cells that already have text
       </label>
 
-      {error && <div role="alert" className="mb-2 text-xs text-red-600">{error}</div>}
+      {error && (
+        <div role="alert" className="mb-2 text-xs text-red-600">
+          {error.planLimit
+            ? <PlanLimitNotice message={error.message} />
+            : error.message}
+        </div>
+      )}
       {notice && <div data-table-fill-notice="" className="mb-2 text-xs text-gray-500">{notice}</div>}
 
       <div className="flex justify-end gap-2">

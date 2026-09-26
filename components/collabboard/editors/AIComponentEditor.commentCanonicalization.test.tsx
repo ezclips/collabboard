@@ -56,6 +56,7 @@ afterEach(() => {
     m.container.remove();
   }
   mounted = [];
+  vi.unstubAllGlobals();
 });
 
 function click(el: Element) {
@@ -73,6 +74,19 @@ function setInputValue(input: HTMLInputElement, value: string) {
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
+}
+function setTextareaValue(input: HTMLTextAreaElement, value: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+function buttonByText(root: ParentNode, text: string): HTMLButtonElement {
+  const found = Array.from(root.querySelectorAll('button'))
+    .find((b) => (b.textContent ?? '').trim() === text);
+  expect(found, `no button "${text}"`).not.toBeUndefined();
+  return found as HTMLButtonElement;
 }
 
 const noop = () => {};
@@ -234,5 +248,55 @@ describe('AIComponentEditor -- canonical Comment UI wiring (PATCH 8T)', () => {
       const saved = onSave.mock.calls[0][0];
       expect(saved.metadata.detachedComments).toEqual([historical]);
     });
+  });
+});
+
+describe('AIComponentEditor -- PATCH-188 the board pays', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const PLAN_LIMIT = {
+    error: "The Free plan's AI credits for this month are used up.",
+    code: 'plan_limit_credits',
+  };
+
+  function mountAndGenerate(boardId: string) {
+    const c = mount(<AIComponentEditor isOpen onClose={noop} onSave={noop} boardId={boardId} />);
+    setTextareaValue(c.querySelector('textarea') as HTMLTextAreaElement, 'Photosynthesis for middle school');
+    click(buttonByText(c, 'Generate'));
+    return c;
+  }
+
+  it('sends boardId when the editor has one', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ html: '<p>stub</p>' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const c = mountAndGenerate(BOARD);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/ai/generate-component');
+    expect(JSON.parse(String(init.body)).boardId).toBe(BOARD);
+    expect(c).not.toBeNull();
+  });
+
+  it('a 402 plan_limit_credits shows the message and the See plans link', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(PLAN_LIMIT), { status: 402 })));
+    const c = mountAndGenerate(BOARD);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
+
+    const notice = c.querySelector('[data-plan-limit-notice="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(PLAN_LIMIT.error);
+    expect(notice!.querySelector('a')?.getAttribute('href')).toBe('/dashboard/settings/billing');
+  });
+
+  it("any other error keeps today's text", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: 'Failed to generate component' }),
+      { status: 502 },
+    )));
+    const c = mountAndGenerate(BOARD);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
+
+    expect(c.textContent).toContain('Failed to generate component');
+    expect(c.querySelector('[data-plan-limit-notice="true"]')).toBeNull();
   });
 });

@@ -2419,6 +2419,7 @@ export default function TableEditor({
                             columns={columns}
                             targetColumn={fillTarget}
                             rows={rows}
+                            boardId={boardId}
                             onSuggestions={handleColumnFillSuggestions}
                             onClose={closeFillPanel}
                         />
@@ -2439,6 +2440,7 @@ export default function TableEditor({
                             columns={columns}
                             rowIndex={fillRow}
                             rows={rows}
+                            boardId={boardId}
                             onSuggestions={handleRowFillSuggestions}
                             onClose={closeRowFillPanel}
                         />
@@ -2460,6 +2462,7 @@ export default function TableEditor({
                             text={askAI.text}
                             truncated={askAI.truncated}
                             cellCount={askAI.cellCount}
+                            boardId={boardId}
                             activeCell={selectedCell}
                             activeCellHasText={activeCellHasText}
                             onInsert={insertAskAIAnswer}
@@ -2509,6 +2512,7 @@ export default function TableEditor({
                     >
                         <TableAIEditPanel
                             grid={currentGrid()}
+                            boardId={boardId}
                             onApply={applyAIEdit}
                             onPreview={setAiEditPreview}
                             onClose={closeAIEdit}

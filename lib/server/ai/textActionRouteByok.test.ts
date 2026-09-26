@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
     getConnection: vi.fn(),
     loadCredential: vi.fn(),
   })),
+  checkAiActionCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -42,6 +44,10 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkAiActionCredits: mocks.checkAiActionCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 let route: typeof import('../../../app/api/ai/text-action/route');
@@ -84,6 +90,9 @@ beforeEach(() => {
   mocks.resolveAIModelForRole.mockResolvedValue(DEFAULT_RESOLUTION);
   mocks.generateText.mockResolvedValue('generated text');
   mocks.getAIProviderAdapter.mockReturnValue({ generateText: mocks.generateText });
+  // PATCH-188. Default: a byok caller, so the ledger is never read.
+  mocks.checkAiActionCredits.mockResolvedValue({ kind: 'byok' });
+  mocks.recordBoardAiCreditUsage.mockResolvedValue(undefined);
 });
 
 afterEach(() => {

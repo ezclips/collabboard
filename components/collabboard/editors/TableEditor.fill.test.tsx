@@ -81,8 +81,8 @@ const FILL_GRID = {
   titleStyle: {},
 };
 
-function tableEditor(content: object, onSave = vi.fn()) {
-  const c = mount(<TableEditor isOpen onClose={vi.fn()} onSave={onSave} initialContent={JSON.stringify(content)} />);
+function tableEditor(content: object, onSave = vi.fn(), boardId?: string) {
+  const c = mount(<TableEditor isOpen onClose={vi.fn()} onSave={onSave} initialContent={JSON.stringify(content)} boardId={boardId} />);
   return { c, onSave };
 }
 
@@ -264,5 +264,48 @@ describe('PATCH-166 -- errors', () => {
     expect(panel.textContent).toContain("No suggestions came back.");
     expect(c.textContent).not.toContain("AI suggestions");
     expect(Array.from(c.querySelectorAll<HTMLInputElement>("td input")).every((i) => i.readOnly)).toBe(false);
+  });
+});
+
+describe('PATCH-188 -- the board pays', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const PLAN_LIMIT = {
+    error: "The Free plan's AI credits for this month are used up.",
+    code: 'plan_limit_credits',
+  };
+
+  it('sends boardId when the editor has one', async () => {
+    const { c } = tableEditor(FILL_GRID, vi.fn(), BOARD);
+    const fetchMock = stubFillResponse([{ row: 0, value: 'Change the oil' }]);
+    const panel = await openFillPanel(c, 2);
+    await generate(panel);
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).boardId).toBe(BOARD);
+  });
+
+  it('a 402 plan_limit_credits shows the message and the See plans link', async () => {
+    const { c } = tableEditor(FILL_GRID, vi.fn(), BOARD);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(PLAN_LIMIT), { status: 402 })));
+    const panel = await openFillPanel(c, 2);
+    await generate(panel);
+
+    const notice = panel.querySelector('[data-plan-limit-notice="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(PLAN_LIMIT.error);
+    expect(notice!.querySelector('a')?.getAttribute('href')).toBe('/dashboard/settings/billing');
+  });
+
+  it("any other error keeps today's text", async () => {
+    const { c } = tableEditor(FILL_GRID, vi.fn(), BOARD);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: 'The provider is unavailable.' }),
+      { status: 502 },
+    )));
+    const panel = await openFillPanel(c, 2);
+    await generate(panel);
+
+    expect(panel.textContent).toContain('The provider is unavailable.');
+    expect(panel.querySelector('[data-plan-limit-notice="true"]')).toBeNull();
   });
 });

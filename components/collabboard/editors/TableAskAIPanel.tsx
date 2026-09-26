@@ -5,6 +5,7 @@ import { Sparkles, X } from 'lucide-react';
 
 import { AI_ROLE_EDIT } from '@/lib/ai/aiRoles';
 import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 import { TEXT_ACTION_INSTRUCTION_MAX } from '@/lib/ai/textActions';
 import {
   tableAskAIInstruction,
@@ -32,7 +33,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'preview'; result: string }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; planLimit?: boolean };
 
 type DetailPreset = 'translate' | 'question';
 
@@ -41,6 +42,8 @@ export interface TableAskAIPanelProps {
   readonly text: string;
   readonly truncated: boolean;
   readonly cellCount: number;
+  /** PATCH-188. The board this action runs on; the owner's plan pays. */
+  readonly boardId?: string;
   /** The cell `Insert into cell` would write to, read live from the editor. */
   readonly activeCell: { row: number; col: number } | null;
   readonly activeCellHasText: boolean;
@@ -53,6 +56,7 @@ export default function TableAskAIPanel({
   text,
   truncated,
   cellCount,
+  boardId,
   activeCell,
   activeCellHasText,
   onInsert,
@@ -91,12 +95,19 @@ export default function TableAskAIPanel({
           // The stored role preference the server resolves a provider from. No
           // provider, model or key travels with the request.
           purpose: AI_ROLE_EDIT,
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          ...(boardId ? { boardId } : {}),
         }),
       });
       if (generationRef.current !== generation) return;
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
+        const planLimit = planLimitFromResponse(response.status, body);
+        if (planLimit) {
+          setPhase({ kind: 'error', message: planLimit.message, planLimit: true });
+          return;
+        }
         const message = body && typeof body.error === 'string'
           ? body.error
           : 'The AI request failed. Please try again.';
@@ -266,7 +277,11 @@ export default function TableAskAIPanel({
           {isLoading && <div role="status" className="mt-2 text-xs text-gray-400">Thinking…</div>}
 
           {phase.kind === 'error' && (
-            <div role="alert" className="mt-2 text-xs text-red-600">{phase.message}</div>
+            <div role="alert" className="mt-2 text-xs text-red-600">
+              {phase.planLimit
+                ? <PlanLimitNotice message={phase.message} />
+                : phase.message}
+            </div>
           )}
 
           {phase.kind === 'preview' && (

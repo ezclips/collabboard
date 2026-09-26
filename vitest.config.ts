@@ -42,6 +42,8 @@ export default defineConfig({
       // Without this line a test file here is silently NOT RUN, which is worse
       // than a failing one -- it reports nothing and looks green.
       'components/ai/*.test.tsx',
+      // PATCH-188: the shared plan-limit refusal.
+      'components/billing/*.test.tsx',
       'components/ui/*.test.tsx',
       'components/canvas/*.test.tsx',
       'components/map/*.test.tsx',

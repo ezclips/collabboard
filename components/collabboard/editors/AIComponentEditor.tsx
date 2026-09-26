@@ -39,6 +39,7 @@ import { resolveCaptionStyle, CAPTION_STYLE_PRESETS, type CaptionHeading } from 
 import { nextTextAlign } from './textAlignCycle';
 import { AI_ROLE_COMPONENT } from '@/lib/ai/aiRoles';
 import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 import { formatAIGenerationAttribution, readAIGenerationAttribution } from '@/lib/ai/attribution';
 import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
@@ -78,6 +79,8 @@ interface AIComponentEditorProps {
   accessMode?: CommentAccessMode;
   currentUserId?: string;
   currentUserName?: string;
+  /** PATCH-188. The board this card is built on; the owner's plan pays. */
+  boardId?: string;
 }
 
 type CommentDraft = {
@@ -223,6 +226,7 @@ export default function AIComponentEditor({
   accessMode = 'manage',
   currentUserId = 'anon',
   currentUserName = 'You',
+  boardId,
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
   const [title, setTitle] = useState(initialTitle);
@@ -315,6 +319,9 @@ export default function AIComponentEditor({
   const [content, setContent] = useState<unknown>(initialContent ?? null);
   const [stage, setStage] = useState<Stage>(initialContent ? 'done' : 'idle');
   const [error, setError] = useState<string | null>(null);
+  /** PATCH-188. True when `error` is the server's plan-limit refusal, so it
+   *  renders with the shared message and the "See plans" link. */
+  const [errorIsPlanLimit, setErrorIsPlanLimit] = useState(false);
   /** Its own line: a failed model change and a failed generation are different
    *  failures, and neither may overwrite the other's message. */
   const [modelError, setModelError] = useState<string | null>(null);
@@ -340,6 +347,7 @@ export default function AIComponentEditor({
     setContent(initialContent ?? null);
     setStage(initialContent ? 'done' : 'idle');
     setError(null);
+    setErrorIsPlanLimit(false);
 
     setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
     setTopStrip(typeof initialMetadata?.topStrip === 'string' ? initialMetadata.topStrip : 'transparent');
@@ -467,6 +475,7 @@ export default function AIComponentEditor({
 
     setUiMode(nextUiMode);
     setError(null);
+    setErrorIsPlanLimit(false);
 
     if (nextUiMode === 'auto') {
       // Don't change mode/subtype yet -- resolved at generate time
@@ -485,6 +494,7 @@ export default function AIComponentEditor({
     if (!prompt.trim()) return;
 
     setError(null);
+    setErrorIsPlanLimit(false);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -500,7 +510,8 @@ export default function AIComponentEditor({
         const classifyRes = await fetch('/api/ai/classify-intent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: prompt.trim() }),
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          body: JSON.stringify({ prompt: prompt.trim(), ...(boardId ? { boardId } : {}) }),
           signal: controller.signal,
         });
         if (classifyRes.ok) {
@@ -533,13 +544,24 @@ export default function AIComponentEditor({
       const res = await fetch('/api/ai/generate-component', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+        // PATCH-188. Omitted when absent, never sent as undefined or ''.
+        body: JSON.stringify({ ...requestBody, ...(boardId ? { boardId } : {}) }),
         signal: controller.signal,
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        // PATCH-188. A plan-limit refusal is the one failure with its own
+        // message and the shared "See plans" link; every other failure keeps
+        // this surface's existing text, including the quota-check branch below.
+        const planLimit = planLimitFromResponse(res.status, data);
+        if (planLimit) {
+          setError(planLimit.message);
+          setErrorIsPlanLimit(true);
+          setStage('error');
+          return;
+        }
         const message = getErrorMessage(data);
         if (isQuotaExceededMessage(message)) {
           throw new Error('API quota exceeded. Please try again later or upgrade your plan.');
@@ -577,6 +599,7 @@ export default function AIComponentEditor({
     abortRef.current?.abort();
     setStage(content ? 'done' : 'idle');
     setError(null);
+    setErrorIsPlanLimit(false);
   };
 
   const handleSave = () => {
@@ -1039,7 +1062,9 @@ export default function AIComponentEditor({
 
               {error && (
                 <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm">
-                  <p className="text-xs text-red-600">{error}</p>
+                  {errorIsPlanLimit
+                    ? <PlanLimitNotice message={error} />
+                    : <p className="text-xs text-red-600">{error}</p>}
                 </div>
               )}
 

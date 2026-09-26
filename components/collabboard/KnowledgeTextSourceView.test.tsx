@@ -508,4 +508,62 @@ describe('a transcript can be made readable, with the words guaranteed', () => {
     expect(source).not.toContain('text-action');
     expect(source).toContain('/api/ai/transcript-punctuate');
   });
+
+  /**
+   * PATCH-188. The Readable transcript is one of the board-less AI actions:
+   * its caller now carries the board so the owner's plan pays. When there is
+   * no board the field is omitted entirely (test 12 above pins that shape).
+   */
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+
+  it('22. PATCH-188: posts boardId when the reader has one', async () => {
+    stubAi(punctuating);
+    const { host } = render({
+      text: SPOKEN,
+      transcriptRepresentation: representation,
+      boardId: BOARD,
+    });
+    click(toggle(host)!);
+    await settle();
+
+    expect(sentBodies.length).toBeGreaterThan(0);
+    for (const body of sentBodies) {
+      expect((body as { boardId?: string }).boardId).toBe(BOARD);
+    }
+  });
+
+  it('23. PATCH-188: a 402 plan_limit_credits shows the message and the See plans link', async () => {
+    stubAi(() => new Response(JSON.stringify({
+      error: "The Free plan's AI credits for this month are used up.",
+      code: 'plan_limit_credits',
+    }), { status: 402 }));
+    const { host } = render({
+      text: SPOKEN,
+      transcriptRepresentation: representation,
+      boardId: BOARD,
+    });
+    click(toggle(host)!);
+    await settle();
+
+    const notice = host.querySelector('[data-plan-limit-notice="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain("The Free plan's AI credits for this month are used up.");
+    expect(notice!.querySelector('a')?.getAttribute('href')).toBe('/dashboard/settings/billing');
+    // The raw transcript stays on screen -- never a blank pane.
+    expect(transcriptText(host)?.textContent).toContain(SPOKEN);
+  });
+
+  it("24. PATCH-188: any other error keeps today's text", async () => {
+    stubAi(() => new Response(JSON.stringify({ error: 'nope', code: 'server_error' }), { status: 500 }));
+    const { host } = render({
+      text: SPOKEN,
+      transcriptRepresentation: representation,
+      boardId: BOARD,
+    });
+    click(toggle(host)!);
+    await settle();
+
+    expect(host.querySelector('[data-plan-limit-notice="true"]')).toBeNull();
+    expect(host.textContent).toContain('Could not make a readable version. Showing the original.');
+  });
 });

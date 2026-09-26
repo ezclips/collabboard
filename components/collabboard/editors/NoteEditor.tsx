@@ -138,6 +138,12 @@ interface NoteEditorProps {
    */
   sourceReferences?: readonly SourceReference[];
   onOpenSourceReference?: (reference: SourceReference) => void;
+  /**
+   * PATCH-188. The board this note lives on, so its AI actions pay from the
+   * board owner's plan (PRICING.md Rule 1). ABSENT means the request names no
+   * board; a managed call is then refused.
+   */
+  boardId?: string;
 }
 
 // PATCH-152 §22.6 (Route D2): a stable module-level reference so an omitted
@@ -167,6 +173,7 @@ export default function NoteEditor({
   accessMode = 'manage',
   sourceReferences = EMPTY_SOURCE_REFERENCES,
   onOpenSourceReference,
+  boardId,
 }: NoteEditorProps) {
   const panels = useShellPanels();
   const [title, setTitle] = useState(initialTitle);
@@ -1194,6 +1201,7 @@ export default function NoteEditor({
               editor={editor}
               range={aiRange}
               capturedText={aiCapturedText}
+              boardId={boardId}
               onClose={() => { setAiPanelOpen(false); setAiRange(null); }}
             />
           </div>

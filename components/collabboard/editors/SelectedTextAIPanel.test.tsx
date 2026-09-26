@@ -65,9 +65,9 @@ function setupEditor(word = 'Bravo') {
   return { container, editor: editor!, range, capturedText };
 }
 
-function mountPanel(editor: Editor, range: { from: number; to: number }, capturedText: string, onClose = vi.fn()) {
+function mountPanel(editor: Editor, range: { from: number; to: number }, capturedText: string, onClose = vi.fn(), boardId?: string) {
   const { container, root } = mount(
-    <SelectedTextAIPanel editor={editor} range={range} capturedText={capturedText} onClose={onClose} />
+    <SelectedTextAIPanel editor={editor} range={range} capturedText={capturedText} boardId={boardId} onClose={onClose} />
   );
   return { container, root, onClose };
 }
@@ -380,5 +380,49 @@ describe('SelectedTextAIPanel: hostile AI output is never parsed as HTML', () =>
     clickByText(container, 'Replace selection');
     expect(editor.state.doc.textContent).toContain('<img src=x onerror=alert(1)>');
     expect(document.querySelector('.ProseMirror img')).toBeNull();
+  });
+});
+
+describe('SelectedTextAIPanel: PATCH-188 the board pays', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const PLAN_LIMIT = {
+    error: "The Free plan's AI credits for this month are used up.",
+    code: 'plan_limit_credits',
+  };
+
+  it('sends boardId when the panel has one', async () => {
+    const { editor, range, capturedText } = setupEditor();
+    const fetchMock = fetchOk('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = mountPanel(editor, range, capturedText, vi.fn(), BOARD);
+    clickByText(container, 'Improve writing');
+    await flush();
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.boardId).toBe(BOARD);
+  });
+
+  it('a 402 plan_limit_credits shows the message and the See plans link', async () => {
+    const { editor, range, capturedText } = setupEditor();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(PLAN_LIMIT), { status: 402 })));
+    const { container } = mountPanel(editor, range, capturedText, vi.fn(), BOARD);
+    clickByText(container, 'Improve writing');
+    await flush();
+
+    const notice = container.querySelector('[data-plan-limit-notice="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(PLAN_LIMIT.error);
+    expect(notice!.querySelector('a')?.getAttribute('href')).toBe('/dashboard/settings/billing');
+  });
+
+  it("any other error keeps today's text", async () => {
+    const { editor, range, capturedText } = setupEditor();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), { status: 429 })));
+    const { container } = mountPanel(editor, range, capturedText, vi.fn(), BOARD);
+    clickByText(container, 'Improve writing');
+    await flush();
+
+    expect(container.textContent).toMatch(/too many ai requests/i);
+    expect(container.querySelector('[data-plan-limit-notice="true"]')).toBeNull();
   });
 });

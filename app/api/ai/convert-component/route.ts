@@ -23,10 +23,15 @@ import { isConversionAllowed } from '@/lib/ai/conversion-matrix';
 import { MODE_REGISTRY } from '@/lib/ai/mode-registry';
 import type { AIGenerationAttribution } from '@/lib/ai/contracts';
 import { COMPONENT_MAX_TOKENS } from '@/lib/server/ai/componentGeneration';
-import { generateComponentText } from '@/lib/server/ai/componentGeneration';
+import { ComponentCreditRefusal, generateComponentText } from '@/lib/server/ai/componentGeneration';
 import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+
+/** PATCH-188. The optional board id, validated the same way a zod uuid is. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Share the same rate-limit store as generate-component (in-memory per process)
 const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
@@ -221,6 +226,13 @@ export async function POST(req: NextRequest) {
 
     const { sourceEnvelope, targetMode, targetSubtype, instruction } = body;
 
+    // PATCH-188. The OPTIONAL board this conversion runs on.
+    const rawBoardId = body.boardId;
+    if (rawBoardId !== undefined && (typeof rawBoardId !== 'string' || !UUID_PATTERN.test(rawBoardId))) {
+      return NextResponse.json({ error: 'boardId must be a UUID.' }, { status: 400 });
+    }
+    const boardId = typeof rawBoardId === 'string' ? rawBoardId : null;
+
     if (!isStoredAIContent(sourceEnvelope)) {
       return NextResponse.json({ error: 'sourceEnvelope must be a valid AI content envelope.' }, { status: 400 });
     }
@@ -281,10 +293,25 @@ export async function POST(req: NextRequest) {
         maxTokens: CONVERT_MAX_TOKENS,
         temperature: 0.3,
         timeoutMs: 25_000,
+        boardId,
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+        creditFeature: 'component',
+        creditCost: 1,
       });
       raw = generation.text;
       generatedBy = generation.generatedBy;
     } catch (error) {
+      // PATCH-188. The credit refusal maps to its own status and code first.
+      if (error instanceof ComponentCreditRefusal) {
+        return NextResponse.json(
+          error.code === 'forbidden' ? { error: error.message } : { error: error.message, code: error.code },
+          { status: error.status },
+        );
+      }
       trackAIConversionFailed({
         sourceMode: sourceEnvelope.mode,
         sourceSubtype,

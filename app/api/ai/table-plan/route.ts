@@ -18,6 +18,13 @@ import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
+import {
+  checkAiActionCredits,
+  recordBoardAiCreditUsage,
+} from '@/lib/server/billing/aiCredits';
+import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
 
 /**
@@ -66,6 +73,8 @@ const tablePlanRequestSchema = z.object({
     .array(z.array(z.string().max(TABLE_PLAN_SAMPLE_CELL_CHARS)))
     .max(TABLE_PLAN_SAMPLE_ROWS),
   rowCount: z.number().int().min(0),
+  /** PATCH-188. The board this plan runs on; the owner's plan pays. */
+  boardId: z.string().uuid().optional(),
 }).strict();
 
 /**
@@ -115,12 +124,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid table-plan request.' }, { status: 400 });
     }
 
-    const { command, columns, sampleRows, rowCount } = parsed.data;
+    const { command, columns, sampleRows, rowCount, boardId } = parsed.data;
 
     // Cross-field rules the object shape cannot state. Each sample row must line
     // up with the columns, or the model is looking at a table that cannot exist.
     if (sampleRows.some((row) => row.length !== columns.length)) {
       return NextResponse.json({ error: 'Every sample row must match the columns.' }, { status: 400 });
+    }
+
+    // PATCH-188. AI credits: the board owner's plan pays (PRICING.md Rule 1).
+    let creditDecision: Awaited<ReturnType<typeof checkAiActionCredits>>;
+    try {
+      creditDecision = await checkAiActionCredits({
+        boardId: boardId ?? null,
+        userId: user.id,
+        role: AI_ROLE_EDIT,
+        cost: AI_CREDIT_COSTS.table_plan,
+        now: new Date(),
+        preferences: createAIRolePreferenceRepository(),
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'forbidden') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
     }
 
     const resolved = await resolveAIModelForRole(asUserId(user.id), AI_ROLE_EDIT, {
@@ -147,6 +182,26 @@ export async function POST(req: NextRequest) {
       });
     } finally {
       clearTimeout(timer);
+    }
+
+    // PATCH-188. Charged only on a successful managed run.
+    if (creditDecision.kind === 'allowed' && creditDecision.charge && boardId) {
+      try {
+        await recordBoardAiCreditUsage({
+          plan: creditDecision.plan,
+          balance: creditDecision.balance,
+          boardId,
+          userId: user.id,
+          feature: 'table_plan',
+          credits: AI_CREDIT_COSTS.table_plan,
+        });
+      } catch {
+        console.error('AI credit usage was not recorded', {
+          boardId,
+          feature: 'table_plan',
+          credits: AI_CREDIT_COSTS.table_plan,
+        });
+      }
     }
 
     // A model that returned prose, an apology or a broken body yields `null` --

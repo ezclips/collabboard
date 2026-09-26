@@ -4,6 +4,8 @@ import {
   AI_CREDIT_COSTS,
   BOARD_CHAT_SEARCH_SURCHARGE,
   PLAN_CREDITS_EXHAUSTED_CODE,
+  PLAN_NO_BOARD_CODE,
+  PLAN_NO_BOARD_ERROR,
   PLAN_NO_WORKSPACE_CODE,
   PLAN_NO_WORKSPACE_ERROR,
   PAID_PLAN_IDS,
@@ -23,6 +25,7 @@ import {
   planPageLimitError,
   splitAiCreditCharge,
   statusGrantsPlan,
+  transcriptPunctuateCredits,
 } from './plans';
 import { sanitizeKnowledgeProcessingError } from '../knowledge/knowledgeExtraction';
 
@@ -345,5 +348,21 @@ describe('PATCH-187 — AI credits', () => {
       "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.",
     );
     expect(PLAN_NO_WORKSPACE_CODE).toBe('plan_limit_no_workspace');
+  });
+});
+
+describe('PATCH-188 — board-less AI actions', () => {
+  it('transcriptPunctuateCredits is one credit per ten passages, at least one', () => {
+    expect(transcriptPunctuateCredits(1)).toBe(1);
+    expect(transcriptPunctuateCredits(10)).toBe(1);
+    expect(transcriptPunctuateCredits(11)).toBe(2);
+    expect(transcriptPunctuateCredits(12)).toBe(2);
+  });
+
+  it('PLAN_NO_BOARD text and code', () => {
+    expect(PLAN_NO_BOARD_CODE).toBe('plan_limit_no_board');
+    expect(PLAN_NO_BOARD_ERROR).toBe(
+      "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.",
+    );
   });
 });

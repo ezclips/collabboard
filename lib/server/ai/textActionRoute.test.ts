@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   getPreference: vi.fn(),
   getConnection: vi.fn(),
   loadCredential: vi.fn(),
+  checkAiActionCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -32,6 +34,12 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
     getConnection: mocks.getConnection,
     loadCredential: mocks.loadCredential,
   }),
+}));
+// PATCH-188. The credit ledger, mocked so a byok caller (the default here) is
+// exactly the pre-PATCH-188 path: no board, no ledger read.
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkAiActionCredits: mocks.checkAiActionCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 let route: typeof import('../../../app/api/ai/text-action/route');
@@ -71,6 +79,9 @@ beforeEach(() => {
   // No stored role preference => CollabBoard Default => DeepSeek, and the
   // credential table is never consulted on that path.
   mocks.getPreference.mockResolvedValue({ ok: true, value: null });
+  // PATCH-188. Default: byok, so the ledger is never read and nothing records.
+  mocks.checkAiActionCredits.mockResolvedValue({ kind: 'byok' });
+  mocks.recordBoardAiCreditUsage.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -278,5 +289,102 @@ describe('PATCH-162: the route asks for no thinking', () => {
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const sentBody = JSON.parse(String(init.body));
     expect(sentBody.thinking).toEqual({ type: 'disabled' });
+  });
+});
+
+describe('text-action PATCH-188: AI credits', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const PLAN = { workspaceId: 'w', planId: 'pro', limits: { monthlyAiCredits: 500, welcomeAiCredits: 0 }, subscriptionPeriod: null };
+  const BALANCE = { allowance: 500, allowanceUsed: 0, grantTotal: 0, grantUsed: 0, remaining: 500, period: { start: new Date(), end: new Date() } };
+  const allowed = () => ({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+
+  it('byok without boardId runs as today, and nothing is recorded', async () => {
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo' }));
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('managed without boardId is 402 plan_limit_no_board, and the model is never called', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({
+      kind: 'refused',
+      status: 402,
+      body: { error: 'no board', code: 'plan_limit_no_board' },
+    });
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo' }));
+    expect(response.status).toBe(402);
+    expect((await response.json()).code).toBe('plan_limit_no_board');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('managed on an unreadable board is 403, and the model is never called', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'forbidden' });
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }));
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('managed with credits runs and records one text_action credit', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }));
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({
+      feature: 'text_action',
+      credits: 1,
+      boardId: BOARD,
+    });
+  });
+
+  it('a refused decision is 402 with its body, and the model is never called', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({
+      kind: 'refused',
+      status: 402,
+      body: { error: 'out of credits', code: 'plan_limit_credits' },
+    });
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }));
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: 'out of credits', code: 'plan_limit_credits' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a check throw is 503, and the model is never called', async () => {
+    mocks.checkAiActionCredits.mockRejectedValue(new Error('down'));
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }))).status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed model call records nothing', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('SECRET_PROVIDER_BODY'); }));
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }));
+    expect(response.status).toBe(502);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('a recording throw still returns the answer', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    vi.stubGlobal('fetch', mockDeepSeekSuccess('Better text'));
+    mocks.recordBoardAiCreditUsage.mockRejectedValue(new Error('insert failed'));
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ text: 'Better text' });
+  });
+
+  it('a non-uuid boardId is 400', async () => {
+    expect((await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: 'nope' }))).status).toBe(400);
   });
 });

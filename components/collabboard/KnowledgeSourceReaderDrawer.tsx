@@ -803,6 +803,7 @@ export default function KnowledgeSourceReaderDrawer({
         <KnowledgeTextSourceView
           documentId={reader.documentId}
           originalFilename={reader.originalFilename}
+          boardId={boardId}
           text={reader.text ?? null}
           loading={reader.loading}
           error={reader.error}

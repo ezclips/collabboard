@@ -11,6 +11,7 @@ import {
 } from '@/lib/ai/textActions';
 import { AI_ROLE_EDIT } from '@/lib/ai/aiRoles';
 import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 
 interface SelectedTextAIPanelProps {
   /** Shared by Note and Document -- this component never reads a live TipTap
@@ -21,6 +22,8 @@ interface SelectedTextAIPanelProps {
   range: { from: number; to: number };
   /** The exact text captured at that same moment via doc.textBetween. */
   capturedText: string;
+  /** PATCH-188. The board this action runs on; the owner's plan pays. */
+  boardId?: string;
   onClose: () => void;
 }
 
@@ -28,7 +31,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'preview'; result: string }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; planLimit?: boolean };
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -38,7 +41,7 @@ function readRangeText(editor: Editor, range: { from: number; to: number }): str
   return editor.state.doc.textBetween(range.from, range.to, '\n', '\n');
 }
 
-export default function SelectedTextAIPanel({ editor, range, capturedText, onClose }: SelectedTextAIPanelProps) {
+export default function SelectedTextAIPanel({ editor, range, capturedText, boardId, onClose }: SelectedTextAIPanelProps) {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [action, setAction] = useState<TextAction | null>(null);
   const [instruction, setInstruction] = useState('');
@@ -74,10 +77,18 @@ export default function SelectedTextAIPanel({ editor, range, capturedText, onClo
           // from. Sent explicitly rather than relying on the route's default,
           // so this caller's role is visible at the call site.
           purpose: AI_ROLE_EDIT,
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          ...(boardId ? { boardId } : {}),
         }),
       });
       if (generationRef.current !== generation) return;
       if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const planLimit = planLimitFromResponse(res.status, body);
+        if (planLimit) {
+          setPhase({ kind: 'error', message: planLimit.message, planLimit: true });
+          return;
+        }
         setPhase({
           kind: 'error',
           message: res.status === 429
@@ -204,7 +215,11 @@ export default function SelectedTextAIPanel({ editor, range, capturedText, onClo
 
         {phase.kind === 'error' && (
           <div className="mt-2">
-            <div role="alert" className="text-xs text-red-600 mb-2">{phase.message}</div>
+            <div role="alert" className="text-xs text-red-600 mb-2">
+              {phase.planLimit
+                ? <PlanLimitNotice message={phase.message} />
+                : phase.message}
+            </div>
             {action && (
               <button type="button" onClick={retry} className="text-xs text-blue-600 hover:underline">Retry</button>
             )}

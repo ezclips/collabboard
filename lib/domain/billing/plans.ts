@@ -292,3 +292,21 @@ export const PLAN_NO_WORKSPACE_CODE = 'plan_limit_no_workspace';
 
 export const PLAN_NO_WORKSPACE_ERROR =
   "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.";
+
+/**
+ * PATCH-188. The board-less AI actions refuse on the MANAGED path when the
+ * request names no board: there is no owner's plan to meter. A byok caller
+ * needs no board at all, and never sees this.
+ */
+export const PLAN_NO_BOARD_CODE = 'plan_limit_no_board';
+
+export const PLAN_NO_BOARD_ERROR =
+  "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.";
+
+/**
+ * PATCH-188. A Readable transcript (transcript-punctuate) costs one credit per
+ * ten passages, and at least one for any request that carries a passage.
+ */
+export function transcriptPunctuateCredits(passageCount: number): number {
+  return Math.max(1, Math.ceil(passageCount / 10));
+}

@@ -8,6 +8,7 @@ import {
 } from '../../domain/billing/plans';
 import { AI_ROLE_CHAT } from '../../ai/aiRoles';
 import {
+  checkAiActionCredits,
   checkBoardAiCredits,
   checkManagedAiCredits,
   readAiCreditBalance,
@@ -281,5 +282,83 @@ describe('checkBoardAiCredits', () => {
     expect(decision.kind).toBe('allowed');
     expect(adminMocks.getSupabaseAdmin).toHaveBeenCalledTimes(1);
     expect(aiFilters).toContainEqual(['workspace_id', WORKSPACE]);
+  });
+});
+
+describe('checkAiActionCredits (PATCH-188)', () => {
+  const preferences = (connectionId: string | null) => ({
+    getPreference: vi.fn(async () => ({ ok: true, value: { connectionId, modelId: null } }) as never),
+  });
+  const canReadBoard = (value: boolean) => vi.fn(async () => value);
+
+  it('byok: no board read, no ledger read, allowed without a board', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const read = canReadBoard(true);
+
+    const decision = await checkAiActionCredits({
+      boardId: undefined, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'), canReadBoard: read,
+    });
+
+    expect(decision).toEqual({ kind: 'byok' });
+    expect(read).not.toHaveBeenCalled();
+    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('managed without a board: plan_limit_no_board, and neither board nor ledger is read', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const read = canReadBoard(true);
+
+    const decision = await checkAiActionCredits({
+      boardId: undefined, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences(null), canReadBoard: read,
+    });
+
+    expect(decision).toEqual({
+      kind: 'refused',
+      status: 402,
+      body: {
+        error: "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.",
+        code: 'plan_limit_no_board',
+      },
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('managed on a board the caller cannot read: forbidden, and no ledger read', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+
+    const decision = await checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences(null), canReadBoard: canReadBoard(false),
+    });
+
+    expect(decision).toEqual({ kind: 'forbidden' });
+    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('managed and readable: the PATCH-187 decision', async () => {
+    const { client, aiFilters } = makeAdmin();
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
+
+    const decision = await checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences(null), canReadBoard: canReadBoard(true),
+    });
+
+    expect(decision.kind).toBe('allowed');
+    if (decision.kind === 'allowed') expect(decision.charge).toBe(true);
+    expect(aiFilters).toContainEqual(['workspace_id', WORKSPACE]);
+  });
+
+  it('a canReadBoard throw propagates', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+
+    await expect(checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences(null),
+      canReadBoard: async () => { throw new Error('down'); },
+    })).rejects.toThrow('down');
   });
 });

@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   createAIRolePreferenceRepository: vi.fn(() => ({})),
   createAIProviderCredentialRepository: vi.fn(() => ({})),
+  checkAiActionCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -41,6 +43,10 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkAiActionCredits: mocks.checkAiActionCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 const USER_ID = 'user-1';
@@ -81,6 +87,9 @@ beforeEach(async () => {
   session();
   mocks.resolveAIModelForRole.mockResolvedValue({ provider: 'deepseek', model: 'deepseek-flash', apiKey: 'k' });
   mocks.generateText.mockResolvedValue(VALID_ANSWER);
+  // PATCH-188. Default: byok, so the ledger is never read and nothing records.
+  mocks.checkAiActionCredits.mockResolvedValue({ kind: 'byok' });
+  mocks.recordBoardAiCreditUsage.mockResolvedValue(undefined);
   ({ AIProviderError } = await import('@/lib/server/ai/providers/errors'));
   route = await import('../../../app/api/ai/table-plan/route');
 });
@@ -180,5 +189,66 @@ describe('table-plan: generation', () => {
     const response = await post(base());
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'AI request failed.' });
+  });
+});
+
+describe('table-plan PATCH-188: AI credits', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const PLAN = { workspaceId: 'w', planId: 'pro', limits: { monthlyAiCredits: 500, welcomeAiCredits: 0 }, subscriptionPeriod: null };
+  const BALANCE = { allowance: 500, allowanceUsed: 0, grantTotal: 0, grantUsed: 0, remaining: 500, period: { start: new Date(), end: new Date() } };
+  const allowed = () => ({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+
+  it('byok without boardId runs as today, and nothing is recorded', async () => {
+    await post(base());
+    expect(mocks.generateText).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('managed without boardId is 402 plan_limit_no_board', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'refused', status: 402, body: { error: 'no board', code: 'plan_limit_no_board' } });
+    const response = await post(base());
+    expect(response.status).toBe(402);
+    expect((await response.json()).code).toBe('plan_limit_no_board');
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('managed on an unreadable board is 403', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'forbidden' });
+    expect((await post(base({ boardId: BOARD }))).status).toBe(403);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('managed with credits runs and records one table_plan credit', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    await post(base({ boardId: BOARD }));
+    expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ feature: 'table_plan', credits: 1 });
+  });
+
+  it('a refused decision is 402 and the model is never called', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'refused', status: 402, body: { error: 'out', code: 'plan_limit_credits' } });
+    expect((await post(base({ boardId: BOARD }))).status).toBe(402);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('a check throw is 503, and a failed model call records nothing', async () => {
+    mocks.checkAiActionCredits.mockRejectedValue(new Error('down'));
+    expect((await post(base({ boardId: BOARD }))).status).toBe(503);
+
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    mocks.generateText.mockRejectedValue(new Error('SECRET_PROVIDER_BODY'));
+    await post(base({ boardId: BOARD }));
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('a recording throw still returns the plan', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    mocks.recordBoardAiCreditUsage.mockRejectedValue(new Error('insert failed'));
+    const response = await post(base({ boardId: BOARD }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).plan.message).toBe('Sorted.');
+  });
+
+  it('a non-uuid boardId is 400', async () => {
+    expect((await post(base({ boardId: 'nope' }))).status).toBe(400);
   });
 });

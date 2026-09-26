@@ -6,8 +6,13 @@ import type { AIMode, DiagramSubtype } from '@/lib/ai/contracts';
 import { MODE_REGISTRY } from '@/lib/ai/mode-registry';
 import { DIAGRAM_SUBTYPE_SCHEMAS } from '@/lib/ai/validators';
 import { trackAIAutoModeSelected, trackAIClassifyFailed } from '@/lib/ai/telemetry';
-import { generateComponentText } from '@/lib/server/ai/componentGeneration';
+import { generateComponentText, ComponentCreditRefusal } from '@/lib/server/ai/componentGeneration';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+
+/** PATCH-188. The optional board id, validated the same way a zod uuid is. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface ClassifyIntentResult {
   mode: AIMode;
@@ -192,6 +197,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'prompt is required.' }, { status: 400 });
     }
 
+    // PATCH-188. The OPTIONAL board this classification runs on. Cost 0 and
+    // never recorded, but checked: an exhausted Free workspace pauses here too.
+    const rawBoardId = (body as Record<string, unknown>).boardId;
+    if (rawBoardId !== undefined && (typeof rawBoardId !== 'string' || !UUID_PATTERN.test(rawBoardId))) {
+      return NextResponse.json({ error: 'boardId must be a UUID.' }, { status: 400 });
+    }
+    const boardId = typeof rawBoardId === 'string' ? rawBoardId : null;
+
     // The classifier runs on EVERY Auto generation, so it is the
     // highest-frequency AI call in the product. It resolves the same component
     // role the generation itself will: a user who has chosen a provider for
@@ -209,9 +222,25 @@ export async function POST(req: NextRequest) {
         maxTokens: CLASSIFY_MAX_TOKENS,
         temperature: 0.1,
         timeoutMs: 10_000,
+        boardId,
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+        // No creditFeature: the classifier records nothing.
+        creditCost: 0,
       });
       raw = generation.text;
     } catch (error) {
+      // PATCH-188. A credit refusal is not a classifier failure; it maps to its
+      // own status and code so the client can show the plan message.
+      if (error instanceof ComponentCreditRefusal) {
+        return NextResponse.json(
+          error.code === 'forbidden' ? { error: error.message } : { error: error.message, code: error.code },
+          { status: error.status },
+        );
+      }
       // The reason is ours, never the provider's response body -- AIProviderError
       // carries a fixed message by construction. `details` is gone for the same
       // reason: it used to echo that body straight back to the browser.

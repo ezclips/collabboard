@@ -47,6 +47,12 @@ interface DocumentEditorProps {
   currentUserId?: string;
   currentUserName?: string;
   accessMode?: CommentAccessMode;
+  /**
+   * PATCH-188. The board this document lives on, so its AI actions pay from the
+   * board owner's plan (PRICING.md Rule 1). ABSENT means the request names no
+   * board; a managed call is then refused.
+   */
+  boardId?: string;
 }
 
 // PATCH-152 targeted correction: closing (backdrop/X/Escape) always saves a
@@ -64,6 +70,7 @@ export default function DocumentEditor({
   currentUserId,
   currentUserName,
   accessMode = 'manage',
+  boardId,
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialMetadata?.description || '');
@@ -610,6 +617,7 @@ export default function DocumentEditor({
                   editor={editor}
                   range={aiRange}
                   capturedText={aiCapturedText}
+                  boardId={boardId}
                   onClose={() => { setAiPanelOpen(false); setAiRange(null); }}
                 />
               </div>

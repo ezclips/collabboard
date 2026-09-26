@@ -20,9 +20,11 @@
 
 import type { AIGenerationAttribution } from '../../ai/contracts';
 import { AI_ROLE_COMPONENT } from '../../ai/aiRoles';
+import type { AiCreditFeature } from '../../domain/billing/plans';
 import type { UserId } from '../../domain/core/ids';
 import { createAIProviderCredentialRepository } from '../../infra/settings/aiProviderCredentialRepository';
 import { createAIRolePreferenceRepository } from '../../infra/settings/aiRolePreferenceRepository';
+import { checkAiActionCredits, recordBoardAiCreditUsage } from '../billing/aiCredits';
 import { getAIProviderAdapter } from './providers/registry';
 import { resolveAIModelForRole } from './resolveAIModelForRole';
 
@@ -55,6 +57,24 @@ export interface ComponentGenerationInput {
   readonly temperature: number;
   /** The calling route's existing deadline, unchanged by this move. */
   readonly timeoutMs: number;
+  /**
+   * PATCH-188. The board this generation runs on, when the caller named one.
+   * The board owner's plan pays (PRICING.md Rule 1); a byok caller needs none.
+   */
+  readonly boardId?: string | null;
+  /**
+   * How a managed call proves it may spend this board's credits. REQUIRED, so a
+   * new component route cannot call the model on the CollabBoard key unmetered
+   * by forgetting it: that is a compile error, not a review finding.
+   */
+  readonly canReadBoard: (boardId: string) => Promise<boolean>;
+  /**
+   * The feature the ledger records, and its cost. Omitted means the call is a
+   * classifier (`classify-intent`): it is checked (so an exhausted Free
+   * workspace pauses) but records nothing.
+   */
+  readonly creditFeature?: AiCreditFeature;
+  readonly creditCost?: number;
 }
 
 export interface ComponentGenerationResult {
@@ -66,19 +86,56 @@ export interface ComponentGenerationResult {
   readonly generatedBy: AIGenerationAttribution;
 }
 
+/**
+ * PATCH-188. The credit refusal a component route turns into a 402/403. It
+ * carries the status and body the check produced, and the route maps them
+ * without ever having seen the ledger.
+ */
+export class ComponentCreditRefusal extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, message: string, code: string) {
+    super(message);
+    this.name = 'ComponentCreditRefusal';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export async function generateComponentText(
   input: ComponentGenerationInput,
 ): Promise<ComponentGenerationResult> {
+  const preferences = createAIRolePreferenceRepository();
+  const credentials = createAIProviderCredentialRepository();
+
+  // PATCH-188. The credit check runs BEFORE the model, on every call.
+  const creditDecision = await checkAiActionCredits({
+    boardId: input.boardId ?? null,
+    userId: input.userId,
+    role: AI_ROLE_COMPONENT,
+    cost: input.creditCost ?? 1,
+    now: new Date(),
+    preferences,
+    canReadBoard: input.canReadBoard,
+  });
+  if (creditDecision.kind === 'forbidden') {
+    throw new ComponentCreditRefusal(403, 'Forbidden', 'forbidden');
+  }
+  if (creditDecision.kind === 'refused') {
+    throw new ComponentCreditRefusal(creditDecision.status, creditDecision.body.error, creditDecision.body.code);
+  }
+
   const resolved = await resolveAIModelForRole(input.userId, AI_ROLE_COMPONENT, {
-    preferences: createAIRolePreferenceRepository(),
-    credentials: createAIProviderCredentialRepository(),
+    preferences,
+    credentials,
   });
   const adapter = getAIProviderAdapter(resolved.provider);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+  let text: string;
   try {
-    const text = await adapter.generateText({
+    text = await adapter.generateText({
       model: resolved.model,
       apiKey: resolved.apiKey,
       system: input.system,
@@ -87,9 +144,38 @@ export async function generateComponentText(
       temperature: input.temperature,
       signal: controller.signal,
     });
-    // Two named fields, written out. A spread here would ship the key.
-    return { text, generatedBy: { source: resolved.source, model: resolved.model } };
   } finally {
     clearTimeout(timer);
   }
+
+  // Charge only a managed run that the check said to charge. A classifier
+  // (`creditFeature` omitted) records nothing. A recording failure is logged
+  // and swallowed: the answer is already in hand.
+  if (
+    creditDecision.kind === 'allowed'
+    && creditDecision.charge
+    && resolved.source === 'collabboard-default'
+    && input.creditFeature
+    && typeof input.boardId === 'string'
+  ) {
+    try {
+      await recordBoardAiCreditUsage({
+        plan: creditDecision.plan,
+        balance: creditDecision.balance,
+        boardId: input.boardId,
+        userId: input.userId,
+        feature: input.creditFeature,
+        credits: input.creditCost ?? 1,
+      });
+    } catch {
+      console.error('AI credit usage was not recorded', {
+        boardId: input.boardId,
+        feature: input.creditFeature,
+        credits: input.creditCost ?? 1,
+      });
+    }
+  }
+
+  // Two named fields, written out. A spread here would ship the key.
+  return { text, generatedBy: { source: resolved.source, model: resolved.model } };
 }

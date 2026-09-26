@@ -17,7 +17,17 @@ import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
+import {
+  checkAiActionCredits,
+  recordBoardAiCreditUsage,
+} from '@/lib/server/billing/aiCredits';
+import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
+
+/** PATCH-188. The optional board id, validated the same way a zod uuid is. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * FILL A TABLE COLUMN WITH AI.
@@ -69,6 +79,8 @@ const tableFillRequestSchema = z.object({
     row: z.number().int().min(0),
     input: z.string().min(1).max(TABLE_FILL_MAX_INPUT_CHARS),
   }).strict()).min(1).max(TABLE_FILL_MAX_ITEMS),
+  /** PATCH-188. The board this fill runs on; the owner's plan pays. */
+  boardId: z.string().uuid().optional(),
 }).strict();
 
 /**
@@ -122,7 +134,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid table-fill request.' }, { status: 400 });
     }
 
-    const { preset, detail, items } = parsed.data;
+    const { preset, detail, items, boardId } = parsed.data;
 
     // Cross-field rules the object shape cannot state. `detail` is required
     // unless the preset is summarize, and forbidden for summarize.
@@ -142,6 +154,33 @@ export async function POST(req: NextRequest) {
     const totalChars = items.reduce((sum, item) => sum + item.input.length, 0);
     if (totalChars > TABLE_FILL_MAX_TOTAL_CHARS) {
       return NextResponse.json({ error: 'items carry too much text.' }, { status: 400 });
+    }
+
+    // PATCH-188. AI credits: the board owner's plan pays (PRICING.md Rule 1).
+    // The board is read through the CALLER'S OWN session client.
+    let creditDecision: Awaited<ReturnType<typeof checkAiActionCredits>>;
+    try {
+      creditDecision = await checkAiActionCredits({
+        boardId: boardId ?? null,
+        userId: user.id,
+        role: AI_ROLE_EDIT,
+        cost: AI_CREDIT_COSTS.table_fill,
+        now: new Date(),
+        preferences: createAIRolePreferenceRepository(),
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'forbidden') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
     }
 
     const resolved = await resolveAIModelForRole(asUserId(user.id), AI_ROLE_EDIT, {
@@ -168,6 +207,27 @@ export async function POST(req: NextRequest) {
       });
     } finally {
       clearTimeout(timer);
+    }
+
+    // PATCH-188. Charged only on a successful managed run, and only when the
+    // check said to charge. A recording failure is logged and swallowed.
+    if (creditDecision.kind === 'allowed' && creditDecision.charge && boardId) {
+      try {
+        await recordBoardAiCreditUsage({
+          plan: creditDecision.plan,
+          balance: creditDecision.balance,
+          boardId,
+          userId: user.id,
+          feature: 'table_fill',
+          credits: AI_CREDIT_COSTS.table_fill,
+        });
+      } catch {
+        console.error('AI credit usage was not recorded', {
+          boardId,
+          feature: 'table_fill',
+          credits: AI_CREDIT_COSTS.table_fill,
+        });
+      }
     }
 
     // A model that returned prose, an apology or a broken body yields `[]` --

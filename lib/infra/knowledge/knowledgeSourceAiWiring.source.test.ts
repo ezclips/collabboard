@@ -76,12 +76,15 @@ describe('PDF Source AI Phase 1 wiring', () => {
 
   it('the endpoint stays generic -- it still knows nothing about Knowledge, PDFs or boards', () => {
     // The route stays generic: it knows nothing about Knowledge, PDFs, or boards.
-    for (const forbidden of ['sourceDocumentId', 'KnowledgeSource', 'boardId', 'pdf', 'PDF']) {
+    // PATCH-188 REMOVED 'boardId' FROM THIS FORBIDDEN LIST, and only that: the
+    // route learns a board ID solely to meter AI credits (PRICING.md Rule 1),
+    // never anything about Knowledge or PDFs.
+    for (const forbidden of ['sourceDocumentId', 'KnowledgeSource', 'pdf', 'PDF']) {
       expect(textActionRoute, forbidden).not.toContain(forbidden);
     }
-    // BYOK Phase 3 added `purpose` to the destructure. It is a role name --
-    // 'source-ai' | 'edit' -- validated against the shared AIRole contract, so
-    // the route learned a ROLE, not anything about the Knowledge feature.
+    // BYOK Phase 3 added `purpose` to the destructure; PATCH-188 added the
+    // optional `boardId`. Both are contract inputs the route already validates;
+    // neither carries provider, model, key or Knowledge content.
     expect(textActionRoute).toContain("const { action, selectedText, instruction, purpose } = body");
   });
 

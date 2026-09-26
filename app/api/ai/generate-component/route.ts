@@ -24,10 +24,15 @@ import {
   safeValidateAIContentWithSubtypeCheck,
 } from '@/lib/ai/validators';
 import type { AIGenerationAttribution } from '@/lib/ai/contracts';
-import { COMPONENT_MAX_TOKENS, generateComponentText } from '@/lib/server/ai/componentGeneration';
+import { COMPONENT_MAX_TOKENS, ComponentCreditRefusal, generateComponentText } from '@/lib/server/ai/componentGeneration';
 import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+
+/** PATCH-188. The optional board id, validated the same way a zod uuid is. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // In-memory rate limiter: max 5 requests per IP per minute
 const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
@@ -240,14 +245,24 @@ export async function POST(req: NextRequest) {
     }
 
     let requestBody: GenerateAIContentRequest;
+    let rawBody: unknown;
     try {
-      requestBody = parseGenerateRequest(await req.json());
+      rawBody = await req.json();
+      requestBody = parseGenerateRequest(rawBody);
     } catch (error) {
       return NextResponse.json(
         { error: error instanceof Error ? error.message : 'Invalid request body.' },
         { status: 400 },
       );
     }
+
+    // PATCH-188. The OPTIONAL board this generation runs on. A present but
+    // non-uuid value is a 400; absent is fine for a byok caller.
+    const rawBoardId = isObject(rawBody) ? rawBody.boardId : undefined;
+    if (rawBoardId !== undefined && (typeof rawBoardId !== 'string' || !UUID_PATTERN.test(rawBoardId))) {
+      return NextResponse.json({ error: 'boardId must be a UUID.' }, { status: 400 });
+    }
+    const boardId = typeof rawBoardId === 'string' ? rawBoardId : null;
 
     const { prompt, mode, subtype } = requestBody;
     capturedMode = mode;
@@ -268,10 +283,26 @@ export async function POST(req: NextRequest) {
         maxTokens: COMPONENT_MAX_TOKENS,
         temperature: 0.5,
         timeoutMs: 25_000,
+        boardId,
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+        creditFeature: 'component',
+        creditCost: 1,
       });
       raw = generation.text;
       generatedBy = generation.generatedBy;
     } catch (error) {
+      // PATCH-188. The credit refusal maps to its own status and code before
+      // the provider-error mapping below.
+      if (error instanceof ComponentCreditRefusal) {
+        return NextResponse.json(
+          error.code === 'forbidden' ? { error: error.message } : { error: error.message, code: error.code },
+          { status: error.status },
+        );
+      }
       trackAIGenerationFailed({
         mode,
         subtype,

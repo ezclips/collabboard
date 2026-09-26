@@ -194,6 +194,7 @@ export default function CanvasModals({
           currentUserId={user?.id}
           currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
           accessMode={commentAccessMode}
+          boardId={canvasId}
           onClose={() => {
             setDocumentModalDestination(null);
             setPadletToEdit(null);
@@ -224,6 +225,7 @@ export default function CanvasModals({
           currentUserName={user?.email?.split('@')[0] || 'You'}
           sourceReferences={noteSourceReferences}
           onOpenSourceReference={onOpenSourceReference}
+          boardId={canvasId}
           onSave={saveNote}
         />
       </div>
@@ -560,6 +562,7 @@ export default function CanvasModals({
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
           currentUserName={user?.email?.split('@')[0] || 'You'}
+          boardId={canvasId}
         />
       </div>
 
@@ -590,6 +593,7 @@ export default function CanvasModals({
             }}
             envelope={lockedEnvelope}
             initialPrompt={padletToEdit?.metadata?.aiPrompt || ''}
+            boardId={canvasId}
             onSave={saveAIComponent}
           />
         </div>

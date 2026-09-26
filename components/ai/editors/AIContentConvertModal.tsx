@@ -20,6 +20,7 @@ import {
 } from '@/lib/ai/telemetry';
 import { AI_ROLE_COMPONENT } from '@/lib/ai/aiRoles';
 import AIRoleModelChooser from '@/components/ai/AIRoleModelChooser';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 import { formatAIGenerationAttribution, readAIGenerationAttribution } from '@/lib/ai/attribution';
 
 export interface AIContentConvertModalProps {
@@ -27,6 +28,8 @@ export interface AIContentConvertModalProps {
   onClose: () => void;
   envelope: StoredAIContent;
   initialPrompt?: string;
+  /** PATCH-188. The board this conversion runs on; the owner's plan pays. */
+  boardId?: string;
   onSave: (data: { aiPrompt: string; aiComponentJson: LoadedAIContent }) => void;
 }
 
@@ -34,7 +37,7 @@ type ConvertPhase =
   | { kind: 'select' }
   | { kind: 'converting' }
   | { kind: 'preview'; result: StoredAIContent }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; planLimit?: boolean };
 
 function getSourceSubtype(envelope: StoredAIContent): DiagramSubtype | undefined {
   if (envelope.mode !== 'diagram') return undefined;
@@ -59,6 +62,7 @@ export default function AIContentConvertModal({
   onClose,
   envelope,
   initialPrompt = '',
+  boardId,
   onSave,
 }: AIContentConvertModalProps) {
   const [phase, setPhase] = useState<ConvertPhase>({ kind: 'select' });
@@ -108,12 +112,17 @@ export default function AIContentConvertModal({
           targetMode,
           targetSubtype,
           instruction: instruction.trim() || undefined,
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          ...(boardId ? { boardId } : {}),
         }),
       });
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: 'Conversion failed.' }));
-        const msg = typeof body?.error === 'string' ? body.error : 'Conversion failed.';
+        const planLimit = planLimitFromResponse(res.status, body);
+        const msg = planLimit
+          ? planLimit.message
+          : (typeof body?.error === 'string' ? body.error : 'Conversion failed.');
         trackAIConversionFailed({
           sourceMode: envelope.mode,
           sourceSubtype,
@@ -121,7 +130,7 @@ export default function AIContentConvertModal({
           targetSubtype,
           reason: msg,
         });
-        setPhase({ kind: 'error', message: msg });
+        setPhase({ kind: 'error', message: msg, planLimit: planLimit !== null });
         return;
       }
 
@@ -280,7 +289,11 @@ export default function AIContentConvertModal({
             {hasError && (
               <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
                 <p className="text-xs font-medium text-red-700">Conversion failed</p>
-                <p className="mt-1 text-xs text-red-600">{phase.message}</p>
+                <p className="mt-1 text-xs text-red-600">
+                  {phase.planLimit
+                    ? <PlanLimitNotice message={phase.message} />
+                    : phase.message}
+                </p>
               </div>
             )}
 

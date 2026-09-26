@@ -30,6 +30,7 @@ import {
   readableTranscriptParagraphs,
   transcriptPunctuationChunks,
 } from '@/lib/domain/knowledge/transcriptPunctuationProjection';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 
 export interface KnowledgeTextSourceHighlight {
   /** Inclusive, in UTF-16 code units of the canonical text. */
@@ -62,6 +63,12 @@ export interface KnowledgeTextSourceViewProps {
    * before.
    */
   readonly transcriptRepresentation?: KnowledgeTranscriptStoredRepresentation | null;
+  /**
+   * PATCH-188. The board this transcript belongs to, so a Readable run pays
+   * from its owner's plan. Optional: absent on a mount with no board (a test,
+   * or a host that genuinely has none), and never sent as an empty string.
+   */
+  readonly boardId?: string;
 }
 
 /**
@@ -98,6 +105,7 @@ export default function KnowledgeTextSourceView({
   highlight,
   presentation,
   transcriptRepresentation,
+  boardId,
 }: KnowledgeTextSourceViewProps) {
   const markRef = useRef<HTMLElement | null>(null);
   const handledRequestRef = useRef<number | null>(null);
@@ -135,8 +143,16 @@ export default function KnowledgeTextSourceView({
   const [readablePhase, setReadablePhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   /** Per-chunk projected text, or null when that chunk was refused (renders raw). */
   const [chunkResults, setChunkResults] = useState<readonly (string | null)[] | null>(null);
+  /** PATCH-188. The plan-limit refusal's message, or null for every other failure. */
+  const [readablePlanLimit, setReadablePlanLimit] = useState<string | null>(null);
   const readableAbortRef = useRef<AbortController | null>(null);
   const readableGenerationRef = useRef(0);
+  /**
+   * PATCH-188. The plan-limit message of the current run, seen in the batch
+   * loop before the phase is committed. A ref, not state: it is read in the
+   * same tick it is written, and the phase change is what re-renders.
+   */
+  const readablePlanLimitRef = useRef<string | null>(null);
 
   useEffect(() => () => { readableAbortRef.current?.abort(); }, []);
 
@@ -179,9 +195,17 @@ export default function KnowledgeTextSourceView({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
-        body: JSON.stringify({ passages }),
+        // PATCH-188. Omitted when absent, never sent as undefined or ''.
+        body: JSON.stringify({ passages, ...(boardId ? { boardId } : {}) }),
       });
-      if (!res.ok) return failedAll();
+      if (!res.ok) {
+        // PATCH-188. A plan-limit refusal is the one failure with its own
+        // message; every other failure keeps the caller's fixed text below.
+        const body = await res.json().catch(() => null);
+        const planLimit = planLimitFromResponse(res.status, body);
+        if (planLimit) readablePlanLimitRef.current = planLimit.message;
+        return failedAll();
+      }
       const parsed = await res.json().catch(() => null);
       const results = parsed && Array.isArray(parsed.results) ? parsed.results : null;
       if (results === null || results.length !== passages.length) return failedAll();
@@ -206,6 +230,9 @@ export default function KnowledgeTextSourceView({
     readableAbortRef.current = controller;
     const generation = ++readableGenerationRef.current;
     setReadablePhase('loading');
+    // A new run starts clean: a previous plan-limit refusal never leaks into it.
+    readablePlanLimitRef.current = null;
+    setReadablePlanLimit(null);
     const chunks = transcriptPunctuationChunks(text);
     const passages = chunks.map((chunk) => text.slice(chunk.charStart, chunk.charEnd));
     try {
@@ -222,6 +249,13 @@ export default function KnowledgeTextSourceView({
         }
         if (readableGenerationRef.current !== generation) return;
         outcomes.push(...batchOutcomes);
+      }
+      // PATCH-188. A plan-limit refusal takes precedence over the partial/outage
+      // branches: the whole request is refused, and the user needs to see why.
+      if (readablePlanLimitRef.current !== null) {
+        setReadablePlanLimit(readablePlanLimitRef.current);
+        setReadablePhase('error');
+        return;
       }
       // EVERY passage failed the request itself: that is an outage, not a
       // partial result, so the raw text stays and the error is stated.
@@ -373,7 +407,11 @@ export default function KnowledgeTextSourceView({
             ) : null}
             {readablePhase === 'error' ? (
               <span data-knowledge-transcript-readable-status="error" className="text-[11px] text-amber-700">
-                Could not make a readable version. Showing the original.
+                {readablePlanLimit !== null
+                  // PATCH-188. A plan-limit refusal has its own message and the
+                  // shared "See plans" link; every other failure is unchanged.
+                  ? <PlanLimitNotice message={readablePlanLimit} />
+                  : 'Could not make a readable version. Showing the original.'}
               </span>
             ) : null}
             {/*

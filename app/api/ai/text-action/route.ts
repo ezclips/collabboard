@@ -15,7 +15,17 @@ import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
+import {
+  checkAiActionCredits,
+  recordBoardAiCreditUsage,
+} from '@/lib/server/billing/aiCredits';
+import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+
+/** PATCH-188. The optional board id, validated the same way a zod uuid is. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // In-memory, per-instance rate limiter -- same fixed-window shape as the
 // existing AI routes (classify-intent, generate-component, convert-component).
@@ -178,6 +188,42 @@ export async function POST(req: NextRequest) {
     }
     const role: AIRole = purpose === undefined ? AI_ROLE_EDIT : purpose;
 
+    // PATCH-188. The OPTIONAL board this action runs on. Absent is fine for a
+    // byok caller; a managed caller without one is refused.
+    const rawBoardId = (body as Record<string, unknown>).boardId;
+    if (rawBoardId !== undefined && (typeof rawBoardId !== 'string' || !UUID_PATTERN.test(rawBoardId))) {
+      return NextResponse.json({ error: 'boardId must be a UUID.' }, { status: 400 });
+    }
+    const boardId = typeof rawBoardId === 'string' ? rawBoardId : null;
+
+    // PATCH-188. AI credits: the board owner's plan pays (PRICING.md Rule 1).
+    // The board is read through the CALLER'S OWN session client, so a caller
+    // cannot spend another workspace's credits by naming its board.
+    let creditDecision: Awaited<ReturnType<typeof checkAiActionCredits>>;
+    try {
+      creditDecision = await checkAiActionCredits({
+        boardId,
+        userId: user.id,
+        role,
+        cost: AI_CREDIT_COSTS.text_action,
+        now: new Date(),
+        preferences: createAIRolePreferenceRepository(),
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'forbidden') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
+    }
+
     const trimmedInstruction = action === 'custom' ? (instruction as string).trim() : undefined;
     const systemPrompt = buildSystemPrompt(action, trimmedInstruction);
 
@@ -203,6 +249,32 @@ export async function POST(req: NextRequest) {
     const text = raw.trim();
     if (!text) {
       return NextResponse.json({ error: 'AI returned an empty result.' }, { status: 502 });
+    }
+
+    // PATCH-188. A successful managed action is charged to the owner's plan,
+    // only when the check said to charge and the run was managed. A recording
+    // failure is logged and swallowed: the answer is already in hand.
+    if (
+      creditDecision.kind === 'allowed'
+      && creditDecision.charge
+      && typeof boardId === 'string'
+    ) {
+      try {
+        await recordBoardAiCreditUsage({
+          plan: creditDecision.plan,
+          balance: creditDecision.balance,
+          boardId,
+          userId: user.id,
+          feature: 'text_action',
+          credits: AI_CREDIT_COSTS.text_action,
+        });
+      } catch {
+        console.error('AI credit usage was not recorded', {
+          boardId,
+          feature: 'text_action',
+          credits: AI_CREDIT_COSTS.text_action,
+        });
+      }
     }
 
     return NextResponse.json({ text });

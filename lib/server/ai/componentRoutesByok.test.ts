@@ -48,6 +48,8 @@ const mocks = vi.hoisted(() => ({
     getConnection: vi.fn(),
     loadCredential: vi.fn(),
   })),
+  checkAiActionCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -63,6 +65,12 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+// PATCH-188. The credit ledger, mocked so the default (byok) is the
+// pre-PATCH-188 path: no board, no ledger read.
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkAiActionCredits: mocks.checkAiActionCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 let generateRoute: typeof import('../../../app/api/ai/generate-component/route');
@@ -142,6 +150,9 @@ beforeEach(() => {
   mocks.resolveAIModelForRole.mockResolvedValue(DEFAULT_RESOLUTION);
   mocks.getAIProviderAdapter.mockReturnValue({ generateText: mocks.generateText });
   mocks.generateText.mockResolvedValue(JSON.stringify(LESSON_BOARD));
+  // PATCH-188. Default: byok, so the ledger is never read and nothing records.
+  mocks.checkAiActionCredits.mockResolvedValue({ kind: 'byok' });
+  mocks.recordBoardAiCreditUsage.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -461,5 +472,54 @@ describe('source guarantees: the hard-wired DeepSeek calls are gone', () => {
     expect(seam).toContain('AI_ROLE_COMPONENT');
     // No spread of the resolver's answer anywhere in this file.
     expect(seam).not.toMatch(/\.\.\.resolved/);
+  });
+});
+
+describe('PATCH-188: the component routes carry a board and pay from its plan', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const PLAN = { workspaceId: 'w', planId: 'pro', limits: { monthlyAiCredits: 500, welcomeAiCredits: 0 }, subscriptionPeriod: null };
+  const BALANCE = { allowance: 500, allowanceUsed: 0, grantTotal: 0, grantUsed: 0, remaining: 500, period: { start: new Date(), end: new Date() } };
+  const allowed = () => ({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+
+  it('generate-component byok without a board runs and records nothing', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'byok' });
+    const res = await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board' }));
+    expect(res.status).toBe(200);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('generate-component managed without a board is 402 plan_limit_no_board', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'refused', status: 402, body: { error: 'no board', code: 'plan_limit_no_board' } });
+    const res = await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board' }));
+    expect(res.status).toBe(402);
+    expect((await res.json()).code).toBe('plan_limit_no_board');
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('generate-component managed with credits records one component credit', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board', boardId: BOARD }));
+    expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ feature: 'component', credits: 1 });
+  });
+
+  it('convert-component managed for a forbidden board is 403', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'forbidden' });
+    const res = await convertRoute.POST(convertRequest({ boardId: BOARD }));
+    expect(res.status).toBe(403);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('classify-intent managed success records NOTHING (cost 0)', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    mocks.generateText.mockResolvedValue(JSON.stringify({ mode: 'diagram', subtype: 'flowchart', confidence: 'high' }));
+    const res = await classifyRoute.POST(request('classify-intent', { prompt: 'p', boardId: BOARD }));
+    expect(res.status).toBe(200);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('a non-uuid boardId is 400 on a component route', async () => {
+    const res = await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board', boardId: 'nope' }));
+    expect(res.status).toBe(400);
+    expect(mocks.checkAiActionCredits).not.toHaveBeenCalled();
   });
 });

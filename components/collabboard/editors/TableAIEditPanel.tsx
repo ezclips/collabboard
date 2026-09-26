@@ -11,6 +11,7 @@ import {
   type TablePlan,
 } from '@/lib/domain/ai/tablePlan';
 import type { TableGrid } from '@/lib/domain/canvas/tableStructure';
+import PlanLimitNotice, { planLimitFromResponse } from '@/components/billing/PlanLimitNotice';
 import TablePlanPreview from './TablePlanPreview';
 
 /**
@@ -32,11 +33,13 @@ type Phase =
   | { kind: 'loading' }
   | { kind: 'preview'; plan: TablePlan; draft: TableGrid }
   | { kind: 'nothing'; message: string; plan: TablePlan }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; planLimit?: boolean };
 
 export interface TableAIEditPanelProps {
   /** The table the plan is built from, and the draft runs against. */
   readonly grid: TableGrid;
+  /** PATCH-188. The board this plan runs on; the owner's plan pays. */
+  readonly boardId?: string;
   /** Reports the draft upward on Apply; never writes the grid itself. */
   readonly onApply: (draft: TableGrid, stepCount: number) => void;
   /** Reports whether a draft is being previewed, so the editor can lock. */
@@ -44,7 +47,7 @@ export interface TableAIEditPanelProps {
   readonly onClose: () => void;
 }
 
-export default function TableAIEditPanel({ grid, onApply, onPreview, onClose }: TableAIEditPanelProps) {
+export default function TableAIEditPanel({ grid, boardId, onApply, onPreview, onClose }: TableAIEditPanelProps) {
   const [command, setCommand] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'ask' });
   const abortRef = useRef<AbortController | null>(null);
@@ -75,12 +78,21 @@ export default function TableAIEditPanel({ grid, onApply, onPreview, onClose }: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify(buildTablePlanRequest(grid, trimmed)),
+        body: JSON.stringify({
+          ...buildTablePlanRequest(grid, trimmed),
+          // PATCH-188. Omitted when absent, never sent as undefined or ''.
+          ...(boardId ? { boardId } : {}),
+        }),
       });
       if (generationRef.current !== generation) return;
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
+        const planLimit = planLimitFromResponse(response.status, body);
+        if (planLimit) {
+          setPhase({ kind: 'error', message: planLimit.message, planLimit: true });
+          return;
+        }
         const message = body && typeof body.error === 'string'
           ? body.error
           : 'The AI request failed. Please try again.';
@@ -247,7 +259,11 @@ export default function TableAIEditPanel({ grid, onApply, onPreview, onClose }: 
 
       {phase.kind === 'error' && (
         <>
-          <div role="alert" data-table-plan-error="" className="mb-2 text-xs text-red-600">{phase.message}</div>
+          <div role="alert" data-table-plan-error="" className="mb-2 text-xs text-red-600">
+            {phase.planLimit
+              ? <PlanLimitNotice message={phase.message} />
+              : phase.message}
+          </div>
           <div className="flex justify-end gap-2">
             <button
               type="button"

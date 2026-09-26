@@ -17,6 +17,8 @@ import {
   aiCreditBalance,
   aiCreditPeriod,
   PLAN_CREDITS_EXHAUSTED_CODE,
+  PLAN_NO_BOARD_CODE,
+  PLAN_NO_BOARD_ERROR,
   PLAN_NO_WORKSPACE_CODE,
   PLAN_NO_WORKSPACE_ERROR,
   PLANS,
@@ -257,4 +259,69 @@ export async function recordBoardAiCreditUsage(
   input: RecordAiCreditUsageInput,
 ): Promise<void> {
   await recordAiCreditUsage(getSupabaseAdmin(), input);
+}
+
+/**
+ * PATCH-188. The shared pre-check for the board-less AI actions (text-action,
+ * table-fill, table-plan, transcript-punctuate and the component routes). They
+ * carry no board in their contract, so the caller may send an OPTIONAL
+ * `boardId` -- the board the action runs on.
+ *
+ * ORDER IS LOAD-BEARING:
+ *   1. the SOURCE is resolved from the role preference only. A byok caller is
+ *      allowed immediately: their own key pays, so no board is needed, the
+ *      board is never read, and the ledger is never touched.
+ *   2. a MANAGED call with no board is refused with `plan_limit_no_board`.
+ *   3. a managed call must be able to READ the board it names -- otherwise
+ *      anyone could spend another workspace's credits by naming its board.
+ *      A forbidden board never reads the ledger.
+ *   4. only then is the PATCH-187 decision taken.
+ *
+ * A throw from ANYTHING inside (the preference read, `canReadBoard`, the
+ * ledger) PROPAGATES: the route turns it into a 503 and never calls the model.
+ * Fail closed.
+ */
+export type AiActionCreditDecision =
+  | { readonly kind: 'byok' }
+  | { readonly kind: 'forbidden' }
+  | { readonly kind: 'allowed'; readonly plan: BoardPlan; readonly balance: AiCreditBalance; readonly charge: boolean }
+  | { readonly kind: 'refused'; readonly status: 402; readonly body: { readonly error: string; readonly code: string } };
+
+export async function checkAiActionCredits(input: {
+  readonly boardId?: string | null;
+  readonly userId: string;
+  readonly role: AIRole;
+  readonly cost: number;
+  readonly now: Date;
+  readonly preferences: AIRolePreferenceReader;
+  readonly canReadBoard: (boardId: string) => Promise<boolean>;
+}): Promise<AiActionCreditDecision> {
+  const source = await resolveAIModelSourceForRole(
+    input.userId as never,
+    input.role,
+    input.preferences,
+  );
+  if (source === 'byok') return { kind: 'byok' };
+
+  const boardId = input.boardId;
+  if (boardId === undefined || boardId === null || boardId.length === 0) {
+    return {
+      kind: 'refused',
+      status: 402,
+      body: { error: PLAN_NO_BOARD_ERROR, code: PLAN_NO_BOARD_CODE },
+    };
+  }
+
+  if (!(await input.canReadBoard(boardId))) return { kind: 'forbidden' };
+
+  // The PATCH-187 body: resolve the plan, read the ledger, decide. A throw here
+  // propagates, as it does everywhere else on this path.
+  return checkBoardAiCredits({
+    boardId,
+    userId: input.userId,
+    role: input.role,
+    cost: input.cost,
+    now: input.now,
+    preferences: input.preferences,
+  });
 }

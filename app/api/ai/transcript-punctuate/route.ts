@@ -15,6 +15,13 @@ import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
+import {
+  checkAiActionCredits,
+  recordBoardAiCreditUsage,
+} from '@/lib/server/billing/aiCredits';
+import { transcriptPunctuateCredits } from '@/lib/domain/billing/plans';
+import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
+import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
 
 /**
@@ -65,6 +72,8 @@ function checkRateLimit(userId: string): boolean {
 
 const transcriptPunctuateRequestSchema = z.object({
   passages: z.array(z.string().min(1).max(MAX_PASSAGE_CHARS)).min(1).max(MAX_PASSAGES),
+  /** PATCH-188. The board this transcript belongs to; the owner's plan pays. */
+  boardId: z.string().uuid().optional(),
 }).strict();
 
 /** What one passage resolved to. */
@@ -167,9 +176,37 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid transcript-punctuate request.' }, { status: 400 });
     }
-    const { passages } = parsed.data;
+    const { passages, boardId } = parsed.data;
     if (passages.reduce((sum, passage) => sum + passage.length, 0) > MAX_TOTAL_CHARS) {
       return NextResponse.json({ error: 'The passages carry too much text.' }, { status: 400 });
+    }
+
+    // PATCH-188. One credit per ten passages. Checked before the model runs;
+    // the board is read through the CALLER'S OWN session client.
+    const creditCost = transcriptPunctuateCredits(passages.length);
+    let creditDecision: Awaited<ReturnType<typeof checkAiActionCredits>>;
+    try {
+      creditDecision = await checkAiActionCredits({
+        boardId: boardId ?? null,
+        userId: user.id,
+        role: AI_ROLE_SOURCE,
+        cost: creditCost,
+        now: new Date(),
+        preferences: createAIRolePreferenceRepository(),
+        canReadBoard: (id) => canReadBoardKnowledge(
+          supabase as unknown as KnowledgeBoardReadAuthorizationClient,
+          id,
+          user.id,
+        ),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'forbidden') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
     }
 
     const resolved = await resolveAIModelForRole(asUserId(user.id), AI_ROLE_SOURCE, {
@@ -191,6 +228,27 @@ export async function POST(req: NextRequest) {
       );
     } finally {
       clearTimeout(timer);
+    }
+
+    // PATCH-188. Charged only on a successful managed run. Even when every
+    // passage failed, the request itself succeeded and the call was paid for.
+    if (creditDecision.kind === 'allowed' && creditDecision.charge && boardId) {
+      try {
+        await recordBoardAiCreditUsage({
+          plan: creditDecision.plan,
+          balance: creditDecision.balance,
+          boardId,
+          userId: user.id,
+          feature: 'transcript_punctuate',
+          credits: creditCost,
+        });
+      } catch {
+        console.error('AI credit usage was not recorded', {
+          boardId,
+          feature: 'transcript_punctuate',
+          credits: creditCost,
+        });
+      }
     }
 
     // 200 even when every passage failed: the client decides what that means.
