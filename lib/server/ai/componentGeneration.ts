@@ -24,7 +24,7 @@ import type { AiCreditFeature } from '../../domain/billing/plans';
 import type { UserId } from '../../domain/core/ids';
 import { createAIProviderCredentialRepository } from '../../infra/settings/aiProviderCredentialRepository';
 import { createAIRolePreferenceRepository } from '../../infra/settings/aiRolePreferenceRepository';
-import { checkAiActionCredits, recordBoardAiCreditUsage } from '../billing/aiCredits';
+import { allowByokFor, checkAiActionCredits, recordBoardAiCreditUsage } from '../billing/aiCredits';
 import { getAIProviderAdapter } from './providers/registry';
 import { resolveAIModelForRole } from './resolveAIModelForRole';
 
@@ -128,7 +128,7 @@ export async function generateComponentText(
   const resolved = await resolveAIModelForRole(input.userId, AI_ROLE_COMPONENT, {
     preferences,
     credentials,
-  });
+  }, { allowByok: allowByokFor(creditDecision) });
   const adapter = getAIProviderAdapter(resolved.provider);
 
   const controller = new AbortController();

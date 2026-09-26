@@ -26,6 +26,7 @@ import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiPro
 import { AI_ROLE_CHAT } from '@/lib/ai/aiRoles';
 import { AI_CREDIT_COSTS, BOARD_CHAT_SEARCH_SURCHARGE } from '@/lib/domain/billing/plans';
 import {
+  allowByokFor,
   checkBoardAiCredits,
   recordBoardAiCreditUsage,
 } from '@/lib/server/billing/aiCredits';
@@ -455,6 +456,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       result = await executeBoardAiChat(scopedUser, turns, {
         preferences: createAIRolePreferenceRepository(),
         credentials: createAIProviderCredentialRepository(),
+        // PATCH-190: the key runs only when the check's kind says it may.
+        allowByok: allowByokFor(creditDecision),
       }, modelContext, boardAiSearchPromptState(searchResult?.outcome ?? 'off'));
     } catch (error) {
       // The user's message stays. No assistant row is written, because there

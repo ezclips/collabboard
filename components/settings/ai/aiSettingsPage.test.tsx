@@ -21,6 +21,20 @@ vi.mock('@/lib/infra/supabase/sessionToken', () => ({
   getSessionAccessToken: () => getSessionAccessToken(),
 }));
 
+// PATCH-190. The page reads the workspace entitlements to decide whether to
+// show the "keys are Premium" notice. The permission helpers are REAL; only the
+// context read is stubbed.
+const permissionMocks = vi.hoisted(() => ({ getPermissionContext: vi.fn() }));
+vi.mock('@/lib/supabase-provider', () => ({
+  useSupabase: () => ({
+    supabase: { auth: { getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })) } },
+  }),
+}));
+vi.mock('@/lib/auth/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth/permissions')>();
+  return { ...actual, getPermissionContext: permissionMocks.getPermissionContext };
+});
+
 vi.mock('sonner', () => ({
   toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) },
 }));
@@ -158,6 +172,10 @@ beforeEach(() => {
   getSessionAccessToken.mockResolvedValue('test-token');
   toastSuccess.mockClear();
   toastError.mockClear();
+  // Default: a Premium workspace, so the PATCH-190 notice is absent.
+  permissionMocks.getPermissionContext.mockResolvedValue({
+    entitlements: { plan: 'premium', status: 'active', trialEndsAt: null },
+  });
   stubFetch(defaultHandler);
 });
 
@@ -530,5 +548,51 @@ describe('AI settings: verification labelling', () => {
     });
     await render();
     expect(text()).not.toContain('Last verified');
+  });
+});
+
+describe('AI settings: PATCH-190, own keys are a Premium feature', () => {
+  const byokLink = () => container.querySelector('a[href="/dashboard/settings/billing"]');
+
+  it('29. shows the notice and the See plans link for a non-Premium workspace', async () => {
+    permissionMocks.getPermissionContext.mockResolvedValue({
+      entitlements: { plan: 'pro', status: 'active', trialEndsAt: null },
+    });
+    await render();
+    expect(text()).toContain('Your own AI keys are used on boards of Premium workspaces');
+    expect(byokLink()).not.toBeNull();
+  });
+
+  it('29b. shows the notice during the Premium trial only because the trial IS Premium', async () => {
+    // A trialing workspace is Premium level: no notice.
+    permissionMocks.getPermissionContext.mockResolvedValue({
+      entitlements: {
+        plan: 'premium',
+        status: 'free',
+        trialEndsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    });
+    await render();
+    expect(text()).not.toContain('Your own AI keys are used on boards of Premium workspaces');
+    expect(byokLink()).toBeNull();
+  });
+
+  it('30. shows no notice for a Premium workspace', async () => {
+    await render();
+    expect(text()).not.toContain('Your own AI keys are used on boards of Premium workspaces');
+    expect(byokLink()).toBeNull();
+  });
+
+  it('31. saving a key still works while the notice is shown', async () => {
+    permissionMocks.getPermissionContext.mockResolvedValue({
+      entitlements: { plan: 'free', status: 'free', trialEndsAt: null },
+    });
+    await render();
+    await click(buttonWithText('Add provider'));
+    await setValue(findByLabel('API key'), 'sk-test-abcdefgh');
+    await click(dialogButton('Save'));
+    expect(requestFor('/api/settings/ai-providers', 'POST')?.body)
+      .toMatchObject({ apiKey: 'sk-test-abcdefgh' });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 });

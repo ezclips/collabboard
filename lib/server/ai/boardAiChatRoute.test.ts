@@ -34,6 +34,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkBoardAiCredits: mocks.checkBoardAiCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 vi.mock('@/lib/server/ai/boardAiChatSearch', () => ({
   searchBoardAiContext: mocks.searchBoardAiContext,
@@ -406,7 +407,7 @@ describe('9-15. provider execution is the existing authority', () => {
     expect(userId).toBe(USER_ID);
     expect(mocks.createAIRolePreferenceRepository).toHaveBeenCalled();
     expect(mocks.createAIProviderCredentialRepository).toHaveBeenCalled();
-    expect(Object.keys(deps as object).sort()).toEqual(['credentials', 'preferences']);
+    expect(Object.keys(deps as object).sort()).toEqual(['allowByok', 'credentials', 'preferences']);
   });
 
   it('14-15. no credential appears in the response or in a persisted message', async () => {
@@ -451,6 +452,22 @@ describe('PATCH-187. AI credits', () => {
     // With no attachments the search has room and runs; its block travels.
     expect(mocks.searchBoardAiContext).toHaveBeenCalledTimes(1);
     expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ credits: 2 });
+  });
+
+  it('PATCH-190: a byok decision passes allowByok true to the execution', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(BYOK);
+    await post({ message: 'hello' });
+    const [, , deps] = mocks.executeBoardAiChat.mock.calls[0];
+    expect((deps as { allowByok: boolean }).allowByok).toBe(true);
+  });
+
+  it('PATCH-190: a configured-byok user on a Pro board runs managed and is charged', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(allowed());
+    mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'm', source: 'collabboard-default' });
+    await post({ message: 'hello' });
+    const [, , deps] = mocks.executeBoardAiChat.mock.calls[0];
+    expect((deps as { allowByok: boolean }).allowByok).toBe(false);
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
   });
 
   it('a refusal is 402 with the code, and the model is never called', async () => {

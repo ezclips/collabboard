@@ -668,6 +668,16 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     expect(compileSource).toContain(".from('board_wiki_pages')\n    .select('id, content')");
   });
 
+  it('PATCH-190: the compile seam passes the credit decision\'s allowByok to the resolver', () => {
+    // There is no behavioural harness for compileBoardWikiProposal, so the
+    // call site is pinned at the source: the check's kind decides the key, and
+    // the flag travels into the execution deps.
+    const compileSource = readFileSync(
+      resolve(process.cwd(), 'lib/server/wiki/boardWikiCompileSession.ts'), 'utf8');
+    expect(compileSource).toContain('allowByokFor(creditDecision)');
+    expect(compileSource).toContain('...deps.resolverDeps, allowByok:');
+  });
+
   it('the page surface never reaches for an admin client', () => {
     // A service role bypasses every policy, and nothing here needs one: a wiki
     // page is one row with no blobs and no children the caller cannot see. The

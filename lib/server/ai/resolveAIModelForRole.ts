@@ -72,6 +72,19 @@ export interface AIModelResolverDeps {
   readonly credentials: AIProviderCredentialReader;
 }
 
+/**
+ * PATCH-190. The permission a caller must state before a BYOK connection may
+ * run. REQUIRED, so every call site decides -- forgetting it is a compile
+ * error, never a silent use of the key.
+ *
+ * `allowByok: false` with a role that names a connection returns the
+ * CollabBoard default exactly as for no connection: the connection row and the
+ * credential are never read. `allowByok: true` is the pre-PATCH-190 behaviour.
+ */
+export interface AIModelResolveOptions {
+  readonly allowByok: boolean;
+}
+
 
 function trimmedOrNull(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -102,6 +115,7 @@ export async function resolveAIModelForRole(
   userId: UserId,
   role: AIRole,
   deps: AIModelResolverDeps,
+  options: AIModelResolveOptions,
 ): Promise<ResolvedAIModel> {
   const preference = await deps.preferences.getPreference(userId, role);
   if (!preference.ok) throw new AIProviderError('provider_unavailable');
@@ -111,6 +125,13 @@ export async function resolveAIModelForRole(
   // No row, or a row explicitly on the default: these are the SAME state, and
   // the only state that reaches the environment-backed provider.
   if (connectionId === null) return resolveCollabBoardDefault();
+
+  // PATCH-190. A configured key may only run when the plan permits it. The
+  // preference is still read (above) so the source is known, but with
+  // `allowByok: false` the connection row and the credential are never read --
+  // the saved key stays saved and untouched, and the call runs on the
+  // CollabBoard default exactly as if no connection existed.
+  if (!options.allowByok) return resolveCollabBoardDefault();
 
   // From here the user has explicitly chosen BYOK. Every failure below is a
   // broken configuration the user must fix -- never a silent downgrade to the

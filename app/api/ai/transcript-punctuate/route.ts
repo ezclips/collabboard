@@ -16,6 +16,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
 import {
+  allowByokFor,
   checkAiActionCredits,
   recordBoardAiCreditUsage,
 } from '@/lib/server/billing/aiCredits';
@@ -212,7 +213,7 @@ export async function POST(req: NextRequest) {
     const resolved = await resolveAIModelForRole(asUserId(user.id), AI_ROLE_SOURCE, {
       preferences: createAIRolePreferenceRepository(),
       credentials: createAIProviderCredentialRepository(),
-    });
+    }, { allowByok: allowByokFor(creditDecision) });
     const adapter = getAIProviderAdapter(resolved.provider);
 
     // ONE abort for the whole request: when it fires, any passage still working

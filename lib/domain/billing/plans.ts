@@ -370,7 +370,7 @@ export function planCreditsExhaustedError(planName: string, renewsOn: Date): str
 export const PLAN_NO_WORKSPACE_CODE = 'plan_limit_no_workspace';
 
 export const PLAN_NO_WORKSPACE_ERROR =
-  "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.";
+  "This board isn't in a workspace, so it has no AI credits.";
 
 /**
  * PATCH-188. The board-less AI actions refuse on the MANAGED path when the
@@ -380,7 +380,7 @@ export const PLAN_NO_WORKSPACE_ERROR =
 export const PLAN_NO_BOARD_CODE = 'plan_limit_no_board';
 
 export const PLAN_NO_BOARD_ERROR =
-  "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.";
+  "This AI action isn't linked to a board, so it has no AI credits.";
 
 /**
  * PATCH-189. A plan whose `processedDocuments` is 0 (Free, after the trial)

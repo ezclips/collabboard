@@ -48,6 +48,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkAiActionCredits: mocks.checkAiActionCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 let route: typeof import('../../../app/api/ai/text-action/route');
@@ -113,17 +114,17 @@ describe('text-action BYOK: auth and purpose validation', () => {
 
   it('2. an omitted purpose defaults to the edit role', async () => {
     await route.POST(request({ action: 'improve', selectedText: 'hello' }));
-    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'edit', expect.anything());
+    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'edit', expect.anything(), { allowByok: true });
   });
 
   it('3. purpose "edit" resolves the edit role', async () => {
     await route.POST(request({ action: 'improve', selectedText: 'hello', purpose: 'edit' }));
-    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'edit', expect.anything());
+    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'edit', expect.anything(), { allowByok: true });
   });
 
   it('4. purpose "source-ai" resolves the source-ai role', async () => {
     await route.POST(request({ action: 'custom', selectedText: 'hello', instruction: 'Summarize.', purpose: 'source-ai' }));
-    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'source-ai', expect.anything());
+    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'source-ai', expect.anything(), { allowByok: true });
   });
 
   it('5. an unrecognised purpose is rejected with 400 before any provider work', async () => {
@@ -141,7 +142,7 @@ describe('text-action BYOK: auth and purpose validation', () => {
 
   it('5c. the user id comes from the session, never from the request body', async () => {
     await route.POST(request({ action: 'improve', selectedText: 'hello', userId: 'attacker' }));
-    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'edit', expect.anything());
+    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', 'edit', expect.anything(), { allowByok: true });
   });
 });
 
@@ -366,5 +367,20 @@ describe('text-action BYOK: source guarantees', () => {
     expect(code).toContain('getAIProviderAdapter');
     expect(code).toContain('20_000');
     expect(code.match(/setTimeout\(/g) ?? []).toHaveLength(1);
+  });
+});
+
+describe('text-action PATCH-190: the credit decision decides allowByok', () => {
+  it('a byok decision tells the resolver allowByok true', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'byok' });
+    await route.POST(request({ action: 'improve', selectedText: 'hello' }));
+    expect(mocks.resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: true });
+  });
+
+  it('a configured-byok user on a Pro board (managed decision) is told allowByok false', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue({ kind: 'allowed', plan: {}, balance: {}, charge: true });
+    await route.POST(request({ action: 'improve', selectedText: 'hello', boardId: '11111111-1111-4111-8111-111111111111' }));
+    expect(mocks.resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: false });
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
   });
 });

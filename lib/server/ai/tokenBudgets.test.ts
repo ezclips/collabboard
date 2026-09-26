@@ -106,7 +106,9 @@ describe('the budgets, and the model they were measured against', () => {
     // so the reason is in the module header where a later split would start.
     const module = readFileSync(
       resolve(process.cwd(), 'lib/server/ai/boardWikiCompilation.ts'), 'utf8');
-    expect(module).toContain('resolveAIModelForRole(userId, AI_ROLE_CHAT, deps)');
+    // PATCH-190 added the required `{ allowByok }` permission argument; the
+    // role and the seam are unchanged, which is what this pin is for.
+    expect(module).toContain('resolveAIModelForRole(userId, AI_ROLE_CHAT, deps, {');
     expect(module).not.toMatch(/model:\s*['"]/);
     expect(module).not.toContain('DEEPSEEK_DEFAULT_MODEL');
   });

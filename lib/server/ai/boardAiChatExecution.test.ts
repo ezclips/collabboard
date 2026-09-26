@@ -178,7 +178,7 @@ describe('the execution seam reuses the existing authorities', () => {
     // called, not a reimplementation of it.
     vi.resetModules();
     const generateText = vi.fn<(input: Record<string, unknown>) => Promise<string>>(async () => 'answer');
-    const resolveAIModelForRole = vi.fn<(userId: string, role: string, deps: unknown) => Promise<unknown>>(async () => ({
+    const resolveAIModelForRole = vi.fn<(userId: string, role: string, deps: unknown, options: unknown) => Promise<unknown>>(async () => ({
       source: 'collabboard-default', provider: 'deepseek', model: 'deepseek-chat',
       apiKey: 'sk-secret-value', connectionId: null,
     }));
@@ -189,12 +189,14 @@ describe('the execution seam reuses the existing authorities', () => {
     const result = await mod.executeBoardAiChat(
       'user-1' as never,
       [turn('user', 'hi')],
-      { preferences: {} as never, credentials: {} as never },
+      { preferences: {} as never, credentials: {} as never, allowByok: false },
     );
 
     expect(resolveAIModelForRole).toHaveBeenCalledTimes(1);
     // The role is fixed here; no request field can choose it.
     expect(resolveAIModelForRole.mock.calls[0][1]).toBe('board-chat');
+    // PATCH-190: the deps' permission is passed to the resolver as an option.
+    expect(resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: false });
 
     const input = generateText.mock.calls[0][0];
     expect(input.system).toBe(mod.BOARD_AI_CHAT_SYSTEM_PROMPT);
@@ -223,7 +225,7 @@ describe('the execution seam reuses the existing authorities', () => {
 
     const mod = await import('./boardAiChatExecution');
     await expect(mod.executeBoardAiChat('user-1' as never, [turn('user', 'hi')], {
-      preferences: {} as never, credentials: {} as never,
+      preferences: {} as never, credentials: {} as never, allowByok: false,
     })).rejects.toThrow();
     // The broken BYOK choice is NOT retried against the managed key.
     expect(generateText).not.toHaveBeenCalled();

@@ -16,6 +16,7 @@ import {
 import { AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
 import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
 import {
+  allowByokFor,
   checkBoardAiCredits,
   recordBoardAiCreditUsage,
 } from '@/lib/server/billing/aiCredits';
@@ -177,7 +178,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const resolved = await resolveAIModelForRole(asUserId(user.id), AI_ROLE_SOURCE, {
       preferences: createAIRolePreferenceRepository(),
       credentials: createAIProviderCredentialRepository(),
-    });
+    }, { allowByok: allowByokFor(creditDecision) });
     const adapter = getAIProviderAdapter(resolved.provider);
 
     const controller = new AbortController();

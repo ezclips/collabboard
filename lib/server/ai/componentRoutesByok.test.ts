@@ -71,6 +71,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkAiActionCredits: mocks.checkAiActionCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 let generateRoute: typeof import('../../../app/api/ai/generate-component/route');
@@ -195,7 +196,7 @@ describe('the component role exists in BOTH lists, because neither is derived fr
 describe.each(ROUTES)('$name: provider selection', ({ post }) => {
   it('resolves the component role for the SESSION user', async () => {
     await post();
-    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', AI_ROLE_COMPONENT, expect.anything());
+    expect(mocks.resolveAIModelForRole).toHaveBeenCalledWith('user-1', AI_ROLE_COMPONENT, expect.anything(), { allowByok: true });
   });
 
   it('an unauthenticated request never resolves a provider', async () => {
@@ -500,6 +501,14 @@ describe('PATCH-188: the component routes carry a board and pay from its plan', 
     mocks.checkAiActionCredits.mockResolvedValue(allowed());
     await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board', boardId: BOARD }));
     expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ feature: 'component', credits: 1 });
+  });
+
+  it('PATCH-190: a configured-byok user on a Pro board runs managed, allowByok false, and is charged', async () => {
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    const res = await generateRoute.POST(request('generate-component', { prompt: 'p', mode: 'lesson_board', boardId: BOARD }));
+    expect(res.status).toBe(200);
+    expect(mocks.resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: false });
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
   });
 
   it('convert-component managed for a forbidden board is 403', async () => {

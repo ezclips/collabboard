@@ -70,6 +70,7 @@ vi.mock('@/lib/infra/ai/boardAiSearchReader', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkBoardAiCredits: mocks.checkBoardAiCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';

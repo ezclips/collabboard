@@ -64,7 +64,7 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
   it('resolves DeepSeek when the role has no preference row', async () => {
     const d = deps({ preference: ok(null) });
 
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).resolves.toEqual({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: false })).resolves.toEqual({
       source: 'collabboard-default',
       provider: 'deepseek',
       model: 'deepseek-flash',
@@ -79,7 +79,7 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
       preference: ok({ role: AI_ROLE_EDIT, connectionId: null, modelId: 'ignored-model' }),
     });
 
-    const resolved = await resolveAIModelForRole(USER, AI_ROLE_EDIT, d.value);
+    const resolved = await resolveAIModelForRole(USER, AI_ROLE_EDIT, d.value, { allowByok: false });
 
     expect(resolved.source).toBe('collabboard-default');
     expect(resolved.model).toBe('deepseek-flash');
@@ -90,7 +90,7 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
   it('never touches the credential table on the default path', async () => {
     const d = deps({ preference: ok(null) });
 
-    await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value);
+    await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: false });
 
     expect(d.getConnection).not.toHaveBeenCalled();
     expect(d.loadCredential).not.toHaveBeenCalled();
@@ -101,7 +101,7 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
       vi.stubEnv('DEEPSEEK_API_KEY', value);
       const d = deps({ preference: ok(null) });
 
-      await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).rejects.toMatchObject({
+      await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: false })).rejects.toMatchObject({
         category: 'invalid_configuration',
       });
     }
@@ -111,10 +111,30 @@ describe('resolveAIModelForRole -- CollabBoard default', () => {
     const d = deps({ preference: ok(null) });
 
     vi.stubEnv('DEEPSEEK_API_KEY', 'first-key');
-    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).apiKey).toBe('first-key');
+    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: false })).apiKey).toBe('first-key');
 
     vi.stubEnv('DEEPSEEK_API_KEY', 'second-key');
-    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).apiKey).toBe('second-key');
+    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: false })).apiKey).toBe('second-key');
+  });
+
+  // PATCH-190. The permission decides: a saved key is not used where the plan
+  // does not allow it, and the connection/credential are never even read.
+  it('allowByok false with a connection resolves the default, and reads no connection or credential', async () => {
+    const d = deps({ preference: ok({ role: AI_ROLE_SOURCE, connectionId: CONNECTION_ID, modelId: null }) });
+
+    const resolved = await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: false });
+
+    expect(resolved).toEqual({
+      source: 'collabboard-default',
+      provider: 'deepseek',
+      model: 'deepseek-flash',
+      apiKey: DEFAULT_KEY,
+      supportsImages: false,
+      connectionId: null,
+    });
+    expect(d.getConnection).not.toHaveBeenCalled();
+    expect(d.loadCredential).not.toHaveBeenCalled();
+    expect(JSON.stringify(resolved)).not.toContain(BYOK_KEY);
   });
 });
 
@@ -124,7 +144,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
   it('resolves the owned connection, its provider and its decrypted credential', async () => {
     const d = deps({ preference: byokPreference });
 
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).resolves.toEqual({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).resolves.toEqual({
       source: 'byok',
       provider: 'anthropic',
       model: 'claude-opus-5',
@@ -144,7 +164,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       connectionResult: ok(connection({ supportsImages: true })),
     });
 
-    const resolved = await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value);
+    const resolved = await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true });
 
     expect(resolved.supportsImages).toBe(true);
     // Still never inferred from the model id itself.
@@ -154,7 +174,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
   it('passes the caller userId to every ownership-sensitive lookup', async () => {
     const d = deps({ preference: byokPreference });
 
-    await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value);
+    await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true });
 
     expect(d.getPreference).toHaveBeenCalledWith(USER, AI_ROLE_SOURCE);
     expect(d.getConnection).toHaveBeenCalledWith(USER, CONNECTION_ID);
@@ -171,7 +191,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       preference: ok({ role: AI_ROLE_SOURCE, connectionId: CONNECTION_ID, modelId: 'claude-sonnet-5' }),
     });
 
-    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).model).toBe('claude-sonnet-5');
+    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).model).toBe('claude-sonnet-5');
   });
 
   it('falls back to the connection default when the role model is null or blank', async () => {
@@ -180,7 +200,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
         preference: ok({ role: AI_ROLE_SOURCE, connectionId: CONNECTION_ID, modelId }),
       });
 
-      expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).model).toBe('claude-opus-5');
+      expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).model).toBe('claude-opus-5');
     }
   });
 
@@ -190,7 +210,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       connectionResult: ok(connection({ defaultModel: null })),
     });
 
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).rejects.toMatchObject({
       category: 'invalid_configuration',
     });
   });
@@ -201,7 +221,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       credentialResult: err(domainError('not_found', 'No credential is stored')),
     });
 
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).rejects.toMatchObject({
       category: 'invalid_configuration',
     });
   });
@@ -212,7 +232,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       credentialResult: err(domainError('unavailable', 'Could not decrypt the provider credential')),
     });
 
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).rejects.toMatchObject({
       category: 'invalid_configuration',
     });
   });
@@ -221,7 +241,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
     // The repository returns null for both cases; a foreign id must not resolve.
     const d = deps({ preference: byokPreference, connectionResult: ok(null) });
 
-    await expect(resolveAIModelForRole(OTHER_USER, AI_ROLE_SOURCE, d.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(OTHER_USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).rejects.toMatchObject({
       category: 'invalid_configuration',
     });
     expect(d.loadCredential).not.toHaveBeenCalled();
@@ -233,7 +253,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       connectionResult: ok(connection({ providerType: 'ollama' as AIProviderConnection['providerType'] })),
     });
 
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).rejects.toMatchObject({
       category: 'invalid_configuration',
     });
   });
@@ -249,7 +269,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       connectionResult: ok(connection({ providerType })),
     });
 
-    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)).provider).toBe(expected);
+    expect((await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })).provider).toBe(expected);
   });
 
   it('NEVER silently falls back to the CollabBoard DeepSeek key when BYOK is broken', async () => {
@@ -263,7 +283,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
     ];
 
     for (const d of brokenCases) {
-      const resolved = await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value)
+      const resolved = await resolveAIModelForRole(USER, AI_ROLE_SOURCE, d.value, { allowByok: true })
         .then((value) => value)
         .catch((error: unknown) => error);
 
@@ -276,7 +296,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
 
   it('surfaces repository infrastructure failures as provider_unavailable, not a default', async () => {
     const preferenceFailure = deps({ preference: err(domainError('unavailable', 'db down')) });
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, preferenceFailure.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, preferenceFailure.value, { allowByok: true })).rejects.toMatchObject({
       category: 'provider_unavailable',
     });
 
@@ -284,7 +304,7 @@ describe('resolveAIModelForRole -- BYOK', () => {
       preference: byokPreference,
       connectionResult: err(domainError('unavailable', 'db down')),
     });
-    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, connectionFailure.value)).rejects.toMatchObject({
+    await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, connectionFailure.value, { allowByok: true })).rejects.toMatchObject({
       category: 'provider_unavailable',
     });
   });

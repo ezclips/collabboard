@@ -25,8 +25,20 @@
 import { AI_ROLE_CHAT } from '../../ai/aiRoles';
 import type { BoardAiCitablePassage } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
-import { resolveAIModelForRole, type AIModelResolverDeps, type AIModelResolutionSource } from './resolveAIModelForRole';
+import {
+  resolveAIModelForRole,
+  type AIModelResolverDeps,
+  type AIModelResolutionSource,
+} from './resolveAIModelForRole';
 import type { UserId } from '../../domain/core/ids';
+
+/**
+ * PATCH-190. The resolver deps plus the permission to use the caller's own key.
+ * REQUIRED, so a caller cannot compile on a key the plan did not allow.
+ */
+export interface BoardWikiCompilationDeps extends AIModelResolverDeps {
+  readonly allowByok: boolean;
+}
 
 /**
  * MEASURED, NOT CHOSEN -- see `tokenBudgets.test.ts` for why that distinction
@@ -124,9 +136,11 @@ export async function executeBoardWikiCompilation(
   userId: UserId,
   topic: string,
   passageBlockText: string,
-  deps: AIModelResolverDeps,
+  deps: BoardWikiCompilationDeps,
 ): Promise<BoardWikiCompilationResult> {
-  const resolved = await resolveAIModelForRole(userId, AI_ROLE_CHAT, deps);
+  const resolved = await resolveAIModelForRole(userId, AI_ROLE_CHAT, deps, {
+    allowByok: deps.allowByok,
+  });
   const adapter = getAIProviderAdapter(resolved.provider);
 
   const controller = new AbortController();

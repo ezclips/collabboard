@@ -61,6 +61,7 @@ vi.mock('@/lib/infra/ai/boardAiThreadRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkBoardAiCredits: mocks.checkBoardAiCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -259,6 +260,20 @@ describe('PATCH-187. AI credits — starter questions cost nothing, but pause on
     expect(mocks.checkBoardAiCredits.mock.calls[0][0]).toMatchObject({
       boardId: BOARD_ID, userId: USER_ID, cost: 0, boardChat: true,
     });
+  });
+
+  it('PATCH-190: a configured-byok user on a Pro board runs managed, allowByok false', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({
+      kind: 'allowed',
+      plan: { workspaceId: 'w', planId: 'pro', limits: {}, subscriptionPeriod: null },
+      balance: { remaining: 1 },
+      charge: true,
+    });
+    const response = await post(oneItem);
+    expect(response.status).toBe(200);
+    expect(mocks.resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: false });
+    // Cost 0: the owner's plan is checked, but nothing is charged.
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
   });
 
   it('a refusal is 402 with the code, and the model is never called', async () => {

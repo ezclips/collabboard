@@ -19,7 +19,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
 import { AI_ROLE_CHAT } from '@/lib/ai/aiRoles';
-import { checkBoardAiCredits } from '@/lib/server/billing/aiCredits';
+import { allowByokFor, checkBoardAiCredits } from '@/lib/server/billing/aiCredits';
 import { asUserId } from '@/lib/domain/core/ids';
 
 /**
@@ -209,7 +209,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const resolvedModel = await resolveAIModelForRole(asUserId(user.id), AI_ROLE_CHAT, {
       preferences: createAIRolePreferenceRepository(),
       credentials: createAIProviderCredentialRepository(),
-    });
+    }, { allowByok: allowByokFor(creditDecision) });
     const adapter = getAIProviderAdapter(resolvedModel.provider);
 
     // Its OWN 15 s clock, owned here: adapters start no timers of their own.

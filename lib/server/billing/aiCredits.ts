@@ -23,12 +23,17 @@ import {
   PLAN_NO_WORKSPACE_ERROR,
   PLANS,
   planCreditsExhaustedError,
+  planIncludes,
   splitAiCreditCharge,
   type AiCreditBalance,
   type AiCreditFeature,
 } from '../../domain/billing/plans';
 import { getSupabaseAdmin } from '../../supabase/admin';
-import { resolveAIModelSourceForRole, type AIRolePreferenceReader } from '../ai/resolveAIModelForRole';
+import {
+  resolveAIModelSourceForRole,
+  type AIModelResolutionSource,
+  type AIRolePreferenceReader,
+} from '../ai/resolveAIModelForRole';
 import { resolveBoardPlan, type BoardPlan } from './boardPlan';
 
 export type CheckManagedAiCreditsResult =
@@ -128,7 +133,23 @@ export async function checkManagedAiCredits(
   options?: { readonly boardChat?: boolean },
 ): Promise<CheckManagedAiCreditsResult> {
   const plan = await resolveBoardPlan(admin, boardId);
+  return evaluateManagedAiCredits(admin, plan, now, cost, options);
+}
 
+/**
+ * PATCH-190. The managed decision for an ALREADY-RESOLVED plan.
+ *
+ * Split out so the byok path can read the plan once, find it non-Premium, and
+ * take the managed decision with that same plan instead of reading it twice.
+ * The plan's workspace absence and the ledger arithmetic are unchanged.
+ */
+async function evaluateManagedAiCredits(
+  admin: SupabaseClient,
+  plan: BoardPlan,
+  now: Date,
+  cost: number,
+  options?: { readonly boardChat?: boolean },
+): Promise<CheckManagedAiCreditsResult> {
   if (plan.workspaceId === null) {
     return {
       kind: 'refused',
@@ -199,11 +220,13 @@ export async function recordAiCreditUsage(
 
 /**
  * The route-facing check. Resolves the pre-call SOURCE (preference only, no
- * credential) and reads the ledger ONLY for a managed call; a byok caller never
- * reaches the database.
+ * credential -- the connection and the key are never read here).
  *
- * A preference read error propagates as the resolver's own `provider_unavailable`,
- * which the route turns into 503 without calling the model.
+ * PATCH-190. A configured `byok` is only kept on a Premium board; everywhere
+ * else the call is managed and the ledger is read, so the board owner's plan
+ * decides. A preference read error propagates as the resolver's own
+ * `provider_unavailable`, which the route turns into 503 without calling the
+ * model.
  */
 export type ManagedAiCreditDecision =
   | { readonly kind: 'byok' }
@@ -219,6 +242,49 @@ export type ManagedAiCreditDecision =
     readonly body: { readonly error: string; readonly code: string };
   };
 
+/**
+ * PATCH-190. The board decision for an ALREADY-RESOLVED source.
+ *
+ * A configured `byok` no longer short-circuits: the board owner's plan is read,
+ * and the key is kept only on Premium (including the 7-day trial). On any other
+ * plan the call falls through to the managed path with the SAME plan -- so it
+ * uses the board owner's credits exactly as a managed call does, and the
+ * ledger is read. A throw from the plan read or the ledger propagates.
+ */
+async function decideBoardAiCredits(
+  source: AIModelResolutionSource,
+  input: {
+    readonly boardId: string;
+    readonly now: Date;
+    readonly cost: number;
+    readonly boardChat?: boolean;
+  },
+): Promise<ManagedAiCreditDecision> {
+  const admin = getSupabaseAdmin();
+  const plan = await resolveBoardPlan(admin, input.boardId);
+
+  if (source === 'byok' && planIncludes(plan.planId, 'premium')) {
+    return { kind: 'byok' };
+  }
+
+  const checked = await evaluateManagedAiCredits(
+    admin,
+    plan,
+    input.now,
+    input.cost,
+    input.boardChat === undefined ? undefined : { boardChat: input.boardChat },
+  );
+  if (checked.kind === 'refused') {
+    return { kind: 'refused', status: checked.status, body: checked.body };
+  }
+  return {
+    kind: 'allowed',
+    plan: checked.plan,
+    balance: checked.balance,
+    charge: checked.charge,
+  };
+}
+
 export async function checkBoardAiCredits(input: {
   readonly boardId: string;
   readonly userId: string;
@@ -233,25 +299,7 @@ export async function checkBoardAiCredits(input: {
     input.role,
     input.preferences,
   );
-  if (source === 'byok') return { kind: 'byok' };
-
-  const admin = getSupabaseAdmin();
-  const checked = await checkManagedAiCredits(
-    admin,
-    input.boardId,
-    input.now,
-    input.cost,
-    input.boardChat === undefined ? undefined : { boardChat: input.boardChat },
-  );
-  if (checked.kind === 'refused') {
-    return { kind: 'refused', status: checked.status, body: checked.body };
-  }
-  return {
-    kind: 'allowed',
-    plan: checked.plan,
-    balance: checked.balance,
-    charge: checked.charge,
-  };
+  return decideBoardAiCredits(source, input);
 }
 
 /** The route-facing recorder. Builds the admin client here, as the check does. */
@@ -268,18 +316,20 @@ export async function recordBoardAiCreditUsage(
  * `boardId` -- the board the action runs on.
  *
  * ORDER IS LOAD-BEARING:
- *   1. the SOURCE is resolved from the role preference only. A byok caller is
- *      allowed immediately: their own key pays, so no board is needed, the
- *      board is never read, and the ledger is never touched.
- *   2. a MANAGED call with no board is refused with `plan_limit_no_board`.
- *   3. a managed call must be able to READ the board it names -- otherwise
- *      anyone could spend another workspace's credits by naming its board.
- *      A forbidden board never reads the ledger.
- *   4. only then is the PATCH-187 decision taken.
+ *   1. the SOURCE is resolved from the role preference only. PATCH-190: a
+ *      configured `byok` no longer short-circuits -- with no board there is no
+ *      Premium plan, so the key cannot apply and the call is refused with the
+ *      managed `plan_limit_no_board` like any other.
+ *   2. a call with no board is refused with `plan_limit_no_board`.
+ *   3. a call must be able to READ the board it names -- otherwise anyone could
+ *      spend another workspace's credits by naming its board. A forbidden board
+ *      never reads the plan or the ledger.
+ *   4. only then is the board decision taken: `byok` on Premium, managed on any
+ *      other plan.
  *
- * A throw from ANYTHING inside (the preference read, `canReadBoard`, the
- * ledger) PROPAGATES: the route turns it into a 503 and never calls the model.
- * Fail closed.
+ * A throw from ANYTHING inside (the preference read, `canReadBoard`, the plan
+ * read, the ledger) PROPAGATES: the route turns it into a 503 and never calls
+ * the model. Fail closed.
  */
 export type AiActionCreditDecision =
   | { readonly kind: 'byok' }
@@ -301,7 +351,6 @@ export async function checkAiActionCredits(input: {
     input.role,
     input.preferences,
   );
-  if (source === 'byok') return { kind: 'byok' };
 
   const boardId = input.boardId;
   if (boardId === undefined || boardId === null || boardId.length === 0) {
@@ -314,14 +363,25 @@ export async function checkAiActionCredits(input: {
 
   if (!(await input.canReadBoard(boardId))) return { kind: 'forbidden' };
 
-  // The PATCH-187 body: resolve the plan, read the ledger, decide. A throw here
-  // propagates, as it does everywhere else on this path.
-  return checkBoardAiCredits({
+  // The board decision: resolve the owner's plan once, then `byok` on Premium
+  // or the PATCH-187 managed body otherwise. A throw here propagates, as it
+  // does everywhere else on this path.
+  return decideBoardAiCredits(source, {
     boardId,
-    userId: input.userId,
-    role: input.role,
-    cost: input.cost,
     now: input.now,
-    preferences: input.preferences,
+    cost: input.cost,
   });
+}
+
+/**
+ * PATCH-190. Whether a decision lets the caller's own key run.
+ *
+ * `kind === 'byok'` is the only permission: `allowed` (managed), `refused` and
+ * `forbidden` all mean the key is not used and the call runs on the CollabBoard
+ * default. The nine call sites read the same way.
+ */
+export function allowByokFor(
+  decision: ManagedAiCreditDecision | AiActionCreditDecision,
+): boolean {
+  return decision.kind === 'byok';
 }

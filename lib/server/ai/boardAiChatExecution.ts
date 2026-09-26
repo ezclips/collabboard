@@ -24,8 +24,24 @@ import {
   defaultVisionModelFor,
   modelDeclaredForImages,
 } from './providers/visionCapability';
-import { resolveAIModelForRole, type AIModelResolverDeps, type AIModelResolutionSource } from './resolveAIModelForRole';
+import {
+  resolveAIModelForRole,
+  type AIModelResolverDeps,
+  type AIModelResolutionSource,
+} from './resolveAIModelForRole';
 import type { UserId } from '../../domain/core/ids';
+
+/**
+ * PATCH-190. The resolver deps plus the permission to use the caller's own key.
+ *
+ * `allowByok` is REQUIRED: the route decides it from the credit check's kind
+ * and this module cannot run the resolver without an explicit answer. The
+ * dependency object is passed through to `resolveAIModelForRole` unchanged, so
+ * the extra field costs the resolver nothing.
+ */
+export interface BoardAiChatExecutionDeps extends AIModelResolverDeps {
+  readonly allowByok: boolean;
+}
 
 /**
  * The longest single message this feature accepts, matching the existing AI
@@ -286,11 +302,13 @@ export interface BoardAiChatResult {
 export async function executeBoardAiChat(
   userId: UserId,
   turns: readonly BoardAiChatTurn[],
-  deps: AIModelResolverDeps,
+  deps: BoardAiChatExecutionDeps,
   context: readonly ResolvedBoardAiContextBlock[] = [],
   searchState: BoardAiChatSearchState = 'off',
 ): Promise<BoardAiChatResult> {
-  const resolved = await resolveAIModelForRole(userId, AI_ROLE_CHAT, deps);
+  const resolved = await resolveAIModelForRole(userId, AI_ROLE_CHAT, deps, {
+    allowByok: deps.allowByok,
+  });
   const adapter = getAIProviderAdapter(resolved.provider);
 
   // In block order, so the image the user attached first is the one that goes.

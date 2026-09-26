@@ -16,6 +16,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
 import {
+  allowByokFor,
   checkAiActionCredits,
   recordBoardAiCreditUsage,
 } from '@/lib/server/billing/aiCredits';
@@ -93,11 +94,12 @@ async function generateResolvedText(
   role: AIRole,
   systemPrompt: string,
   selectedText: string,
+  allowByok: boolean,
 ): Promise<string> {
   const resolved = await resolveAIModelForRole(userId, role, {
     preferences: createAIRolePreferenceRepository(),
     credentials: createAIProviderCredentialRepository(),
-  });
+  }, { allowByok });
   const adapter = getAIProviderAdapter(resolved.provider);
 
   const controller = new AbortController();
@@ -229,7 +231,13 @@ export async function POST(req: NextRequest) {
 
     let raw: string;
     try {
-      raw = await generateResolvedText(user.id as UserId, role, systemPrompt, selectedText.trim());
+      raw = await generateResolvedText(
+        user.id as UserId,
+        role,
+        systemPrompt,
+        selectedText.trim(),
+        allowByokFor(creditDecision),
+      );
     } catch (error) {
       // A normalized failure carries a category, a provider and a status --
       // never a provider response body, a key, a ciphertext or a wrapped cause

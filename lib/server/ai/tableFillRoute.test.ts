@@ -47,6 +47,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkAiActionCredits: mocks.checkAiActionCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 const USER_ID = 'user-1';
@@ -245,6 +246,16 @@ describe('table-fill PATCH-188: AI credits', () => {
     mocks.checkAiActionCredits.mockResolvedValue(allowed());
     await post(summarize({ boardId: BOARD }));
     expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ feature: 'table_fill', credits: 1 });
+  });
+
+  it('PATCH-190: a configured-byok user on a Pro board runs managed, allowByok false, and is charged', async () => {
+    // The check returns `allowed` (the owner's plan pays), so the key must not
+    // be used: the resolver is told allowByok false and the run is charged.
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    const response = await post(summarize({ boardId: BOARD }));
+    expect(response.status).toBe(200);
+    expect(mocks.resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: false });
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
   });
 
   it('a refused decision is 402 and the model is never called', async () => {

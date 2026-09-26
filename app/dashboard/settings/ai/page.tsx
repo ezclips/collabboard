@@ -4,6 +4,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AIProviderConnection } from '@/lib/domain/settings/aiProviderConnection';
+import { getPermissionContext, hasPremiumEntitlements } from '@/lib/auth/permissions';
+import { useSupabase } from '@/lib/supabase-provider';
+import PlanLimitNotice from '@/components/billing/PlanLimitNotice';
 import AIRoleSettings from '@/components/settings/ai/AIRoleSettings';
 import AIProviderList, { type AIProviderTestStatus } from '@/components/settings/ai/AIProviderList';
 import AIProviderDialog, {
@@ -38,6 +41,7 @@ interface DialogState {
 }
 
 export default function AISettingsPage() {
+  const { supabase } = useSupabase();
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [providers, setProviders] = useState<readonly AIProviderConnection[]>([]);
@@ -46,6 +50,12 @@ export default function AISettingsPage() {
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [testStatus, setTestStatus] = useState<Record<string, AIProviderTestStatus>>({});
+  /**
+   * PATCH-190. Whether the current workspace is NOT Premium, so a saved key is
+   * inactive. Unknown (false) until the entitlements read lands: the notice is
+   * information, not a gate, and is simply absent if it cannot be read.
+   */
+  const [showByokNotice, setShowByokNotice] = useState(false);
 
   /** A 401 is CollabBoard's own session; anything else is a feature error. */
   const reportError = useCallback((error: unknown, fallback: string) => {
@@ -76,6 +86,28 @@ export default function AISettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // PATCH-190. A saved key is used only on a Premium workspace's boards. The
+  // rule is enforced on the server; this only says so. A failed read shows
+  // nothing -- a saving, testing and deleting key keep working either way.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const permissionContext = await getPermissionContext(supabase, user);
+        if (!cancelled) {
+          setShowByokNotice(!hasPremiumEntitlements(permissionContext.entitlements));
+        }
+      } catch {
+        if (!cancelled) setShowByokNotice(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   const handleSaveRole = async (
     role: AISettingsRole,
@@ -192,6 +224,15 @@ export default function AISettingsPage() {
       )}
 
       <AIRoleSettings providers={providers} roles={roles} onSave={handleSaveRole} />
+
+      {showByokNotice && (
+        <div className="mt-6" data-testid="ai-byok-notice">
+          <PlanLimitNotice
+            className="block rounded-xl border border-gray-200 bg-gray-50 px-6 py-4 text-sm text-gray-600"
+            message="Your own AI keys are used on boards of Premium workspaces. On other boards, AI runs on CollabBoard's model and uses the board's AI credits."
+          />
+        </div>
+      )}
 
       <AIProviderList
         providers={providers}

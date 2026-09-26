@@ -22,6 +22,7 @@ import {
 } from '../ai/boardWikiCompilation';
 import type { BoardWikiCompilationResult } from '../ai/boardWikiCompilation';
 import {
+  allowByokFor,
   checkBoardAiCredits,
   recordBoardAiCreditUsage,
   type ManagedAiCreditDecision,
@@ -244,7 +245,8 @@ export async function compileBoardWikiProposal(
       asUserId(input.userId),
       input.topic,
       block.text,
-      deps.resolverDeps,
+      // PATCH-190: the key runs only when the check's kind says it may.
+      { ...deps.resolverDeps, allowByok: allowByokFor(creditDecision) },
     );
   } catch {
     // Includes the timeout abort. No provider detail travels outward.

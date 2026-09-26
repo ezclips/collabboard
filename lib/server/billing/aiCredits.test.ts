@@ -8,6 +8,7 @@ import {
 } from '../../domain/billing/plans';
 import { AI_ROLE_CHAT } from '../../ai/aiRoles';
 import {
+  allowByokFor,
   checkAiActionCredits,
   checkBoardAiCredits,
   checkManagedAiCredits,
@@ -189,7 +190,7 @@ describe('checkManagedAiCredits', () => {
       kind: 'refused',
       status: 402,
       body: {
-        error: "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.",
+        error: "This board isn't in a workspace, so it has no AI credits.",
         code: 'plan_limit_no_workspace',
       },
     });
@@ -278,8 +279,11 @@ describe('checkBoardAiCredits', () => {
     getPreference: vi.fn(async () => ({ ok: true, value: { connectionId, modelId: null } }) as never),
   });
 
-  it('a caller on their own key never builds the admin client or reads the ledger', async () => {
-    adminMocks.getSupabaseAdmin.mockReset();
+  it('a caller on their own key on a Premium board is byok, and the ledger is never read', async () => {
+    const { client, aiFilters } = makeAdmin({
+      subscription: { data: { plan: 'premium', status: 'active' }, error: null },
+    });
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
 
     const decision = await checkBoardAiCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
@@ -287,7 +291,53 @@ describe('checkBoardAiCredits', () => {
     });
 
     expect(decision).toEqual({ kind: 'byok' });
-    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+    // PATCH-190: the plan IS read to decide, but the credit ledger is not.
+    expect(adminMocks.getSupabaseAdmin).toHaveBeenCalledTimes(1);
+    expect(aiFilters).toEqual([]);
+  });
+
+  it('a caller on their own key on a Pro board is managed and the ledger decides', async () => {
+    const { client, aiFilters } = makeAdmin({
+      subscription: { data: { plan: 'pro', status: 'active' }, error: null },
+    });
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'),
+    });
+
+    expect(decision.kind).toBe('allowed');
+    expect(adminMocks.getSupabaseAdmin).toHaveBeenCalledTimes(1);
+    expect(aiFilters).toContainEqual(['workspace_id', WORKSPACE]);
+  });
+
+  it('a caller on their own key during the Premium trial is byok', async () => {
+    const trialing = { data: { created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }, error: null };
+    const { client, aiFilters } = makeAdmin({ subscription: { data: null, error: null }, workspace: trialing });
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'),
+    });
+
+    expect(decision).toEqual({ kind: 'byok' });
+    expect(aiFilters).toEqual([]);
+  });
+
+  it('a caller on their own key on Free after the trial is refused plan_limit_credits', async () => {
+    const expired = { data: { created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString() }, error: null };
+    const { client } = makeAdmin({ subscription: { data: null, error: null }, workspace: expired });
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'),
+    });
+
+    expect(decision.kind).toBe('refused');
+    if (decision.kind === 'refused') expect(decision.body.code).toBe('plan_limit_credits');
   });
 
   it('a managed caller reads the board owner ledger', async () => {
@@ -314,7 +364,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
   });
   const canReadBoard = (value: boolean) => vi.fn(async () => value);
 
-  it('byok: no board read, no ledger read, allowed without a board', async () => {
+  it('configured byok with no board is refused plan_limit_no_board: the key cannot apply without a plan', async () => {
     adminMocks.getSupabaseAdmin.mockReset();
     const read = canReadBoard(true);
 
@@ -323,9 +373,74 @@ describe('checkAiActionCredits (PATCH-188)', () => {
       preferences: preferences('conn-1'), canReadBoard: read,
     });
 
-    expect(decision).toEqual({ kind: 'byok' });
+    expect(decision).toEqual({
+      kind: 'refused',
+      status: 402,
+      body: {
+        error: "This AI action isn't linked to a board, so it has no AI credits.",
+        code: 'plan_limit_no_board',
+      },
+    });
     expect(read).not.toHaveBeenCalled();
     expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('configured byok on an unreadable board is forbidden, with no plan read', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+
+    const decision = await checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'), canReadBoard: canReadBoard(false),
+    });
+
+    expect(decision).toEqual({ kind: 'forbidden' });
+    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('configured byok on a readable Pro board takes the managed decision', async () => {
+    const { client, aiFilters } = makeAdmin({
+      subscription: { data: { plan: 'pro', status: 'active' }, error: null },
+    });
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
+
+    const decision = await checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'), canReadBoard: canReadBoard(true),
+    });
+
+    expect(decision.kind).toBe('allowed');
+    expect(aiFilters).toContainEqual(['workspace_id', WORKSPACE]);
+  });
+
+  it('configured byok on a readable Premium board is byok, with no ledger read', async () => {
+    const { client, aiFilters } = makeAdmin({
+      subscription: { data: { plan: 'premium', status: 'active' }, error: null },
+    });
+    adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
+
+    const decision = await checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      preferences: preferences('conn-1'), canReadBoard: canReadBoard(true),
+    });
+
+    expect(decision).toEqual({ kind: 'byok' });
+    expect(aiFilters).toEqual([]);
+  });
+
+  it('allowByokFor is true only for a byok decision', () => {
+    expect(allowByokFor({ kind: 'byok' })).toBe(true);
+    expect(allowByokFor({ kind: 'forbidden' })).toBe(false);
+    expect(allowByokFor({
+      kind: 'allowed',
+      plan: freePlan(),
+      balance: aiCreditBalance(PLANS.free.limits, aiCreditPeriod(NOW, null), { allowanceUsed: 0, grantUsed: 0 }),
+      charge: true,
+    })).toBe(false);
+    expect(allowByokFor({
+      kind: 'refused',
+      status: 402,
+      body: { error: 'x', code: 'plan_limit_credits' },
+    })).toBe(false);
   });
 
   it('managed without a board: plan_limit_no_board, and neither board nor ledger is read', async () => {
@@ -341,7 +456,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
       kind: 'refused',
       status: 402,
       body: {
-        error: "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.",
+        error: "This AI action isn't linked to a board, so it has no AI credits.",
         code: 'plan_limit_no_board',
       },
     });

@@ -358,7 +358,7 @@ describe('PATCH-187 — AI credits', () => {
 
   it('PLAN_NO_WORKSPACE_ERROR is the exact text', () => {
     expect(PLAN_NO_WORKSPACE_ERROR).toBe(
-      "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.",
+      "This board isn't in a workspace, so it has no AI credits.",
     );
     expect(PLAN_NO_WORKSPACE_CODE).toBe('plan_limit_no_workspace');
   });
@@ -375,7 +375,7 @@ describe('PATCH-188 — board-less AI actions', () => {
   it('PLAN_NO_BOARD text and code', () => {
     expect(PLAN_NO_BOARD_CODE).toBe('plan_limit_no_board');
     expect(PLAN_NO_BOARD_ERROR).toBe(
-      "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.",
+      "This AI action isn't linked to a board, so it has no AI credits.",
     );
   });
 });

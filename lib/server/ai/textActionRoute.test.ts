@@ -40,6 +40,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkAiActionCredits: mocks.checkAiActionCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 let route: typeof import('../../../app/api/ai/text-action/route');
@@ -343,6 +344,26 @@ describe('text-action PATCH-188: AI credits', () => {
       credits: 1,
       boardId: BOARD,
     });
+  });
+
+  it('PATCH-190: a configured-byok user on a Pro board runs on the CollabBoard model, is charged, and no credential is loaded', async () => {
+    mocks.getPreference.mockResolvedValue({
+      ok: true,
+      value: { role: 'edit', connectionId: 'conn-1', modelId: 'user-model' },
+    });
+    mocks.checkAiActionCredits.mockResolvedValue(allowed());
+    const fetchMock = mockDeepSeekSuccess('Better text');
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.POST(request({ action: 'improve', selectedText: 'Bravo', boardId: BOARD }));
+    expect(response.status).toBe(200);
+    // The saved connection and its credential are NEVER touched.
+    expect(mocks.getConnection).not.toHaveBeenCalled();
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
+    // The managed model ran, not the configured one, and the call was charged.
+    const [, init] = fetchMock.mock.calls[0];
+    const sentBody = JSON.parse((init as RequestInit).body as string) as { model: string };
+    expect(sentBody.model).not.toBe('user-model');
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
   });
 
   it('a refused decision is 402 with its body, and the model is never called', async () => {

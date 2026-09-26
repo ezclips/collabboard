@@ -53,6 +53,7 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 vi.mock('@/lib/server/billing/aiCredits', () => ({
   checkBoardAiCredits: mocks.checkBoardAiCredits,
   recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+  allowByokFor: (d: { kind: string }) => d.kind === 'byok',
 }));
 
 const USER_ID = 'user-1';
@@ -259,6 +260,15 @@ describe('table-from-document: PATCH-187 AI credits', () => {
     await post(base());
     expect(mocks.generateText).toHaveBeenCalledTimes(1);
     expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ feature: 'table_from_document', credits: 3 });
+  });
+
+  it('PATCH-190: a configured-byok user on a Pro board runs managed, allowByok false, and is charged', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+    mocks.resolveAIModelForRole.mockResolvedValue({ provider: 'deepseek', model: 'deepseek-flash', apiKey: 'k', source: 'collabboard-default' });
+    const response = await post(base());
+    expect(response.status).toBe(200);
+    expect(mocks.resolveAIModelForRole.mock.calls[0][3]).toEqual({ allowByok: false });
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
   });
 
   it('a refusal is 402 with the code, and nothing runs', async () => {
