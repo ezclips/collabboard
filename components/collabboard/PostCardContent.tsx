@@ -1169,10 +1169,15 @@ const SOURCE_EXCERPT_CLAMP: React.CSSProperties = {
 /**
  * P6J-F6-B2 -- the card's provenance marker.
  *
- * Deliberately NON-INTERACTIVE. It lives inside the TEXT/DEFAULT wrapper's
- * `pointer-events-none` region, which is load-bearing for canvas drag: making
- * this clickable would swallow the drag gesture on every source-linked Note.
- * The clickable affordance lives in the Note editor instead.
+ * INTERACTIVE WHEN AN OPENER EXISTS. It lives inside the TEXT/DEFAULT wrapper's
+ * `pointer-events-none` region, which is load-bearing for canvas drag, so the
+ * interactive `<button>` opts BACK IN to pointer events itself with
+ * `pointer-events-auto` -- a descendant with `pointer-events: auto` still
+ * receives events inside a `pointer-events: none` ancestor. The rest of the
+ * card body keeps passing presses through for drag/select, and the marker's own
+ * swallow handlers keep a press on it from starting a card drag. The inert
+ * `<div>` branch (no opener) is NOT given the class: it must keep passing
+ * presses through to the card.
  *
  * Renders nothing when the Note has no references -- including when the
  * reference read failed, since that yields an empty index.
@@ -1248,7 +1253,7 @@ export function KnowledgeSourceMarker({ padletId, noteContent, hideRegionCrop = 
                     type="button"
                     data-knowledge-source-marker="true"
                     data-knowledge-source-open="true"
-                    className="mt-1.5 flex w-full items-center gap-1 text-left text-[10px] leading-none text-gray-400 hover:text-gray-600 hover:underline focus-visible:outline focus-visible:outline-1"
+                    className="pointer-events-auto mt-1.5 flex w-full items-center gap-1 text-left text-[10px] leading-none text-gray-400 hover:text-gray-600 hover:underline focus-visible:outline focus-visible:outline-1"
                     title={label}
                     aria-label={`Open ${label}`}
                     onPointerDown={swallow}

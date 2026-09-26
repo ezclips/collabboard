@@ -4482,8 +4482,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 />
                 {/* P6J-F6-B2H: this branch hand-writes its own Note markup and
                     never reaches PostCardContent, so the shared marker is
-                    mounted here too. Display-only, exactly as on every other
-                    layout -- the editor keeps the interactive Source control. */}
+                    mounted here too. Interactive when the board wired an
+                    opener, exactly as on every other layout: the marker opts
+                    back into pointer events itself, so its API is the same
+                    wherever it is mounted. */}
                 <KnowledgeSourceMarker padletId={padlet.id} noteContent={padlet.content} />
                 </>
               )}

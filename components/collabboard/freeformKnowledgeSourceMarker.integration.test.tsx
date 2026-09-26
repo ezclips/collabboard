@@ -207,6 +207,25 @@ function mountMarker(references: readonly SourceReference[], padletId = PADLET, 
   return host!;
 }
 
+/** PATCH-194. The same marker with an opener, so the interactive branch renders. */
+function mountMarkerWithOpener(references: readonly SourceReference[], padletId = PADLET, noteContent = '') {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  const onOpen = vi.fn();
+  act(() => {
+    root!.render(
+      <KnowledgeSourceReferenceProvider
+        index={buildKnowledgeSourceReferenceIndex(references)}
+        onOpenSourceReference={onOpen}
+      >
+        <KnowledgeSourceMarker padletId={padletId} noteContent={noteContent} />
+      </KnowledgeSourceReferenceProvider>,
+    );
+  });
+  return host!;
+}
+
 describe('P6J-F6-B2H shared marker rendering (freeform contract)', () => {
   it('zero references render no marker at all', () => {
     const container = mountMarker([]);
@@ -246,6 +265,36 @@ describe('P6J-F6-B2H shared marker rendering (freeform contract)', () => {
   it('the marker adds no interactive element', () => {
     const container = mountMarker([reference('ref-1', 2, 2, '2026-01-01T00:00:00.000Z')]);
     expect(container.querySelector('button, a, [role="button"], [tabindex]')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH-194 -- the interactive marker opts back into pointer events
+// ---------------------------------------------------------------------------
+describe('PATCH-194 interactive marker pointer-events', () => {
+  /**
+   * jsdom does not apply CSS hit-testing, so a click test here would pass with
+   * or without the fix and prove nothing. This pins the CLASS only: the
+   * interactive `<button>` (an opener exists) must carry `pointer-events-auto`
+   * so it receives events inside PostCardContent's `pointer-events-none`
+   * wrapper, and the inert `<div>` (no opener) must NOT, so it keeps passing
+   * presses through to the card for drag. The actual hit-testing -- that a
+   * click reaches the link and that dragging the card body still drags it -- is
+   * verified live.
+   */
+  it('an opener exists: the interactive button opts back in with pointer-events-auto', () => {
+    const container = mountMarkerWithOpener([reference('ref-1', 2, 2, '2026-01-01T00:00:00.000Z')]);
+    const marker = container.querySelector('[data-knowledge-source-open="true"]');
+    expect(marker).not.toBeNull();
+    expect(marker!.tagName).toBe('BUTTON');
+    expect(marker!.className).toContain('pointer-events-auto');
+  });
+
+  it('no opener: the inert label does NOT opt in, so presses pass through to the card', () => {
+    const container = mountMarker([reference('ref-1', 2, 2, '2026-01-01T00:00:00.000Z')]);
+    const marker = container.querySelector(MARKER)!;
+    expect(marker.tagName).toBe('DIV');
+    expect(marker.className).not.toContain('pointer-events-auto');
   });
 });
 
