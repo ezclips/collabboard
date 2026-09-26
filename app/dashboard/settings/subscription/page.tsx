@@ -18,6 +18,17 @@ const CONFIRM_MESSAGE = 'Your plan changes now. The price difference is settled 
 
 function planFeatures(planId: PlanId): string[] {
     const { limits } = PLANS[planId];
+    // PATCH-189. Free's card says what Free KEEPS (boards, sharing) and what it
+    // no longer has. It must not read "0 Knowledge documents" or "0 AI credits
+    // / month".
+    if (planId === 'free') {
+        return [
+            `${limits.boards} boards`,
+            `${formatBytes(limits.fileSizeBytes)} per file`,
+            'No AI',
+            'No new documents',
+        ];
+    }
     return [
         limits.boards === null ? 'Unlimited boards' : `${limits.boards} boards`,
         `${formatBytes(limits.fileSizeBytes)} per file`,
@@ -28,6 +39,12 @@ function planFeatures(planId: PlanId): string[] {
         `${limits.monthlyAiCredits} AI credits / month`,
         ...(limits.modelTier === 'premium' ? ['Premium AI models'] : [])
     ];
+}
+
+/** PATCH-189. Whole days left in the trial, rounded up; never less than 1. */
+function trialDaysLeft(endsAt: string, now: Date): number {
+    const remaining = new Date(endsAt).getTime() - now.getTime();
+    return Math.max(1, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
 }
 
 const plans = PLAN_ORDER.map((id) => ({
@@ -48,12 +65,17 @@ export default function SubscriptionPage() {
     const [currentPlan, setCurrentPlan] = useState<PlanId>('free');
     const [billingInterval, setBillingInterval] = useState<BillingInterval>('monthly');
     const [subscriptionStatus, setSubscriptionStatus] = useState<string>('free');
+    const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
     const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
     const [pendingPlan, setPendingPlan] = useState<PlanId | null>(null);
     const [cardError, setCardError] = useState<{ plan: PlanId; message: string } | null>(null);
 
     const onPaidPlan = effectivePlanId(currentPlan, subscriptionStatus) !== 'free';
     const canManageBilling = workspaceRole === 'owner' || workspaceRole === 'admin';
+    // PATCH-189. During the trial no card is "current": the trial is Premium
+    // level, and Pro and Premium must still be offered.
+    const onTrial = trialEndsAt !== null;
+    const trialDays = onTrial ? trialDaysLeft(trialEndsAt, new Date()) : 0;
 
     useEffect(() => {
         void loadSubscription();
@@ -77,6 +99,7 @@ export default function SubscriptionPage() {
 
             setCurrentPlan(permissionContext.entitlements.plan);
             setSubscriptionStatus(permissionContext.entitlements.status);
+            setTrialEndsAt(permissionContext.entitlements.trialEndsAt);
             setWorkspaceRole(permissionContext.workspaceMembership?.role ?? null);
 
             if (typeof data?.stripe_price_id === 'string' && data.stripe_price_id === process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_YEARLY) {
@@ -211,6 +234,25 @@ export default function SubscriptionPage() {
                 {workspaceRole ? ` · Role: ${workspaceRole}` : ''}
             </p>
 
+            {onTrial && (
+                <div
+                    data-billing-trial="true"
+                    className="mb-8 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900"
+                >
+                    Premium trial — {trialDays} {trialDays === 1 ? 'day' : 'days'} left
+                </div>
+            )}
+
+            {!onTrial && currentPlan === 'free' && (
+                <div
+                    data-billing-trial-ended="true"
+                    className="mb-8 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700"
+                >
+                    Your Premium trial has ended. You&apos;re on Free: boards and sharing stay;
+                    AI and new documents need a plan.
+                </div>
+            )}
+
             <div className="mb-8 p-4 bg-purple-50 border border-purple-200 rounded-lg flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <CreditCard className="w-5 h-5 text-purple-600" />
@@ -220,7 +262,7 @@ export default function SubscriptionPage() {
                         <span className="ml-3 text-sm text-purple-600">Status: {subscriptionStatus}</span>
                     </div>
                 </div>
-                {currentPlan !== 'free' && canManageBilling && (
+                {!onTrial && currentPlan !== 'free' && canManageBilling && (
                     <button
                         onClick={handleOpenPortal}
                         disabled={openingPortal}
@@ -252,7 +294,7 @@ export default function SubscriptionPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {plans.map((plan) => {
-                    const isCurrent = plan.id === currentPlan;
+                    const isCurrent = !onTrial && plan.id === currentPlan;
                     return (
                         <div
                             key={plan.id}

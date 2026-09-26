@@ -32,6 +32,8 @@ const USER = '33333333-3333-4333-8333-333333333333';
 function makeAdmin(handlers: {
   board?: { data: unknown; error: unknown };
   subscription?: { data: unknown; error: unknown };
+  /** PATCH-189. The workspace's `created_at`, read to decide the trial. */
+  workspace?: { data: unknown; error: unknown };
   allowance?: { data: unknown; error: unknown };
   grant?: { data: unknown; error: unknown };
   insertError?: unknown;
@@ -51,6 +53,15 @@ function makeAdmin(handlers: {
       const builder = {
         eq: vi.fn(() => builder),
         maybeSingle: vi.fn(async () => handlers.subscription ?? { data: null, error: null }),
+      };
+      return { select: vi.fn(() => builder) };
+    }
+    if (table === 'workspaces') {
+      const builder = {
+        eq: vi.fn(() => builder),
+        // PATCH-189. Default: no `created_at`, so no trial -- the pre-PATCH-189
+        // behaviour for every existing case here.
+        maybeSingle: vi.fn(async () => handlers.workspace ?? { data: { created_at: null }, error: null }),
       };
       return { select: vi.fn(() => builder) };
     }
@@ -96,12 +107,20 @@ const proPlan = (period: BoardPlan['subscriptionPeriod']): BoardPlan => ({
   planId: 'pro',
   limits: PLANS.pro.limits,
   subscriptionPeriod: period,
+  trial: null,
 });
 const freePlan = (): BoardPlan => ({
   workspaceId: WORKSPACE,
   planId: 'free',
   limits: PLANS.free.limits,
   subscriptionPeriod: null,
+  trial: null,
+});
+// PATCH-189. Free is 0/0 now; the grant-bucket split is exercised with the
+// shape the bucket exists for (an allowance plus a welcome grant).
+const grantPlan = (): BoardPlan => ({
+  ...freePlan(),
+  limits: { ...PLANS.free.limits, monthlyAiCredits: 10, welcomeAiCredits: 30 },
 });
 
 const NOW = new Date('2026-09-15T12:00:00Z');
@@ -229,10 +248,11 @@ describe('recordAiCreditUsage', () => {
 
   it('splits into two rows when the allowance runs out mid-charge', async () => {
     const { client, inserts } = makeAdmin();
-    const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 9, grantUsed: 0 });
+    const plan = grantPlan();
+    const balance = aiCreditBalance(plan.limits, period, { allowanceUsed: 9, grantUsed: 0 });
 
     await recordAiCreditUsage(client, {
-      plan: freePlan(), balance, boardId: BOARD, userId: USER, feature: 'table_from_document', credits: 3,
+      plan, balance, boardId: BOARD, userId: USER, feature: 'table_from_document', credits: 3,
     });
 
     expect(inserts[0]).toEqual([
@@ -271,7 +291,10 @@ describe('checkBoardAiCredits', () => {
   });
 
   it('a managed caller reads the board owner ledger', async () => {
-    const { client, aiFilters } = makeAdmin();
+    // A paid plan: Free is 0 credits now, so an allowed decision needs one.
+    const { client, aiFilters } = makeAdmin({
+      subscription: { data: { plan: 'pro', status: 'active' }, error: null },
+    });
     adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
 
     const decision = await checkBoardAiCredits({
@@ -339,7 +362,10 @@ describe('checkAiActionCredits (PATCH-188)', () => {
   });
 
   it('managed and readable: the PATCH-187 decision', async () => {
-    const { client, aiFilters } = makeAdmin();
+    // A paid plan: Free is 0 credits now, so an allowed decision needs one.
+    const { client, aiFilters } = makeAdmin({
+      subscription: { data: { plan: 'pro', status: 'active' }, error: null },
+    });
     adminMocks.getSupabaseAdmin.mockReset().mockReturnValue(client);
 
     const decision = await checkAiActionCredits({
@@ -360,5 +386,66 @@ describe('checkAiActionCredits (PATCH-188)', () => {
       preferences: preferences(null),
       canReadBoard: async () => { throw new Error('down'); },
     })).rejects.toThrow('down');
+  });
+});
+
+describe('PATCH-189 — the trial and the small Free plan', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  // `resolveBoardPlan` reads `created_at` against the REAL clock, so these are
+  // relative to now, not to the fixed NOW the ledger arithmetic uses.
+  const TRIAL_WORKSPACE = {
+    data: { created_at: new Date(Date.now() - 2 * DAY).toISOString() },
+    error: null,
+  };
+  const EXPIRED_WORKSPACE = {
+    data: { created_at: new Date(Date.now() - 8 * DAY).toISOString() },
+    error: null,
+  };
+
+  it('a trialing workspace allows up to 100 credits, then refuses', async () => {
+    const under = makeAdmin({
+      subscription: { data: null, error: null },
+      workspace: TRIAL_WORKSPACE,
+      allowance: { data: [{ credits: 99 }], error: null },
+    });
+    const allowed = await checkManagedAiCredits(under.client, BOARD, NOW, 1);
+    expect(allowed.kind).toBe('allowed');
+    if (allowed.kind === 'allowed') {
+      expect(allowed.balance.allowance).toBe(100);
+      expect(allowed.balance.remaining).toBe(1);
+    }
+
+    const spent = makeAdmin({
+      subscription: { data: null, error: null },
+      workspace: TRIAL_WORKSPACE,
+      allowance: { data: [{ credits: 100 }], error: null },
+    });
+    const refused = await checkManagedAiCredits(spent.client, BOARD, NOW, 1);
+    expect(refused.kind).toBe('refused');
+    if (refused.kind === 'refused') expect(refused.body.code).toBe('plan_limit_credits');
+  });
+
+  it('an expired Free workspace refuses every managed call with plan_limit_credits', async () => {
+    const { client } = makeAdmin({
+      subscription: { data: null, error: null },
+      workspace: EXPIRED_WORKSPACE,
+    });
+
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1);
+
+    expect(result.kind).toBe('refused');
+    if (result.kind === 'refused') expect(result.body.code).toBe('plan_limit_credits');
+  });
+
+  it('board chat on expired Free is refused, not free', async () => {
+    const { client } = makeAdmin({
+      subscription: { data: null, error: null },
+      workspace: EXPIRED_WORKSPACE,
+    });
+
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, { boardChat: true });
+
+    expect(result.kind).toBe('refused');
+    if (result.kind === 'refused') expect(result.body.code).toBe('plan_limit_credits');
   });
 });

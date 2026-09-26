@@ -3,8 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // Relative imports (not the '@/...' alias) so the isolated Knowledge worker,
 // which bundles this module with esbuild and has no path alias, can reuse it.
 import {
-  effectivePlanId,
   PLANS,
+  workspacePlan,
   type PlanId,
   type PlanLimits,
 } from "../../domain/billing/plans";
@@ -23,11 +23,19 @@ export interface BoardPlan {
   readonly planId: PlanId;
   readonly limits: PlanLimits;
   /**
-   * PATCH-187. The stored subscription period, used to scope the monthly AI
-   * credit allowance. Null when the workspace has no row, or when the effective
-   * plan is Free -- a Free workspace always uses the UTC calendar month.
+   * PATCH-187, widened by PATCH-189. The window the AI allowance is scoped to:
+   * the stored SUBSCRIPTION period on a paid plan, the TRIAL window during the
+   * 7-day Premium trial, else null (a Free workspace uses the UTC calendar
+   * month). The field keeps its PATCH-187 name on purpose -- renaming it would
+   * churn every AI route test fixture for no gain. `aiCreditPeriod` reads it
+   * unchanged: a trial window is simply a credit period that contains `now`.
    */
   readonly subscriptionPeriod: { readonly start: string | null; readonly end: string | null } | null;
+  /**
+   * PATCH-189. The Premium trial's end (ISO), or null when the plan is a paid
+   * subscription or plain Free. Present so a surface can say how long is left.
+   */
+  readonly trial: { readonly endsAt: string } | null;
 }
 
 /**
@@ -51,7 +59,13 @@ export async function resolveBoardPlan(
     (board as { workspace_id?: string | null } | null)?.workspace_id ?? null;
 
   if (!workspaceId) {
-    return { workspaceId: null, planId: "free", limits: PLANS.free.limits, subscriptionPeriod: null };
+    return {
+      workspaceId: null,
+      planId: "free",
+      limits: PLANS.free.limits,
+      subscriptionPeriod: null,
+      trial: null,
+    };
   }
 
   const { data: subscription, error: subscriptionError } = await adminClient
@@ -62,21 +76,35 @@ export async function resolveBoardPlan(
 
   if (subscriptionError) throw subscriptionError;
 
+  // PATCH-189. The trial is counted from the workspace's creation, so its row
+  // is read too. Read with the SAME admin client as the rest of the plan: the
+  // uploader may be a contributor who cannot read the owner's workspace row.
+  const { data: workspace, error: workspaceError } = await adminClient
+    .from("workspaces")
+    .select("created_at")
+    .eq("id", workspaceId)
+    .maybeSingle();
+
+  if (workspaceError) throw workspaceError;
+
   const row = subscription as {
     plan?: string | null;
     status?: string | null;
     current_period_start?: string | null;
     current_period_end?: string | null;
   } | null;
-  const planId = effectivePlanId(row?.plan, row?.status);
+  const createdAt =
+    (workspace as { created_at?: string | null } | null)?.created_at ?? null;
 
-  // PATCH-187. Only a paid, granting plan has a billing period to scope the
-  // monthly allowance to; Free always falls back to the UTC calendar month.
-  const subscriptionPeriod = planId === "free"
-    ? null
-    : { start: row?.current_period_start ?? null, end: row?.current_period_end ?? null };
+  const resolved = workspacePlan(row, createdAt, new Date());
 
-  return { workspaceId, planId, limits: PLANS[planId].limits, subscriptionPeriod };
+  return {
+    workspaceId,
+    planId: resolved.planId,
+    limits: resolved.limits,
+    subscriptionPeriod: resolved.creditPeriod,
+    trial: resolved.trial ? { endsAt: resolved.trial.endsAt.toISOString() } : null,
+  };
 }
 
 /**

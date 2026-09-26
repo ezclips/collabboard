@@ -39,24 +39,34 @@ Contributors never need to pay.
 **Rule 2: AI is metered in credits; storage is not metered.** Files are "unlimited, fair use",
 with a per-file size limit and a per-PDF page limit as technical safety nets.
 
-**Rule 3: your own AI key costs no credits.** Users can already connect their own AI provider
-keys. AI run on the user's own key consumes no credits. This is fair, it costs us nothing, and
-it's a selling point for power users.
+**Rule 3 (changed 2026-09-26): your own AI key is a Premium feature, and costs no credits.**
+Below Premium, a saved key stays saved but inactive: the call runs on the CollabBoard model and
+uses credits. The key is never deleted. The board owner's plan decides, as everywhere (Rule 1).
+**Why the change (owner, 2026-09-26):** a free own key gave Free users unlimited AI, including
+premium models, and gave Pro users premium models for the Pro price -- it removed the reason to
+upgrade for exactly the heavy AI users most likely to pay.
+
+**Rule 4 (added 2026-09-26): Free is for evaluating.** A new workspace gets a **7-day Premium
+trial** (no card, counted from the workspace's creation). When it ends without a payment, the
+workspace becomes the small Free plan below: its boards stay usable and shareable and
+contributors stay free (the sharing loop is how the canvas side grows), but AI is off and no new
+documents are processed. Documents processed during the trial stay readable. Owner's choice of
+"Mix: small Free stays" over a read-only lock (Heptabase) and over the old free-forever AI plan.
 
 ## 3. The plans
 
 | | **Free** | **Pro** | **Premium** |
 |---|---|---|---|
-| Price | $0 | **$9 / month**, or $90 / year | **$19 / month**, or $190 / year |
+| Price | $0 (after a 7-day Premium trial) | **$9 / month**, or $90 / year | **$19 / month**, or $190 / year |
 | Boards | 3 (as today) | unlimited | unlimited |
 | Contributors on your boards | unlimited, free | unlimited, free | unlimited, free |
 | File size, per file | 20 MB | 250 MB | 1 GB |
-| PDFs and documents processed (Knowledge) | 5 in total | unlimited (fair use) | unlimited (fair use) |
+| PDFs and documents processed (Knowledge) | none new (those from the trial stay readable) | unlimited (fair use) | unlimited (fair use) |
 | Pages per PDF | 50 | 500 | 2,000 |
-| AI credits | 30 once, as a welcome, + 10 / month | 500 / month | 2,000 / month |
-| AI models | basic (cheap, fast) | basic | basic + premium (GPT, Claude, Gemini Pro) |
-| When credits run out | AI features pause until next month or an upgrade | basic Q&A on boards stays free; creating and editing need credits | same as Pro |
-| Your own AI key | ✓, costs no credits | ✓ | ✓ |
+| AI credits | none (AI is part of the trial only) | 500 / month | 2,000 / month |
+| AI models | — | basic (cheap, fast) | basic + premium (GPT, Claude, Gemini Pro) |
+| When credits run out | — (no AI on Free) | basic Q&A on boards stays free; creating and editing need credits | same as Pro |
+| Your own AI key | — (saved keys stay, inactive) | — (saved keys stay, inactive) | ✓, costs no credits |
 
 **Why these numbers:**
 - **$9 and $19** sit exactly where Padlet, Milanote, Miro, Notion and Heptabase sit ($8–12 for

@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
-import { PLANS } from "@/lib/domain/billing/plans";
+import { PLANS, PLAN_TRIAL_DAYS } from "@/lib/domain/billing/plans";
 
 import { countWorkspaceKnowledgeDocuments, resolveBoardPlan } from "./boardPlan";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * PATCH-185. The board-owner's plan and the document count, with an injected
@@ -16,6 +18,8 @@ const BOARD = "22222222-2222-4222-8222-222222222222";
 function makeAdminClient(handlers: {
   board?: { data: unknown; error: unknown };
   subscription?: { data: unknown; error: unknown };
+  /** PATCH-189. The workspace's `created_at`, read to decide the trial. */
+  workspace?: { data: unknown; error: unknown };
   boardIds?: { data: unknown; error: unknown };
   documentCount?: { count: number | null; error: unknown };
 }) {
@@ -23,6 +27,7 @@ function makeAdminClient(handlers: {
     boardEq: [] as unknown[][],
     boardListEq: [] as unknown[][],
     subscriptionEq: [] as unknown[][],
+    workspaceEq: [] as unknown[][],
     in: [] as unknown[][],
     neq: [] as unknown[][],
   };
@@ -58,6 +63,19 @@ function makeAdminClient(handlers: {
           return builder;
         }),
         maybeSingle: vi.fn(async () => handlers.subscription ?? { data: null, error: null }),
+      };
+      return { select: vi.fn(() => builder) };
+    }
+
+    if (table === "workspaces") {
+      const builder = {
+        eq: vi.fn((column: string, value: unknown) => {
+          calls.workspaceEq.push([column, value]);
+          return builder;
+        }),
+        // PATCH-189 default: no `created_at`, so no trial. Every pre-PATCH-189
+        // case here keeps its old meaning.
+        maybeSingle: vi.fn(async () => handlers.workspace ?? { data: { created_at: null }, error: null }),
       };
       return { select: vi.fn(() => builder) };
     }
@@ -133,6 +151,7 @@ describe("resolveBoardPlan", () => {
       planId: "free",
       limits: PLANS.free.limits,
       subscriptionPeriod: null,
+      trial: null,
     });
   });
 
@@ -148,9 +167,11 @@ describe("resolveBoardPlan", () => {
       planId: "free",
       limits: PLANS.free.limits,
       subscriptionPeriod: null,
+      trial: null,
     });
     // No workspace means nothing to look a subscription up under.
     expect(calls.subscriptionEq).toEqual([]);
+    expect(calls.workspaceEq).toEqual([]);
   });
 
   it("a boards read error throws (fail closed)", async () => {
@@ -227,6 +248,59 @@ describe("resolveBoardPlan", () => {
     const plan = await resolveBoardPlan(client, BOARD);
 
     expect(plan.subscriptionPeriod).toBeNull();
+  });
+});
+
+describe("resolveBoardPlan PATCH-189: the 7-day Premium trial", () => {
+  const createdAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString();
+  const trialEndFor = (createdAt: string) =>
+    new Date(Date.parse(createdAt) + PLAN_TRIAL_DAYS * DAY_MS).toISOString();
+
+  it("a board created 2 days ago is on the Premium trial, with the trial window as its credit period", async () => {
+    const createdAt = createdAgo(2);
+    const { client, calls } = makeAdminClient({
+      board: { data: { workspace_id: WORKSPACE }, error: null },
+      subscription: { data: null, error: null },
+      workspace: { data: { created_at: createdAt }, error: null },
+    });
+
+    const plan = await resolveBoardPlan(client, BOARD);
+
+    expect(plan.planId).toBe("premium");
+    expect(plan.trial).toEqual({ endsAt: trialEndFor(createdAt) });
+    expect(plan.subscriptionPeriod).toEqual({
+      start: new Date(createdAt).toISOString(),
+      end: trialEndFor(createdAt),
+    });
+    // The workspace row is read BY ID, with the same client.
+    expect(calls.workspaceEq).toEqual([["id", WORKSPACE]]);
+  });
+
+  it("a board created 8 days ago is Free", async () => {
+    const { client } = makeAdminClient({
+      board: { data: { workspace_id: WORKSPACE }, error: null },
+      subscription: { data: null, error: null },
+      workspace: { data: { created_at: createdAgo(8) }, error: null },
+    });
+
+    const plan = await resolveBoardPlan(client, BOARD);
+
+    expect(plan.planId).toBe("free");
+    expect(plan.trial).toBeNull();
+    expect(plan.subscriptionPeriod).toBeNull();
+  });
+
+  it("a workspaces read error throws (fail closed)", async () => {
+    const { client } = makeAdminClient({
+      board: { data: { workspace_id: WORKSPACE }, error: null },
+      subscription: { data: null, error: null },
+      workspace: { data: null, error: { code: "42501", message: "denied" } },
+    });
+
+    await expect(resolveBoardPlan(client, BOARD)).rejects.toEqual({
+      code: "42501",
+      message: "denied",
+    });
   });
 });
 

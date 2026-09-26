@@ -4,15 +4,18 @@ import {
   AI_CREDIT_COSTS,
   BOARD_CHAT_SEARCH_SURCHARGE,
   PLAN_CREDITS_EXHAUSTED_CODE,
+  PLAN_DOCUMENTS_ZERO_ERROR,
   PLAN_NO_BOARD_CODE,
   PLAN_NO_BOARD_ERROR,
   PLAN_NO_WORKSPACE_CODE,
   PLAN_NO_WORKSPACE_ERROR,
+  PLAN_TRIAL_DAYS,
   PAID_PLAN_IDS,
   PLANS,
   PLAN_CURRENCY,
   PLAN_ORDER,
   PLAN_PAGE_LIMIT_PREFIX,
+  TRIAL_AI_CREDITS,
   aiCreditBalance,
   aiCreditPeriod,
   effectivePlanId,
@@ -26,6 +29,7 @@ import {
   splitAiCreditCharge,
   statusGrantsPlan,
   transcriptPunctuateCredits,
+  workspacePlan,
 } from './plans';
 import { sanitizeKnowledgeProcessingError } from '../knowledge/knowledgeExtraction';
 
@@ -41,10 +45,11 @@ describe('PRICING.md §3 — every plan, value by value', () => {
     expect(PLANS.free.price.yearly).toBe(0);
     expect(PLANS.free.limits.boards).toBe(3);
     expect(PLANS.free.limits.fileSizeBytes).toBe(20 * MB);
-    expect(PLANS.free.limits.processedDocuments).toBe(5);
+    // PATCH-189. Free is for evaluating: no new documents, no AI, no grant.
+    expect(PLANS.free.limits.processedDocuments).toBe(0);
     expect(PLANS.free.limits.pagesPerPdf).toBe(50);
-    expect(PLANS.free.limits.monthlyAiCredits).toBe(10);
-    expect(PLANS.free.limits.welcomeAiCredits).toBe(30);
+    expect(PLANS.free.limits.monthlyAiCredits).toBe(0);
+    expect(PLANS.free.limits.welcomeAiCredits).toBe(0);
     expect(PLANS.free.limits.modelTier).toBe('basic');
   });
 
@@ -279,18 +284,26 @@ describe('PATCH-187 — AI credits', () => {
     });
   });
 
+  // PATCH-189. Free is now 0 credits / 0 grant, so the allowance+grant
+  // arithmetic is exercised with the shape the grant bucket exists for.
+  const PLAN_WITH_GRANT = {
+    ...PLANS.free.limits,
+    monthlyAiCredits: 10,
+    welcomeAiCredits: 30,
+  };
+
   describe('aiCreditBalance', () => {
     const period = aiCreditPeriod(new Date('2026-09-15T12:00:00Z'), null);
 
     it('Free, fresh → 40 remaining', () => {
-      const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 0, grantUsed: 0 });
+      const balance = aiCreditBalance(PLAN_WITH_GRANT, period, { allowanceUsed: 0, grantUsed: 0 });
       expect(balance.allowance).toBe(10);
       expect(balance.grantTotal).toBe(30);
       expect(balance.remaining).toBe(40);
     });
 
     it('Free with 10 allowance used and 5 grant used → 25', () => {
-      const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 10, grantUsed: 5 });
+      const balance = aiCreditBalance(PLAN_WITH_GRANT, period, { allowanceUsed: 10, grantUsed: 5 });
       expect(balance.remaining).toBe(25);
     });
 
@@ -302,7 +315,7 @@ describe('PATCH-187 — AI credits', () => {
     });
 
     it('an overspent allowance never goes negative', () => {
-      const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 999, grantUsed: 0 });
+      const balance = aiCreditBalance(PLAN_WITH_GRANT, period, { allowanceUsed: 999, grantUsed: 0 });
       expect(balance.remaining).toBe(30);
     });
   });
@@ -310,7 +323,7 @@ describe('PATCH-187 — AI credits', () => {
   describe('splitAiCreditCharge', () => {
     const period = aiCreditPeriod(new Date('2026-09-15T12:00:00Z'), null);
     const balanceOf = (allowanceUsed: number, grantUsed: number) =>
-      aiCreditBalance(PLANS.free.limits, period, { allowanceUsed, grantUsed });
+      aiCreditBalance(PLAN_WITH_GRANT, period, { allowanceUsed, grantUsed });
 
     it('all from the allowance', () => {
       expect(splitAiCreditCharge(balanceOf(0, 0), 3)).toEqual([
@@ -363,6 +376,95 @@ describe('PATCH-188 — board-less AI actions', () => {
     expect(PLAN_NO_BOARD_CODE).toBe('plan_limit_no_board');
     expect(PLAN_NO_BOARD_ERROR).toBe(
       "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.",
+    );
+  });
+});
+
+describe('PATCH-189 — the 7-day Premium trial', () => {
+  const NOW = new Date('2026-09-15T12:00:00Z');
+  const DAY = 24 * 60 * 60 * 1000;
+  const CREATED = '2026-09-13T12:00:00.000Z';
+  const trialEnd = new Date(Date.parse(CREATED) + PLAN_TRIAL_DAYS * DAY);
+
+  it('PLAN_TRIAL_DAYS is 7 and the trial allowance is 100', () => {
+    expect(PLAN_TRIAL_DAYS).toBe(7);
+    expect(TRIAL_AI_CREDITS).toBe(100);
+  });
+
+  it('created 2 days ago with no subscription → premium, endsAt = created + 7 days, 100 credits', () => {
+    const plan = workspacePlan(null, CREATED, NOW);
+    expect(plan.planId).toBe('premium');
+    expect(plan.trial).toEqual({ endsAt: trialEnd });
+    expect(plan.limits.monthlyAiCredits).toBe(TRIAL_AI_CREDITS);
+    // Premium's other limits carry over.
+    expect(plan.limits.boards).toBeNull();
+    expect(plan.limits.fileSizeBytes).toBe(PLANS.premium.limits.fileSizeBytes);
+  });
+
+  it("the trial's creditPeriod is the trial window", () => {
+    const plan = workspacePlan(null, CREATED, NOW);
+    expect(plan.creditPeriod).toEqual({ start: CREATED, end: trialEnd.toISOString() });
+  });
+
+  it('created 8 days ago → free, trial null', () => {
+    const plan = workspacePlan(null, '2026-09-07T12:00:00Z', NOW);
+    expect(plan.planId).toBe('free');
+    expect(plan.trial).toBeNull();
+    expect(plan.creditPeriod).toBeNull();
+  });
+
+  it('exactly at created + 7 days → free (the window is half-open)', () => {
+    const plan = workspacePlan(null, CREATED, new Date(trialEnd));
+    expect(plan.planId).toBe('free');
+    expect(plan.trial).toBeNull();
+  });
+
+  it('pro active on day 2 → pro, trial null, with the subscription period', () => {
+    const plan = workspacePlan({
+      plan: 'pro',
+      status: 'active',
+      current_period_start: '2026-09-01T00:00:00Z',
+      current_period_end: '2026-10-01T00:00:00Z',
+    }, CREATED, NOW);
+    expect(plan.planId).toBe('pro');
+    expect(plan.trial).toBeNull();
+    expect(plan.creditPeriod).toEqual({
+      start: '2026-09-01T00:00:00Z',
+      end: '2026-10-01T00:00:00Z',
+    });
+  });
+
+  it('pro canceled on day 2 → trial (a trial is not a live paid subscription)', () => {
+    const plan = workspacePlan({ plan: 'pro', status: 'canceled' }, CREATED, NOW);
+    expect(plan.planId).toBe('premium');
+    expect(plan.trial).toEqual({ endsAt: trialEnd });
+  });
+
+  it('a null or garbage createdAt → free (fail closed)', () => {
+    for (const bad of [null, '', 'not-a-date'] as const) {
+      const plan = workspacePlan(null, bad, NOW);
+      expect(plan.planId, String(bad)).toBe('free');
+      expect(plan.trial, String(bad)).toBeNull();
+    }
+  });
+
+  it('aiCreditBalance on the trial has 100 remaining', () => {
+    const plan = workspacePlan(null, CREATED, NOW);
+    const period = aiCreditPeriod(NOW, plan.creditPeriod);
+    const balance = aiCreditBalance(plan.limits, period, { allowanceUsed: 0, grantUsed: 0 });
+    expect(balance.remaining).toBe(100);
+  });
+
+  it('effectivePlanId is unchanged: a trial is not a live paid subscription', () => {
+    // The stored row on a trial grants nothing, so a trialing workspace can
+    // still check out.
+    expect(effectivePlanId(null, null)).toBe('free');
+    expect(effectivePlanId('free', 'free')).toBe('free');
+  });
+
+  it('the limit-0 document refusal reads naturally', () => {
+    expect(PLAN_DOCUMENTS_ZERO_ERROR).toBe(
+      'Processing documents needs a paid plan. Your trial has ended -- upgrade to add more.',
     );
   });
 });

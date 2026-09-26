@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { PLANS } from '@/lib/domain/billing/plans';
+import {
+  PLAN_DOCUMENTS_ZERO_CODE,
+  PLAN_DOCUMENTS_ZERO_ERROR,
+  PLANS,
+} from '@/lib/domain/billing/plans';
 import type { DomainError } from '@/lib/domain/core/errors';
 import { asBoardId, asUserId } from '@/lib/domain/core/ids';
 import {
@@ -223,10 +227,15 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
       planForBoard.documentCount >= documentLimit
     ) {
       const planName = PLANS[planForBoard.plan.planId].name;
+      // PATCH-189. Free (after the trial) allows 0 new documents. "includes 0
+      // documents" reads as nonsense, so a zero limit gets its own sentence.
+      // The non-zero wording from PATCH-185 stays for any future limit > 0.
       return NextResponse.json(
         {
-          error: `The ${planName} plan includes ${documentLimit} documents. Upgrade to add more.`,
-          code: 'plan_limit_documents',
+          error: documentLimit === 0
+            ? PLAN_DOCUMENTS_ZERO_ERROR
+            : `The ${planName} plan includes ${documentLimit} documents. Upgrade to add more.`,
+          code: PLAN_DOCUMENTS_ZERO_CODE,
         },
         { status: 403 },
       );

@@ -3,10 +3,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   effectivePlanId,
-  isPlanId,
   planIncludes,
   planLimits,
+  workspacePlan,
   PLANS,
+  type PlanId,
 } from "@/lib/domain/billing/plans";
 import { resolveCurrentWorkspace } from "@/lib/workspace/context";
 import type {
@@ -104,38 +105,74 @@ export async function getGlobalRole(
   return data ? "platform_admin" : "user";
 }
 
+/**
+ * PATCH-189. The plan that applies to an entitlements context. During the
+ * 7-day Premium trial the subscription row grants nothing (`status` is 'free'),
+ * so `effectivePlanId` alone would read Free; a non-null `trialEndsAt` is the
+ * trial, which is Premium-level.
+ */
+function effectiveEntitlementPlan(entitlements: EntitlementsContext): PlanId {
+  if (entitlements.trialEndsAt !== null) return "premium";
+  return effectivePlanId(entitlements.plan, entitlements.status);
+}
+
+/**
+ * PATCH-189. Reads the workspace's `created_at` through the SAME client it is
+ * given. RLS allows it: the `workspaces` SELECT policy is
+ * "Users can view workspaces they belong to" (`USING has_workspace_access(id)`,
+ * migration 20260309_normalize_workspace_roles.sql), whose `get_workspace_role`
+ * sees the caller's own `workspace_members` row -- so every member can read
+ * their workspace's creation time, not just the owner.
+ */
 export async function getWorkspaceEntitlements(
   supabase: SupabaseClient,
   workspaceId: string | null | undefined,
 ): Promise<EntitlementsContext> {
   if (!workspaceId) {
-    return { plan: "free", status: "free" };
+    return { plan: "free", status: "free", trialEndsAt: null };
   }
 
-  const { data } = await supabase
-    .from("subscriptions")
-    .select("plan, status")
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
+  const [{ data: subscription }, { data: workspace }] = await Promise.all([
+    supabase
+      .from("subscriptions")
+      .select("plan, status")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
+    supabase
+      .from("workspaces")
+      .select("created_at")
+      .eq("id", workspaceId)
+      .maybeSingle(),
+  ]);
+
+  const subscriptionRow = subscription as {
+    plan?: string | null;
+    status?: string | null;
+  } | null;
+  const createdAt =
+    (workspace as { created_at?: string | null } | null)?.created_at ?? null;
+
+  const resolved = workspacePlan(subscriptionRow, createdAt, new Date());
 
   return {
-    plan: isPlanId(data?.plan) ? data.plan : "free",
-    status: normalizeSubscriptionStatus(data?.status),
+    plan: resolved.planId,
+    status: normalizeSubscriptionStatus(subscriptionRow?.status),
+    trialEndsAt: resolved.trial ? resolved.trial.endsAt.toISOString() : null,
   };
 }
 
 export function hasProEntitlements(entitlements: EntitlementsContext): boolean {
-  return planIncludes(effectivePlanId(entitlements.plan, entitlements.status), "pro");
+  return planIncludes(effectiveEntitlementPlan(entitlements), "pro");
 }
 
 export function hasPremiumEntitlements(entitlements: EntitlementsContext): boolean {
-  return planIncludes(effectivePlanId(entitlements.plan, entitlements.status), "premium");
+  return planIncludes(effectiveEntitlementPlan(entitlements), "premium");
 }
 
 export function getBoardLimitForEntitlements(
   entitlements: EntitlementsContext,
 ): number | "unlimited" {
-  const limits = planLimits(effectivePlanId(entitlements.plan, entitlements.status));
+  const limits = planLimits(effectiveEntitlementPlan(entitlements));
   return limits.boards === null ? "unlimited" : limits.boards;
 }
 

@@ -73,7 +73,7 @@ export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState<any>(null);
     const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext | null>(null);
-    const [entitlements, setEntitlements] = useState<EntitlementsContext>({ plan: 'free', status: 'free' });
+    const [entitlements, setEntitlements] = useState<EntitlementsContext>({ plan: 'free', status: 'free', trialEndsAt: null });
 
     // Filter state
     const [activeFilter, setActiveFilter] = useState<FilterType>('all');

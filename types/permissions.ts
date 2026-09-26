@@ -35,6 +35,8 @@ export interface BoardAccessContext {
 export interface EntitlementsContext {
   plan: BillingPlan;
   status: SubscriptionStatus;
+  /** PATCH-189. ISO timestamp the Premium trial ends, or null when not on a trial. */
+  trialEndsAt: string | null;
 }
 
 export interface AuthContext {

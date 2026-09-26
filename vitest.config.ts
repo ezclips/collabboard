@@ -44,6 +44,8 @@ export default defineConfig({
       'components/ai/*.test.tsx',
       // PATCH-188: the shared plan-limit refusal.
       'components/billing/*.test.tsx',
+      // PATCH-189: the billing page's trial lines and Free plan card.
+      'app/dashboard/settings/**/*.test.tsx',
       'components/ui/*.test.tsx',
       'components/canvas/*.test.tsx',
       'components/map/*.test.tsx',

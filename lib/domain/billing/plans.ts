@@ -56,14 +56,17 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
     id: 'free',
     name: 'Free',
     price: { monthly: 0, yearly: 0 },
-    tagline: 'Three boards and a taste of AI',
+    // PATCH-189. Free is for evaluating (PRICING.md Rule 4): its boards stay
+    // usable and shareable, but AI and new document processing are off. The
+    // grant bucket is kept at 0 (not removed) for future top-up packs.
+    tagline: 'Share boards with anyone, free',
     limits: {
       boards: 3,
       fileSizeBytes: 20 * MB,
-      processedDocuments: 5,
+      processedDocuments: 0,
       pagesPerPdf: 50,
-      monthlyAiCredits: 10,
-      welcomeAiCredits: 30,
+      monthlyAiCredits: 0,
+      welcomeAiCredits: 0,
       modelTier: 'basic',
       boardChatWhenOutOfCredits: false,
     },
@@ -148,6 +151,82 @@ export function planLimits(planId: PlanId): PlanLimits {
 /** True when `planId` is at least `required` in PLAN_ORDER (premium ⊇ pro ⊇ free). */
 export function planIncludes(planId: PlanId, required: PlanId): boolean {
   return PLAN_ORDER.indexOf(planId) >= PLAN_ORDER.indexOf(required);
+}
+
+/**
+ * PATCH-189. The 7-day Premium trial a new workspace gets with no card
+ * (PRICING.md Rule 4). Its AI allowance is deliberately small -- a workspace can
+ * be created every week, so a full 2,000 would be a free Premium plan.
+ */
+export const PLAN_TRIAL_DAYS = 7;
+export const TRIAL_AI_CREDITS = 100;
+
+/** The trial's limits: Premium's, with the trial's own AI allowance. */
+const TRIAL_LIMITS: PlanLimits = Object.freeze({
+  ...PLANS.premium.limits,
+  monthlyAiCredits: TRIAL_AI_CREDITS,
+});
+
+/** The plan a workspace ACTUALLY has right now, and why. */
+export interface WorkspacePlan {
+  /** 'premium' during the trial, the subscription's plan when it grants, else 'free'. */
+  readonly planId: PlanId;
+  /** The trial's limits during the trial, the plan's otherwise. */
+  readonly limits: PlanLimits;
+  /** Non-null only while the trial applies. */
+  readonly trial: { readonly endsAt: Date } | null;
+  /** The window the AI allowance is scoped to: the subscription period, the trial window, or null. */
+  readonly creditPeriod: { start: string | null; end: string | null } | null;
+}
+
+const TRIAL_MS = PLAN_TRIAL_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * The plan a workspace actually has now: a PAYING subscription wins, else the
+ * 7-day trial window counted from `workspaceCreatedAt`, else Free.
+ *
+ * A trial is NOT a live paid subscription -- `effectivePlanId` (and therefore
+ * checkout and `findLivePaidSubscription`) is untouched: a trialing workspace
+ * can still check out. A missing or unparseable `created_at` fails closed to
+ * Free, never to a trial.
+ */
+export function workspacePlan(
+  subscription: {
+    plan?: string | null;
+    status?: string | null;
+    current_period_start?: string | null;
+    current_period_end?: string | null;
+  } | null,
+  workspaceCreatedAt: string | null,
+  now: Date,
+): WorkspacePlan {
+  const planId = effectivePlanId(subscription?.plan, subscription?.status);
+  if (planId !== 'free') {
+    return {
+      planId,
+      limits: PLANS[planId].limits,
+      trial: null,
+      creditPeriod: {
+        start: subscription?.current_period_start ?? null,
+        end: subscription?.current_period_end ?? null,
+      },
+    };
+  }
+
+  const createdAt = workspaceCreatedAt ? new Date(workspaceCreatedAt) : null;
+  if (createdAt && !Number.isNaN(createdAt.getTime())) {
+    const endsAt = new Date(createdAt.getTime() + TRIAL_MS);
+    if (now < endsAt) {
+      return {
+        planId: 'premium',
+        limits: TRIAL_LIMITS,
+        trial: { endsAt },
+        creditPeriod: { start: createdAt.toISOString(), end: endsAt.toISOString() },
+      };
+    }
+  }
+
+  return { planId: 'free', limits: PLANS.free.limits, trial: null, creditPeriod: null };
 }
 
 /**
@@ -302,6 +381,17 @@ export const PLAN_NO_BOARD_CODE = 'plan_limit_no_board';
 
 export const PLAN_NO_BOARD_ERROR =
   "This AI action isn't linked to a board, so it has no AI credits. Your own AI key still works.";
+
+/**
+ * PATCH-189. A plan whose `processedDocuments` is 0 (Free, after the trial)
+ * cannot process a new document; the old "The Free plan includes 0 documents"
+ * reading would be nonsense. The non-zero wording from PATCH-185 stays for any
+ * future non-zero limit.
+ */
+export const PLAN_DOCUMENTS_ZERO_CODE = 'plan_limit_documents';
+
+export const PLAN_DOCUMENTS_ZERO_ERROR =
+  'Processing documents needs a paid plan. Your trial has ended -- upgrade to add more.';
 
 /**
  * PATCH-188. A Readable transcript (transcript-punctuate) costs one credit per

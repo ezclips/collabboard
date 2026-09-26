@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PLANS } from '@/lib/domain/billing/plans';
+import { PLAN_DOCUMENTS_ZERO_ERROR, PLANS } from '@/lib/domain/billing/plans';
 import type { KnowledgeIngestionDeps } from '@/lib/domain/knowledge/knowledgeIngestion';
 import type { KnowledgeDocument } from '@/lib/domain/knowledge/knowledgePersistence';
 import {
@@ -24,12 +24,30 @@ const PRO_PLAN: BoardPlan = {
   planId: 'pro',
   limits: PLANS.pro.limits,
   subscriptionPeriod: null,
+  trial: null,
 };
 const FREE_PLAN: BoardPlan = {
   workspaceId: '11111111-1111-4111-8111-111111111111',
   planId: 'free',
   limits: PLANS.free.limits,
   subscriptionPeriod: null,
+  trial: null,
+};
+// PATCH-189. Free now processes 0 documents, so the document gate fires before
+// the size gate and no Free case reaches `sizeLimitForFile`'s plan-binding path.
+// This fixture keeps Free's 20 MB plan-bound size but allows documents, so that
+// path stays covered.
+const FREE_SIZE_BINDING: BoardPlan = {
+  ...FREE_PLAN,
+  limits: { ...PLANS.free.limits, processedDocuments: null },
+};
+// PATCH-189. A workspace on its Premium trial: Premium's document allowance.
+const TRIAL_PLAN: BoardPlan = {
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  planId: 'premium',
+  limits: PLANS.premium.limits,
+  subscriptionPeriod: null,
+  trial: { endsAt: '2026-09-20T12:00:00.000Z' },
 };
 
 function planDep(plan: BoardPlan = PRO_PLAN, documentCount: number | null = null) {
@@ -482,7 +500,7 @@ describe("PATCH-185: the board owner's plan decides size and document limits", (
     ).buffer;
 
   it('Free: a 21 MB PDF is refused with the plan message and code, before any bytes are read', async () => {
-    const { post } = handlerFor('free-pdf-user', FREE_PLAN, 0);
+    const { post } = handlerFor('free-pdf-user', FREE_SIZE_BINDING, null);
     const file = sizedFile({ name: 'big.pdf', type: 'application/pdf', size: 21 * MB });
 
     const response = await post(requestWithFile(file), context());
@@ -517,22 +535,22 @@ describe("PATCH-185: the board owner's plan decides size and document limits", (
     expect(body.code).toBeUndefined();
   });
 
-  it('Free with 5 documents is refused BEFORE formData() is called', async () => {
-    const { post } = handlerFor('free-5-docs', FREE_PLAN, 5);
+  it('Free after the trial is refused with the limit-0 message BEFORE formData() is called', async () => {
+    const { post } = handlerFor('free-0-docs', FREE_PLAN, 0);
     const { request, formData } = requestBeforeBody();
 
     const response = await post(request, context());
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: 'The Free plan includes 5 documents. Upgrade to add more.',
+      error: PLAN_DOCUMENTS_ZERO_ERROR,
       code: 'plan_limit_documents',
     });
     expect(formData).not.toHaveBeenCalled();
   });
 
-  it('Free with 4 documents passes', async () => {
-    const { post } = handlerFor('free-4-docs', FREE_PLAN, 4);
+  it('a trialing workspace passes the document gate', async () => {
+    const { post } = handlerFor('trial-user', TRIAL_PLAN, 0);
     const file = sizedFile({ name: 'ok.pdf', type: 'application/pdf', size: 12 });
 
     const response = await post(requestWithFile(file), context());
@@ -572,7 +590,7 @@ describe("PATCH-185: the board owner's plan decides size and document limits", (
   });
 
   it('Free: a 20 MB text source passes and a 21 MB one is refused with the technical message', async () => {
-    const { post } = handlerFor('free-text-user', FREE_PLAN, 0);
+    const { post } = handlerFor('free-text-user', FREE_SIZE_BINDING, null);
 
     const ok = sizedFile({
       name: 'notes.txt',

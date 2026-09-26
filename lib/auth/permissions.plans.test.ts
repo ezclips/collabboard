@@ -5,13 +5,18 @@ import type { EntitlementsContext, SubscriptionStatus } from '@/types/permission
 
 import {
   FREE_PLAN_BOARD_LIMIT,
+  canCreateBoardForEntitlements,
   getBoardLimitForEntitlements,
   hasPremiumEntitlements,
   hasProEntitlements,
 } from './permissions';
 
-function entitlements(plan: PlanId, status: SubscriptionStatus): EntitlementsContext {
-  return { plan, status };
+function entitlements(
+  plan: PlanId,
+  status: SubscriptionStatus,
+  trialEndsAt: string | null = null,
+): EntitlementsContext {
+  return { plan, status, trialEndsAt };
 }
 
 const GRANTING: SubscriptionStatus[] = ['active', 'trialing', 'past_due'];
@@ -70,5 +75,28 @@ describe('getBoardLimitForEntitlements', () => {
 
   it('FREE_PLAN_BOARD_LIMIT === 3', () => {
     expect(FREE_PLAN_BOARD_LIMIT).toBe(3);
+  });
+});
+
+describe('PATCH-189 — the trial follows through to boards', () => {
+  /** What getWorkspaceEntitlements returns for a workspace on day 2. */
+  const onTrial = entitlements('premium', 'free', '2026-09-20T12:00:00.000Z');
+
+  it('a trialing workspace has unlimited boards', () => {
+    expect(getBoardLimitForEntitlements(onTrial)).toBe('unlimited');
+    expect(hasProEntitlements(onTrial)).toBe(true);
+    expect(hasPremiumEntitlements(onTrial)).toBe(true);
+  });
+
+  it('after the trial the limit is 3', () => {
+    expect(getBoardLimitForEntitlements(entitlements('free', 'free'))).toBe(3);
+  });
+
+  it('5 existing boards after the trial cannot create another, and nothing else changes', () => {
+    const free = entitlements('free', 'free');
+    expect(canCreateBoardForEntitlements(free, 5)).toBe(false);
+    // Under the limit still creates; the helper's meaning is unchanged.
+    expect(canCreateBoardForEntitlements(free, 2)).toBe(true);
+    expect(getBoardLimitForEntitlements(free)).toBe(3);
   });
 });
