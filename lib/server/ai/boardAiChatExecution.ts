@@ -24,7 +24,7 @@ import {
   defaultVisionModelFor,
   modelDeclaredForImages,
 } from './providers/visionCapability';
-import { resolveAIModelForRole, type AIModelResolverDeps } from './resolveAIModelForRole';
+import { resolveAIModelForRole, type AIModelResolverDeps, type AIModelResolutionSource } from './resolveAIModelForRole';
 import type { UserId } from '../../domain/core/ids';
 
 /**
@@ -268,6 +268,11 @@ export interface BoardAiChatResult {
   readonly text: string;
   readonly provider: string;
   readonly model: string;
+  /**
+   * PATCH-187. The source that ACTUALLY ran -- `resolved.source`, the same value
+   * the pre-call check read. The credit ledger charges only a managed run.
+   */
+  readonly source: AIModelResolutionSource;
 }
 
 /**
@@ -357,7 +362,7 @@ export async function executeBoardAiChat(
     // stays in `resolved` and is never returned, logged or persisted. The model
     // returned is the one that ACTUALLY ran, substitution included, so the UI
     // can say which model saw the image rather than which one was configured.
-    return { text, provider: resolved.provider, model };
+    return { text, provider: resolved.provider, model, source: resolved.source };
   } finally {
     clearTimeout(timer);
   }

@@ -22,6 +22,12 @@ export interface BoardPlan {
   readonly workspaceId: string | null;
   readonly planId: PlanId;
   readonly limits: PlanLimits;
+  /**
+   * PATCH-187. The stored subscription period, used to scope the monthly AI
+   * credit allowance. Null when the workspace has no row, or when the effective
+   * plan is Free -- a Free workspace always uses the UTC calendar month.
+   */
+  readonly subscriptionPeriod: { readonly start: string | null; readonly end: string | null } | null;
 }
 
 /**
@@ -45,21 +51,32 @@ export async function resolveBoardPlan(
     (board as { workspace_id?: string | null } | null)?.workspace_id ?? null;
 
   if (!workspaceId) {
-    return { workspaceId: null, planId: "free", limits: PLANS.free.limits };
+    return { workspaceId: null, planId: "free", limits: PLANS.free.limits, subscriptionPeriod: null };
   }
 
   const { data: subscription, error: subscriptionError } = await adminClient
     .from("subscriptions")
-    .select("plan, status")
+    .select("plan, status, current_period_start, current_period_end")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
 
   if (subscriptionError) throw subscriptionError;
 
-  const row = subscription as { plan?: string | null; status?: string | null } | null;
+  const row = subscription as {
+    plan?: string | null;
+    status?: string | null;
+    current_period_start?: string | null;
+    current_period_end?: string | null;
+  } | null;
   const planId = effectivePlanId(row?.plan, row?.status);
 
-  return { workspaceId, planId, limits: PLANS[planId].limits };
+  // PATCH-187. Only a paid, granting plan has a billing period to scope the
+  // monthly allowance to; Free always falls back to the UTC calendar month.
+  const subscriptionPeriod = planId === "free"
+    ? null
+    : { start: row?.current_period_start ?? null, end: row?.current_period_end ?? null };
+
+  return { workspaceId, planId, limits: PLANS[planId].limits, subscriptionPeriod };
 }
 
 /**

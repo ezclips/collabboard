@@ -235,6 +235,8 @@ export interface BoardAiDocumentScopedSession {
   readonly loadingMessages: boolean;
   readonly sending: boolean;
   readonly error: string | null;
+  /** PATCH-187. True when `error` is a plan-limit refusal that offers an upgrade. */
+  readonly errorPlansLink?: boolean;
   /**
    * Assistant messages already saved as a Note, by message id.
    *
@@ -368,6 +370,7 @@ export default function BoardAiChatDrawer({
   const [boardLoadingMessages, setBoardLoadingMessages] = useState(false);
   const [boardSending, setBoardSending] = useState(false);
   const [boardError, setBoardError] = useState<string | null>(null);
+  const [boardErrorPlansLink, setBoardErrorPlansLink] = useState(false);
   const [internalDocumentSessions, setInternalDocumentSessions] =
     useState<Record<string, BoardAiDocumentScopedSession>>({});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -446,6 +449,9 @@ export default function BoardAiChatDrawer({
   const loadingMessages = documentScopeId ? documentSession.loadingMessages : boardLoadingMessages;
   const sending = documentScopeId ? documentSession.sending : boardSending;
   const error = documentScopeId ? documentSession.error : boardError;
+  const errorPlansLink = documentScopeId
+    ? documentSession.errorPlansLink === true
+    : boardErrorPlansLink;
   const savedNoteMessageIds = documentScopeId
     ? documentSession.savedNoteMessageIds ?? EMPTY_SAVED_NOTE_MESSAGE_IDS
     : boardSavedNoteMessageIds;
@@ -619,6 +625,24 @@ export default function BoardAiChatDrawer({
       return;
     }
     setBoardError(action);
+  }, [documentScopeId, setDocumentSessionValue]);
+
+  /**
+   * PATCH-187. Sets the error AND whether it offers the plans link, in one
+   * update. Kept separate from `setError` so every pre-existing caller resets
+   * the link the way it always implicitly did (off).
+   */
+  const setErrorWithPlansLink = useCallback((message: string, showPlansLink: boolean) => {
+    if (documentScopeId) {
+      setDocumentSessionValue(documentScopeId, (session) => ({
+        ...session,
+        error: message,
+        errorPlansLink: showPlansLink,
+      }));
+      return;
+    }
+    setBoardError(message);
+    setBoardErrorPlansLink(showPlansLink);
   }, [documentScopeId, setDocumentSessionValue]);
 
   /**
@@ -1140,6 +1164,7 @@ export default function BoardAiChatDrawer({
     const requestDocumentScopeId = documentScopeId;
     setSending(true);
     setError(null);
+    setBoardErrorPlansLink(false);
     setContextNotice(null);
     // Captured for this ONE message. Attachments are not standing state: the
     // next question starts empty unless the user attaches again.
@@ -1189,7 +1214,7 @@ export default function BoardAiChatDrawer({
         }),
       });
       const payload = await response.json().catch(() => null) as
-        | { threadId?: string; message?: BoardAiChatMessageView; error?: string }
+        | { threadId?: string; message?: BoardAiChatMessageView; error?: string; code?: string }
         | null;
 
       if (requestDocumentScopeId !== activeDocumentScopeRef.current && requestDocumentScopeId) {
@@ -1201,7 +1226,8 @@ export default function BoardAiChatDrawer({
               activeThreadId: payload?.threadId ?? session.activeThreadId,
               messages: payload?.threadId ? session.messages : withoutPending,
               draft: payload?.threadId ? session.draft : content,
-              error: safeError(response.status, payload?.error),
+              error: safeError(response.status, payload?.error, payload?.error, payload?.code),
+              errorPlansLink: typeof payload?.code === 'string' && payload.code.startsWith('plan_limit_'),
               sending: false,
             };
           }
@@ -1220,7 +1246,10 @@ export default function BoardAiChatDrawer({
       if (payload?.threadId) setActiveThreadId(payload.threadId);
 
       if (!response.ok) {
-        setError(safeError(response.status, payload?.error));
+        setErrorWithPlansLink(
+          safeError(response.status, payload?.error, payload?.error, payload?.code),
+          typeof payload?.code === 'string' && payload.code.startsWith('plan_limit_'),
+        );
         // Two very different failures, told apart by what the ROUTE does
         // rather than by the status alone.
         //
@@ -1282,6 +1311,7 @@ export default function BoardAiChatDrawer({
     setDraft,
     setDraftContext,
     setError,
+    setErrorWithPlansLink,
     setMessages,
     setSending,
     reloadThread,
@@ -1639,6 +1669,12 @@ export default function BoardAiChatDrawer({
       {error ? (
         <p data-board-ai-chat-error="true" role="alert" className="shrink-0 border-t border-red-100 bg-red-50 px-3 py-1.5 text-[11px] text-red-700">
           {error}
+          {errorPlansLink ? (
+            <>
+              {' '}
+              <a href="/dashboard/settings/billing" className="font-medium underline">See plans</a>
+            </>
+          ) : null}
         </p>
       ) : null}
 
@@ -1905,7 +1941,13 @@ function threadLabel(thread: BoardAiChatThreadSummary): string {
 }
 
 /** One safe sentence per failure. No provider text, no status echo, no stack. */
-function safeError(status: number, category?: string): string {
+function safeError(status: number, category?: string, serverMessage?: string, code?: string): string {
+  // PATCH-187. Only a plan-limit refusal is trusted to show the server's own
+  // sentence: it names the plan and the renewal day and was authored by OUR
+  // route. Every other failure keeps its fixed sentence.
+  if (typeof code === 'string' && code.startsWith('plan_limit_') && serverMessage) {
+    return serverMessage;
+  }
   if (status === 429) return 'Too many messages. Wait a moment and try again.';
   if (status === 403) return 'You no longer have access to this board.';
   if (status === 404) return 'That conversation is no longer available.';

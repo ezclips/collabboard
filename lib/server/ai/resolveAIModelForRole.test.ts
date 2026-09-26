@@ -5,7 +5,7 @@ import { domainError } from '../../domain/core/errors';
 import { err, ok } from '../../domain/core/result';
 import type { UserId } from '../../domain/core/ids';
 import type { AIProviderConnection } from '../../domain/settings/aiProviderConnection';
-import { resolveAIModelForRole, type AIModelResolverDeps } from './resolveAIModelForRole';
+import { resolveAIModelForRole, resolveAIModelSourceForRole, type AIModelResolverDeps } from './resolveAIModelForRole';
 
 const USER = 'user-1' as UserId;
 const OTHER_USER = 'user-2' as UserId;
@@ -287,5 +287,43 @@ describe('resolveAIModelForRole -- BYOK', () => {
     await expect(resolveAIModelForRole(USER, AI_ROLE_SOURCE, connectionFailure.value)).rejects.toMatchObject({
       category: 'provider_unavailable',
     });
+  });
+});
+
+describe('PATCH-187 resolveAIModelSourceForRole -- the preference only', () => {
+  it('no row → collabboard-default', async () => {
+    const d = deps({ preference: ok(null) });
+
+    await expect(resolveAIModelSourceForRole(USER, AI_ROLE_SOURCE, d.value.preferences))
+      .resolves.toBe('collabboard-default');
+  });
+
+  it('a null connection → collabboard-default', async () => {
+    const d = deps({
+      preference: ok({ role: AI_ROLE_SOURCE, connectionId: null, modelId: null }),
+    });
+
+    await expect(resolveAIModelSourceForRole(USER, AI_ROLE_SOURCE, d.value.preferences))
+      .resolves.toBe('collabboard-default');
+  });
+
+  it('a connection → byok, and the credential is NEVER loaded', async () => {
+    const d = deps({
+      preference: ok({ role: AI_ROLE_SOURCE, connectionId: CONNECTION_ID, modelId: null }),
+    });
+
+    await expect(resolveAIModelSourceForRole(USER, AI_ROLE_SOURCE, d.value.preferences))
+      .resolves.toBe('byok');
+    expect(d.getPreference).toHaveBeenCalledWith(USER, AI_ROLE_SOURCE);
+    // Reading only the preference must not touch the credential table at all.
+    expect(d.getConnection).not.toHaveBeenCalled();
+    expect(d.loadCredential).not.toHaveBeenCalled();
+  });
+
+  it('a read error throws provider_unavailable', async () => {
+    const d = deps({ preference: err(domainError('unavailable', 'db down')) });
+
+    await expect(resolveAIModelSourceForRole(USER, AI_ROLE_SOURCE, d.value.preferences))
+      .rejects.toMatchObject({ category: 'provider_unavailable' });
   });
 });

@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   createAIRolePreferenceRepository: vi.fn(() => ({})),
   createAIProviderCredentialRepository: vi.fn(() => ({})),
+  checkBoardAiCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -47,6 +49,10 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkBoardAiCredits: mocks.checkBoardAiCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 const USER_ID = 'user-1';
@@ -97,6 +103,8 @@ beforeEach(async () => {
   mocks.cookies.mockResolvedValue({});
   session();
   mocks.canReadBoardKnowledge.mockResolvedValue(true);
+  mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'byok' });
+  mocks.recordBoardAiCreditUsage.mockResolvedValue(undefined);
   mocks.readTableSourceText.mockResolvedValue(sourceOk());
   mocks.resolveAIModelForRole.mockResolvedValue({ provider: 'deepseek', model: 'deepseek-flash', apiKey: 'k' });
   mocks.generateText.mockResolvedValue(VALID_ANSWER);
@@ -225,5 +233,66 @@ describe('table-from-document: the model call and the answer', () => {
     const response = await post(base());
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'AI request failed.' });
+  });
+});
+
+describe('table-from-document: PATCH-187 AI credits', () => {
+  const PLAN = { workspaceId: 'w', planId: 'pro', limits: { monthlyAiCredits: 500, welcomeAiCredits: 0 }, subscriptionPeriod: null };
+  const BALANCE = { allowance: 500, allowanceUsed: 0, grantTotal: 0, grantUsed: 0, remaining: 500, period: { start: new Date(), end: new Date() } };
+
+  it('byok: the ledger is never read and nothing is recorded', async () => {
+    await post(base());
+    expect(mocks.checkBoardAiCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('the check runs with the documented cost of 3', async () => {
+    await post(base());
+    expect(mocks.checkBoardAiCredits.mock.calls[0][0]).toMatchObject({
+      boardId: BOARD, userId: USER_ID, cost: 3,
+    });
+  });
+
+  it('managed with credits: 3 credits are recorded on success', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+    mocks.resolveAIModelForRole.mockResolvedValue({ provider: 'deepseek', model: 'deepseek-flash', apiKey: 'k', source: 'collabboard-default' });
+    await post(base());
+    expect(mocks.generateText).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ feature: 'table_from_document', credits: 3 });
+  });
+
+  it('a refusal is 402 with the code, and nothing runs', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({
+      kind: 'refused', status: 402,
+      body: { error: 'out', code: 'plan_limit_credits' },
+    });
+    const response = await post(base());
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: 'out', code: 'plan_limit_credits' });
+    expect(mocks.readTableSourceText).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('a check throw is 503, and nothing runs', async () => {
+    mocks.checkBoardAiCredits.mockRejectedValue(new Error('ledger down'));
+    const response = await post(base());
+    expect(response.status).toBe(503);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('a model failure records nothing', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+    mocks.generateText.mockRejectedValue(new Error('boom'));
+    await post(base());
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('a recording throw still returns the answer', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge: true });
+    mocks.resolveAIModelForRole.mockResolvedValue({ provider: 'deepseek', model: 'deepseek-flash', apiKey: 'k', source: 'collabboard-default' });
+    mocks.recordBoardAiCreditUsage.mockRejectedValue(new Error('insert failed'));
+    const response = await post(base());
+    expect(response.status).toBe(200);
+    expect((await response.json()).table.columns).toEqual(['Part', 'Number', 'Price']);
   });
 });

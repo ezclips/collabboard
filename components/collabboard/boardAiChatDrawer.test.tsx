@@ -286,6 +286,31 @@ describe('26-27. failures stay truthful', () => {
     const posts = fetchMock.mock.calls.filter((c) => c[1]?.method === 'POST');
     expect(JSON.parse(String(posts[1][1]!.body)).threadId).toBe(THREAD_A);
   });
+
+  it('PATCH-187. a plan_limit_credits refusal shows the server sentence and a See plans link', async () => {
+    stubChat({
+      post: () => json({
+        error: "The Free plan's AI credits for this month are used up. They renew on 1 October. Upgrade for more.",
+        code: 'plan_limit_credits',
+      }, 402),
+    });
+    await mount();
+    await type('hello');
+    await click('[data-board-ai-chat-action="send"]');
+    const error = q('[data-board-ai-chat-error="true"]')!;
+    expect(error.textContent).toContain("The Free plan's AI credits for this month are used up.");
+    expect(error.querySelector('a')?.getAttribute('href')).toBe('/dashboard/settings/billing');
+  });
+
+  it('PATCH-187. an ordinary failure keeps its fixed sentence and shows no link', async () => {
+    stubChat({ post: () => json({ error: 'AI request failed.', threadId: THREAD_A }, 502) });
+    await mount();
+    await type('hello');
+    await click('[data-board-ai-chat-action="send"]');
+    const error = q('[data-board-ai-chat-error="true"]')!;
+    expect(error.textContent).toContain('Board AI could not answer. Your message was saved.');
+    expect(error.querySelector('a')).toBeNull();
+  });
 });
 
 describe('23,49. messages render as text', () => {

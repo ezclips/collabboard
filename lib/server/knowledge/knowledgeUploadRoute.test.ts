@@ -23,11 +23,13 @@ const PRO_PLAN: BoardPlan = {
   workspaceId: '11111111-1111-4111-8111-111111111111',
   planId: 'pro',
   limits: PLANS.pro.limits,
+  subscriptionPeriod: null,
 };
 const FREE_PLAN: BoardPlan = {
   workspaceId: '11111111-1111-4111-8111-111111111111',
   planId: 'free',
   limits: PLANS.free.limits,
+  subscriptionPeriod: null,
 };
 
 function planDep(plan: BoardPlan = PRO_PLAN, documentCount: number | null = null) {

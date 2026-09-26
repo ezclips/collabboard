@@ -19,6 +19,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
 import { AI_ROLE_CHAT } from '@/lib/ai/aiRoles';
+import { checkBoardAiCredits } from '@/lib/server/billing/aiCredits';
 import { asUserId } from '@/lib/domain/core/ids';
 
 /**
@@ -156,6 +157,27 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
     }
     if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    // PATCH-187. AI credits: the board owner's plan pays. Starter questions COST
+    // nothing (cost 0, never recorded), but they pause with the rest of AI on an
+    // exhausted Free plan and keep working on a paid one (`boardChat`).
+    let creditDecision: Awaited<ReturnType<typeof checkBoardAiCredits>>;
+    try {
+      creditDecision = await checkBoardAiCredits({
+        boardId,
+        userId: user.id,
+        role: AI_ROLE_CHAT,
+        cost: 0,
+        now: new Date(),
+        boardChat: true,
+        preferences: createAIRolePreferenceRepository(),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
+    }
 
     // The CALLER'S OWN client, so RLS is the boundary. No admin client exists
     // on this path, and no second way of reading a document is introduced.

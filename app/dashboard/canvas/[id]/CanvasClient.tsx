@@ -152,6 +152,7 @@ import { buildKnowledgeSourceOpenRequest, buildKnowledgeDocumentOpenRequest } fr
 import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer';
+import { BoardWikiPlanLimitError } from '@/components/collabboard/BoardWikiDrawer';
 import { seekBoardVideo } from '@/components/collabboard/boardVideoPlayerRegistry';
 import {
   boardDockClaim,
@@ -2265,6 +2266,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // topic is not. Collapsing them into one message sent people to retry
       // something that will never work.
       if (response.status === 409) throw new Error('retry');
+      // PATCH-187. A plan-limit refusal is the server's own sentence and carries
+      // a code the drawer turns into an upgrade link; it must not be flattened
+      // into the generic "came back unusable" message.
+      if (response.status === 402) {
+        const payload = await response.json().catch(() => null);
+        const code = payload && typeof payload.code === 'string' ? payload.code : '';
+        const message = payload && typeof payload.error === 'string' ? payload.error : '';
+        if (code.startsWith('plan_limit_')) {
+          throw new BoardWikiPlanLimitError(message, code);
+        }
+      }
       // ONLY 404 IS AN ANSWER ABOUT THE BOARD. Every other failure is an answer
       // about US, and must not be dressed as one about the board.
       //

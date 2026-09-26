@@ -14,6 +14,11 @@ import {
   TABLE_FROM_DOCUMENT_MAX_REQUEST_CHARS,
 } from '@/lib/domain/ai/tableFromDocument';
 import { AI_ROLE_SOURCE } from '@/lib/ai/aiRoles';
+import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
+import {
+  checkBoardAiCredits,
+  recordBoardAiCreditUsage,
+} from '@/lib/server/billing/aiCredits';
 import { resolveAIModelForRole } from '@/lib/server/ai/resolveAIModelForRole';
 import { getAIProviderAdapter } from '@/lib/server/ai/providers/registry';
 import { AIProviderError } from '@/lib/server/ai/providers/errors';
@@ -132,6 +137,26 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+    // PATCH-187. AI credits: the board owner's plan pays. Checked after
+    // authorization and before the document is read or the model is called, so
+    // a refusal costs nothing and reads nothing.
+    let creditDecision: Awaited<ReturnType<typeof checkBoardAiCredits>>;
+    try {
+      creditDecision = await checkBoardAiCredits({
+        boardId,
+        userId: user.id,
+        role: AI_ROLE_SOURCE,
+        cost: AI_CREDIT_COSTS.table_from_document,
+        now: new Date(),
+        preferences: createAIRolePreferenceRepository(),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
+    }
+
     const source = await readTableSourceText(
       sessionClient as unknown as TableSourceSupabaseClient,
       boardId,
@@ -173,6 +198,32 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
     } finally {
       clearTimeout(timer);
+    }
+
+    // PATCH-187. A successful proposal is charged to the owner's plan, only for
+    // a managed run and only when the check said to charge. A recording failure
+    // is logged and swallowed: the answer is already in the person's hands.
+    if (
+      creditDecision.kind === 'allowed'
+      && creditDecision.charge
+      && resolved.source === 'collabboard-default'
+    ) {
+      try {
+        await recordBoardAiCreditUsage({
+          plan: creditDecision.plan,
+          balance: creditDecision.balance,
+          boardId,
+          userId: user.id,
+          feature: 'table_from_document',
+          credits: AI_CREDIT_COSTS.table_from_document,
+        });
+      } catch {
+        console.error('AI credit usage was not recorded', {
+          boardId,
+          feature: 'table_from_document',
+          credits: AI_CREDIT_COSTS.table_from_document,
+        });
+      }
     }
 
     return NextResponse.json({

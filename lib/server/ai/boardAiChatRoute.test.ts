@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   executeBoardAiChat: vi.fn(),
   createAIRolePreferenceRepository: vi.fn(() => ({})),
   createAIProviderCredentialRepository: vi.fn(() => ({})),
+  checkBoardAiCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
+  searchBoardAiContext: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -27,6 +30,13 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkBoardAiCredits: mocks.checkBoardAiCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
+}));
+vi.mock('@/lib/server/ai/boardAiChatSearch', () => ({
+  searchBoardAiContext: mocks.searchBoardAiContext,
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -49,6 +59,9 @@ const ok = <T>(value: T) => ({ ok: true as const, value });
 const notFound = () => ({ ok: false as const, error: { code: 'not_found', message: 'nope' } });
 const unavailable = () => ({ ok: false as const, error: { code: 'unavailable', message: 'down' } });
 const fail = (code: string) => ({ ok: false as const, error: { code, message: code } });
+
+/** PATCH-187. A byok caller reads no ledger: the default decision for old tests. */
+const BYOK = { kind: 'byok' as const };
 
 const thread = { id: THREAD_ID, boardId: BOARD_ID, userId: USER_ID, title: null, createdAt: 'c', updatedAt: 'u' };
 const assistantRow = {
@@ -103,6 +116,17 @@ beforeEach(async () => {
   mocks.cookies.mockResolvedValue({});
   session();
   mocks.canReadBoardKnowledge.mockResolvedValue(true);
+  mocks.checkBoardAiCredits.mockResolvedValue(BYOK);
+  mocks.recordBoardAiCreditUsage.mockResolvedValue(undefined);
+  // A search that matched nothing still carries a block, which is what the
+  // surcharge keys on.
+  mocks.searchBoardAiContext.mockResolvedValue({
+    ok: true,
+    value: {
+      block: { type: 'board-search', label: 'Board search — no text matched', query: 'hello', text: 'No passages on this board matched this search.' },
+      result: { outcome: 'ran', returned: 0, used: 0, dropped: 0, query: 'hello' },
+    },
+  });
   mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'deepseek-chat' });
   repository();
   ({ AIProviderError } = await import('./providers/errors'));
@@ -394,5 +418,86 @@ describe('9-15. provider execution is the existing authority', () => {
     expect(JSON.stringify(repo.appended)).not.toMatch(/apiKey|api_key|sk-|keyHint|connectionId/);
     // Names only.
     expect(body).toContain('openai');
+  });
+});
+
+describe('PATCH-187. AI credits', () => {
+  const PLAN = { workspaceId: 'w', planId: 'pro', limits: { monthlyAiCredits: 500, welcomeAiCredits: 0 }, subscriptionPeriod: null };
+  const BALANCE = { allowance: 500, allowanceUsed: 0, grantTotal: 0, grantUsed: 0, remaining: 500, period: { start: new Date(), end: new Date() } };
+  const allowed = (charge = true) => ({ kind: 'allowed', plan: PLAN, balance: BALANCE, charge });
+
+  it('byok: the ledger is never read and nothing is recorded', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(BYOK);
+    await post({ message: 'hello' });
+    expect(mocks.checkBoardAiCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('managed with credits: the model runs and exactly 1 credit is recorded', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(allowed());
+    mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'm', source: 'collabboard-default' });
+    await post({ message: 'hello' });
+    expect(mocks.executeBoardAiChat).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({
+      boardId: BOARD_ID, userId: USER_ID, feature: 'board_chat', credits: 1,
+    });
+  });
+
+  it('with search used, 2 credits are recorded', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(allowed());
+    mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'm', source: 'collabboard-default' });
+    await post({ message: 'hello', searchBoard: true });
+    // With no attachments the search has room and runs; its block travels.
+    expect(mocks.searchBoardAiContext).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage.mock.calls[0][0]).toMatchObject({ credits: 2 });
+  });
+
+  it('a refusal is 402 with the code, and the model is never called', async () => {
+    const repo = repository();
+    mocks.checkBoardAiCredits.mockResolvedValue({
+      kind: 'refused', status: 402,
+      body: { error: 'out', code: 'plan_limit_credits' },
+    });
+    const response = await post({ message: 'hello' });
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: 'out', code: 'plan_limit_credits' });
+    expect(mocks.executeBoardAiChat).not.toHaveBeenCalled();
+    // A refused message leaves NOTHING behind: no thread and no user turn.
+    expect(repo.createThread).not.toHaveBeenCalled();
+    expect(repo.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it('a check throw is 503, and the model is never called', async () => {
+    mocks.checkBoardAiCredits.mockRejectedValue(new Error('ledger down'));
+    const response = await post({ message: 'hello' });
+    expect(response.status).toBe(503);
+    expect(mocks.executeBoardAiChat).not.toHaveBeenCalled();
+  });
+
+  it('a failed model call records nothing', async () => {
+    const repo = repository();
+    mocks.checkBoardAiCredits.mockResolvedValue(allowed());
+    mocks.executeBoardAiChat.mockRejectedValue(new AIProviderError('provider_unavailable'));
+    const response = await post({ message: 'hello' });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+    expect(repo.appended).toHaveLength(1);
+  });
+
+  it('a recording throw still returns the answer', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(allowed());
+    mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'm', source: 'collabboard-default' });
+    mocks.recordBoardAiCreditUsage.mockRejectedValue(new Error('insert failed'));
+    const response = await post({ message: 'hello' });
+    expect(response.status).toBe(200);
+    expect((await response.json()).message.content).toBe('answer');
+  });
+
+  it('Pro out of credits (charge false): the answer returns and nothing is recorded', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue(allowed(false));
+    await post({ message: 'hello' });
+    expect(mocks.executeBoardAiChat).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
   });
 });

@@ -25,7 +25,7 @@
 import { AI_ROLE_CHAT } from '../../ai/aiRoles';
 import type { BoardAiCitablePassage } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
-import { resolveAIModelForRole, type AIModelResolverDeps } from './resolveAIModelForRole';
+import { resolveAIModelForRole, type AIModelResolverDeps, type AIModelResolutionSource } from './resolveAIModelForRole';
 import type { UserId } from '../../domain/core/ids';
 
 /**
@@ -105,6 +105,11 @@ export interface BoardWikiCompilationResult {
   readonly text: string;
   readonly provider: string;
   readonly model: string;
+  /**
+   * PATCH-187. The source that ACTUALLY ran. The credit ledger charges only a
+   * managed run, and only after the proposal is accepted.
+   */
+  readonly source: AIModelResolutionSource;
 }
 
 /**
@@ -138,7 +143,7 @@ export async function executeBoardWikiCompilation(
     });
     // The provider and model NAMES travel onward; the credential stays in
     // `resolved` and is never returned, logged or persisted.
-    return { text, provider: resolved.provider, model: resolved.model };
+    return { text, provider: resolved.provider, model: resolved.model, source: resolved.source };
   } finally {
     clearTimeout(timer);
   }

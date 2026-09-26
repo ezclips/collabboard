@@ -320,6 +320,32 @@ describe('PATCH-176 -- apply, discard, errors', () => {
     expect(panel.querySelector('[data-table-from-document-error]')!.textContent)
       .toContain('This document is still being processed.');
   });
+
+  it('PATCH-187. a plan_limit_credits refusal shows the text and a See plans link', async () => {
+    const { c } = tableEditor(EMPTY_GRID, { boardId: BOARD });
+    stubFetch({
+      post: { error: "The Free plan's AI credits for this month are used up. They renew on 1 October. Upgrade for more.", code: 'plan_limit_credits' },
+      postStatus: 402,
+    });
+    const panel = await openPanel(c);
+    setInputValue(panel.querySelector('[data-table-from-document-request]') as HTMLTextAreaElement, 'x');
+    await generate(panel);
+    const error = panel.querySelector('[data-table-from-document-error]')!;
+    expect(error.textContent).toContain("The Free plan's AI credits for this month are used up.");
+    const link = error.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('/dashboard/settings/billing');
+  });
+
+  it('PATCH-187. any other error keeps its text and shows no link', async () => {
+    const { c } = tableEditor(EMPTY_GRID, { boardId: BOARD });
+    stubFetch({ post: { error: 'boom' }, postStatus: 500 });
+    const panel = await openPanel(c);
+    setInputValue(panel.querySelector('[data-table-from-document-request]') as HTMLTextAreaElement, 'x');
+    await generate(panel);
+    const error = panel.querySelector('[data-table-from-document-error]')!;
+    expect(error.textContent).toContain('The AI request failed. Please try again.');
+    expect(error.querySelector('a')).toBeNull();
+  });
 });
 
 describe('PATCH-176 -- one panel at a time', () => {

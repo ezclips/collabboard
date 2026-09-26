@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   executeBoardAiChat: vi.fn(),
   createAIRolePreferenceRepository: vi.fn(() => ({})),
   createAIProviderCredentialRepository: vi.fn(() => ({})),
+  checkBoardAiCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -27,6 +29,10 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkBoardAiCredits: mocks.checkBoardAiCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -78,6 +84,7 @@ beforeEach(async () => {
   mocks.cookies.mockResolvedValue({});
   session();
   mocks.canReadBoardKnowledge.mockResolvedValue(true);
+  mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'byok' });
   repository();
   route = await import('../../../app/api/boards/[id]/ai/chat/route');
 });

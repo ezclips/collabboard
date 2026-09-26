@@ -1,18 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AI_CREDIT_COSTS,
+  BOARD_CHAT_SEARCH_SURCHARGE,
+  PLAN_CREDITS_EXHAUSTED_CODE,
+  PLAN_NO_WORKSPACE_CODE,
+  PLAN_NO_WORKSPACE_ERROR,
   PAID_PLAN_IDS,
   PLANS,
   PLAN_CURRENCY,
   PLAN_ORDER,
   PLAN_PAGE_LIMIT_PREFIX,
+  aiCreditBalance,
+  aiCreditPeriod,
   effectivePlanId,
   formatPlanPrice,
   isPlanId,
   isPlanPageLimitError,
+  planCreditsExhaustedError,
   planIncludes,
   planLimits,
   planPageLimitError,
+  splitAiCreditCharge,
   statusGrantsPlan,
 } from './plans';
 import { sanitizeKnowledgeProcessingError } from '../knowledge/knowledgeExtraction';
@@ -209,5 +218,132 @@ describe('the objects are frozen', () => {
     }
     expect(Object.isFrozen(PLAN_ORDER)).toBe(true);
     expect(Object.isFrozen(PAID_PLAN_IDS)).toBe(true);
+  });
+});
+
+describe('PATCH-187 — AI credits', () => {
+  it('AI_CREDIT_COSTS values', () => {
+    expect(AI_CREDIT_COSTS).toEqual({
+      board_chat: 1,
+      table_from_document: 3,
+      wiki_compile: 10,
+      text_action: 1,
+      table_fill: 1,
+      table_plan: 1,
+      transcript_punctuate: 1,
+      component: 1,
+    });
+    expect(BOARD_CHAT_SEARCH_SURCHARGE).toBe(1);
+    expect(Object.isFrozen(AI_CREDIT_COSTS)).toBe(true);
+  });
+
+  it('boardChatWhenOutOfCredits per plan', () => {
+    expect(PLANS.free.limits.boardChatWhenOutOfCredits).toBe(false);
+    expect(PLANS.pro.limits.boardChatWhenOutOfCredits).toBe(true);
+    expect(PLANS.premium.limits.boardChatWhenOutOfCredits).toBe(true);
+  });
+
+  describe('aiCreditPeriod', () => {
+    it('a paid period that contains now → that period', () => {
+      const now = new Date('2026-09-15T12:00:00Z');
+      const period = aiCreditPeriod(now, {
+        start: '2026-09-01T00:00:00Z',
+        end: '2026-10-01T00:00:00Z',
+      });
+      expect(period.start.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+      expect(period.end.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    });
+
+    it('no period → the UTC calendar month', () => {
+      const period = aiCreditPeriod(new Date('2026-09-15T12:00:00Z'), null);
+      expect(period.start.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+      expect(period.end.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    });
+
+    it('an expired period → the calendar month', () => {
+      const period = aiCreditPeriod(new Date('2026-09-15T12:00:00Z'), {
+        start: '2026-07-01T00:00:00Z',
+        end: '2026-08-01T00:00:00Z',
+      });
+      expect(period.start.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+      expect(period.end.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    });
+
+    it('now at 2026-12-31T23:59Z → December to 1 January', () => {
+      const period = aiCreditPeriod(new Date('2026-12-31T23:59:00Z'), null);
+      expect(period.start.toISOString()).toBe('2026-12-01T00:00:00.000Z');
+      expect(period.end.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+    });
+  });
+
+  describe('aiCreditBalance', () => {
+    const period = aiCreditPeriod(new Date('2026-09-15T12:00:00Z'), null);
+
+    it('Free, fresh → 40 remaining', () => {
+      const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 0, grantUsed: 0 });
+      expect(balance.allowance).toBe(10);
+      expect(balance.grantTotal).toBe(30);
+      expect(balance.remaining).toBe(40);
+    });
+
+    it('Free with 10 allowance used and 5 grant used → 25', () => {
+      const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 10, grantUsed: 5 });
+      expect(balance.remaining).toBe(25);
+    });
+
+    it('Pro → 500, grant 0', () => {
+      const balance = aiCreditBalance(PLANS.pro.limits, period, { allowanceUsed: 0, grantUsed: 0 });
+      expect(balance.allowance).toBe(500);
+      expect(balance.grantTotal).toBe(0);
+      expect(balance.remaining).toBe(500);
+    });
+
+    it('an overspent allowance never goes negative', () => {
+      const balance = aiCreditBalance(PLANS.free.limits, period, { allowanceUsed: 999, grantUsed: 0 });
+      expect(balance.remaining).toBe(30);
+    });
+  });
+
+  describe('splitAiCreditCharge', () => {
+    const period = aiCreditPeriod(new Date('2026-09-15T12:00:00Z'), null);
+    const balanceOf = (allowanceUsed: number, grantUsed: number) =>
+      aiCreditBalance(PLANS.free.limits, period, { allowanceUsed, grantUsed });
+
+    it('all from the allowance', () => {
+      expect(splitAiCreditCharge(balanceOf(0, 0), 3)).toEqual([
+        { bucket: 'allowance', credits: 3 },
+      ]);
+    });
+
+    it('allowance then grant (1 allowance left, charge 3 → 1 + 2)', () => {
+      expect(splitAiCreditCharge(balanceOf(9, 0), 3)).toEqual([
+        { bucket: 'allowance', credits: 1 },
+        { bucket: 'grant', credits: 2 },
+      ]);
+    });
+
+    it('overflow on the allowance when the grant is spent', () => {
+      expect(splitAiCreditCharge(balanceOf(10, 30), 3)).toEqual([
+        { bucket: 'allowance', credits: 3 },
+      ]);
+    });
+
+    it('0 → []', () => {
+      expect(splitAiCreditCharge(balanceOf(0, 0), 0)).toEqual([]);
+    });
+  });
+
+  it('planCreditsExhaustedError is the exact text', () => {
+    expect(planCreditsExhaustedError('Free', new Date('2026-10-01T00:00:00Z'))).toBe(
+      "The Free plan's AI credits for this month are used up. They renew on 1 October. Upgrade for more.",
+    );
+    expect(PLAN_CREDITS_EXHAUSTED_CODE).toBe('plan_limit_credits');
+  });
+
+  it('PLAN_NO_WORKSPACE_ERROR is the exact text', () => {
+    expect(PLAN_NO_WORKSPACE_ERROR).toBe(
+      "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.",
+    );
+    expect(PLAN_NO_WORKSPACE_CODE).toBe('plan_limit_no_workspace');
   });
 });

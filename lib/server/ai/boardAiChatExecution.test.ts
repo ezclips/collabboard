@@ -204,7 +204,9 @@ describe('the execution seam reuses the existing authorities', () => {
     expect((input.signal as AbortSignal).aborted).toBe(false);
 
     // 14/15. The credential reaches the adapter and nothing else.
-    expect(result).toEqual({ text: 'answer', provider: 'deepseek', model: 'deepseek-chat' });
+    // PATCH-187: `source` is the one that ACTUALLY ran, so the credit ledger
+    // charges only a managed call.
+    expect(result).toEqual({ text: 'answer', provider: 'deepseek', model: 'deepseek-chat', source: 'collabboard-default' });
     expect(JSON.stringify(result)).not.toContain('sk-secret-value');
     vi.doUnmock('./resolveAIModelForRole');
     vi.doUnmock('./providers/registry');

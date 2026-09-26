@@ -146,3 +146,22 @@ export async function resolveAIModelForRole(
     connectionId,
   };
 }
+
+/**
+ * PATCH-187. Reads ONLY the role preference -- no credential is loaded or
+ * decrypted.
+ *
+ * The same rule as `resolveAIModelForRole`: a null `connectionId` means
+ * 'collabboard-default', a non-null one means 'byok'. A preference read error
+ * THROWS exactly as it does there, so a caller that must not guess at the
+ * source fails closed rather than assuming the free path.
+ */
+export async function resolveAIModelSourceForRole(
+  userId: UserId,
+  role: AIRole,
+  preferences: AIRolePreferenceReader,
+): Promise<AIModelResolutionSource> {
+  const preference = await preferences.getPreference(userId, role);
+  if (!preference.ok) throw new AIProviderError('provider_unavailable');
+  return (preference.value?.connectionId ?? null) === null ? 'collabboard-default' : 'byok';
+}

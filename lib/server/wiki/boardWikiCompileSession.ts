@@ -1,4 +1,6 @@
 import { asUserId } from '../../domain/core/ids';
+import { AI_ROLE_CHAT } from '../../ai/aiRoles';
+import { AI_CREDIT_COSTS } from '../../domain/billing/plans';
 import {
   boardAiCitationIdentityKey,
   boardAiCitationItemFromPassage,
@@ -18,6 +20,12 @@ import {
   boardWikiPassageTokens,
   executeBoardWikiCompilation,
 } from '../ai/boardWikiCompilation';
+import type { BoardWikiCompilationResult } from '../ai/boardWikiCompilation';
+import {
+  checkBoardAiCredits,
+  recordBoardAiCreditUsage,
+  type ManagedAiCreditDecision,
+} from '../billing/aiCredits';
 import type { AIModelResolverDeps } from '../ai/resolveAIModelForRole';
 import type { BoardAiSearchReader } from '../ai/boardAiChatSearch';
 
@@ -52,7 +60,27 @@ import type { BoardAiSearchReader } from '../ai/boardAiChatSearch';
 export interface BoardWikiCompileDependencies {
   readonly searchReader: BoardAiSearchReader;
   readonly resolverDeps: AIModelResolverDeps;
+  /**
+   * PATCH-187. The AI credit ledger, injected so a test can observe the decision
+   * and the charge. Production defaults to the real ledger.
+   *
+   * THE CHECK LIVES HERE, next to the only place the model source is resolved,
+   * rather than in the route: the route cannot know whether the call that will
+   * run is managed, and a byok caller must never read the ledger.
+   */
+  readonly credits?: BoardWikiCompileCreditDeps;
 }
+
+/** The two ledger operations the compile needs. */
+export interface BoardWikiCompileCreditDeps {
+  readonly checkBoardAiCredits: typeof checkBoardAiCredits;
+  readonly recordBoardAiCreditUsage: typeof recordBoardAiCreditUsage;
+}
+
+const DEFAULT_CREDIT_DEPS: BoardWikiCompileCreditDeps = {
+  checkBoardAiCredits,
+  recordBoardAiCreditUsage,
+};
 
 /**
  * The Supabase client, as this module uses it.
@@ -186,7 +214,31 @@ export async function compileBoardWikiProposal(
     tokened.push({ token, item, version });
   }
 
-  let generated: { text: string };
+  // PATCH-187. AI CREDITS. After authorization and before the model call: the
+  // board owner's plan pays for a wiki compile (10 credits). A byok caller never
+  // reads the ledger. A check that throws fails closed.
+  const credits = deps.credits ?? DEFAULT_CREDIT_DEPS;
+  let creditDecision: ManagedAiCreditDecision;
+  try {
+    creditDecision = await credits.checkBoardAiCredits({
+      boardId: input.boardId,
+      userId: input.userId,
+      role: AI_ROLE_CHAT,
+      cost: AI_CREDIT_COSTS.wiki_compile,
+      now: new Date(),
+      preferences: deps.resolverDeps.preferences,
+    });
+  } catch {
+    return err(domainError('unavailable', 'The compilation could not be completed'));
+  }
+  if (creditDecision.kind === 'refused') {
+    // The route maps `quota_exceeded` to 402 with the plan-limit code it carries.
+    return err(domainError('quota_exceeded', creditDecision.body.error, {
+      details: { planLimitCode: creditDecision.body.code },
+    }));
+  }
+
+  let generated: BoardWikiCompilationResult;
   try {
     generated = await executeBoardWikiCompilation(
       asUserId(input.userId),
@@ -252,6 +304,32 @@ export async function compileBoardWikiProposal(
     .eq('board_id', input.boardId)
     .eq('page_id', input.pageId)
     .neq('id', insertedId);
+
+  // PATCH-187. Charged only after the proposal is accepted and stored, only for
+  // a managed run, and only when the check said to charge. A recording failure
+  // must not lose the proposal the user is about to see.
+  if (
+    creditDecision.kind === 'allowed'
+    && creditDecision.charge
+    && generated.source === 'collabboard-default'
+  ) {
+    try {
+      await credits.recordBoardAiCreditUsage({
+        plan: creditDecision.plan,
+        balance: creditDecision.balance,
+        boardId: input.boardId,
+        userId: input.userId,
+        feature: 'wiki_compile',
+        credits: AI_CREDIT_COSTS.wiki_compile,
+      });
+    } catch {
+      console.error('AI credit usage was not recorded', {
+        boardId: input.boardId,
+        feature: 'wiki_compile',
+        credits: AI_CREDIT_COSTS.wiki_compile,
+      });
+    }
+  }
 
   return ok({
     id: String((inserted as { id?: unknown }).id ?? ''),

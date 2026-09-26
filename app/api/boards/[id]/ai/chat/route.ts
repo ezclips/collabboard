@@ -23,6 +23,12 @@ import { AIProviderError } from '@/lib/server/ai/providers/errors';
 import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStatus';
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
+import { AI_ROLE_CHAT } from '@/lib/ai/aiRoles';
+import { AI_CREDIT_COSTS, BOARD_CHAT_SEARCH_SURCHARGE } from '@/lib/domain/billing/plans';
+import {
+  checkBoardAiCredits,
+  recordBoardAiCreditUsage,
+} from '@/lib/server/billing/aiCredits';
 import { asBoardId, asUserId } from '@/lib/domain/core/ids';
 import type { BoardAiJsonValue } from '@/lib/domain/ai/boardAiChat';
 import {
@@ -226,6 +232,32 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
     }
     if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    // PATCH-187. AI CREDITS: the board OWNER's plan pays (PRICING.md Rule 1).
+    // The check runs BEFORE the thread is created and before the user's turn is
+    // stored, so a refusal leaves nothing behind.
+    //
+    // A byok caller never reaches the ledger: `checkBoardAiCredits` resolves the
+    // pre-call source from the role preference alone and returns early on byok.
+    // A check that throws fails closed (503) and never reaches the model.
+    let creditDecision: Awaited<ReturnType<typeof checkBoardAiCredits>>;
+    try {
+      creditDecision = await checkBoardAiCredits({
+        boardId,
+        userId: user.id,
+        role: AI_ROLE_CHAT,
+        cost: AI_CREDIT_COSTS.board_chat,
+        now: new Date(),
+        // Basic Q&A on boards keeps answering at 0 credits on a paid plan.
+        boardChat: true,
+        preferences: createAIRolePreferenceRepository(),
+      });
+    } catch {
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
+    if (creditDecision.kind === 'refused') {
+      return NextResponse.json(creditDecision.body, { status: creditDecision.status });
+    }
 
     // The caller's own client, so RLS is the boundary. No admin client exists
     // on this path -- a chat nobody else may read is not a chat the server
@@ -436,6 +468,41 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         );
       }
       return NextResponse.json({ error: 'AI request failed.', threadId: thread.id }, { status: 502 });
+    }
+
+    // PATCH-187. The answer succeeded, so record what it cost -- but only for a
+    // managed run, and only when the pre-call check said to charge. A paid plan's
+    // free board chat (`charge: false`) records nothing.
+    //
+    // "Search was used" is `searchBlock !== null`: the block exists exactly when
+    // a search ran and its context actually travelled with this turn (including
+    // a search that matched nothing).
+    //
+    // A recording failure is logged and swallowed: the person already has their
+    // answer, and failing the request now would waste the call we paid for.
+    if (
+      creditDecision.kind === 'allowed'
+      && creditDecision.charge
+      && result.source === 'collabboard-default'
+    ) {
+      const creditCost = AI_CREDIT_COSTS.board_chat
+        + (searchBlock !== null ? BOARD_CHAT_SEARCH_SURCHARGE : 0);
+      try {
+        await recordBoardAiCreditUsage({
+          plan: creditDecision.plan,
+          balance: creditDecision.balance,
+          boardId,
+          userId: user.id,
+          feature: 'board_chat',
+          credits: creditCost,
+        });
+      } catch {
+        console.error('AI credit usage was not recorded', {
+          boardId,
+          feature: 'board_chat',
+          credits: creditCost,
+        });
+      }
     }
 
     // The machine footer is read here and nowhere else, and it never reaches

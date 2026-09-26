@@ -140,7 +140,21 @@ const ERROR_RESPONSES: Record<DomainErrorCode, { status: number; error: string }
   unknown: { status: 500, error: 'Could not complete the request' },
 };
 
+const PLAN_LIMIT_CODE_PREFIX = 'plan_limit_';
+
 function failure(error: DomainError): NextResponse {
+  // PATCH-187. The AI credits refusal is the one quota error the surface is
+  // meant to show verbatim: it names the plan and the renewal day, and carries
+  // the `plan_limit_` code the UI turns into an upgrade link. Every other
+  // quota_exceeded stays the generic 403 it has always been.
+  if (error.code === 'quota_exceeded') {
+    const code = (error.details as { planLimitCode?: unknown } | undefined)?.planLimitCode;
+    // Every plan-limit refusal (credits used up, a board with no workspace)
+    // carries its own text; nothing else leaves as-is.
+    if (typeof code === 'string' && code.startsWith(PLAN_LIMIT_CODE_PREFIX)) {
+      return NextResponse.json({ error: error.message, code }, { status: 402 });
+    }
+  }
   const mapped = ERROR_RESPONSES[error.code] ?? ERROR_RESPONSES.unknown;
   return NextResponse.json({ error: mapped.error }, { status: mapped.status });
 }

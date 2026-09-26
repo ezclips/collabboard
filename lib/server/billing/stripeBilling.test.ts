@@ -1,7 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
-import { canManageWorkspaceBilling, findLivePaidSubscription } from "./stripeBilling";
+import type Stripe from "stripe";
+
+import {
+  canManageWorkspaceBilling,
+  findLivePaidSubscription,
+  stripeSubscriptionPeriod,
+} from "./stripeBilling";
 
 /**
  * PATCH-184. The two billing authority helpers, with injected clients so no
@@ -148,5 +154,37 @@ describe("findLivePaidSubscription", () => {
     });
 
     expect(await findLivePaidSubscription(client, WORKSPACE)).toBeNull();
+  });
+});
+
+describe("stripeSubscriptionPeriod", () => {
+  const START = 1790000000; // 2026-09-21T...
+  const END = 1792592000;
+  const sub = (shape: unknown) => shape as Stripe.Subscription;
+
+  it("reads the period from the subscription item (the current Stripe API)", () => {
+    expect(
+      stripeSubscriptionPeriod(
+        sub({ items: { data: [{ current_period_start: START, current_period_end: END }] } }),
+      ),
+    ).toEqual({
+      start: new Date(START * 1000).toISOString(),
+      end: new Date(END * 1000).toISOString(),
+    });
+  });
+
+  it("falls back to the old top-level fields", () => {
+    expect(
+      stripeSubscriptionPeriod(
+        sub({ current_period_start: START, current_period_end: END, items: { data: [{}] } }),
+      ),
+    ).toEqual({
+      start: new Date(START * 1000).toISOString(),
+      end: new Date(END * 1000).toISOString(),
+    });
+  });
+
+  it("is null when neither place has it", () => {
+    expect(stripeSubscriptionPeriod(sub({ items: { data: [] } }))).toEqual({ start: null, end: null });
   });
 });

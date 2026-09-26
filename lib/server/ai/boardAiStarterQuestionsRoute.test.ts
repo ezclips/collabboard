@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   createAIRolePreferenceRepository: vi.fn(() => ({})),
   createAIProviderCredentialRepository: vi.fn(() => ({})),
   createBoardAiThreadRepository: vi.fn(),
+  checkBoardAiCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -55,6 +57,10 @@ vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
 // the call is impossible rather than merely absent today.
 vi.mock('@/lib/infra/ai/boardAiThreadRepository', () => ({
   createBoardAiThreadRepository: mocks.createBoardAiThreadRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkBoardAiCredits: mocks.checkBoardAiCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -97,6 +103,7 @@ beforeEach(async () => {
   mocks.cookies.mockResolvedValue({});
   session();
   mocks.canReadBoardKnowledge.mockResolvedValue(true);
+  mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'byok' });
   mocks.resolveBoardAiChatContext.mockResolvedValue(ok([block('the document text')]));
   mocks.resolveAIModelForRole.mockResolvedValue({ provider: 'deepseek', model: 'deepseek-flash', apiKey: 'k' });
   mocks.generateText.mockResolvedValue('What is the claim?\nWhy does it matter?\nWho is it for?');
@@ -237,5 +244,44 @@ describe('5. nothing is written', () => {
     expect(source).not.toContain('createBoardAiThreadRepository');
     expect(source).not.toContain('service_role');
     expect(source).not.toContain('adminClient');
+  });
+});
+
+describe('PATCH-187. AI credits — starter questions cost nothing, but pause on Free', () => {
+  it('byok: the ledger is never read and nothing is recorded', async () => {
+    await post(oneItem);
+    expect(mocks.checkBoardAiCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
+  });
+
+  it('the check runs with cost 0 and boardChat true', async () => {
+    await post(oneItem);
+    expect(mocks.checkBoardAiCredits.mock.calls[0][0]).toMatchObject({
+      boardId: BOARD_ID, userId: USER_ID, cost: 0, boardChat: true,
+    });
+  });
+
+  it('a refusal is 402 with the code, and the model is never called', async () => {
+    mocks.checkBoardAiCredits.mockResolvedValue({
+      kind: 'refused', status: 402,
+      body: { error: 'out', code: 'plan_limit_credits' },
+    });
+    const response = await post(oneItem);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: 'out', code: 'plan_limit_credits' });
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('a check throw is 503, and the model is never called', async () => {
+    mocks.checkBoardAiCredits.mockRejectedValue(new Error('ledger down'));
+    const response = await post(oneItem);
+    expect(response.status).toBe(503);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('nothing is ever recorded, even on success', async () => {
+    await post(oneItem);
+    expect(mocks.generateText).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBoardAiCreditUsage).not.toHaveBeenCalled();
   });
 });

@@ -115,6 +115,21 @@ export interface BoardWikiDrawerProps {
   ) => Promise<BoardWikiProposal | null>;
 }
 
+/**
+ * PATCH-187. A plan-limit refusal from the compile endpoint, carrying the
+ * server's own text and the code the surface turns into an upgrade link. The
+ * canvas throws this type so the drawer can show it rather than the generic
+ * "came back unusable" message.
+ */
+export class BoardWikiPlanLimitError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'BoardWikiPlanLimitError';
+    this.code = code;
+  }
+}
+
 const stateLabel: Record<BoardWikiSourceState, string> = {
   current: '',
   stale: '(changed)',
@@ -144,6 +159,7 @@ export default function BoardWikiDrawer({
   const [draft, setDraft] = useState<BoardWikiDraft | null>(null);
   const [proposal, setProposal] = useState<BoardWikiProposal | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [statusPlansLink, setStatusPlansLink] = useState(false);
   const [busy, setBusy] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -308,6 +324,7 @@ export default function BoardWikiDrawer({
     if (!onRequestRecompile || selectedPageId === null || draft === null) return;
     setBusy(true);
     setStatus('Compiling from this board…');
+    setStatusPlansLink(false);
     try {
       // THE TOPIC IS THE PAGE'S TITLE, which is the one thing on the page a
       // person definitely wrote. Using the CONTENT would feed a compilation its
@@ -319,7 +336,14 @@ export default function BoardWikiDrawer({
       // worth another go; a board with nothing to say on the topic is not, and
       // telling someone to retry that wastes their time and a provider call.
       setStatus(compiled === null ? 'This board has nothing on that topic yet.' : null);
-    } catch {
+    } catch (error) {
+      // PATCH-187. A plan-limit refusal is the server's own sentence, and it
+      // carries a link to the plans. Everything else keeps today's text.
+      if (error instanceof BoardWikiPlanLimitError) {
+        setStatus(error.message);
+        setStatusPlansLink(true);
+        return;
+      }
       setStatus('That compilation came back unusable. Try again.');
     } finally {
       setBusy(false);
@@ -465,7 +489,17 @@ export default function BoardWikiDrawer({
         </nav>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
-          {status && <p data-board-wiki-status="true" className="mb-3 rounded bg-gray-50 px-3 py-2 text-xs text-gray-700">{status}</p>}
+          {status && (
+            <p data-board-wiki-status="true" className="mb-3 rounded bg-gray-50 px-3 py-2 text-xs text-gray-700">
+              {status}
+              {statusPlansLink ? (
+                <>
+                  {' '}
+                  <a href="/dashboard/settings/billing" className="font-medium underline">See plans</a>
+                </>
+              ) : null}
+            </p>
+          )}
 
           {draft === null && <p className="text-xs text-gray-500">Select a page.</p>}
 

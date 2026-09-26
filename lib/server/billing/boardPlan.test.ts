@@ -128,7 +128,12 @@ describe("resolveBoardPlan", () => {
 
     const plan = await resolveBoardPlan(client, BOARD);
 
-    expect(plan).toEqual({ workspaceId: WORKSPACE, planId: "free", limits: PLANS.free.limits });
+    expect(plan).toEqual({
+      workspaceId: WORKSPACE,
+      planId: "free",
+      limits: PLANS.free.limits,
+      subscriptionPeriod: null,
+    });
   });
 
   it("a board without a workspace → free with workspaceId null", async () => {
@@ -138,7 +143,12 @@ describe("resolveBoardPlan", () => {
 
     const plan = await resolveBoardPlan(client, BOARD);
 
-    expect(plan).toEqual({ workspaceId: null, planId: "free", limits: PLANS.free.limits });
+    expect(plan).toEqual({
+      workspaceId: null,
+      planId: "free",
+      limits: PLANS.free.limits,
+      subscriptionPeriod: null,
+    });
     // No workspace means nothing to look a subscription up under.
     expect(calls.subscriptionEq).toEqual([]);
   });
@@ -164,6 +174,59 @@ describe("resolveBoardPlan", () => {
       code: "42501",
       message: "denied",
     });
+  });
+
+  it("PATCH-187: an active Pro carries its subscription period", async () => {
+    const { client } = makeAdminClient({
+      board: { data: { workspace_id: WORKSPACE }, error: null },
+      subscription: {
+        data: {
+          plan: "pro",
+          status: "active",
+          current_period_start: "2026-09-01T00:00:00Z",
+          current_period_end: "2026-10-01T00:00:00Z",
+        },
+        error: null,
+      },
+    });
+
+    const plan = await resolveBoardPlan(client, BOARD);
+
+    expect(plan.subscriptionPeriod).toEqual({
+      start: "2026-09-01T00:00:00Z",
+      end: "2026-10-01T00:00:00Z",
+    });
+  });
+
+  it("PATCH-187: Free carries no subscription period, even with stored dates", async () => {
+    const { client } = makeAdminClient({
+      board: { data: { workspace_id: WORKSPACE }, error: null },
+      subscription: {
+        data: {
+          plan: "pro",
+          status: "canceled",
+          current_period_start: "2026-09-01T00:00:00Z",
+          current_period_end: "2026-10-01T00:00:00Z",
+        },
+        error: null,
+      },
+    });
+
+    const plan = await resolveBoardPlan(client, BOARD);
+
+    expect(plan.planId).toBe("free");
+    expect(plan.subscriptionPeriod).toBeNull();
+  });
+
+  it("PATCH-187: no subscription row carries no subscription period", async () => {
+    const { client } = makeAdminClient({
+      board: { data: { workspace_id: WORKSPACE }, error: null },
+      subscription: { data: null, error: null },
+    });
+
+    const plan = await resolveBoardPlan(client, BOARD);
+
+    expect(plan.subscriptionPeriod).toBeNull();
   });
 });
 

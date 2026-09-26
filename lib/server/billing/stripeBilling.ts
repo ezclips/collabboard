@@ -158,6 +158,29 @@ export async function upsertCustomerFromStripe(customerId: string) {
   return data;
 }
 
+/**
+ * PATCH-187. The billing period, as ISO strings. Stripe's API since 2025-03-31
+ * (the one `stripe` v18 speaks) reports it on each subscription ITEM, not on the
+ * subscription, so reading only the old top-level fields stored null for every
+ * subscription -- and AI credits then renewed on the calendar month instead of
+ * the billing date. The item wins; the old field is the fallback.
+ */
+export function stripeSubscriptionPeriod(
+  subscription: Stripe.Subscription,
+): { start: string | null; end: string | null } {
+  const item = subscription.items?.data?.[0] as
+    | { current_period_start?: number | null; current_period_end?: number | null }
+    | undefined;
+  const legacy = subscription as unknown as {
+    current_period_start?: number | null;
+    current_period_end?: number | null;
+  };
+  return {
+    start: toIsoOrNull(item?.current_period_start ?? legacy.current_period_start),
+    end: toIsoOrNull(item?.current_period_end ?? legacy.current_period_end),
+  };
+}
+
 export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription) {
   const supabaseAdmin = getSupabaseAdmin();
   const workspaceId =
@@ -186,6 +209,7 @@ export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscrip
       : null;
 
   const firstItem = subscription.items.data[0];
+  const period = stripeSubscriptionPeriod(subscription);
   const row: StripeSubscriptionRow = {
     workspace_id: workspaceId,
     customer_id: customerRow?.id || null,
@@ -196,8 +220,8 @@ export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscrip
     plan: planForStripePrice(firstItem?.price?.id || null),
     status: subscription.status,
     cancel_at_period_end: subscription.cancel_at_period_end,
-    current_period_start: toIsoOrNull((subscription as any).current_period_start),
-    current_period_end: toIsoOrNull((subscription as any).current_period_end),
+    current_period_start: period.start,
+    current_period_end: period.end,
     trial_start: toIsoOrNull(subscription.trial_start),
     trial_end: toIsoOrNull(subscription.trial_end),
     canceled_at: toIsoOrNull(subscription.canceled_at),

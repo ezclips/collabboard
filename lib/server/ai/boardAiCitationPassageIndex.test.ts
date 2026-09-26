@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   resolveHistoricalBoardAiChatContext: vi.fn(),
   searchPosts: vi.fn(),
   searchChunks: vi.fn(),
+  checkBoardAiCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -64,6 +66,10 @@ vi.mock('@/lib/infra/ai/boardAiSearchReader', () => ({
     searchPosts: mocks.searchPosts,
     searchChunks: mocks.searchChunks,
   }),
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkBoardAiCredits: mocks.checkBoardAiCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -109,6 +115,7 @@ beforeEach(async () => {
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })) },
   });
   mocks.canReadBoardKnowledge.mockResolvedValue(true);
+  mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'byok' });
   mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'deepseek-flash' });
   mocks.createBoardAiThreadRepository.mockReturnValue({
     createThread: vi.fn(async () => ok({ id: THREAD_ID, boardId: BOARD_ID, userId: USER_ID, title: null, createdAt: 'c', updatedAt: 'u' })),

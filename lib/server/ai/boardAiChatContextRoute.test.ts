@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   resolveHistoricalBoardAiChatContext: vi.fn(),
   createAIRolePreferenceRepository: vi.fn(() => ({})),
   createAIProviderCredentialRepository: vi.fn(() => ({})),
+  checkBoardAiCredits: vi.fn(),
+  recordBoardAiCreditUsage: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
@@ -33,6 +35,10 @@ vi.mock('@/lib/infra/settings/aiRolePreferenceRepository', () => ({
 }));
 vi.mock('@/lib/infra/settings/aiProviderCredentialRepository', () => ({
   createAIProviderCredentialRepository: mocks.createAIProviderCredentialRepository,
+}));
+vi.mock('@/lib/server/billing/aiCredits', () => ({
+  checkBoardAiCredits: mocks.checkBoardAiCredits,
+  recordBoardAiCreditUsage: mocks.recordBoardAiCreditUsage,
 }));
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -104,6 +110,7 @@ beforeEach(async () => {
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })) },
   });
   mocks.canReadBoardKnowledge.mockResolvedValue(true);
+  mocks.checkBoardAiCredits.mockResolvedValue({ kind: 'byok' });
   mocks.executeBoardAiChat.mockResolvedValue({ text: 'answer', provider: 'deepseek', model: 'deepseek-chat' });
   mocks.resolveBoardAiChatContext.mockResolvedValue(ok([pageBlock]));
   mocks.resolveHistoricalBoardAiChatContext.mockResolvedValue([]);

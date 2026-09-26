@@ -374,6 +374,50 @@ describe('compiling a proposal (Unit 3)', () => {
     expect(text).not.toContain('sk-abc');
     expect(text).not.toContain('deepseek');
   });
+
+  it('PATCH-187. an AI credits refusal is 402 with the plan-limit code and its text', async () => {
+    // The compile session makes the check; a refusal comes back as the
+    // `quota_exceeded` domain error carrying the plan-limit code, which the
+    // handler must surface verbatim so the drawer can offer an upgrade link.
+    const handler = createBoardWikiCompileHandler({
+      getAuthenticatedSession: async () => session({
+        compilePage: vi.fn(async () => err(domainError('quota_exceeded', "The Free plan's AI credits for this month are used up. They renew on 1 October. Upgrade for more.", {
+          details: { planLimitCode: 'plan_limit_credits' },
+        }))),
+      }),
+    });
+    const response = await handler(post({ topic: 'bumper' }), itemContext);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({
+      error: "The Free plan's AI credits for this month are used up. They renew on 1 October. Upgrade for more.",
+      code: 'plan_limit_credits',
+    });
+  });
+
+  it('PATCH-187. a board with no workspace is 402 with its own plan-limit code and text', async () => {
+    const message = "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.";
+    const handler = createBoardWikiCompileHandler({
+      getAuthenticatedSession: async () => session({
+        compilePage: vi.fn(async () => err(domainError('quota_exceeded', message, {
+          details: { planLimitCode: 'plan_limit_no_workspace' },
+        }))),
+      }),
+    });
+    const response = await handler(post({ topic: 'bumper' }), itemContext);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: message, code: 'plan_limit_no_workspace' });
+  });
+
+  it('PATCH-187. every other quota_exceeded stays the generic 403 it always was', async () => {
+    const handler = createBoardWikiCompileHandler({
+      getAuthenticatedSession: async () => session({
+        compilePage: vi.fn(async () => err(domainError('quota_exceeded', 'some other quota'))),
+      }),
+    });
+    const response = await handler(post({ topic: 'bumper' }), itemContext);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'Forbidden' });
+  });
 });
 
 describe('deleting a page (Unit 2b)', () => {

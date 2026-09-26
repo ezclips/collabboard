@@ -27,6 +27,9 @@ import TablePlanPreview from './TablePlanPreview';
 
 const REQUEST_TIMEOUT_MS = 65_000;
 
+/** PATCH-187. A plan-limit refusal carries server-authored text and a link. */
+const PLAN_LIMIT_CODE_PREFIX = 'plan_limit_';
+
 interface DocumentListItem {
   readonly id: string;
   readonly originalFilename: string;
@@ -44,7 +47,7 @@ type Phase =
       draft: TableGrid;
     }
   | { kind: 'nothing'; message: string }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; showPlansLink?: boolean };
 
 export interface TableFromDocumentPanelProps {
   readonly boardId: string;
@@ -164,7 +167,18 @@ export default function TableFromDocumentPanel({
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
         const apiMessage = payload && typeof payload.error === 'string' ? payload.error : null;
-        if (response.status === 409) {
+        const apiCode = payload && typeof payload.code === 'string' ? payload.code : null;
+        // PATCH-187. Only a plan-limit refusal is trusted to show the server's
+        // own text verbatim and point at the plans: that sentence was authored
+        // by our route, unlike a 400's actionable reason or an intermediary's
+        // error body.
+        if (apiCode !== null && apiCode.startsWith(PLAN_LIMIT_CODE_PREFIX)) {
+          setPhase({
+            kind: 'error',
+            message: apiMessage ?? 'The AI request failed. Please try again.',
+            showPlansLink: true,
+          });
+        } else if (response.status === 409) {
           setPhase({ kind: 'error', message: 'This document is still being processed.' });
         } else if (response.status === 404 || response.status === 403) {
           setPhase({ kind: 'error', message: 'This document is not available.' });
@@ -394,7 +408,15 @@ export default function TableFromDocumentPanel({
 
       {phase.kind === 'error' && (
         <>
-          <div role="alert" data-table-from-document-error="" className="mb-2 text-xs text-red-600">{phase.message}</div>
+          <div role="alert" data-table-from-document-error="" className="mb-2 text-xs text-red-600">
+            {phase.message}
+            {phase.showPlansLink ? (
+              <>
+                {' '}
+                <a href="/dashboard/settings/billing" className="font-medium underline">See plans</a>
+              </>
+            ) : null}
+          </div>
           <div className="flex justify-end gap-2">
             <button
               type="button"

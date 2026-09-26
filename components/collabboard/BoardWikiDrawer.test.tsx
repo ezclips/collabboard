@@ -6,7 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import BoardWikiDrawer from './BoardWikiDrawer';
+import BoardWikiDrawer, { BoardWikiPlanLimitError } from './BoardWikiDrawer';
 import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
 
 /**
@@ -402,6 +402,37 @@ describe('refresh is a proposal: diff, apply, discard', () => {
       (rejected.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
     });
     expect(rejected.querySelector('[data-board-wiki-status="true"]')!.textContent).toContain('Try again');
+  });
+
+  it('PATCH-187. a plan-limit refusal shows the server text and a See plans link', async () => {
+    stubFetch();
+    const container = await mount({
+      onRequestRecompile: async () => {
+        throw new BoardWikiPlanLimitError(
+          "The Free plan's AI credits for this month are used up. They renew on 1 October. Upgrade for more.",
+          'plan_limit_credits',
+        );
+      },
+    });
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    const status = container.querySelector('[data-board-wiki-status="true"]')!;
+    expect(status.textContent).toContain("The Free plan's AI credits for this month are used up.");
+    expect(status.querySelector('a')?.getAttribute('href')).toBe('/dashboard/settings/billing');
+  });
+
+  it('PATCH-187. any other failure shows today\'s text and no link', async () => {
+    stubFetch();
+    const container = await mount({ onRequestRecompile: async () => { throw new Error('retry'); } });
+    await openPage(container);
+    await act(async () => {
+      (container.querySelector('[data-board-wiki-refresh="true"]') as HTMLButtonElement).click();
+    });
+    const status = container.querySelector('[data-board-wiki-status="true"]')!;
+    expect(status.textContent).toContain('That compilation came back unusable. Try again.');
+    expect(status.querySelector('a')).toBeNull();
   });
 
   it('a failed compilation does not leave the surface stuck busy', async () => {

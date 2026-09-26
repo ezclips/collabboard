@@ -18,6 +18,8 @@ export interface PlanLimits {
   readonly monthlyAiCredits: number;
   readonly welcomeAiCredits: number; // once, on a new workspace
   readonly modelTier: ModelTier;
+  /** PRICING.md §3: on a paid plan, basic Board AI chat keeps answering when the credits run out. */
+  readonly boardChatWhenOutOfCredits: boolean;
 }
 
 export interface PlanDefinition {
@@ -63,6 +65,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       monthlyAiCredits: 10,
       welcomeAiCredits: 30,
       modelTier: 'basic',
+      boardChatWhenOutOfCredits: false,
     },
   },
   pro: {
@@ -78,6 +81,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       monthlyAiCredits: 500,
       welcomeAiCredits: 0,
       modelTier: 'basic',
+      boardChatWhenOutOfCredits: true,
     },
   },
   premium: {
@@ -93,6 +97,7 @@ const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       monthlyAiCredits: 2000,
       welcomeAiCredits: 0,
       modelTier: 'premium',
+      boardChatWhenOutOfCredits: true,
     },
   },
 };
@@ -144,3 +149,146 @@ export function planLimits(planId: PlanId): PlanLimits {
 export function planIncludes(planId: PlanId, required: PlanId): boolean {
   return PLAN_ORDER.indexOf(planId) >= PLAN_ORDER.indexOf(required);
 }
+
+/**
+ * PATCH-187. The AI features the ledger meters. Every one is declared now, so
+ * the migration's check constraint already allows them; PATCH-188 meters the
+ * board-less routes and needs no second migration.
+ */
+export type AiCreditFeature =
+  | 'board_chat'
+  | 'table_from_document'
+  | 'wiki_compile'
+  | 'text_action'
+  | 'table_fill'
+  | 'table_plan'
+  | 'transcript_punctuate'
+  | 'component';
+
+/**
+ * PRICING.md §4, basic model. Must be calibrated against measured costs before
+ * launch.
+ */
+export const AI_CREDIT_COSTS: Readonly<Record<AiCreditFeature, number>> = deepFreeze({
+  board_chat: 1,
+  table_from_document: 3,
+  wiki_compile: 10,
+  text_action: 1,
+  table_fill: 1,
+  table_plan: 1,
+  transcript_punctuate: 1,
+  component: 1,
+});
+
+/** The extra credit a Board AI chat answer costs when board search ran for it. */
+export const BOARD_CHAT_SEARCH_SURCHARGE = 1;
+
+/** A half-open window `[start, end)`. */
+export interface AiCreditPeriod {
+  readonly start: Date;
+  readonly end: Date;
+}
+
+/**
+ * A paid plan with a subscription period that contains `now` uses it;
+ * everything else uses the UTC calendar month.
+ *
+ * The caller passes the stored period only for a paid plan (`BoardPlan`
+ * nulls it on Free), so a non-null-but-expired period correctly falls back.
+ */
+export function aiCreditPeriod(
+  now: Date,
+  subscriptionPeriod: { start: string | null; end: string | null } | null,
+): AiCreditPeriod {
+  if (subscriptionPeriod?.start && subscriptionPeriod?.end) {
+    const start = new Date(subscriptionPeriod.start);
+    const end = new Date(subscriptionPeriod.end);
+    if (
+      !Number.isNaN(start.getTime())
+      && !Number.isNaN(end.getTime())
+      && start <= now
+      && now < end
+    ) {
+      return { start, end };
+    }
+  }
+  return {
+    start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+    end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
+  };
+}
+
+export interface AiCreditBalance {
+  readonly allowance: number; // limits.monthlyAiCredits
+  readonly allowanceUsed: number; // this period, bucket 'allowance'
+  readonly grantTotal: number; // limits.welcomeAiCredits (top-ups later add here)
+  readonly grantUsed: number; // ALL TIME, bucket 'grant'
+  readonly remaining: number; // max(0, allowance − allowanceUsed) + max(0, grantTotal − grantUsed)
+  readonly period: AiCreditPeriod;
+}
+
+export function aiCreditBalance(
+  limits: PlanLimits,
+  period: AiCreditPeriod,
+  used: { allowanceUsed: number; grantUsed: number },
+): AiCreditBalance {
+  const allowance = limits.monthlyAiCredits;
+  const grantTotal = limits.welcomeAiCredits;
+  const remaining =
+    Math.max(0, allowance - used.allowanceUsed)
+    + Math.max(0, grantTotal - used.grantUsed);
+  return {
+    allowance,
+    allowanceUsed: used.allowanceUsed,
+    grantTotal,
+    grantUsed: used.grantUsed,
+    remaining,
+    period,
+  };
+}
+
+export type AiCreditBucket = 'allowance' | 'grant';
+
+/**
+ * The monthly allowance is spent first, then the grant. Returns 1 or 2 rows.
+ *
+ * A charge larger than `remaining` puts the overflow on `'allowance'`, so
+ * `allowanceUsed` can exceed the allowance. It never goes the other way: the
+ * grant is never overdrawn.
+ */
+export function splitAiCreditCharge(
+  balance: AiCreditBalance,
+  credits: number,
+): ReadonlyArray<{ bucket: AiCreditBucket; credits: number }> {
+  if (credits <= 0) return [];
+  const allowanceHeadroom = Math.max(0, balance.allowance - balance.allowanceUsed);
+  const grantHeadroom = Math.max(0, balance.grantTotal - balance.grantUsed);
+  const fromAllowance = Math.min(credits, allowanceHeadroom);
+  const fromGrant = Math.min(credits - fromAllowance, grantHeadroom);
+  const overflow = credits - fromAllowance - fromGrant;
+
+  const rows: { bucket: AiCreditBucket; credits: number }[] = [];
+  const allowanceCharge = fromAllowance + overflow;
+  if (allowanceCharge > 0) rows.push({ bucket: 'allowance', credits: allowanceCharge });
+  if (fromGrant > 0) rows.push({ bucket: 'grant', credits: fromGrant });
+  return rows;
+}
+
+/** PATCH-187. The code a credits refusal carries, so the UI can offer an upgrade. */
+export const PLAN_CREDITS_EXHAUSTED_CODE = 'plan_limit_credits';
+
+const PLAN_RENEWAL_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  timeZone: 'UTC',
+});
+
+export function planCreditsExhaustedError(planName: string, renewsOn: Date): string {
+  return `The ${planName} plan's AI credits for this month are used up. They renew on ${PLAN_RENEWAL_DATE_FORMAT.format(renewsOn)}. Upgrade for more.`;
+}
+
+/** PATCH-187. A board with no workspace has no plan to meter against. */
+export const PLAN_NO_WORKSPACE_CODE = 'plan_limit_no_workspace';
+
+export const PLAN_NO_WORKSPACE_ERROR =
+  "This board isn't in a workspace, so it has no AI credits. Your own AI key still works here.";
