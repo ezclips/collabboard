@@ -3,39 +3,35 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import DashboardSidebar, { Folder } from '@/components/dashboard/DashboardSidebar';
 import CanvasCard from '@/components/dashboard/CanvasCard';
 import { Plus, Loader2, ArrowLeft, LayoutDashboard, Clock, Star, Trash2, Folder as FolderIcon, Settings, Palette, X } from 'lucide-react';
 import Link from 'next/link';
 import { createTemplate1Canvas } from '@/lib/collabboard/templates/template1';
-import { resolveCurrentWorkspace, type WorkspaceContext } from '@/lib/workspace/context';
+import { type WorkspaceContext } from '@/lib/workspace/context';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import EmojiPicker from 'emoji-picker-react';
 import { toast } from 'sonner';
 import {
     canCreateBoardForEntitlements,
     getBoardLimitForEntitlements,
-    getWorkspaceEntitlements,
 } from '@/lib/auth/permissions';
 import type { EntitlementsContext } from '@/types/permissions';
+import { loadDashboardData, type Canvas } from '@/lib/dashboard/loadDashboardData';
 
-interface Canvas {
-    id: number;
-    title: string;
-    description: string;
-    layout: string;
-    created_at: string;
-    updated_at: string;
-    thumbnail_url?: string | null;
-    last_visited_at?: string | null;
-    is_favorite?: boolean;
-    folder_id?: string | null;
-    deleted_at?: string | null;
-    metadata?: Record<string, any> | null;
-}
+/**
+ * PATCH-192. The emoji picker is ~1.3 MB and is only ever rendered when the
+ * folder dialog's icon button opens it, so it is loaded on first open rather
+ * than with the dashboard. The placeholder reserves the picker's own box
+ * (320x360) so the dialog does not jump when it arrives.
+ */
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
+    ssr: false,
+    loading: () => <div style={{ width: 320, height: 360 }} />,
+});
 
 type FilterType = 'all' | 'recent' | 'mine' | 'favorites' | 'trash';
 
@@ -101,59 +97,24 @@ export default function DashboardPage() {
             }
             setUser(user);
 
-            const resolvedWorkspace = await resolveCurrentWorkspace(supabase, user).catch((workspaceError) => {
-                console.warn('Workspace resolution fallback:', formatError(workspaceError));
-                return null;
-            });
-            setWorkspaceContext(resolvedWorkspace);
-            setEntitlements(await getWorkspaceEntitlements(supabase, resolvedWorkspace?.workspaceId));
+            // PATCH-192. The network reads live in loadDashboardData, which runs
+            // entitlements, boards and folders in parallel. Each failure comes
+            // back as an empty value rather than aborting the others.
+            const data = await loadDashboardData(supabase, user);
 
-            // Load canvases
-            let canvasQuery = supabase
-                .from('boards')
-                .select('*')
-                .order('updated_at', { ascending: false });
-
-            canvasQuery = resolvedWorkspace
-                ? canvasQuery.eq('workspace_id', resolvedWorkspace.workspaceId)
-                : canvasQuery.eq('user_id', user.id);
-
-            const { data: canvasData, error: canvasError } = await canvasQuery;
-
-            if (canvasError) {
-                console.error('Error loading canvases:', formatError(canvasError));
-            } else {
-                setCanvases(canvasData || []);
+            setWorkspaceContext(data.workspace);
+            // A failed entitlements read leaves the page's default in place.
+            if (data.entitlements) {
+                setEntitlements(data.entitlements);
             }
-
-            // Load folders (wrapped in try-catch in case table doesn't exist yet)
-            try {
-                let folderQuery = supabase
-                    .from('folders')
-                    .select('*')
-                    .order('position', { ascending: true });
-
-                folderQuery = resolvedWorkspace
-                    ? folderQuery.eq('workspace_id', resolvedWorkspace.workspaceId)
-                    : folderQuery.eq('user_id', user.id);
-
-                const { data: folderData, error: folderError } = await folderQuery;
-
-                if (folderError) {
-                    console.error('Error loading folders:', formatError(folderError));
-                } else if (folderData) {
-                    const foldersWithCount = folderData.map(f => ({
-                        id: f.id,
-                        name: f.name,
-                        icon: f.icon,
-                        color: f.color,
-                        canvasCount: (canvasData || []).filter(c => c.folder_id === f.id && !c.deleted_at).length
-                    }));
-                    setFolders(foldersWithCount);
-                }
-            } catch (folderLoadError) {
-                console.error('Error during folder load:', formatError(folderLoadError));
-            }
+            setCanvases(data.canvases);
+            setFolders(data.folders.map(f => ({
+                id: f.id,
+                name: f.name,
+                icon: f.icon ?? undefined,
+                color: f.color ?? undefined,
+                canvasCount: data.canvases.filter(c => c.folder_id === f.id && !c.deleted_at).length,
+            })));
         } catch (err) {
             console.error('Error loading data:', formatError(err));
         } finally {

@@ -21,6 +21,8 @@ export default defineConfig({
       // PATCH-183: the Stripe plan-mapping tests.
       'lib/stripe/**/*.test.ts',
       'lib/infra/**/*.test.ts',
+      // PATCH-192: the dashboard data loader.
+      'lib/dashboard/**/*.test.ts',
       'lib/server/**/*.test.ts',
       'scripts/harness/**/*.test.ts',
       'scripts/*.test.ts',

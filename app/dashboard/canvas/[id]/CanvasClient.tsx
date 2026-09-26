@@ -335,6 +335,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const freeformPanStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null);
   const router = useRouter();
 
+  // PATCH-192. The Back button navigates to /dashboard, so prefetch the route
+  // here: without this the route's code and payload are fetched only after the
+  // click, leaving the canvas frozen while that download happens.
+  useEffect(() => {
+    router.prefetch('/dashboard');
+  }, [router]);
+
   // Prevent hydration mismatch by only rendering after mount
   const [hasMounted, setHasMounted] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
