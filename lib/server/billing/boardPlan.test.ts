@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { PLANS, PLAN_TRIAL_DAYS } from "@/lib/domain/billing/plans";
 
-import { countWorkspaceKnowledgeDocuments, resolveBoardPlan } from "./boardPlan";
+import {
+  countWorkspaceKnowledgeDocuments,
+  resolveBoardPlan,
+  resolveWorkspacePlanById,
+} from "./boardPlan";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -298,6 +302,75 @@ describe("resolveBoardPlan PATCH-189: the 7-day Premium trial", () => {
     });
 
     await expect(resolveBoardPlan(client, BOARD)).rejects.toEqual({
+      code: "42501",
+      message: "denied",
+    });
+  });
+});
+
+describe("resolveWorkspacePlanById (PATCH-191)", () => {
+  const createdAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString();
+  const trialEndFor = (createdAt: string) =>
+    new Date(Date.parse(createdAt) + PLAN_TRIAL_DAYS * DAY_MS).toISOString();
+
+  it("a workspace with pro active → pro, reading by workspace id", async () => {
+    const { client, calls } = makeAdminClient({
+      subscription: { data: { plan: "pro", status: "active" }, error: null },
+    });
+
+    const plan = await resolveWorkspacePlanById(client, WORKSPACE);
+
+    expect(plan.workspaceId).toBe(WORKSPACE);
+    expect(plan.planId).toBe("pro");
+    expect(plan.limits).toBe(PLANS.pro.limits);
+    expect(calls.subscriptionEq).toEqual([["workspace_id", WORKSPACE]]);
+    expect(calls.workspaceEq).toEqual([["id", WORKSPACE]]);
+  });
+
+  it("a workspace created 2 days ago is on the Premium trial", async () => {
+    const createdAt = createdAgo(2);
+    const { client } = makeAdminClient({
+      subscription: { data: null, error: null },
+      workspace: { data: { created_at: createdAt }, error: null },
+    });
+
+    const plan = await resolveWorkspacePlanById(client, WORKSPACE);
+
+    expect(plan.planId).toBe("premium");
+    expect(plan.trial).toEqual({ endsAt: trialEndFor(createdAt) });
+  });
+
+  it("a workspace created 8 days ago is Free", async () => {
+    const { client } = makeAdminClient({
+      subscription: { data: null, error: null },
+      workspace: { data: { created_at: createdAgo(8) }, error: null },
+    });
+
+    const plan = await resolveWorkspacePlanById(client, WORKSPACE);
+
+    expect(plan.planId).toBe("free");
+    expect(plan.trial).toBeNull();
+    expect(plan.subscriptionPeriod).toBeNull();
+  });
+
+  it("a subscriptions read error throws (fail closed)", async () => {
+    const { client } = makeAdminClient({
+      subscription: { data: null, error: { code: "42501", message: "denied" } },
+    });
+
+    await expect(resolveWorkspacePlanById(client, WORKSPACE)).rejects.toEqual({
+      code: "42501",
+      message: "denied",
+    });
+  });
+
+  it("a workspaces read error throws (fail closed)", async () => {
+    const { client } = makeAdminClient({
+      subscription: { data: null, error: null },
+      workspace: { data: null, error: { code: "42501", message: "denied" } },
+    });
+
+    await expect(resolveWorkspacePlanById(client, WORKSPACE)).rejects.toEqual({
       code: "42501",
       message: "denied",
     });

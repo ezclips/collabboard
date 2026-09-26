@@ -5,7 +5,7 @@ import { Check, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getBoardLimitForEntitlements, getPermissionContext } from '@/lib/auth/permissions';
-import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
+import { PLANS, PLAN_ORDER, PLAN_RENEWAL_DATE_FORMAT } from '@/lib/domain/billing/plans';
 import type { PlanId } from '@/lib/domain/billing/plans';
 import { effectivePlanId, formatPlanPrice } from '@/lib/domain/billing/plans';
 import { formatBytes } from '@/lib/domain/storage/uploadLimits';
@@ -13,6 +13,64 @@ import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole, SubscriptionStatus } from '@/types/permissions';
 
 const CONFIRM_MESSAGE = 'Your plan changes now. The price difference is settled on your next invoice.';
+
+/** PATCH-191. One workspace's usage, exactly as `GET /api/billing/usage` returns it. */
+interface BillingUsage {
+    planId: PlanId;
+    trialEndsAt: string | null;
+    credits: { used: number; total: number; remaining: number; renewsOn: string | null };
+    documents: { used: number; limit: number | null };
+    boards: { used: number; limit: number | null };
+}
+
+/** PATCH-191. The ONE date spelling, shared with the refusal text. */
+function formatBillingDate(iso: string): string {
+    return PLAN_RENEWAL_DATE_FORMAT.format(new Date(iso));
+}
+
+/** A bounded percentage, 0 at no limit. */
+function meterPercent(used: number, limit: number): number {
+    if (limit <= 0) return 0;
+    return Math.min(100, Math.round((used / limit) * 100));
+}
+
+/** PATCH-191. Grey below 80%, amber at 80%, the page's error red at 100%. */
+function meterBarClass(percent: number): string {
+    if (percent >= 100) return 'bg-red-600';
+    if (percent >= 80) return 'bg-amber-500';
+    return 'bg-purple-600';
+}
+
+/**
+ * PATCH-191. A usage bar with an accessible value. It exists only where there
+ * IS a limit; an unlimited meter renders a bare count.
+ */
+function MeterBar({ used, limit, label }: { used: number; limit: number; label: string }) {
+    const percent = meterPercent(used, limit);
+    return (
+        <div
+            role="meter"
+            aria-label={label}
+            aria-valuenow={used}
+            aria-valuemin={0}
+            aria-valuemax={limit}
+            className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100"
+        >
+            <div
+                data-meter-fill="true"
+                className={`h-full rounded-full ${meterBarClass(percent)}`}
+                style={{ width: `${percent}%` }}
+            />
+        </div>
+    );
+}
+
+/** PATCH-191. "renews on 25 October", or the trial's own end, or nothing. */
+function creditsRenewalText(usage: BillingUsage): string {
+    if (usage.trialEndsAt) return `trial ends on ${formatBillingDate(usage.trialEndsAt)}`;
+    if (usage.credits.renewsOn) return `renews on ${formatBillingDate(usage.credits.renewsOn)}`;
+    return '';
+}
 
 function planFeatures(planId: PlanId): string[] {
     const { limits } = PLANS[planId];
@@ -67,6 +125,11 @@ export default function BillingPage() {
     const [changing, setChanging] = useState(false);
     const [pendingPlan, setPendingPlan] = useState<PlanId | null>(null);
     const [cardError, setCardError] = useState<{ plan: PlanId; message: string } | null>(null);
+    // PATCH-191. The usage meters, independent of the plan cards: a failed usage
+    // read says so and leaves the rest of the page working.
+    const [usage, setUsage] = useState<BillingUsage | null>(null);
+    const [usageLoading, setUsageLoading] = useState(true);
+    const [usageFailed, setUsageFailed] = useState(false);
 
     const onPaidPlan = effectivePlanId(currentPlan, currentStatus) !== 'free';
     const canManageBilling = workspaceRole === 'owner' || workspaceRole === 'admin';
@@ -77,6 +140,7 @@ export default function BillingPage() {
 
     useEffect(() => {
         void loadBillingData();
+        void loadUsage();
     }, []);
 
     const loadBillingData = async () => {
@@ -105,6 +169,38 @@ export default function BillingPage() {
             console.error('Error loading billing data:', err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // PATCH-191. Fetch the usage meters the same way the page fetches anything
+    // else: the session token in an Authorization header. A failure or a
+    // non-OK response shows the message; it never blocks the plan cards.
+    const loadUsage = async () => {
+        try {
+            setUsageLoading(true);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+                setUsageFailed(true);
+                setUsage(null);
+                return;
+            }
+            const response = await fetch('/api/billing/usage', {
+                headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                setUsageFailed(true);
+                setUsage(null);
+                return;
+            }
+            setUsage(data as BillingUsage);
+            setUsageFailed(false);
+        } catch (err) {
+            console.error('Error loading usage:', err);
+            setUsageFailed(true);
+            setUsage(null);
+        } finally {
+            setUsageLoading(false);
         }
     };
 
@@ -158,6 +254,7 @@ export default function BillingPage() {
                     message: data.error || 'This workspace already has a subscription.'
                 });
                 await loadBillingData();
+                await loadUsage();
                 return;
             }
             if (!response.ok || !data.url) {
@@ -198,6 +295,7 @@ export default function BillingPage() {
             }
             setPendingPlan(null);
             await loadBillingData();
+            await loadUsage();
         } catch (err) {
             console.error('Error changing plan:', err);
             setCardError({
@@ -245,6 +343,92 @@ export default function BillingPage() {
                     AI and new documents need a plan.
                 </div>
             )}
+
+            {/* PATCH-191. Usage, above the plan cards, for every member. */}
+            <section
+                data-billing-usage="true"
+                className="mb-6 bg-white rounded-xl border border-gray-200 p-6"
+            >
+                <h2 className="text-lg font-semibold text-gray-900">Usage</h2>
+
+                {usageLoading && (
+                    <p className="mt-2 text-sm text-gray-500">Loading usage…</p>
+                )}
+
+                {!usageLoading && usageFailed && (
+                    <p className="mt-2 text-sm text-gray-500">Usage is unavailable right now.</p>
+                )}
+
+                {!usageLoading && !usageFailed && usage && (
+                    <div className="mt-4 space-y-5">
+                        <div>
+                            <div className="flex items-center justify-between gap-4 text-sm">
+                                <span className="font-medium text-gray-900">AI credits</span>
+                                <span className="text-gray-600">
+                                    {usage.planId === 'free' ? (
+                                        <>
+                                            No AI on Free{' '}
+                                            <a
+                                                href="/dashboard/settings/billing"
+                                                className="font-medium underline"
+                                            >
+                                                See plans
+                                            </a>
+                                        </>
+                                    ) : (
+                                        `${usage.credits.used} of ${usage.credits.total} used · ${creditsRenewalText(usage)}`
+                                    )}
+                                </span>
+                            </div>
+                            {usage.planId !== 'free' && (
+                                <MeterBar
+                                    used={usage.credits.used}
+                                    limit={usage.credits.total}
+                                    label={`AI credits: ${usage.credits.used} of ${usage.credits.total} used`}
+                                />
+                            )}
+                        </div>
+
+                        <div>
+                            <div className="flex items-center justify-between gap-4 text-sm">
+                                <span className="font-medium text-gray-900">Knowledge documents</span>
+                                <span className="text-gray-600">
+                                    {usage.documents.limit === null
+                                        ? `${usage.documents.used} processed`
+                                        : usage.documents.limit === 0
+                                            ? `${usage.documents.used} processed · no new documents on Free`
+                                            : `${usage.documents.used} of ${usage.documents.limit} documents`}
+                                </span>
+                            </div>
+                            {usage.documents.limit !== null && usage.documents.limit > 0 && (
+                                <MeterBar
+                                    used={usage.documents.used}
+                                    limit={usage.documents.limit}
+                                    label={`Knowledge documents: ${usage.documents.used} of ${usage.documents.limit} used`}
+                                />
+                            )}
+                        </div>
+
+                        <div>
+                            <div className="flex items-center justify-between gap-4 text-sm">
+                                <span className="font-medium text-gray-900">Boards</span>
+                                <span className="text-gray-600">
+                                    {usage.boards.limit === null
+                                        ? `${usage.boards.used} boards`
+                                        : `${usage.boards.used} of ${usage.boards.limit} boards`}
+                                </span>
+                            </div>
+                            {usage.boards.limit !== null && (
+                                <MeterBar
+                                    used={usage.boards.used}
+                                    limit={usage.boards.limit}
+                                    label={`Boards: ${usage.boards.used} of ${usage.boards.limit} used`}
+                                />
+                            )}
+                        </div>
+                    </div>
+                )}
+            </section>
 
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
                 {plans.map((plan) => {

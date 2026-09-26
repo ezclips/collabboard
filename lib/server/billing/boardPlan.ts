@@ -68,6 +68,24 @@ export async function resolveBoardPlan(
     };
   }
 
+  return resolveWorkspacePlanById(adminClient, workspaceId);
+}
+
+/**
+ * PATCH-191. The plan for a workspace id alone: the same read `resolveBoardPlan`
+ * does once it knows the workspace, split out so a usage meter can read a plan
+ * without a board.
+ *
+ * PATCH-189. The trial is counted from the workspace's creation, so its row is
+ * read too. Read with the SAME admin client as the rest of the plan: the caller
+ * may be a contributor who cannot read the owner's workspace row.
+ *
+ * A DB error THROWS (fail closed), exactly as `resolveBoardPlan` does.
+ */
+export async function resolveWorkspacePlanById(
+  adminClient: SupabaseClient,
+  workspaceId: string,
+): Promise<BoardPlan> {
   const { data: subscription, error: subscriptionError } = await adminClient
     .from("subscriptions")
     .select("plan, status, current_period_start, current_period_end")
@@ -76,9 +94,6 @@ export async function resolveBoardPlan(
 
   if (subscriptionError) throw subscriptionError;
 
-  // PATCH-189. The trial is counted from the workspace's creation, so its row
-  // is read too. Read with the SAME admin client as the rest of the plan: the
-  // uploader may be a contributor who cannot read the owner's workspace row.
   const { data: workspace, error: workspaceError } = await adminClient
     .from("workspaces")
     .select("created_at")

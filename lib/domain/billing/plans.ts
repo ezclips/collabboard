@@ -356,7 +356,13 @@ export function splitAiCreditCharge(
 /** PATCH-187. The code a credits refusal carries, so the UI can offer an upgrade. */
 export const PLAN_CREDITS_EXHAUSTED_CODE = 'plan_limit_credits';
 
-const PLAN_RENEWAL_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
+/**
+ * PATCH-191. The ONE billing date spelling: English, day and month in UTC
+ * ("25 October"). Exported so the usage meters render a renewal date or trial
+ * end exactly as `planCreditsExhaustedError` already does -- a second formatter
+ * would be a second spelling.
+ */
+export const PLAN_RENEWAL_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
   month: 'long',
   timeZone: 'UTC',
