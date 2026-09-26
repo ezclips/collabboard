@@ -354,6 +354,10 @@ export default function CanvasModals({
                       content: p.content,
                       type: p.type,
                       metadata: p.metadata,
+                      // PATCH-193. The window's cards must keep the board they
+                      // belong to: a PDF card asks the page-image route for its
+                      // board, and without this it asked for `undefined`.
+                      board_id: p.board_id,
                     }))
                 : []
             }

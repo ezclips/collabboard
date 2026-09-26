@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Maximize2, PanelRight, Type } from 'lucide-react';
 import KnowledgeDocumentPageImage from '@/components/collabboard/KnowledgeDocumentPageImage';
 import { useKnowledgePageRenderRepair } from '@/components/collabboard/useKnowledgePageRenderRepair';
@@ -167,6 +167,38 @@ export function KnowledgePdfOpenProvider({
           {children}
         </KnowledgePdfCreateNoteContext.Provider>
       </KnowledgePdfStatusContext.Provider>
+    </KnowledgePdfOpenContext.Provider>
+  );
+}
+
+/**
+ * PATCH-193. The PDF open action, wrapped the same way as
+ * `KnowledgeSourceOpenOverride` and for the same reason: a host nested inside a
+ * modal must close first, or the reader opens behind the window.
+ *
+ * Deliberately NOT a second `KnowledgePdfOpenProvider`: that would also reset
+ * the status reporter and the create-note action to null for the wrapped
+ * children. This overrides ONLY the open transport and leaves the other two
+ * contexts at their enclosing values.
+ */
+export function KnowledgePdfOpenOverride({
+  before,
+  children,
+}: {
+  before: () => void;
+  children: React.ReactNode;
+}) {
+  const parent = useContext(KnowledgePdfOpenContext);
+  const value = useMemo(
+    () => (parent === null ? null : (request: KnowledgePdfOpenRequest) => {
+      before();
+      parent(request);
+    }),
+    [parent, before],
+  );
+  return (
+    <KnowledgePdfOpenContext.Provider value={value}>
+      {children}
     </KnowledgePdfOpenContext.Provider>
   );
 }

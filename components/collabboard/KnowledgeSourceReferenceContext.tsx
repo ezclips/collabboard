@@ -189,6 +189,38 @@ export function useKnowledgeSourceOpen(): ((reference: SourceReference) => void)
 }
 
 /**
+ * PATCH-193. The same opener, wrapped so a host nested inside a modal (the
+ * container window) can run its OWN close first. The enclosing opener alone
+ * opens the reader BEHIND a window that stays on top, which looks like the
+ * link doing nothing.
+ *
+ * `before` is the host's existing close path, not a new behaviour. A null
+ * parent stays null, so a host with no opener still renders the marker as the
+ * inert label `useKnowledgeSourceOpen`'s contract already describes.
+ */
+export function KnowledgeSourceOpenOverride({
+  before,
+  children,
+}: {
+  before: () => void;
+  children: React.ReactNode;
+}) {
+  const parent = useContext(KnowledgeSourceOpenContext);
+  const value = useMemo(
+    () => (parent === null ? null : (reference: SourceReference) => {
+      before();
+      parent(reference);
+    }),
+    [parent, before],
+  );
+  return (
+    <KnowledgeSourceOpenContext.Provider value={value}>
+      {children}
+    </KnowledgeSourceOpenContext.Provider>
+  );
+}
+
+/**
  * The board's Note colours, for read-time highlight tinting only.
  *
  * Returns the owner's own Map. A surface outside the provider reads as "no

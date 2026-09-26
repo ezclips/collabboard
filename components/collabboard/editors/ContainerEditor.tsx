@@ -23,6 +23,8 @@ import {
 import { ColorPickerContent } from "../ColorPicker";
 import PostCardContent from "@/components/collabboard/PostCardContent";
 import CardPreview from "@/components/collabboard/CardPreview";
+import { KnowledgeSourceOpenOverride } from "@/components/collabboard/KnowledgeSourceReferenceContext";
+import { KnowledgePdfOpenOverride } from "@/components/collabboard/KnowledgePdfCanvasSurface";
 import CommentPopup from "./CommentPopup";
 import TextStylePopup from "./TextStylePopup";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
@@ -79,6 +81,11 @@ interface ChildPadlet {
     title: string;
     content: string;
     type: string;
+    /**
+     * PATCH-193. The board the child lives on. A PDF card's page-image requests
+     * are board-scoped, so without this the window asked for `undefined`.
+     */
+    board_id?: string;
     metadata?: {
         cardColor?: string;
         badgeColor?: string;
@@ -901,6 +908,14 @@ export default function ContainerEditor({
                                                 items={order}
                                                 strategy={verticalListSortingStrategy}
                                             >
+                                                {/* PATCH-193. A source marker or a PDF
+                                                    card opened from inside the window must
+                                                    close the window FIRST, or the reader
+                                                    opens behind it. `handleSaveAndClose`
+                                                    is the same path as Close/ESC, so
+                                                    unsaved edits behave as any other close. */}
+                                                <KnowledgeSourceOpenOverride before={handleSaveAndClose}>
+                                                <KnowledgePdfOpenOverride before={handleSaveAndClose}>
                                                 <div className="p-3 space-y-3">
                                                     {orderedChildren.map((child) => (
                                                         <SortableChildItem
@@ -922,6 +937,8 @@ export default function ContainerEditor({
                                                         />
                                                     ))}
                                                 </div>
+                                                </KnowledgePdfOpenOverride>
+                                                </KnowledgeSourceOpenOverride>
                                             </SortableContext>
                                         </DndContext>
                                     )}
