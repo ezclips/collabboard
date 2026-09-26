@@ -90,6 +90,13 @@ Do not return HTML.
 Do not return markdown.
 Use Mermaid flowchart syntax in the code field only.
 Keep node labels short (under 6 words each).
+
+Return this exact JSON shape:
+{
+  "title": "Diagram title here",
+  "code": "flowchart TD\\n  A[First step] --> B[Next step]",
+  "explanation": "Optional one-sentence summary"
+}
 Do not embed prose or commentary inside node labels.
 Do not include any explanation outside the JSON structure.
         `.trim(),
@@ -108,6 +115,13 @@ Do not return HTML.
 Do not return markdown.
 Use Mermaid mindmap syntax in the code field only.
 Keep branch labels short (under 5 words each).
+
+Return this exact JSON shape:
+{
+  "title": "Mindmap title here",
+  "code": "mindmap\\n  root((Central idea))\\n    Branch one\\n    Branch two",
+  "explanation": "Optional one-sentence summary"
+}
 Do not embed prose or sentences in branch labels.
 Do not include any explanation outside the JSON structure.
         `.trim(),
@@ -126,6 +140,13 @@ Do not return HTML.
 Do not return markdown.
 Return numeric data points for a pie chart.
 All values in dataPoints must be positive numbers greater than zero.
+
+Return this exact JSON shape:
+{
+  "title": "Chart title here",
+  "dataPoints": [{ "label": "Part one", "value": 60 }, { "label": "Part two", "value": 40 }]
+}
+
 Return at least 2 data points.
 Labels must be concise (1 to 4 words).
 Do not return prose explanations outside the JSON structure.
@@ -145,6 +166,15 @@ Do not return HTML.
 Do not return markdown.
 Return numeric category data suitable for a bar chart renderer.
 All values in dataPoints must be positive numbers greater than zero.
+
+Return this exact JSON shape:
+{
+  "title": "Chart title here",
+  "dataPoints": [{ "label": "Category A", "value": 12 }, { "label": "Category B", "value": 7 }],
+  "xLabel": "Optional axis label",
+  "yLabel": "Optional axis label"
+}
+
 Return at least 2 data points.
 Labels must be concise (1 to 4 words).
 If xLabel or yLabel would add clarity, include them.
@@ -190,9 +220,17 @@ You generate structured comparison content.
 Return JSON only.
 Do not return HTML.
 Do not return markdown.
-Return at least 2 columns.
-Each column must have a heading and at least 2 bullet points.
-Keep each bullet point concise (under 12 words).
+Return this exact JSON shape:
+{
+  "title": "Comparison title here",
+  "columns": [
+    { "heading": "Option one", "points": ["Short point", "Short point"] },
+    { "heading": "Option two", "points": ["Short point", "Short point"] }
+  ]
+}
+
+Return at least 2 columns, each with at least 2 entries in "points".
+Keep each point concise (under 12 words).
 Do not add prose outside the JSON structure.
         `.trim(),
         defaultRenderer: 'comparison',
@@ -213,6 +251,13 @@ Do not return markdown.
 Prefer short, visual, image-first content.
 The image.query field must be a short noun phrase (2 to 5 words) suitable for image search, not a full sentence.
 The caption should be one short sentence or omitted.
+
+Return this exact JSON shape:
+{
+  "title": "Card title here",
+  "image": { "query": "alpine village" },
+  "caption": "Optional short sentence"
+}
     `.trim(),
     version: 1,
     requiresImages: true,
