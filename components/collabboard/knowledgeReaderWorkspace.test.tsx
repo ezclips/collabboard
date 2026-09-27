@@ -475,8 +475,9 @@ describe('PDF-R6J-C2: one compact bottom toolbar, and a search popover', () => {
     const bar = toolbar();
     // Absent, not disabled -- a viewer never sees them.
     // A page action with no rendered page is not an action.
-    expect(bar).toContain('onCreateNoteFromPage && documentId && pages.length > 0 && !activeSelection');
-    expect(bar).toContain('onAddBoardAiContext && documentId && pages.length > 0 && !activeSelection');
+    // PATCH-195: the page actions also return while the selection is scrolled out of view.
+    expect(bar).toContain('onCreateNoteFromPage && documentId && pages.length > 0 && (!activeSelection || !selectionInView)');
+    expect(bar).toContain('onAddBoardAiContext && documentId && pages.length > 0 && (!activeSelection || !selectionInView)');
     expect(bar).toContain('onCreateNoteFromPage && documentId && activeRegion');
     expect(bar).toContain('onCreateNoteFromPage && documentId ?');
     // Search is outside every gate: reading is never a privilege.

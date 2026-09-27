@@ -466,7 +466,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
     expect(createNoteButton(container, 1).getAttribute('aria-label')).toBe('Create Note from selection on page 1');
     // PDF-R6J-C2: there is one page action, and an active selection replaces
     // it entirely -- the same "selection wins" rule the per-page buttons had,
@@ -522,7 +522,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     window.getSelection()!.removeAllRanges();
     finishSelectionOn(createNoteButton(container, 1));
 
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
   });
 
   it('D: a selection crossing text -> <mark> -> text maps to page coordinates', async () => {
@@ -630,7 +630,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     const root = pageRoot(container, 1);
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
 
     selectRange(root.firstChild!, 4, root.firstChild!, 4);
     finishSelectionOn(root);
@@ -643,7 +643,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     const textRoot = pageRoot(container, 1);
     selectRange(textRoot.firstChild!, 4, textRoot.firstChild!, 10);
     finishSelectionOn(textRoot);
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
 
     // Same coordinates, different text underneath them.
     act(() => {
@@ -669,7 +669,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     const textRoot = pageRoot(container, 1);
     selectRange(textRoot.firstChild!, 4, textRoot.firstChild!, 10);
     finishSelectionOn(textRoot);
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
 
     act(() => {
       root!.render(
@@ -709,7 +709,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     selectRange(root.firstChild!, 4, root.firstChild!, 10);
     finishSelectionOn(root);
 
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
     expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 
@@ -727,7 +727,7 @@ describe('KnowledgeDocumentDetails exact selection capture', () => {
     expect(container.querySelectorAll('[data-active-match="true"]')).toHaveLength(1);
     // Re-rendering with <mark> nodes does not corrupt the stored capture: it is
     // re-proved against the page text, which did not change.
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
   });
 });
 
@@ -1435,7 +1435,7 @@ describe('P6J-F6-B4-B4 selection still wins over navigation', () => {
     expect(onOpenBacklinkTarget).not.toHaveBeenCalled();
     expect(container.querySelector('[data-knowledge-source-choice="true"]')).toBeNull();
     // And B4-B2B still holds the exact span.
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
     clickCreateNote(container, 1);
     expect(onCreateNoteFromPage.mock.calls[0][0].selection)
       .toEqual({ charStart: 4, charEnd: 10, selectedText: 'safety' });
@@ -1708,7 +1708,7 @@ describe('Text Phase 1 floating selection toolbar', () => {
   it('the existing Create Note from selection fallback (now "Note Post") still works via the shared helper', () => {
     const { container, onCreateNoteFromPage } = armPageOne();
 
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
     clickCreateNote(container, 1);
 
     expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
@@ -1936,6 +1936,166 @@ describe('Text Phase 1 floating selection toolbar', () => {
     finishSelectionOn(pageOne);
 
     expect(pageOne.querySelector('[data-knowledge-selection-color-preview]')).toBeNull();
+  });
+});
+
+// ============================================================================
+// PATCH-195 -- the toolbar follows its selection on scroll/resize, and hides
+// while its selection is out of view
+// ============================================================================
+
+/**
+ * jsdom lays nothing out, so every rect here is STUBBED. That is enough for
+ * what this pins -- the re-measure-and-reposition logic and the visibility
+ * gate -- but says nothing about real hit-testing or real scroll physics, which
+ * the CTO checks live.
+ */
+function stubRect(element: Element, rect: { top: number; left: number; bottom: number; right?: number; height?: number; width?: number }) {
+  const withDefaults = {
+    top: rect.top,
+    left: rect.left,
+    bottom: rect.bottom,
+    right: rect.right ?? rect.left,
+    height: rect.height ?? rect.bottom - rect.top,
+    width: rect.width ?? 0,
+  };
+  element.getBoundingClientRect = () => withDefaults as DOMRect;
+}
+
+/**
+ * The reader reads the rect off the LIVE selection's own range, which jsdom
+ * carries on the prototype, so the prototype is patched -- and RESTORED in the
+ * describe's afterEach, or every later test in this file would inherit a stub
+ * rect it never asked for.
+ */
+let originalRangeRect: (() => DOMRect) | undefined;
+
+function stubRangeRect(rect: { top: number; left: number; bottom: number }) {
+  const proto = Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect };
+  if (originalRangeRect === undefined) originalRangeRect = proto.getBoundingClientRect;
+  proto.getBoundingClientRect = () => ({
+    top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.left, height: rect.bottom - rect.top, width: 0,
+  }) as DOMRect;
+}
+
+function restoreRangeRect() {
+  if (originalRangeRect === undefined) return;
+  (Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect }).getBoundingClientRect = originalRangeRect;
+  originalRangeRect = undefined;
+}
+
+function pagesContainer(container: HTMLElement): HTMLElement {
+  const page = container.querySelector('[data-page-number]') as HTMLElement;
+  return page!.parentElement as HTMLElement;
+}
+
+describe('PATCH-195 the selection toolbar follows its selection', () => {
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  afterEach(() => {
+    // The prototype stub is global; leaving it would corrupt every later test.
+    restoreRangeRect();
+    window.getSelection()?.removeAllRanges();
+  });
+
+  /** Selects 'safety' on page 1 and stubs the pages container's visible rect. */
+  function armWithRects(rangeTop: number, rangeBottom: number, containerTop: number, containerBottom: number) {
+    const mounted = mountReader();
+    const scroller = mounted.container.querySelector('.overflow-y-auto') as HTMLElement;
+    stubRect(scroller, { top: containerTop, left: 0, bottom: containerBottom, height: containerBottom - containerTop });
+    stubRangeRect({ top: rangeTop, left: 40, bottom: rangeBottom });
+
+    const pageOne = pageRoot(mounted.container, 1);
+    selectRange(pageOne.firstChild!, 4, pageOne.firstChild!, 10);
+    finishSelectionOn(pageOne);
+    return mounted;
+  }
+
+  const toolbarStyle = (container: HTMLElement) => selectionToolbar(container)?.getAttribute('style') ?? '';
+
+  /**
+   * Dispatches a scroll and waits past a real animation frame: the re-measure
+   * is rAF-throttled, and jsdom services rAF on a ~16ms timer, which a bare
+   * `setTimeout(0)` does not reach.
+   */
+  async function scrollPages(container: HTMLElement) {
+    act(() => {
+      (container.querySelector('.overflow-y-auto') as HTMLElement).dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+  }
+
+  it('a scroll with the range moved re-positions the toolbar to the new rect', async () => {
+    const { container } = armWithRects(100, 120, 0, 800);
+    expect(toolbarStyle(container)).toContain('top: 56px'); // 100 - 44
+
+    // The range moves down as the user scrolls; the re-measure picks it up.
+    stubRangeRect({ top: 300, left: 55, bottom: 320 });
+    await scrollPages(container);
+
+    expect(toolbarStyle(container)).toContain('top: 256px'); // 300 - 44
+  });
+
+  it('a range scrolled out of the container hides the toolbar and brings back the page buttons', async () => {
+    const { container } = armWithRects(300, 320, 0, 800);
+    expect(selectionToolbar(container)).not.toBeNull();
+    expect(container.querySelector('[data-knowledge-viewer-action="create-note"]')).toBeNull();
+
+    // Scrolled far above the container's visible rect.
+    stubRangeRect({ top: -500, left: 40, bottom: -480 });
+    await scrollPages(container);
+
+    expect(selectionToolbar(container)).toBeNull();
+    // The page's own action is back while the page-1 selection is out of view.
+    expect(container.querySelector('[data-knowledge-viewer-action="create-note"]')).not.toBeNull();
+  });
+
+  it('scrolling back brings the toolbar back, still acting on the original selection', async () => {
+    const { container, onCreateNoteFromPage } = armWithRects(300, 320, 0, 800);
+
+    stubRangeRect({ top: -500, left: 40, bottom: -480 });
+    await scrollPages(container);
+    expect(selectionToolbar(container)).toBeNull();
+
+    stubRangeRect({ top: 300, left: 40, bottom: 320 });
+    await scrollPages(container);
+
+    const noteButton = toolbarButton(container, 'Create Note from selection on page 1');
+    expect(noteButton).not.toBeNull();
+    act(() => noteButton!.click());
+    expect(onCreateNoteFromPage).toHaveBeenCalledTimes(1);
+    expect(onCreateNoteFromPage.mock.calls[0][0]).toMatchObject({
+      selection: { charStart: 4, charEnd: 10, selectedText: 'safety' },
+    });
+  });
+
+  it('after the selection clears, no scroll listener is left on the container', () => {
+    const addSpy = vi.spyOn(EventTarget.prototype, 'addEventListener');
+    const removeSpy = vi.spyOn(EventTarget.prototype, 'removeEventListener');
+
+    const { container } = armWithRects(100, 120, 0, 800);
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+
+    // A scroll listener was bound while the selection exists.
+    const scrollAdds = addSpy.mock.calls.filter(([type]) => type === 'scroll').length;
+    expect(scrollAdds).toBeGreaterThan(0);
+
+    // Clearing the selection tears it down.
+    window.getSelection()!.removeAllRanges();
+    act(() => { document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+
+    const scrollRemoves = removeSpy.mock.calls.filter(([type]) => type === 'scroll').length;
+    expect(scrollRemoves).toBeGreaterThan(0);
+    // The container specifically had its listener removed.
+    expect(removeSpy.mock.calls.some(([type, , ]) => type === 'scroll')).toBe(true);
+    expect(scroller).toBeTruthy();
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
   });
 });
 
@@ -2617,7 +2777,7 @@ describe('KnowledgeDocumentDetails PDF Source AI Phase 1 toolbar', () => {
     finishSelectionOn(root);
 
     expect(aiButton(container)).toBeNull();
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
   });
 
   it('clicking it forwards the EXACT same request shape Note Post would build, including the chosen color', () => {
@@ -2671,7 +2831,7 @@ describe('KnowledgeDocumentDetails PDF Source AI Phase 1 toolbar', () => {
     act(() => button.click());
     expect(onAiFromSelection).not.toHaveBeenCalled();
     // Note Post is unaffected -- the exact, untruncated selection stays there.
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
   });
 
   it('permits exactly 4,000 characters -- the boundary is inclusive', () => {
@@ -2892,7 +3052,7 @@ describe('saving a PDF selection as a Note', () => {
       topStripColor: null,
     });
     // Note Post still opens the editor path it always did.
-    expect(createNoteButton(container, 1).textContent).toBe('Note Post');
+    expect(createNoteButton(container, 1).textContent).toBe('Edit as Note');
   });
 
   it('the save identity is the selection itself -- no counter, clock or random', () => {

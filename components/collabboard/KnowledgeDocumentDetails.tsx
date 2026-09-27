@@ -805,6 +805,82 @@ export default function KnowledgeDocumentDetails({
     return stillExact ? capturedSelection : null;
   }, [capturedSelection, pages]);
 
+  /*
+    PATCH-195. THE TOOLBAR FOLLOWS ITS SELECTION.
+
+    The toolbar is `position: fixed` at the rect captured on mouseup, so a
+    scroll left it floating over another page while still acting on a selection
+    the user could no longer see. While a selection is captured, re-measure on
+    the pages container's scroll and on window resize (rAF-throttled, one
+    measurement per frame):
+
+      - if the LIVE selection still has a range inside the pages container, take
+        its fresh rect;
+      - otherwise leave selectionRect alone. The captured selection stays valid
+        -- the user's chosen span is not lost -- and the toolbar returns when
+        they scroll back to it. Nothing here clears capturedSelection.
+
+    Bound only while capturedSelection is set, and removed when it clears or on
+    unmount.
+  */
+  useEffect(() => {
+    if (capturedSelection === null) return;
+    if (typeof window === 'undefined') return;
+    const container = pagesContainerRef.current;
+    if (container === null) return;
+
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const selection = window.getSelection();
+      const range = selection && !selection.isCollapsed && selection.rangeCount === 1
+        ? selection.getRangeAt(0)
+        : null;
+      if (range === null || typeof range.getBoundingClientRect !== 'function') return;
+      // Only a range still inside THIS reader's pages container re-positions
+      // the toolbar; a range elsewhere leaves the last rect untouched.
+      if (!container.contains(range.startContainer) && !container.contains(range.endContainer)) return;
+      setSelectionRect(range.getBoundingClientRect());
+    };
+    const schedule = () => {
+      if (frame !== 0) return;
+      frame = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(measure)
+        : (setTimeout(measure, 16) as unknown as number);
+    };
+
+    container.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      container.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      if (frame !== 0) {
+        if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+        else clearTimeout(frame);
+      }
+    };
+  }, [capturedSelection]);
+
+  /**
+   * PATCH-195. Whether the captured selection's measured rect overlaps the
+   * pages container's visible rect vertically. The toolbar renders only when it
+   * does, so it can never float over another page.
+   *
+   * A missing rect, or a container that measures nothing (jsdom, a collapsed
+   * pane), reads as visible -- the reader's ordinary behaviour -- rather than
+   * hiding the toolbar behind an unmeasurable host.
+   */
+  const selectionInView = useMemo(() => {
+    if (selectionRect === null) return true;
+    const container = pagesContainerRef.current;
+    if (container === null || typeof container.getBoundingClientRect !== 'function') return true;
+    const bounds = container.getBoundingClientRect();
+    // An unmeasurable container (all zeroes, as under jsdom) cannot hide
+    // anything truthfully.
+    if (bounds.height <= 0 && bounds.top === 0 && bounds.bottom === 0) return true;
+    return selectionRect.bottom >= bounds.top && selectionRect.top <= bounds.bottom;
+  }, [selectionRect]);
+
   /**
    * PDF Source AI Phase 1. The endpoint's own `TEXT_ACTION_SELECTED_TEXT_MAX`
    * bound, checked here so the button fails closed WITHOUT truncating the
@@ -1531,7 +1607,7 @@ export default function KnowledgeDocumentDetails({
           consolidating these buttons removed the old answer (which button you
           pressed named the page).
         */}
-        {onCreateNoteFromPage && documentId && pages.length > 0 && !activeSelection ? (
+        {onCreateNoteFromPage && documentId && pages.length > 0 && (!activeSelection || !selectionInView) ? (
           <button
             type="button"
             data-knowledge-viewer-action="create-note"
@@ -1551,7 +1627,7 @@ export default function KnowledgeDocumentDetails({
           </button>
         ) : null}
 
-        {onAddBoardAiContext && documentId && pages.length > 0 && !activeSelection ? (
+        {onAddBoardAiContext && documentId && pages.length > 0 && (!activeSelection || !selectionInView) ? (
           <button
             type="button"
             data-knowledge-viewer-action="add-to-chat"
@@ -1716,8 +1792,14 @@ export default function KnowledgeDocumentDetails({
         canonical textContent. Positioned via the rect captured at mouseup,
         not from a live selection -- pressing a button here would otherwise
         collapse the very selection it is acting on.
+
+        PATCH-195. The rect is RE-MEASURED on the pages container's scroll and
+        on resize (see the effect above), and the toolbar renders only while
+        selectionInView -- so after a scroll it sits beside its selection, or
+        hides until the user scrolls back to it, rather than floating over
+        another page.
       */}
-      {(onCreateNoteFromPage || onAddBoardAiContext || onSaveSelectionAsNote) && documentId && activeSelection && !regionMode ? (
+      {(onCreateNoteFromPage || onAddBoardAiContext || onSaveSelectionAsNote) && documentId && activeSelection && !regionMode && selectionInView ? (
         <div
           data-knowledge-selection-toolbar="true"
           style={selectionRect
@@ -1752,12 +1834,13 @@ export default function KnowledgeDocumentDetails({
           <button
             type="button"
             aria-label={`Create Note from selection on page ${activeSelection.pageNumber}`}
+            title="Open the Note editor with the selected text"
             className="rounded px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
             onClick={() => onCreateNoteFromPage(
               buildSelectionSourceRequest(documentId, originalFilename, pages, activeSelection, selectionColor),
             )}
           >
-            Note Post
+            Edit as Note
           </button>
           ) : null}
           {/*
