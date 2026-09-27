@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, Play, SendHorizontal, Upload, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
+import BoardAiMarkdown from '@/components/collabboard/BoardAiMarkdown';
 import {
   BoardAiChatDraftChips,
   BoardAiChatPersistedChips,
@@ -1706,18 +1707,22 @@ export default function BoardAiChatDrawer({
             className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
           >
             <div
-              className={`max-w-[85%] whitespace-pre-wrap break-words rounded-lg px-2.5 py-1.5 text-xs leading-relaxed ${
+              className={`max-w-[85%] break-words rounded-lg px-2.5 py-1.5 text-xs leading-relaxed ${
                 message.role === 'user'
-                  ? 'bg-blue-50 text-gray-800'
+                  ? 'whitespace-pre-wrap bg-blue-50 text-gray-800'
                   : 'bg-gray-50 text-gray-800'
               }`}
             >
               {/*
-                Rendered as TEXT. React escapes it, so a model or a user cannot
-                introduce markup: there is no dangerouslySetInnerHTML and no
-                markdown pass anywhere on this path.
+                PATCH-203. The model writes Markdown and the person types text.
+                An assistant turn is rendered through BoardAiMarkdown, which is
+                safe by default: no raw HTML (never rehype-raw) and unsafe URLs
+                dropped. The person's own words stay literally as typed, and the
+                content handed to Save as Note / Save to wiki is untouched.
               */}
-              {message.content}
+              {message.role === 'assistant'
+                ? <BoardAiMarkdown content={message.content} />
+                : message.content}
               {message.role === 'assistant' && message.model ? (
                 <span className="mt-1 block text-[10px] text-gray-400">{message.model}</span>
               ) : null}

@@ -344,6 +344,50 @@ describe('23,49. messages render as text', () => {
   });
 });
 
+describe('PATCH-203 an answer renders Markdown; what you typed does not', () => {
+  it('an assistant answer renders **bold** as a strong element', async () => {
+    stubChat({
+      threads: [summary(THREAD_A, 'z')],
+      messages: { [THREAD_A]: [
+        { id: 'm1', role: 'assistant', content: '**1.d4** e5', provider: 'deepseek', model: 'deepseek-chat', createdAt: 'n' },
+      ] },
+    });
+    await mount();
+    const bubble = q('[data-board-ai-chat-message="assistant"]')!;
+    expect(bubble.querySelector('strong')?.textContent).toBe('1.d4');
+    expect(bubble.textContent).not.toContain('**');
+  });
+
+  it('a user message keeps its asterisks literally', async () => {
+    // What the person typed is not Markdown. A literal `**` must survive.
+    stubChat({
+      threads: [summary(THREAD_A, 'z')],
+      messages: { [THREAD_A]: [
+        { id: 'm1', role: 'user', content: '**1.d4**', provider: null, model: null, createdAt: 'n' },
+      ] },
+    });
+    await mount();
+    const bubble = q('[data-board-ai-chat-message="user"]')!;
+    expect(bubble.querySelector('strong')).toBeNull();
+    expect(bubble.textContent).toContain('**1.d4**');
+  });
+
+  it('Save as Note still receives the raw Markdown', async () => {
+    // The rendering changed; the stored/saved content must not. The wiki reads
+    // the message server-side by id, so its Markdown is untouched by design.
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    stubChat({
+      threads: [summary(THREAD_A, 'z')],
+      messages: { [THREAD_A]: [
+        { id: 'm1', role: 'assistant', content: '**1.d4** e5', provider: 'deepseek', model: 'deepseek-chat', createdAt: 'n' },
+      ] },
+    });
+    await mount({ canSaveAssistantAsNote: true, onSaveAssistantAsNote: onSave });
+    await click('[data-board-ai-chat-action="save-note"]');
+    expect(onSave).toHaveBeenCalledWith({ messageId: 'm1', content: '**1.d4** e5' });
+  });
+});
+
 describe('28. closing and reopening reloads the private history', () => {
   it('a remount reads the server again rather than trusting stale state', async () => {
     stubChat({ threads: [summary(THREAD_A, 'z')], messages: { [THREAD_A]: [] } });
