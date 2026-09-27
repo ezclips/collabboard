@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveAs } from 'file-saver';
-import { BookOpen, Download, X } from 'lucide-react';
+import { BookOpen, Download, FileText, Play, X } from 'lucide-react';
 
 import {
   applyProposalToDraft,
@@ -159,6 +159,19 @@ const stateClass: Record<BoardWikiSourceState, string> = {
   stale: 'border-amber-300 bg-amber-50 text-amber-800',
   gone: 'border-gray-200 bg-gray-100 text-gray-400 line-through',
 };
+
+/**
+ * PATCH-202. A source is OPENABLE when the host can navigate and it is not a
+ * deleted (`gone`) source -- the same rule the chip has always used, now stated
+ * once because both the per-chip link and the section's hint depend on it. A
+ * gone source resolves to nothing, so it must never look like a link.
+ */
+const boardWikiSourceIsOpenable = (
+  status: BoardWikiSourceStatusView,
+  onOpenCitation: BoardWikiDrawerProps['onOpenCitation'],
+): boolean => onOpenCitation !== undefined
+  && status.state !== 'gone'
+  && typeof (status.item as { knowledgeDocumentId?: unknown }).knowledgeDocumentId === 'string';
 
 export default function BoardWikiDrawer({
   boardId,
@@ -688,6 +701,19 @@ export default function BoardWikiDrawer({
                 <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
                   Compiled from
                 </h3>
+                {/*
+                  PATCH-202. An openable source is a LINK back to the original.
+                  Months later the grey tag told nobody what it was or that it
+                  opened anything, so the way back to the truth was invisible.
+                  The hint appears only when something here can actually be
+                  opened, so it never promises a destination a `gone` source
+                  cannot provide.
+                */}
+                {sources.some((status) => boardWikiSourceIsOpenable(status, onOpenCitation)) && (
+                  <p data-board-wiki-sources-hint="true" className="mb-2 text-[11px] text-gray-500">
+                    Click a source to open the original.
+                  </p>
+                )}
                 {sources.length === 0 && (
                   <p className="text-xs text-gray-500">
                     Nothing — this page was written by hand.
@@ -700,9 +726,9 @@ export default function BoardWikiDrawer({
                     // and a chip that navigates nowhere reads as a broken page
                     // rather than as a deleted source -- the distinction item 15
                     // settled for citations, kept here.
-                    const openable = onOpenCitation !== undefined
-                      && status.state !== 'gone'
-                      && typeof documentId === 'string';
+                    const openable = boardWikiSourceIsOpenable(status, onOpenCitation);
+                    const isTranscript = status.isTranscript === true;
+                    const pageNumber = (status.item as { pageNumber?: unknown }).pageNumber;
                     return (
                     <li key={`${status.item.label}-${index}`}>
                       {!openable ? (
@@ -719,14 +745,24 @@ export default function BoardWikiDrawer({
                         <button
                           type="button"
                           data-board-wiki-source={status.state}
+                          data-board-wiki-source-kind={isTranscript ? 'transcript' : 'pdf'}
+                          title={isTranscript
+                            ? 'Open the full transcript'
+                            : typeof pageNumber === 'number'
+                              ? `Open this PDF at page ${pageNumber}`
+                              : 'Open this PDF'}
                           onClick={() => onOpenCitation?.({
                             knowledgeDocumentId: String(documentId),
-                            ...(typeof (status.item as { pageNumber?: unknown }).pageNumber === 'number'
-                              ? { pageNumber: (status.item as { pageNumber: number }).pageNumber }
-                              : {}),
+                            ...(typeof pageNumber === 'number' ? { pageNumber } : {}),
                           })}
-                          className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] hover:bg-gray-50 ${stateClass[status.state]}`}
+                          className="inline-flex items-center gap-1 text-[11px] text-blue-700 hover:underline"
                         >
+                          {isTranscript
+                            ? <Play className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            : <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />}
+                          <span className="shrink-0 text-gray-500">
+                            {isTranscript ? 'Video transcript ·' : 'PDF ·'}
+                          </span>
                           <span className="truncate">{status.item.label}</span>
                           {stateLabel[status.state] && <span className="shrink-0">{stateLabel[status.state]}</span>}
                         </button>

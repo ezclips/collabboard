@@ -395,6 +395,84 @@ describe('the sources chain, and the states derived for it', () => {
   });
 });
 
+describe('PATCH-202 a source reads as a link back to the original', () => {
+  // The defect: the chips already opened their source but looked like grey tags
+  // with no kind, so months later nobody could tell what the source was or that
+  // it opened anything. An openable source now reads as a link; a gone one is
+  // left plain, so a deleted source never looks clickable.
+  const transcriptSource = () => ({
+    item: { type: 'knowledge-page', knowledgeDocumentId: DOC, label: 'chess_opening_theory — transcript' },
+    version: { kind: 'document', contentSha256: 'sha-1', updatedAt: '2026-09-01T00:00:00Z' },
+    state: 'current' as const,
+    isTranscript: true,
+  });
+  const pdfPageOneSource = () => ({
+    item: { type: 'knowledge-page', knowledgeDocumentId: DOC, pageNumber: 1, label: 'chess_opening_theory.pdf — page 1' },
+    version: { kind: 'document', contentSha256: 'sha-1', updatedAt: '2026-09-01T00:00:00Z' },
+    state: 'current' as const,
+  });
+  const sourceChip = (container: HTMLElement, state = 'current') =>
+    container.querySelector(`[data-board-wiki-source="${state}"]`) as HTMLElement;
+
+  it('a transcript source names its kind and links to the full transcript', async () => {
+    const onOpenCitation = vi.fn();
+    stubFetch({ sources: [transcriptSource()] });
+    const container = await mount({ onOpenCitation });
+    await openPage(container);
+
+    const chip = sourceChip(container);
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.getAttribute('data-board-wiki-source-kind')).toBe('transcript');
+    expect(chip.querySelector('svg')).not.toBeNull();
+    expect(chip.textContent).toContain('Video transcript ·');
+    expect(chip.textContent).toContain('chess_opening_theory — transcript');
+    expect(chip.getAttribute('title')).toBe('Open the full transcript');
+    await act(async () => { chip.click(); });
+    expect(onOpenCitation).toHaveBeenCalledWith({ knowledgeDocumentId: DOC });
+  });
+
+  it('a PDF page source names its kind and links to that page', async () => {
+    stubFetch({ sources: [pdfPageOneSource()] });
+    const container = await mount({ onOpenCitation: vi.fn() });
+    await openPage(container);
+
+    const chip = sourceChip(container);
+    expect(chip.getAttribute('data-board-wiki-source-kind')).toBe('pdf');
+    expect(chip.textContent).toContain('PDF ·');
+    expect(chip.getAttribute('title')).toBe('Open this PDF at page 1');
+  });
+
+  it('a gone source is not a link and carries no title', async () => {
+    const onOpenCitation = vi.fn();
+    stubFetch({ sources: [docSourceView('gone')], freshness: 'sources-gone' });
+    const container = await mount({ onOpenCitation });
+    await openPage(container);
+
+    const chip = sourceChip(container, 'gone');
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.getAttribute('title')).toBeNull();
+    expect(chip.getAttribute('data-board-wiki-source-kind')).toBeNull();
+    expect(chip.className).not.toContain('text-blue-700');
+    expect(chip.className).not.toContain('underline');
+    expect(chip.querySelector('svg')).toBeNull();
+  });
+
+  it('shows the open-a-source hint only when a source can be opened', async () => {
+    stubFetch();
+    const container = await mount({ onOpenCitation: vi.fn() });
+    await openPage(container);
+    expect(container.querySelector('[data-board-wiki-sources-hint="true"]')!.textContent)
+      .toContain('Click a source to open the original.');
+  });
+
+  it('shows no hint when no source can be opened', async () => {
+    stubFetch({ sources: [docSourceView('gone')], freshness: 'sources-gone' });
+    const container = await mount({ onOpenCitation: vi.fn() });
+    await openPage(container);
+    expect(container.querySelector('[data-board-wiki-sources-hint="true"]')).toBeNull();
+  });
+});
+
 describe('refresh is a proposal: diff, apply, discard', () => {
   it('shows no Refresh control at all while no compiler exists', async () => {
     // Unit 3 supplies it. Rendering it inert would promise something no code
