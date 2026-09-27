@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MediaPostTranscriptAffordance } from './MediaPostTranscriptAffordance';
 import type { BoardTranscriptIndexEntry } from '@/lib/domain/knowledge/boardTranscriptIndex';
@@ -81,5 +81,58 @@ describe('MediaPostTranscriptAffordance — status only', () => {
     // action menu still needs to know the video has a transcript.
     renderStatus({ index: [entry()] });
     expect(screen.getByTestId('transcript-status')).toBeTruthy();
+  });
+});
+
+describe('PATCH-200: a ready transcript can be opened from the status line', () => {
+  it('with an open callback, the status becomes "Transcript added · Open" and calls it', () => {
+    const onOpen = vi.fn();
+    renderStatus({ index: [entry()], onOpen });
+
+    const button = screen.getByTestId('transcript-open');
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.textContent).toContain('Transcript added · Open');
+    expect(button.textContent).toContain('✓');
+
+    fireEvent.click(button);
+    // The entry's document id, not the URL: identity is what the reader opens.
+    expect(onOpen).toHaveBeenCalledWith('doc-1');
+  });
+
+  it('stops the click from reaching the card, so it does not select or drag it', () => {
+    const onOpen = vi.fn();
+    const onCardClick = vi.fn();
+    const onCardMouseDown = vi.fn();
+    render(
+      <div onClick={onCardClick} onMouseDown={onCardMouseDown}>
+        <MediaPostTranscriptAffordance url={YOUTUBE} index={[entry()]} indexLoaded onOpen={onOpen} />
+      </div>,
+    );
+    const button = screen.getByTestId('transcript-open');
+    fireEvent.mouseDown(button);
+    fireEvent.click(button);
+    expect(onCardMouseDown).not.toHaveBeenCalled();
+    expect(onCardClick).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('WITHOUT a callback the plain status stays, and there is no button', () => {
+    renderStatus({ index: [entry()] });
+    expect(screen.getByText('Transcript added')).toBeTruthy();
+    expect(screen.queryByTestId('transcript-open')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('every other state is unchanged, callback or not', () => {
+    const onOpen = vi.fn();
+    renderStatus({ index: [entry({ processingStatus: 'processing' })], onOpen });
+    expect(screen.getByText('Transcript processing…')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+
+    cleanup();
+
+    renderStatus({ index: [entry({ processingStatus: 'failed' })], onOpen });
+    expect(screen.getByText('Transcript failed to process.')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });

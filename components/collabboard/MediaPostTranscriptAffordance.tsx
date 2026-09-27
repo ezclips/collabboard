@@ -8,7 +8,7 @@ import {
 } from '@/lib/domain/knowledge/boardTranscriptIndex';
 
 /**
- * The transcript STATUS line on a media card. Information only — no action.
+ * The transcript STATUS line on a media card. Information, plus ONE action.
  *
  * ============================================================================
  * THE ACTION LIVES IN THE RIGHT-CLICK MENU, NOT HERE
@@ -25,6 +25,19 @@ import {
  * failed is something a viewer needs to see without opening a menu — and a
  * viewer cannot open an action menu at all. The distinction is the whole reason
  * this component still exists.
+ *
+ * ============================================================================
+ * ONE EXCEPTION, ADDED 2026-09-27 (OWNER DECISION)
+ * ============================================================================
+ *
+ * The owner overrode "information only" for the `ready` state, and for a
+ * narrower reason than the old rule: the status is where people LOOK, and a
+ * transcript that exists but cannot be opened reads as a dead end. So when the
+ * host supplies an open callback, "✓ Transcript added" becomes "✓ Transcript
+ * added · Open" and opens it. With no callback — a host with no reader — the
+ * plain status is unchanged, and so is every other state. It remains status
+ * FIRST: the open control is the status line itself, not a second button that
+ * arrives and leaves as state changes.
  *
  * THREE STATES, AND THE ONE THAT USUALLY GETS FLATTENED:
  *
@@ -50,12 +63,18 @@ export interface MediaPostTranscriptAffordanceProps {
    * rendered as "this video has no transcript" -- see useBoardTranscriptIndex.
    */
   readonly indexLoaded: boolean;
+  /**
+   * PATCH-200. Opens the stored transcript, given its document id. Present only
+   * where the host has a reader; when absent, `ready` keeps the plain status.
+   */
+  readonly onOpen?: (documentId: string) => void;
 }
 
 export function MediaPostTranscriptAffordance({
   url,
   index,
   indexLoaded,
+  onOpen,
 }: MediaPostTranscriptAffordanceProps) {
   // SAY NOTHING UNTIL WE KNOW. Rendering during the read would flash a claim
   // about a video whose transcript we had not looked for yet.
@@ -64,6 +83,34 @@ export function MediaPostTranscriptAffordance({
   const state = mediaPostTranscriptState(url, index);
 
   if (state.kind === 'ready') {
+    // The status line IS the control when there is somewhere to open it. The
+    // mousedown is stopped as well as the click: on a board, selection and drag
+    // begin on mousedown, so a click alone would still have selected or moved
+    // the card underneath.
+    if (onOpen) {
+      const openTranscript = () => onOpen(state.entry.documentId);
+      return (
+        <div
+          className="mt-1 flex items-center gap-1 text-[11px] text-emerald-700"
+          data-testid="transcript-status"
+        >
+          <button
+            type="button"
+            data-testid="transcript-open"
+            title="Open transcript"
+            className="inline-flex items-center gap-1 rounded-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              openTranscript();
+            }}
+          >
+            <span aria-hidden="true">✓</span>
+            <span>Transcript added · Open</span>
+          </button>
+        </div>
+      );
+    }
     return (
       <div
         className="mt-1 flex items-center gap-1 text-[11px] text-emerald-700"

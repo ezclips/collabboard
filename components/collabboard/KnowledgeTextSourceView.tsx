@@ -69,6 +69,21 @@ export interface KnowledgeTextSourceViewProps {
    * or a host that genuinely has none), and never sent as an empty string.
    */
   readonly boardId?: string;
+  /**
+   * PATCH-200. The "next step" bar above a transcript's text. Every prop is
+   * optional and the bar renders only for a transcript WITH somewhere to go, so
+   * a non-transcript mount -- and every existing test mount -- is unchanged.
+   *
+   * `onOpenAssistantPanel` opens the host's AI panel on this document; `onSummarise`
+   * additionally prefills the composer with a summary request, and never sends
+   * it. `canSaveToWiki` says whether the AI answers will offer "Save to wiki",
+   * which decides whether the summarise button and its helper line appear at
+   * all: offering a wiki summary where nothing can be saved to the wiki is the
+   * same dead end this bar exists to remove.
+   */
+  readonly onOpenAssistantPanel?: () => void;
+  readonly onSummariseForWiki?: () => void;
+  readonly canSaveToWiki?: boolean;
 }
 
 /**
@@ -106,6 +121,9 @@ export default function KnowledgeTextSourceView({
   presentation,
   transcriptRepresentation,
   boardId,
+  onOpenAssistantPanel,
+  onSummariseForWiki,
+  canSaveToWiki = false,
 }: KnowledgeTextSourceViewProps) {
   const markRef = useRef<HTMLElement | null>(null);
   const handledRequestRef = useRef<number | null>(null);
@@ -368,6 +386,48 @@ export default function KnowledgeTextSourceView({
           presentation === 'workspace' ? 'max-w-3xl' : '',
         ].join(' ')}
       >
+        {/*
+          PATCH-200. THE NEXT STEP, at the top of a transcript. The owner's
+          complaint was the dead end: the text opened, and nothing said what to
+          do with it. Both buttons open the host's existing AI panel -- the same
+          one the sparkle opens -- and the summarise prompt is PREFILLED, never
+          sent, so no credits are spent without a click.
+
+          A transcript only, and only where a host supplied the opener: a PDF is
+          untouched, and so is a non-transcript text source (this component's
+          existing tests mount it without these props and see no bar).
+        */}
+        {isTranscript && onOpenAssistantPanel ? (
+          <div
+            data-knowledge-transcript-next-step="true"
+            className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded border border-gray-100 bg-gray-50 px-3 py-2"
+          >
+            <button
+              type="button"
+              data-knowledge-transcript-ask-ai="true"
+              onClick={onOpenAssistantPanel}
+              className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
+            >
+              Ask AI about this video
+            </button>
+            {canSaveToWiki && onSummariseForWiki ? (
+              <button
+                type="button"
+                data-knowledge-transcript-summarise="true"
+                onClick={onSummariseForWiki}
+                className="rounded border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50"
+              >
+                Summarise for the wiki
+              </button>
+            ) : null}
+            {canSaveToWiki ? (
+              <span data-knowledge-transcript-wiki-hint="true" className="text-[11px] text-gray-500">
+                {'Every answer has "Save to wiki", which adds it to a wiki page for you to review.'}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         {/*
           PATCH-160. The readable toggle, for a TRANSCRIPT only. A Markdown or
           .txt source has punctuation already, so the control never renders

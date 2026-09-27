@@ -18,6 +18,7 @@ import BoardAiChatDrawer, {
   type BoardAiAssistantNoteSaveRequest,
   type BoardAiDocumentScopedSession,
 } from '@/components/collabboard/BoardAiChatDrawer';
+import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
 import PdfWorkspaceLibraryPanel from '@/components/collabboard/PdfWorkspaceLibraryPanel';
 import PdfReaderDock, { type PdfReaderPanel } from '@/components/collabboard/PdfReaderDock';
 import PdfWorkspaceChrome, {
@@ -67,6 +68,13 @@ const KNOWLEDGE_LIBRARY_SELECTOR = '[data-knowledge-documents="true"]';
  */
 const READER_PAGES_RETRY_LIMIT = 12;
 const READER_PAGES_RETRY_DELAY_MS = 2000;
+
+/**
+ * PATCH-200. What "Summarise for the wiki" puts in the composer. A CONSTANT
+ * rather than a free input: it is a starting point the person edits or sends,
+ * and it is never sent by this code -- the send is theirs.
+ */
+const TRANSCRIPT_SUMMARY_PROMPT = 'Summarise the key points of this video.';
 
 import {
   addBoardAiDraftContext,
@@ -206,6 +214,21 @@ export interface KnowledgeSourceReaderDrawerProps {
   workspaceActivePageNumber?: number | null;
   canSaveAssistantAsNote?: boolean;
   onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
+  /**
+   * PATCH-200. The wiki-save capability the embedded Board AI drawer already
+   * takes, forwarded here so a transcript's AI answers offer "Save to wiki"
+   * exactly as the board chat's do. The SAME gating as the board chat
+   * (`canEditBoardContent` in CanvasClient), and no new server path: the wiki
+   * route already verifies the signed answer.
+   *
+   * It also decides the next-step bar's summarise button and helper line: with
+   * no ability to save, a "Summarise for the wiki" action has nowhere to go.
+   */
+  canSaveAssistantToWiki?: boolean;
+  onOpenWikiWithProposal?: (target: {
+    readonly pageId: string;
+    readonly proposal: BoardWikiProposal;
+  }) => void;
 }
 
 /**
@@ -298,6 +321,8 @@ export default function KnowledgeSourceReaderDrawer({
   workspaceActivePageNumber = null,
   canSaveAssistantAsNote = false,
   onSaveAssistantAsNote,
+  canSaveAssistantToWiki = false,
+  onOpenWikiWithProposal,
 }: KnowledgeSourceReaderDrawerProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
@@ -314,6 +339,14 @@ export default function KnowledgeSourceReaderDrawer({
     useState<Record<string, BoardAiDocumentScopedSession>>({});
   /** The docked reader's own right panel: Library first, AI on request. */
   const [sidePanelRightPanel, setSidePanelRightPanel] = useState<PdfReaderPanel>('library');
+  /**
+   * PATCH-200. The summary prompt the next-step bar queued for the AI composer,
+   * minted with a fresh request id so the SAME prompt can be applied again on a
+   * second click without a rerender re-applying it.
+   */
+  const [composerPrefill, setComposerPrefill] =
+    useState<{ readonly requestId: number; readonly text: string } | null>(null);
+  const composerPrefillRequestIdRef = useRef(0);
   /** Which page the reader is actually on, in either host. */
   const [readerActivePage, setReaderActivePage] =
     useState<{ readonly documentId: string; readonly pageNumber: number } | null>(null);
@@ -771,6 +804,34 @@ export default function KnowledgeSourceReaderDrawer({
     reader?.documentId,
   ]);
 
+  /**
+   * PATCH-200. The reader's ONE AI-panel opener, for the next-step bar's two
+   * buttons. The SAME panel the sparkle opens in each host; it never sends
+   * anything, so both buttons only reveal the conversation.
+   */
+  const openReaderAiPanel = useCallback(() => {
+    if (presentation === 'workspace') {
+      onWorkspaceRightPanelChange?.('ai');
+      return;
+    }
+    setSidePanelRightPanel('ai');
+  }, [presentation, onWorkspaceRightPanelChange]);
+
+  /**
+   * PATCH-200. Prefill the composer with the summary request and open the panel.
+   * The prompt is placed in the box and NEVER sent: the person still presses
+   * Send, so no credits are spent without a click. A fresh request id makes a
+   * second press an intent of its own rather than a no-op.
+   */
+  const summariseTranscriptForWiki = useCallback(() => {
+    composerPrefillRequestIdRef.current += 1;
+    setComposerPrefill({
+      requestId: composerPrefillRequestIdRef.current,
+      text: TRANSCRIPT_SUMMARY_PROMPT,
+    });
+    openReaderAiPanel();
+  }, [openReaderAiPanel]);
+
   const libraryBacklinks = useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null);
   const libraryBacklinkRows = useMemo(
     () => knowledgeSourceBacklinkDocumentRows(libraryBacklinks),
@@ -780,6 +841,13 @@ export default function KnowledgeSourceReaderDrawer({
   if (!boardId || reader === null) return null;
 
   const libraryPageSummary = pageCountSummary(reader.pageCount, reader.pages.length, reader.loading);
+  /**
+   * PATCH-200. A transcript is a text document WITH a representation -- the
+   * same test KnowledgeTextSourceView uses. A plain .txt or Markdown source is
+   * text without one, and must not acquire the transcript bar or "Close".
+   */
+  const isTranscriptDocument =
+    reader.kind === KNOWLEDGE_TEXT_KIND && reader.transcriptRepresentation != null;
   // Board AI is offered only where the board can actually accept an
   // attachment; with no such authority no dock button is mounted at all.
   const boardAiAvailable = !!onBoardAiDraftContextChange;
@@ -820,6 +888,9 @@ export default function KnowledgeSourceReaderDrawer({
             : null}
           presentation={host}
           transcriptRepresentation={reader.transcriptRepresentation}
+          onOpenAssistantPanel={openReaderAiPanel}
+          onSummariseForWiki={summariseTranscriptForWiki}
+          canSaveToWiki={canSaveAssistantToWiki}
         />
       );
     }
@@ -873,9 +944,18 @@ export default function KnowledgeSourceReaderDrawer({
       }];
     const activeDocumentId = activeWorkspacePdfId ?? reader.documentId;
     const readerMatchesActiveDocument = reader.documentId === activeDocumentId;
-    const activePageNumber = Number.isInteger(workspaceActivePageNumber) && (workspaceActivePageNumber ?? 0) >= 1
-      ? workspaceActivePageNumber
-      : reader.initialPageNumber ?? 1;
+    /**
+     * PATCH-200 addendum. The page this workspace's AI is scoped to. NULL for a
+     * text document: page 1 does not exist on a pageless source, and the server
+     * refuses a knowledge-page on one. A PDF keeps the page it is actually on.
+     * The census in boardAiChatDrawer.test.tsx pins the literal below, so the
+     * pageless decision lives in this value rather than at the call site.
+     */
+    const activePageNumber = reader.kind === KNOWLEDGE_TEXT_KIND
+      ? null
+      : Number.isInteger(workspaceActivePageNumber) && (workspaceActivePageNumber ?? 0) >= 1
+        ? workspaceActivePageNumber
+        : reader.initialPageNumber ?? 1;
     const openBacklinkTarget = (targetPadletId: string) => onOpenBacklinkTarget?.(targetPadletId);
     const rightPanelContent = !readerMatchesActiveDocument ? (
       <p data-pdf-workspace-panel-loading="true" className="text-xs text-gray-500">
@@ -910,6 +990,10 @@ export default function KnowledgeSourceReaderDrawer({
         onOpenCitation={openCitation}
         canSaveAssistantAsNote={canSaveAssistantAsNote}
         onSaveAssistantAsNote={onSaveAssistantAsNote}
+        canSaveAssistantToWiki={canSaveAssistantToWiki}
+        onOpenWikiWithProposal={onOpenWikiWithProposal}
+        initialDraftText={composerPrefill?.text}
+        initialDraftTextRequestId={composerPrefill?.requestId}
         selectedBoardItem={null}
       />
     ) : null;
@@ -1116,7 +1200,7 @@ export default function KnowledgeSourceReaderDrawer({
                     className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
                     onClick={closeReader}
                   >
-                    ← Back to PDFs
+                    {isTranscriptDocument ? '← Close' : '← Back to PDFs'}
                   </button>
                   <h2
                     data-knowledge-library-filename="true"
@@ -1156,11 +1240,15 @@ export default function KnowledgeSourceReaderDrawer({
                       isOpen
                       onClose={() => setSidePanelRightPanel('closed')}
                       presentation="embedded"
-                      documentScope={{
-                        knowledgeDocumentId: reader.documentId,
-                        originalFilename: reader.originalFilename || 'Document',
-                        pageNumber: readerActivePageNumber,
-                      }}
+        documentScope={{
+          knowledgeDocumentId: reader.documentId,
+          originalFilename: reader.originalFilename || 'Document',
+          // PATCH-200 addendum. A pageless source (a text document) is scoped to
+          // the DOCUMENT, never a page: page 1 does not exist on it, and the
+          // server refuses a knowledge-page on a pageless source. A PDF keeps
+          // the page it is actually on.
+          pageNumber: reader.kind === KNOWLEDGE_TEXT_KIND ? null : readerActivePageNumber,
+        }}
                       draftContext={boardAiDraftContext}
                       onDraftContextChange={changeBoardAiDraftContext}
                       documentSessions={boardAiSessionsByDocumentId}
@@ -1168,6 +1256,10 @@ export default function KnowledgeSourceReaderDrawer({
                       onOpenCitation={openCitation}
                       canSaveAssistantAsNote={canSaveAssistantAsNote}
                       onSaveAssistantAsNote={onSaveAssistantAsNote}
+                      canSaveAssistantToWiki={canSaveAssistantToWiki}
+                      onOpenWikiWithProposal={onOpenWikiWithProposal}
+                      initialDraftText={composerPrefill?.text}
+                      initialDraftTextRequestId={composerPrefill?.requestId}
                       selectedBoardItem={null}
                     />
                   ) : null}

@@ -11399,6 +11399,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           workspaceActivePageNumber={activePdfId ? pdfWorkspacePageById[activePdfId] ?? null : null}
           canSaveAssistantAsNote={canEditBoardContent}
           onSaveAssistantAsNote={enableBoardAiChat && canEditBoardContent ? savePdfAssistantAnswerAsNote : undefined}
+          /* PATCH-200. The reader's embedded Board AI gets the SAME wiki-save
+             capability and open authority the board chat already has, so a
+             transcript's AI answers offer "Save to wiki" exactly as they do
+             there. No new server path: the wiki route verifies the signed
+             answer. */
+          canSaveAssistantToWiki={canEditBoardContent}
+          onOpenWikiWithProposal={canEditBoardContent ? openBoardWikiWithProposal : undefined}
         />
 
         {/* Board AI Chat. A shell-level sibling for the same reason the reader

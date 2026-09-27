@@ -542,3 +542,48 @@ describe('PATCH-199 a transcript opens through requestKnowledgeDocumentOpen', ()
     expect(mount).not.toContain('setKnowledgeDocumentOpenRequest(');
   });
 });
+
+// ============================================================================
+// PATCH-200: the reader's AI saves to the wiki too
+// ============================================================================
+describe('PATCH-200 the reader threads the wiki-save capability into its AI', () => {
+  it('CanvasClient gives the docked reader the board chat\'s own gating', () => {
+    // The reader mount is bounded by the Board AI comment that follows it, so
+    // the two props are proved to be ON the reader and not merely somewhere in
+    // the file.
+    const readerMount = CLIENT.indexOf('<KnowledgeSourceReaderDrawer');
+    const boardChat = CLIENT.indexOf('{/* Board AI Chat.');
+    expect(readerMount).toBeGreaterThan(-1);
+    expect(boardChat, 'the Board AI sibling must follow the reader mount').toBeGreaterThan(readerMount);
+    const mount = CLIENT.slice(readerMount, boardChat);
+    // The SAME gating the board chat uses: the capability is board-edit, and
+    // the open authority is supplied only for an editor.
+    expect(mount).toContain('canSaveAssistantToWiki={canEditBoardContent}');
+    expect(mount).toContain(
+      'onOpenWikiWithProposal={canEditBoardContent ? openBoardWikiWithProposal : undefined}',
+    );
+  });
+
+  it('the reader declares both props and hands them to the embedded chat in BOTH hosts', () => {
+    const reader = executable(READER);
+    expect(reader).toContain('canSaveAssistantToWiki?: boolean;');
+    expect(reader).toContain('onOpenWikiWithProposal?: (target: {');
+    // One shared render for the docked drawer and the focused workspace: both
+    // mounts of the embedded BoardAiChatDrawer must carry the pair, or an AI
+    // answer in one host would have no "Save to wiki".
+    expect((reader.match(/canSaveAssistantToWiki={canSaveAssistantToWiki}/g) ?? []).length).toBe(2);
+    expect((reader.match(/onOpenWikiWithProposal={onOpenWikiWithProposal}/g) ?? []).length).toBe(2);
+  });
+
+  it('addendum: a pageless text document is scoped to the DOCUMENT in both hosts', () => {
+    const reader = executable(READER);
+    // Docked side panel: an explicit null for a text document.
+    expect(reader).toContain(
+      'pageNumber: reader.kind === KNOWLEDGE_TEXT_KIND ? null : readerActivePageNumber,',
+    );
+    // Focused workspace: the same decision, made in the value the pinned
+    // `pageNumber: activePageNumber` literal reads (a PDF still sends its page).
+    expect(reader).toContain('const activePageNumber = reader.kind === KNOWLEDGE_TEXT_KIND');
+    expect(reader).toContain('pageNumber: activePageNumber,');
+  });
+});

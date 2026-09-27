@@ -2320,3 +2320,204 @@ describe('Stage 1. reading a text source', () => {
     }
   });
 });
+
+// ============================================================================
+// PATCH-200 -- an open transcript shows its next step
+// ============================================================================
+//
+// The owner's complaint: the text opened and nothing said what to do with it.
+// The bar is a TRANSCRIPT's only -- a plain text source and a PDF are untouched
+// -- and its two buttons open the SAME AI panel the sparkle opens, never
+// sending the prefill.
+
+describe('PATCH-200 a transcript shows its next step', () => {
+  const TRANSCRIPT = 'The transcript body.';
+  /**
+   * A structural transcript representation, checked by isTranscriptRepresentation:
+   * an integer representationVersion and cues whose boundaries are integers. The
+   * reader derives "this is a transcript" from exactly this value.
+   */
+  const representation = () => ({
+    representationVersion: 1,
+    cues: [{ charStart: 0, charEnd: 5, startMs: 0, endMs: 1000 }],
+  });
+
+  const serveTranscript = (documentId: string = SOURCE_A) => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      /\/pages$/.test(String(input))
+        ? jsonResponse({
+          document: {
+            id: documentId,
+            originalFilename: 'talk.txt',
+            pageCount: null,
+            kind: 'text',
+            transcriptRepresentation: representation(),
+          },
+          pages: [],
+          text: TRANSCRIPT,
+        })
+        : jsonResponse({ threads: [], messages: [] })
+    ));
+  };
+
+  const openPanel = () =>
+    (drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
+      ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  const posts = () =>
+    fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'POST');
+  /** The docked reader with Board AI available, exactly as a real board mounts it. */
+  const openTranscript = async (extra: Record<string, unknown> = {}) => {
+    serveTranscript();
+    await mount({
+      documentOpenRequest: docRequest(1),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+      ...extra,
+    } as never);
+  };
+
+  it('shows the bar, and "Ask AI about this video" opens the AI panel sending nothing', async () => {
+    await openTranscript();
+
+    const bar = drawerEl()!.querySelector('[data-knowledge-transcript-next-step="true"]');
+    expect(bar, 'a transcript must show the next step').not.toBeNull();
+    expect(bar!.textContent).toContain('Ask AI about this video');
+
+    const postsBefore = posts().length;
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-transcript-ask-ai="true"]') as HTMLElement).click();
+    });
+    await settle();
+
+    // The SAME panel the sparkle opens, with the composer present...
+    expect(openPanel()).toBe('ai');
+    expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).not.toBeNull();
+    // ...and nothing was asked. The person still writes the question.
+    expect(posts()).toHaveLength(postsBefore);
+  });
+
+  it('"Summarise for the wiki" prefills the composer and sends NOTHING', async () => {
+    await openTranscript({ canSaveAssistantToWiki: true, onOpenWikiWithProposal: vi.fn() });
+
+    const postsBefore = posts().length;
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]') as HTMLElement).click();
+    });
+    await settle();
+
+    expect(openPanel()).toBe('ai');
+    const composer = drawerEl()!.querySelector('[data-board-ai-chat-input]') as HTMLTextAreaElement;
+    expect(composer.value).toBe('Summarise the key points of this video.');
+    // NOT sent: no credits spent without a click.
+    expect(posts()).toHaveLength(postsBefore);
+  });
+
+  it('the summarise button and helper line appear only where saving to the wiki is possible', async () => {
+    await openTranscript();
+
+    // The Ask button is always there for a transcript; the wiki half is not.
+    expect(drawerEl()!.querySelector('[data-knowledge-transcript-ask-ai="true"]')).not.toBeNull();
+    expect(drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]')).toBeNull();
+    expect(drawerEl()!.querySelector('[data-knowledge-transcript-wiki-hint="true"]')).toBeNull();
+  });
+
+  it('for a transcript the panel offers "← Close", not "← Back to PDFs"', async () => {
+    await openTranscript();
+    expect(drawerEl()!.textContent).toContain('← Close');
+    expect(drawerEl()!.textContent).not.toContain('← Back to PDFs');
+  });
+
+  it('a PDF source shows no bar and keeps "← Back to PDFs"', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      /\/pages$/.test(String(input))
+        ? jsonResponse({
+          document: { id: SOURCE_A, originalFilename: 'slides.pdf', pageCount: 1, kind: 'pdf' },
+          pages: [{ pageNumber: 1, text: 'page one body' }],
+        })
+        : jsonResponse({ documents: [] })
+    ));
+    await mount({
+      documentOpenRequest: docRequest(1),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+      canSaveAssistantToWiki: true,
+    } as never);
+
+    expect(drawerEl()!.querySelector('[data-knowledge-transcript-next-step="true"]')).toBeNull();
+    expect(drawerEl()!.textContent).toContain('← Back to PDFs');
+    expect(drawerEl()!.textContent).not.toContain('← Close');
+  });
+
+  // ==========================================================================
+  // Addendum: the reader's AI must work on a transcript (pageNumber null)
+  // ==========================================================================
+  it('scopes a transcript\'s AI to the DOCUMENT, not page 1', async () => {
+    // A unique document id, so the module-level starter-questions cache cannot
+    // make this pass by replaying an earlier test's answer.
+    const TRANSCRIPT_DOC = 'cccccccc-3333-4333-8333-333333333333';
+    serveTranscript(TRANSCRIPT_DOC);
+    await mount({
+      documentOpenRequest: docRequest(1, TRANSCRIPT_DOC),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+    } as never);
+
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-transcript-ask-ai="true"]') as HTMLElement).click();
+    });
+    await settle();
+
+    // The mandatory chip is the visible half: a DOCUMENT, and no page claim.
+    const chip = drawerEl()!.querySelector('[data-board-ai-context-mandatory]') as HTMLElement;
+    expect(chip, 'the embedded chat should be scoped to this document').not.toBeNull();
+    expect(chip.getAttribute('data-board-ai-context-mandatory')).toBe('knowledge-document');
+    expect(chip.textContent).toContain('text only');
+    expect(chip.textContent, 'a transcript has no page 1 to send').not.toContain('p. 1');
+
+    // The starter-questions REQUEST is built from the same scope, so it carries
+    // the document too -- the second half of the live failure.
+    const starter = fetchMock.mock.calls.find(([input]) => String(input).includes('/starter-questions'));
+    expect(starter, 'starter questions are asked for a document-scoped chat').toBeTruthy();
+    const body = String((starter![1] as RequestInit).body);
+    expect(body).toContain('knowledge-document');
+    expect(body).not.toContain('knowledge-page');
+    expect(body).not.toContain('pageNumber');
+  });
+
+  it('keeps a PDF\'s AI scoped to the page it is actually on', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      /\/pages$/.test(String(input))
+        ? jsonResponse({
+          document: { id: SOURCE_A, originalFilename: 'slides.pdf', pageCount: 3, kind: 'pdf' },
+          pages: [
+            { pageNumber: 1, text: 'page one body' },
+            { pageNumber: 2, text: 'page two body' },
+            { pageNumber: 3, text: 'page three body' },
+          ],
+        })
+        : jsonResponse({ threads: [], messages: [] })
+    ));
+    await mount({
+      documentOpenRequest: docRequest(1, SOURCE_A, 2),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+    } as never);
+
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLElement).click();
+    });
+    await settle();
+
+    const chip = drawerEl()!.querySelector('[data-board-ai-context-mandatory]') as HTMLElement;
+    expect(chip.getAttribute('data-board-ai-context-mandatory')).toBe('knowledge-page');
+    expect(chip.textContent).toContain('p. 2');
+  });
+});

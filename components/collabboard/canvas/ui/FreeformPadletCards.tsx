@@ -4041,6 +4041,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         url={linkUrlFromMeta || linkUrl}
                         index={transcriptIndex.entries}
                         indexLoaded={transcriptIndex.loaded}
+                        onOpen={props.onOpenTranscript}
                       />
                     </div>
                   );

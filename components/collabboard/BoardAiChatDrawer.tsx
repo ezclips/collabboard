@@ -169,6 +169,16 @@ export interface BoardAiChatDrawerProps {
     readonly proposal: BoardWikiProposal;
   }) => void;
   /**
+   * PATCH-200. Text to place in the composer ONCE, for the request id below.
+   *
+   * The reader's "Summarise for the wiki" uses it: the prompt is PREFILLED and
+   * never sent, so no credits are spent without a click. Keyed by the request id
+   * rather than applied on every render, so an unrelated rerender cannot
+   * overwrite what the person is typing and a second click is a real new intent.
+   */
+  readonly initialDraftText?: string;
+  readonly initialDraftTextRequestId?: number;
+  /**
    * The one supported board object currently selected, already reduced to a
    * draft by the shell's own selection authority. Null when the selection is
    * empty, multiple, or something Board AI cannot honestly use.
@@ -386,6 +396,8 @@ export default function BoardAiChatDrawer({
   onSaveAssistantAsNote,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
+  initialDraftText,
+  initialDraftTextRequestId,
   selectedBoardItem = null,
   onResolveDroppedPost,
 }: BoardAiChatDrawerProps) {
@@ -620,6 +632,22 @@ export default function BoardAiChatDrawer({
     }
     setBoardDraft(action);
   }, [documentScopeId, setDocumentSessionValue]);
+
+  /**
+   * PATCH-200. Apply `initialDraftText` exactly once per request id.
+   *
+   * A REF, not state: applying a draft is an effect on the store, not a value
+   * this component renders from, and holding the id in state would re-render
+   * only to remember something already done. The ref resets with a remount,
+   * which is correct for a first mount; a later request id is what re-arms it.
+   */
+  const appliedDraftRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (initialDraftTextRequestId === undefined) return;
+    if (appliedDraftRequestRef.current === initialDraftTextRequestId) return;
+    appliedDraftRequestRef.current = initialDraftTextRequestId;
+    setDraft(initialDraftText ?? '');
+  }, [initialDraftTextRequestId, initialDraftText, setDraft]);
 
   const setLoadingMessages = useCallback((action: React.SetStateAction<boolean>) => {
     if (documentScopeId) {

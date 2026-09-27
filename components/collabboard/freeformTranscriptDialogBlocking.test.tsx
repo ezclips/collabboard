@@ -392,3 +392,30 @@ describe('PATCH-199 a ready transcript opens, and a successful import opens it t
     host.remove();
   });
 });
+
+describe('PATCH-200 the green status opens the transcript', () => {
+  it('the ready status is a button, and it opens the entry document id', async () => {
+    // PATCH-200 turns the status line itself into the control. The card passes
+    // its OWN onOpenTranscript down, so the button reports the entry's document
+    // id -- identity, not the URL -- to the same board handler the menu uses.
+    transcriptIndexMock.entries = [readyEntry()];
+    const onChange = vi.fn();
+    const onOpen = vi.fn();
+    const { host, root } = await mount(onChange, onOpen);
+
+    const status = host.querySelector<HTMLButtonElement>('[data-testid="transcript-open"]');
+    expect(status, 'the green status should offer Open').toBeTruthy();
+    expect(status!.textContent).toContain('Transcript added · Open');
+
+    await act(async () => {
+      status!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith('doc-ready');
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  });
+});
