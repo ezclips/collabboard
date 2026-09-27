@@ -70,19 +70,19 @@ export interface KnowledgeTextSourceViewProps {
    */
   readonly boardId?: string;
   /**
-   * PATCH-200. The "next step" bar above a transcript's text. Every prop is
+   * PATCH-200/201. The "next step" bar above a transcript's text. Every prop is
    * optional and the bar renders only for a transcript WITH somewhere to go, so
    * a non-transcript mount -- and every existing test mount -- is unchanged.
    *
-   * `onOpenAssistantPanel` opens the host's AI panel on this document; `onSummarise`
-   * additionally prefills the composer with a summary request, and never sends
-   * it. `canSaveToWiki` says whether the AI answers will offer "Save to wiki",
-   * which decides whether the summarise button and its helper line appear at
-   * all: offering a wiki summary where nothing can be saved to the wiki is the
-   * same dead end this bar exists to remove.
+   * `onOpenAssistantPanel` opens the host's AI panel on this document.
+   * `onSummariseVideo` opens it AND sends the summary question through the
+   * panel's own send path (PATCH-201): the button now does what it says instead
+   * of quietly prefilling a composer in the corner. `canSaveToWiki` says whether
+   * the AI answers will offer "Save to wiki", which decides whether the helper
+   * line appears; the summary button itself does not need the wiki.
    */
   readonly onOpenAssistantPanel?: () => void;
-  readonly onSummariseForWiki?: () => void;
+  readonly onSummariseVideo?: () => void;
   readonly canSaveToWiki?: boolean;
 }
 
@@ -122,7 +122,7 @@ export default function KnowledgeTextSourceView({
   transcriptRepresentation,
   boardId,
   onOpenAssistantPanel,
-  onSummariseForWiki,
+  onSummariseVideo,
   canSaveToWiki = false,
 }: KnowledgeTextSourceViewProps) {
   const markRef = useRef<HTMLElement | null>(null);
@@ -387,11 +387,12 @@ export default function KnowledgeTextSourceView({
         ].join(' ')}
       >
         {/*
-          PATCH-200. THE NEXT STEP, at the top of a transcript. The owner's
+          PATCH-200/201. THE NEXT STEP, at the top of a transcript. The owner's
           complaint was the dead end: the text opened, and nothing said what to
           do with it. Both buttons open the host's existing AI panel -- the same
-          one the sparkle opens -- and the summarise prompt is PREFILLED, never
-          sent, so no credits are spent without a click.
+          one the sparkle opens -- and "Summarise this video" now SENDS its
+          question on click, exactly as the suggested-question chips do, so
+          pressing it visibly starts an answer instead of filling a composer.
 
           A transcript only, and only where a host supplied the opener: a PDF is
           untouched, and so is a non-transcript text source (this component's
@@ -410,19 +411,19 @@ export default function KnowledgeTextSourceView({
             >
               Ask AI about this video
             </button>
-            {canSaveToWiki && onSummariseForWiki ? (
+            {onSummariseVideo ? (
               <button
                 type="button"
                 data-knowledge-transcript-summarise="true"
-                onClick={onSummariseForWiki}
+                onClick={onSummariseVideo}
                 className="rounded border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50"
               >
-                Summarise for the wiki
+                Summarise this video
               </button>
             ) : null}
             {canSaveToWiki ? (
               <span data-knowledge-transcript-wiki-hint="true" className="text-[11px] text-gray-500">
-                {'Every answer has "Save to wiki", which adds it to a wiki page for you to review.'}
+                {'Then use "Save to wiki" under the answer to keep it.'}
               </span>
             ) : null}
           </div>

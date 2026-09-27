@@ -2322,13 +2322,13 @@ describe('Stage 1. reading a text source', () => {
 });
 
 // ============================================================================
-// PATCH-200 -- an open transcript shows its next step
+// PATCH-200/201 -- an open transcript shows its next step
 // ============================================================================
 //
 // The owner's complaint: the text opened and nothing said what to do with it.
-// The bar is a TRANSCRIPT's only -- a plain text source and a PDF are untouched
-// -- and its two buttons open the SAME AI panel the sparkle opens, never
-// sending the prefill.
+// The bar is a TRANSCRIPT's only -- a plain text source and a PDF are untouched.
+// "Ask AI about this video" only opens the panel; "Summarise this video" opens
+// it AND sends its question, exactly as a suggested question does (PATCH-201).
 
 describe('PATCH-200 a transcript shows its next step', () => {
   const TRANSCRIPT = 'The transcript body.';
@@ -2398,29 +2398,166 @@ describe('PATCH-200 a transcript shows its next step', () => {
     expect(posts()).toHaveLength(postsBefore);
   });
 
-  it('"Summarise for the wiki" prefills the composer and sends NOTHING', async () => {
+  it('"Summarise this video" opens the AI panel and sends exactly ONE chat question', async () => {
+    // PATCH-201 REVERSES the PATCH-200 premise, on owner feedback: a button that
+    // only filled a composer in the far corner looked like it did nothing. It
+    // now SENDS, through the same path a suggested question uses.
     await openTranscript({ canSaveAssistantToWiki: true, onOpenWikiWithProposal: vi.fn() });
 
-    const postsBefore = posts().length;
+    const chatPosts = () => fetchMock.mock.calls.filter(([input, init]) =>
+      (init as RequestInit)?.method === 'POST' && /\/ai\/chat$/.test(String(input)));
+    const before = chatPosts().length;
+
     await act(async () => {
       (drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]') as HTMLElement).click();
     });
     await settle();
 
     expect(openPanel()).toBe('ai');
-    const composer = drawerEl()!.querySelector('[data-board-ai-chat-input]') as HTMLTextAreaElement;
-    expect(composer.value).toBe('Summarise the key points of this video.');
-    // NOT sent: no credits spent without a click.
-    expect(posts()).toHaveLength(postsBefore);
+    const sent = chatPosts();
+    expect(sent, 'one click is one chat request').toHaveLength(before + 1);
+    const body = JSON.parse(String((sent[sent.length - 1][1] as RequestInit).body)) as { message?: string };
+    expect(body.message).toBe('Summarise the key points of this video.');
   });
 
-  it('the summarise button and helper line appear only where saving to the wiki is possible', async () => {
+  it('a second "Summarise this video" while a reply is pending sends nothing more', async () => {
+    // The first chat request never resolves, so the conversation stays busy.
+    const pending = deferred<Response>();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (/\/pages$/.test(url)) {
+        return jsonResponse({
+          document: {
+            id: SOURCE_A,
+            originalFilename: 'talk.txt',
+            pageCount: null,
+            kind: 'text',
+            transcriptRepresentation: representation(),
+          },
+          pages: [],
+          text: TRANSCRIPT,
+        });
+      }
+      if (/\/ai\/chat$/.test(url)) return pending.promise;
+      return jsonResponse({ threads: [], messages: [] });
+    });
+    await mount({
+      documentOpenRequest: docRequest(1),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+    } as never);
+
+    const chatPosts = () => fetchMock.mock.calls.filter(([input, init]) =>
+      (init as RequestInit)?.method === 'POST' && /\/ai\/chat$/.test(String(input)));
+    const clickSummarise = async () => {
+      await act(async () => {
+        (drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]') as HTMLElement).click();
+      });
+      await settle();
+    };
+
+    await clickSummarise();
+    expect(chatPosts()).toHaveLength(1);
+
+    // A busy conversation must not queue a second question.
+    await clickSummarise();
+    expect(chatPosts(), 'a reply in flight drops the second click').toHaveLength(1);
+
+    pending.resolve(jsonResponse({ threads: [], messages: [] }));
+    await settle();
+  });
+
+  it('does not resend the summary after the AI panel is closed and reopened', async () => {
+    // PATCH-201 review. The chat's same-mount ref resets when the panel
+    // UNMOUNTS, but the request lives in the reader. Closing the panel (X) and
+    // reopening it with "Ask AI about this video" must reuse the consumed
+    // request, not replay it -- one click, one charged question, ever.
+    await openTranscript({ canSaveAssistantToWiki: true, onOpenWikiWithProposal: vi.fn() });
+
+    const chatPosts = () => fetchMock.mock.calls.filter(([input, init]) =>
+      (init as RequestInit)?.method === 'POST' && /\/ai\/chat$/.test(String(input)));
+
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]') as HTMLElement).click();
+    });
+    await settle();
+    expect(chatPosts(), 'one click is one send').toHaveLength(1);
+
+    // Close the AI panel: the embedded chat unmounts with it.
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-board-ai-chat-action="close"]') as HTMLElement).click();
+    });
+    await settle();
+    expect(openPanel()).not.toBe('ai');
+    expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).toBeNull();
+
+    // Reopen WITHOUT asking again: "Ask AI about this video" only opens the panel.
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-knowledge-transcript-ask-ai="true"]') as HTMLElement).click();
+    });
+    await settle();
+    expect(openPanel()).toBe('ai');
+    expect(chatPosts(), 'the consumed request must not replay on remount').toHaveLength(1);
+  });
+
+  it('shows the wiki helper only where saving to the wiki is possible', async () => {
+    await openTranscript({ canSaveAssistantToWiki: true, onOpenWikiWithProposal: vi.fn() });
+    const hint = drawerEl()!.querySelector('[data-knowledge-transcript-wiki-hint="true"]');
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent).toContain('Then use "Save to wiki" under the answer to keep it.');
+  });
+
+  it('shows "Summarise this video" whenever the AI bar is shown, wiki or not', async () => {
     await openTranscript();
 
-    // The Ask button is always there for a transcript; the wiki half is not.
+    // Without the wiki capability the helper is gone, but the summary button --
+    // like Ask AI -- remains: summarising is useful without a wiki.
     expect(drawerEl()!.querySelector('[data-knowledge-transcript-ask-ai="true"]')).not.toBeNull();
-    expect(drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]')).toBeNull();
+    const summarise = drawerEl()!.querySelector('[data-knowledge-transcript-summarise="true"]');
+    expect(summarise).not.toBeNull();
+    expect(summarise!.textContent).toContain('Summarise this video');
     expect(drawerEl()!.querySelector('[data-knowledge-transcript-wiki-hint="true"]')).toBeNull();
+  });
+
+  // ==========================================================================
+  // PATCH-201: the AI panel takes half the reader beside a text document
+  // ==========================================================================
+  it('gives a text document half the drawer from lg up', async () => {
+    // The defect: answers wrapped to a few words in a 300px column beside a
+    // wide transcript. Below lg the panel still covers the reading pane.
+    await openTranscript();
+
+    const pane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane="true"]') as HTMLElement;
+    expect(pane.className).toContain('lg:w-1/2');
+    expect(pane.className).toContain('lg:flex-none');
+    expect(pane.className).not.toContain('lg:w-[300px]');
+    // Below lg nothing changed: it is still the overlay over the reading pane.
+    expect(pane.className).toContain('absolute inset-0');
+  });
+
+  it('keeps the 300px column for a PDF', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
+      /\/pages$/.test(String(input))
+        ? jsonResponse({
+          document: { id: SOURCE_A, originalFilename: 'slides.pdf', pageCount: 1, kind: 'pdf' },
+          pages: [{ pageNumber: 1, text: 'page one body' }],
+        })
+        : jsonResponse({ threads: [], messages: [] })
+    ));
+    await mount({
+      documentOpenRequest: docRequest(1),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+    } as never);
+
+    const pane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane="true"]') as HTMLElement;
+    expect(pane.className).toContain('lg:w-[300px]');
+    expect(pane.className).toContain('lg:flex-none');
+    expect(pane.className).not.toContain('lg:w-1/2');
   });
 
   it('for a transcript the panel offers "← Close", not "← Back to PDFs"', async () => {

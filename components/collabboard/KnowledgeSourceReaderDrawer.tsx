@@ -70,9 +70,9 @@ const READER_PAGES_RETRY_LIMIT = 12;
 const READER_PAGES_RETRY_DELAY_MS = 2000;
 
 /**
- * PATCH-200. What "Summarise for the wiki" puts in the composer. A CONSTANT
- * rather than a free input: it is a starting point the person edits or sends,
- * and it is never sent by this code -- the send is theirs.
+ * PATCH-200/201. What "Summarise this video" sends. A CONSTANT rather than a
+ * free input: the button asks one fixed question, and it travels the embedded
+ * chat's own send path exactly as a suggested question does.
  */
 const TRANSCRIPT_SUMMARY_PROMPT = 'Summarise the key points of this video.';
 
@@ -221,8 +221,9 @@ export interface KnowledgeSourceReaderDrawerProps {
    * (`canEditBoardContent` in CanvasClient), and no new server path: the wiki
    * route already verifies the signed answer.
    *
-   * It also decides the next-step bar's summarise button and helper line: with
-   * no ability to save, a "Summarise for the wiki" action has nowhere to go.
+   * It also decides the next-step bar's helper line: the "Save to wiki" hint is
+   * shown only where it can actually be acted on. The "Summarise this video"
+   * button itself does not need it -- summarising is useful without the wiki.
    */
   canSaveAssistantToWiki?: boolean;
   onOpenWikiWithProposal?: (target: {
@@ -340,13 +341,13 @@ export default function KnowledgeSourceReaderDrawer({
   /** The docked reader's own right panel: Library first, AI on request. */
   const [sidePanelRightPanel, setSidePanelRightPanel] = useState<PdfReaderPanel>('library');
   /**
-   * PATCH-200. The summary prompt the next-step bar queued for the AI composer,
-   * minted with a fresh request id so the SAME prompt can be applied again on a
-   * second click without a rerender re-applying it.
+   * PATCH-201. The summary question the next-step bar asked the AI to SEND,
+   * minted with a fresh request id so each click is one send. The embedded
+   * chat's own `sending` guard drops a click that arrives mid-reply.
    */
-  const [composerPrefill, setComposerPrefill] =
+  const [summariseRequest, setSummariseRequest] =
     useState<{ readonly requestId: number; readonly text: string } | null>(null);
-  const composerPrefillRequestIdRef = useRef(0);
+  const summariseRequestIdRef = useRef(0);
   /** Which page the reader is actually on, in either host. */
   const [readerActivePage, setReaderActivePage] =
     useState<{ readonly documentId: string; readonly pageNumber: number } | null>(null);
@@ -818,19 +819,31 @@ export default function KnowledgeSourceReaderDrawer({
   }, [presentation, onWorkspaceRightPanelChange]);
 
   /**
-   * PATCH-200. Prefill the composer with the summary request and open the panel.
-   * The prompt is placed in the box and NEVER sent: the person still presses
-   * Send, so no credits are spent without a click. A fresh request id makes a
-   * second press an intent of its own rather than a no-op.
+   * PATCH-200/201. Open the AI panel and SEND the summary question. The send
+   * travels the embedded chat's own send path -- the same one the suggested
+   * questions use -- so one click is one question; the chat drops the click if a
+   * reply is already in flight. A fresh request id makes each press its own
+   * intent rather than a no-op.
    */
-  const summariseTranscriptForWiki = useCallback(() => {
-    composerPrefillRequestIdRef.current += 1;
-    setComposerPrefill({
-      requestId: composerPrefillRequestIdRef.current,
+  const summariseTranscript = useCallback(() => {
+    summariseRequestIdRef.current += 1;
+    setSummariseRequest({
+      requestId: summariseRequestIdRef.current,
       text: TRANSCRIPT_SUMMARY_PROMPT,
     });
     openReaderAiPanel();
   }, [openReaderAiPanel]);
+
+  /**
+   * PATCH-201 review fix. The embedded chat is UNMOUNTED whenever the right
+   * panel closes or switches to Library, and its same-mount guard resets with
+   * it. So the request is CONSUMED once handled -- cleared here in its owner --
+   * and a remount sees no request to replay. A stale id leaves the live request
+   * alone.
+   */
+  const handleSummarySent = useCallback((requestId: number) => {
+    setSummariseRequest((current) => (current?.requestId === requestId ? null : current));
+  }, []);
 
   const libraryBacklinks = useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null);
   const libraryBacklinkRows = useMemo(
@@ -889,7 +902,7 @@ export default function KnowledgeSourceReaderDrawer({
           presentation={host}
           transcriptRepresentation={reader.transcriptRepresentation}
           onOpenAssistantPanel={openReaderAiPanel}
-          onSummariseForWiki={summariseTranscriptForWiki}
+          onSummariseVideo={summariseTranscript}
           canSaveToWiki={canSaveAssistantToWiki}
         />
       );
@@ -992,8 +1005,9 @@ export default function KnowledgeSourceReaderDrawer({
         onSaveAssistantAsNote={onSaveAssistantAsNote}
         canSaveAssistantToWiki={canSaveAssistantToWiki}
         onOpenWikiWithProposal={onOpenWikiWithProposal}
-        initialDraftText={composerPrefill?.text}
-        initialDraftTextRequestId={composerPrefill?.requestId}
+        sendText={summariseRequest?.text}
+        sendTextRequestId={summariseRequest?.requestId}
+        onSendTextHandled={handleSummarySent}
         selectedBoardItem={null}
       />
     ) : null;
@@ -1183,7 +1197,18 @@ export default function KnowledgeSourceReaderDrawer({
                 data-knowledge-source-notes-pane="true"
                 data-knowledge-library-panel="true"
                 data-knowledge-reader-right-panel={sidePanelRightPanel}
-                className="absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden border-l border-gray-100 bg-white lg:static lg:z-auto lg:w-[300px] lg:flex-none"
+                /*
+                  PATCH-201. Beside a text document the panel takes HALF the
+                  drawer from `lg` up: a transcript is wide and the AI answers
+                  wrapped to a few words in a 300px column. A PDF keeps the 300px
+                  column (the literal is pinned by a census). Below `lg` both are
+                  unchanged -- the panel covers the reading pane either way.
+                */
+                className={`absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden border-l border-gray-100 bg-white lg:static lg:z-auto ${
+                  reader.kind === KNOWLEDGE_TEXT_KIND
+                    ? 'lg:w-1/2 lg:flex-none'
+                    : 'lg:w-[300px] lg:flex-none'
+                }`}
               >
                 {/*
                   What is this source, where did it come from, and where is it
@@ -1258,8 +1283,9 @@ export default function KnowledgeSourceReaderDrawer({
                       onSaveAssistantAsNote={onSaveAssistantAsNote}
                       canSaveAssistantToWiki={canSaveAssistantToWiki}
                       onOpenWikiWithProposal={onOpenWikiWithProposal}
-                      initialDraftText={composerPrefill?.text}
-                      initialDraftTextRequestId={composerPrefill?.requestId}
+                      sendText={summariseRequest?.text}
+                      sendTextRequestId={summariseRequest?.requestId}
+                      onSendTextHandled={handleSummarySent}
                       selectedBoardItem={null}
                     />
                   ) : null}

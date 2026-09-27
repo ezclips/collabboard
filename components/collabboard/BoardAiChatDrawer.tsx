@@ -169,15 +169,26 @@ export interface BoardAiChatDrawerProps {
     readonly proposal: BoardWikiProposal;
   }) => void;
   /**
-   * PATCH-200. Text to place in the composer ONCE, for the request id below.
+   * PATCH-201. Send a given text ONCE, for the request id below.
    *
-   * The reader's "Summarise for the wiki" uses it: the prompt is PREFILLED and
-   * never sent, so no credits are spent without a click. Keyed by the request id
-   * rather than applied on every render, so an unrelated rerender cannot
-   * overwrite what the person is typing and a second click is a real new intent.
+   * The reader's "Summarise this video" uses it: the question is SENT through
+   * the same `send` the suggested-question chips use, so the person sees the
+   * answer begin instead of a composer quietly filling in a far corner. Keyed by
+   * the request id rather than sent on every render, so one click is one send
+   * and a later rerender cannot repeat it. `send`'s own `sending` guard drops a
+   * click that arrives while a reply is already in flight.
    */
-  readonly initialDraftText?: string;
-  readonly initialDraftTextRequestId?: number;
+  readonly sendText?: string;
+  readonly sendTextRequestId?: number;
+  /**
+   * PATCH-201 review fix. Reports a consumed send request so the OWNER can clear
+   * it. The request outlives this component -- it lives in the reader, which
+   * unmounts this drawer whenever the right panel closes or switches to Library
+   * -- so a same-mount ref cannot stop a remount from replaying it. Called once
+   * per request id, right after it is sent OR dropped while busy; the reader
+   * clears its request when the id matches.
+   */
+  readonly onSendTextHandled?: (requestId: number) => void;
   /**
    * The one supported board object currently selected, already reduced to a
    * draft by the shell's own selection authority. Null when the selection is
@@ -396,8 +407,9 @@ export default function BoardAiChatDrawer({
   onSaveAssistantAsNote,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
-  initialDraftText,
-  initialDraftTextRequestId,
+  sendText,
+  sendTextRequestId,
+  onSendTextHandled,
   selectedBoardItem = null,
   onResolveDroppedPost,
 }: BoardAiChatDrawerProps) {
@@ -632,22 +644,6 @@ export default function BoardAiChatDrawer({
     }
     setBoardDraft(action);
   }, [documentScopeId, setDocumentSessionValue]);
-
-  /**
-   * PATCH-200. Apply `initialDraftText` exactly once per request id.
-   *
-   * A REF, not state: applying a draft is an effect on the store, not a value
-   * this component renders from, and holding the id in state would re-render
-   * only to remember something already done. The ref resets with a remount,
-   * which is correct for a first mount; a later request id is what re-arms it.
-   */
-  const appliedDraftRequestRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (initialDraftTextRequestId === undefined) return;
-    if (appliedDraftRequestRef.current === initialDraftTextRequestId) return;
-    appliedDraftRequestRef.current = initialDraftTextRequestId;
-    setDraft(initialDraftText ?? '');
-  }, [initialDraftTextRequestId, initialDraftText, setDraft]);
 
   const setLoadingMessages = useCallback((action: React.SetStateAction<boolean>) => {
     if (documentScopeId) {
@@ -1487,6 +1483,33 @@ export default function BoardAiChatDrawer({
     setSending,
     reloadThread,
   ]);
+
+  /**
+   * PATCH-201. Send a requested text ONCE per request id, through the SAME
+   * `send` the suggested-question chips use -- no second send path.
+   *
+   * A REF, not state: the id records what has already been sent ON THIS MOUNT,
+   * and `send` itself refuses while `sending`, so a click that lands during a
+   * reply is dropped rather than queued -- one click, one send.
+   *
+   * THE REF IS NOT ENOUGH ALONE. This drawer unmounts when the reader's right
+   * panel closes or switches to Library, which resets the ref while the reader
+   * still holds the same request id -- so a remount would send the summary
+   * again. `onSendTextHandled` hand the consumed id back to the owner, which
+   * clears the request; then a remount sees no request at all.
+   */
+  const appliedSendRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (sendTextRequestId === undefined) return;
+    if (appliedSendRequestRef.current === sendTextRequestId) return;
+    appliedSendRequestRef.current = sendTextRequestId;
+    if (sendText !== undefined && sendText.length > 0) {
+      void send(sendText);
+    }
+    // Consumed whether it was sent or dropped as busy: a later remount must not
+    // replay a request the person already made once.
+    onSendTextHandled?.(sendTextRequestId);
+  }, [sendTextRequestId, sendText, send, onSendTextHandled]);
 
   const refreshThreads = useCallback(async () => {
     try {

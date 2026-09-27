@@ -587,3 +587,27 @@ describe('PATCH-200 the reader threads the wiki-save capability into its AI', ()
     expect(reader).toContain('pageNumber: activePageNumber,');
   });
 });
+
+// ============================================================================
+// PATCH-201: "Summarise this video" sends through the embedded chat's own path
+// ============================================================================
+describe('PATCH-201 the reader sends the summary question', () => {
+  it('hands the send request to the embedded chat in BOTH hosts, and drops the old prefill', () => {
+    const reader = executable(READER);
+    // One shared pair per host: the docked drawer and the focused workspace.
+    expect((reader.match(/sendText={summariseRequest\?\.text}/g) ?? []).length).toBe(2);
+    expect((reader.match(/sendTextRequestId={summariseRequest\?\.requestId}/g) ?? []).length).toBe(2);
+    // PATCH-200's prefill is gone everywhere: it is no longer used.
+    expect(reader).not.toContain('initialDraftText');
+  });
+
+  it('the embedded chat sends via the chip path, not a second send implementation', () => {
+    const drawer = executable(read('components/collabboard/BoardAiChatDrawer.tsx'));
+    expect(drawer).toContain('sendText?: string;');
+    expect(drawer).toContain('sendTextRequestId?: number;');
+    expect(drawer).not.toContain('initialDraftText');
+    // The SAME `send` the suggested-question chips call.
+    expect(drawer).toContain('void send(sendText);');
+    expect(drawer).toContain('onClick={() => { void send(question); }}');
+  });
+});
