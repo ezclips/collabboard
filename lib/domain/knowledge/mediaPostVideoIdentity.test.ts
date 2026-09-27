@@ -131,6 +131,58 @@ describe('mediaPostVideoIdentity', () => {
         'file',
       );
     });
+
+    it('Spotify recognises an episode, with or without a locale prefix', () => {
+      // PATCH-204. The episode id is the provider's own stable id, so this is
+      // canonical and a transcript stored for it may be reused.
+      expect(mediaPostVideoIdentity('https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk')).toEqual({
+        provider: 'spotify',
+        identity: 'spotify:episode:4rOoJ6Egrf8K2IrywzwOMk',
+        canonical: true,
+      });
+      // A locale prefix and a share-tracking parameter are a visit, not a
+      // different episode: the identity must be identical.
+      expect(
+        mediaPostVideoIdentity(
+          'https://open.spotify.com/intl-de/episode/4rOoJ6Egrf8K2IrywzwOMk?si=AbCdEf',
+        )?.identity,
+      ).toBe('spotify:episode:4rOoJ6Egrf8K2IrywzwOMk');
+    });
+
+    it('a Spotify show is not an episode', () => {
+      // A show holds many episodes; there is no single thing to transcribe, so
+      // the card must not offer a transcript for the whole show.
+      expect(
+        mediaPostVideoIdentity('https://open.spotify.com/show/4rOoJ6Egrf8K2IrywzwOMk'),
+      ).toBeNull();
+    });
+
+    it('Apple Podcasts recognises an episode by its ?i= id, and a show is not one', () => {
+      expect(
+        mediaPostVideoIdentity(
+          'https://podcasts.apple.com/us/podcast/the-daily/id1200361736?i=1000634567890',
+        ),
+      ).toEqual({
+        provider: 'apple-podcasts',
+        identity: 'apple-podcasts:1000634567890',
+        canonical: true,
+      });
+      // Without `?i=` the URL names the show, not an episode.
+      expect(
+        mediaPostVideoIdentity('https://podcasts.apple.com/us/podcast/the-daily/id1200361736'),
+      ).toBeNull();
+    });
+
+    it('Pocket Casts is recognised but never claimed as canonical', () => {
+      // Its ids are not reliably extractable, so the normalised URL stands in:
+      // enough to notice a change, not enough to reuse someone's transcript.
+      const short = mediaPostVideoIdentity('https://pca.st/abc123');
+      expect(short?.provider).toBe('pocketcasts');
+      expect(short?.canonical).toBe(false);
+      const page = mediaPostVideoIdentity('https://pocketcasts.com/podcast/the-daily/1234/5678');
+      expect(page?.provider).toBe('pocketcasts');
+      expect(page?.canonical).toBe(false);
+    });
   });
 
   describe('what is NOT media', () => {
@@ -163,6 +215,16 @@ describe('mediaPostVideoIdentity', () => {
       // affordance. An article card showing "Add transcript" is the noise this
       // gate exists to prevent.
       expect(mediaPostCarriesSpokenContent('https://example.com/an-article')).toBe(false);
+      // PATCH-204. A podcast episode offers the paste exactly as a video does.
+      expect(
+        mediaPostCarriesSpokenContent('https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk'),
+      ).toBe(true);
+      expect(
+        mediaPostCarriesSpokenContent(
+          'https://podcasts.apple.com/us/podcast/the-daily/id1200361736?i=1000634567890',
+        ),
+      ).toBe(true);
+      expect(mediaPostCarriesSpokenContent('https://pca.st/abc123')).toBe(true);
     });
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { KnowledgeTranscriptFormat } from '@/lib/domain/knowledge/knowledgeTranscriptCues';
 import { KNOWLEDGE_TRANSCRIPT_SAVED_STATE_UNCERTAIN } from '@/lib/domain/knowledge/knowledgeTranscriptImport';
@@ -66,6 +66,21 @@ export interface KnowledgeTranscriptImportPanelProps {
    * reading it (see knowledgeTranscriptPanelPaste.ts).
    */
   readonly initialFormat?: KnowledgeTranscriptFormat;
+  /**
+   * PATCH-204. The "Add a transcript" dialog now has a tab per app, and the
+   * format follows the open tab while the box is empty and the person has not
+   * chosen one. That requires the format to CHANGE after mount, which an
+   * `initialFormat` read once cannot do -- so `initialFormat` is applied on a
+   * prop change, not only at mount. The panel still owns the value and still
+   * lets the person override it; `onFormatChange` reports only a person's own
+   * choice, never the prop-driven update, so the dialog can tell the two apart.
+   */
+  readonly onFormatChange?: (format: KnowledgeTranscriptFormat | '') => void;
+  /**
+   * PATCH-204. Reports the box's contents, so the dialog knows whether pasted
+   * text is present before it lets a tab switch move the format.
+   */
+  readonly onPayloadChange?: (payload: string) => void;
 }
 
 /** One label and one control style, so no two fields can drift apart. */
@@ -96,12 +111,33 @@ export function KnowledgeTranscriptImportPanel({
   initialVideoIdentity,
   initialTitle,
   initialFormat,
+  onFormatChange,
+  onPayloadChange,
   onImported,
 }: KnowledgeTranscriptImportPanelProps) {
   const [payload, setPayload] = useState('');
   // NO DEFAULT FORMAT. An empty value cannot be submitted, which is the point:
   // the person says what they pasted.
   const [format, setFormat] = useState<KnowledgeTranscriptFormat | ''>(initialFormat ?? '');
+  /**
+   * PATCH-204. A CHANGE to `initialFormat` re-applies it; an unchanged one does
+   * nothing. This is what lets the dialog move the format with the tab without
+   * remounting the panel -- which would throw away the pasted text.
+   */
+  const lastInitialFormatRef = useRef<KnowledgeTranscriptFormat | undefined>(initialFormat);
+  useEffect(() => {
+    if (initialFormat === lastInitialFormatRef.current) return;
+    lastInitialFormatRef.current = initialFormat;
+    setFormat(initialFormat ?? '');
+  }, [initialFormat]);
+  const chooseFormat = useCallback(
+    (next: KnowledgeTranscriptFormat | '') => {
+      setFormat(next);
+      // A PERSON'S choice, distinct from the prop-driven update above.
+      onFormatChange?.(next);
+    },
+    [onFormatChange],
+  );
   const [title, setTitle] = useState(existing?.title ?? initialTitle ?? '');
   const [language, setLanguage] = useState('');
   const [trackKind, setTrackKind] = useState<'human' | 'machine' | 'unknown'>('unknown');
@@ -214,7 +250,7 @@ export function KnowledgeTranscriptImportPanel({
         <select
           id="transcript-format"
           value={format}
-          onChange={(event) => setFormat(event.target.value as KnowledgeTranscriptFormat)}
+          onChange={(event) => chooseFormat(event.target.value as KnowledgeTranscriptFormat)}
           required
           className={controlClass}
         >
@@ -285,7 +321,10 @@ export function KnowledgeTranscriptImportPanel({
         <textarea
           id="transcript-payload"
           value={payload}
-          onChange={(event) => setPayload(event.target.value)}
+          onChange={(event) => {
+            setPayload(event.target.value);
+            onPayloadChange?.(event.target.value);
+          }}
           required
           rows={12}
           placeholder="Paste the transcript here…"

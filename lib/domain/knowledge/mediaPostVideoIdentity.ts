@@ -43,6 +43,14 @@ export type MediaPostProvider =
   | 'twitter'
   | 'instagram'
   | 'facebook'
+  // PATCH-204. Podcast episode links. A podcast card has no player of its own
+  // here, so a citation into one falls back to opening the transcript in the
+  // reader -- exactly the documented fallback when `seekBoardVideo` is false.
+  // Nothing registers a player for these identities (see LinkMediaEmbed, which
+  // only mounts BoardSeekableVideo for YouTube and Vimeo).
+  | 'spotify'
+  | 'apple-podcasts'
+  | 'pocketcasts'
   | 'file';
 
 export interface MediaPostVideoIdentity {
@@ -156,6 +164,37 @@ export function mediaPostVideoIdentity(url: string): MediaPostVideoIdentity | nu
     // page. There is no video to transcribe, so there is no identity.
     if (id === null) return null;
     return { provider: 'youtube', identity: `yt:${id}`, canonical: true };
+  }
+
+  if (host === 'open.spotify.com') {
+    // A podcast episode, with an optional locale prefix: /episode/<id> or
+    // /intl-de/episode/<id>. The episode id is the provider's own stable id, so
+    // this is canonical enough to reuse a transcript.
+    const match = /\/(?:intl-[a-z]{2}\/)?episode\/([A-Za-z0-9]+)/.exec(path);
+    if (match !== null) {
+      return { provider: 'spotify', identity: `spotify:episode:${match[1]}`, canonical: true };
+    }
+    // A /show/ link is a show, not an episode. There is no single thing to
+    // transcribe, so it gets no identity and the card offers no transcript.
+    return null;
+  }
+
+  if (host === 'podcasts.apple.com') {
+    // The episode is named by `?i=<episode id>`, separate from the show's
+    // `id<digits>` in the path. Without `?i=` this is a show page, not media.
+    const episodeId = parsed.searchParams.get('i');
+    if (episodeId !== null && /^\d+$/.test(episodeId)) {
+      return { provider: 'apple-podcasts', identity: `apple-podcasts:${episodeId}`, canonical: true };
+    }
+    return null;
+  }
+
+  if (host === 'pca.st' || host.endsWith('pocketcasts.com')) {
+    // pca.st short links and pocketcasts.com episode pages. The id is not
+    // reliably extractable, so the identity is the normalised URL: stable enough
+    // to notice a CHANGE (W7), and deliberately not trusted enough to REUSE a
+    // transcript (W1). Same treatment as a direct media file.
+    return uncertain('pocketcasts', parsed);
   }
 
   if (host.endsWith('vimeo.com')) {
