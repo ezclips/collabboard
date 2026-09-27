@@ -2151,6 +2151,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * the three share one dock and the rule below has to see all three.
    */
   const [isBoardWikiOpen, setIsBoardWikiOpen] = useState(false);
+  /**
+   * PATCH-196. The page a wiki citation asked to open. Set when a Board AI
+   * wiki-page citation is clicked and read by BoardWikiDrawer, which selects it
+   * if it exists. A monotonic REQUEST id travels with it so asking twice for the
+   * same page re-triggers the drawer (the id, not the page, is the signal).
+   */
+  const [boardWikiRequestedPage, setBoardWikiRequestedPage] =
+    useState<{ readonly pageId: string; readonly requestId: number } | null>(null);
 
   /**
    * =========================================================================
@@ -2634,13 +2642,34 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * existing rule already closes this chat as the reader takes the dock.
    */
   const openBoardAiCitation = useCallback((request: {
-    readonly knowledgeDocumentId: string;
+    readonly knowledgeDocumentId?: string;
+    /** PATCH-196. A cited wiki page, opened in the board wiki drawer. */
+    readonly wikiPageId?: string;
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
     readonly transcriptStartMs?: number;
     readonly videoIdentity?: string;
   }) => {
+    /**
+     * PATCH-196. A WIKI CITATION OPENS THE WIKI, ON ITS PAGE.
+     *
+     * It goes through the board's ONE wiki-open authority (`openBoardWiki`),
+     * not a second copy of `setIsBoardWikiOpen(true)`: a dock surface that can
+     * be opened from two places acquires the dock rule in one of them and not
+     * the other, which is the exact defect the wiki shipped with. The requested
+     * page rides as a request id so the drawer selects it once its list confirms
+     * the page exists.
+     */
+    if (request.wikiPageId !== undefined) {
+      setBoardWikiRequestedPage((current) => ({
+        pageId: request.wikiPageId as string,
+        requestId: (current?.requestId ?? 0) + 1,
+      }));
+      openBoardWiki();
+      return;
+    }
+    if (request.knowledgeDocumentId === undefined) return;
     /**
      * A TRANSCRIPT CITATION SEEKS THE VIDEO ON THIS BOARD, when there is one.
      *
@@ -2670,7 +2699,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // this document behind the panel it normally opens with.
       revealSource: true,
     });
-  }, [requestKnowledgeDocumentOpen]);
+  }, [requestKnowledgeDocumentOpen, claimDock, openBoardWiki]);
 
   // R1-A-2. Placement gate lives on usePadletSave (constructed below); this ref
   // bridges the ordering without duplicating any placement policy.
@@ -11362,6 +11391,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
              shared board mutation is gated on. */
           canEdit={canEditBoardContent}
           blockingEditorOpen={isBlockingOverlayOpen}
+          /* PATCH-196. A Board AI wiki citation opens the wiki ON this page. */
+          requestedPageId={boardWikiRequestedPage?.pageId ?? null}
           onOpenCitation={openBoardAiCitation}
           /* Only an editor may start a compilation: it writes a proposal row
              and spends provider tokens. A viewer reads the page and its chain

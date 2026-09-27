@@ -65,6 +65,8 @@ vi.mock('@/lib/infra/ai/boardAiSearchReader', () => ({
   createBoardAiSearchReader: () => ({
     searchPosts: mocks.searchPosts,
     searchChunks: mocks.searchChunks,
+    searchWikiPages: async () => ok([]),
+    readCurrentSourceVersions: async () => ok(new Map()),
   }),
 }));
 vi.mock('@/lib/server/billing/aiCredits', () => ({

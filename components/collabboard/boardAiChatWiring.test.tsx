@@ -464,3 +464,37 @@ describe('the board-level entry point', () => {
     expect((CLIENT.match(/data-board-ai-chat-open/g) ?? []).length).toBe(1);
   });
 });
+
+// ============================================================================
+// PATCH-196: a wiki citation opens the wiki, and the reader ignores it
+// ============================================================================
+describe('PATCH-196 a wiki citation opens the board wiki', () => {
+  it('openBoardAiCitation opens the wiki with the cited page, and claims the dock', () => {
+    const fn = CLIENT.slice(
+      CLIENT.indexOf('const openBoardAiCitation = useCallback'),
+      CLIENT.indexOf('const requestPlacementIfRequiredRef'),
+    );
+    // A wiki request sets the requested page, then delegates to the board's ONE
+    // wiki-open authority -- it does not open the wiki a second way.
+    expect(fn).toContain('request.wikiPageId !== undefined');
+    expect(fn).toContain('setBoardWikiRequestedPage(');
+    expect(fn).toContain('openBoardWiki();');
+    // And the drawer receives the requested page.
+    expect(CLIENT).toContain('requestedPageId={boardWikiRequestedPage?.pageId ?? null}');
+  });
+
+  it('the reader ignores a wiki-page citation rather than crashing or opening a document', () => {
+    const reader = executable(READER);
+    const fn = reader.slice(
+      reader.indexOf('const openCitation = useCallback'),
+      reader.indexOf('if (presentation !== ', reader.indexOf('const openCitation = useCallback')),
+    );
+    expect(fn).toContain('request.wikiPageId !== undefined');
+    // No document is opened for a wiki request: the early return precedes the
+    // onOpenKnowledgeDocument call.
+    const wikiGuard = fn.indexOf('request.wikiPageId !== undefined');
+    const openCall = fn.indexOf('onOpenKnowledgeDocument({');
+    expect(wikiGuard).toBeGreaterThan(-1);
+    expect(openCall).toBeGreaterThan(wikiGuard);
+  });
+});

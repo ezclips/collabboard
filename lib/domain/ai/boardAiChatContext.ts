@@ -229,11 +229,21 @@ export const BOARD_AI_CONTEXT_IMAGE_MARKER = '[image attached]';
  * the page it BEGINS on is located rather than invented.
  */
 export interface BoardAiCitablePassage {
-  readonly source: 'post' | 'knowledge';
+  /**
+   * PATCH-196. `'wiki'` is the third kind: a compiled board wiki page. A wiki
+   * passage is cited, never attached -- it has no context-envelope type of its
+   * own, only a citation item (see boardAiChatCitation).
+   */
+  readonly source: 'post' | 'knowledge' | 'wiki';
   readonly label: string;
   readonly padletId?: string;
   readonly knowledgeDocumentId?: string;
   readonly pageStart?: number;
+  /**
+   * PATCH-196. The wiki page this passage came from, so a citation can open the
+   * wiki at it. Identity only, like every field here.
+   */
+  readonly wikiPageId?: string;
   /**
    * Where a PAGELESS passage sits in its source. Identity, like everything
    * else here -- never the text, which a citation says nothing about.

@@ -235,3 +235,40 @@ describe('anything that is not a genuine proof fails closed', () => {
     expect(() => verifyBoardAiProvenanceProof(subject(), proof)).toThrowError(BoardAiProvenanceProofError);
   });
 });
+
+// ============================================================================
+// PATCH-196: a proof signed BEFORE the wiki type existed still verifies
+// ============================================================================
+describe('PATCH-196 existing proofs verify unchanged', () => {
+  /**
+   * A FIXTURE, not a value computed at run time. `canonicalItem` drops keys
+   * whose value is `undefined`, so adding an optional `wikiPageId` to the
+   * citation item must not change the bytes of any subject that does not use it.
+   * This signature was produced by the PRE-PATCH code (fixed subject, fixed
+   * test key); if the canonicalization ever changes shape, this constant no
+   * longer matches and the test fails -- which is the point.
+   */
+  const PRE_PATCH_SIGNATURE = 'kQnnkNGhmJ11MlW9qfPzqjxwzHcJziVoBULp644aNt8';
+
+  it('a pre-patch proof (byte-pinned) still verifies against its own subject', () => {
+    expect(signBoardAiProvenance(subject())).toBe(PRE_PATCH_SIGNATURE);
+    expect(verifyBoardAiProvenanceProof(subject(), {
+      version: BOARD_AI_PROVENANCE_PROOF_VERSION,
+      algorithm: BOARD_AI_PROVENANCE_PROOF_ALGORITHM,
+      signature: PRE_PATCH_SIGNATURE,
+    })).toBe(true);
+  });
+
+  it('a proof OVER a wiki-page citation verifies', () => {
+    const wikiSubject = subject({
+      citationItems: [{ type: 'wiki-page', wikiPageId: 'wwwwwwww-3333-4333-8333-333333333333', label: 'Oil headlines' }],
+    });
+    const proof = createBoardAiProvenanceProof(wikiSubject);
+    expect(verifyBoardAiProvenanceProof(wikiSubject, proof)).toBe(true);
+    // And it does not transplant onto a different page.
+    const other = subject({
+      citationItems: [{ type: 'wiki-page', wikiPageId: 'zzzzzzzz-3333-4333-8333-333333333333', label: 'Oil headlines' }],
+    });
+    expect(verifyBoardAiProvenanceProof(other, proof)).toBe(false);
+  });
+});

@@ -95,6 +95,15 @@ export interface BoardWikiDrawerProps {
   readonly canEdit: boolean;
   readonly blockingEditorOpen?: boolean;
   /**
+   * PATCH-196. A page to select when this drawer opens (or when the id
+   * changes) -- how a Board AI wiki citation opens the wiki ON that page.
+   *
+   * Matched against the loaded list: a page id that EXISTS selects; an unknown
+   * id leaves the current selection untouched rather than clearing it. Null /
+   * absent means "no request".
+   */
+  readonly requestedPageId?: string | null;
+  /**
    * Same shape the chat drawer's citation click uses, deliberately: a KNOWLEDGE
    * source opens in the reader, and a board post does not (the chat path opens
    * neither, and inventing a second navigation contract here would put the same
@@ -148,6 +157,7 @@ export default function BoardWikiDrawer({
   onClose,
   canEdit,
   blockingEditorOpen = false,
+  requestedPageId = null,
   onOpenCitation,
   onRequestRecompile,
 }: BoardWikiDrawerProps) {
@@ -222,6 +232,21 @@ export default function BoardWikiDrawer({
     if (!isOpen || selectedPageId === null) return;
     void loadPage(selectedPageId);
   }, [isOpen, selectedPageId, loadPage]);
+
+  /**
+   * PATCH-196. Select a REQUESTED page, once the list can confirm it exists.
+   *
+   * Runs when the drawer opens or the requested id changes, and only when the
+   * id is in the loaded list -- an unknown id leaves the current selection
+   * alone rather than clearing it, so a stale citation never empties the pane.
+   * The id is read as a value, not compared to `selectedPageId`, so asking for
+   * the page already open is a no-op rather than a reload.
+   */
+  useEffect(() => {
+    if (!isOpen || requestedPageId === null || requestedPageId === undefined) return;
+    if (!pages.some((summary) => summary.id === requestedPageId)) return;
+    setSelectedPageId((current) => (current === requestedPageId ? current : requestedPageId));
+  }, [isOpen, requestedPageId, pages]);
 
   const dirty = draft !== null && boardWikiDraftIsDirty(draft);
 

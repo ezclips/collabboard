@@ -608,11 +608,19 @@ export default function KnowledgeSourceReaderDrawer({
    * there the document stays beside it at every width.
    */
   const openCitation = useCallback((request: {
-    readonly knowledgeDocumentId: string;
+    readonly knowledgeDocumentId?: string;
+    /** PATCH-196. A wiki citation. This reader has no wiki, so it ignores it. */
+    readonly wikiPageId?: string;
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
   }) => {
+    // PATCH-196. A WIKI PAGE IS NOT A DOCUMENT. The reader only ever opens
+    // Knowledge documents, so a wiki-page citation is a no-op here rather than
+    // a crash or a document opened with an undefined id -- the board's wiki
+    // drawer is the surface that opens it.
+    if (request.wikiPageId !== undefined) return;
+    if (request.knowledgeDocumentId === undefined) return;
     if (!onOpenKnowledgeDocument) return;
     onOpenKnowledgeDocument({
       documentId: request.knowledgeDocumentId,

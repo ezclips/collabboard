@@ -34,7 +34,16 @@ import { formatTranscriptTimestamp } from './boardAiTranscriptPassage';
  * two searches produced this", which is what the merge step uses it for, and
  * that meaning is true for every kind the corpus will hold.
  */
-export type BoardAiSearchSource = 'post' | 'knowledge';
+export type BoardAiSearchSource = 'post' | 'knowledge' | 'wiki';
+
+/**
+ * PATCH-196. How fresh a compiled wiki page is, as the search learned it.
+ *
+ * `unknown` is the honest default: freshness is an enrichment of a page that is
+ * useful without it, so a failed or skipped version read must never fail the
+ * search or read as `current` (which would claim a page is up to date).
+ */
+export type BoardAiWikiFreshness = 'current' | 'stale' | 'sources-gone' | 'unknown';
 
 /**
  * One passage, already read and already authorized, with its origin attached.
@@ -83,6 +92,17 @@ export interface BoardAiSearchPassage {
   readonly transcriptEndMs?: number;
   /** The claimed video, so a citation can match it against media on the board. */
   readonly videoIdentity?: string;
+  /**
+   * PATCH-196. A board wiki passage's page, so a citation can open the wiki at
+   * it. Present only when `source === 'wiki'`.
+   */
+  readonly wikiPageId?: string;
+  /**
+   * PATCH-196. How fresh the page was when searched. D2: the model is told a
+   * page is a compiled summary and must be able to treat a stale one as
+   * possibly out of date.
+   */
+  readonly wikiFreshness?: BoardAiWikiFreshness;
   /**
    * A post that matched on its TITLE and has no body at all.
    *
@@ -363,6 +383,65 @@ export function boundBoardAiSearchPassages(
   return { kept, dropped: passages.length - kept.length };
 }
 
+/**
+ * PATCH-196. D4: at most two wiki pages per turn, and their total characters
+ * (text + overhead) may take at most 40% of the room the search was given.
+ *
+ * WHY A SEPARATE CAP. Wiki pages go FIRST (D1), and a wiki page is up to
+ * 1,500 characters -- without this, two of them could crowd out the raw post
+ * and PDF passages the answer is supposed to be grounded in. The 40% is
+ * borrowed from llm_wiki's budget split and PROVISIONAL until measured on the
+ * rating battery (D4); the raw passages always keep the larger share.
+ *
+ * A page that would exceed the wiki share is SKIPPED, not truncated, for the
+ * same reason `boundBoardAiSearchPassages` never halves a passage: a citation
+ * must point at a page the model fully saw.
+ */
+export const BOARD_AI_WIKI_BUDGET_SHARE = 0.4;
+
+export function boundBoardAiWikiPassages(
+  passages: readonly BoardAiSearchPassage[],
+  availableChars: number,
+): { readonly kept: readonly BoardAiSearchPassage[]; readonly dropped: number } {
+  const wikiCap = Math.floor(availableChars * BOARD_AI_WIKI_BUDGET_SHARE);
+  const kept: BoardAiSearchPassage[] = [];
+  let spent = 0;
+  for (const passage of passages) {
+    const text = passage.text.length > BOARD_AI_CONTEXT_MAX_SINGLE_CHARS
+      ? `${passage.text.slice(0, BOARD_AI_CONTEXT_MAX_SINGLE_CHARS - 1)}…`
+      : passage.text;
+    const cost = text.length + passage.label.length + passageOverhead(passage);
+    if (spent + cost > wikiCap) continue;
+    kept.push({ ...passage, text });
+    spent += cost;
+  }
+  return { kept, dropped: passages.length - kept.length };
+}
+
+/**
+ * PATCH-196. What the wiki passages actually spent, so the post and PDF
+ * passages are bounded against the REMAINING room and cannot overrun the block.
+ */
+export function boardAiSearchPassageCost(passage: BoardAiSearchPassage): number {
+  const text = passage.text.length > BOARD_AI_CONTEXT_MAX_SINGLE_CHARS
+    ? `${passage.text.slice(0, BOARD_AI_CONTEXT_MAX_SINGLE_CHARS - 1)}…`
+    : passage.text;
+  return text.length + passage.label.length + passageOverhead(passage);
+}
+
+/**
+ * PATCH-196. The freshness clause appended to a wiki passage's origin line.
+ *
+ * `current` and `unknown` say nothing extra -- claiming either in words would
+ * read as a freshness assertion the reader did not make. `stale` and
+ * `sources-gone` are stated, because the model must be able to weigh them.
+ */
+function wikiFreshnessSuffix(freshness: BoardAiWikiFreshness | undefined): string {
+  if (freshness === 'stale') return ' — STALE: its sources changed after it was compiled';
+  if (freshness === 'sources-gone') return ' — its sources were deleted';
+  return '';
+}
+
 /** The label the chip and the payload both use for the one search block. */
 export const BOARD_AI_SEARCH_BLOCK_LABEL = 'Board search';
 
@@ -417,6 +496,12 @@ export function boardAiSearchContextBlock(
         // missing -- the difference between "this post is empty" and "I was
         // given this post" is the whole reason the row is worth keeping.
         if (passage.titleOnly) return `[${token} | board post, title only and no body: ${passage.label}]`;
+        // PATCH-196. A WIKI PAGE IS A COMPILED SUMMARY, NEVER EVIDENCE ON ITS
+        // OWN (D2, the chain of custody). The origin line says so, and names the
+        // freshness so the model can treat a stale page as possibly out of date.
+        if (passage.source === 'wiki') {
+          return `[${token} | board wiki page, compiled from board sources${wikiFreshnessSuffix(passage.wikiFreshness)}: ${passage.label}]\n${passage.text}`;
+        }
         // A TRANSCRIPT PASSAGE SAYS WHEN IT WAS SPOKEN, and that single
         // addition is what lets the model answer "at what minute". Without it
         // the model was given words with no clock and correctly refused to
@@ -470,6 +555,9 @@ export function boardAiSearchContextBlock(
         ...(passage.videoIdentity !== undefined
           ? { videoIdentity: passage.videoIdentity }
           : {}),
+        // PATCH-196. The page this passage came from, so a citation can open
+        // the wiki at it. Identity only, like everything else here.
+        ...(passage.wikiPageId !== undefined ? { wikiPageId: passage.wikiPageId } : {}),
       })),
     }),
     text: body,

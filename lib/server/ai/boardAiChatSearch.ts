@@ -30,15 +30,27 @@ import { boardAiTranscriptPassageTime } from '../../domain/ai/boardAiTranscriptP
 import type { KnowledgeTranscriptStoredRepresentation } from '../../domain/knowledge/knowledgeTranscriptVersion';
 import {
   boardAiSearchContextBlock,
+  boardAiSearchPassageCost,
   boundBoardAiSearchPassages,
+  boundBoardAiWikiPassages,
   dropDuplicateBoardAiSearchPassages,
   isBoardAiSearchPassageCovered,
   mergeBoardAiSearchPassages,
   type BoardAiSearchCoverage,
   type BoardAiSearchPassage,
   type BoardAiSearchResult,
+  type BoardAiWikiFreshness,
 } from '../../domain/ai/boardAiSearchContext';
+import { BOARD_AI_WIKI_MAX_PAGES, scoreWikiSearchPages } from '../../domain/ai/boardAiWikiSearch';
+import {
+  boardWikiPageFreshness,
+  boardWikiPageSourcesFromStored,
+  boardWikiSourceStates,
+} from '../../domain/wiki/boardWikiPageSources';
+import { readCurrentSourceVersions } from '../wiki/boardWikiSourceVersions';
 import type { ResolvedBoardAiContextBlock } from '../../domain/ai/boardAiChatContext';
+import type { BoardAiCitationItem } from '../../domain/ai/boardAiChatCitation';
+import type { BoardWikiCurrentVersions } from '../../domain/wiki/boardWikiPageSources';
 import { canReadBoardKnowledge } from '../knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '../knowledge/knowledgeBoardReadAuthorization';
 
@@ -68,6 +80,36 @@ export interface BoardAiSearchReader {
     boardId: string,
     documentIds: readonly string[],
   ): Promise<Result<ReadonlyMap<string, KnowledgeTranscriptStoredRepresentation>, DomainError>>;
+  /**
+   * PATCH-196. The board's compiled wiki pages, newest first, capped by the
+   * caller. D3: this is an in-app, lexical READ through the caller's own RLS
+   * client, not a privileged RPC -- a wiki page is not a capability, and the
+   * same `canReadBoardKnowledge` check STEP 1 already performed is the
+   * authority. It returns rows; scoring is a pure domain function.
+   */
+  searchWikiPages(
+    boardId: string,
+    limit: number,
+  ): Promise<Result<readonly BoardAiSearchWikiRow[], DomainError>>;
+  /**
+   * PATCH-196. What each cited source looks like RIGHT NOW, for the chosen wiki
+   * pages' freshness. Board-scoped, and the SAME function the wiki surface uses,
+   * so a page cannot read fresh here and stale there. A failure is swallowed by
+   * the caller into 'unknown', never a failed search.
+   */
+  readCurrentSourceVersions(
+    boardId: string,
+    items: readonly BoardAiCitationItem[],
+  ): Promise<Result<BoardWikiCurrentVersions, DomainError>>;
+}
+
+export interface BoardAiSearchWikiRow {
+  readonly id: string;
+  readonly title: string | null;
+  readonly content: string | null;
+  /** The page's recorded source chain, in the citation item shape. Untrusted. */
+  readonly sources: unknown;
+  readonly compiled_at: string | null;
 }
 
 export interface BoardAiSearchPostRow {
@@ -106,6 +148,13 @@ export interface BoardAiSearchChunkRow {
 export const BOARD_AI_SEARCH_LIMIT_PER_SOURCE = 4;
 
 /**
+ * PATCH-196. How many wiki rows one search may READ. Scoring is pure and picks
+ * at most `BOARD_AI_WIKI_MAX_PAGES` from these; the read cap is the board's own
+ * size bound so a pathological board cannot make this unbounded.
+ */
+export const BOARD_AI_WIKI_PAGE_READ_LIMIT = 200;
+
+/**
  * How long the two searches together may take.
  *
  * SEPARATE FROM THE GENERATION CLOCK, AND DELIBERATELY SO. `executeBoardAiChat`
@@ -141,6 +190,49 @@ async function withinSearchBudget<T>(work: Promise<T>): Promise<T | typeof TIMED
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+/**
+ * PATCH-196. The freshness of the chosen wiki pages, best-effort.
+ *
+ * For each page that survived scoring, its RECORDED source chain is compared
+ * against what those sources look like now -- the same `boardWikiPageFreshness`
+ * the wiki surface derives, so the label the model is given and the badge the
+ * reader shows cannot disagree. ANY error yields 'unknown' for every page,
+ * never a failed search: freshness is enrichment of a page that is useful
+ * without it, exactly as timestamps are for a transcript.
+ */
+async function readWikiFreshness(
+  reader: BoardAiSearchReader,
+  boardId: string,
+  pages: readonly { pageId: string; sources: unknown }[],
+): Promise<ReadonlyMap<string, BoardAiWikiFreshness>> {
+  const result = new Map<string, BoardAiWikiFreshness>();
+  if (pages.length === 0) return result;
+  for (const page of pages) result.set(page.pageId, 'unknown');
+
+  // The pages' own recorded sources, in the citation item shape, are the only
+  // thing freshness compares. A page whose stored chain is empty has nothing to
+  // check against -- 'unknown', which the map already holds.
+  const pageItems = pages.map((page) => ({
+    pageId: page.pageId,
+    sources: boardWikiPageSourcesFromStored(page.sources),
+  }));
+
+  try {
+    const current = await reader.readCurrentSourceVersions(
+      boardId,
+      pageItems.flatMap((page) => page.sources.map((source) => source.item)),
+    );
+    if (!current.ok) return result;
+    for (const page of pageItems) {
+      if (page.sources.length === 0) continue;
+      result.set(page.pageId, boardWikiPageFreshness(boardWikiSourceStates(page.sources, current.value)));
+    }
+  } catch {
+    // Swallowed on purpose: the same rule as the transcript read above.
+  }
+  return result;
 }
 
 /** The post's own title, or an honest stand-in. Never the body's first line. */
@@ -198,6 +290,13 @@ export async function searchBoardAiContext(
    * Passed through untouched -- this module decides nothing about it.
    */
   blockIndex = 0,
+  /**
+   * PATCH-196, §2.5 guard. The wiki COMPILER must never take a wiki page as a
+   * source -- that is the error-compounding step D6 forbids, and the smaller of
+   * the two fixes §2.5 offers (pass `false` here rather than filter passages
+   * afterwards). The chat route leaves the default so answers DO read the wiki.
+   */
+  options: { readonly includeWiki?: boolean } = {},
 ): Promise<Result<{ block: ResolvedBoardAiContextBlock; result: BoardAiSearchResult }, DomainError>> {
   // STEP 1. The caller's own client, before anything privileged exists. Owner
   // or is_board_member, re-checked on this turn and never cached.
@@ -221,11 +320,30 @@ export async function searchBoardAiContext(
     return ok({ block: boardAiSearchContextBlock([], '', result, blockIndex), result });
   }
 
-  // STEP 3. Only now, and only reads. Both sources, independently, under one
-  // bounded clock that is NOT the generation clock.
+  // STEP 3. Only now, and only reads. All three sources, independently, under
+  // one bounded clock that is NOT the generation clock.
+  //
+  // PATCH-196. The wiki leg runs INSIDE this same clock and the same
+  // Promise.all, so it is one more bounded read rather than a second phase that
+  // could double the wall time. It is omitted entirely when the caller is the
+  // compiler (§2.5): a compiled page must never list another wiki page.
+  const includeWiki = options.includeWiki !== false;
   const searched = await withinSearchBudget(Promise.all([
     reader.searchPosts(boardId, query.expression, BOARD_AI_SEARCH_LIMIT_PER_SOURCE),
     reader.searchChunks(boardId, query.expression, BOARD_AI_SEARCH_LIMIT_PER_SOURCE),
+    // PATCH-196. A WIKI FAILURE MUST NOT FAIL THE SEARCH -- and that includes a
+    // THROWN error or a rejected promise, not only an `err` result: a reader
+    // that throws here would otherwise take the whole chat turn down with a
+    // 503, losing the posts and chunks that are perfectly fine. The catch turns
+    // any failure into "no wiki passages", exactly as an `err` result does.
+    includeWiki
+      // Wrapped so both a SYNCHRONOUS throw and a rejected promise become the
+      // same 'no wiki' result. `Promise.resolve().then(...)` defers the call so
+      // a throw is caught here rather than escaping into Promise.all.
+      ? Promise.resolve()
+        .then(() => reader.searchWikiPages(boardId, BOARD_AI_WIKI_PAGE_READ_LIMIT))
+        .catch(() => err(domainError('unavailable', 'Could not search this board')))
+      : Promise.resolve(ok([] as readonly BoardAiSearchWikiRow[])),
   ]));
   if (searched === TIMED_OUT) {
     // Refused, not treated as empty: "the search was too slow" and "the board
@@ -233,7 +351,7 @@ export async function searchBoardAiContext(
     // the `failed` outcome the user is actually shown.
     return err(domainError('unavailable', 'Could not search this board'));
   }
-  const [posts, chunks] = searched;
+  const [posts, chunks, wiki] = searched;
   // One source failing does not lose the other: a board with no PDFs and a
   // broken chunk search should still find its own notes.
   const postPassages: readonly BoardAiSearchPassage[] = posts.ok
@@ -323,6 +441,48 @@ export async function searchBoardAiContext(
     return err(domainError('unavailable', 'Could not search this board'));
   }
 
+  /*
+    PATCH-196. THE WIKI PASSAGES, scored and, for the survivors ONLY, given
+    their freshness.
+
+    A wiki read failure is NOT a failed search: `wiki.ok` false yields no wiki
+    passages and the posts and chunks arrive exactly as they always did -- the
+    same rule the transcript read already follows. Scoring is pure; freshness is
+    best-effort enrichment on top of it.
+  */
+  const wikiById = new Map(wiki.ok ? wiki.value.map((row) => [row.id, row] as const) : []);
+  const wikiMatches = wiki.ok
+    ? scoreWikiSearchPages(
+      wiki.value.map((row) => ({
+        pageId: row.id,
+        title: (row.title ?? '').trim(),
+        content: row.content ?? '',
+      })),
+      query,
+    )
+    : [];
+  const wikiFreshness = wiki.ok
+    ? await readWikiFreshness(
+      reader,
+      boardId,
+      wikiMatches.map((match) => ({
+        pageId: match.pageId,
+        sources: wikiById.get(match.pageId)?.sources,
+      })),
+    )
+    : new Map<string, BoardAiWikiFreshness>();
+  const wikiPassages: readonly BoardAiSearchPassage[] = wikiMatches.map((match) => ({
+    source: 'wiki' as const,
+    label: match.title,
+    text: match.excerpt,
+    // A wiki page has no ts_rank; it was scored here. Rank is carried so the
+    // passage shape is uniform, and the merge never compares ranks across
+    // sources anyway.
+    rank: match.score,
+    wikiPageId: match.pageId,
+    wikiFreshness: wikiFreshness.get(match.pageId) ?? 'unknown',
+  }));
+
   // A passage the user ALREADY ATTACHED is not new material. It is dropped by
   // SPAN, not by id: a chunk from a page a document attachment never reached is
   // the only evidence in the request, and must survive.
@@ -358,12 +518,34 @@ export async function searchBoardAiContext(
     BOARD_AI_SEARCH_LIMIT_PER_SOURCE,
   ));
 
-  // STEP 4. Whole passages only, and the dropped count is kept.
-  const { kept, dropped } = boundBoardAiSearchPassages(merged, availableChars);
+  /**
+   * STEP 4. Whole passages only, and the dropped count is kept.
+   *
+   * PATCH-196, D1/D4. WIKI FIRST, THEN THE RAW PASSAGES, IN ONE BLOCK.
+   *
+   * The wiki passages lead (llm_wiki's order) but are bounded to their own 40%
+   * share first, so they can never crowd out the raw post and PDF passages the
+   * answer is grounded in (D4). Whatever the wiki spends is then REMOVED from
+   * the room the raw passages are bounded against, so the block as a whole never
+   * overruns what the search was given. The post and PDF passages keep every
+   * existing rule -- the four-slot rule, the de-duplication, the min-room floor
+   * -- because `merged` is exactly what it was before.
+   *
+   * The tag on each survivor is a WIKI one only for the wiki leg; the raw
+   * passages bound second are on their own. Both are ADMITTED even when the
+   * wiki already spent its share, because each bounder checks its own budget.
+   */
+  const wikiBound = boundBoardAiWikiPassages(wikiPassages, availableChars);
+  const wikiSpent = wikiBound.kept.reduce((sum, passage) => sum + boardAiSearchPassageCost(passage), 0);
+  const rawBound = boundBoardAiSearchPassages(merged, availableChars - wikiSpent);
+
+  const kept = [...wikiBound.kept, ...rawBound.kept];
+  const dropped = wikiBound.dropped + rawBound.dropped;
   const terms = query.terms.join(' ');
   const result: BoardAiSearchResult = {
     outcome: 'ran',
-    returned: merged.length,
+    // Everything the sources returned: wiki (scored) plus the merged raw set.
+    returned: wikiPassages.length + merged.length,
     used: kept.length,
     dropped,
     query: terms,

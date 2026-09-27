@@ -7,6 +7,7 @@ import {
   type BoardAiSearchChunkRow,
   type BoardAiSearchPostRow,
   type BoardAiSearchReader,
+  type BoardAiSearchWikiRow,
 } from './boardAiChatSearch';
 import {
   BOARD_AI_SEARCH_MIN_ROOM_CHARS,
@@ -57,6 +58,10 @@ function reader(calls: string[], posts: BoardAiSearchPostRow[] = [], chunks: Boa
     async searchPosts() { calls.push('search'); return ok(posts); },
     async searchChunks() { calls.push('search'); return ok(chunks); },
     readTranscriptRepresentations: async () => ok(new Map()),
+    // PATCH-196. No wiki pages by default; a test that wants them supplies its
+    // own reader.
+    async searchWikiPages() { return ok([]); },
+    async readCurrentSourceVersions() { return ok(new Map()); },
   };
 }
 
@@ -94,7 +99,7 @@ describe('authorization happens BEFORE the privileged search', () => {
     const searched = vi.fn();
     const result = await searchBoardAiContext(
       authClient(calls, false),
-      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); }, readTranscriptRepresentations: async () => ok(new Map()), },
+      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); }, readTranscriptRepresentations: async () => ok(new Map()), searchWikiPages: async () => ok([]), readCurrentSourceVersions: async () => ok(new Map()), },
       BOARD, USER, 'anything', 5000,
     );
 
@@ -111,7 +116,7 @@ describe('authorization happens BEFORE the privileged search', () => {
 
     const result = await searchBoardAiContext(
       throwing,
-      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); }, readTranscriptRepresentations: async () => ok(new Map()), },
+      { searchPosts: async () => { searched(); return ok([]); }, searchChunks: async () => { searched(); return ok([]); }, readTranscriptRepresentations: async () => ok(new Map()), searchWikiPages: async () => ok([]), readCurrentSourceVersions: async () => ok(new Map()), },
       BOARD, USER, 'anything', 5000,
     );
 
@@ -153,6 +158,8 @@ describe('the merge rule', () => {
         async searchPosts() { return ok([post('p1', 'Weekly plan', 'the oil headlines note')]); },
         async searchChunks() { return { ok: false, error: { code: 'unavailable', message: 'x' } } as never; },
         readTranscriptRepresentations: async () => ok(new Map()),
+        async searchWikiPages() { return ok([]); },
+        async readCurrentSourceVersions() { return ok(new Map()); },
       },
       BOARD, USER, 'oil headlines', 5000,
     );
@@ -480,7 +487,9 @@ describe('the search clock is bounded and separate from the generation clock', (
           // Never resolves. The real shape of a seq scan on a large board.
           searchPosts: () => new Promise(() => {}),
           searchChunks: () => new Promise(() => {}),
+          searchWikiPages: () => new Promise(() => {}),
           readTranscriptRepresentations: async () => ok(new Map()),
+          readCurrentSourceVersions: async () => ok(new Map()),
         },
         BOARD, USER, 'oil headlines', 5000,
       );
@@ -545,7 +554,9 @@ describe('the search block itself', () => {
       {
         async searchPosts(_b, _q, limit) { limits.push(limit); return ok([]); },
         async searchChunks(_b, _q, limit) { limits.push(limit); return ok([]); },
+        async searchWikiPages() { return ok([]); },
         readTranscriptRepresentations: async () => ok(new Map()),
+        async readCurrentSourceVersions() { return ok(new Map()); },
       },
       BOARD, USER, 'oil headlines', 5000,
     );
@@ -559,12 +570,173 @@ describe('the search block itself', () => {
       {
         async searchPosts(_b, query) { queries.push(query); return ok([]); },
         async searchChunks(_b, query) { queries.push(query); return ok([]); },
+        async searchWikiPages() { return ok([]); },
         readTranscriptRepresentations: async () => ok(new Map()),
+        async readCurrentSourceVersions() { return ok(new Map()); },
       },
       BOARD, USER, 'What about the Iran oil headlines & the tankers?', 5000,
     );
     // Stopwords gone, OR-joined, operator punctuation stripped.
     expect(queries[0]).toBe('iran | oil | headlines | tankers');
     expect(queries[0]).toBe(queries[1]);
+  });
+});
+
+// ============================================================================
+// PATCH-196: the board wiki joins the search
+// ============================================================================
+
+const wikiRow = (id: string, title: string, content: string): BoardAiSearchWikiRow => ({
+  id, title, content, sources: [], compiled_at: null,
+});
+
+/** A reader whose wiki leg is tunable, everything else inert. */
+function wikiReader(over: {
+  posts?: BoardAiSearchPostRow[];
+  chunks?: BoardAiSearchChunkRow[];
+  wiki?: readonly BoardAiSearchWikiRow[];
+  wikiError?: boolean;
+  versionsError?: boolean;
+  onWikiRead?: () => void;
+  onVersionRead?: () => void;
+}): BoardAiSearchReader {
+  return {
+    async searchPosts() { return ok(over.posts ?? []); },
+    async searchChunks() { return ok(over.chunks ?? []); },
+    readTranscriptRepresentations: async () => ok(new Map()),
+    async searchWikiPages() {
+      over.onWikiRead?.();
+      if (over.wikiError) return { ok: false, error: { code: 'unavailable', message: 'x' } } as never;
+      return ok(over.wiki ?? []);
+    },
+    async readCurrentSourceVersions() {
+      over.onVersionRead?.();
+      return over.versionsError
+        ? ({ ok: false, error: { code: 'unavailable', message: 'x' } } as never)
+        : ok(new Map());
+    },
+  };
+}
+
+describe('PATCH-196 the wiki leg of the search', () => {
+  it('wiki passages come FIRST, before the post and PDF passages', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      wikiReader({
+        posts: [post('p1', 'Weekly plan', 'oil headlines note')],
+        chunks: [chunk('c1', 'oil in the slides')],
+        wiki: [wikiRow('w1', 'Oil headlines', 'compiled oil body')],
+      }),
+      BOARD, USER, 'oil headlines', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    const passages = result.ok ? result.value.block.passages ?? [] : [];
+    expect(passages[0].source).toBe('wiki');
+    // Exactly one block, never one per source.
+    expect(result.ok && result.value.block.type).toBe('board-search');
+  });
+
+  it('the wiki total characters are capped at 40% of the room', async () => {
+    // 1000 chars of available room => the wiki may spend at most 400, and one
+    // passage's cost includes its label and overhead. A ~500-char page FITS the
+    // room but EXCEEDS the wiki share, so it is skipped -- which is what proves
+    // the 40% cap rather than plain truncation.
+    const bigPage = wikiRow('w1', 'Oil', 'oil ' + 'x'.repeat(470));
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      wikiReader({ posts: [post('p1', 'Plan', 'oil plan')], wiki: [bigPage] }),
+      BOARD, USER, 'oil', 1000,
+    );
+
+    const passages = result.ok ? result.value.block.passages ?? [] : [];
+    expect(passages.some((passage) => passage.source === 'wiki')).toBe(false);
+    expect(passages.some((passage) => passage.source === 'post')).toBe(true);
+  });
+
+  it('a wiki read error still returns the posts and chunks', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      wikiReader({
+        posts: [post('p1', 'Plan', 'oil plan')],
+        chunks: [chunk('c1', 'chunk oil')],
+        wikiError: true,
+      }),
+      BOARD, USER, 'oil', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    const passages = result.ok ? result.value.block.passages ?? [] : [];
+    expect(passages.some((passage) => passage.source === 'post')).toBe(true);
+    expect(passages.some((passage) => passage.source === 'chunk' as never)).toBe(false);
+    expect(passages.some((passage) => passage.source === 'knowledge')).toBe(true);
+  });
+
+  it('a freshness error gives unknown, never a failed search', async () => {
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      wikiReader({ wiki: [wikiRow('w1', 'Oil headlines', 'compiled oil')], versionsError: true }),
+      BOARD, USER, 'oil', 5000,
+    );
+
+    // The search still succeeds with its wiki passage.
+    expect(result.ok).toBe(true);
+    const hasWiki = (result.ok ? result.value.block.passages ?? [] : [])
+      .some((passage) => passage.source === 'wiki');
+    expect(hasWiki).toBe(true);
+    // 'unknown' is not 'current' and not 'stale': it adds no clause to the
+    // origin line, so the model is never told a page is up to date, nor that it
+    // is stale. The origin line itself is present and correct.
+    expect(result.ok && result.value.block.text).toContain('board wiki page, compiled from board sources: Oil headlines');
+    expect(result.ok && result.value.block.text).not.toContain('STALE');
+  });
+
+  it('an all-stopword message makes no wiki read at all', async () => {
+    const onWikiRead = vi.fn();
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      wikiReader({ onWikiRead }),
+      BOARD, USER, 'what is it about?', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(onWikiRead).not.toHaveBeenCalled();
+  });
+
+  it('a reader whose wiki leg THROWS still returns the posts and chunks', async () => {
+    const throwing: BoardAiSearchReader = {
+      async searchPosts() { return ok([post('p1', 'Plan', 'oil plan')]); },
+      async searchChunks() { return ok([chunk('c1', 'chunk oil')]); },
+      readTranscriptRepresentations: async () => ok(new Map()),
+      // Throws SYNCHRONOUSLY, before returning a promise.
+      searchWikiPages() { throw new Error('wiki reader exploded'); },
+      async readCurrentSourceVersions() { return ok(new Map()); },
+    };
+    const result = await searchBoardAiContext(
+      authClient([], true), throwing, BOARD, USER, 'oil', 5000,
+    );
+
+    expect(result.ok).toBe(true);
+    const passages = result.ok ? result.value.block.passages ?? [] : [];
+    expect(passages.some((passage) => passage.source === 'post')).toBe(true);
+    expect(passages.some((passage) => passage.source === 'knowledge')).toBe(true);
+    expect(passages.some((passage) => passage.source === 'wiki')).toBe(false);
+  });
+
+  it('includeWiki: false never reads the wiki (the compiler guard)', async () => {
+    const onWikiRead = vi.fn();
+    const result = await searchBoardAiContext(
+      authClient([], true),
+      wikiReader({ posts: [post('p1', 'Plan', 'oil plan')], wiki: [wikiRow('w1', 'Oil', 'oil')], onWikiRead }),
+      BOARD, USER, 'oil', 5000,
+      undefined,
+      0,
+      { includeWiki: false },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(onWikiRead).not.toHaveBeenCalled();
+    const passages = result.ok ? result.value.block.passages ?? [] : [];
+    expect(passages.some((passage) => passage.source === 'wiki')).toBe(false);
   });
 });

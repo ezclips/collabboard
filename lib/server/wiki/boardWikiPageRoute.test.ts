@@ -678,6 +678,18 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     expect(compileSource).toContain('...deps.resolverDeps, allowByok:');
   });
 
+  it('PATCH-196: a compilation tells the search to SKIP the wiki, so no wiki page becomes a source', () => {
+    // §2.5 guard (D6), pinned from the session side. There is still no
+    // behavioural harness for compileBoardWikiProposal, so the call site is
+    // pinned at the source -- and the search-side test in
+    // boardAiChatSearch.test.ts proves that `includeWiki: false` never reads
+    // the wiki. Together they are the guard: a compiled page can never take a
+    // wiki page as its source, which is the error-compounding step D6 forbids.
+    const compileSource = readFileSync(
+      resolve(process.cwd(), 'lib/server/wiki/boardWikiCompileSession.ts'), 'utf8');
+    expect(compileSource).toContain('{ includeWiki: false }');
+  });
+
   it('the page surface never reaches for an admin client', () => {
     // A service role bypasses every policy, and nothing here needs one: a wiki
     // page is one row with no blobs and no children the caller cannot see. The

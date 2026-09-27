@@ -159,3 +159,38 @@ describe('the search block carries its passages, and only for this turn', () => 
     expect(bounded[0].passages).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PATCH-196: the wiki passage and its origin line
+// ---------------------------------------------------------------------------
+describe('PATCH-196 a wiki passage in the search block', () => {
+  const WIKI_ID = 'wwwwwwww-3333-4333-8333-333333333333';
+  const wiki = (freshness: 'current' | 'stale' | 'sources-gone' | 'unknown') => ({
+    source: 'wiki' as const, label: 'Oil headlines', text: 'compiled [S1.2] body', rank: 6,
+    wikiPageId: WIKI_ID, wikiFreshness: freshness,
+  });
+
+  it('current and unknown add no clause to the origin line', () => {
+    for (const freshness of ['current', 'unknown'] as const) {
+      const block = boardAiSearchContextBlock([wiki(freshness)], 'oil', RESULT, 0);
+      expect(block.text).toContain(`[S1.1 | board wiki page, compiled from board sources: Oil headlines]`);
+      expect(block.text).not.toContain('STALE');
+    }
+  });
+
+  it('stale says so, in words', () => {
+    const block = boardAiSearchContextBlock([wiki('stale')], 'oil', RESULT, 0);
+    expect(block.text).toContain('compiled from board sources — STALE: its sources changed after it was compiled: Oil headlines');
+  });
+
+  it('sources-gone says its sources were deleted', () => {
+    const block = boardAiSearchContextBlock([wiki('sources-gone')], 'oil', RESULT, 0);
+    expect(block.text).toContain('compiled from board sources — its sources were deleted: Oil headlines');
+  });
+
+  it('the passage identity carries the wiki page id, and never its text', () => {
+    const block = boardAiSearchContextBlock([wiki('current')], 'oil', RESULT, 0);
+    expect(block.passages?.[0]).toEqual({ source: 'wiki', label: 'Oil headlines', wikiPageId: WIKI_ID });
+    expect(JSON.stringify(block.passages)).not.toContain('compiled');
+  });
+});

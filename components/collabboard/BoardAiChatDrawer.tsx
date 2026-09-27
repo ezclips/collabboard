@@ -129,7 +129,14 @@ export interface BoardAiChatDrawerProps {
    * source is worth naming even where this surface cannot navigate to it.
    */
   readonly onOpenCitation?: (request: {
-    readonly knowledgeDocumentId: string;
+    /**
+     * A knowledge citation names a document. PATCH-196: a WIKI citation names a
+     * page instead (`wikiPageId`) and has no document, so this is optional and
+     * exactly one of the two is present.
+     */
+    readonly knowledgeDocumentId?: string;
+    /** PATCH-196. A cited wiki page, opened by the board's wiki drawer. */
+    readonly wikiPageId?: string;
     readonly pageNumber?: number;
     /** A pageless source's locator: where in its text the citation points. */
     readonly charStart?: number;
@@ -205,6 +212,9 @@ function visibleCitations(items: readonly BoardAiCitationItem[]): readonly Board
  * never borrows a page it was not given.
  */
 function boardAiCitationLabel(item: BoardAiCitationItem): string {
+  // PATCH-196. A wiki page is named as such: it is a compiled summary, and the
+  // chip should not read like a raw source beside the post and PDF citations.
+  if (item.type === 'wiki-page') return `Wiki: ${item.label}`;
   return item.pageNumber === undefined ? item.label : `${item.label} · p. ${item.pageNumber}`;
 }
 
@@ -1120,7 +1130,8 @@ export default function BoardAiChatDrawer({
    * reader, and both mean the same thing here -- there is nothing they can open.
    */
   const openCitation = useCallback(async (request: {
-    readonly knowledgeDocumentId: string;
+    readonly knowledgeDocumentId?: string;
+    readonly wikiPageId?: string;
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
@@ -1128,7 +1139,16 @@ export default function BoardAiChatDrawer({
     readonly videoIdentity?: string;
   }) => {
     if (!onOpenCitation) return;
-    if (goneCitationDocumentIds.has(request.knowledgeDocumentId)) return;
+    // PATCH-196. A WIKI CITATION IS NOT A DOCUMENT, so the gone-probe below --
+    // which is entirely about Knowledge documents -- does not apply to it. It
+    // is handed straight to the host, which opens the wiki drawer at the page.
+    if (request.wikiPageId !== undefined) {
+      onOpenCitation(request);
+      return;
+    }
+    const documentId = request.knowledgeDocumentId;
+    if (documentId === undefined) return;
+    if (goneCitationDocumentIds.has(documentId)) return;
 
     let documents: readonly { id?: unknown }[] | null = null;
     try {
@@ -1143,8 +1163,8 @@ export default function BoardAiChatDrawer({
       // on the strength of a failed request.
     }
 
-    if (documents !== null && !documents.some((document) => document.id === request.knowledgeDocumentId)) {
-      setGoneCitationDocumentIds((current) => new Set([...current, request.knowledgeDocumentId]));
+    if (documents !== null && !documents.some((document) => document.id === documentId)) {
+      setGoneCitationDocumentIds((current) => new Set([...current, documentId]));
       return;
     }
 
@@ -1529,6 +1549,10 @@ export default function BoardAiChatDrawer({
                       const citationLabel = boardAiCitationLabel(item);
                       const citationMoment = boardAiCitationMoment(item);
                       const citedDocumentId = item.knowledgeDocumentId;
+                      const citedWikiPageId = item.type === 'wiki-page' ? item.wikiPageId : undefined;
+                      // A citation is openable if it names a document OR a wiki
+                      // page, and the surface was given an opener.
+                      const openable = Boolean(citedDocumentId || citedWikiPageId);
                       const chipClass = 'inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] leading-none';
                       // THE SOURCE IS GONE. The citation itself is untouched --
                       // it says what the answer used, which is still true --
@@ -1549,7 +1573,7 @@ export default function BoardAiChatDrawer({
                           </span>
                         );
                       }
-                      if (!onOpenCitation || !citedDocumentId) {
+                      if (!onOpenCitation || !openable) {
                         return (
                           <span
                             key={citationKey}
@@ -1567,7 +1591,8 @@ export default function BoardAiChatDrawer({
                           key={citationKey}
                           type="button"
                           data-board-ai-chat-citation={citationKey}
-                          data-board-ai-chat-citation-document={citedDocumentId}
+                          data-board-ai-chat-citation-document={citedDocumentId ?? ''}
+                          data-board-ai-chat-citation-wiki-page={citedWikiPageId ?? ''}
                           data-board-ai-chat-citation-page={item.pageNumber ?? ''}
                           data-board-ai-chat-citation-range={
                             item.charStart !== undefined && item.charEnd !== undefined
@@ -1586,7 +1611,10 @@ export default function BoardAiChatDrawer({
                           }
                           className={`${chipClass} border-gray-200 text-blue-700 transition hover:border-blue-200 hover:bg-blue-50`}
                           onClick={() => { void openCitation({
-                            knowledgeDocumentId: citedDocumentId,
+                            ...(citedDocumentId ? { knowledgeDocumentId: citedDocumentId } : {}),
+                            // PATCH-196. A wiki citation names a page, not a
+                            // document; the host opens the wiki drawer at it.
+                            ...(citedWikiPageId ? { wikiPageId: citedWikiPageId } : {}),
                             ...(item.pageNumber === undefined ? {} : { pageNumber: item.pageNumber }),
                             // A text citation locates itself by range instead.
                             // Both halves or neither: the request builder

@@ -171,6 +171,68 @@ async function openPage(container: HTMLElement) {
   });
 }
 
+/** The list item for a page, whose selected class marks the current selection. */
+const pageItem = (c: HTMLElement, id = PAGE) =>
+  c.querySelector(`[data-board-wiki-page-item="${id}"]`) as HTMLButtonElement;
+
+/** Lets the initial list fetch (and the selection it enables) settle. */
+async function flush() {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+
+/**
+ * PATCH-196. A minimal, self-contained fetch for the requested-page cases: the
+ * page list and one page's body. Installed per test so it cannot depend on the
+ * shared stub's ordering.
+ */
+function stubWikiFetch() {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (String(url).endsWith(`/wiki/${PAGE}`)) {
+      return new Response(JSON.stringify(pageBody()), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      pages: [{ id: PAGE, slug: 'horn-replacement', title: 'Horn replacement', updatedAt: 'u', sourceCount: 1 }],
+    }), { status: 200 });
+  }));
+}
+
+describe('PATCH-196 a requested page is selected', () => {
+  it('selects and LOADS the requested page when it exists in the list', async () => {
+    stubWikiFetch();
+    const c = await mount({ requestedPageId: PAGE });
+    await flush();
+    // The requested page is the selected one, and it actually loaded.
+    expect(pageItem(c)).not.toBeNull();
+    expect(pageItem(c).className).toContain('bg-gray-100');
+    expect(content(c).value).toContain('Line one.');
+  });
+
+  it('an UNKNOWN requested page leaves the current selection untouched', async () => {
+    stubWikiFetch();
+    const c = await mount({ requestedPageId: 'not-a-real-page' });
+    await flush();
+    // Nothing was selected, so no page content was loaded, and nothing crashed.
+    expect(c.querySelector('[data-board-wiki-content="true"]')).toBeNull();
+  });
+
+  it('a request that arrives AFTER mount selects then', async () => {
+    stubWikiFetch();
+    const c = await mount({ requestedPageId: null });
+    await flush();
+    expect(c.querySelector('[data-board-wiki-content="true"]')).toBeNull();
+
+    await act(async () => {
+      root!.render(
+        <BoardWikiDrawer boardId={BOARD} isOpen onClose={vi.fn()} canEdit requestedPageId={PAGE} />,
+      );
+    });
+    await flush();
+
+    expect(pageItem(c).className).toContain('bg-gray-100');
+  });
+});
+
 const content = (c: HTMLElement) => c.querySelector('[data-board-wiki-content="true"]') as HTMLTextAreaElement;
 const titleField = (c: HTMLElement) => c.querySelector('[data-board-wiki-title="true"]') as HTMLInputElement;
 const saveButton = (c: HTMLElement) => c.querySelector('[data-board-wiki-save="true"]') as HTMLButtonElement;

@@ -156,6 +156,12 @@ export async function compileBoardWikiProposal(
     BOARD_AI_CONTEXT_MAX_TOTAL_CHARS,
     { padletIds: new Set(), documentPages: new Set() },
     0,
+    // PATCH-196, §2.5 guard (D6). A COMPILED PAGE MUST NEVER TAKE A WIKI PAGE
+    // AS A SOURCE: that is the error-compounding step -- one wrong answer
+    // becoming several wrong pages -- and a board is shared by a team. The
+    // search is told to skip the wiki leg, so a wiki page can never reach
+    // `boardWikiPassageTokens` and thus never becomes a recorded source.
+    { includeWiki: false },
   );
   if (!searched.ok) return err(searched.error);
 

@@ -119,6 +119,45 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+// ---------------------------------------------------------------------------
+// PATCH-196: a wiki-page citation
+// ---------------------------------------------------------------------------
+describe('PATCH-196 a wiki-page citation', () => {
+  const WIKI_ID = 'wwwwwwww-3333-4333-8333-333333333333';
+  const wikiItem = { type: 'wiki-page', wikiPageId: WIKI_ID, label: 'Oil headlines' };
+
+  it('renders with the "Wiki: " prefix and calls onOpenCitation with the page', async () => {
+    const c = await mount([wikiItem]);
+    const chip = c.querySelector('[data-board-ai-chat-citation-wiki-page]') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toContain('Wiki: Oil headlines');
+    expect(chip!.getAttribute('data-board-ai-chat-citation-wiki-page')).toBe(WIKI_ID);
+
+    await click(chip!);
+    // A wiki citation has no document to probe, so it is handed to the host
+    // straight through -- no gone-check, no knowledge fetch.
+    expect(onOpenCitation).toHaveBeenCalledWith({ wikiPageId: WIKI_ID });
+    expect(onOpenCitation).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders as a plain label with no opener, never a dead button', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    stubRoutes([wikiItem]);
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <BoardAiChatDrawer boardId={BOARD_ID} isOpen onClose={vi.fn()} draftContext={[]} onDraftContextChange={vi.fn()} />,
+      );
+    });
+    await settle();
+
+    expect(host.querySelector('button[data-board-ai-chat-citation]')).toBeNull();
+    expect(host.textContent).toContain('Wiki: Oil headlines');
+  });
+});
+
 describe('a citation whose document still exists', () => {
   it('opens it, exactly as before', async () => {
     await mount([citation(LIVE_DOC, 3, 'handbook.pdf — page 3')]);

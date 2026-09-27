@@ -32,8 +32,11 @@ import type {
   BoardAiSearchChunkRow,
   BoardAiSearchPostRow,
   BoardAiSearchReader,
+  BoardAiSearchWikiRow,
 } from '../../server/ai/boardAiChatSearch';
 import type { KnowledgeTranscriptStoredRepresentation } from '../../domain/knowledge/knowledgeTranscriptVersion';
+import type { BoardAiCitationItem } from '../../domain/ai/boardAiChatCitation';
+import { readCurrentSourceVersions } from '../../server/wiki/boardWikiSourceVersions';
 
 export function createBoardAiSearchReader(): BoardAiSearchReader {
   return {
@@ -93,6 +96,47 @@ export function createBoardAiSearchReader(): BoardAiSearchReader {
         return ok(map as ReadonlyMap<string, KnowledgeTranscriptStoredRepresentation>);
       } catch {
         return err(domainError('unavailable', 'Could not read transcript cues'));
+      }
+    },
+    /**
+     * PATCH-196. The board's compiled wiki pages, newest first.
+     *
+     * READ THROUGH THE SAME PRIVILEGED CLIENT as the other two searches, and
+     * for the same reason: `searchBoardAiContext` proved, with the CALLER'S own
+     * client, that this board is readable BEFORE this is reached. The 200-row
+     * cap is fixed, not the caller's top-K -- scoring is a pure domain function
+     * over the returned set, so the read is bounded by the board's own size
+     * (tens of pages) rather than by a limit chosen here.
+     */
+    async searchWikiPages(boardId: string, limit: number) {
+      try {
+        const { data, error } = await getSupabaseAdmin()
+          .from('board_wiki_pages')
+          .select('id, title, content, sources, compiled_at')
+          .eq('board_id', boardId)
+          .order('updated_at', { ascending: false })
+          .limit(limit);
+        if (error) return err(domainError('unavailable', 'Could not search this board'));
+        return ok((data ?? []) as readonly BoardAiSearchWikiRow[]);
+      } catch {
+        return err(domainError('unavailable', 'Could not search this board'));
+      }
+    },
+    /**
+     * PATCH-196. The same version read the wiki surface uses, through the SAME
+     * admin client the reads above use. It is board-scoped on top of RLS, and
+     * the caller has already proved this board readable.
+     */
+    async readCurrentSourceVersions(boardId: string, items: readonly BoardAiCitationItem[]) {
+      try {
+        const current = await readCurrentSourceVersions(
+          getSupabaseAdmin() as never,
+          boardId,
+          items,
+        );
+        return ok(current);
+      } catch {
+        return err(domainError('unavailable', 'Could not read source versions'));
       }
     },
   };

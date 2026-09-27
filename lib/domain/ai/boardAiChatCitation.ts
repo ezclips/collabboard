@@ -77,6 +77,12 @@ export const BOARD_AI_CITATION_INSTRUCTIONS: readonly string[] = [
   'Each entry in `explicitContext` carries a `sourceId` such as "S1". Those ids exist only so you can say which of the sources you were given you actually used.',
   `When your answer relies on one or more of them, end your reply with exactly one final line of the form ${BOARD_AI_CITATION_FOOTER_PREFIX}S1,S3]] naming those ids, newest first is not required.`,
   'A board search result contains several passages, and each is introduced by an id of the form "S3.2". When your answer relies on a search, name the passages you actually used rather than the search as a whole.',
+  // PATCH-196, D2: the chain-of-custody sentence. A wiki page is a compiled
+  // summary, not evidence; where a raw passage supports a statement, that
+  // passage is what gets cited, and a STALE page must be treated as possibly
+  // out of date. Placed here, in the same block as the other rules the model is
+  // given about citing.
+  'Board wiki pages are summaries compiled from the board; when a post or document passage supports a statement, cite that passage, and cite a wiki page only for what it alone supports. Treat a STALE page as possibly out of date.',
   `If your answer uses none of them, end with ${BOARD_AI_CITATION_FOOTER_PREFIX}${BOARD_AI_CITATION_NONE}]] instead.`,
   'That line is machine-read and removed before the user sees your reply, so write nothing else on it, and never mention source ids, document identifiers or page numbers as a way of citing anything in your prose.',
 ];
@@ -120,14 +126,32 @@ export function parseBoardAiCitationFooter(text: string): BoardAiCitationParseRe
 }
 
 /**
+ * PATCH-196. The types a CITATION item may name.
+ *
+ * Deliberately NOT `BoardAiContextType` alone. A wiki page is CITED but never
+ * ATTACHED: it has no context-envelope type, and adding `'wiki-page'` to
+ * `BOARD_AI_CONTEXT_TYPES` would wrongly make it attachable as chat context and
+ * would widen a persisted-union every context parser reads. The citation side
+ * therefore has its own, one member wider than the context side.
+ */
+export type BoardAiCitationItemType = BoardAiContextType | 'wiki-page';
+
+/** Is this a type a citation item may name? Wider than `isBoardAiContextType`. */
+export function isBoardAiCitationItemType(value: unknown): value is BoardAiCitationItemType {
+  return value === 'wiki-page' || isBoardAiContextType(value);
+}
+
+/**
  * One cited source: identity the reader can navigate to, plus the server's own
  * label. No text, no excerpt -- a citation says WHERE, never WHAT.
  */
 export interface BoardAiCitationItem {
-  readonly type: BoardAiContextType;
+  readonly type: BoardAiCitationItemType;
   readonly knowledgeDocumentId?: string;
   readonly pageNumber?: number;
   readonly padletId?: string;
+  /** PATCH-196. A cited wiki page, so the reader can open the wiki at it. */
+  readonly wikiPageId?: string;
   readonly charStart?: number;
   readonly charEnd?: number;
   /**
@@ -187,6 +211,10 @@ export function boardAiCitationIdentityKey(item: BoardAiCitationItem): string {
     // same card attached as text.
     case 'padlet-image':
       return `padlet-image:${item.padletId}`;
+    // PATCH-196. A cited wiki page, keyed by the page alone: two mentions of one
+    // page are one citation however they are labelled.
+    case 'wiki-page':
+      return `wiki-page:${item.wikiPageId}`;
     // Unreachable in practice -- citationItemFromBlock refuses a search block,
     // because a search is not a place a reader can be taken to. Present so the
     // switch stays exhaustive over BoardAiContextType, and keyed by nothing
@@ -301,6 +329,14 @@ export function boardAiCitationItemFromPassage(
   if (passage.source === 'post') {
     return passage.padletId ? { type: 'padlet', padletId: passage.padletId, label } : null;
   }
+  // PATCH-196. A WIKI PAGE PASSAGE CITES THE PAGE. Without a page id there is
+  // no destination to open, so it emits null rather than a wiki-page item that
+  // names nowhere -- the same standard every other arm applies.
+  if (passage.source === 'wiki') {
+    return passage.wikiPageId
+      ? { type: 'wiki-page', wikiPageId: passage.wikiPageId, label }
+      : null;
+  }
   if (!passage.knowledgeDocumentId) return null;
 
   // A PAGELESS SOURCE IS CITED BY ITS RANGE. This is Decision 0: keying a text
@@ -400,11 +436,15 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
     if (items.length >= BOARD_AI_CITATION_MAX_ITEMS) break;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const stored = raw as Record<string, unknown>;
-    if (!isBoardAiContextType(stored.type)) continue;
+    if (!isBoardAiCitationItemType(stored.type)) continue;
     const label = typeof stored.label === 'string' ? boardAiContextLabel(stored.label) : '';
     if (!label) continue;
     const documentId = typeof stored.knowledgeDocumentId === 'string' ? stored.knowledgeDocumentId : undefined;
     const padletId = typeof stored.padletId === 'string' ? stored.padletId : undefined;
+    // PATCH-196. Non-empty, like every other identity field read back.
+    const wikiPageId = typeof stored.wikiPageId === 'string' && stored.wikiPageId.trim().length > 0
+      ? stored.wikiPageId
+      : undefined;
     const page = typeof stored.pageNumber === 'number' && Number.isInteger(stored.pageNumber) && stored.pageNumber >= 1
       ? stored.pageNumber
       : undefined;
@@ -471,6 +511,10 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
       item = { type: 'knowledge-document', knowledgeDocumentId: documentId, label };
     } else if (stored.type === 'padlet' && padletId) {
       item = { type: 'padlet', padletId, label };
+    } else if (stored.type === 'wiki-page' && wikiPageId !== undefined) {
+      // PATCH-196. Non-empty string id and a label (already required above).
+      // A wiki-page citation with no page names nowhere and is dropped.
+      item = { type: 'wiki-page', wikiPageId, label };
     }
     if (item === null) continue;
 

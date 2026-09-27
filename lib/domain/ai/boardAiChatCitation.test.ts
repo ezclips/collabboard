@@ -183,9 +183,9 @@ describe('H: a stored envelope is read back strictly', () => {
  */
 const searchBlock = (
   passages: readonly {
-    source: 'post' | 'knowledge'; label: string;
+    source: 'post' | 'knowledge' | 'wiki'; label: string;
     padletId?: string; knowledgeDocumentId?: string; pageStart?: number;
-    charStart?: number; charEnd?: number;
+    charStart?: number; charEnd?: number; wikiPageId?: string;
   }[],
 ): ResolvedBoardAiContextBlock => ({
   type: 'board-search',
@@ -199,6 +199,8 @@ const POST_PASSAGE = { source: 'post' as const, label: 'Weekly plan', padletId: 
 const PDF_PASSAGE = { source: 'knowledge' as const, label: 'slides.pdf — page 3', knowledgeDocumentId: DOC_A, pageStart: 3 };
 const TEXT_PASSAGE_A = { source: 'knowledge' as const, label: 'tide-pools.md', knowledgeDocumentId: DOC_A, charStart: 0, charEnd: 338 };
 const TEXT_PASSAGE_B = { source: 'knowledge' as const, label: 'tide-pools.md', knowledgeDocumentId: DOC_A, charStart: 338, charEnd: 1113 };
+const WIKI_PAGE_ID = 'wwwwwwww-3333-4333-8333-333333333333';
+const WIKI_PASSAGE = { source: 'wiki' as const, label: 'Oil headlines', wikiPageId: WIKI_PAGE_ID };
 
 describe('search passages become ordinary, navigable citations', () => {
   it('a post passage cites the board post itself', () => {
@@ -310,6 +312,47 @@ describe('search passages become ordinary, navigable citations', () => {
     const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([POST_PASSAGE])]);
     expect(JSON.stringify(envelope)).not.toContain('body');
     expect(Object.keys(envelope!.items[0]).sort()).toEqual(['label', 'padletId', 'type']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH-196: a wiki passage cites the wiki page
+// ---------------------------------------------------------------------------
+describe('PATCH-196 a wiki passage becomes a wiki-page citation', () => {
+  it('S{n}.1 on a wiki passage gives a wiki-page item', () => {
+    const envelope = buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([WIKI_PASSAGE])]);
+    expect(envelope?.items).toEqual([{ type: 'wiki-page', wikiPageId: WIKI_PAGE_ID, label: 'Oil headlines' }]);
+  });
+
+  it('a wiki passage with no wikiPageId cites nothing', () => {
+    const noId = { source: 'wiki' as const, label: 'Oil headlines' };
+    expect(buildBoardAiCitationEnvelope(['S1.1'], [searchBlock([noId])])).toBeNull();
+  });
+
+  it('the identity key is wiki-page:{wikiPageId}', () => {
+    expect(boardAiCitationIdentityKey({ type: 'wiki-page', wikiPageId: WIKI_PAGE_ID, label: 'x' }))
+      .toBe(`wiki-page:${WIKI_PAGE_ID}`);
+  });
+
+  it('round-trips through a stored envelope', () => {
+    const stored = {
+      version: BOARD_AI_CITATION_VERSION,
+      items: [{ type: 'wiki-page', wikiPageId: WIKI_PAGE_ID, label: 'Oil headlines' }],
+    };
+    const read = boardAiCitationsFromStored(stored);
+    expect(read?.items).toEqual([{ type: 'wiki-page', wikiPageId: WIKI_PAGE_ID, label: 'Oil headlines' }]);
+  });
+
+  it('rejects a malformed wiki-page item (no id, or an empty id)', () => {
+    for (const item of [
+      { type: 'wiki-page', label: 'Oil headlines' },
+      { type: 'wiki-page', wikiPageId: '', label: 'Oil headlines' },
+      { type: 'wiki-page', wikiPageId: '   ', label: 'Oil headlines' },
+      { type: 'wiki-page', wikiPageId: WIKI_PAGE_ID },
+    ]) {
+      const read = boardAiCitationsFromStored({ version: BOARD_AI_CITATION_VERSION, items: [item] });
+      expect(read).toBeNull();
+    }
   });
 });
 
