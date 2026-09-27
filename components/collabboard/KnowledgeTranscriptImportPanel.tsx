@@ -101,7 +101,7 @@ const FORMAT_OPTIONS: readonly { value: KnowledgeTranscriptFormat; label: string
   // list is an exhaustive Record, so widening KnowledgeTranscriptFormat breaks
   // neither of them -- a new format that is added to the union and to nothing
   // else compiles, tests green, and cannot be chosen or submitted by anyone.
-  { value: 'youtube-panel', label: 'Copied from YouTube’s transcript panel' },
+  { value: 'youtube-panel', label: 'Transcript panel with timestamps (YouTube, Spotify)' },
   { value: 'plain', label: 'Plain text (no timings)' },
 ];
 

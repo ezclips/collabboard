@@ -372,6 +372,54 @@ describe('a caption FILE pasted as a panel copy is refused, not half-read', () =
   });
 });
 
+describe('the Spotify transcript tab copies the same layout', () => {
+  /**
+   * THE OWNER DISPROVED PATCH-204'S RESEARCH. Third-party articles said Spotify
+   * would not let you copy a transcript. Signed in, the episode page has a
+   * "Transcript" tab beside "Description", and the whole text copies with a
+   * timestamp line, a speaker line and the words -- the same start-only line
+   * layout this parser already reads. So no parser branch is needed; only the
+   * tab's wording and its preselected format were wrong.
+   *
+   * The sample is the owner's own, kept short; the words are re-typed rather
+   * than committed from Spotify.
+   */
+  const SPOTIFY_PASTE = [
+    '0:12',
+    'Speaker 1',
+    'Exactly.',
+    '0:13',
+    'Speaker 2',
+    'Just every morning.',
+  ].join('\n');
+
+  it('parses cues with the right startMs and the speaker in the text', () => {
+    const result = parseKnowledgeTranscript(SPOTIFY_PASTE, 'youtube-panel');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cues.map((cue) => [cue.startMs, cue.text])).toEqual([
+      [12_000, 'Speaker 1 Exactly.'],
+      [13_000, 'Speaker 2 Just every morning.'],
+    ]);
+    expect(result.value.endsAreDerived).toBe(true);
+  });
+
+  it('keeps a cue whose speaker line is followed by multiple text lines', () => {
+    // A cue is not always one short sentence: the speaker line is followed by
+    // whatever was said until the next timestamp, and every line must survive.
+    const multiLine = [
+      '0:12',
+      'Speaker 1',
+      'Exactly.',
+      'That is the whole point.',
+    ].join('\n');
+    const result = parseKnowledgeTranscript(multiLine, 'youtube-panel');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cues[0].text).toBe('Speaker 1 Exactly. That is the whole point.');
+  });
+});
+
 describe('the REAL clipboard shape, measured at last', () => {
   /**
    * SETTLED 2026-09-22, BY A REAL PASTE FROM A REAL VIDEO.

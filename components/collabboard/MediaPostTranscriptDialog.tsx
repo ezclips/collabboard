@@ -100,7 +100,7 @@ const APP_TAB_ORDER: readonly TranscriptAppTab[] = [
 const APP_TAB_LABELS: Record<TranscriptAppTab, { tab: string; badge: string; open: string | null }> = {
   youtube: { tab: 'YouTube', badge: 'Full text + timestamps', open: 'Open on YouTube ↗' },
   apple: { tab: 'Apple Podcasts', badge: 'Copy in parts', open: 'Open in Apple Podcasts ↗' },
-  spotify: { tab: 'Spotify', badge: 'No copying', open: 'Open in Spotify ↗' },
+  spotify: { tab: 'Spotify', badge: 'Full text + timestamps', open: 'Open in Spotify ↗' },
   pocketcasts: { tab: 'Pocket Casts', badge: 'Full text', open: 'Open in Pocket Casts ↗' },
   website: { tab: 'Website or file', badge: 'Full text + timestamps', open: 'Open the page ↗' },
 };
@@ -129,9 +129,9 @@ export function transcriptAppTabForUrl(url: string): TranscriptAppTab {
 export function transcriptFormatForTab(tab: TranscriptAppTab): KnowledgeTranscriptFormat | '' {
   switch (tab) {
     case 'youtube':
+    case 'spotify':
       return 'youtube-panel';
     case 'apple':
-    case 'spotify':
     case 'pocketcasts':
       return 'plain';
     case 'website':
@@ -203,21 +203,35 @@ function transcriptTabBody(tab: TranscriptAppTab): React.ReactNode {
             </li>
           </ol>
           <p className="mb-2 text-[11px] text-gray-500">
-            Tip: if the show is on YouTube or Pocket Casts, use that tab: you get the whole
-            text at once.
+            Tip: if the show is on YouTube, Spotify or Pocket Casts, use that tab: you get the
+            whole text at once.
           </p>
         </>
       );
     case 'spotify':
       return (
         <>
-          <p className="mb-2 text-xs text-gray-700">
-            Spotify shows transcripts for many episodes, but does not let you copy or export
-            them.
-          </p>
-          <p className="mb-2 text-xs text-gray-700">
-            Find the same episode on YouTube, Pocket Casts or the show’s website, and use that
-            tab instead.
+          <ol className="mb-2 list-decimal space-y-2 pl-5 text-xs text-gray-700">
+            <li>
+              Press <span className="font-medium">“Open in Spotify”</span> and sign in to Spotify
+              in your browser. The transcript is only shown when you are signed in.
+            </li>
+            <li>
+              On the episode page, click the <span className="font-medium">“Transcript”</span> tab
+              next to “Description”. Not every episode has one.
+            </li>
+            <li>
+              Select the whole transcript (click at its start, then Shift+click at its end) and
+              copy it (Ctrl+C).
+            </li>
+            <li>
+              Come back to this tab and press <span className="font-medium">“Paste
+              transcript”</span>.
+            </li>
+          </ol>
+          <p className="mb-2 text-[11px] text-gray-500">
+            Leave the timestamps and speaker names in. The timestamps let a citation point to the
+            moment it was said.
           </p>
         </>
       );

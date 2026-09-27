@@ -93,13 +93,20 @@ describe('PATCH-204 the dialog has one tab per app', () => {
     expect(selectedTab()!.getAttribute('data-app-tab')).toBe(expected);
   });
 
-  it('the Spotify tab says copying is impossible and gives no numbered steps', async () => {
+  it('the Spotify tab gives the four signed-in steps and its note', async () => {
     await mount(SPOTIFY);
     const body = tabPanel('spotify')!;
-    expect(body.textContent).toContain('does not let you copy or export them');
-    // No numbered steps: Spotify does not permit the workflow, so there is
-    // nothing to walk a person through.
-    expect(body.querySelector('ol')).toBeNull();
+    const badge = host!.querySelector('[data-app-tab-badge="spotify"]')!;
+    expect(badge.textContent).toBe('Full text + timestamps');
+    // The episode's own "Transcript" tab is named, because that is where the
+    // text now comes from -- the old text sent people away from a source that
+    // works.
+    expect(body.textContent).toContain('Transcript');
+    const steps = [...body.querySelectorAll('ol > li')].map((li) => li.textContent ?? '');
+    expect(steps).toHaveLength(4);
+    expect(steps[0]).toContain('sign in');
+    expect(steps[1]).toContain('Transcript');
+    expect(body.textContent).toContain('Leave the timestamps and speaker names in');
   });
 
   it('the Apple tab warns that copying is only in parts', async () => {
@@ -130,6 +137,15 @@ describe('PATCH-204 the format follows the tab until the person decides', () => 
     expect(formatSelect().value).toBe('plain');
     await clickTab('youtube');
     expect(formatSelect().value).toBe('youtube-panel');
+  });
+
+  it('Spotify opens with the timestamped format preselected, box empty', async () => {
+    // Spotify's own signed-in "Transcript" tab copies with timestamps and
+    // speakers, the same line layout the panel parser reads, so the tab must
+    // preselect `youtube-panel` -- not `plain`, which would drop the timestamps.
+    await mount(SPOTIFY);
+    expect(formatSelect().value).toBe('youtube-panel');
+    expect(payloadBox().value).toBe('');
   });
 
   it('typed text survives a tab switch and pins the format', async () => {
