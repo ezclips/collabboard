@@ -16,7 +16,8 @@ import {
 import { boardAiCitationIdentityKey } from '../../domain/ai/boardAiChatCitation';
 import { SupabaseKnowledgeBoardAuthorizer } from '../../infra/knowledge/knowledgeIngestionAdapters';
 import { readCurrentSourceVersions } from './boardWikiSourceVersions';
-import { compileBoardWikiProposal } from './boardWikiCompileSession';
+import { compileBoardWikiProposal, writeBoardWikiProposal } from './boardWikiCompileSession';
+import { buildBoardWikiAnswerProposal } from './boardWikiAnswerProposal';
 import { createBoardAiSearchReader } from '../../infra/ai/boardAiSearchReader';
 import { createAIRolePreferenceRepository } from '../../infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '../../infra/settings/aiProviderCredentialRepository';
@@ -391,6 +392,119 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
         },
         { boardId, pageId, userId, topic },
       );
+    },
+
+    /**
+     * PATCH-197. A proposal built from a stored Board AI answer.
+     *
+     * WRITE PERMISSION, as compile requires: it writes a proposal row. There is
+     * no model call and no credit charge -- nothing here reaches an LLM.
+     *
+     * THE MESSAGE IS READ THROUGH THE CALLER'S OWN CLIENT, scoped to this
+     * board, exactly as the note-provenance route reads it -- so RLS decides
+     * what the caller can see, and a message on another board cannot lend its
+     * provenance here. A missing row, a user row, or one on another board is the
+     * same not_found.
+     */
+    async proposeFromAnswer({ boardId, pageId, userId, messageId }) {
+      if (!await requireWrite(boardId, userId)) {
+        return err(domainError('not_found', 'Wiki page was not found'));
+      }
+
+      // The page's current content -- the baseline the proposal is diffed
+      // against, and the text the answer is appended to.
+      const { data: pageRow, error: pageError } = await client
+        .from('board_wiki_pages')
+        .select('id, content')
+        .eq('board_id', boardId)
+        .eq('id', pageId)
+        .maybeSingle();
+      if (pageError) return err(domainError('unavailable', 'Could not load the wiki page'));
+      if (!pageRow) return err(domainError('not_found', 'Wiki page was not found'));
+      const pageContent = typeof (pageRow as { content?: unknown }).content === 'string'
+        ? (pageRow as { content: string }).content
+        : '';
+
+      // The assistant row, read through the caller's own client and joined to
+      // its thread so a foreign board's message cannot be used.
+      const { data: row, error: messageError } = await client
+        .from('board_ai_messages')
+        .select('id, thread_id, role, content, citations, board_ai_threads!inner(board_id, user_id)')
+        .eq('id', messageId)
+        .maybeSingle();
+      if (messageError) return err(domainError('unavailable', 'Could not load the answer'));
+      const thread = (row as { board_ai_threads?: { board_id?: unknown; user_id?: unknown } } | null)
+        ?.board_ai_threads;
+      const stored = row as unknown as {
+        id?: unknown; thread_id?: unknown; role?: unknown; content?: unknown; citations?: unknown;
+      } | null;
+      const message = stored
+        && thread
+        && thread.user_id === userId
+        && String(thread.board_id) === boardId
+        && typeof stored.id === 'string'
+        && typeof stored.thread_id === 'string'
+        ? {
+          id: stored.id,
+          threadId: stored.thread_id,
+          boardId,
+          role: typeof stored.role === 'string' ? stored.role : '',
+          content: typeof stored.content === 'string' ? stored.content : '',
+          citations: stored.citations,
+        }
+        : null;
+      // A message that is not this board's, not this user's, a user turn, or an
+      // unknown id reads as not_found -- the same shape the note route uses.
+      if (!message || message.role !== 'assistant') {
+        return err(domainError('not_found', 'Answer not found'));
+      }
+
+      // The preceding user turn, for the section heading. Read oldest-first and
+      // take the last one BEFORE this message; a missing one is a heading of
+      // "From Board AI".
+      let question: string | null = null;
+      const { data: threadRows } = await client
+        .from('board_ai_messages')
+        .select('id, role, content, created_at')
+        .eq('thread_id', message.threadId)
+        .order('created_at', { ascending: true });
+      const ordered = (threadRows ?? []) as readonly { id?: unknown; role?: unknown; content?: unknown }[];
+      const index = ordered.findIndex((entry) => String(entry.id) === message.id);
+      for (let i = index - 1; i >= 0; i -= 1) {
+        if (ordered[i].role === 'user') {
+          question = typeof ordered[i].content === 'string' ? (ordered[i].content as string) : null;
+          break;
+        }
+      }
+
+      const built = await buildBoardWikiAnswerProposal({
+        boardId,
+        pageId,
+        userId,
+        messageId,
+        pageContent,
+        message,
+        question,
+        readVersions: (items) => readCurrentSourceVersions(client as never, boardId, items),
+        writeProposal: async ({ content, sources, basedOnContent }) => {
+          const written = await writeBoardWikiProposal(client as never, {
+            boardId, pageId, userId, content, sources, basedOnContent,
+          });
+          // The shared writer returns a Result; a failure here is an outage the
+          // caller maps to 503. `buildBoardWikiAnswerProposal` only needs the
+          // value or a throw, so a failure throws and the route catches it.
+          if (!written.ok) throw written.error;
+          return written.value;
+        },
+      });
+
+      if (!built.ok) {
+        return err(domainError(
+          built.status === 403 ? 'permission_denied' : 'not_found',
+          built.reason === 'unsigned_or_forged' ? 'Provenance could not be verified' : 'Answer not found',
+        ));
+      }
+      return ok(built.proposal);
     },
   };
 }

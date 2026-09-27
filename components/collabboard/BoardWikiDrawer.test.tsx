@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import BoardWikiDrawer, { BoardWikiPlanLimitError } from './BoardWikiDrawer';
 import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
+// (the type is imported above; the runtime value is not needed here)
 
 /**
  * The archive and the download are stubbed, not exercised: JSZip's output is
@@ -187,8 +188,16 @@ async function flush() {
  * shared stub's ordering.
  */
 function stubWikiFetch() {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (String(url).endsWith(`/wiki/${PAGE}`)) {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    // A PATCH is recorded into the SAME `saved` slot the shared stub uses, so a
+    // test can prove a save did or did not happen regardless of which stub it
+    // chose.
+    if (init?.method === 'PATCH') {
+      saved.body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ page: { id: PAGE, title: 'x', updatedAt: 'y' } }), { status: 200 });
+    }
+    if (url.endsWith(`/wiki/${PAGE}`)) {
       return new Response(JSON.stringify(pageBody()), { status: 200 });
     }
     return new Response(JSON.stringify({
@@ -214,6 +223,25 @@ describe('PATCH-196 a requested page is selected', () => {
     await flush();
     // Nothing was selected, so no page content was loaded, and nothing crashed.
     expect(c.querySelector('[data-board-wiki-content="true"]')).toBeNull();
+  });
+
+  it('a pending proposal is applied to the draft once, and not saved until Save', async () => {
+    stubWikiFetch();
+    const proposal = {
+      id: 'prop-answer', content: 'Line one.\nLine two.\n\n## From Board AI\n\nThe saved answer.',
+      sources: [], basedOnContent: 'Line one.\nLine two.', createdAt: 'now',
+    } as never;
+    const c = await mount({
+      requestedPageId: PAGE,
+      pendingProposal: { pageId: PAGE, proposal: proposal as unknown as BoardWikiProposal },
+    });
+    await flush();
+    await flush();
+
+    // The proposal's text is in the DRAFT...
+    expect(content(c).value).toContain('The saved answer.');
+    // ...and NOTHING was saved: no PATCH reached the server.
+    expect(saved.body).toBeNull();
   });
 
   it('a request that arrives AFTER mount selects then', async () => {

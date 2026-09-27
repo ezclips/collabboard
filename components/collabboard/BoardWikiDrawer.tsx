@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveAs } from 'file-saver';
 import { BookOpen, Download, X } from 'lucide-react';
 
@@ -104,6 +104,15 @@ export interface BoardWikiDrawerProps {
    */
   readonly requestedPageId?: string | null;
   /**
+   * PATCH-197. A proposal to put into the DRAFT for review, with the page it
+   * belongs to -- how "Save to wiki" hands a just-created proposal to a person.
+   *
+   * Applied ONCE, through the SAME `applyProposalToDraft` path Recompile uses,
+   * when the drawer is showing that page. Nothing is saved: closing without
+   * pressing Save discards the draft, exactly as a Recompile proposal does.
+   */
+  readonly pendingProposal?: { readonly pageId: string; readonly proposal: BoardWikiProposal } | null;
+  /**
    * Same shape the chat drawer's citation click uses, deliberately: a KNOWLEDGE
    * source opens in the reader, and a board post does not (the chat path opens
    * neither, and inventing a second navigation contract here would put the same
@@ -158,6 +167,7 @@ export default function BoardWikiDrawer({
   canEdit,
   blockingEditorOpen = false,
   requestedPageId = null,
+  pendingProposal = null,
   onOpenCitation,
   onRequestRecompile,
 }: BoardWikiDrawerProps) {
@@ -247,6 +257,31 @@ export default function BoardWikiDrawer({
     if (!pages.some((summary) => summary.id === requestedPageId)) return;
     setSelectedPageId((current) => (current === requestedPageId ? current : requestedPageId));
   }, [isOpen, requestedPageId, pages]);
+
+  /**
+   * PATCH-197. Apply a pending proposal to the DRAFT, exactly once.
+   *
+   * The ref remembers the proposal id already applied, so a rerender does not
+   * re-apply it and the user's own edits to the draft are never clobbered by a
+   * second pass. The application happens only once the draft for THAT page has
+   * loaded, so the proposal is applied to the real page content rather than to
+   * null. Nothing is saved here: the draft holds the change until the user
+   * presses Save, and closing without saving discards it, as Recompile does.
+   */
+  const appliedPendingProposalRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || pendingProposal === null) return;
+    if (selectedPageId !== pendingProposal.pageId) return;
+    if (draft === null) return;
+    if (appliedPendingProposalRef.current === pendingProposal.proposal.id) return;
+    appliedPendingProposalRef.current = pendingProposal.proposal.id;
+    setDraft(applyProposalToDraft(draft, pendingProposal.proposal));
+    setProposal(null);
+    // draft is deliberately excluded: re-running on every draft edit would
+    // re-apply the proposal over the user's own changes. The guard ref makes
+    // this idempotent regardless.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, pendingProposal, selectedPageId, draft === null]);
 
   const dirty = draft !== null && boardWikiDraftIsDirty(draft);
 

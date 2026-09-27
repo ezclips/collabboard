@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createBoardWikiAnswerProposalHandler,
   createBoardWikiCreateHandler,
   createBoardWikiCompileHandler,
   createBoardWikiDeleteHandler,
@@ -61,6 +62,7 @@ function session(overrides: Partial<BoardWikiSession> = {}): BoardWikiSession {
     createPage: vi.fn(async () => ok(storedPage)),
     savePage: vi.fn(async () => ok(storedPage)),
     compilePage: vi.fn(async () => ok({ id: 'p', content: 'x [S1.1].', sources: [docSource], basedOnContent: '', createdAt: 't' })),
+    proposeFromAnswer: vi.fn(async () => ok({ id: 'p2', content: 'x', sources: [], basedOnContent: '', createdAt: 't' })),
     deletePage: vi.fn(async () => ok({ deleted: true as const })),
     ...overrides,
   } as BoardWikiSession;
@@ -550,6 +552,10 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
       'createBoardWikiReadHandler',
       'createBoardWikiSaveHandler',
       'createBoardWikiCompileHandler',
+      // PATCH-197: "Save to wiki". Added here deliberately. It RETURNS a
+      // proposal and writes no page, so the property this block protects -- no
+      // handler turns a proposal into a page -- is untouched.
+      'createBoardWikiAnswerProposalHandler',
       'createBoardWikiDeleteHandler',
     ]);
     // UNIT 3 CHANGED THE SHAPE OF THIS PIN DELIBERATELY. Before compilation
@@ -572,14 +578,18 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     expect(save.slice(0, save.indexOf('\n}\n'))).not.toMatch(/proposal/i);
   });
 
-  it('the session exposes exactly seven commands, and only one of them compiles', () => {
+  it('the session exposes exactly eight commands, and only one of them compiles', () => {
     // UNIT 3 added `exportPages`, deliberately, and this pin is enumerated so
     // that adding one has to be an edit here. It is the second READ on the
     // session -- it selects pages and returns them -- and it carries no write
     // of any kind, which the export block above asserts at the handler.
+    //
+    // PATCH-197 added `proposeFromAnswer`: it writes a PROPOSAL (never a page)
+    // from a verified answer, so it is a write shaped exactly like compilePage
+    // and the "a proposal is never applied" property is unchanged.
     const commands = [...routeSource.matchAll(/^ {2}(\w+)\(input: \{/gm)].map((m) => m[1]);
     expect(commands.sort())
-      .toEqual(['compilePage', 'createPage', 'deletePage', 'exportPages', 'listPages', 'readPage', 'savePage']);
+      .toEqual(['compilePage', 'createPage', 'deletePage', 'exportPages', 'listPages', 'proposeFromAnswer', 'readPage', 'savePage']);
   });
 
   it('THE REFRESH LOOP CLOSES: an applied proposal decides the versions it carries', () => {
@@ -711,5 +721,56 @@ describe('NO SERVER PATH WRITES COMPILE OUTPUT TO A PAGE', () => {
     const stamps = [...body.matchAll(/compiled_at/g)];
     expect(stamps).toHaveLength(1);
     expect(body).toContain('...(request.appliedProposalId ? { compiled_at:');
+  });
+});
+
+// ============================================================================
+// PATCH-197: the "Save to wiki" handler
+// ============================================================================
+describe('PATCH-197 the answer-proposal handler', () => {
+  it('names the message and nothing that could steer provenance', async () => {
+    const proposeFromAnswer = vi.fn(async () => ok({ id: 'p', content: 'x', sources: [], basedOnContent: '', createdAt: 't' }));
+    const handler = createBoardWikiAnswerProposalHandler({
+      getAuthenticatedSession: async () => session({ proposeFromAnswer }),
+    });
+
+    const response = await handler(post({
+      fromMessageId: '  m1  ',
+      sources: ['forged'], citations: [{ type: 'padlet' }], topic: 'ignored',
+    }), itemContext);
+
+    expect(response.status).toBe(201);
+    // The message id is trimmed, and NOTHING else reaches the session.
+    expect(proposeFromAnswer).toHaveBeenCalledWith({
+      boardId: BOARD, pageId: PAGE, userId: 'user-1', messageId: 'm1',
+    });
+    // No topic is passed: this is not the compile path.
+    expect((proposeFromAnswer.mock.calls[0] as unknown[])[0]).not.toHaveProperty('topic');
+  });
+
+  it('returns a PROPOSAL and never a page', async () => {
+    const handler = createBoardWikiAnswerProposalHandler({
+      getAuthenticatedSession: async () => session({ proposeFromAnswer: vi.fn(async () => ok({ id: 'p', content: 'x', sources: [], basedOnContent: '', createdAt: 't' })) }),
+    });
+    const body = await (await handler(post({ fromMessageId: 'm1' }), itemContext)).json();
+    expect(body.proposal.id).toBe('p');
+    expect(body.page).toBeUndefined();
+  });
+
+  it('a missing or non-string fromMessageId is 400', async () => {
+    const handler = createBoardWikiAnswerProposalHandler({ getAuthenticatedSession: async () => session() });
+    for (const body of [{}, { fromMessageId: 7 }, { fromMessageId: '   ' }]) {
+      expect((await handler(post(body), itemContext)).status, JSON.stringify(body)).toBe(400);
+    }
+  });
+
+  it('a 403 from the session is a 403, and an unauthenticated caller is 401', async () => {
+    const forbidden = createBoardWikiAnswerProposalHandler({
+      getAuthenticatedSession: async () => session({ proposeFromAnswer: vi.fn(async () => err(domainError('permission_denied', 'no'))) }),
+    });
+    expect((await forbidden(post({ fromMessageId: 'm1' }), itemContext)).status).toBe(403);
+
+    const anonymous = createBoardWikiAnswerProposalHandler({ getAuthenticatedSession: async () => null });
+    expect((await anonymous(post({ fromMessageId: 'm1' }), itemContext)).status).toBe(401);
   });
 });

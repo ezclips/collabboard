@@ -15,6 +15,7 @@ import {
   type BoardWikiCompiledPassage,
 } from '../../domain/wiki/boardWikiCompiledPage';
 import type { BoardWikiProposal } from '../../domain/wiki/boardWikiEditing';
+import type { BoardWikiPageSource } from '../../domain/wiki/boardWikiPageSources';
 import { searchBoardAiContext } from '../ai/boardAiChatSearch';
 import {
   boardWikiPassageTokens,
@@ -110,6 +111,66 @@ interface CompileClient {
       };
     };
   };
+}
+
+/**
+ * PATCH-197. ONE writer for a wiki proposal row, shared by the compile path and
+ * the "Save to wiki" path.
+ *
+ * Both produce the SAME row -- the content a person will review, the sources
+ * and their compile-time versions, and `based_on_content` -- so a second copy of
+ * the insert would be a second place the lifecycle could drift. This is the
+ * "share the proposal writer" the patch allows: the insert, then the deletion
+ * of the page's SUPERSEDED proposals (Unit 1's lifecycle, "a superseded
+ * proposal is deleted and a new one inserted").
+ *
+ * The delete runs AFTER the insert, never before, so a failed write leaves the
+ * proposal the user already has. It is scoped to this page and excludes the row
+ * just written.
+ */
+export async function writeBoardWikiProposal(
+  client: CompileClient,
+  input: {
+    readonly boardId: string;
+    readonly pageId: string;
+    readonly userId: string;
+    readonly content: string;
+    readonly sources: readonly BoardWikiPageSource[];
+    readonly basedOnContent: string;
+  },
+): Promise<Result<BoardWikiProposal, DomainError>> {
+  const { data: inserted, error: insertError } = await client
+    .from('board_wiki_page_proposals')
+    .insert({
+      page_id: input.pageId,
+      board_id: input.boardId,
+      content: input.content,
+      sources: input.sources,
+      based_on_content: input.basedOnContent,
+      created_by: input.userId,
+    })
+    .select('id, created_at')
+    .maybeSingle();
+  if (insertError || !inserted) {
+    return err(domainError('unavailable', 'The proposal could not be saved'));
+  }
+
+  // SUPERSEDED PROPOSALS ARE DELETED -- see this function's own note above.
+  const insertedId = String((inserted as { id?: unknown }).id ?? '');
+  await client
+    .from('board_wiki_page_proposals')
+    .delete()
+    .eq('board_id', input.boardId)
+    .eq('page_id', input.pageId)
+    .neq('id', insertedId);
+
+  return ok({
+    id: insertedId,
+    content: input.content,
+    sources: input.sources,
+    basedOnContent: input.basedOnContent,
+    createdAt: String((inserted as { created_at?: unknown }).created_at ?? ''),
+  });
 }
 
 /**
@@ -276,42 +337,18 @@ export async function compileBoardWikiProposal(
   // compile-time version from THIS ROW. Returning the proposal without storing
   // it would leave the browser holding the only copy of a version the server
   // would later have to take its word for.
-  const { data: inserted, error: insertError } = await client
-    .from('board_wiki_page_proposals')
-    .insert({
-      page_id: input.pageId,
-      board_id: input.boardId,
-      content: reading.value.content,
-      sources: reading.value.sources,
-      based_on_content: basedOnContent,
-      created_by: input.userId,
-    })
-    .select('id, created_at')
-    .maybeSingle();
-  if (insertError || !inserted) {
-    return err(domainError('unavailable', 'The compilation could not be saved'));
-  }
-
-  // SUPERSEDED PROPOSALS ARE DELETED, which is the lifecycle Unit 1's migration
-  // already declared -- "a superseded proposal is deleted and a new one
-  // inserted" -- and which nothing implemented, so rows accumulated silently
-  // (the first live page had two within minutes).
   //
-  // AFTER the insert, never before: a failed compile must leave the proposal
-  // the user already has. Scoped to this page, and excluding the row just
-  // written.
-  //
-  // A save naming a now-deleted proposal falls back to the stored page's
-  // versions rather than failing -- see `savePage`. That is the narrow cost of
-  // clearing them, and it is conservative in the right direction: the page
-  // reads stale and can be refreshed, rather than losing text.
-  const insertedId = String((inserted as { id?: unknown }).id ?? '');
-  await client
-    .from('board_wiki_page_proposals')
-    .delete()
-    .eq('board_id', input.boardId)
-    .eq('page_id', input.pageId)
-    .neq('id', insertedId);
+  // PATCH-197. The SAME writer the "Save to wiki" path uses, so the row shape
+  // and the superseded-proposal lifecycle live in one place.
+  const written = await writeBoardWikiProposal(client, {
+    boardId: input.boardId,
+    pageId: input.pageId,
+    userId: input.userId,
+    content: reading.value.content,
+    sources: reading.value.sources,
+    basedOnContent,
+  });
+  if (!written.ok) return written;
 
   // PATCH-187. Charged only after the proposal is accepted and stored, only for
   // a managed run, and only when the check said to charge. A recording failure
@@ -339,11 +376,5 @@ export async function compileBoardWikiProposal(
     }
   }
 
-  return ok({
-    id: String((inserted as { id?: unknown }).id ?? ''),
-    content: reading.value.content,
-    sources: reading.value.sources,
-    basedOnContent,
-    createdAt: String((inserted as { created_at?: unknown }).created_at ?? ''),
-  });
+  return ok(written.value);
 }

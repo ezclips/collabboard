@@ -273,10 +273,15 @@ describe('what the upload path may not do', () => {
     // list admits only these, so the upload unit still cannot grow a server
     // surface quietly, and neither can anything else in the drawer.
     const paths = new Set(executable.match(/`\/api\/[^`]+`/g) ?? []);
+    // PATCH-197 added two, deliberately: the wiki list and a page's proposals,
+    // for "Save to wiki". Still an EXACT allow-list, so a fourth endpoint
+    // cannot arrive quietly.
     expect([...paths].sort()).toEqual([
       '`/api/boards/${encodeURIComponent(boardId)}/ai/chat/starter-questions`',
       '`/api/boards/${encodeURIComponent(boardId)}/ai/chat`',
       '`/api/boards/${encodeURIComponent(boardId)}/knowledge`',
+      '`/api/boards/${boardId}/wiki`',
+      '`/api/boards/${boardId}/wiki/${pageId}/proposals`',
     ].sort());
     expect(executable).toContain('/knowledge');
   });

@@ -425,7 +425,14 @@ describe('46-48. no context is sent, and none is offered', () => {
     // page text, no selection, no rendered page ever enters this component.
     // The sibling assertion below is what holds that line.
     const urls = code.match(/\/api\/[^`'"]*/g) ?? [];
-    expect(urls.every((url) => url.includes('/ai/chat') || url.endsWith('/knowledge'))).toBe(true);
+    // PATCH-197 adds two endpoints, deliberately: the board wiki list and a
+    // wiki page's proposals -- the "Save to wiki" button's create + propose
+    // calls. Neither hands this surface a SOURCE: it posts an answer id and
+    // reads page titles, and the content rule just below still holds.
+    expect(urls.every((url) => url.includes('/ai/chat')
+      || url.endsWith('/knowledge')
+      || url.endsWith('/wiki')
+      || url.endsWith('/proposals'))).toBe(true);
     // Specifically NOT the endpoints that would hand it content.
     for (const contentRoute of ['/pages', '/original', '/render-pages', '/knowledge/search', '/highlights']) {
       expect(code, `${contentRoute} would make this surface a reader`).not.toContain(contentRoute);

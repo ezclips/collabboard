@@ -112,6 +112,16 @@ export interface BoardWikiSession {
     readonly userId: string;
     readonly topic: string;
   }): Promise<Result<BoardWikiProposal, DomainError>>;
+  /**
+   * PATCH-197. A proposal built from a stored Board AI answer, verified
+   * server-side. It writes a proposal row and touches no page and no model.
+   */
+  proposeFromAnswer(input: {
+    readonly boardId: string;
+    readonly pageId: string;
+    readonly userId: string;
+    readonly messageId: string;
+  }): Promise<Result<BoardWikiProposal, DomainError>>;
 }
 
 export interface BoardWikiRouteDependencies {
@@ -455,6 +465,50 @@ export function createBoardWikiCompileHandler(deps: BoardWikiRouteDependencies) 
     let result: Result<BoardWikiProposal, DomainError>;
     try {
       result = await session.compilePage({ boardId: id, pageId, userId: session.userId, topic });
+    } catch {
+      return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });
+    }
+    if (!result.ok) return failure(result.error);
+
+    return NextResponse.json({ proposal: result.value }, { status: 201 });
+  };
+}
+
+/**
+ * PATCH-197. "Save to wiki": a proposal built from a stored Board AI answer.
+ *
+ * The body names the assistant message (`fromMessageId`) and nothing else about
+ * its content or sources -- the server reads the signed row itself. A missing
+ * message is 404; an unsigned or forged one is 403, the same refusal the note
+ * route makes. It is NOT the compile endpoint: no topic, no model, no credits.
+ */
+export function createBoardWikiAnswerProposalHandler(deps: BoardWikiRouteDependencies) {
+  return async function POST(
+    request: Request,
+    context: BoardWikiPageItemRouteContext,
+  ): Promise<NextResponse> {
+    const session = await resolveSession(deps);
+    if (!session) return unauthorized();
+
+    const { id, pageId } = await context.params;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    const messageId = typeof (body as { fromMessageId?: unknown })?.fromMessageId === 'string'
+      ? (body as { fromMessageId: string }).fromMessageId.trim()
+      : '';
+    if (messageId.length === 0) {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    let result: Result<BoardWikiProposal, DomainError>;
+    try {
+      result = await session.proposeFromAnswer({ boardId: id, pageId, userId: session.userId, messageId });
     } catch {
       return NextResponse.json({ error: UNAVAILABLE }, { status: 503 });
     }

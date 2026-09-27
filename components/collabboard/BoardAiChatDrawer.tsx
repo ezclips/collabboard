@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, Play, SendHorizontal, Upload, X } from 'lucide-react';
+import { BookOpen, Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, Play, SendHorizontal, Upload, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import {
@@ -15,6 +15,7 @@ import {
   parseBoardAiPostClipPayload,
 } from '@/lib/domain/ai/boardAiPostClipPayload';
 import type { BoardAiCitationItem } from '@/lib/domain/ai/boardAiChatCitation';
+import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
 import {
   BOARD_AI_DRAFT_CONTEXT_MAX,
   addBoardAiDraftContext,
@@ -153,6 +154,20 @@ export interface BoardAiChatDrawerProps {
   }) => void;
   readonly canSaveAssistantAsNote?: boolean;
   readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
+  /**
+   * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
+   * capability the wiki drawer gates its Save on; false renders nothing at all,
+   * not a disabled button.
+   */
+  readonly canSaveAssistantToWiki?: boolean;
+  /**
+   * Open the board wiki ON A PAGE, with a proposal already in the draft for
+   * review. Called once the create + proposal calls have succeeded.
+   */
+  readonly onOpenWikiWithProposal?: (target: {
+    readonly pageId: string;
+    readonly proposal: BoardWikiProposal;
+  }) => void;
   /**
    * The one supported board object currently selected, already reduced to a
    * draft by the shell's own selection authority. Null when the selection is
@@ -369,6 +384,8 @@ export default function BoardAiChatDrawer({
   onOpenCitation,
   canSaveAssistantAsNote = false,
   onSaveAssistantAsNote,
+  canSaveAssistantToWiki = false,
+  onOpenWikiWithProposal,
   selectedBoardItem = null,
   onResolveDroppedPost,
 }: BoardAiChatDrawerProps) {
@@ -920,6 +937,112 @@ export default function BoardAiChatDrawer({
       setAssistantNoteSaveOutcome(message.id, 'idle');
     }
   }, [setAssistantNoteSaveOutcome, onSaveAssistantAsNote]);
+
+  /**
+   * PATCH-197. "Save to wiki" -- the popover, its page list, and the create +
+   * proposal calls.
+   *
+   * The server does the provenance work; this only chooses a page and hands the
+   * answer over. A failure names the reason (403 sources unverifiable, 404 page
+   * gone, else a retry), and a create that succeeds before a proposal failure is
+   * SAID rather than silently deleted.
+   */
+  const [wikiPopoverMessageId, setWikiPopoverMessageId] = useState<string | null>(null);
+  const [wikiPages, setWikiPages] = useState<readonly { id: string; title: string }[]>([]);
+  const [wikiNewTitle, setWikiNewTitle] = useState('');
+  const [wikiBusy, setWikiBusy] = useState(false);
+  const [wikiOutcome, setWikiOutcome] = useState<Record<string, { state: 'saving' | 'sent' | 'failed'; message?: string }>>({});
+
+  const openWikiPopover = useCallback(async (messageId: string, question: string) => {
+    setWikiPopoverMessageId(messageId);
+    setWikiNewTitle(question.slice(0, 80));
+    try {
+      const response = await fetch(`/api/boards/${boardId}/wiki`);
+      const payload = await response.json().catch(() => ({}));
+      setWikiPages(Array.isArray(payload?.pages)
+        ? payload.pages.map((page: { id: string; title: string }) => ({ id: String(page.id), title: String(page.title) }))
+        : []);
+    } catch {
+      setWikiPages([]);
+    }
+  }, [boardId]);
+
+  const saveAnswerToWiki = useCallback(async (messageId: string, pageId: string, created: boolean) => {
+    setWikiBusy(true);
+    setWikiOutcome((current) => ({ ...current, [messageId]: { state: 'saving' } }));
+    try {
+      const response = await fetch(`/api/boards/${boardId}/wiki/${pageId}/proposals`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fromMessageId: messageId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.proposal) {
+        // A page that was created but whose proposal failed is said, never
+        // silently deleted: the page is the user's now.
+        const reason = response.status === 403
+          ? "This answer's sources could not be verified"
+          : response.status === 404
+            ? 'That page no longer exists'
+            : 'Could not save to the wiki. Try again.';
+        setWikiOutcome((current) => ({
+          ...current,
+          [messageId]: {
+            state: 'failed',
+            message: created ? `Page created; the answer was not added. ${reason}` : reason,
+          },
+        }));
+        return;
+      }
+      setWikiOutcome((current) => ({ ...current, [messageId]: { state: 'sent' } }));
+      setWikiPopoverMessageId(null);
+      onOpenWikiWithProposal?.({ pageId, proposal: payload.proposal as BoardWikiProposal });
+    } catch {
+      setWikiOutcome((current) => ({
+        ...current,
+        [messageId]: {
+          state: 'failed',
+          message: created
+            ? 'Page created; the answer was not added. Could not save to the wiki. Try again.'
+            : 'Could not save to the wiki. Try again.',
+        },
+      }));
+    } finally {
+      setWikiBusy(false);
+    }
+  }, [boardId, onOpenWikiWithProposal]);
+
+  const createPageThenSave = useCallback(async (messageId: string) => {
+    const title = wikiNewTitle.trim();
+    if (title.length === 0) return;
+    setWikiBusy(true);
+    setWikiOutcome((current) => ({ ...current, [messageId]: { state: 'saving' } }));
+    // A create failure is its own message; the page was never created.
+    let pageId: string | null = null;
+    try {
+      const response = await fetch(`/api/boards/${boardId}/wiki`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.page?.id) {
+        setWikiOutcome((current) => ({
+          ...current,
+          [messageId]: { state: 'failed', message: 'Could not create the page. Try again.' },
+        }));
+        return;
+      }
+      pageId = String(payload.page.id);
+    } catch {
+      setWikiOutcome((current) => ({ ...current, [messageId]: { state: 'failed', message: 'Could not create the page. Try again.' } }));
+      return;
+    } finally {
+      setWikiBusy(false);
+    }
+    // From here a failure is "page created; the answer was not added".
+    await saveAnswerToWiki(messageId, pageId, true);
+  }, [boardId, wikiNewTitle, saveAnswerToWiki]);
 
   const setDraftContext = useCallback((items: readonly BoardAiDraftContextItem[]) => {
     onDraftContextChange?.(items);
@@ -1512,6 +1635,19 @@ export default function BoardAiChatDrawer({
           const canShowSaveAsNote = message.role === 'assistant'
             && canSaveAssistantAsNote
             && !!onSaveAssistantAsNote;
+          // PATCH-197. The preceding user turn, for the section heading and the
+          // New-page title. Absent for the first message, and the server treats
+          // that as "From Board AI".
+          const precedingQuestion = (() => {
+            for (let i = index - 1; i >= 0; i -= 1) {
+              if (messages[i].role === 'user') return messages[i].content;
+            }
+            return null;
+          })();
+          const canShowSaveToWiki = message.role === 'assistant'
+            && canSaveAssistantToWiki
+            && !!onOpenWikiWithProposal;
+          const wikiState = wikiOutcome[message.id];
           return (
           <div
             key={message.id}
@@ -1674,6 +1810,86 @@ export default function BoardAiChatDrawer({
                     <span data-board-ai-chat-save-note-error="true" className="text-[10px] text-red-600">
                       Could not save note.
                     </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {canShowSaveToWiki ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">
+                  <button
+                    type="button"
+                    data-board-ai-chat-action="save-wiki"
+                    data-board-ai-chat-save-wiki-message-id={message.id}
+                    className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-default disabled:border-green-200 disabled:bg-green-50 disabled:text-green-700"
+                    disabled={wikiState?.state === 'saving' || wikiState?.state === 'sent'}
+                    onClick={() => {
+                      if (wikiPopoverMessageId === message.id) {
+                        setWikiPopoverMessageId(null);
+                        return;
+                      }
+                      void openWikiPopover(message.id, precedingQuestion ?? '');
+                    }}
+                  >
+                    {wikiState?.state === 'sent' ? (
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    ) : wikiState?.state === 'saving' ? (
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <BookOpen className="h-3 w-3" aria-hidden="true" />
+                    )}
+                    {wikiState?.state === 'sent' ? 'Sent to wiki' : wikiState?.state === 'saving' ? 'Saving…' : 'Save to wiki'}
+                  </button>
+                  {wikiState?.state === 'failed' ? (
+                    <span data-board-ai-chat-save-wiki-error="true" className="text-[10px] text-red-600">
+                      {wikiState.message ?? 'Could not save to the wiki. Try again.'}
+                    </span>
+                  ) : null}
+                  {wikiPopoverMessageId === message.id ? (
+                    <div
+                      data-board-ai-chat-wiki-popover="true"
+                      className="mt-1 w-full rounded border border-gray-200 bg-white p-2"
+                    >
+                      <div className="mb-2">
+                        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">New page</p>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={wikiNewTitle}
+                            onChange={(event) => setWikiNewTitle(event.currentTarget.value)}
+                            placeholder="Page title"
+                            aria-label="New wiki page title"
+                            className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-700 outline-none focus:border-blue-400"
+                          />
+                          <button
+                            type="button"
+                            data-board-ai-chat-wiki-create="true"
+                            disabled={wikiBusy || wikiNewTitle.trim().length === 0}
+                            onClick={() => { void createPageThenSave(message.id); }}
+                            className="rounded border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            Create
+                          </button>
+                        </div>
+                      </div>
+                      {wikiPages.length > 0 ? (
+                        <div>
+                          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">Add to page</p>
+                          <div className="flex flex-wrap gap-1">
+                            {wikiPages.map((page) => (
+                              <button
+                                key={page.id}
+                                type="button"
+                                data-board-ai-chat-wiki-page={page.id}
+                                disabled={wikiBusy}
+                                onClick={() => { void saveAnswerToWiki(message.id, page.id, false); }}
+                                className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                {page.title}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               ) : null}

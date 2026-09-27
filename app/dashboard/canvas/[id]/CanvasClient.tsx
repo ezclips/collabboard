@@ -153,6 +153,7 @@ import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer';
 import { BoardWikiPlanLimitError } from '@/components/collabboard/BoardWikiDrawer';
+import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
 import { seekBoardVideo } from '@/components/collabboard/boardVideoPlayerRegistry';
 import {
   boardDockClaim,
@@ -2159,6 +2160,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const [boardWikiRequestedPage, setBoardWikiRequestedPage] =
     useState<{ readonly pageId: string; readonly requestId: number } | null>(null);
+  /**
+   * PATCH-197. A proposal just created from a Board AI answer, to put into the
+   * wiki drawer's draft ON its page for review. Applied once by the drawer.
+   */
+  const [boardWikiPendingProposal, setBoardWikiPendingProposal] =
+    useState<{ readonly pageId: string; readonly proposal: BoardWikiProposal } | null>(null);
 
   /**
    * =========================================================================
@@ -2250,6 +2257,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [claimDock]);
 
   const closeBoardWiki = useCallback(() => setIsBoardWikiOpen(false), []);
+
+  /**
+   * PATCH-197. Open the wiki on a page with a freshly created proposal in the
+   * draft. Goes through the board's ONE wiki-open authority, and rides the same
+   * request-id shape PATCH-196's citation open uses.
+   */
+  const openBoardWikiWithProposal = useCallback((target: {
+    readonly pageId: string;
+    readonly proposal: BoardWikiProposal;
+  }) => {
+    setBoardWikiRequestedPage((current) => ({
+      pageId: target.pageId,
+      requestId: (current?.requestId ?? 0) + 1,
+    }));
+    setBoardWikiPendingProposal({ pageId: target.pageId, proposal: target.proposal });
+    openBoardWiki();
+  }, [openBoardWiki]);
 
   /**
    * WIKI-U3. Asking the server to compile a PROPOSAL for one page.
@@ -11371,6 +11395,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             draftContext={boardAiChatDraftContext}
             onDraftContextChange={setBoardAiChatDraftContext}
             onOpenCitation={openBoardAiCitation}
+            /* PATCH-197. The same capability the wiki drawer gates Save on; a
+               viewer is offered no "Save to wiki" at all. */
+            canSaveAssistantToWiki={canEditBoardContent}
+            onOpenWikiWithProposal={canEditBoardContent ? openBoardWikiWithProposal : undefined}
             selectedBoardItem={boardAiChatSelectedItem}
             /* The same reduction the selected item uses, so a dropped post and
                a selected one cannot become two different things. */
@@ -11393,6 +11421,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           blockingEditorOpen={isBlockingOverlayOpen}
           /* PATCH-196. A Board AI wiki citation opens the wiki ON this page. */
           requestedPageId={boardWikiRequestedPage?.pageId ?? null}
+          /* PATCH-197. A just-saved answer's proposal, put into the draft once
+             the drawer shows its page. */
+          pendingProposal={boardWikiPendingProposal}
           onOpenCitation={openBoardAiCitation}
           /* Only an editor may start a compilation: it writes a proposal row
              and spends provider tokens. A viewer reads the page and its chain
