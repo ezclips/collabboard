@@ -100,7 +100,7 @@ const APP_TAB_ORDER: readonly TranscriptAppTab[] = [
 const APP_TAB_LABELS: Record<TranscriptAppTab, { tab: string; badge: string; open: string | null }> = {
   youtube: { tab: 'YouTube', badge: 'Full text + timestamps', open: 'Open on YouTube ↗' },
   apple: { tab: 'Apple Podcasts', badge: 'Copy in parts', open: 'Open in Apple Podcasts ↗' },
-  spotify: { tab: 'Spotify', badge: 'Full text + timestamps', open: 'Open in Spotify ↗' },
+  spotify: { tab: 'Spotify', badge: 'Timestamps · on-screen part only', open: 'Open in Spotify ↗' },
   pocketcasts: { tab: 'Pocket Casts', badge: 'Full text', open: 'Open in Pocket Casts ↗' },
   website: { tab: 'Website or file', badge: 'Full text + timestamps', open: 'Open the page ↗' },
 };
@@ -221,8 +221,8 @@ function transcriptTabBody(tab: TranscriptAppTab): React.ReactNode {
               next to “Description”. Not every episode has one.
             </li>
             <li>
-              Select the whole transcript (click at its start, then Shift+click at its end) and
-              copy it (Ctrl+C).
+              Select the transcript text you can see and copy it (Ctrl+C). Spotify only keeps a
+              few minutes on screen at a time, so you get just that part.
             </li>
             <li>
               Come back to this tab and press <span className="font-medium">“Paste
@@ -232,6 +232,10 @@ function transcriptTabBody(tab: TranscriptAppTab): React.ReactNode {
           <p className="mb-2 text-[11px] text-gray-500">
             Leave the timestamps and speaker names in. The timestamps let a citation point to the
             moment it was said.
+          </p>
+          <p className="mb-2 text-[11px] text-gray-500">
+            For long episodes: if the episode is also on YouTube, use the YouTube tab. It gives the
+            full transcript with timestamps.
           </p>
         </>
       );

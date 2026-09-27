@@ -93,11 +93,11 @@ describe('PATCH-204 the dialog has one tab per app', () => {
     expect(selectedTab()!.getAttribute('data-app-tab')).toBe(expected);
   });
 
-  it('the Spotify tab gives the four signed-in steps and its note', async () => {
+  it('the Spotify tab explains the on-screen-only copy and points to YouTube', async () => {
     await mount(SPOTIFY);
     const body = tabPanel('spotify')!;
     const badge = host!.querySelector('[data-app-tab-badge="spotify"]')!;
-    expect(badge.textContent).toBe('Full text + timestamps');
+    expect(badge.textContent).toBe('Timestamps · on-screen part only');
     // The episode's own "Transcript" tab is named, because that is where the
     // text now comes from -- the old text sent people away from a source that
     // works.
@@ -106,7 +106,12 @@ describe('PATCH-204 the dialog has one tab per app', () => {
     expect(steps).toHaveLength(4);
     expect(steps[0]).toContain('sign in');
     expect(steps[1]).toContain('Transcript');
+    // Step 3 no longer promises the whole transcript: a copy only gets the rows
+    // on screen, because Spotify swaps them as you scroll.
+    expect(steps[2]).toContain('you can see');
+    expect(steps[2]).toContain('on screen');
     expect(body.textContent).toContain('Leave the timestamps and speaker names in');
+    expect(body.textContent).toContain('use the YouTube tab');
   });
 
   it('the Apple tab warns that copying is only in parts', async () => {
