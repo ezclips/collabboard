@@ -50,7 +50,7 @@ import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMen
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
-import LinkMediaEmbed, { getLinkEmbedKind } from '@/components/collabboard/LinkMediaEmbed';
+import LinkMediaEmbed, { getLinkEmbedKind, sharpFavicon } from '@/components/collabboard/LinkMediaEmbed';
 import FreeformGraphLayer from '@/components/graph/FreeformGraphLayer';
 import { resolveFreeformPostRenderZIndex } from '@/components/collabboard/canvas/engine/zIndex';
 import { buildYouTubeThumbCandidates, extractYouTubeId } from '@/lib/media/youtubeThumb';
@@ -3966,6 +3966,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             url={linkUrl}
                             forcedKind={embedKind as any}
                             disableInteraction={isLineMode || isGraphConnectMode}
+                            previewImage={displayLinkImage}
+                            previewImageFallbacks={linkImageCandidates.slice(1)}
                           />
                         </div>
                       )}
@@ -3975,7 +3977,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           <img
                             src={displayLinkImage}
                             alt=""
-                            className="w-full h-32 object-cover"
+                            className="aspect-[1.91/1] w-full object-cover"
                             data-fallbacks={JSON.stringify(linkImageCandidates.slice(1))}
                             onError={(e) => {
                               const img = e.currentTarget;
@@ -4000,9 +4002,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         <div className="flex items-center gap-1.5">
                           {padlet.metadata.linkFavicon && (
                             <img
-                              src={padlet.metadata.linkFavicon}
+                              src={sharpFavicon(padlet.metadata.linkFavicon)}
                               alt=""
-                              className="w-3 h-3"
+                              className="w-3.5 h-3.5 rounded-sm"
                               onError={(e) => {
                                 (e.target as HTMLImageElement).style.display = 'none';
                               }}

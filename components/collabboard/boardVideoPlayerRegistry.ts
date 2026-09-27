@@ -49,6 +49,21 @@ export interface BoardVideoPlayerHandle {
  */
 const players = new Map<string, Set<BoardVideoPlayerHandle>>();
 
+/**
+ * PATCH-208 FIX. A seek that arrived while the card showed a facade, kept until
+ * a facade for that video actually consumes it.
+ *
+ * WHY THIS EXISTS: a citation's seek used to fail live while returning true.
+ * `seekBoardVideo` calls every registered handle, but the facade that answered
+ * was not always the instance on screen -- a card can be re-keyed and remounted
+ * in the same commit the citation is clicked (the chat closes, the canvas
+ * re-renders), so the activation was applied to an instance React then threw
+ * away. The moment is therefore recorded in the registry too, and a facade
+ * adopts it as it mounts. This makes the seek independent of WHICH instance
+ * happened to be registered at the instant of the click.
+ */
+const pendingSeeks = new Map<string, number>();
+
 /** Registers a mounted player. The returned function MUST run on unmount. */
 export function registerBoardVideoPlayer(
   videoIdentity: string,
@@ -66,6 +81,17 @@ export function registerBoardVideoPlayer(
     // a video whose last card is gone.
     if (set.size === 0) players.delete(videoIdentity);
   };
+}
+
+/**
+ * PATCH-208 FIX. Take the moment recorded for this video, if a seek arrived and
+ * no facade has consumed it yet. `null` when there is nothing waiting.
+ */
+export function takePendingBoardVideoSeek(videoIdentity: string): number | null {
+  const seconds = pendingSeeks.get(videoIdentity);
+  if (seconds === undefined) return null;
+  pendingSeeks.delete(videoIdentity);
+  return seconds;
 }
 
 /** Is any player for this video on screen? Used to decide what a link offers. */
@@ -92,6 +118,10 @@ export function seekBoardVideo(videoIdentity: string, startMs: number): boolean 
   // The click and the link must land on the same frame, or the same citation
   // means two different things depending on which way it was followed.
   const seconds = Math.max(0, Math.floor(startMs / 1000));
+  // Record it BEFORE notifying handles, so a facade that mounts as a result of
+  // this same commit can pick it up even if the instance that received the
+  // handle call is about to be unmounted (see `pendingSeeks`).
+  pendingSeeks.set(videoIdentity, seconds);
   let seeked = false;
   let revealed = false;
   for (const handle of set) {
@@ -113,4 +143,5 @@ export function seekBoardVideo(videoIdentity: string, startMs: number): boolean 
 /** Test seam only: forget every registration. */
 export function resetBoardVideoPlayers(): void {
   players.clear();
+  pendingSeeks.clear();
 }

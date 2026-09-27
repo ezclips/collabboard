@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { Padlet } from "@/types/collabboard";
-import LinkMediaEmbed, { getLinkEmbedKind } from "./LinkMediaEmbed";
+import LinkMediaEmbed, { getLinkEmbedKind, sharpFavicon } from "./LinkMediaEmbed";
 import EmbeddedCommentList from "./EmbeddedCommentList";
 import ReactionDisplay from "./editors/ReactionDisplay";
 import { buildYouTubeThumbCandidates, extractYouTubeId } from "@/lib/media/youtubeThumb";
@@ -360,7 +360,12 @@ export default function PostCardContent({
             <div className="space-y-2 select-none">
                 {showMedia && showEmbed && (
                     <div className="-mx-3 -mt-3 mb-2">
-                        <LinkMediaEmbed url={linkUrl} forcedKind={embedKind as any} />
+                        <LinkMediaEmbed
+                            url={linkUrl}
+                            forcedKind={embedKind as any}
+                            previewImage={linkImage}
+                            previewImageFallbacks={linkImageCandidates.slice(1)}
+                        />
                     </div>
                 )}
 
@@ -369,7 +374,7 @@ export default function PostCardContent({
                         <img
                             src={linkImage}
                             alt=""
-                            className="w-full h-44 object-contain bg-gray-900/5"
+                            className="aspect-[1.91/1] w-full object-cover bg-gray-900/5"
                             data-fallbacks={JSON.stringify(linkImageCandidates.slice(1))}
                             onError={(e) => {
                                 const img = e.currentTarget;
@@ -394,9 +399,9 @@ export default function PostCardContent({
                     <div className="flex items-center gap-1.5">
                         {padlet.metadata?.linkFavicon && (
                             <img
-                                src={padlet.metadata?.linkFavicon}
+                                src={sharpFavicon(padlet.metadata?.linkFavicon)}
                                 alt=""
-                                className="w-3 h-3"
+                                className="w-3.5 h-3.5 rounded-sm"
                                 onError={(e) => {
                                     (e.target as HTMLImageElement).style.display = "none";
                                 }}

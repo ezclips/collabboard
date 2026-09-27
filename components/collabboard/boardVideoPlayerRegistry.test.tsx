@@ -5,6 +5,7 @@ import {
   registerBoardVideoPlayer,
   resetBoardVideoPlayers,
   seekBoardVideo,
+  takePendingBoardVideoSeek,
 } from './boardVideoPlayerRegistry';
 
 afterEach(() => resetBoardVideoPlayers());
@@ -127,5 +128,32 @@ describe('the board video player registry', () => {
     registerBoardVideoPlayer(YT, { seekTo });
     expect(seekBoardVideo(YT, 1_000)).toBe(true);
     expect(seekTo).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('PATCH-208 a seek survives the instance that received it (the live defect)', () => {
+  it('records the moment for a facade that mounts a moment later', () => {
+    // Live 2026-09-28: the citation sought a card that was re-keyed in the same
+    // commit, so the activation landed on a thrown-away instance and no player
+    // mounted -- yet `seekBoardVideo` returned true. The moment is kept until a
+    // facade consumes it.
+    registerBoardVideoPlayer(YT, { seekTo: vi.fn() });
+    expect(seekBoardVideo(YT, 185_000)).toBe(true);
+
+    // A new facade mounts and adopts the moment, at the same whole-second value
+    // the citation used.
+    expect(takePendingBoardVideoSeek(YT)).toBe(185);
+    // Taken ONCE: a later facade must not be yanked to an old moment.
+    expect(takePendingBoardVideoSeek(YT)).toBeNull();
+  });
+
+  it('has nothing waiting when no seek happened', () => {
+    expect(takePendingBoardVideoSeek(YT)).toBeNull();
+  });
+
+  it('does not record a seek when nothing can be seeked', () => {
+    // The caller falls back to opening the reader; there is nothing to adopt.
+    expect(seekBoardVideo(YT, 1_000)).toBe(false);
+    expect(takePendingBoardVideoSeek(YT)).toBeNull();
   });
 });

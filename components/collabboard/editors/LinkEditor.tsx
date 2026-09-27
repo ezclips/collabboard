@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Palette, Image as ImageIcon, Link2, Type, Smile, MessageSquare, ExternalLink } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import EmojiReactionPicker from './EmojiReactionPicker';
-import LinkMediaEmbed, { getLinkEmbedKind } from '../LinkMediaEmbed';
+import LinkMediaEmbed, { getLinkEmbedKind, sharpFavicon } from '../LinkMediaEmbed';
 import { contrastIconColor } from '../shells/CardShell';
 import CommentPopup from './CommentPopup';
 import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
@@ -691,7 +691,7 @@ export default function LinkEditor({
                                 {/* Link Preview - Media */}
                                 {showMedia && showEmbed && (
                                     <div className="relative -mx-4 -mt-4 mb-4">
-                                        <LinkMediaEmbed url={linkUrl} />
+                                        <LinkMediaEmbed url={linkUrl} previewImage={linkImage} />
                                     </div>
                                 )}
 
@@ -701,7 +701,7 @@ export default function LinkEditor({
                                         <img
                                             src={linkImage}
                                             alt={linkTitle}
-                                            className="w-full h-48 object-cover"
+                                            className="aspect-[1.91/1] w-full object-cover"
                                             onError={(e) => {
                                                 (e.target as HTMLImageElement).style.display = 'none';
                                             }}
@@ -714,9 +714,9 @@ export default function LinkEditor({
                                     <div className="flex items-center gap-2 mb-2">
                                         {linkFavicon && (
                                             <img
-                                                src={linkFavicon}
+                                                src={sharpFavicon(linkFavicon)}
                                                 alt=""
-                                                className="w-4 h-4"
+                                                className="w-3.5 h-3.5 rounded-sm"
                                                 onError={(e) => {
                                                     (e.target as HTMLImageElement).style.display = 'none';
                                                 }}

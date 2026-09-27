@@ -31,9 +31,23 @@ const ReactPlayer = dynamic(() => import('react-player'), { ssr: false });
 export interface BoardSeekableVideoProps {
   readonly url: string;
   readonly disableInteraction?: boolean;
+  /** Start playing as soon as the player is ready (facade click, or a seek). */
+  readonly autoPlay?: boolean;
+  /**
+   * PATCH-208. The player instance at ready, for a parent that owns the
+   * registration. Used by the facade, which registers itself while only a
+   * thumbnail is mounted and hands the seek here once the player exists.
+   */
+  readonly onPlayerReady?: (player: ReactPlayerInstance) => void;
+  /**
+   * PATCH-208. Whether this component registers itself in the board player
+   * registry. The facade sets `false`: IT is the registered handle, and two
+   * registrations for one identity would seek one video twice.
+   */
+  readonly registerSelf?: boolean;
 }
 
-interface ReactPlayerInstance {
+export interface ReactPlayerInstance {
   seekTo(amount: number, type?: 'seconds' | 'fraction', keepPlaying?: boolean): void;
   getInternalPlayer(key?: string): unknown;
 }
@@ -88,7 +102,7 @@ export function seekAndPlay(player: ReactPlayerInstance, seconds: number): void 
   player.seekTo(seconds, 'seconds', true);
 }
 
-export function BoardSeekableVideo({ url, disableInteraction = false }: BoardSeekableVideoProps) {
+export function BoardSeekableVideo({ url, disableInteraction = false, autoPlay = false, onPlayerReady, registerSelf = true }: BoardSeekableVideoProps) {
   const playerRef = useRef<ReactPlayerInstance | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const unregisterRef = useRef<(() => void) | null>(null);
@@ -109,6 +123,8 @@ export function BoardSeekableVideo({ url, disableInteraction = false }: BoardSee
   const handleReady = useCallback(
     (player: unknown) => {
       playerRef.current = player as ReactPlayerInstance;
+      onPlayerReady?.(player as ReactPlayerInstance);
+      if (!registerSelf) return;
       if (identity === null) return;
       // Replacing an earlier registration rather than stacking one on top:
       // ReactPlayer calls onReady again after a source change.
@@ -122,7 +138,7 @@ export function BoardSeekableVideo({ url, disableInteraction = false }: BoardSee
         },
       });
     },
-    [identity],
+    [identity, onPlayerReady, registerSelf],
   );
 
   useEffect(
@@ -144,7 +160,14 @@ export function BoardSeekableVideo({ url, disableInteraction = false }: BoardSee
     >
       <div className="pt-[56.25%]" />
       <div className="absolute inset-0">
-        <ReactPlayer url={url} controls width="100%" height="100%" onReady={handleReady} />
+        <ReactPlayer
+          url={url}
+          controls
+          width="100%"
+          height="100%"
+          onReady={handleReady}
+          playing={autoPlay}
+        />
       </div>
     </div>
   );
