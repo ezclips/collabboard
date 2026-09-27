@@ -1215,6 +1215,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * guard in canvasLayerStackingBoundary.architecture.test.tsx -- the toolbar
    * simply steps out of the way for as long as a modal owns the screen.
    */
+  // PATCH-198. The "Add a transcript" dialog keeps its open state inside
+  // FreeformPadletCards, so this one flag -- the single gate every docked
+  // surface yields to -- never saw it and the wiki/chat covered it. The cards
+  // report it up (R6C/R6I-C1's rule: no z-index of its own, join the one flag).
+  const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
+
   const isBlockingEditorModalOpen = useMemo(() => (
     isNoteEditorOpen
     || isTableEditorOpen
@@ -1240,12 +1246,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // image editor, so the reader yields to it through this one flag rather
     // than through a z-index of its own.
     || pendingPdfAreaDraft !== null
+    // PATCH-198. The "Add a transcript" dialog, reported up by the cards.
+    || isTranscriptDialogOpen
   ), [
     isNoteEditorOpen, isTableEditorOpen, isLinkEditorOpen, isTodoEditorOpen,
     isContainerEditorOpen, isCommentEditorOpen, isImageEditorOpen,
     isDrawingEditorOpen, isAIComponentEditorOpen, isAIContentEditModalOpen,
     isAIContentConvertModalOpen, isCardEditorOpen, isCardViewerOpen,
     isClipartDraftModalOpen, imageToolbarPadletId, pendingPdfAreaDraft,
+    isTranscriptDialogOpen,
   ]);
 
 
@@ -10477,6 +10486,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     /* The grip appears only while there is somewhere to drop a
                        post -- Board AI open, and not hidden behind an editor. */
                     boardAiDragEnabled={isBoardAiChatOpen && !isBlockingOverlayOpen}
+                    /* PATCH-198. Reports the "Add a transcript" dialog up, so
+                       the one blocking-modal flag covers it. */
+                    onTranscriptDialogOpenChange={setIsTranscriptDialogOpen}
                     rootPadlets={rootPadlets}
                     padlets={padlets}
                     setPadlets={setPadlets}

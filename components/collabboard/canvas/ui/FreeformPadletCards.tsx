@@ -237,6 +237,17 @@ export interface FreeformPadletCardsProps {
    * than no grip at all.
    */
   boardAiDragEnabled?: boolean;
+  /**
+   * PATCH-198. Reports the "Add a transcript" dialog's open state to the board,
+   * so its ONE blocking-modal flag can cover it and the docked surfaces (wiki,
+   * chat, Knowledge reader, toolbar) step aside -- the same rule R6C/R6I-C1
+   * already applies to the z-[1000] editor tier, without a z-index of its own.
+   *
+   * Reports CHANGES only (true when the dialog opens, false when it closes),
+   * and false on unmount if it last reported true, so a layout switch cannot
+   * leave the board stuck "blocked".
+   */
+  onTranscriptDialogOpenChange?: (open: boolean) => void;
   // Core data
   rootPadlets: Padlet[];
   padlets: Padlet[];
@@ -603,6 +614,37 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     (url: string, title?: string) => setTranscriptDialog({ url, title }),
     [],
   );
+
+  /**
+   * PATCH-198. Tell the board the transcript dialog opened or closed, CHANGES
+   * only, and release the claim on unmount.
+   *
+   * The ref holds the last value REPORTED, so a rerender with the same state
+   * calls the callback zero times, and the unmount cleanup only fires `false`
+   * when the last report was `true` -- a layout that unmounts an already-closed
+   * dialog must not send a spurious `false` (harmless, but noise the board's
+   * flag does not need) and, more importantly, an open one MUST release, or the
+   * board would stay blocked forever after a switch to a non-freeform layout.
+   */
+  const reportedTranscriptOpenRef = React.useRef(false);
+  // The callback in a ref, so the unmount cleanup can run ONCE (empty deps)
+  // rather than whenever the parent re-creates the callback -- which would fire
+  // a spurious `false` mid-lifetime.
+  const onTranscriptDialogOpenChangeRef = React.useRef(props.onTranscriptDialogOpenChange);
+  onTranscriptDialogOpenChangeRef.current = props.onTranscriptDialogOpenChange;
+  React.useEffect(() => {
+    const open = transcriptDialog !== null;
+    if (reportedTranscriptOpenRef.current !== open) {
+      reportedTranscriptOpenRef.current = open;
+      onTranscriptDialogOpenChangeRef.current?.(open);
+    }
+  }, [transcriptDialog]);
+  React.useEffect(() => () => {
+    if (reportedTranscriptOpenRef.current) {
+      reportedTranscriptOpenRef.current = false;
+      onTranscriptDialogOpenChangeRef.current?.(false);
+    }
+  }, []);
 
   /**
    * PATCH POST-RESIZE-B1: shared box-resize preview for Image / AI posts.

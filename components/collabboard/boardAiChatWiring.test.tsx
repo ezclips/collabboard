@@ -498,3 +498,26 @@ describe('PATCH-196 a wiki citation opens the board wiki', () => {
     expect(openCall).toBeGreaterThan(wikiGuard);
   });
 });
+
+// ============================================================================
+// PATCH-198: the transcript dialog joins the one blocking-modal flag
+// ============================================================================
+describe('PATCH-198 the transcript dialog joins isBlockingEditorModalOpen', () => {
+  it('the flag includes isTranscriptDialogOpen', () => {
+    // The dialog's open state lives inside FreeformPadletCards, so the ONE flag
+    // every docked surface yields to must hear about it. Pinned as the flag's
+    // own expression, in the same style as the R6C/R6I-C1 lines above.
+    const flag = CLIENT.slice(
+      CLIENT.indexOf('const isBlockingEditorModalOpen = useMemo'),
+      CLIENT.indexOf('const isAnyEditorOpen = useMemo'),
+    );
+    expect(flag).toContain('|| isTranscriptDialogOpen');
+    // And it is a dependency of the memo, so the flag actually recomputes.
+    expect(flag).toContain('isTranscriptDialogOpen,');
+  });
+
+  it('the state exists and the setter is passed to FreeformPadletCards', () => {
+    expect(CLIENT).toContain('const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);');
+    expect(CLIENT).toContain('onTranscriptDialogOpenChange={setIsTranscriptDialogOpen}');
+  });
+});
