@@ -126,6 +126,88 @@ function uncertain(provider: MediaPostProvider, parsed: URL): MediaPostVideoIden
 }
 
 /**
+ * PATCH-205. The Spotify episode or show a URL names, parsed ONCE here so the
+ * transcript identity and the canvas embed agree on the id. `null` for anything
+ * else on that host -- a track, a playlist, a lookalike host.
+ */
+export function spotifyLinkParts(
+  url: string,
+): { readonly kind: 'episode' | 'show'; readonly id: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(normaliseUrl(url));
+  } catch {
+    return null;
+  }
+  // Only http(s): a `javascript:` URL has no business being embedded.
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  if (hostOf(parsed) !== 'open.spotify.com') return null;
+  const match = /\/(?:intl-[a-z]{2}\/)?(episode|show)\/([A-Za-z0-9]+)/.exec(parsed.pathname);
+  if (match === null) return null;
+  return { kind: match[1] as 'episode' | 'show', id: match[2] };
+}
+
+/**
+ * PATCH-205. The Apple Podcasts path and episode id a URL names. `episodeId` is
+ * null for a show page (no `?i=`). The path is returned as-is so the embed uses
+ * the same locale/slug path on Apple's embed host.
+ */
+export function applePodcastLinkParts(
+  url: string,
+): { readonly path: string; readonly episodeId: string | null } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(normaliseUrl(url));
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  if (hostOf(parsed) !== 'podcasts.apple.com') return null;
+  if (!/\/podcast\//.test(parsed.pathname)) return null;
+  const episodeParam = parsed.searchParams.get('i');
+  const episodeId = episodeParam !== null && /^\d+$/.test(episodeParam) ? episodeParam : null;
+  return { path: parsed.pathname, episodeId };
+}
+
+/** A podcast player the canvas can embed. */
+export interface MediaPostEmbedSource {
+  readonly kind: 'spotify' | 'apple-podcasts';
+  readonly src: string;
+  /** Apple shows are taller than an episode; Spotify uses one height. */
+  readonly isShow: boolean;
+}
+
+/**
+ * PATCH-205. The service's OWN embed player for a podcast link, or null when
+ * there is none (Pocket Casts) or the link is not a podcast.
+ *
+ * THE SRC IS BUILT ONLY FROM PARSED PARTS. None of the pasted URL's path or
+ * query reaches the iframe except Apple's `i=`, so a tracking parameter or a
+ * crafted URL cannot ride along into the player.
+ */
+export function mediaPostEmbedSource(url: string): MediaPostEmbedSource | null {
+  const spotify = spotifyLinkParts(url);
+  if (spotify !== null) {
+    return {
+      kind: 'spotify',
+      src: `https://open.spotify.com/embed/${spotify.kind}/${spotify.id}`,
+      isShow: spotify.kind === 'show',
+    };
+  }
+  const apple = applePodcastLinkParts(url);
+  if (apple !== null) {
+    return {
+      kind: 'apple-podcasts',
+      src: `https://embed.podcasts.apple.com${apple.path}${
+        apple.episodeId === null ? '' : `?i=${apple.episodeId}`
+      }`,
+      isShow: apple.episodeId === null,
+    };
+  }
+  return null;
+}
+
+/**
  * The identity of the video a link post points at, or `null` when the URL is
  * not media this application can carry a transcript for.
  *
@@ -167,24 +249,22 @@ export function mediaPostVideoIdentity(url: string): MediaPostVideoIdentity | nu
   }
 
   if (host === 'open.spotify.com') {
-    // A podcast episode, with an optional locale prefix: /episode/<id> or
-    // /intl-de/episode/<id>. The episode id is the provider's own stable id, so
-    // this is canonical enough to reuse a transcript.
-    const match = /\/(?:intl-[a-z]{2}\/)?episode\/([A-Za-z0-9]+)/.exec(path);
-    if (match !== null) {
-      return { provider: 'spotify', identity: `spotify:episode:${match[1]}`, canonical: true };
+    // A podcast EPISODE is canonical. A show is not media for a transcript --
+    // many episodes, no single thing to transcribe -- though PATCH-205 still
+    // embeds it on the canvas.
+    const parts = spotifyLinkParts(normalised);
+    if (parts !== null && parts.kind === 'episode') {
+      return { provider: 'spotify', identity: `spotify:episode:${parts.id}`, canonical: true };
     }
-    // A /show/ link is a show, not an episode. There is no single thing to
-    // transcribe, so it gets no identity and the card offers no transcript.
     return null;
   }
 
   if (host === 'podcasts.apple.com') {
     // The episode is named by `?i=<episode id>`, separate from the show's
     // `id<digits>` in the path. Without `?i=` this is a show page, not media.
-    const episodeId = parsed.searchParams.get('i');
-    if (episodeId !== null && /^\d+$/.test(episodeId)) {
-      return { provider: 'apple-podcasts', identity: `apple-podcasts:${episodeId}`, canonical: true };
+    const parts = applePodcastLinkParts(normalised);
+    if (parts !== null && parts.episodeId !== null) {
+      return { provider: 'apple-podcasts', identity: `apple-podcasts:${parts.episodeId}`, canonical: true };
     }
     return null;
   }

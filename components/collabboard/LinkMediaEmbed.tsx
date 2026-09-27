@@ -10,6 +10,7 @@ import {
   TwitterEmbed,
 } from "react-social-media-embed";
 import { BoardSeekableVideo } from "./BoardSeekableVideo";
+import { mediaPostEmbedSource } from "@/lib/domain/knowledge/mediaPostVideoIdentity";
 
 type EmbedKind =
   | "twitter"
@@ -18,6 +19,8 @@ type EmbedKind =
   | "tiktok"
   | "instagram"
   | "facebook"
+  | "spotify"
+  | "apple-podcasts"
   | "video"
   | "none";
 
@@ -71,6 +74,13 @@ export const getLinkEmbedKind = (url: string): EmbedKind => {
     if (host.endsWith("instagram.com")) return "instagram";
     if (host.endsWith("facebook.com") || host.endsWith("fb.watch")) return "facebook";
 
+    // PATCH-205. Podcast players. The id/path extraction lives in the domain
+    // module, so the transcript identity and the embed can never disagree about
+    // which episode a link names. Exact-host matching there rejects a lookalike
+    // like `open.spotify.com.evil.test`.
+    const podcast = mediaPostEmbedSource(normalized);
+    if (podcast !== null) return podcast.kind;
+
     const pathname = parsed.pathname.toLowerCase();
     if (VIDEO_EXTENSIONS.some((ext) => pathname.endsWith(ext))) return "video";
 
@@ -100,6 +110,44 @@ export default function LinkMediaEmbed({ url, forcedKind, disableInteraction = f
   const normalizedUrl = normalizeUrl(url);
   const kind = forcedKind && forcedKind !== 'none' ? forcedKind : getLinkEmbedKind(normalizedUrl);
   if (kind === "none") return null;
+
+  if (kind === "spotify" || kind === "apple-podcasts") {
+    // PATCH-205. The service's own player, built from parsed parts. A missing
+    // source here means classification and src disagreed; render nothing rather
+    // than a guessed iframe.
+    const embed = mediaPostEmbedSource(normalizedUrl);
+    if (embed === null) return null;
+    // Fixed heights, because these players are intentionally not 16:9: Spotify's
+    // is a compact row, an Apple show is a tall list.
+    const height = embed.kind === "spotify" ? 152 : embed.isShow ? 450 : 175;
+    return (
+      <div className={disableInteraction ? "pointer-events-none" : ""}>
+        <iframe
+          src={embed.src}
+          width="100%"
+          height={height}
+          style={{ border: 0 }}
+          className="rounded-md"
+          loading="lazy"
+          title={
+            embed.kind === "spotify"
+              ? embed.isShow ? "Spotify show player" : "Spotify episode player"
+              : "Apple Podcasts player"
+          }
+          allow={
+            embed.kind === "spotify"
+              ? "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+              : "autoplay *; encrypted-media *; clipboard-write"
+          }
+          sandbox={
+            embed.kind === "apple-podcasts"
+              ? "allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
 
   if (kind === "twitter") {
     return <TwitterEmbed url={normalizedUrl} width="100%" />;
