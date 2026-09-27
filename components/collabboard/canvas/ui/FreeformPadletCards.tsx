@@ -248,6 +248,17 @@ export interface FreeformPadletCardsProps {
    * leave the board stuck "blocked".
    */
   onTranscriptDialogOpenChange?: (open: boolean) => void;
+  /**
+   * PATCH-199. Opens a media post's stored transcript in the board's reader,
+   * given the transcript document's id.
+   *
+   * Optional on purpose: a host with no reader keeps today's greyed "Transcript
+   * added" rather than offering an action that would go nowhere. When supplied,
+   * a `ready` transcript's menu item becomes "Open transcript" and calls this;
+   * a successful import calls it too, so the person sees their text instead of
+   * the dialog closing with nothing to show.
+   */
+  onOpenTranscript?: (documentId: string) => void;
   // Core data
   rootPadlets: Padlet[];
   padlets: Padlet[];
@@ -4636,6 +4647,24 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 if (!transcriptIndex.loaded) return {};
                 const state = mediaPostTranscriptState(url, transcriptIndex.entries);
                 const offers = mediaPostOffersTranscriptPaste(state);
+                /**
+                 * PATCH-199. A READY transcript is OPENED, when this host has
+                 * somewhere to open it. The item stays ENABLED and is labelled
+                 * for what it does, so the transcript the card holds is one
+                 * click away rather than an answer with no door.
+                 *
+                 * WITHOUT a host reader the state is unchanged -- greyed
+                 * "Transcript added" -- because offering "Open transcript" and
+                 * doing nothing is the dead end this patch exists to remove.
+                 */
+                if (state.kind === 'ready' && props.onOpenTranscript) {
+                  const openTranscript = props.onOpenTranscript;
+                  return {
+                    onAddTranscript: () => openTranscript(state.entry.documentId),
+                    transcriptActionDisabled: false,
+                    transcriptActionLabel: 'Open transcript',
+                  };
+                }
                 return {
                   onAddTranscript: () =>
                     startTranscriptForPost(url, padlet.metadata?.linkTitle || undefined),
@@ -5432,11 +5461,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           url={transcriptDialog?.url ?? null}
           title={transcriptDialog?.title}
           onClose={() => setTranscriptDialog(null)}
-          onImported={() => {
+          onImported={(handle) => {
             // Re-read the index so the card that opened this stops offering a
             // paste and starts reporting the transcript it now has.
             transcriptIndex.refresh();
             setTranscriptDialog(null);
+            // PATCH-199. THEN open it, when this host has a reader: the import
+            // used to close the dialog with no visible result, which the owner
+            // read as "nothing happened". A freshly imported transcript is
+            // stored `ready` in the same transaction, so the reader has text to
+            // show immediately.
+            props.onOpenTranscript?.(handle.documentId);
           }}
         />
       )}

@@ -521,3 +521,24 @@ describe('PATCH-198 the transcript dialog joins isBlockingEditorModalOpen', () =
     expect(CLIENT).toContain('onTranscriptDialogOpenChange={setIsTranscriptDialogOpen}');
   });
 });
+
+// ============================================================================
+// PATCH-199: a ready transcript opens through the board's reader authority
+// ============================================================================
+describe('PATCH-199 a transcript opens through requestKnowledgeDocumentOpen', () => {
+  it('CanvasClient hands FreeformPadletCards an onOpenTranscript that opens the docked reader', () => {
+    // The card carries identity only -- a document id -- and the board's ONE
+    // reader authority decides how it opens, exactly as a citation or a Library
+    // pick does. No second open path is introduced.
+    const mount = CLIENT.slice(
+      CLIENT.indexOf('<FreeformPadletCards'),
+      CLIENT.indexOf('onResetImageCrop={resetImageCrop}'),
+    );
+    expect(mount).toContain('onOpenTranscript={(documentId) =>');
+    expect(mount).toContain(
+      "requestKnowledgeDocumentOpen({ documentId, presentation: 'side-panel' })",
+    );
+    // And it routes through the existing authority, not the reader directly.
+    expect(mount).not.toContain('setKnowledgeDocumentOpenRequest(');
+  });
+});

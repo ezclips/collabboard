@@ -10489,6 +10489,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     /* PATCH-198. Reports the "Add a transcript" dialog up, so
                        the one blocking-modal flag covers it. */
                     onTranscriptDialogOpenChange={setIsTranscriptDialogOpen}
+                    /* PATCH-199. A ready transcript (or a just-imported one)
+                       opens through the board's ONE reader authority, which
+                       claims the dock -- so the wiki and chat yield as they do
+                       for any reader open. */
+                    onOpenTranscript={(documentId) =>
+                      requestKnowledgeDocumentOpen({ documentId, presentation: 'side-panel' })
+                    }
                     rootPadlets={rootPadlets}
                     padlets={padlets}
                     setPadlets={setPadlets}

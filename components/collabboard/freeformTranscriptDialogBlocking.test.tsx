@@ -5,7 +5,7 @@
 // aside. Mounts the REAL FreeformPadletCards through the same harness the ring
 // permission tests use.
 import React, { act } from 'react';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Padlet } from '@/types/collabboard';
 import FreeformPadletCards from '@/components/collabboard/canvas/ui/FreeformPadletCards';
@@ -17,9 +17,19 @@ vi.mock('@/lib/infra/canvas/postsRepository', () => ({
   createPostsRepository: () => ({ updateFieldsById: vi.fn(async () => ({ ok: true, value: undefined })) }),
 }));
 vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
-// The menu item only appears once the transcript index is LOADED; load it empty.
+// The menu item only appears once the transcript index is LOADED. The entries
+// are mutable so a test can hand the card the `ready` transcript PATCH-199
+// opens; the default is empty, which is "no transcript yet".
+const transcriptIndexMock = vi.hoisted(() => ({
+  loaded: true,
+  entries: [] as ReadonlyArray<Record<string, unknown>>,
+}));
 vi.mock('@/components/collabboard/useBoardTranscriptIndex', () => ({
-  useBoardTranscriptIndex: () => ({ loaded: true, entries: [], refresh: () => {} }),
+  useBoardTranscriptIndex: () => ({
+    loaded: transcriptIndexMock.loaded,
+    entries: transcriptIndexMock.entries,
+    refresh: () => {},
+  }),
 }));
 // A media link post mounts a video player, and `react-player`'s dynamic import
 // of its YouTube player fails under jsdom. A stub keeps the card rendering so
@@ -27,18 +37,53 @@ vi.mock('@/components/collabboard/useBoardTranscriptIndex', () => ({
 vi.mock('react-player', () => ({ default: () => null }));
 // A stable, portal-free stand-in for the Radix context menu, so the test can
 // reach the SAME `onAddTranscript` the real menu wires (FreeformPadletCards
-// ~4608). The product path under test -- startTranscriptForPost -> the dialog's
-// open state -> the callback -- is unchanged; only the menu chrome is faked.
+// ~4608). The product path under test -- startTranscriptForPost / openReadyTranscript
+// -> the dialog's open state -> the callback -- is unchanged; only the menu
+// chrome is faked. It renders the label AND the disabled state, because
+// PATCH-199's contract is carried by exactly those two props.
 vi.mock('@/components/collabboard/menus/LinkPostContextMenu', () => ({
-  LinkPostContextMenu: ({ children, onAddTranscript }: { children: React.ReactNode; onAddTranscript?: () => void }) => (
+  LinkPostContextMenu: ({
+    children,
+    onAddTranscript,
+    transcriptActionLabel,
+    transcriptActionDisabled,
+  }: {
+    children: React.ReactNode;
+    onAddTranscript?: () => void;
+    transcriptActionLabel?: string;
+    transcriptActionDisabled?: boolean;
+  }) => (
     <div>
       {children}
       {onAddTranscript ? (
-        <button type="button" data-test-add-transcript="true" onClick={onAddTranscript}>
-          Add transcript
+        <button
+          type="button"
+          data-test-add-transcript="true"
+          data-test-transcript-label={transcriptActionLabel ?? 'Add transcript'}
+          disabled={transcriptActionDisabled === true}
+          onClick={transcriptActionDisabled ? undefined : onAddTranscript}
+        >
+          {transcriptActionLabel ?? 'Add transcript'}
         </button>
       ) : null}
     </div>
+  ),
+}));
+// PATCH-199. The panel is the only thing between the dialog and `onImported`,
+// so it is reduced to the one honest act the test needs: report a saved handle.
+vi.mock('@/components/collabboard/KnowledgeTranscriptImportPanel', () => ({
+  KnowledgeTranscriptImportPanel: ({
+    onImported,
+  }: {
+    onImported?: (handle: { documentId: string; contentSha256: string; mutationRevision: string }) => void;
+  }) => (
+    <button
+      type="button"
+      data-test-import-transcript="true"
+      onClick={() => onImported?.({ documentId: 'doc-new', contentSha256: 'x', mutationRevision: '1' })}
+    >
+      Import transcript
+    </button>
   ),
 }));
 
@@ -66,6 +111,11 @@ beforeAll(() => {
   };
 });
 afterAll(() => restoreOffsetSize?.());
+
+beforeEach(() => {
+  transcriptIndexMock.loaded = true;
+  transcriptIndexMock.entries = [];
+});
 
 function padlet(id: string, type: Padlet['type'], metadata: Padlet['metadata'] = {}): Padlet {
   return { id, board_id: 'board-1', title: id, content: '{}', type, position_x: 100, position_y: 100, width: 200, height: 150, created_at: '', updated_at: '', metadata };
@@ -121,7 +171,7 @@ const canvasEditorValue: CanvasEditorState = {
   commentPopupPosition: null, commentPopupHighlightColor: undefined,
 };
 
-function Harness({ onTranscriptDialogOpenChange }: { onTranscriptDialogOpenChange: (open: boolean) => void }) {
+function Harness({ onTranscriptDialogOpenChange, onOpenTranscript }: { onTranscriptDialogOpenChange: (open: boolean) => void; onOpenTranscript?: (documentId: string) => void }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>(() => [
     padlet('media-1', 'link', { linkUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', linkTitle: 'A video' }),
   ]);
@@ -166,6 +216,7 @@ function Harness({ onTranscriptDialogOpenChange }: { onTranscriptDialogOpenChang
             stableActions={stableActions}
             requestOpenDocument={() => {}}
             onTranscriptDialogOpenChange={onTranscriptDialogOpenChange}
+            onOpenTranscript={onOpenTranscript}
           />
         </div>
       </CanvasEditorProvider>
@@ -173,15 +224,32 @@ function Harness({ onTranscriptDialogOpenChange }: { onTranscriptDialogOpenChang
   );
 }
 
-async function mount(onTranscriptDialogOpenChange: (open: boolean) => void) {
+async function mount(onTranscriptDialogOpenChange: (open: boolean) => void, onOpenTranscript?: (documentId: string) => void) {
   const host = document.createElement('div');
   document.body.appendChild(host);
   let root: Root;
   await act(async () => {
     root = createRoot(host);
-    root.render(<Harness onTranscriptDialogOpenChange={onTranscriptDialogOpenChange} />);
+    root.render(<Harness onTranscriptDialogOpenChange={onTranscriptDialogOpenChange} onOpenTranscript={onOpenTranscript} />);
   });
   return { host, root: root! };
+}
+
+/** A `ready` transcript on the board for the card's video. */
+function readyEntry() {
+  return {
+    documentId: 'doc-ready',
+    title: 'A video',
+    videoIdentity: 'yt:dQw4w9WgXcQ',
+    format: 'youtube-panel',
+    processingStatus: 'ready',
+    updatedAt: '2026-09-27T00:00:00.000Z',
+  };
+}
+
+/** The card's own transcript menu item, with the label the card chose. */
+function transcriptMenuItem(host: HTMLElement) {
+  return host.querySelector<HTMLButtonElement>('[data-test-add-transcript="true"]');
 }
 
 /** Opens the media post's context menu and clicks "Add transcript". */
@@ -242,6 +310,85 @@ describe('PATCH-198 the transcript dialog reports its open state', () => {
     // The release: a layout switch must not leave the board stuck "blocked".
     expect(onChange).toHaveBeenLastCalledWith(false);
 
+    host.remove();
+  });
+});
+
+describe('PATCH-199 a ready transcript opens, and a successful import opens it too', () => {
+  it('ready -> "Open transcript", enabled, and it opens the entry rather than the dialog', async () => {
+    transcriptIndexMock.entries = [readyEntry()];
+    const onChange = vi.fn();
+    const onOpen = vi.fn();
+    const { host, root } = await mount(onChange, onOpen);
+
+    const item = transcriptMenuItem(host);
+    expect(item, 'the transcript item should be offered').toBeTruthy();
+    expect(item!.textContent).toBe('Open transcript');
+    expect(item!.disabled).toBe(false);
+
+    await act(async () => {
+      item!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    // The stored document is what opens, not the paste dialog.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith('doc-ready');
+    expect(host.querySelector('[role="dialog"][aria-label="Add a transcript"]')).toBeNull();
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  });
+
+  it('ready without a reader host stays the greyed "Transcript added"', async () => {
+    transcriptIndexMock.entries = [readyEntry()];
+    const onChange = vi.fn();
+    const { host, root } = await mount(onChange);
+
+    const item = transcriptMenuItem(host);
+    expect(item!.textContent).toBe('Transcript added');
+    expect(item!.disabled).toBe(true);
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  });
+
+  it('none -> "Add transcript" still opens the paste dialog', async () => {
+    const onChange = vi.fn();
+    const onOpen = vi.fn();
+    const { host, root } = await mount(onChange, onOpen);
+
+    const item = transcriptMenuItem(host);
+    expect(item!.textContent).toBe('Add transcript');
+    expect(item!.disabled).toBe(false);
+
+    await openTranscriptDialog(host);
+    expect(host.querySelector('[role="dialog"][aria-label="Add a transcript"]')).not.toBeNull();
+    expect(onOpen).not.toHaveBeenCalled();
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  });
+
+  it('a successful import closes the dialog and then opens the new document', async () => {
+    const onChange = vi.fn();
+    const onOpen = vi.fn();
+    const { host, root } = await mount(onChange, onOpen);
+
+    await openTranscriptDialog(host);
+    expect(host.querySelector('[role="dialog"][aria-label="Add a transcript"]')).not.toBeNull();
+
+    const importButton = host.querySelector<HTMLButtonElement>('[data-test-import-transcript="true"]');
+    expect(importButton, 'the import panel should be mounted').toBeTruthy();
+    await act(async () => {
+      importButton!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onOpen).toHaveBeenCalledWith('doc-new');
+    expect(host.querySelector('[role="dialog"][aria-label="Add a transcript"]')).toBeNull();
+
+    await act(async () => { root.unmount(); });
     host.remove();
   });
 });
