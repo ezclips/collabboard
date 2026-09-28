@@ -339,6 +339,9 @@ export default function SectionHeadingPost({
               data-section-heading-text="true"
               // Keyboard-reachable by construction (H1 Phase 30) rather than a
               // bare div with a click handler.
+              // PATCH-210: the same "how to edit" note as a hover tooltip, and
+              // nothing at all for a viewer who cannot edit.
+              {...(canEdit ? { title: 'Double-click to edit' } : {})}
               className={`block w-full truncate text-left ${SECTION_HEADING_LEVEL_TEXT_CLASS[level]} ${canEdit ? '' : 'cursor-default'}`}
               style={textStyle}
               disabled={!canEdit}
@@ -362,6 +365,22 @@ export default function SectionHeadingPost({
         {showHandles && renderHandle('left')}
         {showHandles && renderHandle('right')}
       </div>
+
+      {/* PATCH-210. Editing starts on double-click (or Enter/F2), and nothing
+          on screen said so. Shown only to someone who can actually edit, and
+          only when the heading is selected and not already being edited.
+
+          OUTSIDE the surface's own element on purpose: it must not be clipped
+          by an ancestor's `overflow-hidden`, and `absolute top-full` keeps it
+          out of layout entirely, so the heading never moves. */}
+      {isSelected && canEdit && !isEditing && (
+        <span
+          data-section-heading-edit-hint="true"
+          className="pointer-events-none absolute left-0 top-full mt-1 select-none text-[11px] text-gray-500"
+        >
+          Double-click to edit the title
+        </span>
+      )}
     </div>
   );
 }
