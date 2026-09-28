@@ -479,6 +479,69 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
     expect(leftRect.x + leftRect.width).toBe(1500);
   });
 
+  // PATCH-209. Resizing at a zoom other than 100% produced fractional x/width
+  // (e.g. -2995.9999999999995), which the integer columns refuse with 22P02, so
+  // the resize rolled back with an error. The geometry is now rounded where it
+  // is computed, as dragging and box resize already do.
+  describe('PATCH-209 the resize yields whole numbers', () => {
+    it('a fractional origin at zoom 0.8 produces integer x and width', () => {
+      // The owner was at 80%; a stored position_x can already be fractional
+      // (written before this rounding existed), and the old left-edge helper
+      // returned `right - nextX` carrying that fraction straight through.
+      const fractional = { x: -2995.9999999999995, width: 500.4 };
+      const right = resizeSectionHeadingRightEdge(origin(fractional), -100.3, FREEFORM_BOUNDS);
+      expect(Number.isInteger(right.x)).toBe(true);
+      expect(Number.isInteger(right.width)).toBe(true);
+      expect(right.x).toBe(-2996);
+
+      const left = resizeSectionHeadingLeftEdge(origin(fractional), -100.3, FREEFORM_BOUNDS);
+      expect(Number.isInteger(left.x)).toBe(true);
+      expect(Number.isInteger(left.width)).toBe(true);
+    });
+
+    it('a zoom-0.8 drag commits whole numbers through the real component', () => {
+      // `onResizeCommit`'s rect IS what `commitSectionHeadingRect` writes
+      // verbatim (position_x: rect.x, width: rect.width), so an integral rect
+      // here is an integral write.
+      const { host, onResizeCommit } = mountHeading(
+        makeHeading({ position_x: -2995.9999999999995, width: 500.4 }),
+        { scale: 0.8 },
+      );
+      dragHandle(host, 'right', 0, 160);
+      expect(onResizeCommit).toHaveBeenCalledTimes(1);
+      const [, rect] = onResizeCommit.mock.calls[0];
+      expect(Number.isInteger(rect.x)).toBe(true);
+      expect(Number.isInteger(rect.width)).toBe(true);
+
+      const { host: leftHost, onResizeCommit: onLeftCommit } = mountHeading(
+        makeHeading({ position_x: -2995.9999999999995, width: 500.4 }),
+        { scale: 0.8 },
+      );
+      dragHandle(leftHost, 'left', 0, -160);
+      const [, leftRect] = onLeftCommit.mock.calls[0];
+      expect(Number.isInteger(leftRect.x)).toBe(true);
+      expect(Number.isInteger(leftRect.width)).toBe(true);
+    });
+
+    it('rounds BEFORE clamping, so the minimum width still holds', () => {
+      const shrunkRight = resizeSectionHeadingRightEdge(
+        origin({ x: 0, width: 500.4 }, 0),
+        -100000.7,
+        FREEFORM_BOUNDS,
+      );
+      expect(shrunkRight.width).toBe(SECTION_HEADING_MIN_WIDTH);
+      expect(Number.isInteger(shrunkRight.width)).toBe(true);
+
+      const shrunkLeft = resizeSectionHeadingLeftEdge(
+        origin({ x: 0, width: 500.4 }, 0),
+        100000.7,
+        FREEFORM_BOUNDS,
+      );
+      expect(shrunkLeft.width).toBe(SECTION_HEADING_MIN_WIDTH);
+      expect(Number.isInteger(shrunkLeft.x)).toBe(true);
+    });
+  });
+
   // PATCH SECTION-H3B: this was "zoom is divided out exactly once". The
   // component no longer divides by a camera scalar AT ALL -- it asks the host
   // for absolute world points -- so the double-division class of bug is now

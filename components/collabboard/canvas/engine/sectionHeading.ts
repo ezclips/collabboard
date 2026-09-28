@@ -276,10 +276,13 @@ function finiteOr(value: number, fallback: number): number {
 }
 
 function readOrigin(origin: SectionHeadingResizeOrigin) {
-  const x = finiteOr(origin.rect.x, 0);
-  const width = Number.isFinite(origin.rect.width) && origin.rect.width > 0
-    ? origin.rect.width
-    : SECTION_HEADING_MIN_WIDTH;
+  // PATCH-209. Round the carried-over geometry HERE, as `postResizeBox` does,
+  // so every number the helpers return is an integer. A stored position_x that
+  // is already fractional (written before this rounding existed) would
+  // otherwise leak straight back out -- e.g. left-edge `right - nextX`.
+  const x = Math.round(finiteOr(origin.rect.x, 0));
+  const startWidth = finiteOr(origin.rect.width, 0);
+  const width = Math.round(startWidth > 0 ? startWidth : SECTION_HEADING_MIN_WIDTH);
   return { x, width, startPointerWorldX: finiteOr(origin.pointerWorldX, 0) };
 }
 
@@ -293,6 +296,9 @@ function readOrigin(origin: SectionHeadingResizeOrigin) {
  * right bound wins outright. A heading parked hard against a finite right edge
  * is allowed to be narrower than the minimum rather than be persisted past
  * that edge; under an unbounded policy the bound simply never bites.
+ *
+ * PATCH-209: `x` is already an integer (readOrigin), and the clamp bound is
+ * rounded, so both returned numbers are integers the integer columns accept.
  */
 export function resizeSectionHeadingRightEdge(
   origin: SectionHeadingResizeOrigin,
@@ -301,7 +307,7 @@ export function resizeSectionHeadingRightEdge(
 ): SectionHeadingRect {
   const { x, width, startPointerWorldX } = readOrigin(origin);
   const delta = finiteOr(pointerWorldX, startPointerWorldX) - startPointerWorldX;
-  const maxWidth = finiteOr(bounds.maxX, Number.POSITIVE_INFINITY) - x;
+  const maxWidth = Math.round(finiteOr(bounds.maxX, Number.POSITIVE_INFINITY) - x);
   const next = Math.round(width + delta);
   const clamped = Math.min(maxWidth, Math.max(SECTION_HEADING_MIN_WIDTH, next));
   // Phase 15: an unbounded maxX must never leak into stored geometry.
@@ -316,6 +322,10 @@ export function resizeSectionHeadingRightEdge(
  * cannot drift by a pixel no matter how far the pointer travels or how the
  * clamps bite. Symmetrically to the right handle, the host's left bound wins
  * over the minimum width.
+ *
+ * PATCH-209: `right` is rounded BEFORE the width is derived from it, so the
+ * width stays an integer too (the old `right - nextX` inherited whatever
+ * fraction `right` carried).
  */
 export function resizeSectionHeadingLeftEdge(
   origin: SectionHeadingResizeOrigin,
@@ -324,7 +334,7 @@ export function resizeSectionHeadingLeftEdge(
 ): SectionHeadingRect {
   const { x, width, startPointerWorldX } = readOrigin(origin);
   const delta = finiteOr(pointerWorldX, startPointerWorldX) - startPointerWorldX;
-  const right = x + width;
+  const right = Math.round(x + width);
   const widthLimitedX = right - SECTION_HEADING_MIN_WIDTH;
   const minX = finiteOr(bounds.minX, Number.NEGATIVE_INFINITY);
   const bounded = Math.max(minX, Math.min(widthLimitedX, x + delta));
