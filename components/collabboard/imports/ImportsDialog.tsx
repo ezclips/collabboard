@@ -7,6 +7,7 @@ import type { ImportProvider, ResolvedImportItem } from '@/lib/imports/types';
 import { getImportProviderStatus } from '@/lib/imports/clientApi';
 import ConnectionRequiredDialog from './ConnectionRequiredDialog';
 import ImportBrowser from './ImportBrowser';
+import GoogleDrivePickerLauncher from './GoogleDrivePickerLauncher';
 
 interface ImportsDialogProps {
   isOpen: boolean;
@@ -73,10 +74,17 @@ function ProviderCard({
 
 export default function ImportsDialog({ isOpen, onClose, onImportResolved, initialProvider = null, canResolveSelection }: ImportsDialogProps) {
   const [screen, setScreen] = useState<Screen>({ name: 'chooser' });
+  /**
+   * PATCH-214. Google's Picker brings its own modal. While it is on screen we
+   * must NOT draw our dark overlay or our box (ours is `z-[4200]` and would sit
+   * on top of Google's dialog). The launcher tells us when the picker is up.
+   */
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Reset to chooser whenever dialog opens
   useEffect(() => {
     if (!isOpen) return;
+    setPickerOpen(false);
     if (initialProvider) {
       setScreen({ name: 'checking', provider: initialProvider });
       return;
@@ -133,8 +141,26 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
   // dialog is opened from within WallpaperSelector's/CanvasSettingsModal's
   // still-open Radix Dialogs, and a plain nested fixed div there doesn't
   // receive clicks correctly.
+  //
+  // PATCH-214 FIX. The Google launcher MUST stay mounted in ONE tree position
+  // for the dialog's whole life: it fetches the picker token and reports when
+  // Google's modal appears. Rendering it in a second tree position (an early
+  // return) unmounted it the instant it reported `true`, a fresh one started
+  // at 'loading' and reported `false`, and the two branches remounted each
+  // other forever, refetching the token each cycle. So the launcher lives HERE
+  // and only OUR chrome is hidden while the picker is up.
   return createPortal(
-    <div className="fixed inset-0 bg-black/50 z-[4200] flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className={`fixed inset-0 bg-black/50 z-[4200] flex items-center justify-center p-4 backdrop-blur-sm ${
+        // Google's own picker modal is attached to document.body and is not
+        // inside this element, so hiding this overlay does not affect it.
+        // `invisible` (visibility: hidden) rather than unmounting or
+        // display:none: the launcher keeps running underneath, and the
+        // custom element is never torn down.
+        pickerOpen ? 'invisible pointer-events-none' : ''
+      }`}
+      onClick={pickerOpen ? undefined : onClose}
+    >
       <div
         className="relative w-full"
         style={{ maxWidth: screen.name === 'browser' ? '720px' : '480px', height: screen.name === 'browser' ? '80vh' : 'auto' }}
@@ -198,20 +224,31 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
 
         {screen.name === 'browser' && (() => {
           const browserProvider = screen.provider;
+          const handleSelectItem = (resolved: ResolvedImportItem) => {
+            onImportResolved(resolved);
+            onClose();
+          };
+          const handleReconnectRequired = () =>
+            setScreen({ name: 'connection-required', provider: browserProvider });
           return (
             <div className="flex flex-col" style={{ height: 'calc(80vh - 61px)' }}>
-              <ImportBrowser
-                canResolveSelection={canResolveSelection}
-                provider={browserProvider}
-                onSelectItem={(resolved) => {
-                  onImportResolved(resolved);
-                  onClose();
-                }}
-                onClose={onClose}
-                onReconnectRequired={() =>
-                  setScreen({ name: 'connection-required', provider: browserProvider })
-                }
-              />
+              {browserProvider === 'google-drive' ? (
+                <GoogleDrivePickerLauncher
+                  canResolveSelection={canResolveSelection}
+                  onSelectItem={handleSelectItem}
+                  onClose={onClose}
+                  onReconnectRequired={handleReconnectRequired}
+                  onPickerOpenChange={setPickerOpen}
+                />
+              ) : (
+                <ImportBrowser
+                  canResolveSelection={canResolveSelection}
+                  provider={browserProvider}
+                  onSelectItem={handleSelectItem}
+                  onClose={onClose}
+                  onReconnectRequired={handleReconnectRequired}
+                />
+              )}
             </div>
           );
         })()}

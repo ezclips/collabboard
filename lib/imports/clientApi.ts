@@ -57,6 +57,17 @@ export async function getImportProviderStatus(provider: ImportProvider): Promise
   );
 }
 
+/**
+ * PATCH-214. The token and Cloud project number the browser needs to open
+ * Google's Picker. A 401 here means the Google connection is gone, which the
+ * caller surfaces as `onReconnectRequired()`.
+ */
+export async function getGooglePickerToken(): Promise<{ accessToken: string; appId: string }> {
+  return fetchImportJson<{ accessToken: string; appId: string }>(
+    '/api/imports/google-drive/picker-token'
+  );
+}
+
 export async function listImportItems(
   provider: ImportProvider,
   parentId: string

@@ -638,6 +638,15 @@ body.cb-dragging-line svg rect[fill^="rgba(59, 130, 246"][stroke="#3b82f6"] {
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
+/* PATCH-214. Google's Picker modal must sit above the canvas chrome. The Picker
+   creates `.picker-dialog` / `.picker-dialog-bg` itself at a default z-index of
+   1000, while this app's dialog is z-[4200] and other canvas popups go higher.
+   One rule, just above our dialog, so the picker is never hidden behind it. */
+.picker-dialog,
+.picker-dialog-bg {
+  z-index: 4300 !important;
+}
+
 .dark .scrollbar-invisible:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
 }

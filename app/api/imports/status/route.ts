@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserId } from '@/lib/imports/auth';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { getValidAccessToken } from '@/lib/imports/tokenRefresh';
 import type { ImportProvider } from '@/lib/imports/types';
 
 export const runtime = 'nodejs';
@@ -35,9 +36,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // PATCH-214. A row is not a working connection. The token must actually
+  // resolve (which now means a refresh the provider REFUSED reads as null), or
+  // the UI shows "Connected" while every real call gets a 401.
+  const token = data ? await getValidAccessToken(auth.userId, provider) : null;
+
   return NextResponse.json({
     provider,
-    connected: !!data,
+    connected: !!data && token !== null,
     email: data?.email ?? null,
   });
 }

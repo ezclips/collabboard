@@ -36,13 +36,15 @@ export function getProviders(): Record<IntegrationProvider, ProviderConfig> {
       authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
       profileUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
-      scope: 'openid email profile https://www.googleapis.com/auth/drive.readonly',
+      scope: 'openid email profile https://www.googleapis.com/auth/drive.file',
       clientId: googleDriveClientId,
       clientSecret: googleDriveClientSecret,
       extraAuthParams: {
         access_type: 'offline',
         prompt: 'consent',
-        include_granted_scopes: 'true',
+        // PATCH-214: NO `include_granted_scopes`. Carrying the previous grant
+        // forward would keep the old `drive.readonly` (a restricted scope) on
+        // every reconnect, which is the thing this change exists to drop.
       },
       mapProfile: (profile) => ({
         providerUserId: typeof profile?.sub === 'string' ? profile.sub : null,

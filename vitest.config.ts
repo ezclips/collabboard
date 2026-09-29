@@ -24,6 +24,8 @@ export default defineConfig({
       // PATCH-213: the import routes' URL allowlist and resolver tests.
       'lib/imports/*.test.ts',
       'app/api/imports/**/*.test.ts',
+      // PATCH-214: the OAuth scope test for the integrations route.
+      'app/api/settings/**/*.test.ts',
       // PATCH-192: the dashboard data loader.
       'lib/dashboard/**/*.test.ts',
       'lib/server/**/*.test.ts',
@@ -38,6 +40,8 @@ export default defineConfig({
       'components/dashboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',
       'components/collabboard/comments/*.test.tsx',
+      // PATCH-214: the Google Drive picker launcher and the imports dialog.
+      'components/collabboard/imports/*.test.tsx',
       'components/collabboard/canvas/engine/*.test.ts',
       'components/collabboard/canvas/hooks/*.test.ts',
       'components/collabboard/canvas/hooks/*.test.tsx',
