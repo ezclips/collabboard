@@ -176,6 +176,9 @@ type SaveApi = ReturnType<typeof usePadletSave>;
 let api: SaveApi | null = null;
 let setDraft: ((padlet: Padlet | null) => void) | null = null;
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
+/** PATCH-212: the position every new post is created at; a test can make it
+ *  fractional to prove the write is rounded. */
+let newPostPosition: { x: number; y: number } = { x: 0, y: 0 };
 
 function Harness({ probe, effects }: { probe: () => boolean; effects: Effects }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>([]);
@@ -213,7 +216,7 @@ function Harness({ probe, effects }: { probe: () => boolean; effects: Effects })
     setWallPlacementPromptOpen: (v) => { if (v) effects.placementDrafts.push('wall-prompt-open'); },
     padlets,
     setPadlets: (next) => { effects.padletSets += 1; setPadlets(next); },
-    getNewPostPosition: () => ({ x: 0, y: 0 }),
+    getNewPostPosition: () => newPostPosition,
   });
 
   return null;
@@ -235,6 +238,7 @@ afterEach(() => {
   mounted = [];
   api = null;
   setDraft = null;
+  newPostPosition = { x: 0, y: 0 };
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
@@ -723,5 +727,33 @@ describe('E. denial leaves contracts and state intact', () => {
 
   it('the refusal value is stable and distinguishable from a server error', () => {
     expect(BOARD_EDIT_NOT_ALLOWED).toBe('board_edit_not_allowed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F. PATCH-212: a new post created at a fractional position is written whole
+// ---------------------------------------------------------------------------
+describe('F. a post created at a computed position writes integer geometry', () => {
+  it('saveNote sends rounded position_x/position_y (the zoom-0.8 value)', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    // The live 22P02 value: `screenX / 0.8` at the viewport centre.
+    newPostPosition = { x: -2995.9999999999995, y: 12.5 };
+    mount(() => true, effects);
+    act(() => { setDraft!({ id: 'new' } as Padlet); });
+
+    await act(async () => {
+      await api!.saveNote({ title: 'n', content: 'c', metadata: {} } as never);
+    });
+
+    const row = effects.inserts.find((r) => (r as { type?: string }).type === 'text') as Record<string, number>;
+    expect(row).toBeTruthy();
+    expect(Number.isInteger(row.position_x)).toBe(true);
+    expect(Number.isInteger(row.position_y)).toBe(true);
+    expect(row.position_x).toBe(-2996);
+    expect(row.position_y).toBe(13);
   });
 });

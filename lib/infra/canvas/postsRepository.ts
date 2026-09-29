@@ -10,6 +10,7 @@ import type {
   PostTasksWriteFields,
 } from '../../domain/canvas/posts';
 import { createBrowserSupabaseClient } from '../supabase/browserClient';
+import { roundPostGeometry } from '../../domain/canvas/postGeometry';
 
 interface SupabaseErrorLike {
   readonly code?: string;
@@ -140,7 +141,9 @@ export class SupabasePostsRepository implements PostsRepository {
   }
 
   async updateFieldsById(id: PostId, fields: object): Promise<Result<void, DomainError>> {
-    const { error } = await this.client.from('padlets').update(fields).eq('id', id);
+    // PATCH-212. Round position/size at the ONE seam every generic write passes,
+    // so no caller can send a fraction to the integer columns.
+    const { error } = await this.client.from('padlets').update(roundPostGeometry(fields)).eq('id', id);
 
     if (error) {
       return err(domainError('unavailable', 'Could not update the post', { cause: error }));
@@ -156,8 +159,8 @@ export class SupabasePostsRepository implements PostsRepository {
     const { error } = await this.client
       .from('padlets')
       .update({
-        position_x: fields.positionX,
-        position_y: fields.positionY,
+        position_x: Math.round(fields.positionX),
+        position_y: Math.round(fields.positionY),
         updated_at: fields.updatedAt,
         ...(fields.metadata !== undefined ? { metadata: fields.metadata } : {}),
       })
@@ -272,7 +275,9 @@ export class SupabasePostsRepository implements PostsRepository {
   }
 
   async insert(row: object): Promise<Result<void, DomainError>> {
-    const { error } = await this.client.from('padlets').insert(row);
+    // PATCH-212. Insert rows carry position/size too (paste, add-at-centre,
+    // template builds); round them at the seam like every update.
+    const { error } = await this.client.from('padlets').insert(roundPostGeometry(row));
 
     if (error) {
       return err(domainError('unavailable', 'Could not create the post', { cause: error }));
@@ -282,7 +287,7 @@ export class SupabasePostsRepository implements PostsRepository {
   }
 
   async insertReturning(row: object): Promise<Result<Record<string, unknown> | null, DomainError>> {
-    const { data, error } = await this.client.from('padlets').insert(row).select().single();
+    const { data, error } = await this.client.from('padlets').insert(roundPostGeometry(row)).select().single();
 
     if (error) {
       return err(domainError('unavailable', 'Could not create the post', { cause: error }));

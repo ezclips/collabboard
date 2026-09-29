@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, Dispatch, SetStateAction } fro
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { persistDurableImageContent } from '@/lib/infra/collabboard/imageDurableContent';
+import { roundPostGeometry } from '@/lib/domain/canvas/postGeometry';
 import {
   readSyncedTwinId,
   updateSyncedNotePair,
@@ -355,6 +356,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
     sourceNoteReference,
     onSourceNoteCreated,
   } = params;
+  /**
+   * PATCH-212. A new post's computed position, rounded at the SOURCE, so every
+   * insert below carries whole-number geometry even at a non-100% zoom. The
+   * payload literal stays as it was -- only the two numbers entering it are
+   * whole -- which keeps this a one-line change at each call site.
+   */
+  const newPostPosition = (cardWidth: number, cardHeight: number) => {
+    const { x, y } = getNewPostPosition(cardWidth, cardHeight);
+    return roundPostGeometry({ position_x: x, position_y: y });
+  };
   // The durable creation identity belongs to ONE draft session, not to "the
   // last save that did not finish". Opening the Image editor starts a new
   // draft, so any identity left over from a previous one is dropped here.
@@ -547,7 +558,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       if (padletToEdit?.id === 'new') {
         // Create new padlet and get its ID
-        const { x: position_x, y: position_y } = getNewPostPosition(280, 280);
+        const { position_x, position_y } = newPostPosition(280, 280);
         const { data: newPadlet, error } = await supabase
           .from('padlets')
           .insert({
@@ -810,7 +821,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
         // Insert new link padlet
-        const { x: position_x, y: position_y } = getNewPostPosition(300, 350);
+        const { position_x, position_y } = newPostPosition(300, 350);
         const { data: newLink, error } = await supabase
           .from('padlets')
           .insert({
@@ -913,7 +924,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { x: position_x, y: position_y } = getNewPostPosition(300, 350);
+        const { position_x, position_y } = newPostPosition(300, 350);
         const { data: newTodo, error } = await supabase
           .from('padlets')
           .insert({
@@ -1006,7 +1017,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { x: position_x, y: position_y } = getNewPostPosition(400, 300);
+        const { position_x, position_y } = newPostPosition(400, 300);
         const { data: newTable, error } = await supabase
           .from('padlets')
           .insert({
@@ -1098,7 +1109,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { x: position_x, y: position_y } = getNewPostPosition(350, 300);
+        const { position_x, position_y } = newPostPosition(350, 300);
         const { data: newContainer, error } = await supabase
           .from('padlets')
           .insert({
@@ -1199,7 +1210,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { x: position_x, y: position_y } = getNewPostPosition(300, 280);
+        const { position_x, position_y } = newPostPosition(300, 280);
         const { data: newComment, error } = await supabase
           .from('padlets')
           .insert({
@@ -1321,7 +1332,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           ...data.metadata,
           ...(padletToEdit.metadata?.parentId ? { parentId: padletToEdit.metadata.parentId } : {}),
         };
-        const { x: position_x, y: position_y } = getNewPostPosition(180, 220);
+        const { position_x, position_y } = newPostPosition(180, 220);
         const { data: newCard, error } = await supabase
           .from('padlets')
           .insert({
@@ -1464,7 +1475,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         // New Image -- title stays independent of the caption (set later,
         // if at all, via the image editing modal's own Title field), not
         // derived from it.
-        const { x: position_x, y: position_y } = getNewPostPosition(300, 200);
+        const { position_x, position_y } = newPostPosition(300, 200);
         // IMAGE-LIBRARY: an Image is a durable asset, so saving one creates the
         // Library object AND this placement together, through the same atomic
         // RPC the PDF-area flow already uses. Two separate client inserts could
@@ -1615,7 +1626,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { x: position_x, y: position_y } = getNewPostPosition(400, 300);
+        const { position_x, position_y } = newPostPosition(400, 300);
         const { data: newDrawing, error } = await supabase
           .from('padlets')
           .insert({
@@ -1768,7 +1779,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { x: position_x, y: position_y } = getNewPostPosition(500, 400);
+        const { position_x, position_y } = newPostPosition(500, 400);
         const { data: newAIComp, error } = await supabase
           .from('padlets')
           .insert({

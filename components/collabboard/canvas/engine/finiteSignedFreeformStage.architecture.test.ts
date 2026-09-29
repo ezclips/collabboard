@@ -287,8 +287,8 @@ describe('PATCH 9V.2B: camera, Line, world and data freezes [matrix 59-61, 64-71
     expect(domain).toContain('positionX: z.number(),');
     expect(domain).toContain('positionY: z.number(),');
     expect(domain).not.toMatch(/position[XY]:\s*z\.number\(\)\.min\(/);
-    expect(repository).toContain('position_x: fields.positionX,');
-    expect(repository).toContain('position_y: fields.positionY,');
+    expect(repository).toContain('position_x: Math.round(fields.positionX),');
+    expect(repository).toContain('position_y: Math.round(fields.positionY),');
     expect(repository).not.toContain('Math.max(0,');
   });
 });

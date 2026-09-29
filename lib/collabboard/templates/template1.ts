@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { Padlet } from '@/types/collabboard';
+import { roundPostGeometry } from '@/lib/domain/canvas/postGeometry';
 import {
     canCreateBoardForEntitlements,
     getWorkspaceEntitlements,
@@ -73,7 +74,7 @@ export async function createTemplate1Canvas(userId: string, workspaceId?: string
 
     // 3. Create Master Drawing Padlet (for Excalidraw sync)
     const masterDrawingId = crypto.randomUUID();
-    await supabase.from('padlets').insert({
+    await supabase.from('padlets').insert(roundPostGeometry({
         id: masterDrawingId,
         board_id: board.id,
         type: 'drawing',
@@ -89,7 +90,7 @@ export async function createTemplate1Canvas(userId: string, workspaceId?: string
             }),
             drawingFiles: '{}'
         }
-    });
+    }));
 
     // 4. Create Containers
     const planningId = crypto.randomUUID();
@@ -133,7 +134,7 @@ export async function createTemplate1Canvas(userId: string, workspaceId?: string
         }
     ];
 
-    await supabase.from('padlets').insert(containers);
+    await supabase.from('padlets').insert(containers.map(roundPostGeometry));
 
     // 5. Create Child Padlets
     const childPadlets: any[] = [
@@ -239,7 +240,7 @@ export async function createTemplate1Canvas(userId: string, workspaceId?: string
     // Insert children
     const { data: createdChildren, error: childrenError } = await supabase
         .from('padlets')
-        .insert(childPadlets)
+        .insert(childPadlets.map(roundPostGeometry))
         .select();
 
     if (childrenError) console.error('Error creating template children:', childrenError);
@@ -283,7 +284,7 @@ export async function createTemplate1Canvas(userId: string, workspaceId?: string
         }
     ];
 
-    await supabase.from('padlets').insert(standalonePadlets);
+    await supabase.from('padlets').insert(standalonePadlets.map(roundPostGeometry));
 
     return board.id;
 }

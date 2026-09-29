@@ -36,6 +36,7 @@ import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerC
 
 import { Padlet } from "@/types/collabboard";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
+import { roundPostGeometry } from '@/lib/domain/canvas/postGeometry';
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 // Removed local Padlet interface to use shared type
@@ -297,7 +298,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
       // Insert to database
       const { error } = await supabase
         .from('padlets')
-        .insert(duplicate);
+        .insert(roundPostGeometry(duplicate));
 
       if (error) throw error;
       toast.success('Container duplicated');
@@ -395,7 +396,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
 
     // Persist to database
     try {
-      await supabase.from('padlets').insert(newContainer);
+      await supabase.from('padlets').insert(roundPostGeometry(newContainer));
       // Bulk update positions could be heavy, maybe just update affected ones?
       // Ideally we call a stored proc or update affected items.
       // For now, we rely on the fact that new posts are at top or sorted by position.

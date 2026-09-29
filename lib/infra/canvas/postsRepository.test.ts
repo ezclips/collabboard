@@ -215,7 +215,7 @@ describe('SupabasePostsRepository', () => {
     }
   });
 
-  it('insert sends the row verbatim to padlets', async () => {
+  it('insert sends the row to padlets with its geometry rounded, values otherwise verbatim', async () => {
     const { client, fromTables, insertCalls, updateCalls } = createFakeClient();
     const repository = new SupabasePostsRepository(client);
     const row = { id: 'post-1', board_id: 'board-1', title: 'Hello' };
@@ -225,8 +225,10 @@ describe('SupabasePostsRepository', () => {
     expect(result.ok).toBe(true);
     expect(fromTables).toEqual(['padlets']);
     expect(insertCalls).toEqual([row]);
-    expect(insertCalls[0]).toBe(row);
     expect(updateCalls).toHaveLength(0);
+    // PATCH-212: a COPY with geometry rounded (the input is not mutated).
+    expect(insertCalls[0]).not.toBe(row);
+    expect(row).toEqual({ id: 'post-1', board_id: 'board-1', title: 'Hello' });
   });
 
   it('insert maps a resolved error to an unavailable DomainError carrying the cause', async () => {
@@ -547,5 +549,63 @@ describe('updateFieldsById', () => {
       expect(result.error.code).toBe('unavailable');
       expect(result.error.cause).toBe(supabaseError);
     }
+  });
+});
+
+describe('PATCH-212 the repository rounds geometry at the seam', () => {
+  it('updateFieldsById sends whole numbers for a fractional payload', async () => {
+    const { client, updateCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    await repository.updateFieldsById(asPostId('post-1'), {
+      position_x: -2995.9999999999995,
+      width: 500.4,
+      updated_at: 'x',
+    });
+
+    expect(updateCalls).toHaveLength(1);
+    expect(Number.isInteger(updateCalls[0].position_x)).toBe(true);
+    expect(Number.isInteger(updateCalls[0].width)).toBe(true);
+    expect(updateCalls[0].position_x).toBe(-2996);
+    expect(updateCalls[0].width).toBe(500);
+  });
+
+  it('insert sends whole numbers for a fractional row', async () => {
+    const { client, insertCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+    const row = { board_id: 'board-1', position_x: 12.5, position_y: 0.2, width: 300.9, height: -1.5 };
+
+    await repository.insert(row);
+
+    expect(insertCalls).toHaveLength(1);
+    const sent = insertCalls[0] as Record<string, number>;
+    expect(sent).toEqual({ board_id: 'board-1', position_x: 13, position_y: 0, width: 301, height: -1 });
+    // The caller's own object is untouched.
+    expect(row.position_x).toBe(12.5);
+  });
+
+  it('insertReturning rounds the row it sends', async () => {
+    const { client, selectSingleCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    await repository.insertReturning({ id: 'post-1', width: 180.6 });
+
+    expect((selectSingleCalls[0] as Record<string, number>).width).toBe(181);
+  });
+
+  it('updatePosition rounds fractional positionX/positionY (the live 22P02 value)', async () => {
+    const { client, updateCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    await repository.updatePosition(asPostId('post-1'), {
+      positionX: -2995.9999999999995,
+      positionY: 12.5,
+      updatedAt: 'x',
+    });
+
+    expect(updateCalls[0].position_x).toBe(-2996);
+    expect(updateCalls[0].position_y).toBe(13);
+    expect(Number.isInteger(updateCalls[0].position_x)).toBe(true);
+    expect(Number.isInteger(updateCalls[0].position_y)).toBe(true);
   });
 });
