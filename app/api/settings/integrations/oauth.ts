@@ -17,6 +17,46 @@ interface ProviderConfig {
 
 export const PROVIDER_IDS: IntegrationProvider[] = ['google-drive', 'microsoft-onedrive'];
 
+/**
+ * PATCH-214b. The scopes a connection MUST actually carry to be usable.
+ *
+ * The consent screen gives each permission its own checkbox, and a user can
+ * leave the Drive box unticked: the connection then saves, Settings says
+ * "Connected", but the token cannot open Drive (the Picker answers 403). So the
+ * callback checks the granted scopes against this list before storing anything.
+ *
+ * Microsoft may report a scope bare (`Files.Read`) or prefixed
+ * (`https://graph.microsoft.com/Files.Read`), so the comparison is
+ * case-insensitive on the final segment.
+ */
+export const REQUIRED_SCOPES: Record<IntegrationProvider, readonly string[]> = {
+  'google-drive': ['https://www.googleapis.com/auth/drive.file'],
+  'microsoft-onedrive': ['Files.Read'],
+};
+
+/**
+ * Which required scopes a connection did NOT grant. An empty result is OK.
+ *
+ * AN EMPTY `granted` ARRAY MEANS "THE PROVIDER DID NOT SAY", so it returns `[]`.
+ * Some token responses omit `scope` entirely, and blocking those would refuse
+ * connections that are in fact fine. Only a NON-EMPTY list that lacks a
+ * required scope is a failure.
+ */
+export function missingRequiredScopes(
+  provider: IntegrationProvider,
+  granted: readonly string[],
+): string[] {
+  if (granted.length === 0) return [];
+  const normalise = (scope: string) => scope.trim().toLowerCase();
+  const grantedSet = new Set(granted.map(normalise));
+  return REQUIRED_SCOPES[provider].filter((required) => {
+    const wanted = normalise(required);
+    if (grantedSet.has(wanted)) return false;
+    // Microsoft's prefixed form: `https://graph.microsoft.com/Files.Read`.
+    return ![...grantedSet].some((scope) => scope.endsWith('/' + wanted));
+  });
+}
+
 export function getProviders(): Record<IntegrationProvider, ProviderConfig> {
   const microsoftTenant = process.env.MICROSOFT_TENANT_ID || 'common';
   const googleDriveClientId = process.env.GOOGLE_DRIVE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;

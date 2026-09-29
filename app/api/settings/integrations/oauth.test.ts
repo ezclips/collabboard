@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getProviders } from './oauth';
+import { getProviders, missingRequiredScopes, REQUIRED_SCOPES } from './oauth';
 
 /**
  * PATCH-214. Google's scope moves from `drive.readonly` (restricted, caps the
@@ -41,5 +41,44 @@ describe('Google Drive OAuth scope', () => {
 
   it('leaves the Microsoft scope unchanged', () => {
     expect(getProviders()['microsoft-onedrive'].scope).toContain('Files.Read');
+  });
+});
+
+describe('PATCH-214b missingRequiredScopes', () => {
+  const DRIVE = 'https://www.googleapis.com/auth/drive.file';
+
+  it('Google with drive.file granted -> nothing missing', () => {
+    expect(missingRequiredScopes('google-drive', ['openid', 'email', 'profile', DRIVE])).toEqual([]);
+  });
+
+  it('Google with only openid/email/profile -> drive.file missing', () => {
+    expect(
+      missingRequiredScopes('google-drive', ['openid', 'email', 'profile']),
+    ).toEqual([DRIVE]);
+  });
+
+  it('an EMPTY granted list means the provider did not say -> nothing missing', () => {
+    expect(missingRequiredScopes('google-drive', [])).toEqual([]);
+    expect(missingRequiredScopes('microsoft-onedrive', [])).toEqual([]);
+  });
+
+  it('Microsoft with the bare name, any case -> nothing missing', () => {
+    expect(missingRequiredScopes('microsoft-onedrive', ['files.read'])).toEqual([]);
+    expect(missingRequiredScopes('microsoft-onedrive', ['User.Read', 'FILES.READ'])).toEqual([]);
+  });
+
+  it('Microsoft with the prefixed name -> nothing missing', () => {
+    expect(
+      missingRequiredScopes('microsoft-onedrive', ['https://graph.microsoft.com/Files.Read']),
+    ).toEqual([]);
+  });
+
+  it('Microsoft with only User.Read/openid -> Files.Read missing', () => {
+    expect(missingRequiredScopes('microsoft-onedrive', ['User.Read', 'openid'])).toEqual(['Files.Read']);
+  });
+
+  it('REQUIRED_SCOPES lives next to each provider', () => {
+    expect(REQUIRED_SCOPES['google-drive']).toEqual([DRIVE]);
+    expect(REQUIRED_SCOPES['microsoft-onedrive']).toEqual(['Files.Read']);
   });
 });

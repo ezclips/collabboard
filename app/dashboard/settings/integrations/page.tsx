@@ -69,7 +69,9 @@ function IntegrationsContent() {
     if (status === 'success') {
       toast.success(`${provider} connected`);
     } else {
-      toast.error(message || `Failed to connect ${provider}`);
+      // PATCH-214b. The callback can send an actionable message (e.g. "tick
+      // the Drive box and connect again"); give it time to be read.
+      toast.error(message || `Failed to connect ${provider}`, { duration: 12000 });
     }
   }, [searchParams]);
 

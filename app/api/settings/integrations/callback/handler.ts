@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { encryptToken } from '@/lib/security/tokenCipher';
-import { resolveProvider, verifyOAuthState } from '../oauth';
+import { missingRequiredScopes, resolveProvider, verifyOAuthState } from '../oauth';
 
 interface TokenResponse {
   access_token?: string;
@@ -127,6 +127,24 @@ export async function handleOAuthCallback(req: NextRequest, providerOverride?: s
       typeof tokenJson.scope === 'string' && tokenJson.scope.trim().length > 0
         ? tokenJson.scope.split(' ').filter(Boolean)
         : [];
+
+    /**
+     * PATCH-214b. A connection that did not grant the scope it needs is saved as
+     * "Connected" but cannot do anything -- the token opens no Drive, and the
+     * Picker answers 403 with no explanation. So check BEFORE the upsert and
+     * store nothing when the required scope is missing. The user is told how to
+     * fix it. An empty `scopes` (the provider did not say) is NOT a failure.
+     *
+     * The existing row, if any, is deliberately left untouched: revoking or
+     * deleting it would drop a connection that may still be working.
+     */
+    const missing = missingRequiredScopes(provider.id, scopes);
+    if (missing.length > 0) {
+      const reason = provider.id === 'google-drive'
+        ? 'Google Drive access wasn\'t granted. Click Connect again and tick the box "See, edit, create, and delete only the specific Google Drive files you use with this app".'
+        : 'OneDrive access wasn\'t granted. Click Connect again and accept the request to read your files.';
+      return redirectWithStatus(req, 'error', provider.id, reason);
+    }
 
     const supabaseAdmin = getSupabaseAdmin();
     const { error: upsertError } = await supabaseAdmin.from('user_integrations').upsert(
