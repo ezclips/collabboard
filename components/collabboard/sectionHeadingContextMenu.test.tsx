@@ -121,8 +121,10 @@ function mount(padlet: Padlet, overrides: Partial<React.ComponentProps<typeof Se
  */
 function mountWithContextMenu(padlet: Padlet) {
   const onCommitText = vi.fn();
+  const onCut = vi.fn();
   const onCopy = vi.fn();
   const onPaste = vi.fn();
+  const onDuplicate = vi.fn();
   const onDelete = vi.fn();
   const onBringToFront = vi.fn();
   const onSendToBack = vi.fn();
@@ -136,6 +138,8 @@ function mountWithContextMenu(padlet: Padlet) {
   function Harness({ canEdit }: { canEdit: boolean }) {
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
     const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+    // PATCH-211: mirrors FreeformPadletCards' per-id edit-request counter.
+    const [editRequests, setEditRequests] = React.useState<Record<string, number>>({});
     return (
       <div data-probe-viewport="true" onClick={() => { outerClick(); setSelectedId(null); }}>
         <div data-padlet-id={padlet.id}>
@@ -146,6 +150,7 @@ function mountWithContextMenu(padlet: Padlet) {
             isDraggingThis={false}
             onMouseDownCapture={(_event, padletId) => setSelectedId(padletId)}
             onCommitText={onCommitText}
+            editRequestId={editRequests[padlet.id] ?? 0}
             clientToWorld={(x, y) => ({ x, y })}
             worldBounds={SECTION_HEADING_UNBOUNDED_WORLD}
             onContextMenu={(event, padletId) => {
@@ -164,8 +169,14 @@ function mountWithContextMenu(padlet: Padlet) {
             position={menu}
             padlet={padlet}
             onClose={() => setMenu(null)}
+            onEditTitle={() => {
+              setEditRequests((prev) => ({ ...prev, [padlet.id]: (prev[padlet.id] ?? 0) + 1 }));
+              setMenu(null);
+            }}
+            onCut={onCut}
             onCopy={onCopy}
             onPaste={onPaste}
+            onDuplicate={onDuplicate}
             onDelete={onDelete}
             onBringToFront={onBringToFront}
             onSendToBack={onSendToBack}
@@ -176,7 +187,7 @@ function mountWithContextMenu(padlet: Padlet) {
   }
 
   act(() => root.render(<Harness canEdit={true} />));
-  return { host, root, onCommitText, onCopy, onPaste, onDelete, onBringToFront, onSendToBack, outerClick };
+  return { host, root, onCommitText, onCut, onCopy, onPaste, onDuplicate, onDelete, onBringToFront, onSendToBack, outerClick };
 }
 
 function isSelected(host: HTMLElement): boolean {
@@ -361,11 +372,16 @@ describe('SECTION-H3B.4 Paste [14-17]', () => {
 
   it('16. paste calling Copy first then Paste round-trips through the SectionHeadingContextMenu wiring', () => {
     const { host, onCopy, onPaste } = mountWithContextMenu(makeHeading());
+    // Selected by LABEL, not index: PATCH-211 changed the item list, and an
+    // index-based lookup silently tests the wrong row the moment it moves.
+    const rowByLabel = (label: string) =>
+      Array.from(document.body.querySelectorAll<HTMLElement>('[data-positioned-menu-row="true"]'))
+        .find((r) => r.textContent === label)!;
     rightClick(host.querySelector('[data-section-heading-surface="true"]')!);
-    act(() => (document.body.querySelectorAll('[data-positioned-menu-row="true"]')[0] as HTMLElement).click());
+    act(() => rowByLabel('Copy').click());
     expect(onCopy).toHaveBeenCalledTimes(1);
     rightClick(host.querySelector('[data-section-heading-surface="true"]')!);
-    act(() => (document.body.querySelectorAll('[data-positioned-menu-row="true"]')[1] as HTMLElement).click());
+    act(() => rowByLabel('Paste').click());
     expect(onPaste).toHaveBeenCalledTimes(1);
   });
 
@@ -406,13 +422,59 @@ describe('SECTION-H3B.4 Delete + z-order [18-21]', () => {
     expect(body).toContain("newZ = Math.max(10, minZ - 1);");
   });
 
-  it('16 (menu row order). Copy, Paste, Delete, separator, Bring to Front, Send to Back -- in that exact order', () => {
+  it('16 (menu row order). Edit title, separator, Cut, Copy, Paste, Duplicate, Delete, separator, Bring to Front, Send to Back -- in that exact order', () => {
     const { host } = mountWithContextMenu(makeHeading());
     rightClick(host.querySelector('[data-section-heading-surface="true"]')!);
     const surface = document.body.querySelector('[data-slot="positioned-context-menu-content"]')!;
     const rows = Array.from(surface.querySelectorAll('[data-positioned-menu-row="true"], [role="separator"]'))
       .map((el) => (el.getAttribute('role') === 'separator' ? '---' : el.textContent));
-    expect(rows).toEqual(['Copy', 'Paste', 'Delete', '---', 'Bring to Front', 'Send to Back']);
+    // PATCH-211 added Edit title (first) and Cut/Duplicate; the item list is
+    // authorized to change.
+    expect(rows).toEqual([
+      'Edit title', '---', 'Cut', 'Copy', 'Paste', 'Duplicate', 'Delete', '---', 'Bring to Front', 'Send to Back',
+    ]);
+  });
+});
+
+// ============================================================ PATCH-211 items
+describe('PATCH-211 section heading menu: Edit title, Cut, Duplicate', () => {
+  function menuRows(): HTMLElement[] {
+    return Array.from(document.body.querySelectorAll<HTMLElement>('[data-positioned-menu-row="true"]'));
+  }
+  function rowByLabel(label: string): HTMLElement {
+    const row = menuRows().find((r) => r.textContent === label);
+    expect(row, `menu row "${label}"`).toBeTruthy();
+    return row!;
+  }
+
+  it('Cut calls cutPadlet with the heading id', () => {
+    const { host, onCut } = mountWithContextMenu(makeHeading());
+    rightClick(host.querySelector('[data-section-heading-surface="true"]')!);
+    act(() => rowByLabel('Cut').click());
+    expect(onCut).toHaveBeenCalledTimes(1);
+  });
+
+  it('Duplicate calls duplicatePadlet with the heading id', () => {
+    const { host, onDuplicate } = mountWithContextMenu(makeHeading());
+    rightClick(host.querySelector('[data-section-heading-surface="true"]')!);
+    act(() => rowByLabel('Duplicate').click());
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
+  });
+
+  it('Edit title puts the heading into edit mode', () => {
+    const { host } = mountWithContextMenu(makeHeading());
+    rightClick(host.querySelector('[data-section-heading-surface="true"]')!);
+    expect(host.querySelector('[data-section-heading-input="true"]')).toBeNull();
+    act(() => rowByLabel('Edit title').click());
+    // The input is mounted, i.e. the same editing state a double-click enters.
+    expect(host.querySelector('[data-section-heading-input="true"]')).not.toBeNull();
+  });
+
+  it('the real host wires Cut/Duplicate/Edit title to the canonical handlers', () => {
+    expect(cardsSrc).toMatch(/onCut=\{\(\) => cutPadlet\(sectionHeadingContextMenu\.padletId\)\}/);
+    expect(cardsSrc).toMatch(/onDuplicate=\{\(\) => duplicatePadlet\(sectionHeadingContextMenu\.padletId\)\}/);
+    expect(cardsSrc).toContain('requestSectionHeadingEdit(sectionHeadingContextMenu.padletId);');
+    expect(cardsSrc).toMatch(/editRequestId=\{sectionHeadingEditRequests\[padlet\.id\] \?\? 0\}/);
   });
 });
 

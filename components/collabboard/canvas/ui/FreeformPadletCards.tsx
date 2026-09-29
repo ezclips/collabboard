@@ -1005,6 +1005,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   // own state is -- the heading component itself only reports the raw event.
   const [sectionHeadingContextMenu, setSectionHeadingContextMenu] = React.useState<{ padletId: string; x: number; y: number } | null>(null);
 
+  /**
+   * PATCH-211. "Edit title" in the menu asks the heading to enter edit mode.
+   * The menu cannot reach into SectionHeadingPost, so the host raises a per-id
+   * counter and the heading reacts to the CHANGE -- the smallest mechanism that
+   * fits, and it needs no cleanup. A missing id reads as 0.
+   */
+  const [sectionHeadingEditRequests, setSectionHeadingEditRequests] = React.useState<Record<string, number>>({});
+  const requestSectionHeadingEdit = React.useCallback((padletId: string) => {
+    setSectionHeadingEditRequests((prev) => ({ ...prev, [padletId]: (prev[padletId] ?? 0) + 1 }));
+  }, []);
+
   const handleSectionHeadingContextMenu = React.useCallback((event: React.MouseEvent, padletId: string) => {
     // Mirrors every other post-type menu's `disabled={!canUseFreeformEditButton}`
     // convention: in read-only mode, no CollabBoard menu opens and the
@@ -1408,6 +1419,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onMouseDownCapture={handlePadletMouseDown}
           onCommitText={(padletId, nextText) => { void updatePadletTitle(padletId, nextText); }}
           onContextMenu={handleSectionHeadingContextMenu}
+          editRequestId={sectionHeadingEditRequests[padlet.id] ?? 0}
           clientToWorld={getWorldPointFromClient}
           worldBounds={FREEFORM_SECTION_HEADING_WORLD_BOUNDS}
           // PATCH SECTION-H2 Phase 20: a heading inside a multi-selection
@@ -1425,8 +1437,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           position={{ x: sectionHeadingContextMenu.x, y: sectionHeadingContextMenu.y }}
           padlet={padlets.find((p) => p.id === sectionHeadingContextMenu.padletId) ?? null}
           onClose={() => setSectionHeadingContextMenu(null)}
+          onEditTitle={() => {
+            requestSectionHeadingEdit(sectionHeadingContextMenu.padletId);
+            setSectionHeadingContextMenu(null);
+          }}
+          onCut={() => cutPadlet(sectionHeadingContextMenu.padletId)}
           onCopy={() => copyPadlet(sectionHeadingContextMenu.padletId)}
           onPaste={handlePaste}
+          onDuplicate={() => duplicatePadlet(sectionHeadingContextMenu.padletId)}
           onDelete={() => requestDeletePadlet(sectionHeadingContextMenu.padletId)}
           onBringToFront={() => movePadletLayer(sectionHeadingContextMenu.padletId, 'bringToFront')}
           onSendToBack={() => movePadletLayer(sectionHeadingContextMenu.padletId, 'sendToBack')}

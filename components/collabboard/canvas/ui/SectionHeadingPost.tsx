@@ -57,6 +57,15 @@ export interface SectionHeadingPostProps {
    */
   onContextMenu?: (event: React.MouseEvent, padletId: string) => void;
   /**
+   * PATCH-211. When this counter CHANGES for this heading, the title enters
+   * edit mode -- the same state a double-click produces. The right-click menu's
+   * "Edit title" item cannot call into this component, so the host raises this
+   * value and the heading reacts. It is deliberately a plain number rather than
+   * a callback ref: a change is the whole signal, nothing has to be cleaned up,
+   * and the initial render is a no-op (see the effect below).
+   */
+  editRequestId?: number;
+  /**
    * PATCH SECTION-H3B Phase 6/7 -- the host's client -> world converter.
    *
    * This is the ONLY thing the heading needs to know about the canvas it is
@@ -94,6 +103,7 @@ export default function SectionHeadingPost({
   onMouseDownCapture,
   onCommitText,
   onContextMenu,
+  editRequestId,
   clientToWorld,
   worldBounds,
   canResize = true,
@@ -113,6 +123,19 @@ export default function SectionHeadingPost({
   useEffect(() => {
     if (isEditing) inputRef.current?.focus();
   }, [isEditing]);
+
+  /**
+   * PATCH-211. "Edit title" from the right-click menu. The value is compared
+   * against the LAST one this instance saw, so mounting with a non-zero value
+   * (or a re-render that leaves it unchanged) never opens the editor -- only a
+   * change does. A viewer (`canEdit === false`) ignores it entirely.
+   */
+  const lastEditRequestIdRef = useRef(editRequestId);
+  useEffect(() => {
+    if (editRequestId === lastEditRequestIdRef.current) return;
+    lastEditRequestIdRef.current = editRequestId;
+    if (canEdit) setIsEditing(true);
+  }, [editRequestId, canEdit]);
 
   const commit = useCallback(() => {
     setIsEditing(false);
@@ -376,7 +399,7 @@ export default function SectionHeadingPost({
       {isSelected && canEdit && !isEditing && (
         <span
           data-section-heading-edit-hint="true"
-          className="pointer-events-none absolute left-0 top-full mt-1 select-none text-[11px] text-gray-500"
+          className="pointer-events-none absolute left-0 top-full mt-1 select-none text-[13px] text-gray-500"
         >
           Double-click to edit the title
         </span>

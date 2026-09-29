@@ -33,8 +33,11 @@ interface SectionHeadingContextMenuProps {
     position: { x: number; y: number };
     padlet: Padlet | null;
     onClose: () => void;
+    onEditTitle?: () => void;
+    onCut?: () => void;
     onCopy?: () => void;
     onPaste?: () => void;
+    onDuplicate?: () => void;
     onDelete?: () => void;
     onBringToFront?: () => void;
     onSendToBack?: () => void;
@@ -45,8 +48,11 @@ export function SectionHeadingContextMenu({
     position,
     padlet,
     onClose,
+    onEditTitle,
+    onCut,
     onCopy,
     onPaste,
+    onDuplicate,
     onDelete,
     onBringToFront,
     onSendToBack,
@@ -78,11 +84,23 @@ export function SectionHeadingContextMenu({
             // identical guard for the same reason.
             onClick={(event) => event.stopPropagation()}
         >
+            <PositionedContextMenuItem onSelect={() => handleAction('post.rename', onEditTitle)}>
+                Edit title
+            </PositionedContextMenuItem>
+
+            <PositionedContextMenuSeparator />
+
+            <PositionedContextMenuItem onSelect={() => handleAction('edit.cut', onCut)}>
+                Cut
+            </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => handleAction('edit.copy', onCopy)}>
                 Copy
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => handleAction('edit.paste', onPaste)}>
                 Paste
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem onSelect={() => handleAction('edit.duplicate', onDuplicate)}>
+                Duplicate
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => handleAction('edit.delete', onDelete)}>
                 Delete

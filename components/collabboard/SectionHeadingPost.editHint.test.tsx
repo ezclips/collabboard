@@ -86,7 +86,8 @@ describe('PATCH-210 the edit hint on a selected section heading', () => {
     expect(hint(host)).not.toBeNull();
     expect(hint(host)!.textContent).toBe('Double-click to edit the title');
     // Small, grey, no background, non-interactive, and out of layout.
-    expect(hint(host)!.className).toContain('text-[11px]');
+    // PATCH-211 raised the size from text-[11px] to text-[13px].
+    expect(hint(host)!.className).toContain('text-[13px]');
     expect(hint(host)!.className).toContain('text-gray-500');
     expect(hint(host)!.className).toContain('pointer-events-none');
     expect(hint(host)!.className).toContain('select-none');
