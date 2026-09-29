@@ -21,6 +21,9 @@ export default defineConfig({
       // PATCH-183: the Stripe plan-mapping tests.
       'lib/stripe/**/*.test.ts',
       'lib/infra/**/*.test.ts',
+      // PATCH-213: the import routes' URL allowlist and resolver tests.
+      'lib/imports/*.test.ts',
+      'app/api/imports/**/*.test.ts',
       // PATCH-192: the dashboard data loader.
       'lib/dashboard/**/*.test.ts',
       'lib/server/**/*.test.ts',

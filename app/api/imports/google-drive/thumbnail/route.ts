@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserId } from '@/lib/imports/auth';
 import { getValidAccessToken } from '@/lib/imports/tokenRefresh';
+import { isAllowedThumbnailUrl } from '@/lib/imports/providerUrls';
 
 export const runtime = 'nodejs';
 
@@ -19,21 +20,18 @@ export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get('url');
   if (!url) return new NextResponse('Missing url param', { status: 400 });
 
-  // Only proxy Google Drive / Google user-content URLs
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return new NextResponse('Invalid url', { status: 400 });
-  }
-  const allowed = ['lh3.googleusercontent.com', 'drive.google.com', 'googleapis.com'];
-  if (!allowed.some((h) => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
+  // PATCH-213. The SAME exact-host allowlist the resolve route uses. A bare
+  // `*.googleapis.com` match admitted `storage.googleapis.com`, so the user's
+  // bearer token could be sent to a third party's public bucket.
+  if (!isAllowedThumbnailUrl('google-drive', url)) {
     return new NextResponse('Forbidden', { status: 403 });
   }
 
   const upstream = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
+    // A redirect could carry the token to a host that is not on the allowlist.
+    redirect: 'error',
   });
 
   if (!upstream.ok) {
