@@ -186,10 +186,10 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
             )}
             <h2 className="text-lg font-bold text-gray-800">
               {screen.name === 'chooser' || screen.name === 'checking'
-                ? 'Import File'
+                ? 'Cloud import'
                 : screen.name === 'browser'
                   ? (screen.provider === 'google-drive' ? 'Import from Google Drive' : 'Import from Microsoft OneDrive')
-                  : 'Import File'}
+                  : 'Cloud import'}
             </h2>
           </div>
         </div>

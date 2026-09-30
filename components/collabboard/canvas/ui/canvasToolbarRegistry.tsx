@@ -19,7 +19,6 @@ import {
   Sparkles,
   StickyNote,
   Table,
-  Upload,
   UserPlus,
 } from 'lucide-react';
 import type { ChronoMode } from '@/types/collabboard';
@@ -249,7 +248,8 @@ export function buildCanvasToolbarGroups({
       label: 'Media',
       tools: [
         { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
-        { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
+        { icon: ImageIcon, label: "Image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image",
+          description: "Free images or upload your own" },
         // PDF belongs in Media, and two properties keep it working there.
         // `pinned` keeps it rendered inline even when Media overflows into the
         // More menu -- that menu dispatches after it has closed, by which point
@@ -263,12 +263,13 @@ export function buildCanvasToolbarGroups({
         // toolbar button competes with this one.
         ...(isDirectPdfLayout ? [
           {
-            icon: FileUp, label: "PDF", color: "text-rose-700", bg: "hover:bg-rose-50",
+            icon: FileUp, label: "Document", color: "text-rose-700", bg: "hover:bg-rose-50",
             type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
+            description: "PDF, Word or text — the wiki and AI can read it",
           },
         ] : []),
-        { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
-        { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
+        { icon: CloudDownload, label: "Cloud import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import",
+          description: "Google Drive or OneDrive" },
       ],
       priority: 5,
     }] : []),

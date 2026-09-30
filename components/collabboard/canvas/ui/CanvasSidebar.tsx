@@ -32,6 +32,11 @@ export interface SidebarToolItem {
   disabled?: boolean;
   hint?: string;
   /**
+   * PATCH-217. What the tool does, shown after the label in its tooltip (and in
+   * the More menu). Optional: a tool without one keeps its bare label.
+   */
+  description?: string;
+  /**
    * Kept as a direct, always-clickable control even when its group overflows
    * into the More menu, and excluded from that menu so it never appears twice.
    * For a tool whose action must happen inside the browser's own click -- see
@@ -249,8 +254,23 @@ export default function CanvasSidebar({
         }`}
       >
         <IconComponent size={18} strokeWidth={1.5} />
-        <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-[100] pointer-events-none">
-          {isDisabled && tool.hint ? tool.hint : tool.label}
+        <span
+          className={`absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 z-[100] pointer-events-none ${
+            // PATCH-217. A described tool wraps so its description can be read;
+            // a label-only tool keeps the single-line pill it always had.
+            !isDisabled && tool.description ? 'w-max max-w-[240px]' : 'whitespace-nowrap'
+          }`}
+        >
+          {isDisabled && tool.hint ? (
+            tool.hint
+          ) : (
+            <>
+              {tool.label}
+              {!isDisabled && tool.description ? (
+                <span className="block text-[11px] text-gray-300">{tool.description}</span>
+              ) : null}
+            </>
+          )}
         </span>
       </div>
     );
@@ -263,7 +283,7 @@ export default function CanvasSidebar({
           data-toolbar-tool={tool.type}
           data-toolbar-native-picker="true"
           className={chrome}
-          title={tool.label}
+          title={tool.description ? `${tool.label} — ${tool.description}` : tool.label}
           tabIndex={0}
           onClick={(event) => {
             // The label's whole purpose is to activate the input natively, so

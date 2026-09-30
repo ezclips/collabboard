@@ -199,12 +199,12 @@ describe('FreeformCanvasBoardMenu — frozen action set', () => {
     expect(rowLabels()).toEqual(ALL_ROWS);
   });
 
-  it('exposes all 14 board tools, keyed to the shared FREEFORM_BOARD_TOOL_ITEMS table', () => {
+  it('exposes all 13 board tools, keyed to the shared FREEFORM_BOARD_TOOL_ITEMS table', () => {
     // MapCanvas imports the same table, so this export is part of the contract.
-    expect(FREEFORM_BOARD_TOOL_ITEMS).toHaveLength(14);
+    expect(FREEFORM_BOARD_TOOL_ITEMS).toHaveLength(13);
     expect(FREEFORM_BOARD_TOOL_ITEMS.map((i) => i.type)).toEqual([
       'note', 'link', 'todo', 'line', 'graph-line', 'container', 'table',
-      'comment', 'image', 'upload', 'import', 'draw', 'library', 'ai-component',
+      'comment', 'image', 'import', 'draw', 'library', 'ai-component',
     ]);
     renderMenu();
     for (const label of TOOL_LABELS) expect(rowLabels()).toContain(label);

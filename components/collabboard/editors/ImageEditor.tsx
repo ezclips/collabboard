@@ -361,7 +361,7 @@ export default function ImageEditor({
                             >
                                 <div className="flex items-center justify-center gap-2">
                                     <Search className="w-4 h-4" />
-                                    Search Pexels
+                                    Free images
                                 </div>
                             </button>
                             <button
@@ -373,7 +373,7 @@ export default function ImageEditor({
                             >
                                 <div className="flex items-center justify-center gap-2">
                                     <Upload className="w-4 h-4" />
-                                    Upload File
+                                    Upload your own
                                 </div>
                             </button>
                         </div>}

@@ -33,6 +33,7 @@ function mount(props: Partial<React.ComponentProps<typeof ImageEditor>> = {}) {
         onSave={onSave}
         onImportAsDocument={props.onImportAsDocument}
         initialData={props.initialData}
+        defaultTab={props.defaultTab}
       />,
     );
   });
@@ -179,5 +180,22 @@ describe('ImageEditor import-as-document choice', () => {
     act(() => { rerender({ ...PDF_IMPORT, importData: { ...PDF_IMPORT.importData } }, true); });
 
     expect(choiceRadio('link')!.checked).toBe(true);
+  });
+});
+
+// PATCH-217. The two image-window tab labels.
+describe('ImageEditor tab labels', () => {
+  it('reads "Free images" and "Upload your own"', () => {
+    mount({});
+    expect(buttonByText('Free images')).toBeTruthy();
+    expect(buttonByText('Upload your own')).toBeTruthy();
+    expect(buttonByText('Search Pexels')).toBeUndefined();
+    expect(buttonByText('Upload File')).toBeUndefined();
+  });
+
+  it('defaultTab="upload" still opens the upload tab', () => {
+    // The upload panel is the only one showing "Upload from your device".
+    mount({ defaultTab: 'upload' as never });
+    expect(document.body.textContent).toContain('Upload from your device');
   });
 });

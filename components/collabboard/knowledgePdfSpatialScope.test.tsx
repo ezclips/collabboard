@@ -128,7 +128,7 @@ describe('1, 4. the rendered toolbar offers Add PDF on Freeform', () => {
     for (const layoutCase of SUPPORTED) {
       const media = toolbarFor(layoutCase).find((group) => group.id === 'media')!;
       const tool = media.tools.find((t) => t.type === 'knowledge-pdf')!;
-      expect(tool.label).toBe('PDF');
+      expect(tool.label).toBe('Document');
       expect(tool.disabled).toBeFalsy();
       // Pinned + label-driven: the sidebar keeps it on the toolbar even when
       // Media collapses, and the browser opens the dialog natively.
@@ -153,9 +153,10 @@ describe('2-3, 5. every unsupported layout renders no Add PDF at all', () => {
       const tools = toolbarFor(layoutCase).flatMap((group) => group.tools);
       expect(tools.some((tool) => tool.label === 'Add PDF')).toBe(false);
       // The rest of Media is untouched -- this scopes PDFs, it does not thin
-      // the toolbar.
+      // the toolbar. PATCH-217 removed the separate `upload` tool (its window
+      // is the Image button's "Upload your own" tab).
       expect(tools.some((tool) => tool.type === 'image')).toBe(true);
-      expect(tools.some((tool) => tool.type === 'upload')).toBe(true);
+      expect(tools.some((tool) => tool.type === 'upload')).toBe(false);
       expect(tools.some((tool) => tool.type === 'import')).toBe(true);
     }
   });

@@ -563,7 +563,7 @@ describe('canvas toolbar PDF entry point', () => {
     const pdfTools = (media?.tools ?? []).filter((tool) => tool.type.startsWith('knowledge-pdf'));
 
     expect(pdfTools).toHaveLength(1);
-    expect(pdfTools[0].label).toBe('PDF');
+    expect(pdfTools[0].label).toBe('Document');
     // Pinned and label-driven: the More menu dispatches after it has closed, by
     // which point the browser will not open a file dialog for us.
     expect(pdfTools[0].pinned).toBe(true);
