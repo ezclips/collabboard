@@ -39,6 +39,9 @@ interface NotePostContextMenuProps {
     // sense (Drawing, Card/Clipart, AI Component) -- undefined for plain
     // Note/Text, so the menu item below never shows there.
     onToggleFullView?: () => void;
+    // PATCH-223. Only Drawings pass this (their zoom moved off the canvas
+    // click and into this menu). Undefined for every other type.
+    onViewFullSize?: () => void;
     disabled?: boolean;
 }
 
@@ -61,6 +64,7 @@ export function NotePostContextMenu({
     groupIntoColumnTargets,
     onAddToLibrary,
     onToggleFullView,
+    onViewFullSize,
     disabled = false,
 }: NotePostContextMenuProps) {
     if (disabled) {
@@ -150,6 +154,11 @@ export function NotePostContextMenu({
                                 ? (padlet.type === 'drawing' ? 'Show draw frame' : 'Show frame')
                                 : (padlet.type === 'drawing' ? 'Hide draw frame' : 'Hide frame')}
                         </ContextMenuItem>
+                        {onViewFullSize && (
+                            <ContextMenuItem onClick={() => onViewFullSize()}>
+                                View full size
+                            </ContextMenuItem>
+                        )}
                     </>
                 )}
 

@@ -769,8 +769,10 @@ describe('30-35. one frame, square corners, real resize handle', () => {
     // placement falls into the shared fallback wrapper whose click was only
     // stopped for text/ai-component. Without this the resize grip -- which is
     // selection-gated -- can never be reached.
+    // PATCH-223: Drawing joins the same list (its zoom click no longer stops
+    // propagation itself).
     expect(FREEFORM).toContain(
-      "onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file') ? (e) => e.stopPropagation() : undefined}",
+      "onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file' || padlet.type === 'drawing') ? (e) => e.stopPropagation() : undefined}",
     );
   });
 

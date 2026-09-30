@@ -4393,7 +4393,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               {padlet.type === 'drawing' && (
                 <PostCardContent
                   padlet={padlet}
-                  onView={() => setViewDrawingPadlet(padlet)}
+                  // PATCH-223 Addendum 2: a viewer has no right-click menu
+                  // (NotePostContextMenu is disabled without edit rights), so
+                  // they keep click-to-view. An editor gets "View full size"
+                  // in the menu and the click selects like every other post.
+                  onView={canUseFreeformEditButton ? undefined : () => setViewDrawingPadlet(padlet)}
                   isDragging={isDragging && draggingPadletId === padlet.id}
                 />
               )}
@@ -5262,6 +5266,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
             groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
             onToggleFullView={padlet.type === 'drawing' || padlet.type === 'ai-component' ? () => toggleFullView(padlet.id) : undefined}
+            onViewFullSize={padlet.type === 'drawing' ? () => setViewDrawingPadlet(padlet) : undefined}
           >
             {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table, scoped to
                 Note/AI-component/PDF ONLY -- this wrapper is also the
@@ -5273,10 +5278,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 PDF-C1: a file placement lands in this same fallback and had
                 the same defect -- its blue selection ring appeared on press
                 and vanished again on release, so the resize grip could never
-                be reached. */}
+                be reached.
+                PATCH-223: Drawing joins this guard now that its own click
+                no longer stops propagation (its zoom moved to its menu). */}
             <div
               className="relative"
-              onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file') ? (e) => e.stopPropagation() : undefined}
+              onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file' || padlet.type === 'drawing') ? (e) => e.stopPropagation() : undefined}
             >
               {content}
               {resizeHandle}

@@ -906,21 +906,28 @@ export default function PostCardContent({
         // PATCH-220. "Hide frame" drops the faint dashed box around the drawing;
         // everything else (click-to-view, drag guard, draggable=false) stays.
         const drawingFullView = (padlet.metadata as any)?.fullView === true;
+        // PATCH-223. The zoom affordance exists ONLY where a viewer is wired
+        // (column children, which have no right-click menu of their own). On
+        // the board no `onView` is passed, so the drawing hovers and clicks
+        // like every other post -- its viewer lives in the right-click menu.
+        const canViewFullSize = typeof onView === "function";
 
         return (
             <div
-                className={`flex flex-col items-center justify-center gap-2 text-red-600 overflow-hidden min-h-[100px] cursor-zoom-in group/drawing-preview ${
+                className={`flex flex-col items-center justify-center gap-2 text-red-600 overflow-hidden min-h-[100px] ${
+                    canViewFullSize ? "cursor-zoom-in " : ""
+                }group/drawing-preview ${
                     drawingFullView ? "" : "bg-red-50/50 border border-red-100 border-dashed"
                 }`}
-                onClick={(e) => {
+                onClick={canViewFullSize ? (e) => {
                     e.stopPropagation();
                     // A drag that ends back over this element still fires a
                     // native click afterward -- without this guard, moving
                     // the card would also pop the viewer open right after.
                     if (isDragging) return;
                     onView?.();
-                }}
-                title="Click to view full size"
+                } : undefined}
+                title={canViewFullSize ? "Click to view full size" : undefined}
             >
                 {previewUrl ? (
                     // draggable=false -- <img> is natively drag-and-drop-able

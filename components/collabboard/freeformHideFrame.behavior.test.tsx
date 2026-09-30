@@ -80,17 +80,17 @@ describe('PATCH-220 the drawing wrapper drops its box under "Hide frame"', () =>
 
   it('with fullView there is no dashed / red-boxed wrapper', () => {
     const c = mountInto(<PostCardContent padlet={drawing(true)} />);
-    const wrapper = c.querySelector('.cursor-zoom-in')!;
+    const wrapper = c.querySelector('[class*="drawing-preview"]') as HTMLElement;
     expect(wrapper.className).not.toContain('border-dashed');
     expect(wrapper.className).not.toContain('border-red-100');
     expect(wrapper.className).not.toContain('bg-red-50/50');
-    // Behaviour kept.
-    expect(wrapper.className).toContain('cursor-zoom-in');
+    // PATCH-223: no `onView` (the board case), so the zoom affordance is gone.
+    expect(wrapper.className).not.toContain('cursor-zoom-in');
   });
 
   it('without fullView the wrapper keeps its box', () => {
     const c = mountInto(<PostCardContent padlet={drawing(false)} />);
-    const wrapper = c.querySelector('.cursor-zoom-in')!;
+    const wrapper = c.querySelector('[class*="drawing-preview"]') as HTMLElement;
     expect(wrapper.className).toContain('border-dashed');
     expect(wrapper.className).toContain('border-red-100');
   });
@@ -182,6 +182,42 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
     await openMenu(c);
     expect(document.body.textContent).toContain('Hide frame');
     expect(document.body.textContent).not.toContain('Hide draw frame');
+  });
+
+  it('PATCH-223: a Drawing menu shows "Hide draw frame" then "View full size", in order', async () => {
+    const onViewFullSize = vi.fn();
+    const c = mountInto(
+      <NotePostContextMenu
+        padlet={padlet({ type: 'drawing' })}
+        onSelect={vi.fn()}
+        onToggleFullView={vi.fn()}
+        onViewFullSize={onViewFullSize}
+      >
+        <div data-testid="trigger">post</div>
+      </NotePostContextMenu>,
+    );
+    const menu = await openMenu(c);
+    const labels = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent?.trim());
+    const frameAt = labels.indexOf('Hide draw frame');
+    const viewAt = labels.indexOf('View full size');
+    expect(frameAt).toBeGreaterThan(-1);
+    expect(viewAt, 'View full size sits directly below Hide draw frame').toBe(frameAt + 1);
+
+    await act(async () => {
+      menuItem(menu, 'View full size').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onViewFullSize).toHaveBeenCalledTimes(1);
+  });
+
+  it('PATCH-223: without onViewFullSize there is no "View full size" item', async () => {
+    const c = mountInto(
+      <NotePostContextMenu padlet={padlet({ type: 'drawing' })} onSelect={vi.fn()} onToggleFullView={vi.fn()}>
+        <div data-testid="trigger">post</div>
+      </NotePostContextMenu>,
+    );
+    const menu = await openMenu(c);
+    expect(menu.textContent).toContain('Hide draw frame');
+    expect(menu.textContent).not.toContain('View full size');
   });
 
   it('clicking still dispatches post.toggleFullView', async () => {
