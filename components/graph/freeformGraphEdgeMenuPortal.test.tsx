@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 //
-// PATCH 9S -- the Graph edge context menu caches its position as fixed screen
-// pixels at open-time (event.clientX/clientY) and never recomputes it. Once
-// camera-anchored zoom can move the world underneath a fixed screen point, a
-// stale menu would visually detach from the edge it targets, so it must
-// close on any zoom change. Mounts the real component (createRoot/act,
-// matching the established convention in freeformGraphLabelDrag.test.tsx)
-// and re-renders with a changed zoom prop to simulate a camera zoom.
+// PATCH-226 -- the Graph edge context menu used `position: fixed` but was
+// rendered inside the zoomed/offset board layer, whose transform made it the
+// containing block; a right-click landed the menu far off-screen. It now
+// renders through a portal to document.body, so `fixed` is viewport-relative
+// again, and its position is clamped inside the window.
+//
+// Mounts the real component (createRoot/act, matching freeformGraphEdgeMenu
+// ZoomClose.test.tsx) with the repo mocked the same way.
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -100,13 +101,9 @@ const postA = post('postA', { position_x: 100, position_y: 100, width: 200, heig
 const postB = post('postB', { position_x: 500, position_y: 100, width: 200, height: 150 });
 
 async function mountAndFlush(ui: React.ReactElement) {
-  const { root, container } = mount(ui);
-  // FreeformGraphLayer's edges list starts empty and only populates once the
-  // mocked repo.getEdges() promise resolves (matching the established flush
-  // pattern in freeformGraphLabelDrag.test.tsx) -- without this, the <g>
-  // element for the edge never renders.
+  const mountedPair = mount(ui);
   await act(async () => { await Promise.resolve(); });
-  return { root, container };
+  return mountedPair;
 }
 
 function openEdgeMenu(container: HTMLElement) {
@@ -117,69 +114,81 @@ function openEdgeMenu(container: HTMLElement) {
   });
 }
 
-function isMenuOpen(_container: HTMLElement): boolean {
-  // PATCH-226: the menu is portalled to document.body, so it is no longer a
-  // descendant of the mount container; look at the document instead.
-  return document.body.textContent?.includes('Edge Settings') ?? false;
+/** The inner "Edge Settings" title div, wherever it is in the document. */
+function menuTitleEl(): HTMLElement | null {
+  return Array.from(document.body.querySelectorAll('div')).find((el) => el.textContent === 'Edge Settings') as HTMLElement | null;
+}
+function menuEl(): HTMLElement | null {
+  return menuTitleEl()?.parentElement ?? null;
+}
+function isMenuOpen(): boolean {
+  return !!menuTitleEl();
 }
 
-describe('PATCH 9S: Graph edge context menu closes on zoom change [Phase 25]', () => {
-  it('opens on right-click, and stays open across a re-render with the SAME zoom (control)', async () => {
-    mockEdges = [edge('e1', 'postA', 'postB')];
-    const { root, container } = await mountAndFlush(
-      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />
-    );
-    openEdgeMenu(container);
-    expect(isMenuOpen(container)).toBe(true);
-
-    act(() => { root.render(<FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />); });
-    expect(isMenuOpen(container)).toBe(true);
-  });
-
-  it('closes when the zoom prop changes (toolbar/wheel zoom)', async () => {
-    mockEdges = [edge('e1', 'postA', 'postB')];
-    const { root, container } = await mountAndFlush(
-      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />
-    );
-    openEdgeMenu(container);
-    expect(isMenuOpen(container)).toBe(true);
-
-    act(() => { root.render(<FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1.1} />); });
-    expect(isMenuOpen(container)).toBe(false);
-  });
-
-  it('closes on a zoom-out change too, not just zoom-in', async () => {
-    mockEdges = [edge('e1', 'postA', 'postB')];
-    const { root, container } = await mountAndFlush(
-      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />
-    );
-    openEdgeMenu(container);
-    expect(isMenuOpen(container)).toBe(true);
-
-    act(() => { root.render(<FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={0.6} />); });
-    expect(isMenuOpen(container)).toBe(false);
-  });
-
-  it('does not open spuriously on mount just because the effect exists', async () => {
+describe('PATCH-226 the Edge Settings menu renders at page level (portal)', () => {
+  it('inside a transformed wrapper, the menu reaches document.body without passing through it', async () => {
     mockEdges = [edge('e1', 'postA', 'postB')];
     const { container } = await mountAndFlush(
-      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />
+      <div data-testid="zoomed-layer" style={{ transform: 'scale(0.8)' }}>
+        <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={0.8} />
+      </div>,
     );
-    expect(isMenuOpen(container)).toBe(false);
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.style.transform).toBe('scale(0.8)');
+
+    openEdgeMenu(container);
+    const menu = menuEl();
+    expect(menu, 'Edge Settings menu rendered').not.toBeNull();
+
+    // It reaches document.body...
+    expect(document.body.contains(menu!)).toBe(true);
+    // ...without passing through the transformed wrapper.
+    expect(wrapper.contains(menu!)).toBe(false);
+    let node: Node | null = menu!;
+    let sawWrapper = false;
+    while (node) {
+      if (node === wrapper) sawWrapper = true;
+      node = node.parentNode;
+    }
+    expect(sawWrapper, 'the menu must not sit under the transformed layer').toBe(false);
   });
 
-  it('zoom-driven close does not call deleteEdge or upsertEdge -- purely local UI state [world-model freeze]', async () => {
+  it('a mousedown inside the menu keeps it open; an outside mousedown closes it', async () => {
     mockEdges = [edge('e1', 'postA', 'postB')];
-    const { root, container } = await mountAndFlush(
-      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />
+    const { container } = await mountAndFlush(
+      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />,
+    );
+    openEdgeMenu(container);
+    expect(isMenuOpen()).toBe(true);
+
+    const swatch = document.body.querySelector('button.h-5.w-5') as HTMLElement | null;
+    expect(swatch, 'a colour swatch is present').not.toBeNull();
+    act(() => {
+      swatch!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    });
+    expect(isMenuOpen(), 'an inside mousedown must not close the menu').toBe(true);
+
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    });
+    expect(isMenuOpen(), 'an outside mousedown closes the menu').toBe(false);
+  });
+
+  it('clicking a colour swatch still calls the repo upsert', async () => {
+    mockEdges = [edge('e1', 'postA', 'postB')];
+    const { container } = await mountAndFlush(
+      <FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1} />,
     );
     openEdgeMenu(container);
     upsertEdgeMock.mockClear();
-    deleteEdgeMock.mockClear();
 
-    act(() => { root.render(<FreeformGraphLayer boardId="board1" posts={[postA, postB]} zoom={1.2} />); });
+    const swatch = document.body.querySelector('button.h-5.w-5') as HTMLElement;
+    await act(async () => {
+      swatch.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
 
-    expect(upsertEdgeMock).not.toHaveBeenCalled();
-    expect(deleteEdgeMock).not.toHaveBeenCalled();
+    expect(upsertEdgeMock).toHaveBeenCalledTimes(1);
+    expect(upsertEdgeMock.mock.calls[0][0]).toMatchObject({ id: 'e1' });
   });
 });

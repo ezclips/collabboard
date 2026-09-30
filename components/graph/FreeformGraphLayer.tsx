@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { selectValidEdges } from '@/lib/graph/graphSelectors';
 import { routeEdge, type Rect, type GraphSide, type RouteEdgeResult } from '@/lib/graph/edgeRouting';
+import { clampMenuPosition } from '@/lib/graph/menuPosition';
 import type { FreeformGraphEdge } from '@/types/graphTypes';
 import type { Padlet } from '@/types/collabboard';
 import { toast } from 'sonner';
@@ -48,6 +50,14 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
     const [labelDraft, setLabelDraft] = useState('');
     const [draggingLabel, setDraggingLabel] = useState<string | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
+    // PATCH-226: the edge menu is portalled to document.body so its `fixed`
+    // position is viewport-relative again (a transformed board-layer ancestor
+    // was acting as its containing block). Measured after mount so the clamp
+    // knows the real height; 320 is the conservative floor jsdom/hydration sees
+    // before measurement (offsetHeight is 0 there).
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const [menuHeight, setMenuHeight] = useState(320);
+    const MENU_WIDTH = 260;
 
     // PATCH-047 owner-authorized client-identity migration - see createFreeformGraphRepo's doc.
     const repo = useMemo(() => createFreeformGraphRepo(boardId), [boardId]);
@@ -167,6 +177,14 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
         const onDown = () => setEdgeMenu(null);
         window.addEventListener('mousedown', onDown);
         return () => window.removeEventListener('mousedown', onDown);
+    }, [edgeMenu]);
+
+    // PATCH-226: measure the menu once it mounts so the clamp uses its real
+    // height (offsetHeight is 0 under jsdom, where the 320 floor is kept).
+    useEffect(() => {
+        if (!edgeMenu) return;
+        const measured = menuRef.current?.offsetHeight;
+        if (measured && measured > 0) setMenuHeight(measured);
     }, [edgeMenu]);
 
     const validEdges = selectValidEdges(posts, edges);
@@ -479,10 +497,17 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                     );
                 })}
 
-            {edgeMenu && menuEdge && (
+            {edgeMenu && menuEdge && (() => {
+                // PATCH-226: the menu lives at page level (portal below) so its
+                // `fixed` position is relative to the viewport; clamp it inside.
+                const clamped = typeof window !== 'undefined'
+                    ? clampMenuPosition(edgeMenu.x, edgeMenu.y, MENU_WIDTH, menuHeight, window.innerWidth, window.innerHeight)
+                    : { left: edgeMenu.x, top: edgeMenu.y };
+                const menu = (
                 <div
+                    ref={menuRef}
                     className="fixed z-[7000] w-[260px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl"
-                    style={{ left: edgeMenu.x, top: edgeMenu.y, pointerEvents: 'auto' }}
+                    style={{ left: clamped.left, top: clamped.top, pointerEvents: 'auto' }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
@@ -618,7 +643,9 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                         Delete Line
                     </button>
                 </div>
-            )}
+                );
+                return typeof document !== 'undefined' ? createPortal(menu, document.body) : menu;
+            })()}
         </>
     );
 }
