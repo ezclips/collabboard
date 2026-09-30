@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any, @next/next/no-img-element */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { Padlet } from "@/types/collabboard";
 import LinkMediaEmbed, { getLinkEmbedKind, sharpFavicon } from "./LinkMediaEmbed";
@@ -17,6 +17,7 @@ import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
 import { isDocumentPost, resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+import { stripDrawingPreviewBackground } from "@/lib/domain/canvas/drawingPreview";
 import DocumentCardContent from "./DocumentCardContent";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 import { IMAGE_CROP_TO_GRID_HEIGHT_PX } from "@/components/collabboard/canvas/engine/utils";
@@ -301,6 +302,19 @@ export default function PostCardContent({
     // reservation instead of PATCH 9E's guessed 6px constant.
     const nestedContainerScrollRef = useRef<HTMLDivElement>(null);
     const nestedContainerScrollbarLane = useScrollbarLane(nestedContainerScrollRef, type === "container");
+
+    // PATCH-222: a frameless drawing's stored preview has Excalidraw's full-size
+    // white background rect baked in (see drawingPreview.ts); strip it at render
+    // time so existing drawings need no re-save. Unconditional (rules of hooks)
+    // and inert for every non-drawing / framed post.
+    const drawingPreviewUrl = padlet.metadata?.previewUrl;
+    const drawingPreviewSrc = useMemo(
+        () =>
+            (padlet.metadata as any)?.fullView === true && drawingPreviewUrl
+                ? stripDrawingPreviewBackground(drawingPreviewUrl)
+                : drawingPreviewUrl,
+        [drawingPreviewUrl, padlet.metadata],
+    );
 
     // Placed after the unconditional hooks above, like every other early return.
     if (knowledgePdfPlacement) {
@@ -919,7 +933,7 @@ export default function PostCardContent({
                     // to move. Only reachable by clicking the drawing's own
                     // preview area; the surrounding card margin was never
                     // affected since it isn't an <img>.
-                    <img src={previewUrl} alt="Drawing preview" className="w-full h-auto object-contain max-h-[300px]" draggable={false} />
+                    <img src={drawingPreviewSrc} alt="Drawing preview" className="w-full h-auto object-contain max-h-[300px]" draggable={false} />
                 ) : (
                     <>
                         <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mt-4">

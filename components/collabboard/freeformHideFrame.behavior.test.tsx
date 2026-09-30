@@ -8,6 +8,7 @@ import { NotePostContextMenu } from './menus/NotePostContextMenu';
 import { ImagePostContextMenu } from './context-menus/ImagePostContextMenu';
 import RowColumnContainerCard from './RowColumnContainerCard';
 import { actionRegistry } from '@/lib/collabboard/ActionRegistry';
+import { stripDrawingPreviewBackground } from '@/lib/domain/canvas/drawingPreview';
 import type { Padlet } from '@/types/collabboard';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,6 +45,16 @@ function mountInto(ui: React.ReactElement) {
 function padlet(overrides: Partial<Padlet>): Padlet {
   return { id: 'p-1', board_id: 'b', title: 'T', content: '', type: 'text', metadata: {}, ...overrides } as Padlet;
 }
+
+const SVG_PREFIX = 'data:image/svg+xml;base64,';
+const svgUrl = (svg: string) => SVG_PREFIX + btoa(svg);
+const decodeSvg = (url: string) => atob(url.slice(SVG_PREFIX.length));
+/** Excalidraw's exportBackground:true shape -- a full-size white rect first. */
+const WHITE_RECT_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">' +
+  '<metadata></metadata><defs><style class="style-fonts">.a{}</style></defs>' +
+  '<rect fill="#ffffff" height="150" width="200" x="0" y="0"></rect>' +
+  '<g><path d="M0 0 L10 10"></path></g></svg>';
 
 /** Opens a Radix context menu by right-clicking its trigger. */
 async function openMenu(container: HTMLElement): Promise<HTMLElement> {
@@ -82,6 +93,24 @@ describe('PATCH-220 the drawing wrapper drops its box under "Hide frame"', () =>
     const wrapper = c.querySelector('.cursor-zoom-in')!;
     expect(wrapper.className).toContain('border-dashed');
     expect(wrapper.className).toContain('border-red-100');
+  });
+
+  it("PATCH-222: a fullView drawing's <img> uses the background-stripped preview", () => {
+    const original = svgUrl(WHITE_RECT_SVG);
+    const c = mountInto(
+      <PostCardContent padlet={padlet({ id: 'd-1', type: 'drawing', metadata: { previewUrl: original, fullView: true } as never })} />,
+    );
+    const src = c.querySelector('img')!.getAttribute('src')!;
+    expect(src).toBe(stripDrawingPreviewBackground(original));
+    expect(decodeSvg(src)).not.toContain('<rect');
+  });
+
+  it("PATCH-222: a framed drawing's <img> uses the stored preview unchanged", () => {
+    const original = svgUrl(WHITE_RECT_SVG);
+    const c = mountInto(
+      <PostCardContent padlet={padlet({ id: 'd-2', type: 'drawing', metadata: { previewUrl: original } as never })} />,
+    );
+    expect(c.querySelector('img')!.getAttribute('src')).toBe(original);
   });
 });
 
@@ -123,6 +152,36 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
     );
     await openMenu(withView);
     expect(document.body.textContent).toContain('Show frame');
+  });
+
+  it('PATCH-222: a Drawing menu says "Hide draw frame" / "Show draw frame"', async () => {
+    const without = mountInto(
+      <NotePostContextMenu padlet={padlet({ type: 'drawing' })} onSelect={vi.fn()} onToggleFullView={vi.fn()}>
+        <div data-testid="trigger">post</div>
+      </NotePostContextMenu>,
+    );
+    await openMenu(without);
+    expect(document.body.textContent).toContain('Hide draw frame');
+    act(() => root?.unmount()); host?.remove();
+
+    const withView = mountInto(
+      <NotePostContextMenu padlet={padlet({ type: 'drawing', metadata: { fullView: true } as never })} onSelect={vi.fn()} onToggleFullView={vi.fn()}>
+        <div data-testid="trigger">post</div>
+      </NotePostContextMenu>,
+    );
+    await openMenu(withView);
+    expect(document.body.textContent).toContain('Show draw frame');
+  });
+
+  it('PATCH-222: an ai-component still says "Hide frame" (not "draw frame")', async () => {
+    const c = mountInto(
+      <NotePostContextMenu padlet={padlet({ type: 'ai-component' })} onSelect={vi.fn()} onToggleFullView={vi.fn()}>
+        <div data-testid="trigger">post</div>
+      </NotePostContextMenu>,
+    );
+    await openMenu(c);
+    expect(document.body.textContent).toContain('Hide frame');
+    expect(document.body.textContent).not.toContain('Hide draw frame');
   });
 
   it('clicking still dispatches post.toggleFullView', async () => {

@@ -322,7 +322,10 @@ export default function DrawingEditor({
                     appState: {
                         ...appState,
                         exportWithDarkMode: false,
-                        exportBackground: true,
+                        // PATCH-222: a transparent export, so a frameless
+                        // drawing shows the board through it instead of a
+                        // full-size white box.
+                        exportBackground: false,
                         viewBackgroundColor: "#ffffff",
                     },
                     files: files,
