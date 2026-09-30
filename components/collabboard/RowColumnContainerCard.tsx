@@ -572,6 +572,15 @@ export default function RowColumnContainerCard({
                   const isCardChild = child.type === 'card' && !!(child.metadata as any)?.svgUrl;
                   const isDocThumbnail = (child.metadata as any)?.importKind === 'document';
                   const isImport = (child.metadata as any)?.source === 'import';
+                  /**
+                   * PATCH-220. "Hide frame" on a child the Freeform board already
+                   * frames conditionally renders it WITHOUT the card chrome --
+                   * no border, no shadow, no white background, no orange strip,
+                   * no inner box. Spacing and handlers are unchanged.
+                   */
+                  const childFullView = (child.metadata as any)?.fullView === true;
+                  const childFrameless = childFullView
+                    && (child.type === 'drawing' || child.type === 'ai-component' || child.type === 'image' || child.type === 'card');
                   const childDetachedComments: any[] = Array.isArray((child.metadata as any)?.detachedComments)
                     ? (child.metadata as any).detachedComments
                     : [];
@@ -580,9 +589,14 @@ export default function RowColumnContainerCard({
                   return (
                     <div
                       key={child.id}
-                      className={`relative border border-gray-200 overflow-hidden shadow-sm ${isImport ? 'pointer-events-auto' : ''}`}
+                      data-child-card={child.id}
+                      className={
+                        childFrameless
+                          ? `relative overflow-hidden ${isImport ? 'pointer-events-auto' : ''}`
+                          : `relative border border-gray-200 overflow-hidden shadow-sm ${isImport ? 'pointer-events-auto' : ''}`
+                      }
                       style={{
-                        backgroundColor: childCardChrome.backgroundColor,
+                        backgroundColor: childFrameless ? 'transparent' : childCardChrome.backgroundColor,
                         ...(isHorizontal
                           ? {
                               flex: `0 0 ${Math.max(Number(child.width) || 180, 1)}px`,
@@ -591,11 +605,11 @@ export default function RowColumnContainerCard({
                           : {}),
                       }}
                     >
-                      {childCardChrome.topStripColor && (
+                      {!childFrameless && childCardChrome.topStripColor && (
                         <div className="h-1.5 w-full" style={{ backgroundColor: childCardChrome.topStripColor }} />
                       )}
-                      {renderChildTitle(child)}
-                      <div className={isImageChild && !isDocThumbnail ? "p-0" : isCardChild ? "p-0" : isDocThumbnail ? "p-1 bg-gray-50" : "p-1.5"}>
+                      {!childFrameless && renderChildTitle(child)}
+                      <div className={childFrameless ? 'p-0' : isImageChild && !isDocThumbnail ? "p-0" : isCardChild ? "p-0" : isDocThumbnail ? "p-1 bg-gray-50" : "p-1.5"}>
                         {isCardChild ? (
                           // Same CardPreview component standalone Clipart cards and
                           // the editor use, instead of the older, separate
@@ -608,6 +622,7 @@ export default function RowColumnContainerCard({
                           <CardPreview
                             padlet={child}
                             isSelected={false}
+                            hideFrame={childFrameless}
                             reactions={Array.isArray((child.metadata as any)?.reactions) ? (child.metadata as any).reactions : []}
                           />
                         ) : (

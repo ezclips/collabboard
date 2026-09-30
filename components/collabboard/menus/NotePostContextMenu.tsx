@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
-import { Check, Lock, LockOpen } from 'lucide-react';
+import { Lock, LockOpen } from 'lucide-react';
 import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
 interface NotePostContextMenuProps {
@@ -146,12 +146,7 @@ export function NotePostContextMenu({
                     <>
                         <ContextMenuSeparator />
                         <ContextMenuItem onClick={() => handleAction('post.toggleFullView')}>
-                            Full View
-                            {isFullView && (
-                                <span className="ml-auto pl-4 flex items-center">
-                                    <Check className="text-gray-500" />
-                                </span>
-                            )}
+                            {isFullView ? 'Show frame' : 'Hide frame'}
                         </ContextMenuItem>
                     </>
                 )}

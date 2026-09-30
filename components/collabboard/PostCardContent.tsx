@@ -889,10 +889,15 @@ export default function PostCardContent({
     // --- DRAWING TYPE ---
     if (type === "drawing") {
         const previewUrl = padlet.metadata?.previewUrl;
+        // PATCH-220. "Hide frame" drops the faint dashed box around the drawing;
+        // everything else (click-to-view, drag guard, draggable=false) stays.
+        const drawingFullView = (padlet.metadata as any)?.fullView === true;
 
         return (
             <div
-                className="flex flex-col items-center justify-center gap-2 text-red-600 bg-red-50/50 border border-red-100 border-dashed overflow-hidden min-h-[100px] cursor-zoom-in group/drawing-preview"
+                className={`flex flex-col items-center justify-center gap-2 text-red-600 overflow-hidden min-h-[100px] cursor-zoom-in group/drawing-preview ${
+                    drawingFullView ? "" : "bg-red-50/50 border border-red-100 border-dashed"
+                }`}
                 onClick={(e) => {
                     e.stopPropagation();
                     // A drag that ends back over this element still fires a

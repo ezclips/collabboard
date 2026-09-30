@@ -145,12 +145,7 @@ export function ImagePostContextMenu({
                     )}
                 </ContextMenuItem>
                 <ContextMenuItem onClick={() => handleAction('post.toggleFullView')}>
-                    Full View
-                    {isFullView && (
-                        <span className="ml-auto pl-4 flex items-center">
-                            <Check className="text-gray-500" />
-                        </span>
-                    )}
+                    {isFullView ? 'Show frame' : 'Hide frame'}
                 </ContextMenuItem>
 
                 <ContextMenuSeparator />
