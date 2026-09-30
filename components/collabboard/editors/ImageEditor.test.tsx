@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The component imports a CSS file; vitest's PostCSS cannot process it here, and
 // the test is about behaviour, not styling.
 vi.mock('react-image-crop/dist/ReactCrop.css', () => ({}));
+
+// PATCH-218. The upload is stored through this one helper; the editor's job is
+// to call it and use its URL, so it is mocked here.
+const storage = vi.hoisted(() => ({ storeUploadedImage: vi.fn() }));
+vi.mock('@/lib/infra/collabboard/imageEditStorage', () => ({
+  storeUploadedImage: storage.storeUploadedImage,
+}));
 
 import ImageEditor from './ImageEditor';
 
@@ -34,6 +41,7 @@ function mount(props: Partial<React.ComponentProps<typeof ImageEditor>> = {}) {
         onImportAsDocument={props.onImportAsDocument}
         initialData={props.initialData}
         defaultTab={props.defaultTab}
+        boardId={props.boardId}
       />,
     );
   });
@@ -197,5 +205,114 @@ describe('ImageEditor tab labels', () => {
     // The upload panel is the only one showing "Upload from your device".
     mount({ defaultTab: 'upload' as never });
     expect(document.body.textContent).toContain('Upload from your device');
+  });
+});
+
+// PATCH-218. An uploaded image is stored as a file, and drag and drop works.
+describe('PATCH-218 upload tab', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const dropZone = () =>
+    document.querySelector('[data-image-dropzone="true"]') as HTMLElement | null;
+  const chooseInput = () =>
+    document.getElementById('file-upload') as HTMLInputElement | null;
+
+  function giveFile(input: HTMLInputElement, file: File) {
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    act(() => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+  }
+
+  const png = () => new File([new Uint8Array([1, 2, 3])], 'photo.png', { type: 'image/png' });
+
+  beforeEach(() => {
+    storage.storeUploadedImage.mockReset();
+    // jsdom implements createObjectURL/revokeObjectURL.
+    (URL as unknown as { createObjectURL: () => string }).createObjectURL = vi.fn(() => 'blob:preview');
+    (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = vi.fn();
+  });
+
+  it('choosing a PNG previews it with a blob: URL, not a data URL', () => {
+    mount({ boardId: BOARD, defaultTab: 'upload' as never });
+    giveFile(chooseInput()!, png());
+    const img = document.querySelector('img[alt="Import preview"], .border-dashed img') as HTMLImageElement | null;
+    // The preview lives in the tab panel; assert the src that got set.
+    expect(document.body.innerHTML).toContain('blob:preview');
+    expect(document.body.innerHTML).not.toContain('data:image');
+    expect(img === null || !img.src.startsWith('data:')).toBe(true);
+  });
+
+  it('"Add Image" stores the file and saves the storage URL, never data:', async () => {
+    storage.storeUploadedImage.mockResolvedValue({ ok: true, url: 'https://cdn.example/u/photo.png' });
+    const onSave = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onSave });
+    giveFile(chooseInput()!, png());
+
+    await act(async () => { buttonByText('Add Image')!.click(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(storage.storeUploadedImage).toHaveBeenCalledTimes(1);
+    const call = storage.storeUploadedImage.mock.calls[0][0] as { boardId: string; file: File };
+    expect(call.boardId).toBe(BOARD);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as { imageUrl: string; source: string };
+    expect(saved.imageUrl).toBe('https://cdn.example/u/photo.png');
+    expect(saved.imageUrl.startsWith('data:')).toBe(false);
+    expect(saved.source).toBe('upload');
+  });
+
+  it('an upload failure shows the message, does NOT save, and keeps the dialog open', async () => {
+    storage.storeUploadedImage.mockResolvedValue({ ok: false, message: 'Could not upload the image. Please try again.' });
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onSave, onClose });
+    giveFile(chooseInput()!, png());
+
+    await act(async () => { buttonByText('Add Image')!.click(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Could not upload the image. Please try again.');
+    expect(document.querySelector('[data-ui="image-editor-modal"]')).not.toBeNull();
+  });
+
+  it('a missing boardId shows a message and does not save', async () => {
+    const onSave = vi.fn();
+    mount({ defaultTab: 'upload' as never, onSave });
+    giveFile(chooseInput()!, png());
+
+    await act(async () => { buttonByText('Add Image')!.click(); });
+
+    expect(storage.storeUploadedImage).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Could not upload the image.');
+  });
+
+  it('dropping an image file previews it like choosing it', () => {
+    mount({ boardId: BOARD, defaultTab: 'upload' as never });
+    const zone = dropZone()!;
+    const file = png();
+    const event = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { files: [file] } });
+    act(() => { zone.dispatchEvent(event); });
+    expect(document.body.innerHTML).toContain('blob:preview');
+  });
+
+  it('a non-image dropped file shows the inline message and no preview', () => {
+    mount({ boardId: BOARD, defaultTab: 'upload' as never });
+    const zone = dropZone()!;
+    const file = new File(['x'], 'notes.txt', { type: 'text/plain' });
+    const event = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { files: [file] } });
+    act(() => { zone.dispatchEvent(event); });
+    expect(document.body.textContent).toContain('Please choose an image file.');
+    expect(document.body.innerHTML).not.toContain('blob:preview');
+  });
+
+  it('an oversize file shows the tooLarge message and no preview', () => {
+    mount({ boardId: BOARD, defaultTab: 'upload' as never });
+    const big = new File([new Uint8Array(21 * 1024 * 1024)], 'big.png', { type: 'image/png' });
+    giveFile(chooseInput()!, big);
+    expect(document.body.textContent).toContain('The limit for images is 20.0 MB.');
+    expect(document.body.innerHTML).not.toContain('blob:preview');
   });
 });

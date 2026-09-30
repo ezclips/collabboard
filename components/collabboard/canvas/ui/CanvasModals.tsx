@@ -486,6 +486,7 @@ export default function CanvasModals({
           }}
           onSave={saveImage}
           onImportAsDocument={onImportAsDocument}
+          boardId={canvasId}
           defaultTab={imageEditorTab as "search" | "upload" | undefined}
           editMode={!!padletToEdit && padletToEdit.id !== 'new'}
           initialData={padletToEdit?.type === 'image' ? {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { storeEditedImage } from './imageEditStorage';
+import { storeEditedImage, storeUploadedImage } from './imageEditStorage';
 
 /**
  * PATCH-182 -- moving an edited Image picture out of the post.
@@ -161,5 +161,81 @@ describe('nothing to move', () => {
     }
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.upload).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * PATCH-218 -- a NEWLY uploaded file goes to Storage, and a failure is an
+ * actionable error, never an inline data URL.
+ */
+describe('storeUploadedImage', () => {
+  const file = (type: string, name: string, size = 4) =>
+    new File([new Uint8Array(size).fill(1)], name, { type });
+
+  it('uploads to a random image-uploads/{board} path and returns the public URL', async () => {
+    mocks.getPublicUrl.mockReturnValue('https://cdn.example/storage/v1/object/public/padlet-files/x.jpg');
+
+    const result = await storeUploadedImage({ boardId: base.boardId, file: file('image/jpeg', 'holiday.jpg') });
+
+    expect(result).toEqual({
+      ok: true,
+      url: 'https://cdn.example/storage/v1/object/public/padlet-files/x.jpg',
+    });
+    const [bucket, objectPath, uploaded] = mocks.upload.mock.calls[0] as [string, string, File];
+    expect(bucket).toBe('padlet-files');
+    expect(objectPath).toMatch(new RegExp(`^image-uploads/${base.boardId}/[0-9a-f-]{36}\\.jpg$`));
+    expect(uploaded).toBeInstanceOf(File);
+    expect(mocks.getPublicUrl).toHaveBeenCalledWith('padlet-files', objectPath);
+  });
+
+  it('never uses the user filename in the path', async () => {
+    await storeUploadedImage({ boardId: base.boardId, file: file('image/png', 'SECRET-NAME.png') });
+    const [, objectPath] = mocks.upload.mock.calls[0] as [string, string];
+    expect(objectPath).not.toContain('SECRET-NAME');
+    expect(objectPath).not.toContain('secret');
+  });
+
+  it('maps each known MIME type to its extension', async () => {
+    const cases: Array<[string, string]> = [
+      ['image/jpeg', 'jpg'],
+      ['image/png', 'png'],
+      ['image/gif', 'gif'],
+      ['image/webp', 'webp'],
+      ['image/svg+xml', 'svg'],
+    ];
+    for (const [mime, ext] of cases) {
+      mocks.upload.mockClear();
+      await storeUploadedImage({ boardId: base.boardId, file: file(mime, `a.${ext}`) });
+      const [, objectPath] = mocks.upload.mock.calls[0] as [string, string];
+      expect(objectPath.endsWith(`.${ext}`), `${mime} -> .${ext}`).toBe(true);
+    }
+  });
+
+  it('refuses a non-image without uploading', async () => {
+    const result = await storeUploadedImage({ boardId: base.boardId, file: file('text/plain', 'notes.txt') });
+    expect(result).toEqual({ ok: false, message: 'Please choose an image file.' });
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it('refuses an oversized image with the tooLarge message and no upload', async () => {
+    const big = file('image/png', 'huge.png', 25 * 1024 * 1024);
+    const result = await storeUploadedImage({ boardId: base.boardId, file: big });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain('25.0 MB');
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it('a gateway failure is { ok: false } with NO data URL anywhere', async () => {
+    mocks.upload.mockResolvedValue({ ok: false, error: { message: 'storage down' } });
+    const result = await storeUploadedImage({ boardId: base.boardId, file: file('image/png', 'a.png') });
+    expect(result).toEqual({ ok: false, message: 'Could not upload the image. Please try again.' });
+    expect(JSON.stringify(result)).not.toContain('data:');
+  });
+
+  it('a thrown upload is { ok: false } with NO data URL anywhere', async () => {
+    mocks.upload.mockRejectedValue(new Error('storage down'));
+    const result = await storeUploadedImage({ boardId: base.boardId, file: file('image/png', 'a.png') });
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('data:');
   });
 });

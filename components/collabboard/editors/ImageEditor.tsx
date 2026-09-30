@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Image as ImageIcon, Loader2, Upload, Check, RotateCw, RotateCcw, FlipHorizontal, Square } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import { isDocumentImportable } from '@/lib/imports/documentImport';
+import { storeUploadedImage } from '@/lib/infra/collabboard/imageEditStorage';
+import { UPLOAD_LIMITS, tooLargeMessage } from '@/lib/domain/storage/uploadLimits';
 import 'react-image-crop/dist/ReactCrop.css';
 
 interface PexelsPhoto {
@@ -64,6 +66,11 @@ interface ImageEditorProps {
     isOpen: boolean;
     onClose: () => void;
     /**
+     * PATCH-218. The board this upload belongs to. Used to store an uploaded
+     * file in `padlet-files` under the board's own folder.
+     */
+    boardId?: string;
+    /**
      * PATCH-216. Present ONLY where a picked document can become a readable
      * Knowledge document. When given, import mode offers the choice between a
      * link card and a readable document.
@@ -96,6 +103,7 @@ interface ImageEditorProps {
 export default function ImageEditor({
     isOpen,
     onClose,
+    boardId,
     onImportAsDocument,
     onSave,
     initialData,
@@ -124,6 +132,26 @@ export default function ImageEditor({
     const [topStrip, setTopStrip] = useState(initialData?.topStrip || null);
     const [activeColorTab, setActiveColorTab] = useState<'background' | 'topstrip'>('background');
     const [manualPhotographer, setManualPhotographer] = useState(initialData?.photographer || '');
+    /**
+     * PATCH-218. The File the current preview came from, if it came from an
+     * uploaded file. It is uploaded to Storage on save; a Pexels or imported
+     * picture has none and keeps the URL it already carries.
+     */
+    const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
+    // The blob: URL of the preview, revoked when it is replaced or unmounted.
+    const objectUrlRef = useRef<string | null>(null);
+
+    const revokeObjectUrl = () => {
+        if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current);
+            objectUrlRef.current = null;
+        }
+    };
+
+    useEffect(() => () => { revokeObjectUrl(); }, []);
 
     // Helper to normalize topStrip values
 
@@ -210,6 +238,36 @@ export default function ImageEditor({
                 topStrip: topStrip || 'transparent',
                 importData: initialData.importData,
             });
+        } else if (uploadedFile) {
+            /**
+             * PATCH-218. An uploaded picture is stored as a FILE, and only its
+             * URL is saved -- never the base64 data URL. A failure keeps the
+             * dialog open with an inline message and does NOT save.
+             */
+            if (!boardId) {
+                setUploadError('Could not upload the image.');
+                return;
+            }
+            setUploadError(null);
+            setUploading(true);
+            try {
+                const stored = await storeUploadedImage({ boardId, file: uploadedFile });
+                if (!stored.ok) {
+                    setUploadError(stored.message);
+                    return;
+                }
+                onSave({
+                    imageUrl: stored.url,
+                    caption,
+                    photographer: manualPhotographer,
+                    photographerUrl: undefined,
+                    source: 'upload',
+                    cardColor,
+                    topStrip: topStrip || 'transparent',
+                });
+            } finally {
+                setUploading(false);
+            }
         } else {
             onSave({
                 imageUrl: previewUrl,
@@ -226,18 +284,40 @@ export default function ImageEditor({
 
 
 
+    /**
+     * PATCH-218. Accept a chosen or dropped file: validate type and size at
+     * once, and preview it with a blob: URL. An invalid file leaves NO preview.
+     */
+    const acceptFile = (file: File) => {
+        const tooBig = file.size > UPLOAD_LIMITS.image;
+        if (!file.type.startsWith('image/')) {
+            setUploadError('Please choose an image file.');
+            return;
+        }
+        if (tooBig) {
+            setUploadError(tooLargeMessage(file.size, UPLOAD_LIMITS.image, 'images'));
+            return;
+        }
+        setUploadError(null);
+        revokeObjectUrl();
+        const url = URL.createObjectURL(file);
+        objectUrlRef.current = url;
+        setPreviewUrl(url);
+        setUploadedFile(file);
+        setSelectedImage(null);
+        setManualPhotographer('Uploaded Image');
+    };
+
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const result = e.target?.result as string;
-                setPreviewUrl(result);
-                setSelectedImage(null);
-                setManualPhotographer('Uploaded Image');
-            };
-            reader.readAsDataURL(file);
-        }
+        if (file) acceptFile(file);
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const file = e.dataTransfer?.files?.[0];
+        if (file) acceptFile(file);
     };
 
     if (!isOpen) return null;
@@ -465,7 +545,19 @@ export default function ImageEditor({
                                 </div>
                             ) : (
                                 /* Upload Tab */
-                                <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 p-8">
+                                <div
+                                    data-image-dropzone="true"
+                                    onDragOver={(e) => {
+                                        // Required so the browser allows a drop.
+                                        e.preventDefault();
+                                        setIsDragging(true);
+                                    }}
+                                    onDragLeave={() => setIsDragging(false)}
+                                    onDrop={handleDrop}
+                                    className={`h-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 transition-colors ${
+                                        isDragging ? 'border-purple-500 bg-purple-50' : 'border-gray-300 bg-gray-50'
+                                    }`}
+                                >
                                     <div className="bg-white p-4 rounded-full shadow-sm mb-4">
                                         <Upload className="w-8 h-8 text-purple-600" />
                                     </div>
@@ -486,6 +578,9 @@ export default function ImageEditor({
                                     >
                                         Choose File
                                     </label>
+                                    {uploadError ? (
+                                        <p role="alert" className="mt-3 text-xs text-red-600">{uploadError}</p>
+                                    ) : null}
                                 </div>
                             )}
                         </div>
@@ -538,12 +633,14 @@ export default function ImageEditor({
                         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg font-medium">Cancel</button>
                         <button
                             onClick={handleSave}
-                            disabled={!previewUrl}
-                            className={`px-6 py-2 text-white rounded-lg font-bold shadow-sm ${previewUrl ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                            disabled={!previewUrl || uploading}
+                            className={`px-6 py-2 text-white rounded-lg font-bold shadow-sm ${previewUrl && !uploading ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-300 cursor-not-allowed'}`}
                         >
-                            {canImportAsDocument && importChoice === 'document'
-                                ? 'Add as document'
-                                : isImportMode ? 'Add to Canvas' : isEditMode ? 'Save Changes' : 'Add Image'}
+                            {uploading
+                                ? 'Uploading…'
+                                : canImportAsDocument && importChoice === 'document'
+                                    ? 'Add as document'
+                                    : isImportMode ? 'Add to Canvas' : isEditMode ? 'Save Changes' : 'Add Image'}
                         </button>
                     </div>
                 </div>

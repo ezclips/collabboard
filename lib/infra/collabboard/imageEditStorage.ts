@@ -1,5 +1,6 @@
 import { decodeImageDataUrl } from '../../domain/canvas/imageDataUrl';
 import { parseKnowledgePdfAreaProvenance } from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
+import { UPLOAD_LIMITS, tooLargeMessage } from '../../domain/storage/uploadLimits';
 import { createStorageGateway } from '../supabase/storage';
 
 /**
@@ -79,5 +80,68 @@ export async function storeEditedImage(input: {
   } catch (reason) {
     console.warn('[image-edit] kept inline:', reason);
     return { url: dataUrl, stored: 'inline' };
+  }
+}
+
+export type StoredUploadedImage =
+  | { readonly ok: true; readonly url: string }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * PATCH-218 -- a NEWLY uploaded image, stored as a file instead of a `data:` URL.
+ *
+ * The Image window's upload tab used to read the chosen file with
+ * `readAsDataURL` and save that base64 string as the post's `file_url`, its
+ * `metadata.imageUrl` and the Image Library row's URLs. Every board load then
+ * downloaded every uploaded picture, in full, inside the JSON. Drawn and cropped
+ * pictures were already moved out (`storeEditedImage`, PATCH-182); this closes
+ * the same hole for new uploads.
+ *
+ * UNLIKE `storeEditedImage`, THERE IS NO INLINE FALLBACK. For a brand-new upload
+ * the file is still in hand, so a failure the user can retry is strictly better
+ * than silently recreating the bloat this function exists to remove. It never
+ * throws: every failure is `{ ok: false, message }`.
+ */
+const UPLOAD_EXTENSION_BY_MIME: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+};
+
+function uploadExtensionFor(mimeType: string): string {
+  const known = UPLOAD_EXTENSION_BY_MIME[mimeType.toLowerCase()];
+  if (known) return known;
+  const tail = mimeType.slice('image/'.length).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return tail.length > 0 ? tail : 'bin';
+}
+
+export async function storeUploadedImage(input: {
+  boardId: string;
+  file: File;
+}): Promise<StoredUploadedImage> {
+  const { boardId, file } = input;
+
+  if (!file.type.startsWith('image/')) {
+    return { ok: false, message: 'Please choose an image file.' };
+  }
+  if (file.size > UPLOAD_LIMITS.image) {
+    return {
+      ok: false,
+      message: tooLargeMessage(file.size, UPLOAD_LIMITS.image, 'images'),
+    };
+  }
+
+  try {
+    const gateway = createStorageGateway();
+    // A RANDOM name: the user's filename is never used in the path.
+    const path = `image-uploads/${boardId}/${crypto.randomUUID()}.${uploadExtensionFor(file.type)}`;
+    const result = await gateway.upload(PADLET_FILES_BUCKET, path, file);
+    if (!result.ok) throw new Error(result.error.message);
+    return { ok: true, url: gateway.getPublicUrl(PADLET_FILES_BUCKET, path) };
+  } catch (reason) {
+    console.warn('[image-upload] failed:', reason);
+    return { ok: false, message: 'Could not upload the image. Please try again.' };
   }
 }
