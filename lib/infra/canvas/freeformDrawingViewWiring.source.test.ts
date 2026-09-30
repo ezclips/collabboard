@@ -75,6 +75,7 @@ describe('PATCH-227 the connect dot is wired on the board', () => {
       expect(dotBlock, `missing show-condition: ${condition}`).toContain(condition);
     }
     expect(dotBlock).toContain('<GraphConnectHandle');
+    expect(dotBlock).toContain('post={padlet}');
     expect(dotBlock).toContain('onEdgesChanged={props.onGraphEdgesChanged}');
   });
 

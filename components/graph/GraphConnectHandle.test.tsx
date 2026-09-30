@@ -1,17 +1,33 @@
 // @vitest-environment jsdom
 //
-// PATCH-227 -- the connect dot's drag interaction: dashed portalled preview,
-// target outline, and exactly-one-write-on-a-valid-drop semantics.
+// PATCH-227/230/231 -- the connect knobs' drag interaction: dashed portalled
+// preview, target outline, one-write-on-a-valid-drop, four sides, and PATCH-231's
+// placement on the same box the lines attach to (measureAnchorRect).
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FreeformGraphEdge } from '@/types/graphTypes';
+import type { Padlet } from '@/types/collabboard';
 import { toast } from 'sonner';
 
 import GraphConnectHandle from './GraphConnectHandle';
+import { measureAnchorRect } from '@/lib/graph/anchorRect';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+(globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+  cb(0);
+  return 0;
+};
+(globalThis as any).cancelAnimationFrame = () => {};
+if (!('ResizeObserver' in globalThis)) {
+  (globalThis as any).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
 
 const upsertEdgeMock = vi.fn(async (edge: Partial<FreeformGraphEdge>) => edge as FreeformGraphEdge);
 let mockEdges: FreeformGraphEdge[] = [];
@@ -23,18 +39,28 @@ vi.mock('@/lib/graph/graphRepo', () => ({
   }),
 }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+vi.mock('@/lib/graph/anchorRect', () => ({
+  measureAnchorRect: vi.fn(() => ({ left: 0, top: 0, width: 100, height: 60, usedVisualAnchor: false })),
+}));
 
 const toastMock = vi.mocked(toast);
+const measureMock = vi.mocked(measureAnchorRect);
+
+const postA = {
+  id: 'postA',
+  board_id: 'board1',
+  title: 'A',
+  content: '',
+  type: 'note',
+  position_x: 0,
+  position_y: 0,
+  width: 100,
+  height: 60,
+  created_at: '',
+  updated_at: '',
+} as unknown as Padlet;
 
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
-function mount(ui: React.ReactElement) {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  act(() => { root.render(ui); });
-  mounted.push({ root, container });
-  return container;
-}
 afterEach(() => {
   for (const m of mounted) {
     act(() => { m.root.unmount(); });
@@ -61,19 +87,32 @@ function postEl(id: string): HTMLElement {
   return el;
 }
 
+// The component is mounted inside a post wrapper, as on the board: its knobs are
+// placed relative to `[data-padlet-id]`.
 function render(props: Partial<React.ComponentProps<typeof GraphConnectHandle>> = {}) {
-  return mount(
-    <GraphConnectHandle
-      boardId="board1"
-      postId="postA"
-      isTopLevel={(id) => id === 'postB'}
-      {...props}
-    />,
-  );
+  const wrapper = document.createElement('div');
+  wrapper.setAttribute('data-padlet-id', 'postA');
+  const container = document.createElement('div');
+  wrapper.appendChild(container);
+  document.body.appendChild(wrapper);
+  const root = createRoot(container);
+  act(() => {
+    root.render(
+      <GraphConnectHandle
+        boardId="board1"
+        postId="postA"
+        post={postA}
+        isTopLevel={(id) => id === 'postB'}
+        {...props}
+      />,
+    );
+  });
+  mounted.push({ root, container });
+  return container;
 }
 
 function dotOf(container: HTMLElement): HTMLElement {
-  // PATCH-230: four dots now; the original single-dot tests target the right one.
+  // PATCH-230/231: four knobs; the original single-dot tests target the right one.
   return container.querySelector('[data-graph-connect-side="right"]') as HTMLElement;
 }
 
@@ -184,7 +223,6 @@ describe('PATCH-227 GraphConnectHandle', () => {
 
 describe('PATCH-230 connect dots on all four sides', () => {
   it('renders a dot on each of the four sides', () => {
-    // MUTATION: rendering only the right dot makes this fail.
     const container = render();
     const dots = Array.from(container.querySelectorAll('[data-graph-connect-handle="true"]'));
     expect(dots).toHaveLength(4);
@@ -234,5 +272,73 @@ describe('PATCH-230 connect dots on all four sides', () => {
     const line = document.querySelector('[data-graph-connect-preview="true"] line')!;
     expect(line.getAttribute('x1')).toBe('107');
     expect(line.getAttribute('y1')).toBe('207');
+  });
+});
+
+describe('PATCH-231 knobs sit on the measured anchor box', () => {
+  it('places the knob container at measureAnchorRect\'s box, divided by the world scale', () => {
+    // MUTATION: using the wrapper box (ignoring measureAnchorRect) makes this fail.
+    measureMock.mockReturnValueOnce({ left: 100, top: 200, width: 80, height: 40, usedVisualAnchor: true });
+
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-padlet-id', 'postA');
+    wrapper.getBoundingClientRect = () => ({
+      left: 90, top: 190, width: 160, height: 120,
+      right: 250, bottom: 310, x: 90, y: 190, toJSON: () => ({}),
+    } as DOMRect);
+    Object.defineProperty(wrapper, 'offsetWidth', { value: 200, configurable: true });
+    const container = document.createElement('div');
+    wrapper.appendChild(container);
+    document.body.appendChild(wrapper);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<GraphConnectHandle boardId="board1" postId="postA" post={postA} isTopLevel={() => true} />);
+    });
+    mounted.push({ root, container });
+
+    const box = container.querySelector('[data-graph-connect-knobs="true"]') as HTMLElement;
+    expect(box).not.toBeNull();
+    // scale = 160 / 200 = 0.8
+    expect(box.style.left).toBe('12.5px');
+    expect(box.style.top).toBe('12.5px');
+    expect(box.style.width).toBe('100px');
+    expect(box.style.height).toBe('50px');
+  });
+
+  it('renders nothing until the first measurement', () => {
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    let pending: FrameRequestCallback | null = null;
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => { pending = cb; return 0; };
+    try {
+      const container = render();
+      expect(container.querySelector('[data-graph-connect-knobs="true"]')).toBeNull();
+      expect(container.querySelectorAll('[data-graph-connect-handle="true"]')).toHaveLength(0);
+
+      act(() => { pending?.(0); });
+      expect(container.querySelector('[data-graph-connect-knobs="true"]')).not.toBeNull();
+      expect(container.querySelectorAll('[data-graph-connect-handle="true"]')).toHaveLength(4);
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+    }
+  });
+
+  it('draws four small filled half-knobs with the right sizes', () => {
+    const container = render();
+    const knobs = Array.from(container.querySelectorAll('[data-graph-connect-knob="true"]')) as HTMLElement[];
+    expect(knobs).toHaveLength(4);
+    const bySide = (side: string) => knobs.find((k) => k.getAttribute('data-graph-connect-knob-side') === side)!;
+    const sizes: Record<string, [string, string]> = {
+      top: ['12px', '6px'],
+      bottom: ['12px', '6px'],
+      left: ['6px', '12px'],
+      right: ['6px', '12px'],
+    };
+    for (const side of ['top', 'right', 'bottom', 'left']) {
+      const k = bySide(side);
+      expect(['rgb(99, 102, 241)', '#6366f1']).toContain(k.style.backgroundColor);
+      expect(k.style.width).toBe(sizes[side][0]);
+      expect(k.style.height).toBe(sizes[side][1]);
+      expect(k.className).not.toContain('border');
+    }
   });
 });

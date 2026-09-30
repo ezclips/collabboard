@@ -1574,6 +1574,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           <GraphConnectHandle
             boardId={String(canvasId)}
             postId={String(padlet.id)}
+            post={padlet}
             isTopLevel={(id) => !!padlets.find((p) => p.id === id && !(p.metadata as any)?.parentId)}
             onEdgesChanged={props.onGraphEdgesChanged}
           />
