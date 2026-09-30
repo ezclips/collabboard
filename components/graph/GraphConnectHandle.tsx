@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
@@ -35,13 +35,20 @@ type DragState = {
   targetRect: TargetRect | null;
 };
 
+/** PATCH-230: one dot on the middle of each edge, half outside the post. */
+const CONNECT_SIDES = [
+  { side: 'top', position: 'left-1/2 -top-2.5 -translate-x-1/2' },
+  { side: 'right', position: '-right-2.5 top-1/2 -translate-y-1/2' },
+  { side: 'bottom', position: 'left-1/2 -bottom-2.5 -translate-x-1/2' },
+  { side: 'left', position: '-left-2.5 top-1/2 -translate-y-1/2' },
+] as const;
+
 export default function GraphConnectHandle({
   boardId,
   postId,
   isTopLevel,
   onEdgesChanged,
 }: GraphConnectHandleProps) {
-  const dotRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
   useEffect(() => {
@@ -95,9 +102,8 @@ export default function GraphConnectHandle({
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const el = dotRef.current;
-    if (!el) return;
-    (el as HTMLElement).setPointerCapture?.(event.pointerId);
+    const el = event.currentTarget as HTMLElement;
+    el.setPointerCapture?.(event.pointerId);
     const r = el.getBoundingClientRect();
     setDrag({
       startX: r.left + r.width / 2,
@@ -128,21 +134,24 @@ export default function GraphConnectHandle({
 
   return (
     <>
-      <div
-        ref={dotRef}
-        data-graph-connect-handle="true"
-        data-no-drag="true"
-        role="button"
-        tabIndex={-1}
-        aria-label="Drag to connect to another post"
-        title="Drag to connect"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
-        className="absolute -right-2.5 top-1/2 z-20 h-3.5 w-3.5 -translate-y-1/2 rounded-full border-2 border-indigo-500 bg-white shadow-sm"
-        style={{ cursor: 'crosshair', touchAction: 'none' }}
-      />
+      {CONNECT_SIDES.map(({ side, position }) => (
+        <div
+          key={side}
+          data-graph-connect-handle="true"
+          data-graph-connect-side={side}
+          data-no-drag="true"
+          role="button"
+          tabIndex={-1}
+          aria-label="Drag to connect to another post"
+          title="Drag to connect"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+          className={`absolute ${position} z-20 h-3.5 w-3.5 rounded-full border-2 border-indigo-500 bg-white shadow-sm`}
+          style={{ cursor: 'crosshair', touchAction: 'none' }}
+        />
+      ))}
       {drag && typeof document !== 'undefined' && createPortal(
         <svg
           data-graph-connect-preview="true"

@@ -73,7 +73,12 @@ function render(props: Partial<React.ComponentProps<typeof GraphConnectHandle>> 
 }
 
 function dotOf(container: HTMLElement): HTMLElement {
-  return container.querySelector('[data-graph-connect-handle="true"]') as HTMLElement;
+  // PATCH-230: four dots now; the original single-dot tests target the right one.
+  return container.querySelector('[data-graph-connect-side="right"]') as HTMLElement;
+}
+
+function dotBySide(container: HTMLElement, side: string): HTMLElement {
+  return container.querySelector(`[data-graph-connect-side="${side}"]`) as HTMLElement;
 }
 
 function pointerDown(el: HTMLElement, x: number, y: number) {
@@ -174,5 +179,60 @@ describe('PATCH-227 GraphConnectHandle', () => {
 
     await pointerUp(dot, 100, 100);
     expect(upsertEdgeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH-230 connect dots on all four sides', () => {
+  it('renders a dot on each of the four sides', () => {
+    // MUTATION: rendering only the right dot makes this fail.
+    const container = render();
+    const dots = Array.from(container.querySelectorAll('[data-graph-connect-handle="true"]'));
+    expect(dots).toHaveLength(4);
+    expect(dots.map((d) => d.getAttribute('data-graph-connect-side'))).toEqual([
+      'top',
+      'right',
+      'bottom',
+      'left',
+    ]);
+    for (const dot of dots) {
+      expect(dot.getAttribute('title')).toBe('Drag to connect');
+      expect(dot.getAttribute('aria-label')).toBe('Drag to connect to another post');
+    }
+  });
+
+  it('a drag from the top dot writes one edge to the dropped-on post', async () => {
+    (document as any).elementsFromPoint = vi.fn(() => [postEl('postB')]);
+    const container = render();
+    const dot = dotBySide(container, 'top');
+    pointerDown(dot, 0, 0);
+    pointerMove(dot, 100, 100);
+    await pointerUp(dot, 100, 100);
+    expect(upsertEdgeMock).toHaveBeenCalledTimes(1);
+    expect(upsertEdgeMock.mock.calls[0][0]).toMatchObject({ source_post_id: 'postA', target_post_id: 'postB' });
+  });
+
+  it('a drag from the left dot writes one edge to the dropped-on post', async () => {
+    (document as any).elementsFromPoint = vi.fn(() => [postEl('postB')]);
+    const container = render();
+    const dot = dotBySide(container, 'left');
+    pointerDown(dot, 0, 0);
+    pointerMove(dot, 100, 100);
+    await pointerUp(dot, 100, 100);
+    expect(upsertEdgeMock).toHaveBeenCalledTimes(1);
+    expect(upsertEdgeMock.mock.calls[0][0]).toMatchObject({ source_post_id: 'postA', target_post_id: 'postB' });
+  });
+
+  it("the preview line starts at the pressed dot's centre", () => {
+    const container = render();
+    const dot = dotBySide(container, 'top');
+    dot.getBoundingClientRect = () => ({
+      left: 100, top: 200, width: 14, height: 14,
+      right: 114, bottom: 214, x: 100, y: 200, toJSON: () => ({}),
+    } as DOMRect);
+
+    pointerDown(dot, 500, 500);
+    const line = document.querySelector('[data-graph-connect-preview="true"] line')!;
+    expect(line.getAttribute('x1')).toBe('107');
+    expect(line.getAttribute('y1')).toBe('207');
   });
 });
