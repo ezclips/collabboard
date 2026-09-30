@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 
 import type { FlowDiagramData, MindmapDiagramData } from '@/lib/ai/contracts';
@@ -40,17 +40,28 @@ function DiagramViewport({ children }: { children: React.ReactNode }) {
 
 function CodeDiagramRenderer({ data }: { data: CodeDiagramData }) {
   const [phase, setPhase] = useState<RenderPhase>({ phase: 'loading' });
-  const lastCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Skip Mermaid re-render when code hasn't changed (guards against parent re-renders)
-    if (data.code === lastCodeRef.current) return;
-    lastCodeRef.current = data.code;
-
     let cancelled = false;
+    // PATCH-232: draw on EVERY attempt. StrictMode (dev) runs effects twice and
+    // discards the first result, so the old "same code" early return left the
+    // second attempt skipped and the phase stuck on loading forever. A code or
+    // subtype change also resets to loading, so an old diagram is never shown
+    // under a new title.
+    setPhase({ phase: 'loading' });
+
+    // Safety net: never spin forever if the engine never settles.
+    const timeout = setTimeout(() => {
+      if (cancelled) return;
+      cancelled = true;
+      trackAIRenderFallback({ renderer: 'code_diagram', subtype: data.subtype, reason: 'timeout' });
+      setPhase({ phase: 'failed' });
+    }, 15000);
 
     renderDiagramCode(data.code).then((result) => {
       if (cancelled) return;
+      cancelled = true;
+      clearTimeout(timeout);
 
       if (result.ok) {
         setPhase({ phase: 'done', svg: result.svg });
@@ -66,6 +77,7 @@ function CodeDiagramRenderer({ data }: { data: CodeDiagramData }) {
 
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [data.code, data.subtype]);
 

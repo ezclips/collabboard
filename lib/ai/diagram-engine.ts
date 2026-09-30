@@ -23,6 +23,13 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
         startOnLoad: false,
         // 'strict' sanitizes HTML labels — safe for AI-generated code.
         securityLevel: 'strict',
+        // PATCH-232 Addendum 2: emit SVG <text>/<tspan> rather than
+        // <foreignObject> HTML. The DOMPurify svg profile (which strips
+        // foreignObject) then keeps every label instead of leaving blank boxes.
+        htmlLabels: false,
+        flowchart: {
+          htmlLabels: false,
+        },
         theme: 'base',
         fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
         themeVariables: {
