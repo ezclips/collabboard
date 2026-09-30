@@ -363,7 +363,7 @@ describe('PATCH 9S.2: FreeformGraphLayer forwards worldOriginRef, measuredRects 
   it('FreeformPadletCards forwards worldOriginRef into FreeformGraphLayer', () => {
     const padletCardsSrc = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
     expect(padletCardsSrc).toContain(
-      '<FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} worldOriginRef={worldOriginRef} zoom={canvasZoom} />'
+      '<FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} worldOriginRef={worldOriginRef} zoom={canvasZoom} canEdit={canUseFreeformEditButton} />'
     );
   });
 

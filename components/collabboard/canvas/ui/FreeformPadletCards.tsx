@@ -5511,7 +5511,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       fixed layer above every post, so a line's Edge Settings panel can send
       it behind a specific post or bring it back in front. */}
                 {isFreeformGraphMode && canvasId && (
-      <FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} worldOriginRef={worldOriginRef} zoom={canvasZoom} />
+      <FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} worldOriginRef={worldOriginRef} zoom={canvasZoom} canEdit={canUseFreeformEditButton} />
                 )}
                 </div>
       {/* PATCH SECTION-H2 Phase 3/4: the selected heading's formatting bar is

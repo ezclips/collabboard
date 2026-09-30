@@ -5,6 +5,8 @@ import { selectValidEdges } from '@/lib/graph/graphSelectors';
 import { routeEdge, type Rect, type GraphSide, type RouteEdgeResult } from '@/lib/graph/edgeRouting';
 import { clampMenuPosition } from '@/lib/graph/menuPosition';
 import { measureAnchorRect } from '@/lib/graph/anchorRect';
+import { findConnectTargetId } from '@/lib/graph/connectTarget';
+import { planReattach, type EdgeEnd } from '@/lib/graph/reattachEdge';
 import type { FreeformGraphEdge } from '@/types/graphTypes';
 import type { Padlet } from '@/types/collabboard';
 import { toast } from 'sonner';
@@ -23,6 +25,9 @@ interface FreeformGraphLayerProps {
     // measuredRects falls back to the pre-9S.2 containerRect-based formula.
     worldOriginRef?: React.RefObject<HTMLDivElement | null>;
     zoom?: number;
+    // PATCH-228: whether this viewer may select, delete or re-attach lines.
+    // Default true so existing tests/harnesses keep their behaviour.
+    canEdit?: boolean;
 }
 
 const LINE_COLORS = ['#9ca3af', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -45,10 +50,25 @@ interface EdgeMenuState {
     y: number;
 }
 
+/** PATCH-228: an in-progress end re-attach drag. */
+interface EndDragState {
+    edgeId: string;
+    end: EdgeEnd;
+    // The post at the OTHER end -- never a drop target.
+    excludedId: string;
+    // Screen position of the OTHER end, where the preview line starts.
+    fromX: number;
+    fromY: number;
+    x: number;
+    y: number;
+    targetId: string | null;
+    targetRect: { left: number; top: number; width: number; height: number } | null;
+}
+
 /** Size of the SVG arrowhead polygon (in px). */
 const ARROW_SIZE = 8;
 
-export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, containerRef, worldOriginRef, zoom = 1 }: FreeformGraphLayerProps) {
+export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, containerRef, worldOriginRef, zoom = 1, canEdit = true }: FreeformGraphLayerProps) {
     const [edges, setEdges] = useState<FreeformGraphEdge[]>([]);
     const [measuredRects, setMeasuredRects] = useState<Record<string, Rect>>({});
     // PATCH-227: post ids whose rect came from their visual anchor (a frameless
@@ -57,6 +77,10 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
     const [edgeMenu, setEdgeMenu] = useState<EdgeMenuState | null>(null);
     const [labelDraft, setLabelDraft] = useState('');
     const [draggingLabel, setDraggingLabel] = useState<string | null>(null);
+    // PATCH-228: a line selected by a left-click; shows the halo + end handles.
+    const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+    // PATCH-228: an in-progress end re-attach drag (portal preview below).
+    const [endDrag, setEndDrag] = useState<EndDragState | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
     // PATCH-226: the edge menu is portalled to document.body so its `fixed`
     // position is viewport-relative again (a transformed board-layer ancestor
@@ -364,6 +388,159 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
         }
     };
 
+    // -------------------------------------------------------------------
+    // PATCH-228: select a line, delete it, drag an end to re-attach it.
+    // -------------------------------------------------------------------
+    const isTopLevelPost = useCallback(
+        (id: string) => !!posts.find((p) => p.id === id && !(p.metadata as any)?.parentId),
+        [posts],
+    );
+
+    const connectTargetAt = (x: number, y: number, excludedId: string) => {
+        const id = findConnectTargetId(document.elementsFromPoint(x, y), excludedId, isTopLevelPost);
+        if (!id) return { id: null, rect: null };
+        const el = document.querySelector(`[data-padlet-id="${id}"]`) as HTMLElement | null;
+        const r = el?.getBoundingClientRect();
+        return { id, rect: r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null };
+    };
+
+    const startEndDrag = (event: React.PointerEvent, edge: FreeformGraphEdge, end: EdgeEnd) => {
+        event.preventDefault();
+        event.stopPropagation();
+        (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+        const route = renderEdgesRef.current.find((r) => r.edge.id === edge.id)?.route;
+        // The preview line starts at the OTHER end, in screen pixels.
+        const otherWorld = end === 'source'
+            ? { x: route?.ex ?? 0, y: route?.ey ?? 0 }
+            : { x: route?.sx ?? 0, y: route?.sy ?? 0 };
+        const svgRect = svgRef.current?.getBoundingClientRect();
+        setEndDrag({
+            edgeId: edge.id,
+            end,
+            excludedId: end === 'source' ? edge.target_post_id : edge.source_post_id,
+            fromX: (svgRect?.left ?? 0) + otherWorld.x * zoom,
+            fromY: (svgRect?.top ?? 0) + otherWorld.y * zoom,
+            x: event.clientX,
+            y: event.clientY,
+            targetId: null,
+            targetRect: null,
+        });
+    };
+
+    const deleteSelectedEdge = useCallback(async (edgeId: string) => {
+        try {
+            await deleteEdge(edgeId);
+            setSelectedEdgeId(null);
+            toast('Line deleted.');
+        } catch (error) {
+            console.error('Could not delete the line.', error);
+            toast.error('Could not delete the line.');
+        }
+    }, [deleteEdge]);
+
+    // Clear the selection on Escape.
+    useEffect(() => {
+        if (!selectedEdgeId) return;
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setSelectedEdgeId(null);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [selectedEdgeId]);
+
+    // Clear the selection when a mousedown lands outside the selected line.
+    useEffect(() => {
+        if (!selectedEdgeId) return;
+        const onDown = (event: MouseEvent) => {
+            const target = event.target as HTMLElement | null;
+            const holder = target?.closest?.('[data-graph-edge-id]');
+            if (holder?.getAttribute('data-graph-edge-id') === selectedEdgeId) return;
+            setSelectedEdgeId(null);
+        };
+        window.addEventListener('mousedown', onDown);
+        return () => window.removeEventListener('mousedown', onDown);
+    }, [selectedEdgeId]);
+
+    // Clear the selection on a zoom change (same rule as the menu).
+    useEffect(() => {
+        setSelectedEdgeId(null);
+    }, [zoom]);
+
+    // A viewer with no edit rights keeps no selection.
+    useEffect(() => {
+        if (!canEdit) setSelectedEdgeId(null);
+    }, [canEdit]);
+
+    // Delete / Backspace removes the selected line, unless a field has focus.
+    useEffect(() => {
+        if (!canEdit || !selectedEdgeId) return;
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+            const target = event.target as HTMLElement | null;
+            const tag = target?.tagName?.toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) return;
+            // PATCH-228 Addendum 3: capture phase + stop, so the bubble-phase
+            // board shortcut (useCanvasShortcuts' post Delete) never also fires
+            // on this same press. The field guard above returns WITHOUT stopping
+            // those keys, so a focused input keeps its own Delete behaviour.
+            event.preventDefault();
+            event.stopPropagation();
+            void deleteSelectedEdge(selectedEdgeId);
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [canEdit, selectedEdgeId, deleteSelectedEdge]);
+
+    // The end re-attach drag: track the pointer, then write on release.
+    useEffect(() => {
+        if (!endDrag) return;
+        const onMove = (event: MouseEvent) => {
+            const { id, rect } = connectTargetAt(event.clientX, event.clientY, endDrag.excludedId);
+            setEndDrag((prev) =>
+                prev ? { ...prev, x: event.clientX, y: event.clientY, targetId: id, targetRect: rect } : prev,
+            );
+        };
+        const onUp = (event: MouseEvent) => {
+            const { id } = connectTargetAt(event.clientX, event.clientY, endDrag.excludedId);
+            const drag = endDrag;
+            setEndDrag(null);
+            if (!id) return;
+            const current = edges.find((ed) => ed.id === drag.edgeId);
+            if (!current) return;
+            const plan = planReattach(current, drag.end, id, edges);
+            if (plan.kind === 'duplicate') {
+                toast('These posts are already connected.');
+                return;
+            }
+            if (plan.kind !== 'update') return;
+            void (async () => {
+                try {
+                    await updateEdge(current.id, plan.patch);
+                    toast('Line moved.');
+                } catch (error) {
+                    console.error('Could not move the line.', error);
+                }
+            })();
+        };
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setEndDrag(null);
+        };
+        const onCancel = () => setEndDrag(null);
+        // PATCH-228 Addendum 4: capture phase. On the board some element stops
+        // the bubble-phase pointerup between the captured circle and window,
+        // which left the drag (and its preview) stuck open; capture runs first.
+        window.addEventListener('pointermove', onMove, true);
+        window.addEventListener('pointerup', onUp, true);
+        window.addEventListener('pointercancel', onCancel, true);
+        window.addEventListener('keydown', onKey, true);
+        return () => {
+            window.removeEventListener('pointermove', onMove, true);
+            window.removeEventListener('pointerup', onUp, true);
+            window.removeEventListener('pointercancel', onCancel, true);
+            window.removeEventListener('keydown', onKey, true);
+        };
+    }, [endDrag, edges, updateEdge, isTopLevelPost]);
+
     const menuEdge = edgeMenu ? edges.find((e) => e.id === edgeMenu.edgeId) || null : null;
     // The edge's actual on-screen angle, so the Arrow buttons' icons rotate to
     // show the real direction they'll produce instead of a fixed →/← glyph
@@ -399,6 +576,7 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                             style={{ pointerEvents: 'none', zIndex: getEdgeZ(edge) }}
                         >
                         <g
+                            data-graph-edge-id={edge.id}
                             onContextMenu={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
@@ -407,20 +585,39 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                             }}
                             style={{ pointerEvents: 'auto' }}
                         >
-                            {/* Invisible wider hit area for easier right-clicking */}
+                            {/* Invisible wider hit area for easier right-clicking and
+                                selection. PATCH-228: a left-click selects the line
+                                without letting the board pan/marquee or clear first. */}
                             <path
                                 d={pathD}
                                 fill="none"
                                 stroke="transparent"
                                 strokeWidth="12"
-                                style={{ cursor: 'context-menu' }}
+                                style={{ cursor: canEdit ? 'pointer' : 'context-menu' }}
+                                onMouseDown={canEdit ? (event) => {
+                                    event.stopPropagation();
+                                    if (event.button === 0) setSelectedEdgeId(edge.id);
+                                } : undefined}
+                                onPointerDown={canEdit ? (event) => event.stopPropagation() : undefined}
                             />
+                            {/* PATCH-228: the selection halo, drawn under the visible line. */}
+                            {canEdit && selectedEdgeId === edge.id && (
+                                <path
+                                    data-graph-edge-halo="true"
+                                    d={pathD}
+                                    fill="none"
+                                    stroke="#6366f1"
+                                    strokeOpacity={0.25}
+                                    strokeWidth={8}
+                                    pointerEvents="none"
+                                />
+                            )}
                             {/* The visible line */}
                             <path
                                 d={pathD}
                                 fill="none"
                                 stroke={strokeColor}
-                                strokeWidth="2"
+                                strokeWidth={canEdit && selectedEdgeId === edge.id ? 3 : 2}
                                 strokeDasharray={strokeDasharray}
                                 pointerEvents="none"
                             />
@@ -495,10 +692,71 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                                     </foreignObject>
                                 );
                             })()}
+                            {/* PATCH-228: draggable end handles for the selected line. */}
+                            {canEdit && selectedEdgeId === edge.id && (
+                                <>
+                                    <circle
+                                        data-graph-edge-end="source"
+                                        cx={sx}
+                                        cy={sy}
+                                        r={6 / zoom}
+                                        fill="#fff"
+                                        stroke="#6366f1"
+                                        strokeWidth={2 / zoom}
+                                        style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                                        onPointerDown={(event) => startEndDrag(event, edge, 'source')}
+                                        onLostPointerCapture={() => setEndDrag(null)}
+                                    />
+                                    <circle
+                                        data-graph-edge-end="target"
+                                        cx={ex}
+                                        cy={ey}
+                                        r={6 / zoom}
+                                        fill="#fff"
+                                        stroke="#6366f1"
+                                        strokeWidth={2 / zoom}
+                                        style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                                        onPointerDown={(event) => startEndDrag(event, edge, 'target')}
+                                        onLostPointerCapture={() => setEndDrag(null)}
+                                    />
+                                </>
+                            )}
                         </g>
                         </svg>
                     );
                 })}
+
+            {endDrag && typeof document !== 'undefined' && createPortal(
+                <svg
+                    data-graph-edge-reattach-preview="true"
+                    className="pointer-events-none fixed inset-0"
+                    style={{ zIndex: 8000, width: '100vw', height: '100vh' }}
+                >
+                    <line
+                        x1={endDrag.fromX}
+                        y1={endDrag.fromY}
+                        x2={endDrag.x}
+                        y2={endDrag.y}
+                        stroke="#6366f1"
+                        strokeWidth={2}
+                        strokeDasharray="6 4"
+                    />
+                    {endDrag.targetRect && (
+                        <rect
+                            x={endDrag.targetRect.left}
+                            y={endDrag.targetRect.top}
+                            width={endDrag.targetRect.width}
+                            height={endDrag.targetRect.height}
+                            rx={6}
+                            ry={6}
+                            fill="none"
+                            stroke="#6366f1"
+                            strokeWidth={2}
+                        />
+                    )}
+                </svg>,
+                document.body,
+            )}
 
             {edgeMenu && menuEdge && (() => {
                 // PATCH-226: the menu lives at page level (portal below) so its

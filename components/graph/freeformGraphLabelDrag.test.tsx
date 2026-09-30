@@ -386,9 +386,11 @@ describe('PATCH 9O: scope guards -- container-transition and orphan-edge defects
 
   it('no new call to repo.deleteEdge/deleteEdge was wired to post-deletion anywhere in this file -- deleteEdge is still reachable only from the explicit "Delete Line" button', () => {
     const deleteEdgeCalls = src.match(/deleteEdge\(/g) || [];
-    // Exactly the definition (`const deleteEdge = async`) and its one call
-    // site inside the "Delete Line" button's onClick.
-    expect(deleteEdgeCalls.length).toBe(2);
+    // Exactly the `repo.deleteEdge` inside `deleteEdge`'s own body, its one
+    // call site inside the "Delete Line" button's onClick, and (PATCH-228,
+    // authorized) the Delete/Backspace-key handler's call -- still no
+    // post-deletion path ever reaches it.
+    expect(deleteEdgeCalls.length).toBe(3);
   });
 });
 
