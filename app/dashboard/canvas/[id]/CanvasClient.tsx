@@ -8733,7 +8733,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           height: 300,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          metadata: { ...createMetadata },
+          // PATCH-221: a NEW drawing starts with its frame hidden ("Hide
+          // frame" default). Existing drawings and other types are untouched.
+          // (`fullView` is a renderer-read metadata flag, not a declared
+          // `Padlet['metadata']` field -- cast on this one draft, as the
+          // renderers themselves read it.)
+          metadata: { ...createMetadata, fullView: true } as unknown as Padlet['metadata'],
         });
         setIsDrawingEditorOpen(true);
         break;

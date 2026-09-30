@@ -314,6 +314,31 @@ describe('A. authorized identities still persist', () => {
 });
 
 // ---------------------------------------------------------------------------
+// PATCH-221: a new drawing's draft metadata (frame hidden) reaches the insert
+// ---------------------------------------------------------------------------
+
+describe("PATCH-221: saveDrawing persists the draft's metadata verbatim", () => {
+  it('a new drawing draft with metadata.fullView === true inserts that value', async () => {
+    const effects = newEffects();
+    installSupabase(effects);
+    mount(() => authorityFor(OWNER, collaborator(OWNER, null)), effects);
+    act(() => {
+      setDraft!({ id: 'new', type: 'drawing', metadata: { fullView: true } } as unknown as Padlet);
+    });
+
+    await act(async () => {
+      await api!.saveDrawing({ drawingData: '{}', drawingAppState: '{}', drawingFiles: '{}' } as never);
+    });
+
+    const row = effects.inserts.find((r) => (r as { type?: string }).type === 'drawing') as
+      | { metadata?: Record<string, unknown> }
+      | undefined;
+    expect(row, 'the drawing row was inserted').toBeTruthy();
+    expect(row!.metadata?.fullView).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // B. Initial denial
 // ---------------------------------------------------------------------------
 
