@@ -4584,7 +4584,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               {padlet.type !== 'container' && ((padlet.metadata?.reactions?.length ?? 0) > 0 || isPadletSelected(padlet.id)) && (
                 <div className={padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0
                   ? "absolute bottom-1.5 left-3 flex items-center gap-1.5"
-                  : "flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100"}>
+                  : isFullView ? "flex items-center gap-1.5 pt-1.5 mt-1.5" : "flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100"}>
                   <ReactionDisplay
                     reactions={padlet.metadata?.reactions || []}
                     onAddClick={() => {

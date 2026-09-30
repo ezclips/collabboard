@@ -93,7 +93,7 @@ describe('PATCH FULLVIEW-FRAME-R1: AI Component Reactions Row and minHeight floo
 
   it('a zero-reaction row is overlaid ONLY for ai-component -- scoped precisely, not applied to Note/Todo/Table/Link/Drawing', () => {
     expect(genericBlock).toContain(
-      "className={padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0\n                  ? \"absolute bottom-1.5 left-3 flex items-center gap-1.5\"\n                  : \"flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100\"}",
+      "className={padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0\n                  ? \"absolute bottom-1.5 left-3 flex items-center gap-1.5\"\n                  : isFullView ? \"flex items-center gap-1.5 pt-1.5 mt-1.5\" : \"flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100\"}",
     );
   });
 

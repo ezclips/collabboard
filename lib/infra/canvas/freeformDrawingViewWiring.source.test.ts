@@ -43,3 +43,15 @@ describe('PATCH-223 the board wires the drawing click and menu correctly', () =>
     );
   });
 });
+
+describe('PATCH-225 the Reactions Row drops its divider when the post frame is hidden', () => {
+  it('the non-overlay branch is border-free for isFullView and keeps border-t otherwise', () => {
+    // The nested ternary: the framed arm keeps the divider verbatim...
+    expect(cards).toContain(
+      ': isFullView ? "flex items-center gap-1.5 pt-1.5 mt-1.5" : "flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100"}',
+    );
+    // ...and the border-free fullView arm exists (the mutation removes it).
+    expect(cards).toContain('isFullView ? "flex items-center gap-1.5 pt-1.5 mt-1.5"');
+  });
+});
+
