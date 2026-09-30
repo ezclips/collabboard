@@ -21,9 +21,9 @@ function mediaTools(overrides: Record<string, unknown> = {}) {
 }
 
 describe('PATCH-217 the Media group', () => {
-  it('labels its tools, in order, Link, Image, Document, Cloud import', () => {
+  it('labels its tools, in order, Link, Image, AI/Wiki Documents, Cloud import', () => {
     expect(mediaTools().map((tool) => tool.label)).toEqual([
-      'Link', 'Image', 'Document', 'Cloud import',
+      'Link', 'Image', 'AI/Wiki Documents', 'Cloud import',
     ]);
   });
 
@@ -31,9 +31,9 @@ describe('PATCH-217 the Media group', () => {
     expect(mediaTools().some((tool) => tool.type === 'upload')).toBe(false);
   });
 
-  it('keeps Document pinned and label-driven', () => {
+  it('keeps the AI/Wiki Documents tool pinned and label-driven', () => {
     const doc = mediaTools().find((tool) => tool.type === 'knowledge-pdf')!;
-    expect(doc.label).toBe('Document');
+    expect(doc.label).toBe('AI/Wiki Documents');
     expect(doc.pinned).toBe(true);
     expect(doc.activatesInputId).toBeTruthy();
   });
@@ -41,13 +41,11 @@ describe('PATCH-217 the Media group', () => {
   it('gives each renamed tool its description', () => {
     const byType = new Map(mediaTools().map((tool) => [tool.type, tool]));
     expect(byType.get('image')?.description).toBe('Free images or upload your own');
-    expect(byType.get('knowledge-pdf')?.description).toBe(
-      'PDF, Word or text — the wiki and AI can read it',
-    );
+    expect(byType.get('knowledge-pdf')?.description).toBe('PDF, Word, Text');
     expect(byType.get('import')?.description).toBe('Google Drive or OneDrive');
   });
 
-  it('omits Document on a layout that cannot place a PDF directly', () => {
+  it('omits the documents tool on a layout that cannot place a PDF directly', () => {
     const labels = mediaTools({ isDirectPdfLayout: false }).map((tool) => tool.label);
     expect(labels).toEqual(['Link', 'Image', 'Cloud import']);
   });

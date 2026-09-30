@@ -263,9 +263,9 @@ export function buildCanvasToolbarGroups({
         // toolbar button competes with this one.
         ...(isDirectPdfLayout ? [
           {
-            icon: FileUp, label: "Document", color: "text-rose-700", bg: "hover:bg-rose-50",
+            icon: FileUp, label: "AI/Wiki Documents", color: "text-rose-700", bg: "hover:bg-rose-50",
             type: "knowledge-pdf", pinned: true, activatesInputId: KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
-            description: "PDF, Word or text — the wiki and AI can read it",
+            description: "PDF, Word, Text",
           },
         ] : []),
         { icon: CloudDownload, label: "Cloud import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import",

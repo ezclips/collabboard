@@ -48,37 +48,38 @@ function mountSidebar(groups: SidebarToolGroup[]) {
   return container;
 }
 
-describe('PATCH-217 tooltip descriptions', () => {
-  it('a described tool renders label and description in its title', () => {
+describe('PATCH-217b tooltip descriptions', () => {
+  it('a described label-path tool carries an aria-label and NO title (no second tooltip)', () => {
     const groups: SidebarToolGroup[] = [{
       id: 'media',
       label: 'Media',
       priority: 1,
       tools: [{
-        icon: ICON, type: 'knowledge-pdf', label: 'Document', bg: '', color: '',
+        icon: ICON, type: 'knowledge-pdf', label: 'AI/Wiki Documents', bg: '', color: '',
         pinned: true, activatesInputId: 'x-input',
-        description: 'PDF, Word or text — the wiki and AI can read it',
+        description: 'PDF, Word, Text',
       }],
     }];
     const host = mountSidebar(groups);
     const label = host.querySelector('[data-toolbar-tool="knowledge-pdf"]');
     expect(label).not.toBeNull();
-    expect(label!.getAttribute('title')).toBe(
-      'Document — PDF, Word or text — the wiki and AI can read it',
-    );
+    expect(label!.getAttribute('aria-label')).toBe('AI/Wiki Documents — PDF, Word, Text');
+    // The native tooltip is what would show a SECOND tooltip under our own.
+    expect(label!.getAttribute('title')).toBeNull();
   });
 
-  it('a tool without a description keeps its bare label as the title', () => {
+  it('a tool without a description keeps its bare label as the aria-label', () => {
     const groups: SidebarToolGroup[] = [{
       id: 'media', label: 'Media', priority: 1,
       tools: [{
-        icon: ICON, type: 'knowledge-pdf', label: 'Document', bg: '', color: '',
+        icon: ICON, type: 'knowledge-pdf', label: 'AI/Wiki Documents', bg: '', color: '',
         pinned: true, activatesInputId: 'x-input',
       }],
     }];
     const host = mountSidebar(groups);
     const tool = host.querySelector('[data-toolbar-tool="knowledge-pdf"]');
-    expect(tool!.getAttribute('title')).toBe('Document');
+    expect(tool!.getAttribute('aria-label')).toBe('AI/Wiki Documents');
+    expect(tool!.getAttribute('title')).toBeNull();
   });
 });
 

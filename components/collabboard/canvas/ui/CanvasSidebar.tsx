@@ -283,7 +283,10 @@ export default function CanvasSidebar({
           data-toolbar-tool={tool.type}
           data-toolbar-native-picker="true"
           className={chrome}
-          title={tool.description ? `${tool.label} — ${tool.description}` : tool.label}
+          // PATCH-217b. A native `title` here would show a SECOND tooltip under
+          // our own dark hover label. `aria-label` carries the same text for
+          // screen readers without the browser tooltip.
+          aria-label={tool.description ? `${tool.label} — ${tool.description}` : tool.label}
           tabIndex={0}
           onClick={(event) => {
             // The label's whole purpose is to activate the input natively, so
