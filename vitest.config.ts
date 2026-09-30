@@ -26,6 +26,8 @@ export default defineConfig({
       'app/api/imports/**/*.test.ts',
       // PATCH-214: the OAuth scope test for the integrations route.
       'app/api/settings/**/*.test.ts',
+      // PATCH-219: the Pexels proxy route's auth, paging and cache tests.
+      'app/api/pexels/**/*.test.ts',
       // PATCH-192: the dashboard data loader.
       'lib/dashboard/**/*.test.ts',
       'lib/server/**/*.test.ts',

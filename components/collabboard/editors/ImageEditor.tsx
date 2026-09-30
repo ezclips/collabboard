@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Image as ImageIcon, Loader2, Upload, Check, RotateCw, RotateCcw, FlipHorizontal, Square } from 'lucide-react';
+import { X, Search, Image as ImageIcon, Loader2, Upload, Check, RotateCw, RotateCcw, FlipHorizontal, Square, AlertCircle } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import { isDocumentImportable } from '@/lib/imports/documentImport';
 import { storeUploadedImage } from '@/lib/infra/collabboard/imageEditStorage';
@@ -125,6 +125,20 @@ export default function ImageEditor({
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<PexelsPhoto[]>([]);
     const [loading, setLoading] = useState(false);
+    /**
+     * PATCH-219. The current grid's mode and paging: the recommended/curated
+     * feed or a search, the page loaded so far, and whether Pexels has a next
+     * page. `error` is shown inline in place of an empty grid.
+     */
+    const [feedMode, setFeedMode] = useState<'curated' | 'search'>('curated');
+    const [feedQuery, setFeedQuery] = useState('');
+    const [feedPage, setFeedPage] = useState(1);
+    const [hasNextPage, setHasNextPage] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [feedError, setFeedError] = useState<string | null>(null);
+    // Only the LATEST request may write the grid: a slow Recommended response
+    // that lands after a search must not replace it.
+    const feedRequestRef = React.useRef(0);
     const [selectedImage, setSelectedImage] = useState<PexelsPhoto | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string>(initialData?.imageUrl || '');
     const [caption, setCaption] = useState(initialData?.caption || '');
@@ -193,23 +207,87 @@ export default function ImageEditor({
         if (isOpen) setImportChoice('link');
     }, [isOpen, importData?.provider, importData?.itemId]);
 
-    const handleSearch = async (e?: React.FormEvent) => {
-        e?.preventDefault();
-        if (!searchQuery.trim()) return;
-
+    /**
+     * PATCH-219. Fetch one page of the current feed and REPLACE the grid. Bumps
+     * the request counter first, so a later call wins even if an earlier one
+     * resolves afterwards.
+     */
+    const fetchFeedPage = async (mode: 'curated' | 'search', query: string, page: number) => {
+        const requestId = feedRequestRef.current + 1;
+        feedRequestRef.current = requestId;
+        setFeedMode(mode);
+        setFeedQuery(query);
+        setFeedError(null);
         setLoading(true);
         try {
-            const res = await fetch(`/api/pexels?query=${encodeURIComponent(searchQuery)}`);
-            const data = await res.json();
-            if (data.photos) {
-                setSearchResults(data.photos);
+            const url = mode === 'search'
+                ? `/api/pexels?query=${encodeURIComponent(query)}&page=${page}`
+                : `/api/pexels?page=${page}`;
+            const res = await fetch(url);
+            const data = await res.json().catch(() => ({}));
+            if (feedRequestRef.current !== requestId) return;
+            if (!res.ok) {
+                setFeedError(typeof data?.error === 'string' ? data.error : 'Failed to fetch from Pexels');
+                setSearchResults([]);
+                setHasNextPage(false);
+                return;
             }
+            setSearchResults(Array.isArray(data.photos) ? data.photos : []);
+            setFeedPage(page);
+            setHasNextPage(Boolean(data.next_page));
         } catch (error) {
             console.error("Search failed", error);
+            if (feedRequestRef.current === requestId) setFeedError('Failed to fetch from Pexels');
         } finally {
-            setLoading(false);
+            if (feedRequestRef.current === requestId) setLoading(false);
         }
     };
+
+    const handleSearch = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        const query = searchQuery.trim();
+        if (!query) {
+            // An empty submit returns to the Recommended feed.
+            await fetchFeedPage('curated', '', 1);
+            return;
+        }
+        await fetchFeedPage('search', query, 1);
+    };
+
+    const handleLoadMore = async () => {
+        if (loadingMore || !hasNextPage) return;
+        const nextPage = feedPage + 1;
+        setLoadingMore(true);
+        try {
+            const url = feedMode === 'search'
+                ? `/api/pexels?query=${encodeURIComponent(feedQuery)}&page=${nextPage}`
+                : `/api/pexels?page=${nextPage}`;
+            const res = await fetch(url);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setFeedError(typeof data?.error === 'string' ? data.error : 'Failed to fetch from Pexels');
+                return;
+            }
+            // APPEND: a load-more must never discard what the grid already shows.
+            setSearchResults((prev) => [...prev, ...(Array.isArray(data.photos) ? data.photos : [])]);
+            setFeedPage(nextPage);
+            setHasNextPage(Boolean(data.next_page));
+        } catch (error) {
+            console.error("Load more failed", error);
+            setFeedError('Failed to fetch from Pexels');
+        } finally {
+            setLoadingMore(false);
+        }
+    };
+
+    // Load the Recommended feed ONCE when the Free images tab is first shown,
+    // and reset the feed whenever the dialog (re)opens.
+    useEffect(() => {
+        if (!isOpen || isImportMode || isEditMode) return;
+        if (activeTab !== 'search') return;
+        void fetchFeedPage('curated', '', 1);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, activeTab, isImportMode, isEditMode]);
 
     const handleSelectImage = (photo: PexelsPhoto) => {
         setSelectedImage(photo);
@@ -504,9 +582,17 @@ export default function ImageEditor({
 
                                     {/* Results Grid */}
                                     <div className="flex-1 overflow-y-auto">
+                                        <h3 className="mb-2 text-sm font-semibold text-gray-700">
+                                            {feedMode === 'search' ? `Results for "${feedQuery}"` : 'Recommended'}
+                                        </h3>
                                         {loading ? (
                                             <div className="flex items-center justify-center h-full">
                                                 <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+                                            </div>
+                                        ) : feedError ? (
+                                            <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                                                <AlertCircle className="w-8 h-8 mb-3 text-amber-400" />
+                                                <p className="text-sm text-center">{feedError}</p>
                                             </div>
                                         ) : searchResults.length > 0 ? (
                                             <div className="grid grid-cols-3 gap-3">
@@ -541,6 +627,29 @@ export default function ImageEditor({
                                                 <p className="text-sm">Search for free stock photos from Pexels</p>
                                             </div>
                                         )}
+                                        {!loading && hasNextPage && (
+                                            <div className="mt-4 flex justify-center">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleLoadMore}
+                                                    disabled={loadingMore}
+                                                    className="px-4 py-2 text-sm font-medium text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-50 disabled:opacity-50"
+                                                >
+                                                    {loadingMore ? 'Loading…' : 'Load more'}
+                                                </button>
+                                            </div>
+                                        )}
+                                        <p className="mt-4 text-center text-xs text-gray-400">
+                                            Photos provided by{' '}
+                                            <a
+                                                href="https://www.pexels.com"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="underline hover:text-gray-600"
+                                            >
+                                                Pexels
+                                            </a>
+                                        </p>
                                     </div>
                                 </div>
                             ) : (

@@ -316,3 +316,133 @@ describe('PATCH-218 upload tab', () => {
     expect(document.body.innerHTML).not.toContain('blob:preview');
   });
 });
+
+// PATCH-219. The Free images tab: Recommended feed, search, Load more, credit.
+describe('PATCH-219 Free images tab', () => {
+  const photo = (id: number) => ({
+    id,
+    width: 100, height: 100,
+    url: `https://pexels/${id}`, photographer: 'A', photographer_url: '',
+    src: { original: '', large2x: '', large: `https://pexels/${id}/large`, medium: `https://pexels/${id}/m`, small: '', portrait: '', landscape: '', tiny: '' },
+    alt: `photo ${id}`,
+  });
+
+  let calls: string[] = [];
+  let respond: (url: string) => { body: unknown; status?: number; delayMs?: number };
+
+  beforeEach(() => {
+    calls = [];
+    respond = () => ({ body: { photos: [photo(1)], page: 1, next_page: null } });
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      const { body, status = 200, delayMs } = respond(url);
+      if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }));
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function flush() {
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('opening the tab fetches the curated feed once and shows "Recommended"', async () => {
+    mount({});
+    await flush();
+    expect(calls).toEqual(['/api/pexels?page=1']);
+    expect(document.body.textContent).toContain('Recommended');
+  });
+
+  it('a search shows Results for "cars" and requests the search URL', async () => {
+    mount({});
+    await flush();
+    const input = document.querySelector('input[placeholder="Search free photos..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'cars');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { (document.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    await flush();
+    expect(calls.some((u) => u === '/api/pexels?query=cars&page=1')).toBe(true);
+    expect(document.body.textContent).toContain('Results for "cars"');
+  });
+
+  it('"Load more" requests page 2 and appends to the grid', async () => {
+    respond = (url) => url.includes('page=2')
+      ? { body: { photos: [photo(2)], page: 2, next_page: null } }
+      : { body: { photos: [photo(1)], page: 1, next_page: 'next' } };
+    mount({});
+    await flush();
+    expect(buttonByText('Load more')).toBeTruthy();
+
+    await act(async () => { buttonByText('Load more')!.click(); });
+    await flush();
+
+    expect(calls).toContain('/api/pexels?page=2');
+    // Two photo tiles now (id 1 and id 2).
+    const tiles = document.querySelectorAll('.grid > div');
+    expect(tiles.length).toBe(2);
+  });
+
+  it('with no next_page there is no Load more button', async () => {
+    respond = () => ({ body: { photos: [photo(1)], page: 1, next_page: null } });
+    mount({});
+    await flush();
+    expect(buttonByText('Load more')).toBeUndefined();
+  });
+
+  it('the credit link points to pexels.com', async () => {
+    mount({});
+    await flush();
+    const link = document.querySelector('a[href="https://www.pexels.com"]') as HTMLAnchorElement | null;
+    expect(link).not.toBeNull();
+    expect(document.body.textContent).toContain('Photos provided by');
+  });
+
+  it('a slow Recommended response that lands after a search does not replace the results', async () => {
+    // Hold the curated response open, resolve the search first, then release
+    // the curated one -- the exact race the guard exists for.
+    let releaseCurated!: () => void;
+    const curatedGate = new Promise<void>((r) => { releaseCurated = r; });
+    respond = (url) => url.includes('query=cars')
+      ? { body: { photos: [photo(99)], page: 1, next_page: null } }
+      : { body: { photos: [photo(1)], page: 1, next_page: null } };
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      const { body, status = 200 } = respond(url);
+      if (!url.includes('query=cars')) await curatedGate;
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }));
+
+    mount({});
+    // Search before the curated response is released.
+    const input = document.querySelector('input[placeholder="Search free photos..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'cars');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { (document.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    await flush();
+
+    // Now let the stale curated response arrive.
+    releaseCurated();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(document.body.textContent).toContain('Results for "cars"');
+    // The stale curated photo (id 1) never replaced the search photo (id 99).
+    expect(document.querySelector('img[alt="photo 99"]')).not.toBeNull();
+    expect(document.querySelector('img[alt="photo 1"]')).toBeNull();
+  });
+
+  it('a 401 shows the route message inline', async () => {
+    respond = () => ({ body: { error: 'Sign in to search images' }, status: 401 });
+    mount({});
+    await flush();
+    expect(document.body.textContent).toContain('Sign in to search images');
+  });
+});
