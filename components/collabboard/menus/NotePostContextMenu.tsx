@@ -151,8 +151,8 @@ export function NotePostContextMenu({
                         <ContextMenuSeparator />
                         <ContextMenuItem onClick={() => handleAction('post.toggleFullView')}>
                             {isFullView
-                                ? (padlet.type === 'drawing' ? 'Show draw frame' : 'Show frame')
-                                : (padlet.type === 'drawing' ? 'Hide draw frame' : 'Hide frame')}
+                                ? (padlet.type === 'drawing' ? 'Show post frame' : 'Show frame')
+                                : (padlet.type === 'drawing' ? 'Hide post frame' : 'Hide frame')}
                         </ContextMenuItem>
                         {onViewFullSize && (
                             <ContextMenuItem onClick={() => onViewFullSize()}>

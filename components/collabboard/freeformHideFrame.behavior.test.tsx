@@ -154,14 +154,14 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
     expect(document.body.textContent).toContain('Show frame');
   });
 
-  it('PATCH-222: a Drawing menu says "Hide draw frame" / "Show draw frame"', async () => {
+  it('PATCH-222: a Drawing menu says "Hide post frame" / "Show post frame"', async () => {
     const without = mountInto(
       <NotePostContextMenu padlet={padlet({ type: 'drawing' })} onSelect={vi.fn()} onToggleFullView={vi.fn()}>
         <div data-testid="trigger">post</div>
       </NotePostContextMenu>,
     );
     await openMenu(without);
-    expect(document.body.textContent).toContain('Hide draw frame');
+    expect(document.body.textContent).toContain('Hide post frame');
     act(() => root?.unmount()); host?.remove();
 
     const withView = mountInto(
@@ -170,10 +170,10 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
       </NotePostContextMenu>,
     );
     await openMenu(withView);
-    expect(document.body.textContent).toContain('Show draw frame');
+    expect(document.body.textContent).toContain('Show post frame');
   });
 
-  it('PATCH-222: an ai-component still says "Hide frame" (not "draw frame")', async () => {
+  it('PATCH-222: an ai-component still says "Hide frame" (not "post frame")', async () => {
     const c = mountInto(
       <NotePostContextMenu padlet={padlet({ type: 'ai-component' })} onSelect={vi.fn()} onToggleFullView={vi.fn()}>
         <div data-testid="trigger">post</div>
@@ -181,10 +181,10 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
     );
     await openMenu(c);
     expect(document.body.textContent).toContain('Hide frame');
-    expect(document.body.textContent).not.toContain('Hide draw frame');
+    expect(document.body.textContent).not.toContain('Hide post frame');
   });
 
-  it('PATCH-223: a Drawing menu shows "Hide draw frame" then "View full size", in order', async () => {
+  it('PATCH-223: a Drawing menu shows "Hide post frame" then "View full size", in order', async () => {
     const onViewFullSize = vi.fn();
     const c = mountInto(
       <NotePostContextMenu
@@ -198,10 +198,10 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
     );
     const menu = await openMenu(c);
     const labels = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent?.trim());
-    const frameAt = labels.indexOf('Hide draw frame');
+    const frameAt = labels.indexOf('Hide post frame');
     const viewAt = labels.indexOf('View full size');
     expect(frameAt).toBeGreaterThan(-1);
-    expect(viewAt, 'View full size sits directly below Hide draw frame').toBe(frameAt + 1);
+    expect(viewAt, 'View full size sits directly below Hide post frame').toBe(frameAt + 1);
 
     await act(async () => {
       menuItem(menu, 'View full size').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -216,7 +216,7 @@ describe('PATCH-220 the menu says Hide frame / Show frame', () => {
       </NotePostContextMenu>,
     );
     const menu = await openMenu(c);
-    expect(menu.textContent).toContain('Hide draw frame');
+    expect(menu.textContent).toContain('Hide post frame');
     expect(menu.textContent).not.toContain('View full size');
   });
 
