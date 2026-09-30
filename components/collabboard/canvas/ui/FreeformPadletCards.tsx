@@ -52,6 +52,7 @@ import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel'
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import LinkMediaEmbed, { getLinkEmbedKind, sharpFavicon } from '@/components/collabboard/LinkMediaEmbed';
 import FreeformGraphLayer from '@/components/graph/FreeformGraphLayer';
+import GraphConnectHandle from '@/components/graph/GraphConnectHandle';
 import { resolveFreeformPostRenderZIndex } from '@/components/collabboard/canvas/engine/zIndex';
 import { buildYouTubeThumbCandidates, extractYouTubeId } from '@/lib/media/youtubeThumb';
 import { MediaPostTranscriptAffordance } from '@/components/collabboard/MediaPostTranscriptAffordance';
@@ -293,6 +294,10 @@ export interface FreeformPadletCardsProps {
   setSelectedPadletId: (id: string | null) => void;
   setGraphConnectSelection: (sel: { id: string; side: any; nonce: number }) => void;
   graphRefreshToken: number;
+  // PATCH-227: called after the connect dot writes a new edge, so the board can
+  // bump its graph refresh token and the new line appears. Optional so existing
+  // test harnesses that mount without it keep working.
+  onGraphEdgesChanged?: () => void;
 
   // Callbacks
   closeAllToolbars: (except?: Record<string, boolean>) => void;
@@ -559,6 +564,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
     [selectedPadletId, selectedPadletIds]
   );
+
+  // PATCH-227: exactly ONE selected post (the primary selection, or a single
+  // lone group member) is the only one that shows the connect dot.
+  const singleSelectedId = React.useMemo(
+    () =>
+      selectedPadletIds.length === 0
+        ? selectedPadletId
+        : selectedPadletIds.length === 1
+          ? selectedPadletIds[0]
+          : null,
+    [selectedPadletId, selectedPadletIds]
+  );
+  const anyPostDragInProgress = isDragging || !!draggingPadletId;
 
   const {
     canvasZoom,
@@ -1463,6 +1481,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         if ((e.target as HTMLElement).closest('[data-comment-panel="true"]')) {
           return;
         }
+        // PATCH-227: the connect dot is its own pointer island -- pressing it
+        // must never start a post drag.
+        if ((e.target as HTMLElement).closest('[data-graph-connect-handle="true"]')) {
+          return;
+        }
         if (isFreeformGraphMode && isGraphConnectMode) {
           const side = getClickedSide(e);
           setSelectedPadletId(padlet.id);
@@ -1537,6 +1560,24 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           <Sparkles size={11} aria-hidden="true" />
         </div>
       )}
+      {/* PATCH-227: drag the dot onto another post to connect them. Shown only
+          for exactly one selected, top-level, unlocked post, and never while a
+          Graph Line / connect mode or a post drag is active. */}
+      {isFreeformGraphMode &&
+        canUseFreeformEditButton &&
+        !isLineMode &&
+        !isGraphConnectMode &&
+        !anyPostDragInProgress &&
+        !(padlet.metadata as any)?.parentId &&
+        !(padlet.metadata as any)?.isLocked &&
+        singleSelectedId === padlet.id && (
+          <GraphConnectHandle
+            boardId={String(canvasId)}
+            postId={String(padlet.id)}
+            isTopLevel={(id) => !!padlets.find((p) => p.id === id && !(p.metadata as any)?.parentId)}
+            onEdgesChanged={props.onGraphEdgesChanged}
+          />
+        )}
       {/* Comment Badge - positioned on outer container so not clipped */}
       {(() => {
         // Skip badge rendering for comment/image/link/todo/table/card-type padlets (they handle their own badges)
@@ -4582,7 +4623,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   case; every other type (and AI with real reaction badges)
                   keeps this row's original in-flow placement unchanged. */}
               {padlet.type !== 'container' && ((padlet.metadata?.reactions?.length ?? 0) > 0 || isPadletSelected(padlet.id)) && (
-                <div className={padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0
+                <div
+                  data-graph-anchor-exclude="true"
+                  className={padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0
                   ? "absolute bottom-1.5 left-3 flex items-center gap-1.5"
                   : isFullView ? "flex items-center gap-1.5 pt-1.5 mt-1.5" : "flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100"}>
                   <ReactionDisplay

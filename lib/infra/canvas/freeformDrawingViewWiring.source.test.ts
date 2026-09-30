@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
  */
 const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8');
 const cards = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+const canvasClient = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
 describe('PATCH-223 the board wires the drawing click and menu correctly', () => {
   it('the Drawing Card Display wires onView only for a viewer; an editor uses the menu', () => {
@@ -54,4 +55,48 @@ describe('PATCH-225 the Reactions Row drops its divider when the post frame is h
     expect(cards).toContain('isFullView ? "flex items-center gap-1.5 pt-1.5 mt-1.5"');
   });
 });
+
+describe('PATCH-227 the connect dot is wired on the board', () => {
+  const dotStart = cards.indexOf('{/* PATCH-227: drag the dot');
+  const dotEnd = cards.indexOf('{/* Comment Badge', dotStart);
+  const dotBlock = dotStart > -1 && dotEnd > dotStart ? cards.slice(dotStart, dotEnd) : '';
+
+  it('renders the handle only for exactly one selected, top-level, unlocked post in edit mode', () => {
+    expect(dotStart, 'connect-dot block not found').toBeGreaterThan(-1);
+    for (const condition of [
+      'isFreeformGraphMode &&',
+      'canUseFreeformEditButton &&',
+      '!isLineMode &&',
+      '!isGraphConnectMode &&',
+      '!anyPostDragInProgress &&',
+      '!(padlet.metadata as any)?.parentId &&',
+      '!(padlet.metadata as any)?.isLocked &&',
+      'singleSelectedId === padlet.id &&',
+    ]) {
+      expect(dotBlock, `missing show-condition: ${condition}`).toContain(condition);
+    }
+    expect(dotBlock).toContain('<GraphConnectHandle');
+    expect(dotBlock).toContain('onEdgesChanged={props.onGraphEdgesChanged}');
+  });
+
+  it('the post wrapper ignores a mousedown that starts on the handle', () => {
+    // MUTATION: dropping this guard makes the test fail.
+    expect(cards).toContain(`closest('[data-graph-connect-handle="true"]')`);
+  });
+
+  it('the generic Reactions Row carries the exclude marker', () => {
+    const marker = cards.indexOf('data-graph-anchor-exclude="true"');
+    expect(marker).toBeGreaterThan(-1);
+    // The marker sits on the same element as the census-pinned Reactions Row ternary.
+    const rowBlock = cards.slice(marker, marker + 400);
+    expect(rowBlock).toContain("padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0");
+  });
+
+  it('CanvasClient refreshes the graph layer when the dot writes an edge', () => {
+    expect(canvasClient).toContain(
+      'onGraphEdgesChanged={() => setGraphRefreshToken((token) => token + 1)}',
+    );
+  });
+});
+
 

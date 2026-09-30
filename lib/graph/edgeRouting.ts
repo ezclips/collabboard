@@ -24,6 +24,11 @@ export type GraphSide = 'left' | 'right' | 'top' | 'bottom';
 
 export interface RouteEdgeOptions {
     gap?: number;
+    // PATCH-227: per-end gaps. Omitted -> both fall back to `gap`, so existing
+    // callers are byte-identical. An end whose post was measured via its visual
+    // anchor uses a small gap (6) so the line meets the drawing itself.
+    sourceGap?: number;
+    targetGap?: number;
     sourceSide?: GraphSide;
     targetSide?: GraphSide;
     sourceSlotIndex?: number;
@@ -118,6 +123,9 @@ export function routeEdge(
     const options: RouteEdgeOptions =
         typeof optsOrPadding === 'number' ? { gap: optsOrPadding } : optsOrPadding;
     const gap = Math.max(6, options.gap ?? 24);
+    // Per-end gaps default to `gap`; each gets the same floor independently.
+    const sourceGap = Math.max(6, options.sourceGap ?? gap);
+    const targetGap = Math.max(6, options.targetGap ?? gap);
 
     // ── Centers ──────────────────────────────────────────────────────────
     const srcCx = source.x + source.width / 2;
@@ -162,10 +170,13 @@ export function routeEdge(
 
     // Clamp gap so arrow always renders even when cards are close together.
     // Use whatever space is available (minimum 0), never hide the arrow.
-    const effectiveGap = availableGap > 0 ? Math.min(gap, availableGap / 2) : 0;
+    // PATCH-227: applied per end, so a small source gap cannot be undone by a
+    // large target gap (or vice versa).
+    const effectiveSourceGap = availableGap > 0 ? Math.min(sourceGap, availableGap / 2) : 0;
+    const effectiveTargetGap = availableGap > 0 ? Math.min(targetGap, availableGap / 2) : 0;
 
-    const startOffset = minStart + effectiveGap;
-    const endOffset = minEnd + effectiveGap;
+    const startOffset = minStart + effectiveSourceGap;
+    const endOffset = minEnd + effectiveTargetGap;
 
     const sx = srcCx + ndx * startOffset;
     const sy = srcCy + ndy * startOffset;

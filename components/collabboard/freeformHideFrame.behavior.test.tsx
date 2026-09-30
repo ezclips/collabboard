@@ -112,6 +112,19 @@ describe('PATCH-220 the drawing wrapper drops its box under "Hide frame"', () =>
     );
     expect(c.querySelector('img')!.getAttribute('src')).toBe(original);
   });
+
+  it("PATCH-227: a fullView drawing's <img> carries data-graph-anchor=visual; a framed one does not", () => {
+    const full = mountInto(
+      <PostCardContent padlet={padlet({ id: 'd-3', type: 'drawing', metadata: { previewUrl: 'https://x/y.png', fullView: true } as never })} />,
+    );
+    expect(full.querySelector('img')!.getAttribute('data-graph-anchor')).toBe('visual');
+    act(() => root?.unmount()); host?.remove();
+
+    const framed = mountInto(
+      <PostCardContent padlet={padlet({ id: 'd-4', type: 'drawing', metadata: { previewUrl: 'https://x/y.png' } as never })} />,
+    );
+    expect(framed.querySelector('img')!.getAttribute('data-graph-anchor')).toBeNull();
+  });
 });
 
 describe('PATCH-220 the menu says Hide frame / Show frame', () => {

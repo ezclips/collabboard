@@ -10566,6 +10566,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setSelectedPadletId={setSelectedPadletId}
                     setGraphConnectSelection={setGraphConnectSelection}
                     graphRefreshToken={graphRefreshToken}
+                    onGraphEdgesChanged={() => setGraphRefreshToken((token) => token + 1)}
                     closeAllToolbars={closeAllToolbars}
                     handlePadletMouseDown={handlePadletMouseDown}
                     getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}

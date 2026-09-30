@@ -4,6 +4,7 @@ import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { selectValidEdges } from '@/lib/graph/graphSelectors';
 import { routeEdge, type Rect, type GraphSide, type RouteEdgeResult } from '@/lib/graph/edgeRouting';
 import { clampMenuPosition } from '@/lib/graph/menuPosition';
+import { measureAnchorRect } from '@/lib/graph/anchorRect';
 import type { FreeformGraphEdge } from '@/types/graphTypes';
 import type { Padlet } from '@/types/collabboard';
 import { toast } from 'sonner';
@@ -26,6 +27,10 @@ interface FreeformGraphLayerProps {
 
 const LINE_COLORS = ['#9ca3af', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 const EDGE_GAP = 32;
+// PATCH-227: an end measured via its visual anchor (the drawing itself) sits
+// just a few px outside it, so the line meets the drawing rather than its
+// invisible card box.
+const VISUAL_ANCHOR_GAP = 6;
 const FREEFORM_COMMENT_FALLBACK_WIDTH = 300;
 const FREEFORM_COMMENT_FALLBACK_HEIGHT = 280;
 // Render-only fallback for edges with no explicit style.zIndex -- keeps today's
@@ -46,6 +51,9 @@ const ARROW_SIZE = 8;
 export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, containerRef, worldOriginRef, zoom = 1 }: FreeformGraphLayerProps) {
     const [edges, setEdges] = useState<FreeformGraphEdge[]>([]);
     const [measuredRects, setMeasuredRects] = useState<Record<string, Rect>>({});
+    // PATCH-227: post ids whose rect came from their visual anchor (a frameless
+    // drawing's image), so their line ends get the small gap.
+    const [visualAnchors, setVisualAnchors] = useState<Record<string, boolean>>({});
     const [edgeMenu, setEdgeMenu] = useState<EdgeMenuState | null>(null);
     const [labelDraft, setLabelDraft] = useState('');
     const [draggingLabel, setDraggingLabel] = useState<string | null>(null);
@@ -109,33 +117,24 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
             const originLeft = originRect ? originRect.left : containerRect.left + padLeft - container.scrollLeft;
             const originTop = originRect ? originRect.top : containerRect.top + padTop - container.scrollTop;
             const next: Record<string, Rect> = {};
+            // PATCH-227: which posts were measured via their visual anchor --
+            // those ends get a small gap so the line meets what you see.
+            const nextVisual: Record<string, boolean> = {};
 
             for (const post of posts) {
                 const el = container.querySelector(`[data-padlet-id="${post.id}"]`) as HTMLElement | null;
                 if (!el) continue;
-                const rect = el.getBoundingClientRect();
-                const commentRoot = el.querySelector('[data-comment-post-root="true"]') as HTMLElement | null;
-                const commentRect = commentRoot?.getBoundingClientRect();
-                // Fallback: if the data-padlet-id wrapper collapsed (e.g. card
-                // posts with absolute-positioned children), measure the first
-                // child element instead so the arrow targets the visible card.
-                const childRect = (el.firstElementChild as HTMLElement | null)?.getBoundingClientRect();
-                const useRect =
-                    (post.type === 'comment' || (post.type as string) === 'Comment') && commentRect
-                        ? commentRect
-                        : (childRect && childRect.width > rect.width + 8 && childRect.height > rect.height + 8)
-                            ? childRect
-                            : (rect.width < 1 || rect.height < 1)
-                                ? childRect ?? rect
-                                : rect;
+                const anchor = measureAnchorRect(el, post);
+                nextVisual[post.id] = anchor.usedVisualAnchor;
                 next[post.id] = {
-                    x: (useRect.left - originLeft) / zoom,
-                    y: (useRect.top - originTop) / zoom,
-                    width: useRect.width / zoom,
-                    height: useRect.height / zoom,
+                    x: (anchor.left - originLeft) / zoom,
+                    y: (anchor.top - originTop) / zoom,
+                    width: anchor.width / zoom,
+                    height: anchor.height / zoom,
                 };
             }
             setMeasuredRects(next);
+            setVisualAnchors(nextVisual);
         };
 
         const scheduleUpdate = () => {
@@ -215,7 +214,11 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
             const source = postById.get(edge.source_post_id);
             const target = postById.get(edge.target_post_id);
             if (!source || !target) return null;
-            const route = routeEdge(getRect(source), getRect(target), { gap: EDGE_GAP });
+            const route = routeEdge(getRect(source), getRect(target), {
+                gap: EDGE_GAP,
+                sourceGap: visualAnchors[source.id] ? VISUAL_ANCHOR_GAP : EDGE_GAP,
+                targetGap: visualAnchors[target.id] ? VISUAL_ANCHOR_GAP : EDGE_GAP,
+            });
             if (route.hidden) return null;
 
             const styleObj = (edge.style && typeof edge.style === 'object') ? (edge.style as Record<string, unknown>) : {};
@@ -231,7 +234,7 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
             strokeColor: string;
             strokeDasharray: string;
         }>;
-    }, [validEdges, measuredRects, posts]);
+    }, [validEdges, measuredRects, visualAnchors, posts]);
 
     // Keep a ref so the drag handler always reads the latest renderEdges
     const renderEdgesRef = useRef(renderEdges);
