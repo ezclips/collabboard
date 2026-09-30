@@ -29,6 +29,8 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
         htmlLabels: false,
         flowchart: {
           htmlLabels: false,
+          // PATCH-234: soft curved flow lines for the coloured flowchart.
+          curve: 'basis',
         },
         theme: 'base',
         fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
@@ -36,7 +38,7 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
           primaryColor: '#f3f4f6',
           primaryTextColor: '#111827',
           primaryBorderColor: '#d1d5db',
-          lineColor: '#6b7280',
+          lineColor: '#9CA3AF',
           background: '#ffffff',
           mainBkg: '#f9fafb',
           nodeBorder: '#d1d5db',

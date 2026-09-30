@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { ComparisonDiagramData } from '@/lib/ai/contracts';
+import { paletteAt } from '@/lib/ai/visualPalette';
 
 function ComparisonDiagramRenderer({ data }: { data: ComparisonDiagramData }) {
   return (
@@ -12,16 +13,42 @@ function ComparisonDiagramRenderer({ data }: { data: ComparisonDiagramData }) {
           <h2 className="mt-1 text-lg font-semibold text-gray-900">{data.title}</h2>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          {data.columns.map((column, index) => (
-            <div key={`${column.heading}-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <h3 className="text-sm font-semibold text-gray-800">{column.heading}</h3>
-              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">
-                {column.points.map((point, pointIndex) => (
-                  <li key={`${column.heading}-${pointIndex}`}>{point}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {data.columns.map((column, index) => {
+            // PATCH-234: a palette-coloured band per column, index-cycled.
+            const color = paletteAt(index);
+            return (
+              <div
+                key={`${column.heading}-${index}`}
+                data-ai-comparison-column="true"
+                className="overflow-hidden rounded-xl border border-gray-200 bg-white"
+              >
+                <div
+                  data-ai-comparison-band="true"
+                  className="px-4 py-3"
+                  style={{
+                    borderTopWidth: '4px',
+                    borderTopStyle: 'solid',
+                    borderTopColor: color.stroke,
+                    backgroundColor: color.fill,
+                  }}
+                >
+                  <h3 className="text-sm font-semibold" style={{ color: color.text }}>{column.heading}</h3>
+                </div>
+                <ul className="space-y-2 p-4 text-sm text-gray-700">
+                  {column.points.map((point, pointIndex) => (
+                    <li key={`${column.heading}-${pointIndex}`} className="flex gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: color.stroke }}
+                      />
+                      <span>{point}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

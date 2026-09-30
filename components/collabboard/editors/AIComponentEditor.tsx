@@ -1237,10 +1237,18 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {/* PATCH-233: the outline's pictures, pick one. */}
+              {/* PATCH-234: one large preview of the selected option, then the
+                  other options as buttons below it. */}
               {showOptions && outlineOptions.length > 0 && !isLoading && (
-                <div data-ai-outline-options="true" className="h-full w-full overflow-auto p-4">
-                  <div className="grid grid-cols-2 gap-3">
+                <div data-ai-outline-options="true" className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
+                  <div
+                    data-ai-outline-preview="true"
+                    className="min-h-0 flex-1 overflow-auto rounded-xl border border-gray-200 bg-white"
+                    style={{ maxHeight: 460 }}
+                  >
+                    {selectedOption && <AIContentRenderer content={optionEnvelope(selectedOption)} />}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
                     {outlineOptions.map((option) => {
                       const isSelected = (selectedOptionKey ?? outlineOptions[0]?.key) === option.key;
                       return (
@@ -1248,19 +1256,20 @@ export default function AIComponentEditor({
                           key={option.key}
                           type="button"
                           data-ai-outline-option={option.key}
+                          aria-pressed={isSelected}
                           onClick={() => setSelectedOptionKey(option.key)}
-                          className={`overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
+                          className={`w-[160px] shrink-0 overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
                             isSelected
                               ? 'border-purple-500 ring-2 ring-purple-200'
                               : 'border-gray-200 hover:border-gray-300'
                           }`}
                         >
-                          <div className="h-40 overflow-hidden bg-gray-50/50">
-                            <div style={{ transform: 'scale(0.55)', transformOrigin: 'top left', width: '182%' }}>
+                          <div className="h-20 overflow-hidden bg-gray-50/50">
+                            <div style={{ transform: 'scale(0.28)', transformOrigin: 'top left', width: '357%' }}>
                               <AIContentRenderer content={optionEnvelope(option)} />
                             </div>
                           </div>
-                          <div className="border-t border-gray-100 px-3 py-2 text-xs font-medium text-gray-700">
+                          <div className="border-t border-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
                             {option.label}
                           </div>
                         </button>

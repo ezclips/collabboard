@@ -94,6 +94,16 @@ export interface MindmapDiagramData extends DiagramDataBase {
   renderer: 'diagram_code';
   code: string;
   explanation?: string;
+  /**
+   * PATCH-234. When present, our own two-sided tree renderer draws this
+   * (root -> branches -> leaves; max 8 branches, 6 leaves each) instead of the
+   * Mermaid `code`. `code` stays required so every stored post remains valid
+   * and the Mermaid path still works for old posts and the plain Mindmap chip.
+   */
+  tree?: {
+    label: string;
+    children?: Array<{ label: string; children?: Array<{ label: string }> }>;
+  };
 }
 
 export interface ChartDataPoint {

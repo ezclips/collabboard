@@ -49,6 +49,24 @@ describe('PATCH-233 outlineToVisuals', () => {
     expect(data.code).toContain('    i1["Condensation"]');
   });
 
+  it('the mind-map option carries both the tree and the code', () => {
+    const option = outlineToVisuals(outline({
+      title: 'Water cycle',
+      items: [{ label: 'Evaporation', children: [{ label: 'Oceans' }] }, { label: 'Condensation' }],
+    })).find((o) => o.key === 'mindmap')!;
+    const data = option.envelopeData;
+    if (data.subtype !== 'mindmap') throw new Error('expected a mindmap');
+
+    expect(data.code).toContain('mindmap');
+    expect(data.tree).toEqual({
+      label: 'Water cycle',
+      children: [
+        { label: 'Evaporation', children: [{ label: 'Oceans' }] },
+        { label: 'Condensation' },
+      ],
+    });
+  });
+
   it('renders hostile flowchart labels without unescaped syntax', () => {
     const hostile = 'a"b]c{d}|e';
     expect(mermaidLabel(hostile)).toBe('abcde');
@@ -59,8 +77,13 @@ describe('PATCH-233 outlineToVisuals', () => {
     const data = option.envelopeData;
     if (data.subtype !== 'flowchart') throw new Error('expected a flowchart');
 
-    expect(data.code).toContain('N0["abcde"]');
+    // Rounded node text, never bracket/quote-breakable.
+    expect(data.code).toContain('N0("abcde")');
     expect(data.code).toContain('N0 --> N1');
+    // Coloured nodes: one classDef per index, and a class assignment.
+    expect(data.code).toContain('classDef c0 fill:');
+    expect(data.code).toContain('class N0 c0');
+    expect(data.code).toContain('class N1 c1');
     // The raw hostile characters never reach the diagram text.
     expect(data.code).not.toContain('a"b');
     expect(data.code).not.toContain(']c');

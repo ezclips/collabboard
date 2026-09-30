@@ -82,8 +82,14 @@ describe('PATCH-233 AIComponentEditor "Show options"', () => {
     const options = Array.from(c.querySelectorAll('[data-ai-outline-option]')) as HTMLElement[];
     expect(options.map((o) => o.getAttribute('data-ai-outline-option'))).toEqual(['mindmap', 'comparison', 'flow']);
 
+    // PATCH-234: one large preview, and the first option selected by default.
+    expect(c.querySelector('[data-ai-outline-preview="true"]')).not.toBeNull();
+    expect(options[0].getAttribute('aria-pressed')).toBe('true');
+
     // MUTATION: saving the first option regardless of selection makes this fail.
     click(options[1]);
+    expect(options[1].getAttribute('aria-pressed')).toBe('true');
+    expect(options[0].getAttribute('aria-pressed')).toBe('false');
     click(buttonContaining(c, 'Save to Canvas'));
 
     const saved = onSave.mock.calls[0][0];

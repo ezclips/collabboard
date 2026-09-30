@@ -20,6 +20,7 @@ const CodeDiagramRenderer = dynamic(() => import('./renderers/CodeDiagramRendere
   ),
 });
 import ComparisonDiagramRenderer from './renderers/ComparisonDiagramRenderer';
+import MindmapTreeRenderer from './renderers/MindmapTreeRenderer';
 import PhotoCardRenderer from './renderers/PhotoCardRenderer';
 import StructuredLessonBoardRenderer from './renderers/StructuredLessonBoardRenderer';
 import TimelineDiagramRenderer from './renderers/TimelineDiagramRenderer';
@@ -78,8 +79,11 @@ function renderDiagram(data: DiagramData): React.ReactNode {
   const subtype = data.subtype;
   switch (subtype) {
     case 'flowchart':
-    case 'mindmap':
       return <CodeDiagramRenderer data={data} />;
+    case 'mindmap':
+      // PATCH-234: our own colourful two-sided tree when the data carries one;
+      // older/stored mind maps (no tree) keep the Mermaid code path.
+      return data.tree ? <MindmapTreeRenderer data={data} /> : <CodeDiagramRenderer data={data} />;
     case 'pie_chart':
     case 'bar_chart':
       return <ChartDiagramRenderer data={data} />;

@@ -26,4 +26,9 @@ describe('PATCH-232 Addendum 2: mermaid label settings', () => {
     expect((engine.match(/htmlLabels: false/g) ?? []).length).toBe(2);
     expect(engine).toMatch(/flowchart:\s*\{[\s\S]*?htmlLabels: false/);
   });
+
+  it('softens the flow curve and greys the connector lines (PATCH-234)', () => {
+    expect(engine).toMatch(/flowchart:\s*\{[\s\S]*?curve: 'basis'/);
+    expect(engine).toContain("lineColor: '#9CA3AF'");
+  });
 });

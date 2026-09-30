@@ -77,6 +77,33 @@ export const FlowDiagramSchema: z.ZodType<FlowDiagramData> = z.object({
   explanation: z.string().optional(),
 });
 
+const MindmapLeafSchema = z.object({ label: z.string().min(1) });
+
+const MindmapBranchSchema = z.object({
+  label: z.string().min(1),
+  children: z.array(MindmapLeafSchema).optional(),
+});
+
+/**
+ * PATCH-234. The optional tree our own mind-map renderer draws. Over-long trees
+ * are trimmed (8 branches, 6 leaves) rather than rejected, matching
+ * `parseOutline`, which already caps the outline at those counts upstream.
+ */
+const MindmapTreeSchema = z
+  .object({
+    label: z.string().min(1),
+    children: z.array(MindmapBranchSchema).optional(),
+  })
+  .transform((tree) => ({
+    label: tree.label,
+    children: tree.children
+      ?.slice(0, 8)
+      .map((branch) => ({
+        label: branch.label,
+        children: branch.children ? branch.children.slice(0, 6) : undefined,
+      })),
+  }));
+
 export const MindmapDiagramSchema: z.ZodType<MindmapDiagramData> = z.object({
   type: z.literal('diagram'),
   subtype: z.literal('mindmap'),
@@ -84,6 +111,7 @@ export const MindmapDiagramSchema: z.ZodType<MindmapDiagramData> = z.object({
   renderer: z.literal('diagram_code'),
   code: z.string().min(1),
   explanation: z.string().optional(),
+  tree: MindmapTreeSchema.optional(),
 });
 
 export const PieChartDiagramSchema: z.ZodType<PieChartDiagramData> = z.object({

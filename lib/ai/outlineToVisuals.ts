@@ -6,6 +6,7 @@ import type {
   TimelineDiagramData,
 } from './contracts';
 import type { VisualOutline } from './outline';
+import { paletteAt } from './visualPalette';
 
 /**
  * PATCH-233. Turns one extracted outline into several pictures to choose from,
@@ -35,6 +36,11 @@ function quoted(value: string): string {
   return `"${mermaidLabel(value)}"`;
 }
 
+/** Rounded Mermaid node text: `N0("label")`. */
+function quotedRound(value: string): string {
+  return `("${mermaidLabel(value)}")`;
+}
+
 function mindmapCode(outline: VisualOutline): string {
   const lines = ['mindmap', `  root((${quoted(outline.title)}))`];
   outline.items.forEach((item, index) => {
@@ -47,14 +53,32 @@ function mindmapCode(outline: VisualOutline): string {
 }
 
 function flowchartCode(outline: VisualOutline): string {
+  const items = outline.items.slice(0, 8);
   const lines = ['flowchart LR'];
-  outline.items.forEach((item, index) => {
-    lines.push(`  N${index}[${quoted(item.label)}]`);
+  items.forEach((item, index) => {
+    lines.push(`  N${index}${quotedRound(item.label)}`);
   });
-  for (let index = 0; index + 1 < outline.items.length; index += 1) {
+  items.forEach((_, index) => {
+    const color = paletteAt(index);
+    lines.push(`  classDef c${index} fill:${color.fill},stroke:${color.stroke},color:${color.text}`);
+  });
+  for (let index = 0; index + 1 < items.length; index += 1) {
     lines.push(`  N${index} --> N${index + 1}`);
   }
+  items.forEach((_, index) => {
+    lines.push(`  class N${index} c${index}`);
+  });
   return lines.join('\n');
+}
+
+function mindmapTree(outline: VisualOutline): NonNullable<MindmapDiagramData['tree']> {
+  return {
+    label: outline.title,
+    children: outline.items.slice(0, 8).map((item) => ({
+      label: item.label,
+      children: item.children?.slice(0, 6).map((child) => ({ label: child.label })),
+    })),
+  };
 }
 
 function mindmap(outline: VisualOutline): MindmapDiagramData {
@@ -64,6 +88,8 @@ function mindmap(outline: VisualOutline): MindmapDiagramData {
     renderer: 'diagram_code',
     title: outline.title,
     code: mindmapCode(outline),
+    // PATCH-234: our own renderer draws this; `code` stays for old posts.
+    tree: mindmapTree(outline),
   };
 }
 
