@@ -8,6 +8,7 @@ import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import type {
   AIContentData,
   AIMode,
+  AIGenerationAttribution,
   DiagramSubtype,
   GenerateAIContentRequest,
   LoadedAIContent,
@@ -21,6 +22,7 @@ import {
   isDiagramModeConfig,
 } from '@/lib/ai/mode-registry';
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
+import { outlineToVisuals, type VisualOption } from '@/lib/ai/outlineToVisuals';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import {
   trackAIAutoModeCorrectedByUser,
@@ -316,6 +318,12 @@ export default function AIComponentEditor({
   const [mode, setMode] = useState<AIMode>(lockedMode ?? initialSelection.mode);
   const [subtype, setSubtype] = useState<DiagramSubtype | undefined>(lockedSubtype ?? initialSelection.subtype);
   const [autoResolved, setAutoResolved] = useState<AutoResolved | null>(null);
+  // PATCH-233. "Show options": one outline call draws several pictures locally.
+  const [showOptions, setShowOptions] = useState(false);
+  const [outlineOptions, setOutlineOptions] = useState<VisualOption[]>([]);
+  const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
+  const [outlineGeneratedBy, setOutlineGeneratedBy] = useState<AIGenerationAttribution | null>(null);
+  const [outlineCreatedAt, setOutlineCreatedAt] = useState<string | null>(null);
   const [content, setContent] = useState<unknown>(initialContent ?? null);
   const [stage, setStage] = useState<Stage>(initialContent ? 'done' : 'idle');
   const [error, setError] = useState<string | null>(null);
@@ -344,6 +352,11 @@ export default function AIComponentEditor({
         ?? (selection.mode === 'diagram' ? selection.subtype ?? getDefaultDiagramSubtype() : undefined)
     );
     setAutoResolved(null);
+    setShowOptions(false);
+    setOutlineOptions([]);
+    setSelectedOptionKey(null);
+    setOutlineGeneratedBy(null);
+    setOutlineCreatedAt(null);
     setContent(initialContent ?? null);
     setStage(initialContent ? 'done' : 'idle');
     setError(null);
@@ -382,7 +395,27 @@ export default function AIComponentEditor({
   const subtypeConfig = activeSubtype ? getDiagramSubtypeConfig(activeSubtype) : undefined;
   const placeholder = subtypeConfig?.placeholder ?? modeConfig.placeholder;
   const helperDescription = subtypeConfig?.description ?? modeConfig.description;
-  const persistedContent = serializeAIContentForPersistence(content);
+  const selectedOption = showOptions
+    ? (outlineOptions.find((option) => option.key === selectedOptionKey) ?? outlineOptions[0] ?? null)
+    : null;
+  // PATCH-233: a chosen option saves exactly as a normal diagram generation of
+  // that subtype would -- same envelope shape, so stored data is unchanged.
+  const optionEnvelope = (option: VisualOption): LoadedAIContent => ({
+    mode: 'diagram',
+    version: 1,
+    data: option.envelopeData,
+    meta: {
+      renderer: option.envelopeData.renderer,
+      subtype: option.envelopeData.subtype,
+      prompt,
+      createdAt: outlineCreatedAt ?? new Date().toISOString(),
+      generatedBy: outlineGeneratedBy ?? undefined,
+    },
+  });
+  const selectedOptionEnvelope = selectedOption ? optionEnvelope(selectedOption) : null;
+  const persistedContent = showOptions
+    ? serializeAIContentForPersistence(selectedOptionEnvelope)
+    : serializeAIContentForPersistence(content);
   const canSave = Boolean(persistedContent) && !isLoading;
 
   const normalizedContent = normalizeAIContent(content);
@@ -476,6 +509,10 @@ export default function AIComponentEditor({
     setUiMode(nextUiMode);
     setError(null);
     setErrorIsPlanLimit(false);
+    // PATCH-233: changing mode invalidates any outline options.
+    setShowOptions(false);
+    setOutlineOptions([]);
+    setSelectedOptionKey(null);
 
     if (nextUiMode === 'auto') {
       // Don't change mode/subtype yet -- resolved at generate time
@@ -531,6 +568,59 @@ export default function AIComponentEditor({
       } catch {
         // Non-fatal: continue with current mode
       }
+    }
+
+    // PATCH-233: "Show options" asks for the outline; the pictures are drawn
+    // locally, so the AI draws nothing. One call, several options.
+    if (effectiveMode === 'diagram' && showOptions) {
+      setStage('generating');
+      try {
+        const res = await fetch('/api/ai/generate-outline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: prompt.trim(), ...(boardId ? { boardId } : {}) }),
+          signal: controller.signal,
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          const planLimit = planLimitFromResponse(res.status, data);
+          if (planLimit) {
+            setError(planLimit.message);
+            setErrorIsPlanLimit(true);
+            setStage('error');
+            return;
+          }
+          const message = getErrorMessage(data);
+          if (isQuotaExceededMessage(message)) {
+            throw new Error('API quota exceeded. Please try again later or upgrade your plan.');
+          }
+          throw new Error(message);
+        }
+
+        setStage('rendering');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        const options = outlineToVisuals(data.outline);
+        setOutlineOptions(options);
+        setSelectedOptionKey(options[0]?.key ?? null);
+        setOutlineGeneratedBy((data.generatedBy as AIGenerationAttribution) ?? null);
+        setOutlineCreatedAt(new Date().toISOString());
+        setContent(null);
+        setStage('done');
+      } catch (err: unknown) {
+        const e = err as Error;
+        if (e.name === 'AbortError') {
+          setError('Request timed out. Please try again.');
+        } else {
+          setError(e.message || 'Unknown error');
+        }
+        setStage('error');
+      } finally {
+        clearTimeout(timeout);
+        abortRef.current = null;
+      }
+      return;
     }
 
     setStage('generating');
@@ -965,27 +1055,60 @@ export default function AIComponentEditor({
                         {(() => {
                           const diagramConfig = MODE_REGISTRY.diagram;
                           if (!isDiagramModeConfig(diagramConfig)) return null;
-                          return (Object.keys(diagramConfig.subtypes) as DiagramSubtype[]).map((subtypeId) => {
-                          const config = diagramConfig.subtypes[subtypeId];
-                          const isSelected = activeSubtype === subtypeId;
-
                           return (
-                            <button
-                              key={subtypeId}
-                              type="button"
-                              onClick={() => setSubtype(subtypeId)}
-                              disabled={isLoading}
-                              className={`rounded-xl border px-3 py-3 text-left transition-all ${
-                                isSelected
-                                  ? 'border-purple-500 bg-purple-50 shadow-sm'
-                                  : 'border-gray-200 bg-white hover:border-gray-300'
-                              }`}
-                            >
-                              <div className="text-sm font-semibold text-gray-900">{config.label}</div>
-                              <div className="mt-1 text-[11px] text-gray-500">{config.description}</div>
-                            </button>
+                            <>
+                              {/* PATCH-233: one outline call, several pictures. */}
+                              <button
+                                key="options"
+                                type="button"
+                                data-ai-subtype-chip="options"
+                                onClick={() => {
+                                  setShowOptions(true);
+                                  setOutlineOptions([]);
+                                  setSelectedOptionKey(null);
+                                  setError(null);
+                                }}
+                                disabled={isLoading}
+                                className={`rounded-xl border px-3 py-3 text-left transition-all ${
+                                  showOptions
+                                    ? 'border-purple-500 bg-purple-50 shadow-sm'
+                                    : 'border-gray-200 bg-white hover:border-gray-300'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                  <span>Show options</span>
+                                  <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">recommended</span>
+                                </div>
+                                <div className="mt-1 text-[11px] text-gray-500">Draw the same content several ways and pick one.</div>
+                              </button>
+                              {(Object.keys(diagramConfig.subtypes) as DiagramSubtype[]).map((subtypeId) => {
+                                const config = diagramConfig.subtypes[subtypeId];
+                                const isSelected = !showOptions && activeSubtype === subtypeId;
+
+                                return (
+                                  <button
+                                    key={subtypeId}
+                                    type="button"
+                                    onClick={() => {
+                                      setShowOptions(false);
+                                      setOutlineOptions([]);
+                                      setSelectedOptionKey(null);
+                                      setSubtype(subtypeId);
+                                    }}
+                                    disabled={isLoading}
+                                    className={`rounded-xl border px-3 py-3 text-left transition-all ${
+                                      isSelected
+                                        ? 'border-purple-500 bg-purple-50 shadow-sm'
+                                        : 'border-gray-200 bg-white hover:border-gray-300'
+                                    }`}
+                                  >
+                                    <div className="text-sm font-semibold text-gray-900">{config.label}</div>
+                                    <div className="mt-1 text-[11px] text-gray-500">{config.description}</div>
+                                  </button>
+                                );
+                              })}
+                            </>
                           );
-                        });
                         })()}
                       </div>
                     </div>
@@ -1093,7 +1216,7 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {!content && !isLoading && (
+              {!content && !isLoading && !(showOptions && outlineOptions.length > 0) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
                   <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
                     <Sparkles className="h-8 w-8 text-gray-300" />
@@ -1114,7 +1237,40 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {!!content && (
+              {/* PATCH-233: the outline's pictures, pick one. */}
+              {showOptions && outlineOptions.length > 0 && !isLoading && (
+                <div data-ai-outline-options="true" className="h-full w-full overflow-auto p-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    {outlineOptions.map((option) => {
+                      const isSelected = (selectedOptionKey ?? outlineOptions[0]?.key) === option.key;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          data-ai-outline-option={option.key}
+                          onClick={() => setSelectedOptionKey(option.key)}
+                          className={`overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
+                            isSelected
+                              ? 'border-purple-500 ring-2 ring-purple-200'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="h-40 overflow-hidden bg-gray-50/50">
+                            <div style={{ transform: 'scale(0.55)', transformOrigin: 'top left', width: '182%' }}>
+                              <AIContentRenderer content={optionEnvelope(option)} />
+                            </div>
+                          </div>
+                          <div className="border-t border-gray-100 px-3 py-2 text-xs font-medium text-gray-700">
+                            {option.label}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {!showOptions && !!content && (
                 <div className="h-full w-full overflow-auto p-4">
                   <AIContentRenderer
                     content={content}

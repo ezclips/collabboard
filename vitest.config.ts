@@ -28,6 +28,8 @@ export default defineConfig({
       'app/api/settings/**/*.test.ts',
       // PATCH-219: the Pexels proxy route's auth, paging and cache tests.
       'app/api/pexels/**/*.test.ts',
+      // PATCH-233: the AI outline route's auth, validation and error mapping.
+      'app/api/ai/**/*.test.ts',
       // PATCH-192: the dashboard data loader.
       'lib/dashboard/**/*.test.ts',
       'lib/server/**/*.test.ts',

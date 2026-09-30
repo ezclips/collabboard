@@ -1,0 +1,139 @@
+import { z } from 'zod';
+
+/**
+ * PATCH-233. The "Show options" outline: the STRUCTURE of the user's text, once,
+ * which `outlineToVisuals` then draws several ways. Napkin-style -- the AI does
+ * not draw, it extracts title/points/details/order.
+ */
+
+export interface VisualOutlineChild {
+  label: string;
+}
+
+export interface VisualOutlineItem {
+  label: string;
+  detail?: string;
+  date?: string;
+  children?: VisualOutlineChild[];
+}
+
+export interface VisualOutline {
+  title: string;
+  ordered: boolean;
+  items: VisualOutlineItem[];
+}
+
+export const OUTLINE_LIMITS = {
+  title: 80,
+  label: 40,
+  detail: 140,
+  date: 24,
+  items: 8,
+  minItems: 2,
+  children: 6,
+} as const;
+
+/** Thrown when the model's outline has too little usable content to draw. */
+export class OutlineParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OutlineParseError';
+  }
+}
+
+export const OUTLINE_SYSTEM_PROMPT = `
+You extract the STRUCTURE of the user's text so it can be drawn as a diagram.
+Return valid JSON only, matching this exact shape:
+{
+  "title": "Short title (<= 80 characters)",
+  "ordered": false,
+  "items": [
+    {
+      "label": "Main point (<= 40 characters)",
+      "detail": "Optional one-line detail (<= 140 characters)",
+      "date": "Optional date as written, only when the text gives one",
+      "children": [{ "label": "Optional sub-point (<= 40 characters)" }]
+    }
+  ]
+}
+Rules:
+- Give 2 to 8 items. Keep every label short.
+- Do not invent facts that are not in the text.
+- Set "ordered" to true ONLY when the points are steps or a sequence in time.
+- Include "children" only when a point genuinely has sub-points.
+- Do not include any explanation outside the JSON structure.
+`.trim();
+
+const OutlineChildSchema = z.object({
+  label: z.string().optional(),
+});
+
+const OutlineItemSchema = z.object({
+  label: z.string().optional(),
+  detail: z.string().optional(),
+  date: z.string().optional(),
+  children: z.array(OutlineChildSchema).optional(),
+});
+
+const OutlineSchema = z.object({
+  title: z.string().optional(),
+  ordered: z.boolean().optional(),
+  items: z.array(OutlineItemSchema).optional(),
+});
+
+function trimTo(value: unknown, limit: number): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineItem | null {
+  const label = trimTo(raw.label, OUTLINE_LIMITS.label);
+  if (!label) return null;
+
+  const item: VisualOutlineItem = { label };
+
+  const detail = trimTo(raw.detail, OUTLINE_LIMITS.detail);
+  if (detail) item.detail = detail;
+
+  const date = trimTo(raw.date, OUTLINE_LIMITS.date);
+  if (date) item.date = date;
+
+  const children = (raw.children ?? [])
+    .map((child) => trimTo(child.label, OUTLINE_LIMITS.label))
+    .filter(Boolean)
+    .slice(0, OUTLINE_LIMITS.children)
+    .map((childLabel) => ({ label: childLabel }));
+  if (children.length > 0) item.children = children;
+
+  return item;
+}
+
+/**
+ * Validates a model's outline, trimming over-long strings rather than failing
+ * and dropping empty children. Throws a typed error only when fewer than two
+ * usable items remain -- too little to draw anything.
+ */
+export function parseOutline(raw: unknown): VisualOutline {
+  const parsed = OutlineSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new OutlineParseError('The AI outline did not match the expected shape.');
+  }
+
+  const data = parsed.data;
+  const items = (data.items ?? [])
+    .map(normalizeItem)
+    .filter((item): item is VisualOutlineItem => item !== null)
+    .slice(0, OUTLINE_LIMITS.items);
+
+  if (items.length < OUTLINE_LIMITS.minItems) {
+    throw new OutlineParseError('The AI outline needs at least two usable points.');
+  }
+
+  const title = trimTo(data.title, OUTLINE_LIMITS.title) || 'Untitled';
+
+  return {
+    title,
+    ordered: data.ordered === true,
+    items,
+  };
+}
