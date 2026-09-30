@@ -57,21 +57,20 @@ describe('PATCH-225 the Reactions Row drops its divider when the post frame is h
 });
 
 describe('PATCH-227 the connect dot is wired on the board', () => {
-  const dotStart = cards.indexOf('{/* PATCH-227: drag the dot');
+  const dotStart = cards.indexOf('{/* PATCH-227/229: drag the dot');
   const dotEnd = cards.indexOf('{/* Comment Badge', dotStart);
   const dotBlock = dotStart > -1 && dotEnd > dotStart ? cards.slice(dotStart, dotEnd) : '';
 
-  it('renders the handle only for exactly one selected, top-level, unlocked post in edit mode', () => {
+  it('renders the handle for a connectable post (single-selected, or any while Graph Line is on)', () => {
     expect(dotStart, 'connect-dot block not found').toBeGreaterThan(-1);
     for (const condition of [
       'isFreeformGraphMode &&',
       'canUseFreeformEditButton &&',
       '!isLineMode &&',
-      '!isGraphConnectMode &&',
       '!anyPostDragInProgress &&',
       '!(padlet.metadata as any)?.parentId &&',
       '!(padlet.metadata as any)?.isLocked &&',
-      'singleSelectedId === padlet.id &&',
+      '(isGraphConnectMode || singleSelectedId === padlet.id) &&',
     ]) {
       expect(dotBlock, `missing show-condition: ${condition}`).toContain(condition);
     }
@@ -98,5 +97,54 @@ describe('PATCH-227 the connect dot is wired on the board', () => {
     );
   });
 });
+
+describe('PATCH-229 the Graph Line button shows every post\'s dot', () => {
+  it('the connect dot shows for every post while the mode is on (or on the single selected post)', () => {
+    // MUTATION: putting `!isGraphConnectMode &&` back makes this fail.
+    expect(cards).toContain('(isGraphConnectMode || singleSelectedId === padlet.id) &&');
+    expect(cards).not.toContain('!isGraphConnectMode &&');
+  });
+
+  it('pressing a post body in the mode just selects it -- no old FROM/TO flow', () => {
+    const branchStart = cards.indexOf('if (isFreeformGraphMode && isGraphConnectMode) {');
+    expect(branchStart, 'graph mousedown branch not found').toBeGreaterThan(-1);
+    const branchEnd = cards.indexOf('// Route all padlet types', branchStart);
+    expect(branchEnd).toBeGreaterThan(branchStart);
+    const branch = cards.slice(branchStart, branchEnd);
+    expect(branch).toContain('setSelectedPadletId(padlet.id);');
+    expect(branch).not.toContain('setGraphConnectSelection');
+    expect(branch).not.toContain('getClickedSide');
+  });
+
+  it('the dot exclusion still precedes that branch', () => {
+    const exclusion = cards.indexOf(`closest('[data-graph-connect-handle="true"]')`);
+    const branchStart = cards.indexOf('if (isFreeformGraphMode && isGraphConnectMode) {');
+    expect(exclusion).toBeGreaterThan(-1);
+    expect(exclusion).toBeLessThan(branchStart);
+  });
+
+  it('CanvasClient says the new words and drops the old ones', () => {
+    expect(canvasClient).toContain(
+      "Graph Line on: drag a post's dot onto another post. Esc to finish.",
+    );
+    expect(canvasClient).toContain('Graph Line mode off.');
+    expect(canvasClient).not.toContain('Click source side');
+    expect(canvasClient).toContain("Drag a post's <kbd style={kbdStyle}>dot</kbd> onto another post to connect.");
+    expect(canvasClient).toContain('<kbd style={kbdStyle}>Delete</kbd> removes it.');
+    expect(canvasClient).not.toContain('then select post <kbd style={kbdStyle}>TO</kbd>');
+  });
+
+  it('CanvasClient has an Escape effect scoped to the mode with a field guard', () => {
+    const start = canvasClient.indexOf('// PATCH-229: Escape ends the Graph Line mode');
+    expect(start, 'Escape effect not found').toBeGreaterThan(-1);
+    const end = canvasClient.indexOf('handleToggleGraphConnect]);', start);
+    expect(end).toBeGreaterThan(start);
+    const effect = canvasClient.slice(start, end);
+    expect(effect).toContain("if (event.key !== 'Escape') return;");
+    expect(effect).toContain("tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable");
+    expect(effect).toContain('handleToggleGraphConnect();');
+  });
+});
+
 
 

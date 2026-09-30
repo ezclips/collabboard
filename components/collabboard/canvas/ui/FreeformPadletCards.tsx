@@ -1487,9 +1487,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           return;
         }
         if (isFreeformGraphMode && isGraphConnectMode) {
-          const side = getClickedSide(e);
+          // PATCH-229: the connect dots drive linking now. Pressing a post body
+          // just selects it (and must not move it); the old click-FROM/click-TO
+          // flow is no longer used.
           setSelectedPadletId(padlet.id);
-          setGraphConnectSelection({ id: padlet.id, side, nonce: Date.now() });
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -1560,17 +1561,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           <Sparkles size={11} aria-hidden="true" />
         </div>
       )}
-      {/* PATCH-227: drag the dot onto another post to connect them. Shown only
-          for exactly one selected, top-level, unlocked post, and never while a
-          Graph Line / connect mode or a post drag is active. */}
+      {/* PATCH-227/229: drag the dot onto another post to connect them. Shown
+          for every connectable top-level, unlocked post while Graph Line is on,
+          or for the single selected post otherwise. */}
       {isFreeformGraphMode &&
         canUseFreeformEditButton &&
         !isLineMode &&
-        !isGraphConnectMode &&
         !anyPostDragInProgress &&
         !(padlet.metadata as any)?.parentId &&
         !(padlet.metadata as any)?.isLocked &&
-        singleSelectedId === padlet.id && (
+        (isGraphConnectMode || singleSelectedId === padlet.id) && (
           <GraphConnectHandle
             boardId={String(canvasId)}
             postId={String(padlet.id)}

@@ -4741,8 +4741,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setGraphConnectSource(null);
     setGraphConnectSelection(null);
     if (next) setIsLineMode(false);
-    toast.message(next ? 'Graph Line mode on. Click source side, then target side. Right-click line to edit/delete.' : 'Graph Line mode off.');
+    toast.message(next ? "Graph Line on: drag a post's dot onto another post. Esc to finish." : 'Graph Line mode off.');
   }, [isFreeformGraphMode, isGraphConnectMode]);
+
+  // PATCH-229: Escape ends the Graph Line mode (same off path as the toggle), so
+  // several lines can be drawn in a row and then finished. Field targets keep
+  // their own Escape behaviour.
+  useEffect(() => {
+    if (!isFreeformGraphMode || !isGraphConnectMode) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) return;
+      handleToggleGraphConnect();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFreeformGraphMode, isGraphConnectMode, handleToggleGraphConnect]);
 
   useEffect(() => {
     if (!isFreeformGraphMode || !isGraphConnectMode || !canvasId || !graphConnectSelection) return;
@@ -9472,8 +9488,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             if (isFreeformGraphMode && isGraphConnectMode) {
               hintContent = (
                 <>
-                  Select post <kbd style={kbdStyle}>FROM</kbd>, then select post <kbd style={kbdStyle}>TO</kbd>.{' '}
-                  To delete, select in reverse or <kbd style={kbdStyle}>right-click</kbd> the line → <kbd style={kbdStyle}>Delete</kbd>
+                  Drag a post's <kbd style={kbdStyle}>dot</kbd> onto another post to connect.{' '}
+                  Click a line to select it, <kbd style={kbdStyle}>Delete</kbd> removes it.{' '}
+                  <kbd style={kbdStyle}>Esc</kbd> to finish
                 </>
               );
             } else if (isLineMode) {
