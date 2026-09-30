@@ -1222,3 +1222,63 @@ describe('PATCH-185: a plan-limit refusal shows its message and a plans link', (
     container.remove();
   });
 });
+
+/**
+ * PATCH-216. `uploadFile` on the imperative handle takes the EXACT same path a
+ * picked file does -- an imported document is handed to this uploader.
+ */
+describe('PATCH-216 uploadFile on the handle', () => {
+  function mountUploader(probe: () => boolean) {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const handle = createRef<KnowledgePdfUploaderHandle>();
+    const fetched: string[] = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (vi.fn(async (url: string, init?: RequestInit) => {
+      fetched.push(`${init?.method ?? 'GET'} ${String(url)}`);
+      return init?.method === 'POST'
+        ? jsonResponse(summary('uploaded'), 201)
+        : jsonResponse({ documents: [summary('ready')] });
+    }) as unknown) as typeof globalThis.fetch;
+
+    act(() => {
+      root.render(
+        <KnowledgePdfUploader
+          ref={handle}
+          initiationPolicy="board-content"
+          canInitiateUploadNow={probe}
+        />,
+      );
+    });
+
+    return {
+      container, root, handle, fetched,
+      restore: () => { globalThis.fetch = previousFetch; container.remove(); },
+    };
+  }
+
+  const pdf = () => new File(['%PDF-1.7\n%%EOF'], 'imported.pdf', { type: 'application/pdf' });
+
+  it('posts the file, exactly like choosing it in the input', async () => {
+    const h = mountUploader(() => true);
+    await act(async () => { h.handle.current!.uploadFile(pdf()); });
+    // Let the polling settle.
+    await act(async () => { await Promise.resolve(); });
+
+    expect(h.fetched.some((f) => f.startsWith(`POST /api/boards/${BOARD_ID}/knowledge`))).toBe(true);
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+
+  it('does nothing when canInitiateUploadNow is false', async () => {
+    const h = mountUploader(() => false);
+    await act(async () => { h.handle.current!.uploadFile(pdf()); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(h.fetched).toHaveLength(0);
+    act(() => { h.root.unmount(); });
+    h.restore();
+  });
+});

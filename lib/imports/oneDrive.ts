@@ -14,6 +14,7 @@ interface GraphItem {
   thumbnails?: { large?: { url?: string }; medium?: { url?: string } }[];
   webUrl?: string;
   parentReference?: { id?: string };
+  '@microsoft.graph.downloadUrl'?: string;
 }
 
 function normalise(item: GraphItem, path: string[] = []): ImportBrowserItem {
@@ -84,4 +85,28 @@ export async function resolveOneDriveItem(
   if (!res.ok) return null;
   const item: GraphItem = await res.json();
   return normalise(item);
+}
+
+/**
+ * PATCH-216. The pre-signed URL Graph returns for a file's bytes.
+ *
+ * `@microsoft.graph.downloadUrl` is a short-lived URL that already carries its
+ * own authorization, so the download is fetched from it WITHOUT our bearer
+ * token -- see the download route. Returns null when the item has none.
+ */
+export async function getOneDriveDownloadUrl(
+  accessToken: string,
+  itemId: string
+): Promise<string | null> {
+  const url = `${GRAPH_API}/me/drive/items/${itemId}?$select=id,@microsoft.graph.downloadUrl`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) return null;
+  const item = (await res.json()) as GraphItem;
+  const downloadUrl = item['@microsoft.graph.downloadUrl'];
+  return typeof downloadUrl === 'string' && downloadUrl.length > 0 ? downloadUrl : null;
 }

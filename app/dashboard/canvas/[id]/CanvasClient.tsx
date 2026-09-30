@@ -210,6 +210,8 @@ import type mapboxgl from 'mapbox-gl';
 import MapStylePanel from '@/components/map/MapStylePanel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
+import { downloadImportedDocument, ImportAuthError } from '@/lib/imports/clientApi';
+import type { KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
 import { buildCanvasToolbarGroups, BOARD_CONTENT_TOOL_TYPES, WORKSPACE_CANVAS_TOOL_TYPES, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import CanvasSettingsModal from '@/components/collabboard/canvas/ui/CanvasSettingsModal';
@@ -1516,6 +1518,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // the defensive guard in the PDF placement owner.
   const canPlaceDirectPdf = isDirectPdfCanvasLayout(canvas?.layout);
 
+  /**
+   * PATCH-216. The shell's handle on the Knowledge uploader that CanvasSidebar
+   * mounts. An imported document is handed to that SAME uploader, so it takes
+   * the same upload/placement/processing path a picked file does.
+   */
+  const knowledgeUploaderRef = useRef<KnowledgePdfUploaderHandle>(null);
+
   // PATCH FREEFORM-ZOOM-C: the initial camera's focal point, reusing the
   // SAME content-bounds algorithm FreeformNavigationControl's minimap
   // already uses (getMinimapDisplayBounds over resolveMinimapWorldItems) --
@@ -2744,6 +2753,39 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    */
   const KNOWLEDGE_PDF_PLACEMENT_WIDTH = 260;
   const KNOWLEDGE_PDF_PLACEMENT_HEIGHT = 320;
+
+  /**
+   * PATCH-216. "Add as a readable document": fetch the file's bytes from the
+   * provider and hand them to the SAME uploader a computer upload uses. The
+   * uploader does the size check, the upload, the placement and the polling --
+   * this only downloads and reports the download's own failures.
+   */
+  const importAsKnowledgeDocument = useCallback(async (importData: {
+    provider: 'google-drive' | 'microsoft-onedrive';
+    itemId: string;
+    fileName: string;
+  }) => {
+    if (!canEditBoardContentRef.current) return;
+    if (!canPlaceDirectPdf || !knowledgeUploaderRef.current) {
+      toast.error('Documents can be added on Freeform canvases only');
+      return;
+    }
+    const providerLabel = importData.provider === 'google-drive' ? 'Google Drive' : 'OneDrive';
+    const toastId = toast.loading(`Downloading ${importData.fileName}…`);
+    try {
+      const file = await downloadImportedDocument(importData.provider, importData.itemId);
+      toast.dismiss(toastId);
+      if (!canEditBoardContentRef.current) return;
+      knowledgeUploaderRef.current.uploadFile(file);
+    } catch (error) {
+      toast.dismiss(toastId);
+      if (error instanceof ImportAuthError) {
+        toast.error(`Your ${providerLabel} connection expired. Please reconnect in Settings.`);
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : 'Could not download the file.');
+    }
+  }, [canPlaceDirectPdf]);
 
   /**
    * PDF-C1. Upload produced ONE Knowledge document; the board gets ONE
@@ -9055,6 +9097,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               // The same authority as a live probe, for the activation
               // events that land before a revoked render has committed.
               canAddBoardContentPdfNow={canEditBoardContentProbe}
+              // PATCH-216. An imported document is handed to THIS uploader.
+              knowledgeUploaderRef={knowledgeUploaderRef}
             />
           </div>
         )}
@@ -9094,6 +9138,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           setIsCommentEditorOpen={setIsCommentEditorOpen}
           isImageEditorOpen={isImageEditorOpen}
           setIsImageEditorOpen={setIsImageEditorOpen}
+          // PATCH-216. Only a Freeform canvas can hold a document card, so the
+          // "Add as a readable document" choice is offered only there.
+          onImportAsDocument={canPlaceDirectPdf ? importAsKnowledgeDocument : undefined}
           isDrawingEditorOpen={isDrawingEditorOpen}
           setIsDrawingEditorOpen={setIsDrawingEditorOpen}
           isAIComponentEditorOpen={isAIComponentEditorOpen}

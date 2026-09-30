@@ -61,3 +61,12 @@ export function isAllowedThumbnailUrl(provider: ImportProvider, url: string): bo
 export function shouldAttachGoogleToken(url: string): boolean {
   return isAllowedThumbnailUrl('google-drive', url);
 }
+
+/**
+ * PATCH-216. The strict item-id shape for each provider, in ONE place so
+ * `resolve-selection` and the new `download` route validate identically.
+ */
+export const ITEM_ID_PATTERNS: Record<ImportProvider, RegExp> = {
+  'google-drive': /^[A-Za-z0-9_-]{10,200}$/,
+  'microsoft-onedrive': /^[A-Za-z0-9!_.-]{1,200}$/,
+};

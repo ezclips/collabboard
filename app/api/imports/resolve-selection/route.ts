@@ -27,7 +27,7 @@ import { getAuthenticatedUserId } from '@/lib/imports/auth';
 import { getValidAccessToken } from '@/lib/imports/tokenRefresh';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { generatePreviewPng } from '@/lib/imports/preview';
-import { isAllowedThumbnailUrl, shouldAttachGoogleToken } from '@/lib/imports/providerUrls';
+import { isAllowedThumbnailUrl, shouldAttachGoogleToken, ITEM_ID_PATTERNS } from '@/lib/imports/providerUrls';
 import { resolveGoogleDriveItem } from '@/lib/imports/googleDrive';
 import { resolveOneDriveItem } from '@/lib/imports/oneDrive';
 import type { ImportProvider, ImportKind, ResolvedImportItem } from '@/lib/imports/types';
@@ -35,11 +35,6 @@ import type { ImportProvider, ImportKind, ResolvedImportItem } from '@/lib/impor
 export const runtime = 'nodejs';
 
 const IMAGE_MIME_PREFIXES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
-
-const ITEM_ID_PATTERNS: Record<ImportProvider, RegExp> = {
-  'google-drive': /^[A-Za-z0-9_-]{10,200}$/,
-  'microsoft-onedrive': /^[A-Za-z0-9!_.-]{1,200}$/,
-};
 
 function isImageMime(mimeType: string): boolean {
   return IMAGE_MIME_PREFIXES.some((p) => mimeType.startsWith(p));

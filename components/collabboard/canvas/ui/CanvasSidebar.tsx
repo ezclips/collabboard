@@ -6,6 +6,7 @@ import KnowledgePdfUploader, {
   KNOWLEDGE_PDF_TOOLBAR_INPUT_ID,
   type KnowledgePdfProcessingStatus,
   type KnowledgePdfUploadResult,
+  type KnowledgePdfUploaderHandle,
 } from '@/components/collabboard/KnowledgePdfUploader';
 import {
   DropdownMenu,
@@ -100,6 +101,12 @@ interface CanvasSidebarProps {
    * Required, like the boolean: a host that forgets it must not compile.
    */
   canAddBoardContentPdfNow: () => boolean;
+  /**
+   * PATCH-216. The shell's handle on the Knowledge uploader, so an imported
+   * document can be handed to the SAME uploader a picked file uses. Optional:
+   * a host that never imports is unchanged.
+   */
+  knowledgeUploaderRef?: React.Ref<KnowledgePdfUploaderHandle>;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -131,6 +138,7 @@ export default function CanvasSidebar({
   onKnowledgePdfSettled,
   canAddBoardContentPdf,
   canAddBoardContentPdfNow,
+  knowledgeUploaderRef,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -414,6 +422,7 @@ export default function CanvasSidebar({
           different surface and is deliberately untouched here. */}
       {canAddBoardContentPdf ? (
         <KnowledgePdfUploader
+          ref={knowledgeUploaderRef}
           initiationPolicy="board-content"
           canInitiateUploadNow={canAddBoardContentPdfNow}
           inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}

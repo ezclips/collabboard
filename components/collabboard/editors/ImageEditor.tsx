@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Image as ImageIcon, Loader2, Upload, Check, RotateCw, RotateCcw, FlipHorizontal, Square } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
+import { isDocumentImportable } from '@/lib/imports/documentImport';
 import 'react-image-crop/dist/ReactCrop.css';
 
 interface PexelsPhoto {
@@ -62,6 +63,12 @@ interface ImportData {
 interface ImageEditorProps {
     isOpen: boolean;
     onClose: () => void;
+    /**
+     * PATCH-216. Present ONLY where a picked document can become a readable
+     * Knowledge document. When given, import mode offers the choice between a
+     * link card and a readable document.
+     */
+    onImportAsDocument?: (importData: ImportData) => void;
     onSave: (data: {
         imageUrl: string;
         caption?: string;
@@ -89,6 +96,7 @@ interface ImageEditorProps {
 export default function ImageEditor({
     isOpen,
     onClose,
+    onImportAsDocument,
     onSave,
     initialData,
     defaultTab = 'search',
@@ -96,6 +104,15 @@ export default function ImageEditor({
 }: ImageEditorProps) {
     const isImportMode = initialData?.source === 'import';
     const isEditMode = (editMode || !!initialData?.imageUrl) && !isImportMode;
+    /**
+     * PATCH-216. The choice exists only in import mode, for a supported file,
+     * when the host gave a way to add it as a document. "Link to the original"
+     * is the default.
+     */
+    const importData = initialData?.importData;
+    const canImportAsDocument =
+        isImportMode && !!onImportAsDocument && !!importData && isDocumentImportable(importData.mimeType);
+    const [importChoice, setImportChoice] = useState<'link' | 'document'>('link');
     const [activeTab, setActiveTab] = useState<'search' | 'upload'>(defaultTab as any || 'search');
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<PexelsPhoto[]>([]);
@@ -132,6 +149,22 @@ export default function ImageEditor({
         }
     }, [isOpen, initialData, defaultTab]);
 
+    /**
+     * PATCH-216 FIX. Reset the import choice in its OWN effect, keyed on the
+     * dialog OPENING and on the item's identity -- NOT on `initialData`.
+     *
+     * `CanvasModals` rebuilds `initialData` inline on every render, so the
+     * canvas's constant re-renders (realtime, presence) changed that object's
+     * identity while the dialog was open. Resetting the choice there wiped
+     * "Add as a readable document" back to "Link" a moment after the user
+     * picked it, and the click made an image card instead. Keying on the
+     * import item's identity resets only when a DIFFERENT item is being
+     * imported.
+     */
+    useEffect(() => {
+        if (isOpen) setImportChoice('link');
+    }, [isOpen, importData?.provider, importData?.itemId]);
+
     const handleSearch = async (e?: React.FormEvent) => {
         e?.preventDefault();
         if (!searchQuery.trim()) return;
@@ -158,6 +191,15 @@ export default function ImageEditor({
 
     const handleSave = async () => {
         if (!previewUrl) return;
+
+        // PATCH-216. "Add as a readable document": hand the import to the host
+        // and close. NO image card is created -- `onSave` is deliberately not
+        // called on this branch.
+        if (canImportAsDocument && importChoice === 'document' && importData) {
+            onImportAsDocument?.(importData);
+            onClose();
+            return;
+        }
 
         if (isImportMode && initialData?.importData) {
             onSave({
@@ -450,20 +492,60 @@ export default function ImageEditor({
                     </div>
                 </div>
 
-                <div className="bg-gray-50 p-4 border-t flex justify-between items-center gap-3">
-                    <div className="flex-1">
-                        {isImportMode && (
-                            <span className="text-xs text-gray-400">Clicking this post will open the original file</span>
-                        )}
+                <div className="bg-gray-50 p-4 border-t">
+                    {canImportAsDocument && (
+                        <fieldset className="mb-3 space-y-2">
+                            <label htmlFor="import-choice-link" className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    id="import-choice-link"
+                                    name="import-choice"
+                                    className="mt-0.5"
+                                    checked={importChoice === 'link'}
+                                    onChange={() => setImportChoice('link')}
+                                />
+                                <span>
+                                    <span className="block text-sm font-medium text-gray-800">Link to the original</span>
+                                    <span className="block text-xs text-gray-500">
+                                        A card with a preview that opens the file in {initialData?.importData?.provider === 'google-drive' ? 'Google Drive' : 'OneDrive'}
+                                    </span>
+                                </span>
+                            </label>
+                            <label htmlFor="import-choice-document" className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    id="import-choice-document"
+                                    name="import-choice"
+                                    className="mt-0.5"
+                                    checked={importChoice === 'document'}
+                                    onChange={() => setImportChoice('document')}
+                                />
+                                <span>
+                                    <span className="block text-sm font-medium text-gray-800">Add as a readable document</span>
+                                    <span className="block text-xs text-gray-500">
+                                        A copy is added to this board, so the wiki and the board AI can read it
+                                    </span>
+                                </span>
+                            </label>
+                        </fieldset>
+                    )}
+                    <div className="flex justify-between items-center gap-3">
+                        <div className="flex-1">
+                            {isImportMode && importChoice === 'link' && (
+                                <span className="text-xs text-gray-400">Clicking this post will open the original file</span>
+                            )}
+                        </div>
+                        <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg font-medium">Cancel</button>
+                        <button
+                            onClick={handleSave}
+                            disabled={!previewUrl}
+                            className={`px-6 py-2 text-white rounded-lg font-bold shadow-sm ${previewUrl ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                        >
+                            {canImportAsDocument && importChoice === 'document'
+                                ? 'Add as document'
+                                : isImportMode ? 'Add to Canvas' : isEditMode ? 'Save Changes' : 'Add Image'}
+                        </button>
                     </div>
-                    <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg font-medium">Cancel</button>
-                    <button
-                        onClick={handleSave}
-                        disabled={!previewUrl}
-                        className={`px-6 py-2 text-white rounded-lg font-bold shadow-sm ${previewUrl ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-300 cursor-not-allowed'}`}
-                    >
-                        {isImportMode ? 'Add to Canvas' : isEditMode ? 'Save Changes' : 'Add Image'}
-                    </button>
                 </div>
             </div>
             </div>

@@ -108,6 +108,13 @@ export const KNOWLEDGE_PDF_TOOLBAR_INPUT_ID = 'knowledge-pdf-toolbar-file-input'
 
 export interface KnowledgePdfUploaderHandle {
   openPicker(): void;
+  /**
+   * PATCH-216. Start an upload for a file obtained from somewhere other than the
+   * file input -- an imported document. It goes through the SAME `handleFile` a
+   * picked file does: the same authority gate, size check, notices, upload,
+   * placement and polling. There is no second path.
+   */
+  uploadFile(file: File): void;
 }
 
 /**
@@ -372,6 +379,10 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
   const boardId = params?.id;
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // PATCH-216. The imperative handle's `uploadFile` needs `handleFile`, which is
+  // declared later in this component; a ref carries it without reordering the
+  // body or making `handleFile` depend on a `useCallback` identity.
+  const handleFileRef = useRef<(file: File) => Promise<void>>(async () => {});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<UploadNotice | null>(null);
 
@@ -380,6 +391,11 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       // No DOM click and no state change for a host that may not ingest.
       if (!mayInitiateNow()) return;
       if (!busy) inputRef.current?.click();
+    },
+    uploadFile(file: File) {
+      // The SAME handler the input's onChange calls -- authority gate, size
+      // check, notices, upload, placement and polling all come from there.
+      void handleFileRef.current(file);
     },
   }), [busy, mayInitiateNow]);
 
@@ -512,6 +528,9 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdf
       }
     }
   };
+
+  // Keep the imperative handle's `uploadFile` pointing at the current handler.
+  handleFileRef.current = handleFile;
 
   return (
     <>

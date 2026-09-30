@@ -109,3 +109,45 @@ export async function resolveImportSelection(
     signal,
   });
 }
+
+/**
+ * PATCH-216. The file's BYTES, as a `File` the Knowledge uploader accepts.
+ *
+ * The name comes from `X-Import-Filename` (URI-encoded), the type from the
+ * response's `Content-Type`. A 401 is an `ImportAuthError`, like every other
+ * import call; any other failure carries the server's own `error` string,
+ * bounded to 200 chars so a long body cannot reach the screen.
+ */
+export async function downloadImportedDocument(
+  provider: ImportProvider,
+  itemId: string,
+  signal?: AbortSignal
+): Promise<File> {
+  const headers = await buildAuthHeaders();
+  const response = await fetch(
+    `/api/imports/download?provider=${encodeURIComponent(provider)}&itemId=${encodeURIComponent(itemId)}`,
+    { headers, signal }
+  );
+
+  if (response.status === 401) {
+    throw new ImportAuthError();
+  }
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body?.error === 'string' && body.error.trim().length > 0) {
+        message = body.error.trim().slice(0, 200);
+      }
+    } catch {
+      // Keep the generic message.
+    }
+    throw new Error(message);
+  }
+
+  const encodedName = response.headers.get('X-Import-Filename');
+  const name = encodedName ? decodeURIComponent(encodedName) : `${provider}-${itemId}`;
+  const type = response.headers.get('Content-Type') || 'application/octet-stream';
+  const blob = await response.blob();
+  return new File([blob], name, { type });
+}

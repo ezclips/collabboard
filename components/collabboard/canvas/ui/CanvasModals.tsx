@@ -85,6 +85,19 @@ export interface CanvasModalsProps {
   user: AuthUser | null;
   canvasLayout: string | undefined;
   canvasId: string | undefined;
+  /**
+   * PATCH-216. Present only where a picked document can become a readable
+   * Knowledge document; passed straight to ImageEditor.
+   */
+  onImportAsDocument?: (importData: {
+    provider: 'google-drive' | 'microsoft-onedrive';
+    itemId: string;
+    openUrl: string;
+    mimeType: string;
+    fileName: string;
+    kind: 'image' | 'document';
+    sizeBytes?: number;
+  }) => void;
   // PATCH 8P -- threaded through to NoteEditor's normal/detached comment
   // panel only. Optional/defaulted so every other editor this shell renders
   // is unaffected.
@@ -134,6 +147,7 @@ export default function CanvasModals({
   imageEditorTab,
   user,
   canvasLayout, canvasId,
+  onImportAsDocument,
   commentAccessMode = 'manage',
   saveNote, saveLink, saveTable, saveTodo, saveContainer,
   saveComment, saveImage, saveDrawing,
@@ -471,6 +485,7 @@ export default function CanvasModals({
             setPadletToEdit(null);
           }}
           onSave={saveImage}
+          onImportAsDocument={onImportAsDocument}
           defaultTab={imageEditorTab as "search" | "upload" | undefined}
           editMode={!!padletToEdit && padletToEdit.id !== 'new'}
           initialData={padletToEdit?.type === 'image' ? {

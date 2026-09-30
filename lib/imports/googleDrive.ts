@@ -131,3 +131,17 @@ export async function resolveGoogleDriveItem(
   const file: DriveFile = await res.json();
   return normalise(file);
 }
+
+/**
+ * PATCH-216. The Drive API URL that serves a file's BYTES.
+ *
+ * An ordinary file is downloaded with `alt=media`; a Google Doc has no bytes of
+ * its own and must be EXPORTED, which the caller expresses with
+ * `exportAsPdf`. Both are fetched with the user's bearer token by the download
+ * route -- this only builds the URL, so the token handling lives in one place.
+ */
+export function googleDriveDownloadUrl(fileId: string, exportAsPdf: boolean): string {
+  return exportAsPdf
+    ? `${DRIVE_API}/files/${fileId}/export?mimeType=application/pdf`
+    : `${DRIVE_API}/files/${fileId}?alt=media`;
+}
