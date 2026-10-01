@@ -5,7 +5,8 @@
  * curved links. No DOM, no React.
  */
 
-import { paletteAt, type VisualColor } from './visualPalette';
+import { themeById, themeColor, type VisualTheme } from './visualThemes';
+import type { VisualColor } from './visualPalette';
 import { wrapLabel } from './infographic/text';
 
 export interface MindmapTree {
@@ -193,6 +194,6 @@ export function layoutMindmap(tree: MindmapTree): MindmapLayout {
   };
 }
 
-export function colorForNode(node: MindmapLayoutNode): VisualColor | null {
-  return node.colorIndex < 0 ? null : paletteAt(node.colorIndex);
+export function colorForNode(node: MindmapLayoutNode, theme: VisualTheme = themeById()): VisualColor | null {
+  return node.colorIndex < 0 ? null : themeColor(theme, node.colorIndex);
 }

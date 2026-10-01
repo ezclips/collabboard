@@ -4,7 +4,7 @@ import React from 'react';
 
 import type { MindmapDiagramData } from '@/lib/ai/contracts';
 import { colorForNode, layoutMindmap } from '@/lib/ai/mindmapLayout';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor } from '@/lib/ai/visualThemes';
 
 /**
  * PATCH-234. Our own colourful, two-sided mind map. Drawn from the optional
@@ -13,11 +13,16 @@ import { paletteAt } from '@/lib/ai/visualPalette';
  * text (escaped), never innerHTML.
  */
 function MindmapTreeRenderer({ data }: { data: MindmapDiagramData }) {
+  const theme = themeById(data.theme);
   if (!data.tree) {
     return (
-      <div className="h-full w-full overflow-auto rounded-2xl border border-black/10 bg-white p-5 shadow-sm">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">mindmap</div>
-        <h2 className="mt-1 text-lg font-semibold text-gray-900">{data.title}</h2>
+      <div
+        data-ai-theme-background={theme.id}
+        className="h-full w-full overflow-auto rounded-2xl border border-black/10 p-5 shadow-sm"
+        style={{ backgroundColor: theme.background }}
+      >
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>mindmap</div>
+        <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
       </div>
     );
   }
@@ -25,12 +30,16 @@ function MindmapTreeRenderer({ data }: { data: MindmapDiagramData }) {
   const layout = layoutMindmap(data.tree);
 
   return (
-    <div className="h-full w-full overflow-auto rounded-2xl border border-black/10 bg-white p-5 shadow-sm">
+    <div
+      data-ai-theme-background={theme.id}
+      className="h-full w-full overflow-auto rounded-2xl border border-black/10 p-5 shadow-sm"
+      style={{ backgroundColor: theme.background }}
+    >
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">mindmap</div>
-          <h2 className="mt-1 text-lg font-semibold text-gray-900">{data.title}</h2>
-          {data.explanation && <p className="mt-2 text-sm text-gray-600">{data.explanation}</p>}
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>mindmap</div>
+          <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
+          {data.explanation && <p className="mt-2 text-sm" style={{ color: theme.text }}>{data.explanation}</p>}
         </div>
 
         <svg
@@ -42,7 +51,7 @@ function MindmapTreeRenderer({ data }: { data: MindmapDiagramData }) {
         >
           {/* Links under the nodes. */}
           {layout.links.map((link, index) => {
-            const stroke = paletteAt(link.colorIndex).stroke;
+            const stroke = themeColor(theme, link.colorIndex).stroke;
             return (
               <path
                 key={`link-${index}`}
@@ -56,12 +65,12 @@ function MindmapTreeRenderer({ data }: { data: MindmapDiagramData }) {
           })}
 
           {layout.nodes.map((node) => {
-            const color = colorForNode(node);
+            const color = colorForNode(node, theme);
             const isRoot = node.depth === 0;
             const isBranch = node.depth === 1;
-            const fill = isRoot ? '#1F2937' : isBranch ? (color?.fill ?? '#ffffff') : '#ffffff';
-            const stroke = isRoot ? '#1F2937' : (color?.stroke ?? '#9CA3AF');
-            const textColor = isRoot ? '#ffffff' : (color?.text ?? '#1F2937');
+            const fill = isRoot ? theme.centreFill : (color?.fill ?? theme.background);
+            const stroke = isRoot ? theme.centreFill : (color?.stroke ?? theme.line);
+            const textColor = isRoot ? theme.centreText : (color?.text ?? theme.text);
             const fontSize = isRoot ? 15 : isBranch ? 13 : 12;
             const fontWeight = isRoot ? 700 : isBranch ? 600 : 500;
             const firstLineY = node.y - ((node.lines.length - 1) * 18) / 2 + 5;

@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
+import { VISUAL_THEMES, contrastRatio, type VisualThemeId } from '@/lib/ai/visualThemes';
 import { ALL_TEMPLATES, layoutInfographic, TEMPLATE_RANGE } from './index';
-import { textBox, type InfographicShape } from './shared';
+import { textBox, type InfographicShape, type InfographicLayout } from './shared';
 import { outline, shapeBox, overlaps } from './testUtils';
+
+const THEME_IDS = Object.keys(VISUAL_THEMES) as VisualThemeId[];
+
+/** Everything except colour, so two themed layouts can be compared for geometry. */
+function geometryOnly(layout: InfographicLayout) {
+  return {
+    width: layout.width,
+    height: layout.height,
+    shapes: layout.shapes.map(({ fill: _f, stroke: _s, ...rest }) => rest),
+    texts: layout.texts.map(({ color: _c, ...rest }) => rest),
+    icons: layout.icons?.map(({ color: _c, ...rest }) => rest) ?? null,
+  };
+}
 
 function items(count: number) {
   return Array.from({ length: count }, (_, i) => ({ label: `Item ${i + 1}`, detail: `Detail for item ${i + 1}` }));
@@ -257,5 +271,77 @@ describe('PATCH-237 infographic icons', () => {
       expect(a.icons).toBeUndefined();
       expect(a).toEqual(b);
     });
+  }
+});
+
+describe('PATCH-238 infographic themes', () => {
+  for (const template of ALL_TEMPLATES) {
+    it(`${template}: geometry is identical across every theme`, () => {
+      const o = outline(items(TEMPLATE_RANGE[template].max));
+      const base = geometryOnly(layoutInfographic(template, o, VISUAL_THEMES.classic));
+      for (const id of THEME_IDS) {
+        expect(geometryOnly(layoutInfographic(template, o, VISUAL_THEMES[id])), `${template}/${id}`).toEqual(base);
+      }
+    });
+  }
+
+  it('every design actually paints with the given theme', () => {
+    const teal = VISUAL_THEMES['teal-night'];
+    const o = outline(items(4));
+
+    const stack = layoutInfographic('stack', o, teal);
+    expect(stack.shapes.find((s) => s.id === 'band0')).toMatchObject({ fill: teal.palette[0].fill, stroke: teal.palette[0].stroke });
+
+    const pyramid = layoutInfographic('pyramid', o, teal);
+    expect(pyramid.shapes.find((s) => s.id === 'band0')).toMatchObject({ fill: teal.palette[0].fill, stroke: teal.palette[0].stroke });
+
+    const stairs = layoutInfographic('stairs', o, teal);
+    expect(stairs.shapes.find((s) => s.id === 'step0')).toMatchObject({ fill: teal.palette[0].fill, stroke: teal.palette[0].stroke });
+
+    const funnel = layoutInfographic('funnel', o, teal);
+    expect(funnel.shapes.find((s) => s.id === 'band0')).toMatchObject({ fill: teal.palette[0].fill, stroke: teal.palette[0].stroke });
+
+    const cycle = layoutInfographic('cycle', o, teal);
+    expect(cycle.shapes.find((s) => s.id === 'node0')).toMatchObject({ fill: teal.palette[0].fill, stroke: teal.palette[0].stroke });
+    expect(cycle.shapes.find((s) => s.id === 'arrow0')?.stroke).toBe(teal.line);
+    expect(cycle.texts.find((t) => t.id === 'title')?.color).toBe(teal.title);
+
+    const hub = layoutInfographic('hub', o, teal);
+    expect(hub.shapes.find((s) => s.id === 'hub')).toMatchObject({ fill: teal.centreFill, stroke: teal.centreFill });
+    expect(hub.shapes.find((s) => s.id === 'card0')).toMatchObject({ fill: teal.palette[0].fill, stroke: teal.palette[0].stroke });
+    expect(hub.texts.find((t) => t.id === 'title')?.color).toBe(teal.centreText);
+  });
+});
+
+describe('PATCH-238 Addendum 1 rendered contrast (every theme x every layout)', () => {
+  const RICH = [
+    { label: 'A rather long first label', detail: 'first detail', icon: 'sun' },
+    { label: 'Beta', detail: 'second detail', icon: 'leaf' },
+    { label: 'Gamma', detail: 'third detail', icon: 'snowflake' },
+    { label: 'Delta', detail: 'fourth detail', icon: 'cloud' },
+  ];
+
+  for (const id of THEME_IDS) {
+    for (const template of ALL_TEMPLATES) {
+      it(`${id}/${template}: inside-shape text is 4.5:1, outside text on the ground, icons 3:1`, () => {
+        const theme = VISUAL_THEMES[id];
+        const layout = layoutInfographic(template, outline(RICH), theme);
+
+        for (const text of layout.texts) {
+          if (text.insideShapeId) {
+            const shape = layout.shapes.find((s) => s.id === text.insideShapeId)!;
+            expect(contrastRatio(text.color, shape.fill), `${template}/${id}/${text.id} on its shape`).toBeGreaterThanOrEqual(4.5);
+          } else {
+            expect(contrastRatio(text.color, theme.background), `${template}/${id}/${text.id} on the ground`).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+
+        for (const icon of layout.icons ?? []) {
+          if (!icon.insideShapeId) continue;
+          const shape = layout.shapes.find((s) => s.id === icon.insideShapeId)!;
+          expect(contrastRatio(icon.color, shape.fill), `${template}/${id}/icon ${icon.name}`).toBeGreaterThanOrEqual(3);
+        }
+      });
+    }
   }
 });

@@ -80,6 +80,8 @@ const STORED = {
   meta: { renderer: 'infographic', subtype: 'infographic', prompt: 'p' },
 };
 
+const STORED_TEAL = { ...STORED, data: { ...STORED.data, theme: 'teal-night' } };
+
 describe('PATCH-236 AIComponentEditor stored infographic', () => {
   it('opens the designs with its template selected and makes NO fetch', async () => {
     const fetchMock = vi.fn();
@@ -229,5 +231,31 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     const tiles = c.querySelector('[data-ai-outline-tiles]') as HTMLElement;
     expect(preview.style.maxHeight).toBe('55%');
     expect(tiles.style.minHeight).toBe('220px');
+  });
+
+  it('PATCH-238: choosing a theme makes NO fetch and Save stores it', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const onSave = vi.fn();
+    const c = mount(<AIComponentEditor isOpen initialContent={STORED} initialPrompt="p" onClose={() => {}} onSave={onSave} />);
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+    const teal = c.querySelector('[data-ai-theme="teal-night"]') as HTMLElement;
+    expect(teal.getAttribute('aria-pressed')).toBe('false');
+    click(teal);
+    expect(teal.getAttribute('aria-pressed')).toBe('true');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    click(buttonContaining(c, 'Save to Canvas'));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.aiComponentJson.data.theme).toBe('teal-night');
+  });
+
+  it('PATCH-238: reopening a stored themed infographic preselects its swatch', async () => {
+    const c = mount(<AIComponentEditor isOpen initialContent={STORED_TEAL} initialPrompt="p" onClose={() => {}} onSave={() => {}} />);
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+    const teal = c.querySelector('[data-ai-theme="teal-night"]') as HTMLElement;
+    expect(teal.getAttribute('aria-pressed')).toBe('true');
   });
 });

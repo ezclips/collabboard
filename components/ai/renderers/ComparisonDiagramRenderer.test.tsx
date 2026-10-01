@@ -5,7 +5,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ComparisonDiagramData } from '@/lib/ai/contracts';
+import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import ComparisonDiagramRenderer from './ComparisonDiagramRenderer';
+
+function rgb(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -57,5 +63,25 @@ describe('PATCH-234 ComparisonDiagramRenderer', () => {
 
     expect(c.textContent).toContain('Cats');
     expect(c.textContent).toContain('Loyal');
+  });
+
+  it('PATCH-238: a chosen theme paints the ground and swaps the palette', () => {
+    const c = mount(<ComparisonDiagramRenderer data={{ ...data, theme: 'teal-night' }} />);
+    const block = c.querySelector('[data-ai-theme-background]') as HTMLElement;
+    expect(block.style.backgroundColor).toBe('rgb(30, 77, 70)'); // #1E4D46
+    const band0 = c.querySelectorAll('[data-ai-comparison-band]')[0] as HTMLElement;
+    expect(band0.style.borderTopColor).toBe('rgb(94, 234, 212)'); // #5EEAD4
+    expect(c.textContent).toContain('Cats');
+  });
+
+  it('PATCH-238 Addendum 1: every theme colours the card body with its palette entry', () => {
+    for (const id of Object.keys(VISUAL_THEMES) as VisualThemeId[]) {
+      const entry = VISUAL_THEMES[id].palette[0];
+      const c = mount(<ComparisonDiagramRenderer data={{ ...data, theme: id }} />);
+      const col0 = c.querySelectorAll('[data-ai-comparison-column]')[0] as HTMLElement;
+      expect(col0.style.backgroundColor, id).toBe(rgb(entry.fill));
+      expect((col0.querySelector('h3') as HTMLElement).style.color, id).toBe(rgb(entry.text));
+      expect((col0.querySelector('[data-ai-comparison-body]') as HTMLElement).style.color, id).toBe(rgb(entry.detail));
+    }
   });
 });

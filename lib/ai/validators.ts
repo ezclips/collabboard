@@ -15,6 +15,18 @@ import type {
   WorkshopBoardData,
 } from './contracts';
 import { parseOutline } from './outline';
+import { VISUAL_THEMES, type VisualThemeId } from './visualThemes';
+
+/**
+ * PATCH-238. An optional colour theme. A known id is kept; an unknown string is
+ * dropped to undefined so a stored post is never rejected over its theme.
+ */
+const ThemeSchema = z
+  .string()
+  .optional()
+  .transform((value): VisualThemeId | undefined =>
+    value && Object.prototype.hasOwnProperty.call(VISUAL_THEMES, value) ? (value as VisualThemeId) : undefined,
+  );
 
 const LessonBoardSectionSchema = z.object({
   title: z.string().min(1),
@@ -114,6 +126,7 @@ export const MindmapDiagramSchema: z.ZodType<MindmapDiagramData> = z.object({
   code: z.string().min(1),
   explanation: z.string().optional(),
   tree: MindmapTreeSchema.optional(),
+  theme: ThemeSchema,
 });
 
 export const PieChartDiagramSchema: z.ZodType<PieChartDiagramData> = z.object({
@@ -140,6 +153,7 @@ export const TimelineDiagramSchema: z.ZodType<TimelineDiagramData> = z.object({
   title: z.string().min(1),
   renderer: z.literal('timeline'),
   items: z.array(TimelineItemSchema).min(1),
+  theme: ThemeSchema,
 });
 
 export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.object({
@@ -148,6 +162,7 @@ export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.objec
   title: z.string().min(1),
   renderer: z.literal('comparison'),
   columns: z.array(ComparisonColumnSchema).min(2),
+  theme: ThemeSchema,
 });
 
 /**
@@ -175,6 +190,7 @@ export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = z.obj
     }
   }),
   explanation: z.string().optional(),
+  theme: ThemeSchema,
 });
 
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({

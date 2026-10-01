@@ -1,5 +1,5 @@
 import type { VisualOutline } from '@/lib/ai/outline';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
 import { labelBlock, LABEL_FONT, DETAIL_FONT, type InfographicLayout } from './shared';
 
 /**
@@ -7,7 +7,7 @@ import { labelBlock, LABEL_FONT, DETAIL_FONT, type InfographicLayout } from './s
  * alternating left/right. Each item is a card (label + detail) sized to whole
  * words; the label sits inside its card. 3-8 items.
  */
-export function layoutHub(outline: VisualOutline): InfographicLayout {
+export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById()): InfographicLayout {
   const items = outline.items.slice(0, 8);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
@@ -29,13 +29,13 @@ export function layoutHub(outline: VisualOutline): InfographicLayout {
   const rowGap = maxCardH + 24;
   const cy = 16 + ((rows - 1) * rowGap) / 2 + maxCardH / 2;
 
-  shapes.push({ id: 'hub', kind: 'circle', cx, cy, r: centreR, fill: '#1F2937', stroke: '#1F2937', colorIndex: -1 });
+  shapes.push({ id: 'hub', kind: 'circle', cx, cy, r: centreR, fill: theme.centreFill, stroke: theme.centreFill, colorIndex: -1 });
   texts.push({
     id: 'title',
     x: cx,
     y: cy,
     lines: labelBlock(outline.title, centreR * 1.4).labelLines,
-    color: '#ffffff',
+    color: theme.centreText,
     fontSize: 13,
     fontWeight: 700,
     anchor: 'middle',
@@ -43,7 +43,7 @@ export function layoutHub(outline: VisualOutline): InfographicLayout {
   });
 
   const place = (item: VisualOutline['items'][number], originalIndex: number, side: 'left' | 'right', row: number) => {
-    const color = paletteAt(originalIndex);
+    const color = themeColor(theme, originalIndex);
     const cardX = side === 'right' ? cx + centreR + gapX : cx - centreR - gapX - cardW;
     const y = 16 + row * rowGap;
     const label = labelBlock(item.label, cardW - 24);
@@ -103,7 +103,7 @@ export function layoutHub(outline: VisualOutline): InfographicLayout {
         x: textX,
         y: labelY + label.height / 2 + 10 + detail.height / 2,
         lines: detail.labelLines,
-        color: '#374151',
+        color: color.detail,
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor,

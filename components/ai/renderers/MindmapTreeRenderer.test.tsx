@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { MindmapDiagramData } from '@/lib/ai/contracts';
 import { VISUAL_PALETTE } from '@/lib/ai/visualPalette';
+import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import MindmapTreeRenderer from './MindmapTreeRenderer';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -63,5 +64,29 @@ describe('PATCH-234 MindmapTreeRenderer', () => {
     const rect = c.querySelector('[data-mindmap-node="b0"] rect')!;
     expect(rect.getAttribute('fill')).toBe(VISUAL_PALETTE[0].fill);
     expect(rect.getAttribute('stroke')).toBe(VISUAL_PALETTE[0].stroke);
+  });
+
+  it('PATCH-238: teal-night paints the theme background and keeps the labels', () => {
+    const c = mount(
+      <MindmapTreeRenderer
+        data={{ ...data({ label: 'Root name', children: [{ label: 'Branch A' }] }), theme: 'teal-night' }}
+      />,
+    );
+    const block = c.querySelector('[data-ai-theme-background]') as HTMLElement;
+    expect(block.style.backgroundColor).toBe('rgb(30, 77, 70)'); // #1E4D46
+    expect(c.textContent).toContain('Root name');
+    expect(c.textContent).toContain('Branch A');
+  });
+
+  it('PATCH-238 Addendum 1: every theme colours branch and leaf nodes with their palette entry', () => {
+    const tree = { label: 'Root', children: [{ label: 'Branch A', children: [{ label: 'Leaf A1' }] }] };
+    for (const id of Object.keys(VISUAL_THEMES) as VisualThemeId[]) {
+      const entry = VISUAL_THEMES[id].palette[0];
+      const c = mount(<MindmapTreeRenderer data={{ ...data(tree), theme: id }} />);
+      for (const nodeId of ['b0', 'b0l0']) {
+        expect((c.querySelector(`[data-mindmap-node="${nodeId}"] rect`) as SVGRectElement).getAttribute('fill'), `${id}/${nodeId}`).toBe(entry.fill);
+        expect((c.querySelector(`[data-mindmap-node="${nodeId}"] text`) as SVGTextElement).getAttribute('fill'), `${id}/${nodeId}`).toBe(entry.text);
+      }
+    }
   });
 });

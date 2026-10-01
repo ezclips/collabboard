@@ -1,5 +1,5 @@
 import type { VisualOutline } from '@/lib/ai/outline';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
 import { labelBlock, sizeText, LABEL_FONT, DETAIL_FONT, type InfographicLayout } from './shared';
 
 /**
@@ -8,7 +8,7 @@ import { labelBlock, sizeText, LABEL_FONT, DETAIL_FONT, type InfographicLayout }
  * moved OUT as the bold first line of its detail block (the band keeps a number).
  * 3-7 items.
  */
-export function layoutPyramid(outline: VisualOutline): InfographicLayout {
+export function layoutPyramid(outline: VisualOutline, theme: VisualTheme = themeById()): InfographicLayout {
   const items = outline.items.slice(0, 7);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
@@ -26,7 +26,7 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
     const y1 = top + ((index + 1) * height) / items.length;
     const halfTop = (halfWidth * (index + 0.15)) / items.length;
     const halfBottom = (halfWidth * (index + 1.15)) / items.length;
-    const color = paletteAt(index);
+    const color = themeColor(theme, index);
     shapes.push({
       id: `band${index}`,
       kind: 'polygon',
@@ -77,10 +77,11 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
         x: cx,
         y: (y0 + y1) / 2 + 4,
         lines: [String(index + 1)],
-        color: '#ffffff',
+        color: color.text,
         fontSize: 12,
         fontWeight: 700,
-        anchor: 'middle'
+        anchor: 'middle',
+        insideShapeId: `band${index}`,
       });
     }
 
@@ -97,7 +98,7 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
         x: detailTextX,
         y: (y0 + y1) / 2,
         lines: allLines,
-        color: '#374151',
+        color: theme.text,
         fontSize: DETAIL_FONT,
         fontWeight: fitsInside ? 400 : 600,
         anchor: 'start',

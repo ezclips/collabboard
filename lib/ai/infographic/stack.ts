@@ -1,12 +1,12 @@
 import type { VisualOutline } from '@/lib/ai/outline';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
 import { labelBlock, DETAIL_FONT, LABEL_FONT, type InfographicLayout } from './shared';
 
 /**
  * PATCH-236 "stack": layered bands, the FIRST item on top, label inside its band
  * and detail to the right. Bands and the canvas grow to fit whole-word labels.
  */
-export function layoutStack(outline: VisualOutline): InfographicLayout {
+export function layoutStack(outline: VisualOutline, theme: VisualTheme = themeById()): InfographicLayout {
   const items = outline.items.slice(0, 8);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
@@ -23,7 +23,7 @@ export function layoutStack(outline: VisualOutline): InfographicLayout {
   items.forEach((item, index) => {
     const block = labelBlock(item.label, labelMax);
     const bandH = Math.max(40, block.height + 20);
-    const color = paletteAt(index);
+    const color = themeColor(theme, index);
     shapes.push({
       id: `band${index}`,
       kind: 'rect',
@@ -69,7 +69,7 @@ export function layoutStack(outline: VisualOutline): InfographicLayout {
         x: dx,
         y: detailY,
         lines: detailBlock.labelLines,
-        color: '#374151',
+        color: theme.text,
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor: 'start',

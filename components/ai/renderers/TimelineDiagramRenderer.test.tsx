@@ -5,7 +5,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { TimelineDiagramData } from '@/lib/ai/contracts';
+import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import TimelineDiagramRenderer from './TimelineDiagramRenderer';
+
+function rgb(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -52,5 +58,25 @@ describe('PATCH-234 TimelineDiagramRenderer', () => {
 
     expect(c.textContent).toContain('Kickoff');
     expect(c.textContent).toContain('Scope the work');
+  });
+
+  it('PATCH-238: a chosen theme paints the ground and swaps the palette', () => {
+    const c = mount(<TimelineDiagramRenderer data={{ ...data, theme: 'teal-night' }} />);
+    const block = c.querySelector('[data-ai-theme-background]') as HTMLElement;
+    expect(block.style.backgroundColor).toBe('rgb(30, 77, 70)'); // #1E4D46
+    const dots = c.querySelectorAll('[data-ai-timeline-dot]') as NodeListOf<HTMLElement>;
+    expect(dots[0].style.backgroundColor).toBe('rgb(94, 234, 212)'); // #5EEAD4
+    expect(c.textContent).toContain('Kickoff');
+  });
+
+  it('PATCH-238 Addendum 1: every theme colours the card body with its palette entry', () => {
+    for (const id of Object.keys(VISUAL_THEMES) as VisualThemeId[]) {
+      const entry = VISUAL_THEMES[id].palette[0];
+      const c = mount(<TimelineDiagramRenderer data={{ ...data, theme: id }} />);
+      const body = c.querySelector('[data-ai-timeline-body]') as HTMLElement;
+      expect(body.style.backgroundColor, id).toBe(rgb(entry.fill));
+      expect((c.querySelector('[data-ai-timeline-title]') as HTMLElement).style.color, id).toBe(rgb(entry.text));
+      expect((c.querySelector('[data-ai-timeline-description]') as HTMLElement).style.color, id).toBe(rgb(entry.detail));
+    }
   });
 });

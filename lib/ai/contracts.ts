@@ -1,4 +1,5 @@
 import type { CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import type { VisualThemeId } from './visualThemes';
 
 export type AIMode =
   | 'lesson_board'
@@ -106,6 +107,8 @@ export interface MindmapDiagramData extends DiagramDataBase {
     label: string;
     children?: Array<{ label: string; children?: Array<{ label: string }> }>;
   };
+  /** PATCH-238. The tree renderer's colour theme; absent means classic. */
+  theme?: VisualThemeId;
 }
 
 export interface ChartDataPoint {
@@ -137,6 +140,8 @@ export interface TimelineDiagramData extends DiagramDataBase {
   subtype: 'timeline';
   renderer: 'timeline';
   items: TimelineItem[];
+  /** PATCH-238. The colour theme; absent means classic. */
+  theme?: VisualThemeId;
 }
 
 export interface ComparisonColumn {
@@ -148,6 +153,8 @@ export interface ComparisonDiagramData extends DiagramDataBase {
   subtype: 'comparison';
   renderer: 'comparison';
   columns: ComparisonColumn[];
+  /** PATCH-238. The colour theme; absent means classic. */
+  theme?: VisualThemeId;
 }
 
 /**
@@ -162,6 +169,8 @@ export interface InfographicDiagramData extends DiagramDataBase {
   template: InfographicTemplate;
   outline: import('./outline').VisualOutline;
   explanation?: string;
+  /** PATCH-238. The colour theme; absent means classic. */
+  theme?: VisualThemeId;
 }
 
 // Mirrors CaptionStyle (lib/domain/canvas/captionStyle.ts) -- the same

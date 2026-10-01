@@ -5,6 +5,7 @@ import React from 'react';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { VisualOutline } from '@/lib/ai/outline';
+import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from './OutlineTextEditor';
 /**
  * PATCH-236/237. The Suggestions panel for Show options: one large preview of
@@ -27,6 +28,9 @@ interface OutlineSuggestionsPanelProps {
   flowDirection?: 'LR' | 'TD';
   onFlowDirectionChange?: (direction: 'LR' | 'TD') => void;
   onApplyCustomize?: (options: { detail?: 'auto' | 'summary' | 'detailed'; keepWording?: boolean; visualHint?: string }) => void;
+  /** PATCH-238. Colour themes. */
+  theme?: VisualThemeId;
+  onThemeChange?: (id: VisualThemeId) => void;
 }
 
 const TILE_WIDTH = 160;
@@ -40,12 +44,14 @@ function ThumbButton({
   best,
   envelope,
   onSelect,
+  note,
 }: {
   option: SuggestionOption;
   isSelected: boolean;
   best: boolean;
   envelope: unknown;
   onSelect: () => void;
+  note?: string;
 }) {
   // PATCH-236 Addendum 4: a fixed 560px natural render, scaled by tile/560 (≤1).
   const innerW = TILE_WIDTH - 4;
@@ -90,6 +96,11 @@ function ThumbButton({
           </span>
         )}
       </div>
+      {note && (
+        <div data-ai-theme-note="true" className="px-3 pb-1.5 text-[9px] text-gray-500">
+          {note}
+        </div>
+      )}
     </button>
   );
 }
@@ -104,6 +115,8 @@ export default function OutlineSuggestionsPanel({
   flowDirection = 'LR',
   onFlowDirectionChange,
   onApplyCustomize,
+  theme = 'classic',
+  onThemeChange,
 }: OutlineSuggestionsPanelProps) {
   const selected = options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
   const effectiveSelectedKey = selected?.key ?? null;
@@ -160,6 +173,7 @@ export default function OutlineSuggestionsPanel({
               isSelected={effectiveSelectedKey === option.key}
               envelope={envelopeFor(option)}
               onSelect={() => onSelect(option.key)}
+              note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
             />
           ))}
         </div>
@@ -176,12 +190,38 @@ export default function OutlineSuggestionsPanel({
                   isSelected={effectiveSelectedKey === option.key}
                   envelope={envelopeFor(option)}
                   onSelect={() => onSelect(option.key)}
+                  note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
                 />
               ))}
             </div>
           </div>
         ))}
       </div>
+
+      {/* PATCH-238: Colours -- local only, re-derives every option with a theme. */}
+      {onThemeChange && (
+        <div data-ai-colours="true" className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colours</span>
+          {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
+            const swatch = VISUAL_THEMES[id];
+            return (
+              <button
+                key={id}
+                type="button"
+                data-ai-theme={id}
+                aria-label={swatch.name}
+                aria-pressed={theme === id}
+                title={swatch.name}
+                onClick={() => onThemeChange(id)}
+                className={`h-5 w-5 rounded-full border ${theme === id ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-300'}`}
+                style={{
+                  background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* PATCH-237: Customize -- one new AI call only when Apply is pressed. */}
       <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-3">

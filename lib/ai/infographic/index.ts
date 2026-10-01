@@ -1,5 +1,6 @@
 import type { InfographicTemplate } from '@/lib/ai/contracts';
 import type { VisualOutline } from '@/lib/ai/outline';
+import { themeById, type VisualTheme } from '@/lib/ai/visualThemes';
 import { fitLayout, type InfographicLayout } from './shared';
 import { layoutStack } from './stack';
 import { layoutPyramid } from './pyramid';
@@ -10,7 +11,7 @@ import { layoutHub } from './hub';
 
 export type { InfographicLayout, InfographicShape, InfographicText, InfographicIcon } from './shared';
 
-const LAYOUTS: Record<InfographicTemplate, (outline: VisualOutline) => InfographicLayout> = {
+const LAYOUTS: Record<InfographicTemplate, (outline: VisualOutline, theme: VisualTheme) => InfographicLayout> = {
   stack: layoutStack,
   pyramid: layoutPyramid,
   stairs: layoutStairs,
@@ -19,9 +20,13 @@ const LAYOUTS: Record<InfographicTemplate, (outline: VisualOutline) => Infograph
   hub: layoutHub,
 };
 
-export function layoutInfographic(template: InfographicTemplate, outline: VisualOutline): InfographicLayout {
+export function layoutInfographic(
+  template: InfographicTemplate,
+  outline: VisualOutline,
+  theme: VisualTheme = themeById(),
+): InfographicLayout {
   // PATCH-236 Addendum 4: shift every design so all anchor-aware text boxes fit.
-  return fitLayout(LAYOUTS[template](outline));
+  return fitLayout(LAYOUTS[template](outline, theme));
 }
 
 /** The item-count range each template can hold. */

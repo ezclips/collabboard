@@ -1,5 +1,5 @@
 import type { VisualOutline } from '@/lib/ai/outline';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
 import { labelBlock, sizeText, LABEL_FONT, DETAIL_FONT, type InfographicLayout } from './shared';
 
 /**
@@ -7,7 +7,7 @@ import { labelBlock, sizeText, LABEL_FONT, DETAIL_FONT, type InfographicLayout }
  * that fits sits inside its band; one that does not is moved OUT as the bold
  * first line of its detail block (the band keeps a number). 3-6 items.
  */
-export function layoutFunnel(outline: VisualOutline): InfographicLayout {
+export function layoutFunnel(outline: VisualOutline, theme: VisualTheme = themeById()): InfographicLayout {
   const items = outline.items.slice(0, 6);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
@@ -25,7 +25,7 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
     const y1 = y0 + bandH - 6;
     const topW = maxW - ((maxW - minW) * index) / Math.max(1, items.length - 1);
     const botW = maxW - ((maxW - minW) * (index + 1)) / Math.max(1, items.length - 1);
-    const color = paletteAt(index);
+    const color = themeColor(theme, index);
     shapes.push({
       id: `band${index}`,
       kind: 'polygon',
@@ -74,10 +74,11 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
         x: cx,
         y: (y0 + y1) / 2 + 4,
         lines: [String(index + 1)],
-        color: '#ffffff',
+        color: color.text,
         fontSize: 12,
         fontWeight: 700,
-        anchor: 'middle'
+        anchor: 'middle',
+        insideShapeId: `band${index}`,
       });
     }
 
@@ -91,7 +92,7 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
         x: detailTextX,
         y: (y0 + y1) / 2,
         lines: allLines,
-        color: '#374151',
+        color: theme.text,
         fontSize: DETAIL_FONT,
         fontWeight: fitsInside ? 400 : 600,
         anchor: 'start',

@@ -58,7 +58,6 @@ export interface InfographicIcon {
 }
 
 export const INFO_LINE_HEIGHT = 18;
-export const ROOT_TEXT = '#1F2937';
 
 export const TITLE_FONT = 15;
 export const LABEL_FONT = 13;

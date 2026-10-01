@@ -4,6 +4,7 @@ import React from 'react';
 
 import type { InfographicDiagramData } from '@/lib/ai/contracts';
 import { layoutInfographic, type InfographicShape, type InfographicText, type InfographicIcon } from '@/lib/ai/infographic';
+import { themeById } from '@/lib/ai/visualThemes';
 import { getVisualIcon } from './visualIconMap';
 
 /**
@@ -60,15 +61,20 @@ function iconEl(icon: InfographicIcon) {
 }
 
 function InfographicRenderer({ data }: { data: InfographicDiagramData }) {
-  const layout = layoutInfographic(data.template, data.outline);
+  const theme = themeById(data.theme);
+  const layout = layoutInfographic(data.template, data.outline, theme);
 
   return (
-    <div className="h-full w-full overflow-auto rounded-2xl border border-black/10 bg-white p-5 shadow-sm">
+    <div
+      data-ai-theme-background={theme.id}
+      className="h-full w-full overflow-auto rounded-2xl border border-black/10 p-5 shadow-sm"
+      style={{ backgroundColor: theme.background }}
+    >
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">infographic</div>
-          <h2 className="mt-1 text-lg font-semibold text-gray-900">{data.title}</h2>
-          {data.explanation && <p className="mt-2 text-sm text-gray-600">{data.explanation}</p>}
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>infographic</div>
+          <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
+          {data.explanation && <p className="mt-2 text-sm" style={{ color: theme.text }}>{data.explanation}</p>}
         </div>
         <svg
           viewBox={`0 0 ${layout.width} ${layout.height}`}

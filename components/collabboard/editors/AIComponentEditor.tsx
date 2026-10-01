@@ -26,6 +26,7 @@ import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
+import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from './OutlineTextEditor';
 import OutlineSuggestionsPanel from './OutlineSuggestionsPanel';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
@@ -126,6 +127,18 @@ function readStoredInfographic(initialContent?: unknown): InfographicDiagramData
     return data as InfographicDiagramData;
   }
   return null;
+}
+
+/** PATCH-238. Subtypes that draw with a theme; Flow/Mermaid keep their colours. */
+const THEMED_SUBTYPES: ReadonlySet<string> = new Set(['infographic', 'mindmap', 'comparison', 'timeline']);
+
+/**
+ * PATCH-238. Stamps the chosen theme onto a themed diagram's envelope data.
+ * Classic (and Flow) are left untouched so a plain picture is byte-identical.
+ */
+function applyThemeToData<T extends { subtype: string }>(data: T, theme: VisualThemeId): T {
+  if (!THEMED_SUBTYPES.has(data.subtype) || theme === 'classic') return data;
+  return { ...data, theme } as T;
 }
 
 function inferInitialSelection(initialContent?: unknown): {
@@ -349,6 +362,8 @@ export default function AIComponentEditor({
   // PATCH-237 Addendum 1. The Customize hint named on the last Apply, kept so
   // later local re-ranks (Edit text) rank the named design first too.
   const [activeVisualHint, setActiveVisualHint] = useState<string | undefined>(undefined);
+  // PATCH-238. The chosen colour theme; local to the picture, saved with it.
+  const [visualTheme, setVisualTheme] = useState<VisualThemeId>('classic');
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
   const [outlineGeneratedBy, setOutlineGeneratedBy] = useState<AIGenerationAttribution | null>(null);
   const [outlineCreatedAt, setOutlineCreatedAt] = useState<string | null>(null);
@@ -385,6 +400,7 @@ export default function AIComponentEditor({
     setShowOptions(false);
     setOutlineOptions([]);
     setActiveVisualHint(undefined);
+    setVisualTheme('classic');
     setSelectedOptionKey(null);
     setOutlineGeneratedBy(null);
     setOutlineCreatedAt(null);
@@ -414,6 +430,8 @@ export default function AIComponentEditor({
       setShowOptions(true);
       setOutlineOptions(options);
       setActiveOutline(storedInfographic.outline);
+      // PATCH-238: preselect the stored theme (unknown/absent -> classic).
+      setVisualTheme(themeById(storedInfographic.theme).id);
       setSelectedOptionKey(`infographic:${storedInfographic.template}`);
       setOutlineGeneratedBy(readAIGenerationAttribution(initialContent) ?? null);
       setOutlineCreatedAt(new Date().toISOString());
@@ -469,14 +487,19 @@ export default function AIComponentEditor({
       if (option.key !== 'flow' || option.envelopeData.subtype !== 'flowchart' || !activeOutline) return option;
       return { ...option, envelopeData: { ...option.envelopeData, code: flowCode(activeOutline, flowDirection) } };
     });
-  const displayOptions = directionOptions(outlineOptions);
+  // PATCH-238: stamp the chosen theme onto every themed option (local, no AI).
+  const themedOptions = outlineOptions.map((option) => ({
+    ...option,
+    envelopeData: applyThemeToData(option.envelopeData, visualTheme),
+  }));
+  const displayOptions = directionOptions(themedOptions);
 
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
   const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => ({
     mode: 'diagram',
     version: 1,
-    data: option.envelopeData,
+    data: applyThemeToData(option.envelopeData, visualTheme),
     meta: {
       renderer: option.envelopeData.renderer,
       subtype: option.envelopeData.subtype,
@@ -1349,6 +1372,8 @@ export default function AIComponentEditor({
                   flowDirection={flowDirection}
                   onFlowDirectionChange={setFlowDirection}
                   onApplyCustomize={(options) => { void generate(options); }}
+                  theme={visualTheme}
+                  onThemeChange={setVisualTheme}
                 />
               )}
 

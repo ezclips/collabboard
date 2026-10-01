@@ -66,4 +66,12 @@ describe('PATCH-236 InfographicRenderer', () => {
       expect(c.querySelector(`[data-infographic-svg="${template}"]`)).not.toBeNull();
     });
   }
+
+  it('PATCH-238: teal-night paints the theme background and keeps the labels', () => {
+    const c = mount(<InfographicRenderer data={{ ...data('stack'), theme: 'teal-night' }} />);
+    const block = c.querySelector('[data-ai-theme-background]') as HTMLElement;
+    expect(block.getAttribute('data-ai-theme-background')).toBe('teal-night');
+    expect(block.style.backgroundColor).toBe('rgb(30, 77, 70)'); // #1E4D46
+    expect(c.textContent).toContain('Evaporation');
+  });
 });

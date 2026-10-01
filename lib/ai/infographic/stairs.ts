@@ -1,5 +1,5 @@
 import type { VisualOutline } from '@/lib/ai/outline';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
 import { labelBlock, DETAIL_FONT, LABEL_FONT, type InfographicLayout } from './shared';
 
 /**
@@ -8,7 +8,7 @@ import { labelBlock, DETAIL_FONT, LABEL_FONT, type InfographicLayout } from './s
  * to its wrapped label; steps rise by a fixed amount; the canvas height includes
  * the tallest label+detail column. 3-7 items.
  */
-export function layoutStairs(outline: VisualOutline): InfographicLayout {
+export function layoutStairs(outline: VisualOutline, theme: VisualTheme = themeById()): InfographicLayout {
   const items = outline.items.slice(0, 7);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
@@ -31,7 +31,7 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
 
   items.forEach((item, index) => {
     const { block, detail } = boxes[index];
-    const color = paletteAt(index);
+    const color = themeColor(theme, index);
     const x = 16 + index * stepW;
     const boxH = block.height + 16;
     const y = baseY - (index + 1) * rise - (maxLabelH - boxH);
@@ -63,10 +63,11 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
       x: x + 16,
       y: y + boxH / 2 + 4,
       lines: [String(index + 1)],
-      color: '#ffffff',
+      color: color.text,
       fontSize: 12,
       fontWeight: 700,
-      anchor: 'middle'
+      anchor: 'middle',
+      insideShapeId: `step${index}`,
     });
     texts.push({
       id: `label${index}`,
@@ -99,7 +100,7 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
         x,
         y: detailTop + detail.height / 2,
         lines: detail.labelLines,
-        color: '#374151',
+        color: theme.text,
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor: 'start',

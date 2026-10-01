@@ -1,5 +1,5 @@
 import type { VisualOutline } from '@/lib/ai/outline';
-import { paletteAt } from '@/lib/ai/visualPalette';
+import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
 import { labelBlock, sizeText, LABEL_FONT, DETAIL_FONT, type InfographicLayout } from './shared';
 
 /**
@@ -8,7 +8,7 @@ import { labelBlock, sizeText, LABEL_FONT, DETAIL_FONT, type InfographicLayout }
  * radius fits its widest whole-word label (min 34); the ring grows so nodes and
  * their outward detail blocks do not overlap. 3-8 items.
  */
-export function layoutCycle(outline: VisualOutline): InfographicLayout {
+export function layoutCycle(outline: VisualOutline, theme: VisualTheme = themeById()): InfographicLayout {
   const items = outline.items.slice(0, 8);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
@@ -33,7 +33,7 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
     const angle = -Math.PI / 2 + (index * 2 * Math.PI) / n;
     const nx = cx + radius * Math.cos(angle);
     const ny = cy + radius * Math.sin(angle);
-    const color = paletteAt(index);
+    const color = themeColor(theme, index);
     shapes.push({
       id: `node${index}`,
       kind: 'circle',
@@ -79,7 +79,7 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
         x: dx,
         y: dy,
         lines: detail.labelLines,
-        color: '#374151',
+        color: theme.text,
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor,
@@ -104,7 +104,7 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
       kind: 'path',
       d: `M ${sx},${sy} A ${radius},${radius} 0 0 1 ${ex},${ey}`,
       fill: 'none',
-      stroke: '#9CA3AF',
+      stroke: theme.line,
       strokeWidth: 2,
       colorIndex: index,
     });
@@ -119,8 +119,8 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
       id: `arrowHead${index}`,
       kind: 'polygon',
       points: `${ex},${ey} ${hx1},${hy1} ${hx2},${hy2}`,
-      fill: '#9CA3AF',
-      stroke: '#9CA3AF',
+      fill: theme.line,
+      stroke: theme.line,
       colorIndex: index,
     });
   }
@@ -130,7 +130,7 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
     x: cx,
     y: cy,
     lines: labelBlock(outline.title, radius * 1.4).labelLines,
-    color: '#1F2937',
+    color: theme.title,
     fontSize: 14,
     fontWeight: 700,
     anchor: 'middle',
