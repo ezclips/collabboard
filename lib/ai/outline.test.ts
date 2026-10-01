@@ -88,3 +88,19 @@ describe('PATCH-236 outline kind', () => {
     expect(parseOutline({ title: 'T', items }).kind).toBe('list');
   });
 });
+
+describe('PATCH-237 outline icons', () => {
+  it('keeps a listed icon and drops an unlisted one', () => {
+    const out = parseOutline({
+      title: 'T',
+      items: [
+        { label: 'A', icon: 'sun' },
+        { label: 'B', icon: 'not-a-real-icon' },
+        { label: 'C' },
+      ],
+    });
+    expect(out.items[0].icon).toBe('sun');
+    expect(out.items[1].icon).toBeUndefined();
+    expect(out.items[2].icon).toBeUndefined();
+  });
+});

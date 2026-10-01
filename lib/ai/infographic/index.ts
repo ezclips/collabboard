@@ -8,7 +8,7 @@ import { layoutCycle } from './cycle';
 import { layoutFunnel } from './funnel';
 import { layoutHub } from './hub';
 
-export type { InfographicLayout, InfographicShape, InfographicText } from './shared';
+export type { InfographicLayout, InfographicShape, InfographicText, InfographicIcon } from './shared';
 
 const LAYOUTS: Record<InfographicTemplate, (outline: VisualOutline) => InfographicLayout> = {
   stack: layoutStack,

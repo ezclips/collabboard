@@ -11,6 +11,7 @@ export function layoutHub(outline: VisualOutline): InfographicLayout {
   const items = outline.items.slice(0, 8);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
+  const icons: InfographicLayout['icons'] = [];
 
   const cardW = 190;
   const gapX = 70;
@@ -75,9 +76,19 @@ export function layoutHub(outline: VisualOutline): InfographicLayout {
     const textX = side === 'right' ? cardX + 12 : cardX + cardW - 12;
     const anchor = side === 'right' ? 'start' : 'end';
     const labelY = y + 14 + label.height / 2;
+    if (item.icon) {
+      icons!.push({
+        name: item.icon,
+        x: side === 'right' ? cardX + 10 : cardX + cardW - 28,
+        y: labelY - 9,
+        size: 18,
+        color: color.text,
+        insideShapeId: `card${originalIndex}`,
+      });
+    }
     texts.push({
       id: `label${originalIndex}`,
-      x: textX,
+      x: item.icon ? (side === 'right' ? textX + 26 : textX - 26) : textX,
       y: labelY,
       lines: label.labelLines,
       color: color.text,
@@ -118,5 +129,6 @@ export function layoutHub(outline: VisualOutline): InfographicLayout {
     height: 16 + rows * rowGap,
     shapes,
     texts,
+    icons: icons!.length ? icons : undefined,
   };
 }

@@ -52,9 +52,9 @@ function mindmapCode(outline: VisualOutline): string {
   return lines.join('\n');
 }
 
-function flowchartCode(outline: VisualOutline): string {
+function flowchartCode(outline: VisualOutline, direction: 'LR' | 'TD' = 'LR'): string {
   const items = outline.items.slice(0, 8);
-  const lines = ['flowchart LR'];
+  const lines = [`flowchart ${direction}`];
   items.forEach((item, index) => {
     lines.push(`  N${index}${quotedRound(item.label)}`);
   });
@@ -106,6 +106,10 @@ function comparison(outline: VisualOutline): ComparisonDiagramData {
         : [item.detail ?? item.label],
     })),
   };
+}
+
+export function flowCode(outline: VisualOutline, direction: 'LR' | 'TD' = 'LR'): string {
+  return flowchartCode(outline, direction);
 }
 
 function flow(outline: VisualOutline): FlowDiagramData {

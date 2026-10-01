@@ -3,7 +3,8 @@
 import React from 'react';
 
 import type { InfographicDiagramData } from '@/lib/ai/contracts';
-import { layoutInfographic, type InfographicShape, type InfographicText } from '@/lib/ai/infographic';
+import { layoutInfographic, type InfographicShape, type InfographicText, type InfographicIcon } from '@/lib/ai/infographic';
+import { getVisualIcon } from './visualIconMap';
 
 /**
  * PATCH-236. Draws an infographic design from its stored outline. Every label is
@@ -48,6 +49,16 @@ function textEl(text: InfographicText) {
   );
 }
 
+function iconEl(icon: InfographicIcon) {
+  const Icon = getVisualIcon(icon.name);
+  if (!Icon) return null;
+  return (
+    <g key={`icon-${icon.name}-${icon.x}-${icon.y}`} data-infographic-icon={icon.name}>
+      <Icon x={icon.x} y={icon.y} width={icon.size} height={icon.size} color={icon.color} />
+    </g>
+  );
+}
+
 function InfographicRenderer({ data }: { data: InfographicDiagramData }) {
   const layout = layoutInfographic(data.template, data.outline);
 
@@ -68,6 +79,7 @@ function InfographicRenderer({ data }: { data: InfographicDiagramData }) {
         >
           {layout.shapes.map(shapeEl)}
           {layout.texts.map(textEl)}
+          {layout.icons?.map(iconEl)}
         </svg>
       </div>
     </div>

@@ -101,3 +101,57 @@ describe('PATCH-233 POST /api/ai/generate-outline', () => {
     expect(res.status).toBe(502);
   });
 });
+
+describe('PATCH-237 generate-outline options', () => {
+  const systemSent = () => String((h.generate.mock.calls[0][0] as { user: string }).user);
+
+  it('rejects a bad detail value with 400', async () => {
+    const res = await POST(makeRequest({ prompt: 'x', options: { detail: 'huge' } }));
+    expect(res.status).toBe(400);
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a visualHint over 60 chars with 400', async () => {
+    const res = await POST(makeRequest({ prompt: 'x', options: { visualHint: 'a'.repeat(61) } }));
+    expect(res.status).toBe(400);
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+
+  it('ignores unknown option keys', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    const res = await POST(makeRequest({ prompt: 'x', options: { detail: 'summary', bogus: 1 } }));
+    expect(res.status).toBe(200);
+  });
+
+  it('summary / detailed / keepWording each add exactly their fixed sentence', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+
+    await POST(makeRequest({ prompt: 'x', options: { detail: 'summary' } }));
+    expect(systemSent()).toContain('Keep labels to at most 4 words and omit details unless essential.');
+
+    h.generate.mockClear();
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x', options: { detail: 'detailed' } }));
+    expect(systemSent()).toContain('Give every item a detail sentence (up to 140 characters).');
+
+    h.generate.mockClear();
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x', options: { keepWording: true } }));
+    expect(systemSent()).toContain("Use the user's own words for labels and details; do not paraphrase.");
+  });
+
+  it('a hint is sanitized inside quotes', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x', options: { visualHint: 'py"ra\nmid' } }));
+    const system = systemSent();
+    expect(system).toContain('The user wants this drawn as: "pyra mid".');
+    expect(system).not.toContain('py"ra');
+  });
+
+  it('no options leaves the system prompt byte-identical to before', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x' }));
+    // No "User preferences" block is appended when there are no options.
+    expect(systemSent()).not.toContain('User preferences');
+  });
+});

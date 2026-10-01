@@ -12,6 +12,7 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
   const items = outline.items.slice(0, 7);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
+  const icons: InfographicLayout['icons'] = [];
 
   const stepW = 170;
   const rise = 34;
@@ -69,7 +70,7 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
     });
     texts.push({
       id: `label${index}`,
-      x: x + 34,
+      x: x + (item.icon ? 56 : 34),
       y: y + boxH / 2,
       lines: block.labelLines,
       color: color.text,
@@ -78,6 +79,16 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
       anchor: 'start',
       insideShapeId: `step${index}`,
     });
+    if (item.icon) {
+      icons!.push({
+        name: item.icon,
+        x: x + 34,
+        y: y + boxH / 2 - 9,
+        size: 18,
+        color: color.text,
+        insideShapeId: `step${index}`,
+      });
+    }
 
     if (detail.labelLines.length) {
       // PATCH-236 Addendum 4: the detail starts at THIS box's bottom + 8, not a
@@ -102,5 +113,6 @@ export function layoutStairs(outline: VisualOutline): InfographicLayout {
     height: maxBottom + 16,
     shapes,
     texts,
+    icons: icons!.length ? icons : undefined,
   };
 }

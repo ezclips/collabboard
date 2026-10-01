@@ -24,6 +24,9 @@ import {
 } from '@/lib/ai/mode-registry';
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
+import type { VisualOutline } from '@/lib/ai/outline';
+import { flowCode } from '@/lib/ai/outlineToVisuals';
+import OutlineTextEditor from './OutlineTextEditor';
 import OutlineSuggestionsPanel from './OutlineSuggestionsPanel';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import {
@@ -341,6 +344,11 @@ export default function AIComponentEditor({
   // PATCH-233. "Show options": one outline call draws several pictures locally.
   const [showOptions, setShowOptions] = useState(false);
   const [outlineOptions, setOutlineOptions] = useState<DesignSuggestion[]>([]);
+  // PATCH-237. The CURRENT outline, so Edit text can redraw locally with no AI call.
+  const [activeOutline, setActiveOutline] = useState<VisualOutline | null>(null);
+  // PATCH-237 Addendum 1. The Customize hint named on the last Apply, kept so
+  // later local re-ranks (Edit text) rank the named design first too.
+  const [activeVisualHint, setActiveVisualHint] = useState<string | undefined>(undefined);
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
   const [outlineGeneratedBy, setOutlineGeneratedBy] = useState<AIGenerationAttribution | null>(null);
   const [outlineCreatedAt, setOutlineCreatedAt] = useState<string | null>(null);
@@ -376,6 +384,7 @@ export default function AIComponentEditor({
     setAutoResolved(null);
     setShowOptions(false);
     setOutlineOptions([]);
+    setActiveVisualHint(undefined);
     setSelectedOptionKey(null);
     setOutlineGeneratedBy(null);
     setOutlineCreatedAt(null);
@@ -404,6 +413,7 @@ export default function AIComponentEditor({
       setSubtype(undefined);
       setShowOptions(true);
       setOutlineOptions(options);
+      setActiveOutline(storedInfographic.outline);
       setSelectedOptionKey(`infographic:${storedInfographic.template}`);
       setOutlineGeneratedBy(readAIGenerationAttribution(initialContent) ?? null);
       setOutlineCreatedAt(new Date().toISOString());
@@ -446,6 +456,21 @@ export default function AIComponentEditor({
   const selectedOption = showOptions
     ? (outlineOptions.find((option) => option.key === selectedOptionKey) ?? outlineOptions[0] ?? null)
     : null;
+  // PATCH-237: Edit text redraws locally from the edited outline -- no AI call.
+  const applyEditedOutline = (next: VisualOutline) => {
+    setActiveOutline(next);
+    setOutlineOptions(suggestDesigns(next, activeVisualHint ? { preferKey: activeVisualHint } : undefined));
+  };
+
+  // PATCH-237: Flow direction is local only; it re-derives the Flow option's code.
+  const [flowDirection, setFlowDirection] = useState<'LR' | 'TD'>('LR');
+  const directionOptions = (base: DesignSuggestion[]): DesignSuggestion[] =>
+    base.map((option) => {
+      if (option.key !== 'flow' || option.envelopeData.subtype !== 'flowchart' || !activeOutline) return option;
+      return { ...option, envelopeData: { ...option.envelopeData, code: flowCode(activeOutline, flowDirection) } };
+    });
+  const displayOptions = directionOptions(outlineOptions);
+
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
   const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => ({
@@ -575,7 +600,11 @@ export default function AIComponentEditor({
     }
   };
 
-  const generate = async () => {
+  const generate = async (outlineOptionsBody?: {
+    detail?: 'auto' | 'summary' | 'detailed';
+    keepWording?: boolean;
+    visualHint?: string;
+  }) => {
     if (!prompt.trim()) return;
 
     setError(null);
@@ -626,7 +655,11 @@ export default function AIComponentEditor({
         const res = await fetch('/api/ai/generate-outline', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: prompt.trim(), ...(boardId ? { boardId } : {}) }),
+          body: JSON.stringify({
+            prompt: prompt.trim(),
+            ...(boardId ? { boardId } : {}),
+            ...(outlineOptionsBody ? { options: outlineOptionsBody } : {}),
+          }),
           signal: controller.signal,
         });
         const data = await res.json().catch(() => ({}));
@@ -649,8 +682,13 @@ export default function AIComponentEditor({
         setStage('rendering');
         await new Promise((resolve) => setTimeout(resolve, 200));
 
-        const options = suggestDesigns(data.outline);
+        // PATCH-237 Addendum 1: the Apply hint must reach the ranking, and stay
+        // for the session so local re-ranks keep the named design first.
+        const preferKey = outlineOptionsBody?.visualHint;
+        setActiveVisualHint(preferKey);
+        const options = suggestDesigns(data.outline, preferKey ? { preferKey } : undefined);
         setOutlineOptions(options);
+        setActiveOutline(data.outline);
         setSelectedOptionKey(options[0]?.key ?? null);
         setOutlineGeneratedBy((data.generatedBy as AIGenerationAttribution) ?? null);
         setOutlineCreatedAt(new Date().toISOString());
@@ -1212,7 +1250,7 @@ export default function AIComponentEditor({
 
               <div className="flex gap-2">
                 <button
-                  onClick={generate}
+                  onClick={() => { void generate(); }}
                   disabled={isLoading || !prompt.trim() || (uiMode !== 'auto' && mode === 'diagram' && !activeSubtype)}
                   className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 font-medium transition-all ${
                     isLoading || !prompt.trim() || (uiMode !== 'auto' && mode === 'diagram' && !activeSubtype)
@@ -1302,10 +1340,15 @@ export default function AIComponentEditor({
                   selected design, then "Suggested" and per-category headings. */}
               {showOptions && outlineOptions.length > 0 && !isLoading && (
                 <OutlineSuggestionsPanel
-                  options={outlineOptions}
+                  options={displayOptions}
                   selectedKey={selectedOptionKey}
                   onSelect={setSelectedOptionKey}
                   envelopeFor={(option) => optionEnvelope(option)}
+                  outline={activeOutline}
+                  onEditOutline={applyEditedOutline}
+                  flowDirection={flowDirection}
+                  onFlowDirectionChange={setFlowDirection}
+                  onApplyCustomize={(options) => { void generate(options); }}
                 />
               )}
 

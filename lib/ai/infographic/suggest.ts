@@ -43,9 +43,38 @@ function fitRank(preferred: string[], key: string, fallback: number): number {
   return index === -1 ? fallback : index;
 }
 
-export function suggestDesigns(outline: VisualOutline): DesignSuggestion[] {
+/**
+ * PATCH-237. Maps a "make it a <hint>" phrase to a design key. Whole-word,
+ * case-insensitive; returns the matching suggestion key or null.
+ */
+export function preferKeyFromHint(hint: string): string | null {
+  const text = hint.toLowerCase();
+  const aliases: Array<[string[], string]> = [
+    [['pyramid'], 'infographic:pyramid'],
+    [['stack', 'layers'], 'infographic:stack'],
+    [['stairs', 'steps'], 'infographic:stairs'],
+    [['cycle'], 'infographic:cycle'],
+    [['funnel'], 'infographic:funnel'],
+    [['hub'], 'infographic:hub'],
+    [['mind map', 'mindmap'], 'mindmap'],
+    [['flow', 'flowchart'], 'flow'],
+    [['timeline'], 'timeline'],
+    [['comparison'], 'comparison'],
+  ];
+  for (const [words, key] of aliases) {
+    for (const word of words) {
+      const re = new RegExp(`(^|[^a-z])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`, 'i');
+      if (re.test(text)) return key;
+    }
+  }
+  return null;
+}
+
+export function suggestDesigns(outline: VisualOutline, options?: { preferKey?: string }): DesignSuggestion[] {
   const count = outline.items.length;
   const preferred = PREFERRED[outline.kind] ?? PREFERRED.list;
+  // A user-named design ranks first (fit 0) when it is actually offered.
+  const hintedKey = options?.preferKey ? preferKeyFromHint(options.preferKey) : null;
 
   const suggestions: DesignSuggestion[] = [];
 
@@ -82,14 +111,18 @@ export function suggestDesigns(outline: VisualOutline): DesignSuggestion[] {
       key: `infographic:${template}`,
       label: TEMPLATE_LABELS[template],
       category: TEMPLATE_CATEGORY[template],
-      fit: fitRank(preferred, `infographic:${template}`, 50),
+      fit: hintedKey === `infographic:${template}` ? 0 : fitRank(preferred, `infographic:${template}`, 50),
       envelopeData,
     });
   }
 
-  // Stable sort by fit.
+  // Stable sort by fit, with a user-hinted design ranked first.
   return suggestions
     .map((suggestion, index) => ({ suggestion, index }))
-    .sort((a, b) => (a.suggestion.fit - b.suggestion.fit) || (a.index - b.index))
+    .sort((a, b) => {
+      const aHint = hintedKey && a.suggestion.key === hintedKey ? 0 : 1;
+      const bHint = hintedKey && b.suggestion.key === hintedKey ? 0 : 1;
+      return (aHint - bHint) || (a.suggestion.fit - b.suggestion.fit) || (a.index - b.index);
+    })
     .map((entry) => entry.suggestion);
 }

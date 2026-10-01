@@ -52,3 +52,29 @@ describe('PATCH-236 suggestDesigns', () => {
     }
   });
 });
+
+describe('PATCH-237 suggestDesigns preferKey (Customize hint)', () => {
+  const first = (outline: ReturnType<typeof makeOutline>, preferKey?: string) =>
+    suggestDesigns(outline, preferKey ? { preferKey } : undefined)[0];
+
+  function makeOutline(kind: OutlineKind, count: number) {
+    return { title: 'T', ordered: false, kind, items: Array.from({ length: count }, (_, i) => ({ label: `I${i + 1}` })) };
+  }
+
+  it('a hint naming a design puts it first, marked Best match', () => {
+    const o = makeOutline('list', 4); // list prefers mindmap; pyramid is not first
+    const top = first(o, 'pyramid');
+    expect(top.key).toBe('infographic:pyramid');
+    expect(top.fit).toBe(0);
+  });
+
+  it('a hint naming nothing changes nothing', () => {
+    const o = makeOutline('levels', 4);
+    expect(first(o, 'zzz')).toEqual(first(o));
+  });
+
+  it('a preferred design that does not fit the count is not forced', () => {
+    const o = makeOutline('list', 2); // pyramid needs 3-7
+    expect(first(o, 'pyramid').key).not.toBe('infographic:pyramid');
+  });
+});

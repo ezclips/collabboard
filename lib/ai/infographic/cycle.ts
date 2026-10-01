@@ -12,10 +12,15 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
   const items = outline.items.slice(0, 8);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
+  const icons: InfographicLayout['icons'] = [];
   const n = items.length;
 
   const blocks = items.map((item) => labelBlock(item.label, 96));
-  const nodeR = Math.max(34, ...blocks.map((b) => Math.max(sizeText(b.labelLines, LABEL_FONT, 600).width / 2, b.height / 2) + 12));
+  const hasIcons = items.some((item) => item.icon);
+  const nodeR = Math.max(
+    34,
+    ...blocks.map((b) => Math.max(sizeText(b.labelLines, LABEL_FONT, 600).width / 2, b.height / 2) + 12 + (hasIcons ? 12 : 0)),
+  );
 
   // Ring radius: enough for node arcs plus a wide enough gap for neighbours.
   const arcNeed = n * (nodeR + 6);
@@ -43,7 +48,7 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
     texts.push({
       id: `label${index}`,
       x: nx,
-      y: ny,
+      y: hasIcons && item.icon ? ny + 8 : ny,
       lines: blocks[index].labelLines,
       color: color.text,
       fontSize: LABEL_FONT,
@@ -51,6 +56,16 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
       anchor: 'middle',
       insideShapeId: `node${index}`,
     });
+    if (item.icon) {
+      icons!.push({
+        name: item.icon,
+        x: nx - 9,
+        y: ny - nodeR / 2 - 4,
+        size: 18,
+        color: color.text,
+        insideShapeId: `node${index}`,
+      });
+    }
 
     if (item.detail) {
       const detail = labelBlock(item.detail, 110);
@@ -126,5 +141,6 @@ export function layoutCycle(outline: VisualOutline): InfographicLayout {
     height: cy + radius + 120,
     shapes,
     texts,
+    icons: icons!.length ? icons : undefined,
   };
 }

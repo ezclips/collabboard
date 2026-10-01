@@ -11,6 +11,7 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
   const items = outline.items.slice(0, 6);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
+  const icons: InfographicLayout['icons'] = [];
 
   const maxW = 360;
   const minW = 140;
@@ -84,9 +85,10 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
       const lines = fitsInside ? [] : block.labelLines;
       const detailBlock = item.detail ? labelBlock(item.detail, 240) : { labelLines: [], width: 0, height: 0 };
       const allLines = [...lines, ...detailBlock.labelLines];
+      const detailTextX = item.icon ? detailX + 24 : detailX;
       texts.push({
         id: `detail${index}`,
-        x: detailX,
+        x: detailTextX,
         y: (y0 + y1) / 2,
         lines: allLines,
         color: '#374151',
@@ -94,8 +96,17 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
         fontWeight: fitsInside ? 400 : 600,
         anchor: 'start',
       });
+      if (item.icon) {
+        icons!.push({
+          name: item.icon,
+          x: detailX,
+          y: (y0 + y1) / 2 - 9,
+          size: 18,
+          color: color.stroke,
+        });
+      }
       const widest = Math.max(lines.length ? sizeText(lines, LABEL_FONT, 600).width : 0, detailBlock.width);
-      maxRight = Math.max(maxRight, detailX + widest);
+      maxRight = Math.max(maxRight, detailTextX + widest);
     }
   });
 
@@ -104,5 +115,6 @@ export function layoutFunnel(outline: VisualOutline): InfographicLayout {
     height: 16 + items.length * bandH + 16,
     shapes,
     texts,
+    icons: icons!.length ? icons : undefined,
   };
 }

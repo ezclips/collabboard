@@ -214,3 +214,48 @@ describe('PATCH-236 infographic layouts', () => {
     }
   });
 });
+
+describe('PATCH-237 infographic icons', () => {
+  const WITH_ICONS = [
+    { label: 'Alpha', detail: 'first', icon: 'sun' },
+    { label: 'Beta', detail: 'second', icon: 'leaf' },
+    { label: 'Gamma', detail: 'third', icon: 'snowflake' },
+    { label: 'Delta', detail: 'fourth', icon: 'cloud' },
+  ];
+
+  for (const template of ALL_TEMPLATES) {
+    it(`${template}: draws one icon per item, inside its shape, not overlapping text`, () => {
+      const layout = layoutInfographic(template, outline(WITH_ICONS));
+      const icons = layout.icons ?? [];
+      expect(icons.length).toBeGreaterThan(0);
+
+      const iconBox = (i: { x: number; y: number; size: number }) => ({
+        left: i.x, right: i.x + i.size, top: i.y, bottom: i.y + i.size,
+      });
+      const textBoxes = layout.texts.map(textBox);
+      for (const icon of icons) {
+        const box = iconBox(icon);
+        // Not overlapping any text box.
+        for (const tb of textBoxes) {
+          expect(overlaps(box, tb), `${template}: icon ${icon.name} overlaps text`).toBe(false);
+        }
+        // Inside its shape, when it names one.
+        if (icon.insideShapeId) {
+          const shape = layout.shapes.find((s) => s.id === icon.insideShapeId)!;
+          const bounds = insideBounds(shape, icon.y + icon.size / 2);
+          expect(box.left, `${template}:${icon.name} left`).toBeGreaterThanOrEqual(bounds.left - 1);
+          expect(box.right, `${template}:${icon.name} right`).toBeLessThanOrEqual(bounds.right + 1);
+        }
+      }
+    });
+
+    it(`${template}: without icons the geometry is unchanged`, () => {
+      const withoutIcons = outline(WITH_ICONS.map(({ icon, ...rest }) => rest));
+      const plain = outline(WITH_ICONS.map(({ icon, ...rest }) => rest));
+      const a = layoutInfographic(template, withoutIcons);
+      const b = layoutInfographic(template, plain);
+      expect(a.icons).toBeUndefined();
+      expect(a).toEqual(b);
+    });
+  }
+});

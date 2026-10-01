@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { VisualOutline } from './outline';
-import { mermaidLabel, outlineToVisuals } from './outlineToVisuals';
+import { flowCode, mermaidLabel, outlineToVisuals } from './outlineToVisuals';
 
 function outline(overrides: Partial<VisualOutline> = {}): VisualOutline {
   return {
@@ -122,5 +122,17 @@ describe('PATCH-233 outlineToVisuals', () => {
       { title: 'Kickoff', description: 'Scope the work', dateLabel: 'Jan' },
       { title: 'Ship', description: undefined, dateLabel: 'Feb' },
     ]);
+  });
+});
+
+describe('PATCH-237 flow direction', () => {
+  it('LR vs TD changes only the flowchart direction line', () => {
+    const o = { title: 'T', ordered: true, kind: 'steps' as const, items: [{ label: 'A' }, { label: 'B' }] };
+    const lr = flowCode(o, 'LR');
+    const td = flowCode(o, 'TD');
+    expect(lr.startsWith('flowchart LR\n')).toBe(true);
+    expect(td.startsWith('flowchart TD\n')).toBe(true);
+    // Everything after the first line is identical.
+    expect(lr.split('\n').slice(1).join('\n')).toBe(td.split('\n').slice(1).join('\n'));
   });
 });

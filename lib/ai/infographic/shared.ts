@@ -44,6 +44,17 @@ export interface InfographicLayout {
   height: number;
   shapes: InfographicShape[];
   texts: InfographicText[];
+  /** PATCH-237. A Lucide icon per item, when the outline carried one. */
+  icons?: InfographicIcon[];
+}
+
+export interface InfographicIcon {
+  name: string;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  insideShapeId?: string;
 }
 
 export const INFO_LINE_HEIGHT = 18;
@@ -152,5 +163,6 @@ export function fitLayout(layout: InfographicLayout, pad = 16): InfographicLayou
     height,
     shapes: layout.shapes.map(shiftShape),
     texts: layout.texts.map((t) => ({ ...t, x: t.x + dx, y: t.y + dy })),
+    icons: layout.icons?.map((icon) => ({ ...icon, x: icon.x + dx, y: icon.y + dy })),
   };
 }

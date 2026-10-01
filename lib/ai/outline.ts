@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { VISUAL_ICON_NAMES, isVisualIconName } from './visualIcons';
+
 /**
  * PATCH-233. The "Show options" outline: the STRUCTURE of the user's text, once,
  * which `outlineToVisuals` then draws several ways. Napkin-style -- the AI does
@@ -14,6 +16,8 @@ export interface VisualOutlineItem {
   label: string;
   detail?: string;
   date?: string;
+  /** PATCH-237. One icon name from VISUAL_ICON_NAMES, when one fits. */
+  icon?: string;
   children?: VisualOutlineChild[];
 }
 
@@ -97,6 +101,8 @@ Rules:
 - Do not invent facts that are not in the text.
 - Set "ordered" to true ONLY when the points are steps or a sequence in time.
 - Include "children" only when a point genuinely has sub-points.
+- "icon" is optional: when a fitting icon exists, use ONE of these exact names, otherwise omit it.
+  Allowed icons: ${VISUAL_ICON_NAMES.join(', ')}.
 - Do not include any explanation outside the JSON structure.
 `.trim();
 
@@ -108,6 +114,7 @@ const OutlineItemSchema = z.object({
   label: z.string().optional(),
   detail: z.string().optional(),
   date: z.string().optional(),
+  icon: z.string().optional(),
   children: z.array(OutlineChildSchema).optional(),
 });
 
@@ -134,6 +141,9 @@ function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineIte
 
   const date = trimTo(raw.date, OUTLINE_LIMITS.date);
   if (date) item.date = date;
+
+  // PATCH-237: keep only a listed icon; an unknown one is dropped, never throws.
+  if (isVisualIconName(raw.icon)) item.icon = raw.icon;
 
   const children = (raw.children ?? [])
     .map((child) => trimTo(child.label, OUTLINE_LIMITS.label))

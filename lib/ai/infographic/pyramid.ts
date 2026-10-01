@@ -12,6 +12,7 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
   const items = outline.items.slice(0, 7);
   const shapes: InfographicLayout['shapes'] = [];
   const texts: InfographicLayout['texts'] = [];
+  const icons: InfographicLayout['icons'] = [];
 
   const height = items.length * 60;
   const halfWidth = 220;
@@ -90,9 +91,10 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
       const outLines = fitsInside ? [] : labelBlock(item.label, 240).labelLines;
       const detailBlock = item.detail ? labelBlock(item.detail, 240) : { labelLines: [], width: 0, height: 0 };
       const allLines = [...outLines, ...detailBlock.labelLines];
+      const detailTextX = item.icon ? detailX + 24 : detailX;
       texts.push({
         id: `detail${index}`,
-        x: detailX,
+        x: detailTextX,
         y: (y0 + y1) / 2,
         lines: allLines,
         color: '#374151',
@@ -100,11 +102,20 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
         fontWeight: fitsInside ? 400 : 600,
         anchor: 'start',
       });
+      if (item.icon) {
+        icons!.push({
+          name: item.icon,
+          x: detailX,
+          y: (y0 + y1) / 2 - 9,
+          size: 18,
+          color: color.stroke,
+        });
+      }
       const widest = Math.max(
         outLines.length ? sizeText(outLines, LABEL_FONT, 600).width : 0,
         detailBlock.width,
       );
-      maxRight = Math.max(maxRight, detailX + widest);
+      maxRight = Math.max(maxRight, detailTextX + widest);
     }
 
     // Leader line inside -> detail.
@@ -124,5 +135,6 @@ export function layoutPyramid(outline: VisualOutline): InfographicLayout {
     height: top + height + 16,
     shapes,
     texts,
+    icons: icons!.length ? icons : undefined,
   };
 }

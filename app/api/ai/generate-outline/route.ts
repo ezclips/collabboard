@@ -50,6 +50,65 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+const DETAIL_VALUES = new Set(['auto', 'summary', 'detailed']);
+const VISUAL_HINT_MAX = 60;
+
+interface OutlineOptions {
+  detail?: 'auto' | 'summary' | 'detailed';
+  keepWording?: boolean;
+  visualHint?: string;
+}
+
+/**
+ * PATCH-237. Parses the optional Customize options. Unknown keys are ignored; a
+ * malformed value or an over-long hint is a hard error (the caller returns 400).
+ */
+function parseOutlineOptions(raw: unknown): OutlineOptions {
+  if (raw === undefined) return {};
+  if (!isObject(raw)) throw new Error('options must be an object.');
+
+  const options: OutlineOptions = {};
+
+  if (raw.detail !== undefined) {
+    if (typeof raw.detail !== 'string' || !DETAIL_VALUES.has(raw.detail)) {
+      throw new Error('options.detail must be auto, summary or detailed.');
+    }
+    options.detail = raw.detail as OutlineOptions['detail'];
+  }
+
+  if (raw.keepWording !== undefined) {
+    if (typeof raw.keepWording !== 'boolean') throw new Error('options.keepWording must be a boolean.');
+    options.keepWording = raw.keepWording;
+  }
+
+  if (raw.visualHint !== undefined) {
+    if (typeof raw.visualHint !== 'string') throw new Error('options.visualHint must be a string.');
+    // Control characters removed; trimmed; capped at 60.
+    const cleaned = raw.visualHint.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleaned.length > VISUAL_HINT_MAX) throw new Error(`options.visualHint must be ${VISUAL_HINT_MAX} characters or fewer.`);
+    if (cleaned) options.visualHint = cleaned;
+  }
+
+  return options;
+}
+
+/**
+ * Builds the "User preferences" block from FIXED sentences only. The hint is the
+ * one variable part, and its double quotes are removed before it goes inside the
+ * quoted instruction.
+ */
+function buildPreferenceBlock(options: OutlineOptions): string {
+  const lines: string[] = [];
+  if (options.detail === 'summary') lines.push('Keep labels to at most 4 words and omit details unless essential.');
+  if (options.detail === 'detailed') lines.push('Give every item a detail sentence (up to 140 characters).');
+  if (options.keepWording) lines.push("Use the user's own words for labels and details; do not paraphrase.");
+  if (options.visualHint) {
+    const hint = options.visualHint.replace(/"/g, '');
+    lines.push(`The user wants this drawn as: "${hint}". Choose the kind and items that suit it.`);
+  }
+  return lines.length > 0 ? `User preferences:\n${lines.map((l) => `- ${l}`).join('\n')}` : '';
+}
+
 function buildGenerationPrompt(systemPrompt: string, userPrompt: string): string {
   return `
 ${systemPrompt}
@@ -121,9 +180,24 @@ export async function POST(req: NextRequest) {
     }
     const boardId = typeof rawBoardId === 'string' ? rawBoardId : null;
 
+    // PATCH-237. The optional Customize preferences.
+    let options: OutlineOptions;
+    try {
+      options = parseOutlineOptions(rawBody.options);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid options.' },
+        { status: 400 },
+      );
+    }
+
     trackAIGenerationStarted({ mode: 'diagram', subtype: 'outline' });
 
-    const finalPrompt = buildGenerationPrompt(OUTLINE_SYSTEM_PROMPT, prompt);
+    // The preference block is appended only when there are options, so a plain
+    // request's system prompt is byte-identical to before.
+    const preferenceBlock = buildPreferenceBlock(options);
+    const systemPrompt = preferenceBlock ? `${OUTLINE_SYSTEM_PROMPT}\n\n${preferenceBlock}` : OUTLINE_SYSTEM_PROMPT;
+    const finalPrompt = buildGenerationPrompt(systemPrompt, prompt);
 
     let raw: string;
     let generatedBy: AIGenerationAttribution;
