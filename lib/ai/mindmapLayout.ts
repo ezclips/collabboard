@@ -17,6 +17,8 @@ export interface MindmapTree {
 export interface MindmapLayoutNode {
   id: string;
   depth: 0 | 1 | 2;
+  /** PATCH-240. Position in the tree: [] root, [b] branch, [b, l] leaf. */
+  path: number[];
   /** Centre, in the returned viewBox coordinates. */
   x: number;
   y: number;
@@ -80,6 +82,7 @@ export function layoutMindmap(tree: MindmapTree): MindmapLayout {
   const root: MindmapLayoutNode = {
     id: 'root',
     depth: 0,
+    path: [],
     x: 0,
     y: 0,
     ...measure(tree.label ?? '', ROOT_CHAR, ROOT_MAX),
@@ -122,6 +125,7 @@ export function layoutMindmap(tree: MindmapTree): MindmapLayout {
       nodes.push({
         id: `b${ordinal}`,
         depth: 1,
+        path: [ordinal],
         x: branchX,
         y: cursorY + node.h / 2,
         w: node.w,
@@ -135,6 +139,7 @@ export function layoutMindmap(tree: MindmapTree): MindmapLayout {
         nodes.push({
           id: `b${ordinal}l${leafIndex}`,
           depth: 2,
+          path: [ordinal, leafIndex],
           x: leafX,
           y: leafY + leaf.h / 2,
           w: leaf.w,

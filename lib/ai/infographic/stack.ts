@@ -23,7 +23,7 @@ export function layoutStack(outline: VisualOutline, theme: VisualTheme = themeBy
   items.forEach((item, index) => {
     const block = labelBlock(item.label, labelMax);
     const bandH = Math.max(40, block.height + 20);
-    const color = themeColor(theme, index);
+    const color = themeColor(theme, item.color ?? index);
     shapes.push({
       id: `band${index}`,
       kind: 'rect',
@@ -36,6 +36,7 @@ export function layoutStack(outline: VisualOutline, theme: VisualTheme = themeBy
       stroke: color.stroke,
       strokeWidth: 1.5,
       colorIndex: index,
+      item: index,
     });
     const labelCx = 16 + bandW / 2 + (hasIcons ? iconSize / 2 : 0);
     texts.push({
@@ -48,6 +49,7 @@ export function layoutStack(outline: VisualOutline, theme: VisualTheme = themeBy
       fontWeight: 600,
       anchor: 'middle',
       insideShapeId: `band${index}`,
+      ref: { field: 'label', item: index },
     });
     if (item.icon) {
       icons!.push({
@@ -73,6 +75,7 @@ export function layoutStack(outline: VisualOutline, theme: VisualTheme = themeBy
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor: 'start',
+        ref: { field: 'detail', item: index },
       });
       maxRight = Math.max(maxRight, dx + detailBlock.width);
     }

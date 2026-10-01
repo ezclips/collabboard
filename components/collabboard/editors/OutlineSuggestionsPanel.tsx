@@ -3,6 +3,8 @@
 import React from 'react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
+import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
+import type { InfographicDiagramData } from '@/lib/ai/contracts';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
@@ -120,6 +122,16 @@ export default function OutlineSuggestionsPanel({
 }: OutlineSuggestionsPanelProps) {
   const selected = options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
   const effectiveSelectedKey = selected?.key ?? null;
+  // PATCH-240. The selected infographic edits on the picture itself, bound to the
+  // same active outline as "Edit text" (no AI call). Every other option keeps the
+  // plain preview.
+  const selectedData = selected
+    ? (envelopeFor(selected) as { data?: { subtype?: string } } | null)?.data
+    : null;
+  const editableInfographic: InfographicDiagramData | null =
+    outline && onEditOutline && selectedData?.subtype === 'infographic'
+      ? (selectedData as InfographicDiagramData)
+      : null;
   const suggested = options.slice(0, 4);
   const rest = options.slice(4);
 
@@ -145,7 +157,11 @@ export default function OutlineSuggestionsPanel({
         className="min-h-0 shrink-0 overflow-auto rounded-xl border border-gray-200 bg-white"
         style={{ maxHeight: '55%' }}
       >
-        {selected && <AIContentRenderer content={envelopeFor(selected)} />}
+        {selected && (editableInfographic ? (
+          <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
+        ) : (
+          <AIContentRenderer content={envelopeFor(selected)} />
+        ))}
       </div>
 
       {outline && onEditOutline && (

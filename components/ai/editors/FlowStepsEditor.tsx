@@ -12,6 +12,9 @@ import type { FlowGraph } from '@/lib/ai/outlineToVisuals';
 
 const inputClass = 'min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-xs';
 const selectClass = 'rounded border border-gray-300 px-2 py-1 text-xs';
+// PATCH-240. The "to" select overflowed the left form column; let both connection
+// selects shrink (min-w-0) and share the row (flex-1) instead of pushing out.
+const edgeSelectClass = 'min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-xs';
 
 function nextNodeId(nodes: FlowGraph['nodes']): string {
   let max = -1;
@@ -113,7 +116,7 @@ export default function FlowStepsEditor({
               data-ai-flow-edge-from={index}
               value={edge.from}
               onChange={(e) => updateEdge(index, { from: e.target.value })}
-              className={selectClass}
+              className={edgeSelectClass}
             >
               {graph.nodes.map((node) => (
                 <option key={node.id} value={node.id}>{node.label || node.id}</option>
@@ -124,7 +127,7 @@ export default function FlowStepsEditor({
               data-ai-flow-edge-to={index}
               value={edge.to}
               onChange={(e) => updateEdge(index, { to: e.target.value })}
-              className={selectClass}
+              className={edgeSelectClass}
             >
               {graph.nodes.map((node) => (
                 <option key={node.id} value={node.id}>{node.label || node.id}</option>

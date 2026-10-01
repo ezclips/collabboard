@@ -104,3 +104,23 @@ describe('PATCH-237 outline icons', () => {
     expect(out.items[2].icon).toBeUndefined();
   });
 });
+
+describe('PATCH-240 outline item colour', () => {
+  it('keeps a palette slot 0..5 and drops an invalid one', () => {
+    const out = parseOutline({
+      title: 'T',
+      items: [
+        { label: 'A', color: 3 },
+        { label: 'B', color: 9 },
+        { label: 'C', color: -1 },
+        { label: 'D', color: 2.5 },
+        { label: 'E' },
+      ],
+    });
+    expect(out.items[0].color).toBe(3);
+    expect(out.items[1].color).toBeUndefined();
+    expect(out.items[2].color).toBeUndefined();
+    expect(out.items[3].color).toBeUndefined();
+    expect(out.items[4].color).toBeUndefined();
+  });
+});

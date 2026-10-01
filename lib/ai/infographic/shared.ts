@@ -24,7 +24,14 @@ export interface InfographicShape {
   stroke: string;
   strokeWidth?: number;
   colorIndex: number;
+  /** PATCH-240. The item this shape belongs to (the main shape only). */
+  item?: number;
 }
+
+/** PATCH-240. Which editable field a text draws. */
+export type InfographicTextRef =
+  | { field: 'title' }
+  | { field: 'label' | 'detail'; item: number };
 
 export interface InfographicText {
   id: string;
@@ -37,6 +44,8 @@ export interface InfographicText {
   anchor: 'start' | 'middle' | 'end';
   /** When set, the text is meant to sit inside this shape (the inside-shape rule). */
   insideShapeId?: string;
+  /** PATCH-240. The outline field this text edits directly. */
+  ref?: InfographicTextRef;
 }
 
 export interface InfographicLayout {
@@ -106,6 +115,42 @@ export function textBox(text: InfographicText) {
   const { width, height } = sizeText(text.lines, text.fontSize, text.fontWeight);
   const left = text.anchor === 'start' ? text.x : text.anchor === 'end' ? text.x - width : text.x - width / 2;
   return { left, right: left + width, top: text.y - height / 2, bottom: text.y + height / 2, width, height };
+}
+
+export interface ShapeBounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * PATCH-240. The bounding box of a shape, in viewBox coordinates, so the edit
+ * overlay can place a − / + handle without measuring the live DOM.
+ */
+export function shapeBounds(shape: InfographicShape): ShapeBounds | null {
+  if (shape.kind === 'circle') {
+    const r = shape.r ?? 0;
+    return { left: (shape.cx ?? 0) - r, right: (shape.cx ?? 0) + r, top: (shape.cy ?? 0) - r, bottom: (shape.cy ?? 0) + r, width: r * 2, height: r * 2 };
+  }
+  if (shape.kind === 'polygon' && shape.points) {
+    const pts = shape.points.split(' ').map((p) => p.split(',').map(Number));
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    const left = Math.min(...xs);
+    const right = Math.max(...xs);
+    const top = Math.min(...ys);
+    const bottom = Math.max(...ys);
+    return { left, right, top, bottom, width: right - left, height: bottom - top };
+  }
+  if (shape.kind === 'path') return null;
+  const x = shape.x ?? 0;
+  const y = shape.y ?? 0;
+  const width = shape.width ?? 0;
+  const height = shape.height ?? 0;
+  return { left: x, right: x + width, top: y, bottom: y + height, width, height };
 }
 
 /**

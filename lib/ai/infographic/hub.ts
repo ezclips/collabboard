@@ -40,10 +40,11 @@ export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById
     fontWeight: 700,
     anchor: 'middle',
     insideShapeId: 'hub',
+    ref: { field: 'title' },
   });
 
   const place = (item: VisualOutline['items'][number], originalIndex: number, side: 'left' | 'right', row: number) => {
-    const color = themeColor(theme, originalIndex);
+    const color = themeColor(theme, item.color ?? originalIndex);
     const cardX = side === 'right' ? cx + centreR + gapX : cx - centreR - gapX - cardW;
     const y = 16 + row * rowGap;
     const label = labelBlock(item.label, cardW - 24);
@@ -61,6 +62,7 @@ export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById
       stroke: color.stroke,
       strokeWidth: 1.5,
       colorIndex: originalIndex,
+      item: originalIndex,
     });
     const spokeX = side === 'right' ? cardX : cardX + cardW;
     const edgeX = side === 'right' ? cx + centreR : cx - centreR;
@@ -96,6 +98,7 @@ export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById
       fontWeight: 600,
       anchor,
       insideShapeId: `card${originalIndex}`,
+      ref: { field: 'label', item: originalIndex },
     });
     if (detail.labelLines.length) {
       texts.push({
@@ -108,6 +111,7 @@ export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById
         fontWeight: 400,
         anchor,
         insideShapeId: `card${originalIndex}`,
+        ref: { field: 'detail', item: originalIndex },
       });
     }
   };

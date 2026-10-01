@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Save, Trash2, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
+import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
+import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
 import type {
   AIContentData,
   BarChartDiagramData,
@@ -45,6 +47,8 @@ export interface AIContentEditModalProps {
   onClose: () => void;
   envelope: StoredAIContent;
   initialPrompt?: string;
+  /** PATCH-240. A data-ai-edit-ref from a board double-click, opened for editing. */
+  initialEditRef?: string | null;
   onSave: (data: { aiPrompt: string; aiComponentJson: LoadedAIContent }) => void;
 }
 
@@ -621,6 +625,7 @@ export default function AIContentEditModal({
   onClose,
   envelope,
   initialPrompt = '',
+  initialEditRef = null,
   onSave,
 }: AIContentEditModalProps) {
   const [draftData, setDraftData] = useState<AIContentData>(envelope.data);
@@ -907,6 +912,45 @@ export default function AIContentEditModal({
     return <p className="text-sm text-gray-400">This content type has no editable fields.</p>;
   }
 
+  // PATCH-240. Infographics and tree mind maps edit on the picture itself; every
+  // other type keeps the plain preview. The concrete renderer is used directly
+  // because the shared AIContentRenderer does not carry an `edit` callback.
+  function renderPreview() {
+    if (draftData.type === 'diagram' && draftData.subtype === 'infographic') {
+      return (
+        <InfographicRenderer
+          data={draftData}
+          initialEditRef={initialEditRef}
+          edit={{
+            onChange: (next) =>
+              setDraftData((prev) =>
+                prev.type === 'diagram' && prev.subtype === 'infographic'
+                  ? { ...prev, outline: next, title: next.title }
+                  : prev,
+              ),
+          }}
+        />
+      );
+    }
+    if (draftData.type === 'diagram' && draftData.subtype === 'mindmap' && draftData.tree) {
+      return (
+        <MindmapTreeRenderer
+          data={draftData}
+          initialEditRef={initialEditRef}
+          edit={{
+            onChange: (next) =>
+              setDraftData((prev) =>
+                prev.type === 'diagram' && prev.subtype === 'mindmap'
+                  ? { ...prev, tree: next, code: mindmapCodeFromTree(next) }
+                  : prev,
+              ),
+          }}
+        />
+      );
+    }
+    return <AIContentRenderer content={draftEnvelope} />;
+  }
+
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div
@@ -943,7 +987,7 @@ export default function AIContentEditModal({
           <div className="flex flex-1 flex-col overflow-hidden bg-white p-6">
             <p className="block text-sm font-medium text-gray-700">Live preview</p>
             <div className="relative mt-4 flex-1 overflow-auto rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-4 shadow-inner">
-              <AIContentRenderer content={draftEnvelope} />
+              {renderPreview()}
             </div>
           </div>
         </div>

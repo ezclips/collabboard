@@ -26,7 +26,7 @@ export function layoutPyramid(outline: VisualOutline, theme: VisualTheme = theme
     const y1 = top + ((index + 1) * height) / items.length;
     const halfTop = (halfWidth * (index + 0.15)) / items.length;
     const halfBottom = (halfWidth * (index + 1.15)) / items.length;
-    const color = themeColor(theme, index);
+    const color = themeColor(theme, item.color ?? index);
     shapes.push({
       id: `band${index}`,
       kind: 'polygon',
@@ -40,6 +40,7 @@ export function layoutPyramid(outline: VisualOutline, theme: VisualTheme = theme
       stroke: color.stroke,
       strokeWidth: 1.5,
       colorIndex: index,
+      item: index,
     });
 
     // The band's usable width at its centre row (~ the mean of top/bottom).
@@ -59,6 +60,7 @@ export function layoutPyramid(outline: VisualOutline, theme: VisualTheme = theme
         fontWeight: 600,
         anchor: 'middle',
         insideShapeId: `band${index}`,
+        ref: { field: 'label', item: index },
       });
     } else {
       // A number in the band, and the label moved OUT as the detail's first line.
@@ -102,6 +104,7 @@ export function layoutPyramid(outline: VisualOutline, theme: VisualTheme = theme
         fontSize: DETAIL_FONT,
         fontWeight: fitsInside ? 400 : 600,
         anchor: 'start',
+        ref: { field: 'detail', item: index },
       });
       if (item.icon) {
         icons!.push({

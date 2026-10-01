@@ -302,6 +302,9 @@ export interface FreeformPadletCardsProps {
   // PATCH-235: "Visualize…" on a Note/Document opens the AI generator pre-filled
   // from that post's text; CanvasClient places and links the result next to it.
   onVisualizePost?: (padlet: Padlet) => void;
+  // PATCH-240: double-clicking an infographic / tree mind-map picture opens the
+  // Edit window with the clicked word (its data-ai-edit-ref) already in edit mode.
+  onAIContentEdit?: (padlet: Padlet, initialEditRef: string | null) => void;
 
   // Callbacks
   closeAllToolbars: (except?: Record<string, boolean>) => void;
@@ -3585,9 +3588,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             title="Resize"
           />
         ) : null;
+        // PATCH-240. Only an infographic / tree mind-map post edits on the picture;
+        // a viewer (or a locked post) never opens the editor. The clicked word's
+        // data-ai-edit-ref is carried up so the modal opens it in edit mode.
+        const handlePictureDoubleClick = (e: React.MouseEvent) => {
+          if (!canUseFreeformEditButton || (padlet.metadata as any)?.isLocked) return;
+          if ((e.target as HTMLElement).closest('button')) return;
+          const pictureContent = normalizeAIContent(extractAIContentFromPadletMetadata(padlet.metadata));
+          if (pictureContent.kind !== 'structured') return;
+          const pictureData = pictureContent.data;
+          const isEditablePicture = pictureData.type === 'diagram'
+            && (pictureData.subtype === 'infographic' || (pictureData.subtype === 'mindmap' && !!pictureData.tree));
+          if (!isEditablePicture) return;
+          e.stopPropagation();
+          const initialEditRef = (e.target as HTMLElement).closest('[data-ai-edit-ref]')?.getAttribute('data-ai-edit-ref') ?? null;
+          props.onAIContentEdit?.(padlet, initialEditRef);
+        };
         const content = (
           <div
             ref={(el) => { genericCardRefs.current[padlet.id] = el; }}
+            onDoubleClick={padlet.type === 'ai-component' ? handlePictureDoubleClick : undefined}
             className={`group group/image-container relative overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id) && canUseFreeformEditButton
                 ? 'ring-2 ring-blue-500 ring-offset-2'
               : ''

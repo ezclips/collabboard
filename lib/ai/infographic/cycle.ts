@@ -33,7 +33,7 @@ export function layoutCycle(outline: VisualOutline, theme: VisualTheme = themeBy
     const angle = -Math.PI / 2 + (index * 2 * Math.PI) / n;
     const nx = cx + radius * Math.cos(angle);
     const ny = cy + radius * Math.sin(angle);
-    const color = themeColor(theme, index);
+    const color = themeColor(theme, item.color ?? index);
     shapes.push({
       id: `node${index}`,
       kind: 'circle',
@@ -44,6 +44,7 @@ export function layoutCycle(outline: VisualOutline, theme: VisualTheme = themeBy
       stroke: color.stroke,
       strokeWidth: 1.5,
       colorIndex: index,
+      item: index,
     });
     texts.push({
       id: `label${index}`,
@@ -55,6 +56,7 @@ export function layoutCycle(outline: VisualOutline, theme: VisualTheme = themeBy
       fontWeight: 600,
       anchor: 'middle',
       insideShapeId: `node${index}`,
+      ref: { field: 'label', item: index },
     });
     if (item.icon) {
       icons!.push({
@@ -83,6 +85,7 @@ export function layoutCycle(outline: VisualOutline, theme: VisualTheme = themeBy
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor,
+        ref: { field: 'detail', item: index },
       });
     }
   });
@@ -134,6 +137,7 @@ export function layoutCycle(outline: VisualOutline, theme: VisualTheme = themeBy
     fontSize: 14,
     fontWeight: 700,
     anchor: 'middle',
+    ref: { field: 'title' },
   });
 
   return {

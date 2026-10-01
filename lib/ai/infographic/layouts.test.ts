@@ -274,6 +274,44 @@ describe('PATCH-237 infographic icons', () => {
   }
 });
 
+describe('PATCH-240 infographic refs, items and colour', () => {
+  for (const template of ALL_TEMPLATES) {
+    it(`${template}: every item is addressable by a shape and a text ref`, () => {
+      const o = outline(items(TEMPLATE_RANGE[template].min));
+      const layout = layoutInfographic(template, o);
+      for (let i = 0; i < o.items.length; i += 1) {
+        expect(layout.shapes.some((s) => s.item === i), `${template}: item ${i} has no shape`).toBe(true);
+        const hasLabel = layout.texts.some((t) => t.ref?.field === 'label' && t.ref.item === i);
+        const hasDetail = layout.texts.some((t) => t.ref?.field === 'detail' && t.ref.item === i);
+        expect(hasLabel || hasDetail, `${template}: item ${i} has no ref`).toBe(true);
+      }
+    });
+  }
+
+  it('the centre title of cycle and hub carries the title ref', () => {
+    for (const template of ['cycle', 'hub'] as const) {
+      const layout = layoutInfographic(template, outline(items(4)));
+      expect(layout.texts.find((t) => t.id === 'title')?.ref, template).toEqual({ field: 'title' });
+    }
+  });
+
+  it('item.color overrides the palette slot for both shape and text', () => {
+    const withColor = items(4).map((item, i) => (i === 1 ? { ...item, color: 3 } : item));
+    const layout = layoutInfographic('stack', outline(withColor), VISUAL_THEMES.classic);
+    const band = layout.shapes.find((s) => s.id === 'band1')!;
+    expect(band.fill).toBe(VISUAL_THEMES.classic.palette[3].fill);
+    expect(band.stroke).toBe(VISUAL_THEMES.classic.palette[3].stroke);
+    expect(layout.texts.find((t) => t.id === 'label1')?.color).toBe(VISUAL_THEMES.classic.palette[3].text);
+  });
+
+  it('without color the palette slot is the item index (today\u2019s colours)', () => {
+    const layout = layoutInfographic('stack', outline(items(4)), VISUAL_THEMES.classic);
+    expect(layout.shapes.find((s) => s.id === 'band0')!.fill).toBe(VISUAL_THEMES.classic.palette[0].fill);
+    expect(layout.shapes.find((s) => s.id === 'band1')!.fill).toBe(VISUAL_THEMES.classic.palette[1].fill);
+    expect(layout.texts.find((t) => t.id === 'label1')?.color).toBe(VISUAL_THEMES.classic.palette[1].text);
+  });
+});
+
 describe('PATCH-238 infographic themes', () => {
   for (const template of ALL_TEMPLATES) {
     it(`${template}: geometry is identical across every theme`, () => {

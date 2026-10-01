@@ -854,11 +854,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [visualizeRequest, setVisualizeRequest] = useState<{ sourceId: string; x: number; y: number; prompt: string } | null>(null);
   const visualizeLinkRef = useRef<{ sourceId: string; beforeIds: Set<string> } | null>(null);
   const isAIContentEditModalOpen = canvasState.editors.isAIContentEditModalOpen;
-  const setIsAIContentEditModalOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isAIContentEditModalOpen: v } });
+  // PATCH-240. A board double-click on an AI picture carries the clicked word's
+  // data-ai-edit-ref through to the Edit window. It lives here, not in
+  // CanvasEditorContext, whose fixed type the patch may not widen. Cleared on close.
+  const [aiContentInitialEditRef, setAIContentInitialEditRef] = useState<string | null>(null);
+  const setIsAIContentEditModalOpen = (v: boolean) => {
+    dispatch({ type: 'EDITORS_PATCH', payload: { isAIContentEditModalOpen: v } });
+    if (!v) setAIContentInitialEditRef(null);
+  };
   const isAIContentConvertModalOpen = canvasState.editors.isAIContentConvertModalOpen;
   const setIsAIContentConvertModalOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isAIContentConvertModalOpen: v } });
   const padletToEdit = canvasState.editors.padletToEdit; // SHARED: overlays + editors
   const setPadletToEdit = (v: Padlet | null) => dispatch({ type: 'EDITORS_PATCH', payload: { padletToEdit: v } });
+  // PATCH-240. Open the Edit window on the double-clicked picture word.
+  const openAIContentEdit = (padlet: Padlet, initialEditRef: string | null) => {
+    setAIContentInitialEditRef(initialEditRef);
+    setPadletToEdit(padlet);
+    setIsAIContentEditModalOpen(true);
+  };
   const viewDrawingPadlet = canvasState.editors.viewDrawingPadlet; // SHARED: overlays + editors
   const setViewDrawingPadlet = (v: Padlet | null) => dispatch({ type: 'EDITORS_PATCH', payload: { viewDrawingPadlet: v } });
   const [isClipartDraftModalOpen, setIsClipartDraftModalOpen] = useState(false);
@@ -9270,6 +9283,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           setIsAIComponentEditorOpen={setIsAIComponentEditorOpen}
           isAIContentEditModalOpen={isAIContentEditModalOpen}
           setIsAIContentEditModalOpen={setIsAIContentEditModalOpen}
+          initialEditRef={aiContentInitialEditRef}
           isAIContentConvertModalOpen={isAIContentConvertModalOpen}
           setIsAIContentConvertModalOpen={setIsAIContentConvertModalOpen}
           documentModalDestination={documentModalDestination}
@@ -10689,6 +10703,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     graphRefreshToken={graphRefreshToken}
                     onGraphEdgesChanged={() => setGraphRefreshToken((token) => token + 1)}
                     onVisualizePost={handleVisualizePost}
+                    onAIContentEdit={openAIContentEdit}
                     closeAllToolbars={closeAllToolbars}
                     handlePadletMouseDown={handlePadletMouseDown}
                     getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}

@@ -63,6 +63,9 @@ function setTextareaValue(input: HTMLTextAreaElement, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+function keydown(el: Element, key: string) {
+  act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
+}
 function buttonContaining(root: ParentNode, text: string): HTMLButtonElement {
   const found = Array.from(root.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes(text));
   expect(found, `no button containing "${text}"`).toBeTruthy();
@@ -154,7 +157,7 @@ describe('PATCH-239 AIContentEditModal structured editors', () => {
     const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={onSave} />);
 
     setInputValue(c.querySelector('[data-ai-mindmap-branch="0"]') as HTMLInputElement, 'Evaporation X');
-    expect(c.querySelector('[data-preview]')!.getAttribute('data-preview')).toContain('Evaporation X');
+    expect((c.querySelector('[data-mindmap-svg]') as SVGElement).textContent).toContain('Evaporation X');
 
     click(buttonContaining(c, 'Save changes'));
     const saved = onSave.mock.calls[0][0].aiComponentJson as StoredAIContent;
@@ -237,5 +240,63 @@ describe('PATCH-239 AIContentEditModal structured editors', () => {
     const tree = (saved.data as typeof MINDMAP_DATA).tree;
     expect(tree.label).toBe('New root');
     expect(tree.children![0].label).toBe('Changed');
+  });
+});
+
+const STACK_INFOGRAPHIC_ENVELOPE: StoredAIContent = {
+  mode: 'diagram',
+  version: 1,
+  data: {
+    type: 'diagram',
+    subtype: 'infographic',
+    renderer: 'infographic',
+    title: 'Seasons',
+    template: 'stack',
+    outline: OUTLINE,
+  },
+};
+
+describe('PATCH-240 AIContentEditModal edits the picture directly', () => {
+  it('editing a word on the picture updates the form field and Save stores it', () => {
+    const onSave = vi.fn();
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={STACK_INFOGRAPHIC_ENVELOPE} onSave={onSave} />);
+
+    click(c.querySelector('[data-ai-edit-ref="label:0"]') as Element);
+    const input = c.querySelector('[data-ai-edit-input="true"]') as HTMLInputElement;
+    expect(input.value).toBe('Spring');
+    setInputValue(input, 'Springtime');
+    keydown(input, 'Enter');
+
+    expect((c.querySelector('[data-ai-outline-item-label="0"]') as HTMLInputElement).value).toBe('Springtime');
+
+    click(buttonContaining(c, 'Save changes'));
+    const saved = onSave.mock.calls[0][0].aiComponentJson as StoredAIContent;
+    const data = saved.data as { outline: typeof OUTLINE };
+    expect(data.outline.items[0].label).toBe('Springtime');
+  });
+
+  it('editing the form updates the picture', () => {
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={STACK_INFOGRAPHIC_ENVELOPE} onSave={() => {}} />);
+    setInputValue(c.querySelector('[data-ai-outline-item-label="1"]') as HTMLInputElement, 'Summertime');
+    expect((c.querySelector('[data-ai-edit-ref="label:1"]') as Element).textContent).toContain('Summertime');
+  });
+
+  it('initialEditRef opens that word in edit mode', () => {
+    const c = mount(
+      <AIContentEditModal isOpen onClose={() => {}} envelope={STACK_INFOGRAPHIC_ENVELOPE} onSave={() => {}} initialEditRef="label:1" />,
+    );
+    const input = c.querySelector('[data-ai-edit-input="true"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.value).toBe('Summer');
+  });
+
+  it('editing a branch on a mind map picture updates the tree editor', () => {
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={() => {}} />);
+    click(c.querySelector('[data-ai-edit-ref="0"]') as Element);
+    const input = c.querySelector('[data-ai-edit-input="true"]') as HTMLInputElement;
+    expect(input.value).toBe('Evaporation');
+    setInputValue(input, 'Evap');
+    keydown(input, 'Enter');
+    expect((c.querySelector('[data-ai-mindmap-branch="0"]') as HTMLInputElement).value).toBe('Evap');
   });
 });

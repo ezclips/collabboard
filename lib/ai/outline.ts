@@ -18,6 +18,8 @@ export interface VisualOutlineItem {
   date?: string;
   /** PATCH-237. One icon name from VISUAL_ICON_NAMES, when one fits. */
   icon?: string;
+  /** PATCH-240. A palette slot (0..5) overriding the item's index colour. */
+  color?: number;
   children?: VisualOutlineChild[];
 }
 
@@ -115,6 +117,7 @@ const OutlineItemSchema = z.object({
   detail: z.string().optional(),
   date: z.string().optional(),
   icon: z.string().optional(),
+  color: z.number().optional(),
   children: z.array(OutlineChildSchema).optional(),
 });
 
@@ -144,6 +147,11 @@ function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineIte
 
   // PATCH-237: keep only a listed icon; an unknown one is dropped, never throws.
   if (isVisualIconName(raw.icon)) item.icon = raw.icon;
+
+  // PATCH-240: keep only an integer palette slot 0..5; anything else is dropped.
+  if (typeof raw.color === 'number' && Number.isInteger(raw.color) && raw.color >= 0 && raw.color <= 5) {
+    item.color = raw.color;
+  }
 
   const children = (raw.children ?? [])
     .map((child) => trimTo(child.label, OUTLINE_LIMITS.label))

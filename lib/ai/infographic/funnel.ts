@@ -25,7 +25,7 @@ export function layoutFunnel(outline: VisualOutline, theme: VisualTheme = themeB
     const y1 = y0 + bandH - 6;
     const topW = maxW - ((maxW - minW) * index) / Math.max(1, items.length - 1);
     const botW = maxW - ((maxW - minW) * (index + 1)) / Math.max(1, items.length - 1);
-    const color = themeColor(theme, index);
+    const color = themeColor(theme, item.color ?? index);
     shapes.push({
       id: `band${index}`,
       kind: 'polygon',
@@ -39,6 +39,7 @@ export function layoutFunnel(outline: VisualOutline, theme: VisualTheme = themeB
       stroke: color.stroke,
       strokeWidth: 1.5,
       colorIndex: index,
+      item: index,
     });
 
     const rowHalf = Math.min(topW, botW) / 2;
@@ -57,6 +58,7 @@ export function layoutFunnel(outline: VisualOutline, theme: VisualTheme = themeB
         fontWeight: 600,
         anchor: 'middle',
         insideShapeId: `band${index}`,
+        ref: { field: 'label', item: index },
       });
     } else {
       shapes.push({
@@ -96,6 +98,7 @@ export function layoutFunnel(outline: VisualOutline, theme: VisualTheme = themeB
         fontSize: DETAIL_FONT,
         fontWeight: fitsInside ? 400 : 600,
         anchor: 'start',
+        ref: { field: 'detail', item: index },
       });
       if (item.icon) {
         icons!.push({

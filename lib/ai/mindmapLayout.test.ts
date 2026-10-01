@@ -82,6 +82,13 @@ describe('PATCH-234 layoutMindmap', () => {
     expect(layout.nodes.filter((n) => n.depth === 0)[0].colorIndex).toBe(-1);
   });
 
+  it('PATCH-240: every node carries its path (root [], branch [b], leaf [b, l])', () => {
+    const layout = layoutMindmap(tree(3, 2));
+    expect(layout.nodes.find((n) => n.id === 'root')!.path).toEqual([]);
+    expect(layout.nodes.find((n) => n.id === 'b0')!.path).toEqual([0]);
+    expect(layout.nodes.find((n) => n.id === 'b1l1')!.path).toEqual([1, 1]);
+  });
+
   it('starts and ends every link on a node edge midpoint', () => {
     const layout = layoutMindmap(tree(3, 2));
     const byId = new Map(layout.nodes.map((n) => [n.id, n]));

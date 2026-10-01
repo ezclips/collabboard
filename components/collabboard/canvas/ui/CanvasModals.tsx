@@ -70,6 +70,9 @@ export interface CanvasModalsProps {
   setIsAIContentEditModalOpen: (v: boolean) => void;
   isAIContentConvertModalOpen: boolean;
   setIsAIContentConvertModalOpen: (v: boolean) => void;
+  // PATCH-240. A data-ai-edit-ref carried from a board double-click, so the Edit
+  // window opens with that word already in edit mode.
+  initialEditRef?: string | null;
   documentModalDestination: DocumentModalDestination | null;
   setDocumentModalDestination: (d: DocumentModalDestination | null) => void;
 
@@ -144,6 +147,7 @@ export default function CanvasModals({
   isAIComponentEditorOpen, setIsAIComponentEditorOpen,
   isAIContentEditModalOpen, setIsAIContentEditModalOpen,
   isAIContentConvertModalOpen, setIsAIContentConvertModalOpen,
+  initialEditRef,
   documentModalDestination, setDocumentModalDestination,
   padletToEdit, setPadletToEdit,
   padlets, setPadlets,
@@ -596,7 +600,7 @@ export default function CanvasModals({
 
       {/* AI Content Field Editor Modal */}
       {lockedEnvelope && (
-        <div key={isAIContentEditModalOpen ? `ai-edit-${padletToEdit?.id || 'open'}` : 'ai-edit-closed'}>
+        <div key={isAIContentEditModalOpen ? `ai-edit-${padletToEdit?.id || 'open'}-${initialEditRef ?? ''}` : 'ai-edit-closed'}>
           <AIContentEditModal
             isOpen={isAIContentEditModalOpen}
             onClose={() => {
@@ -605,6 +609,7 @@ export default function CanvasModals({
             }}
             envelope={lockedEnvelope}
             initialPrompt={padletToEdit?.metadata?.aiPrompt || ''}
+            initialEditRef={initialEditRef ?? null}
             onSave={saveAIComponent}
           />
         </div>

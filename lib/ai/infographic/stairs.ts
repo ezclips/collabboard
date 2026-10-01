@@ -31,7 +31,7 @@ export function layoutStairs(outline: VisualOutline, theme: VisualTheme = themeB
 
   items.forEach((item, index) => {
     const { block, detail } = boxes[index];
-    const color = themeColor(theme, index);
+    const color = themeColor(theme, item.color ?? index);
     const x = 16 + index * stepW;
     const boxH = block.height + 16;
     const y = baseY - (index + 1) * rise - (maxLabelH - boxH);
@@ -47,6 +47,7 @@ export function layoutStairs(outline: VisualOutline, theme: VisualTheme = themeB
       stroke: color.stroke,
       strokeWidth: 1.5,
       colorIndex: index,
+      item: index,
     });
     shapes.push({
       id: `badge${index}`,
@@ -79,6 +80,7 @@ export function layoutStairs(outline: VisualOutline, theme: VisualTheme = themeB
       fontWeight: 600,
       anchor: 'start',
       insideShapeId: `step${index}`,
+      ref: { field: 'label', item: index },
     });
     if (item.icon) {
       icons!.push({
@@ -104,6 +106,7 @@ export function layoutStairs(outline: VisualOutline, theme: VisualTheme = themeB
         fontSize: DETAIL_FONT,
         fontWeight: 400,
         anchor: 'start',
+        ref: { field: 'detail', item: index },
       });
       maxBottom = Math.max(maxBottom, detailTop + detail.height);
     }
