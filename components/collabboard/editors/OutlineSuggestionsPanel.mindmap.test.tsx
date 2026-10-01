@@ -103,6 +103,16 @@ describe('PATCH-243 OutlineSuggestionsPanel editable tree', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('stages the large preview so it can be zoomed and moved', () => {
+    const c = render(() => {});
+    const preview = c.querySelector('[data-ai-outline-preview]') as HTMLElement;
+    expect(c.querySelector('[data-ai-outline-preview] [data-picture-zoom-value]')).not.toBeNull();
+    expect(c.querySelector('[data-picture-mode="css"]')).not.toBeNull();
+    // The preview has a definite height so the stage fills a real box.
+    expect(preview.style.height).toBe('55%');
+    expect(preview.style.maxHeight).toBe('55%');
+  });
+
   it('adds a right-side branch from the root + and nothing else moves', () => {
     const onEditOutline = vi.fn();
     const c = render(onEditOutline);

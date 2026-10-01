@@ -183,6 +183,27 @@ describe('PATCH-242 stored sides (outline)', () => {
   });
 });
 
+describe('PATCH-245 Addendum 3 antv mind-map side rule', () => {
+  it('effectiveOutlineSides with the antv-mindmap rule defaults to even left / odd right', () => {
+    expect(effectiveOutlineSides(hub().items, 'antv-mindmap')).toEqual(['left', 'right', 'left', 'right']);
+    // The hub rule is unchanged.
+    expect(effectiveOutlineSides(hub().items)).toEqual(['right', 'left', 'right', 'left']);
+  });
+
+  it('insertItem with the antv-mindmap rule freezes every existing side even->left', () => {
+    const base = hub();
+    const next = insertItem(base, 4, { side: 'right', rule: 'antv-mindmap' });
+    expect(next.items.map((i) => i.side)).toEqual(['left', 'right', 'left', 'right', 'right']);
+    const originals = next.items.filter((_, i) => i !== 4);
+    expect(originals.map((i) => i.side)).toEqual(['left', 'right', 'left', 'right']);
+  });
+
+  it('removeItem with the antv-mindmap rule keeps every remaining side', () => {
+    const next = removeItem(hub(), 1, 'antv-mindmap');
+    expect(next.items.map((i) => i.side)).toEqual(['left', 'left', 'right']);
+  });
+});
+
 describe('PATCH-242 stored sides (tree)', () => {
   it('effectiveBranchSides defaults to first ceil(n/2) right', () => {
     expect(effectiveBranchSides([

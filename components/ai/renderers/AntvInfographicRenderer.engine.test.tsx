@@ -14,6 +14,12 @@ import type { VisualOutline } from '@/lib/ai/outline';
  */
 const h = vi.hoisted(() => {
   const instances: FakeInfographic[] = [];
+  const madeInteractions: string[] = [];
+  class FakeInteraction {
+    constructor(public name: string) {
+      madeInteractions.push(name);
+    }
+  }
   class FakeInfographic {
     listeners = new Map<string, Array<(payload: unknown) => void>>();
     rendered = 0;
@@ -40,11 +46,58 @@ const h = vi.hoisted(() => {
       for (const listener of this.listeners.get(event) ?? []) listener(payload);
     }
   }
-  return { instances, FakeInfographic };
+  return {
+    instances,
+    madeInteractions,
+    FakeInfographic,
+    mocks: {
+      Infographic: FakeInfographic,
+      DblClickEditText: class extends FakeInteraction {
+        constructor() {
+          super('dblclick-edit-text');
+        }
+      },
+      ClickSelect: class extends FakeInteraction {
+        constructor() {
+          super('click-select');
+        }
+      },
+      BrushSelect: class extends FakeInteraction {
+        constructor() {
+          super('brush-select');
+        }
+      },
+      DragElement: class extends FakeInteraction {
+        constructor() {
+          super('drag-element');
+        }
+      },
+      HotkeyHistory: class extends FakeInteraction {
+        constructor() {
+          super('hotkey-history');
+        }
+      },
+      SelectHighlight: class extends FakeInteraction {
+        constructor() {
+          super('select-highlight');
+        }
+      },
+      ZoomWheel: class extends FakeInteraction {
+        constructor() {
+          super('zoom-wheel');
+        }
+      },
+      DragCanvas: class extends FakeInteraction {
+        constructor() {
+          super('drag-canvas');
+        }
+      },
+    },
+  };
 });
 
 vi.mock('@/lib/ai/antv/load', () => ({
-  loadAntv: async () => ({ Infographic: h.FakeInfographic }),
+  loadAntv: async () => h.mocks,
 }));
 
 // Imported after the mock is registered.
@@ -55,6 +108,7 @@ import AntvInfographicRenderer from './AntvInfographicRenderer';
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
 beforeEach(() => {
   h.instances.length = 0;
+  h.madeInteractions.length = 0;
 });
 afterEach(() => {
   for (const m of mounted) {
@@ -170,6 +224,36 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
           // And an op/path we do not understand is ignored.
           { op: 'frobnicate', path: 'data.items', indexes: [1], value: {} },
         ],
+      });
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the editing interactions but drops ZoomWheel / DragCanvas (the stage owns those)', async () => {
+    mount(<AntvInfographicRenderer data={data()} edit={{ onChange: vi.fn() }} />);
+    await flush();
+    const instance = h.instances[0];
+    expect(h.madeInteractions).toEqual([
+      'dblclick-edit-text',
+      'click-select',
+      'brush-select',
+      'drag-element',
+      'hotkey-history',
+      'select-highlight',
+    ]);
+    expect((instance.options.interactions as unknown[]).length).toBe(6);
+  });
+
+  it('a viewBox options:change does not call onChange', async () => {
+    const onChange = vi.fn();
+    mount(<AntvInfographicRenderer data={data()} edit={{ onChange }} />);
+    await flush();
+    const instance = h.instances[0];
+
+    act(() => {
+      instance.emit('options:change', {
+        type: 'options:change',
+        changes: [{ op: 'update', path: '', value: { viewBox: '10 10 100 100' } }],
       });
     });
     expect(onChange).not.toHaveBeenCalled();

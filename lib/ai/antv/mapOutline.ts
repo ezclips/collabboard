@@ -6,7 +6,13 @@
  */
 
 import { isVisualIconName } from '@/lib/ai/visualIcons';
-import { addItemChild, insertItem, removeItem, removeItemChild } from '@/lib/ai/infographic/edit';
+import {
+  addItemChild,
+  insertItem,
+  removeItem,
+  removeItemChild,
+  type OutlineSideRule,
+} from '@/lib/ai/infographic/edit';
 import {
   isSafeTextColor,
   OUTLINE_LIMITS,
@@ -269,15 +275,19 @@ export function applyAntvButton(
   const edit = mapAntvButton(indexes, op, templateName);
   if (!edit) return outline;
 
+  // PATCH-245 Addendum 3. A side-less AntV mind map is drawn even -> left, so
+  // freezing must use that rule or the first edit flips every branch.
+  const sideRule: OutlineSideRule = isMindmapTemplate(templateName) ? 'antv-mindmap' : 'hub';
+
   if (edit.kind === 'item') {
     if (edit.op === 'add') {
       if (outline.items.length >= OUTLINE_LIMITS.items) return outline;
       if (edit.index < 0 || edit.index > outline.items.length) return outline;
-      return insertItem(outline, edit.index);
+      return insertItem(outline, edit.index, { rule: sideRule });
     }
     if (outline.items.length <= OUTLINE_LIMITS.minItems) return outline;
     if (edit.index < 0 || edit.index >= outline.items.length) return outline;
-    return removeItem(outline, edit.index);
+    return removeItem(outline, edit.index, sideRule);
   }
 
   const item = outline.items[edit.itemIndex];

@@ -2,10 +2,17 @@
 
 import React from 'react';
 
+import { PictureZoomContext } from './PictureStage';
+
 /**
  * PATCH-240. The thin HTML layer over an AI picture's SVG: the blue +/− circles,
  * the inline text input, and the colour popover. It is pure presentation -- the
  * renderer owns the state and the edit helpers. Never part of the saved picture.
+ *
+ * PATCH-245 Addendum 1. The layer lives inside the stage's scaled wrapper, so
+ * every control counter-scales by `1 / zoom` to keep a constant on-screen size
+ * (18px circles, a readable input) while its percent position still moves with
+ * the picture.
  */
 
 export interface EditHandle {
@@ -39,6 +46,8 @@ export interface ColorPopoverState {
 }
 
 function EditInput({ edit }: { edit: ActiveEdit }) {
+  const zoom = React.useContext(PictureZoomContext) || 1;
+  const counterScale = 1 / zoom;
   const doneRef = React.useRef(false);
   const commit = (value: string) => {
     if (doneRef.current) return;
@@ -65,8 +74,14 @@ function EditInput({ edit }: { edit: ActiveEdit }) {
         else if (e.key === 'Escape') cancel();
       }}
       onBlur={(e) => commit(e.currentTarget.value)}
-      className="pointer-events-auto absolute z-30 -translate-x-1/2 -translate-y-1/2 rounded border border-indigo-400 bg-white px-1 py-0.5 text-xs shadow-md outline-none"
-      style={{ left: `${edit.left}%`, top: `${edit.top}%`, minWidth: 80 }}
+      className="pointer-events-auto absolute z-30 rounded border border-indigo-400 bg-white px-1 py-0.5 shadow-md outline-none"
+      style={{
+        left: `${edit.left}%`,
+        top: `${edit.top}%`,
+        minWidth: 80,
+        fontSize: '13px',
+        transform: `translate(-50%, -50%) scale(${counterScale})`,
+      }}
     />
   );
 }
@@ -80,6 +95,8 @@ export default function PictureEditOverlay({
   activeEdit?: ActiveEdit | null;
   colorPopover?: ColorPopoverState | null;
 }) {
+  const zoom = React.useContext(PictureZoomContext) || 1;
+  const counterScale = 1 / zoom;
   return (
     <div data-ai-edit-overlay="true" className="pointer-events-none absolute inset-0 z-20">
       {handles.map((handle) => (
@@ -94,8 +111,14 @@ export default function PictureEditOverlay({
             handle.onActivate();
           }}
           title={handle.kind === 'add' ? 'Add' : 'Remove'}
-          className="pointer-events-auto absolute z-30 flex h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-blue-500 text-[12px] font-bold leading-none text-white opacity-0 shadow transition-opacity group-hover:opacity-100"
-          style={{ left: `${handle.left}%`, top: `${handle.top}%` }}
+          className="pointer-events-auto absolute z-30 flex items-center justify-center rounded-full border border-white bg-blue-500 text-[12px] font-bold leading-none text-white opacity-0 shadow transition-opacity group-hover:opacity-100"
+          style={{
+            left: `${handle.left}%`,
+            top: `${handle.top}%`,
+            width: 18,
+            height: 18,
+            transform: `translate(-50%, -50%) scale(${counterScale})`,
+          }}
         >
           {handle.kind === 'add' ? '+' : '\u2212'}
         </button>
@@ -109,8 +132,12 @@ export default function PictureEditOverlay({
           data-no-drag="true"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          className="pointer-events-auto absolute z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-gray-200 bg-white p-1.5 shadow-lg"
-          style={{ left: `${colorPopover.left}%`, top: `${colorPopover.top}%` }}
+          className="pointer-events-auto absolute z-30 flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1.5 shadow-lg"
+          style={{
+            left: `${colorPopover.left}%`,
+            top: `${colorPopover.top}%`,
+            transform: `translateX(-50%) scale(${counterScale})`,
+          }}
         >
           {colorPopover.swatches.map((swatch, index) => (
             <button

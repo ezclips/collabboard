@@ -58,4 +58,11 @@ describe('PATCH-241 InfographicRenderer dispatch', () => {
     expect(c.querySelector('[data-testid="antv-renderer"]')).toBeNull();
     expect(c.querySelector('[data-infographic-svg="stack"]')).not.toBeNull();
   });
+
+  it('a board/thumbnail render carries no PictureStage (only the editor and panel stage it)', () => {
+    const our = mount(<InfographicRenderer data={data('stack')} />);
+    expect(our.querySelector('[data-picture-stage]')).toBeNull();
+    const antv = mount(<InfographicRenderer data={data('antv:list-grid-badge-card')} />);
+    expect(antv.querySelector('[data-picture-stage]')).toBeNull();
+  });
 });

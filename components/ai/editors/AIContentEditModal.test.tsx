@@ -346,3 +346,36 @@ describe('PATCH-241 AIContentEditModal picture-first and List view', () => {
     expect(data.title).toBe('The water cycle');
   });
 });
+
+describe('PATCH-245 AIContentEditModal stages the picture', () => {
+  it('wraps the picture-first view AND the live preview in a PictureStage', () => {
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={STACK_INFOGRAPHIC_ENVELOPE} onSave={() => {}} />);
+    expect(c.querySelector('[data-ai-picture-first="true"] [data-picture-zoom-value]')).not.toBeNull();
+    expect(c.querySelector('[data-picture-mode="css"]')).not.toBeNull();
+
+    click(c.querySelector('[data-ai-list-view-toggle="true"]') as Element);
+    expect(c.querySelector('[data-ai-picture-first="true"]')).toBeNull();
+    expect(c.querySelector('[data-picture-zoom-value]')).not.toBeNull();
+  });
+
+  it('uses the AntV viewBox mode for an AntV picture', () => {
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={ANTV_INFOGRAPHIC_ENVELOPE} onSave={() => {}} />);
+    expect(c.querySelector('[data-ai-picture-first="true"] [data-picture-mode="antv"]')).not.toBeNull();
+  });
+
+  it('gives the picture area a definite height so the stage is not 0px', () => {
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={STACK_INFOGRAPHIC_ENVELOPE} onSave={() => {}} />);
+    const body = c.querySelector('[data-ai-modal-body="true"]') as HTMLElement;
+    expect(body).not.toBeNull();
+    expect(body.style.minHeight).toBe('60vh');
+    // Both modal places live inside that body.
+    expect(c.querySelector('[data-ai-picture-first="true"] [data-picture-stage]')).not.toBeNull();
+
+    click(c.querySelector('[data-ai-list-view-toggle="true"]') as Element);
+    const live = Array.from(c.querySelectorAll('[data-picture-stage]')).find(
+      (el) => el.getAttribute('aria-label') === 'Live preview',
+    );
+    expect(live).not.toBeNull();
+    expect((live as Element).closest('[data-ai-modal-body="true"]')).not.toBeNull();
+  });
+});

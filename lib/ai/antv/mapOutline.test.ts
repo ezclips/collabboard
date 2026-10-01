@@ -180,6 +180,18 @@ describe('PATCH-243 AntV button mapping', () => {
     expect(applyAntvButton(base, [0, 1], 'remove', mm).items.map((i) => i.label)).toEqual(['A', 'C']);
   });
 
+  it('uses the AntV mind-map rule (even -> left) when freezing sides on add and remove', () => {
+    const mm = 'hierarchy-mindmap-branch-gradient-capsule-item';
+    const base = outline({ items: [{ label: 'A' }, { label: 'B' }, { label: 'C' }, { label: 'D' }] });
+    // A side-less mind map is DRAWN even->left by stableMindmap; freezing must match.
+    expect(applyAntvButton(base, [0, 4], 'add', mm).items.map((i) => i.side)).toEqual([
+      'left', 'right', 'left', 'right', 'right',
+    ]);
+    expect(applyAntvButton(base, [0, 1], 'remove', mm).items.map((i) => i.side)).toEqual([
+      'left', 'left', 'right',
+    ]);
+  });
+
   it('maps a nested child button and returns unchanged for impossible edits', () => {
     const base = outline({
       items: [{ label: 'A', children: [{ label: 'A1' }] }, { label: 'B' }],

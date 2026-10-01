@@ -12,6 +12,7 @@ import {
   type AntvButtonOp,
   type AntvChangeEvent,
 } from '@/lib/ai/antv/mapOutline';
+import { stageInteractions } from '@/lib/ai/antv/interactions';
 import { insertItem } from '@/lib/ai/infographic/edit';
 import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/outline';
 import { themeById } from '@/lib/ai/visualThemes';
@@ -190,7 +191,7 @@ export function buildAntvMindmapHandles(
       left: pctX(root.x - offset),
       top: pctY(y),
       target: 'root:left',
-      onActivate: () => onChange(insertItem(outline, items.length, { side: 'left' })),
+      onActivate: () => onChange(insertItem(outline, items.length, { side: 'left', rule: 'antv-mindmap' })),
     });
     handles.push({
       key: 'add-root-right',
@@ -198,7 +199,7 @@ export function buildAntvMindmapHandles(
       left: pctX(root.x + root.w + offset),
       top: pctY(y),
       target: 'root:right',
-      onActivate: () => onChange(insertItem(outline, items.length, { side: 'right' })),
+      onActivate: () => onChange(insertItem(outline, items.length, { side: 'right', rule: 'antv-mindmap' })),
     });
   }
 
@@ -324,6 +325,19 @@ function AntvInfographicRenderer({
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => recompute());
     resizeObserver?.observe(container);
 
+    // PATCH-245. PictureStage drives the SVG's viewBox; our PATCH-243 mind-map
+    // handles are percent-positioned inside that viewBox, so recompute them on
+    // every viewBox change (no `onChange`: it is not outline data).
+    const viewObserver =
+      editable && isMindmap && typeof MutationObserver !== 'undefined'
+        ? new MutationObserver(() => recompute())
+        : null;
+    viewObserver?.observe(container, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['viewBox'],
+    });
+
     // The adapter (setup + our icons) is itself lazy: it joins the engine chunk
     // instead of the main bundle, and only for a page that shows a picture.
     import('@/lib/ai/antv/load')
@@ -331,13 +345,21 @@ function AntvInfographicRenderer({
       .then((mod) => {
         if (cancelled) return;
         container.innerHTML = '';
-        instance = new mod.Infographic({
+        // PATCH-245. Inside the stage the picture's zoom/pan is ours, so the
+        // engine keeps only the editing interactions (ZoomWheel/DragCanvas off).
+        const interactions = editable ? stageInteractions(mod) : [];
+        const options: Record<string, unknown> = {
+          ...toAntvOptions(outlineRef.current, templateName, data.theme),
           container,
           width: '100%',
           height: 'auto',
           editable,
-          ...toAntvOptions(outlineRef.current, templateName, data.theme),
-        }) as unknown as AntvInstance;
+        };
+        if (interactions.length) options.interactions = interactions;
+        const InfographicCtor = mod.Infographic as unknown as new (
+          options: Record<string, unknown>,
+        ) => AntvInstance;
+        instance = new InfographicCtor(options);
         instance.on('error', () => {
           if (!cancelled) setPhase('failed');
         });
@@ -374,6 +396,7 @@ function AntvInfographicRenderer({
     return () => {
       cancelled = true;
       resizeObserver?.disconnect();
+      viewObserver?.disconnect();
       container.removeEventListener('click', handleClick);
       container.removeAttribute('data-antv-editable');
       container.removeAttribute('data-antv-mindmap-overlay');

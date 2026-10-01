@@ -57,15 +57,33 @@ const outline: VisualOutline = {
   ],
 };
 
-function data(): InfographicDiagramData {
+function dataFor(o: VisualOutline): InfographicDiagramData {
   return {
     type: 'diagram',
     subtype: 'infographic',
     renderer: 'infographic',
-    title: outline.title,
+    title: o.title,
     template: `antv:${MINDMAP.slice('antv:'.length)}` as `antv:${string}`,
-    outline,
+    outline: o,
   };
+}
+
+function data(): InfographicDiagramData {
+  return dataFor(outline);
+}
+
+/** Each branch's drawn side, keyed by its AntV `data-indexes`, read from the SVG. */
+function drawnSides(c: HTMLElement): Record<string, 'left' | 'right'> {
+  const boxes = nodeBoxes(c);
+  const root = boxes.find((box) => box.indexes === '0');
+  if (!root) return {};
+  const rootCx = root.x + root.w / 2;
+  const sides: Record<string, 'left' | 'right'> = {};
+  for (const box of boxes) {
+    if (box.indexes === '0') continue;
+    sides[box.indexes] = box.x + box.w / 2 >= rootCx ? 'right' : 'left';
+  }
+  return sides;
 }
 
 interface NodeBox {
@@ -144,13 +162,64 @@ describe('PATCH-243 Addendum 2 AntV mind-map handles', () => {
     const branched = onChange.mock.calls.at(-1)![0] as VisualOutline;
     expect(branched.items).toHaveLength(outline.items.length + 1);
     expect(branched.items.at(-1)!.side).toBe('right');
-    // Existing branches keep the side they were on.
-    expect(branched.items[0].side).toBe('right');
-    expect(branched.items[1].side).toBe('left');
+    // Existing branches keep the side they were DRAWN on (AntV mind map: even -> left).
+    expect(branched.items[0].side).toBe('left');
+    expect(branched.items[1].side).toBe('right');
+    expect(branched.items[2].side).toBe('left');
 
     onChange.mockClear();
     click(c.querySelector('[data-ai-edit-add="add:0"]') as Element);
     const child = onChange.mock.calls.at(-1)![0] as VisualOutline;
     expect(child.items[0].children?.map((entry) => entry.label)).toEqual(['Pizza', 'New point']);
+  }, 30000);
+
+  it('the first + on a side-less AntV mind map keeps every branch on its drawn side', async () => {
+    const base: VisualOutline = {
+      title: 'Root',
+      ordered: false,
+      kind: 'list',
+      items: [{ label: 'Alpha' }, { label: 'Beta' }, { label: 'Gamma' }, { label: 'Delta' }],
+    };
+    const onChange = vi.fn();
+    const c1 = mount(<AntvInfographicRenderer data={dataFor(base)} edit={{ onChange }} />);
+    expect(await waitFor(c1, '[data-ai-edit-add="root:right"]')).not.toBeNull();
+    const before = drawnSides(c1);
+    // A side-less AntV mind map is drawn even -> left.
+    expect(before).toEqual({ '0,0': 'left', '0,1': 'right', '0,2': 'left', '0,3': 'right' });
+
+    click(c1.querySelector('[data-ai-edit-add="root:right"]') as Element);
+    const next = onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(next.items.at(-1)!.side).toBe('right');
+
+    const c2 = mount(<AntvInfographicRenderer data={dataFor(next)} edit={{ onChange: vi.fn() }} />);
+    expect(await waitFor(c2, '[data-ai-edit-add="root:right"]')).not.toBeNull();
+    const after = drawnSides(c2);
+    for (const index of Object.keys(before)) {
+      expect(after[index], index).toBe(before[index]);
+    }
+    expect(after['0,4']).toBe('right');
+  }, 30000);
+
+  it('keeps the svg height auto outside a PictureStage (the board path)', async () => {
+    const c = mount(<AntvInfographicRenderer data={data()} edit={{ onChange: vi.fn() }} />);
+    expect(await waitFor(c, 'svg')).not.toBeNull();
+    const svg = c.querySelector('svg') as SVGSVGElement;
+    expect(svg.getAttribute('height')).toBe('auto');
+  });
+
+  it('recomputes our handles when PictureStage changes the viewBox', async () => {
+    const c = mount(<AntvInfographicRenderer data={data()} edit={{ onChange: vi.fn() }} />);
+    expect(await waitFor(c, '[data-ai-edit-add="root:right"]')).not.toBeNull();
+    const before = (c.querySelector('[data-ai-edit-add="root:right"]') as HTMLElement).style.left;
+
+    const svg = c.querySelector('svg')!;
+    const [x, y, w, h] = viewBox(c);
+    await act(async () => {
+      svg.setAttribute('viewBox', `${x + 100} ${y} ${w} ${h}`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const after = (c.querySelector('[data-ai-edit-add="root:right"]') as HTMLElement).style.left;
+    expect(after).not.toBe(before);
   }, 30000);
 });

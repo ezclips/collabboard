@@ -5,7 +5,8 @@ import React from 'react';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
-import type { InfographicDiagramData, MindmapDiagramData } from '@/lib/ai/contracts';
+import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/PictureStage';
+import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
@@ -153,6 +154,11 @@ export default function OutlineSuggestionsPanel({
 }: OutlineSuggestionsPanelProps) {
   const selected = options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
   const effectiveSelectedKey = selected?.key ?? null;
+  // PATCH-245. The large preview is zoomable/movable like the Edit window.
+  const selectedTemplate =
+    selected && 'template' in selected.envelopeData ? selected.envelopeData.template : undefined;
+  const previewMode: PictureStageMode =
+    selectedTemplate && isAntvTemplate(selectedTemplate) ? 'antv' : 'css';
   // PATCH-240. The selected infographic edits on the picture itself, bound to the
   // same active outline as "Edit text" (no AI call). Every other option keeps the
   // plain preview.
@@ -205,19 +211,26 @@ export default function OutlineSuggestionsPanel({
           area scrolls, so selecting a tile never scrolls the preview away. */}
       <div
         data-ai-outline-preview="true"
-        className="min-h-0 shrink-0 overflow-auto rounded-xl border border-gray-200 bg-white"
-        style={{ maxHeight: '55%' }}
+        className="min-h-0 shrink-0"
+        style={{ height: '55%', maxHeight: '55%' }}
       >
-        {selected && (editableInfographic ? (
-          <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
-        ) : editableMindmap ? (
-          <MindmapTreeRenderer
-            data={editableMindmap}
-            edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
-          />
-        ) : (
-          <AIContentRenderer content={envelopeFor(selected)} />
-        ))}
+        <PictureStage
+          mode={previewMode}
+          resetKey={`${effectiveSelectedKey ?? ''}:${theme}`}
+          aria-label="Design preview"
+          className="h-full"
+        >
+          {selected && (editableInfographic ? (
+            <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
+          ) : editableMindmap ? (
+            <MindmapTreeRenderer
+              data={editableMindmap}
+              edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
+            />
+          ) : (
+            <AIContentRenderer content={envelopeFor(selected)} />
+          ))}
+        </PictureStage>
       </div>
 
       {/* PATCH-241: same-family AntV designs for the selected one. */}

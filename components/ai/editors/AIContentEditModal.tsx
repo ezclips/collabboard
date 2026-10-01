@@ -6,6 +6,8 @@ import { Plus, Save, Trash2, X } from 'lucide-react';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
+import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/PictureStage';
+import { isAntvTemplate } from '@/lib/ai/contracts';
 import type {
   AIContentData,
   BarChartDiagramData,
@@ -981,6 +983,19 @@ export default function AIContentEditModal({
     return <AIContentRenderer content={draftEnvelope} />;
   }
 
+  // PATCH-245. The picture is zoomable/movable in place: AntV pictures drive
+  // their SVG viewBox; our designs and tree mind maps use a CSS transform.
+  const pictureMode: PictureStageMode =
+    draftData.type === 'diagram' && draftData.subtype === 'infographic' && isAntvTemplate(draftData.template)
+      ? 'antv'
+      : 'css';
+  const pictureResetKey = [
+    draftData.type,
+    draftData.type === 'diagram' ? draftData.subtype : '',
+    draftData.type === 'diagram' && 'template' in draftData ? draftData.template : '',
+    draftData.type === 'diagram' && 'theme' in draftData ? (draftData.theme ?? '') : '',
+  ].join(':');
+
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div
@@ -1011,15 +1026,25 @@ export default function AIContentEditModal({
           </div>
         </div>
 
-        {/* Body */}
-        <div className="flex flex-1 overflow-hidden">
+        {/* Body. PATCH-245 Addendum 1: a definite height, or the picture-first
+            stage fills a content-sized parent and collapses to 0. */}
+        <div
+          data-ai-modal-body="true"
+          className="flex flex-1 overflow-hidden"
+          style={{ minHeight: '60vh' }}
+        >
           {isInfographic && !listView ? (
             /* PATCH-241: picture-first -- the picture fills the window and is
                edited directly; the form is behind "List view". */
-            <div data-ai-picture-first="true" className="flex flex-1 flex-col overflow-hidden bg-white p-6">
-              <div className="relative flex-1 overflow-auto rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-4 shadow-inner">
+            <div data-ai-picture-first="true" className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white p-6">
+              <PictureStage
+                mode={pictureMode}
+                resetKey={pictureResetKey}
+                aria-label="Picture"
+                className="min-h-0 flex-1"
+              >
                 {renderPreview()}
-              </div>
+              </PictureStage>
             </div>
           ) : (
             <>
@@ -1037,11 +1062,16 @@ export default function AIContentEditModal({
               </div>
 
               {/* Right: live preview */}
-              <div className="flex flex-1 flex-col overflow-hidden bg-white p-6">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white p-6">
                 <p className="block text-sm font-medium text-gray-700">Live preview</p>
-                <div className="relative mt-4 flex-1 overflow-auto rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-4 shadow-inner">
+                <PictureStage
+                  mode={pictureMode}
+                  resetKey={pictureResetKey}
+                  aria-label="Live preview"
+                  className="mt-4 min-h-0 flex-1"
+                >
                   {renderPreview()}
-                </div>
+                </PictureStage>
               </div>
             </>
           )}

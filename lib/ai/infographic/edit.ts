@@ -49,19 +49,37 @@ export function renameOutline(outline: VisualOutline, ref: OutlineTextRef, text:
 }
 
 /**
- * PATCH-242. The side each item is drawn on: its stored `side` when present,
- * else today's hub default (even -> right, odd -> left). Pure.
+ * PATCH-245 Addendum 3. Which default a side-less item falls back to. Our hub
+ * draws even -> right; AntV's mind map draws even -> left (`stableMindmap.tsx`).
  */
-export function effectiveOutlineSides(items: ReadonlyArray<{ side?: VisualSide }>): VisualSide[] {
-  return items.map((item, index) => item.side ?? (index % 2 === 0 ? 'right' : 'left'));
+export type OutlineSideRule = 'hub' | 'antv-mindmap';
+
+function defaultOutlineSide(index: number, rule: OutlineSideRule): VisualSide {
+  if (rule === 'antv-mindmap') return index % 2 === 0 ? 'left' : 'right';
+  return index % 2 === 0 ? 'right' : 'left';
+}
+
+/**
+ * PATCH-242 / PATCH-245. The side each item is drawn on: its stored `side` when
+ * present, else the rule's default (hub even -> right, AntV mind map even ->
+ * left). Pure.
+ */
+export function effectiveOutlineSides(
+  items: ReadonlyArray<{ side?: VisualSide }>,
+  rule: OutlineSideRule = 'hub',
+): VisualSide[] {
+  return items.map((item, index) => item.side ?? defaultOutlineSide(index, rule));
 }
 
 /**
  * PATCH-242. Freeze every item's CURRENT effective side into the data, so the
  * next edit cannot move any item that is already placed. Returns new objects.
  */
-function freezeOutlineSides(items: readonly VisualOutlineItem[]): VisualOutlineItem[] {
-  const sides = effectiveOutlineSides(items);
+function freezeOutlineSides(
+  items: readonly VisualOutlineItem[],
+  rule: OutlineSideRule = 'hub',
+): VisualOutlineItem[] {
+  const sides = effectiveOutlineSides(items, rule);
   return items.map((item, index) => ({ ...item, side: sides[index] }));
 }
 
@@ -73,26 +91,31 @@ function freezeOutlineSides(items: readonly VisualOutlineItem[]): VisualOutlineI
 export function insertItem(
   outline: VisualOutline,
   index: number,
-  opts?: { side?: VisualSide },
+  opts?: { side?: VisualSide; rule?: OutlineSideRule },
 ): VisualOutline {
   if (outline.items.length >= OUTLINE_LIMITS.items) {
     return { ...outline, items: outline.items.slice() };
   }
+  const rule = opts?.rule ?? 'hub';
   const at = Math.max(0, Math.min(index, outline.items.length));
-  const sides = effectiveOutlineSides(outline.items);
-  const items = freezeOutlineSides(outline.items);
-  const side = opts?.side ?? (at > 0 ? sides[at - 1] : 'right');
+  const sides = effectiveOutlineSides(outline.items, rule);
+  const items = freezeOutlineSides(outline.items, rule);
+  const side = opts?.side ?? (at > 0 ? sides[at - 1] : defaultOutlineSide(0, rule));
   items.splice(at, 0, { label: NEW_ITEM_LABEL, side });
   return { ...outline, items };
 }
 
 /** Remove the item at `index`, never below the minimum item count. PATCH-242:
  * every remaining item's side is frozen so no other item moves. */
-export function removeItem(outline: VisualOutline, index: number): VisualOutline {
+export function removeItem(
+  outline: VisualOutline,
+  index: number,
+  rule: OutlineSideRule = 'hub',
+): VisualOutline {
   if (outline.items.length <= OUTLINE_LIMITS.minItems || index < 0 || index >= outline.items.length) {
     return { ...outline, items: outline.items.slice() };
   }
-  return { ...outline, items: freezeOutlineSides(outline.items).filter((_, i) => i !== index) };
+  return { ...outline, items: freezeOutlineSides(outline.items, rule).filter((_, i) => i !== index) };
 }
 
 /** Set (or, with null/invalid, clear) an item's palette slot. */
