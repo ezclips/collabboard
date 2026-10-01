@@ -3,6 +3,7 @@
 import React from 'react';
 
 import { OUTLINE_LIMITS, type VisualOutline, type VisualOutlineItem } from '@/lib/ai/outline';
+import { effectiveOutlineSides, insertItem } from '@/lib/ai/infographic/edit';
 import { VISUAL_ICON_NAMES } from '@/lib/ai/visualIcons';
 
 /**
@@ -27,7 +28,12 @@ export default function OutlineTextEditor({
 
   const addItem = () => {
     if (outline.items.length >= OUTLINE_LIMITS.items) return;
-    update({ items: [...outline.items, { label: 'New item' }] });
+    // PATCH-242: add on the side with fewer items (tie -> right), after the
+    // helper has frozen every existing item's current side.
+    const sides = effectiveOutlineSides(outline.items);
+    const left = sides.filter((side) => side === 'left').length;
+    const side = left < sides.length - left ? 'left' : 'right';
+    onChange(insertItem(outline, outline.items.length, { side }));
   };
 
   const removeItem = (index: number) => {

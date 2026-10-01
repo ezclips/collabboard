@@ -12,6 +12,9 @@ export interface VisualOutlineChild {
   label: string;
 }
 
+/** PATCH-242. Which side of a hub/tree picture an item sits on. */
+export type VisualSide = 'left' | 'right';
+
 export interface VisualOutlineItem {
   label: string;
   detail?: string;
@@ -20,6 +23,12 @@ export interface VisualOutlineItem {
   icon?: string;
   /** PATCH-240. A palette slot (0..5) overriding the item's index colour. */
   color?: number;
+  /**
+   * PATCH-242. The side this item was placed on, so adding/removing an item
+   * never moves the others. Only the hub design uses it; every other design
+   * ignores it. Kept leniently by `parseOutline`.
+   */
+  side?: VisualSide;
   children?: VisualOutlineChild[];
 }
 
@@ -118,6 +127,7 @@ const OutlineItemSchema = z.object({
   date: z.string().optional(),
   icon: z.string().optional(),
   color: z.number().optional(),
+  side: z.unknown().optional(),
   children: z.array(OutlineChildSchema).optional(),
 });
 
@@ -152,6 +162,9 @@ function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineIte
   if (typeof raw.color === 'number' && Number.isInteger(raw.color) && raw.color >= 0 && raw.color <= 5) {
     item.color = raw.color;
   }
+
+  // PATCH-242: keep only a valid side; anything else is dropped, never throws.
+  if (raw.side === 'left' || raw.side === 'right') item.side = raw.side;
 
   const children = (raw.children ?? [])
     .map((child) => trimTo(child.label, OUTLINE_LIMITS.label))

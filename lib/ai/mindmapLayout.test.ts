@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { layoutMindmap, type MindmapLayoutNode, type MindmapTree } from './mindmapLayout';
+import { effectiveBranchSides, layoutMindmap, type MindmapLayoutNode, type MindmapTree } from './mindmapLayout';
 
 function branch(label: string, leafCount = 0): { label: string; children?: Array<{ label: string }> } {
   return {
@@ -87,6 +87,49 @@ describe('PATCH-234 layoutMindmap', () => {
     expect(layout.nodes.find((n) => n.id === 'root')!.path).toEqual([]);
     expect(layout.nodes.find((n) => n.id === 'b0')!.path).toEqual([0]);
     expect(layout.nodes.find((n) => n.id === 'b1l1')!.path).toEqual([1, 1]);
+  });
+
+  it('PATCH-242: no side anywhere === today\u2019s geometry', () => {
+    const explicit: MindmapTree = {
+      label: 'Root',
+      children: [
+        { label: 'Branch 1', side: 'right' },
+        { label: 'Branch 2', side: 'right' },
+        { label: 'Branch 3', side: 'left' },
+      ],
+    };
+    expect(layoutMindmap(explicit)).toEqual(layoutMindmap(tree(3)));
+  });
+
+  it('PATCH-242: effectiveBranchSides keeps a stored side and defaults the rest', () => {
+    expect(effectiveBranchSides([
+      { label: 'A' },
+      { label: 'B', side: 'left' },
+      { label: 'C' },
+      { label: 'D' },
+    ])).toEqual(['right', 'left', 'left', 'left']);
+  });
+
+  it('PATCH-242: stored sides put branches on their side in outline order', () => {
+    const explicit: MindmapTree = {
+      label: 'Root',
+      children: [
+        { label: 'L1', side: 'left' },
+        { label: 'L2', side: 'left' },
+        { label: 'R1', side: 'right' },
+        { label: 'R2', side: 'right' },
+      ],
+    };
+    const layout = layoutMindmap(explicit);
+    const root = layout.nodes.find((n) => n.depth === 0)!;
+    const node = (id: string) => layout.nodes.find((n) => n.id === id)!;
+    expect(node('b0').x).toBeLessThan(root.x);
+    expect(node('b1').x).toBeLessThan(root.x);
+    expect(node('b2').x).toBeGreaterThan(root.x);
+    expect(node('b3').x).toBeGreaterThan(root.x);
+    // Outline order top to bottom within each side.
+    expect(node('b0').y).toBeLessThan(node('b1').y);
+    expect(node('b2').y).toBeLessThan(node('b3').y);
   });
 
   it('starts and ends every link on a node edge midpoint', () => {

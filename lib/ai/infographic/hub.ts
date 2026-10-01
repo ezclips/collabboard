@@ -1,5 +1,6 @@
 import type { VisualOutline } from '@/lib/ai/outline';
 import { themeById, themeColor, type VisualTheme } from '@/lib/ai/visualThemes';
+import { effectiveOutlineSides } from './edit';
 import { labelBlock, LABEL_FONT, DETAIL_FONT, type InfographicLayout } from './shared';
 
 /**
@@ -19,8 +20,11 @@ export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById
   const columnX = centreR + gapX + cardW;
   const cx = columnX + 16;
 
-  const rightItems = items.map((item, i) => ({ item, i })).filter(({ i }) => i % 2 === 0);
-  const leftItems = items.map((item, i) => ({ item, i })).filter(({ i }) => i % 2 === 1);
+  // PATCH-242: a stored side wins; with none the even/odd default is identical
+  // to today's geometry.
+  const sides = effectiveOutlineSides(items);
+  const rightItems = items.map((item, i) => ({ item, i })).filter(({ i }) => sides[i] === 'right');
+  const leftItems = items.map((item, i) => ({ item, i })).filter(({ i }) => sides[i] === 'left');
   const rows = Math.max(rightItems.length, leftItems.length, 1);
   const maxCardH = Math.max(
     64,
@@ -119,7 +123,7 @@ export function layoutHub(outline: VisualOutline, theme: VisualTheme = themeById
   let r = 0;
   let l = 0;
   items.forEach((item, index) => {
-    if (index % 2 === 0) {
+    if (sides[index] === 'right') {
       place(item, index, 'right', r);
       r += 1;
     } else {

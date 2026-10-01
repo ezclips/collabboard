@@ -1,5 +1,5 @@
-import { OUTLINE_LIMITS, type VisualOutline, type VisualOutlineItem } from '@/lib/ai/outline';
-import type { MindmapTree } from '@/lib/ai/mindmapLayout';
+import { OUTLINE_LIMITS, type VisualOutline, type VisualOutlineItem, type VisualSide } from '@/lib/ai/outline';
+import { effectiveBranchSides, type MindmapTree } from '@/lib/ai/mindmapLayout';
 
 /**
  * PATCH-240. The pure edit helpers behind "edit on the picture itself": rename a
@@ -48,23 +48,51 @@ export function renameOutline(outline: VisualOutline, ref: OutlineTextRef, text:
   return { ...outline, items };
 }
 
-/** Insert a new item at `index`, capped at the maximum item count. */
-export function insertItem(outline: VisualOutline, index: number): VisualOutline {
+/**
+ * PATCH-242. The side each item is drawn on: its stored `side` when present,
+ * else today's hub default (even -> right, odd -> left). Pure.
+ */
+export function effectiveOutlineSides(items: ReadonlyArray<{ side?: VisualSide }>): VisualSide[] {
+  return items.map((item, index) => item.side ?? (index % 2 === 0 ? 'right' : 'left'));
+}
+
+/**
+ * PATCH-242. Freeze every item's CURRENT effective side into the data, so the
+ * next edit cannot move any item that is already placed. Returns new objects.
+ */
+function freezeOutlineSides(items: readonly VisualOutlineItem[]): VisualOutlineItem[] {
+  const sides = effectiveOutlineSides(items);
+  return items.map((item, index) => ({ ...item, side: sides[index] }));
+}
+
+/**
+ * Insert a new item at `index`, capped at the maximum item count. PATCH-242:
+ * every existing item's side is frozen first; the new item takes an explicit
+ * `side` when given, else the side of the item before it, else `right`.
+ */
+export function insertItem(
+  outline: VisualOutline,
+  index: number,
+  opts?: { side?: VisualSide },
+): VisualOutline {
   if (outline.items.length >= OUTLINE_LIMITS.items) {
     return { ...outline, items: outline.items.slice() };
   }
   const at = Math.max(0, Math.min(index, outline.items.length));
-  const items = outline.items.slice();
-  items.splice(at, 0, { label: NEW_ITEM_LABEL });
+  const sides = effectiveOutlineSides(outline.items);
+  const items = freezeOutlineSides(outline.items);
+  const side = opts?.side ?? (at > 0 ? sides[at - 1] : 'right');
+  items.splice(at, 0, { label: NEW_ITEM_LABEL, side });
   return { ...outline, items };
 }
 
-/** Remove the item at `index`, never below the minimum item count. */
+/** Remove the item at `index`, never below the minimum item count. PATCH-242:
+ * every remaining item's side is frozen so no other item moves. */
 export function removeItem(outline: VisualOutline, index: number): VisualOutline {
   if (outline.items.length <= OUTLINE_LIMITS.minItems || index < 0 || index >= outline.items.length) {
     return { ...outline, items: outline.items.slice() };
   }
-  return { ...outline, items: outline.items.filter((_, i) => i !== index) };
+  return { ...outline, items: freezeOutlineSides(outline.items).filter((_, i) => i !== index) };
 }
 
 /** Set (or, with null/invalid, clear) an item's palette slot. */
@@ -113,13 +141,27 @@ export function renameNode(tree: MindmapTree, path: number[], text: string): Min
   };
 }
 
-/** Add a branch at the root ([]) or a leaf on a branch ([b]). */
-export function addChild(tree: MindmapTree, path: number[]): MindmapTree {
+/**
+ * Add a branch at the root ([]) or a leaf on a branch ([b]). PATCH-242: for a
+ * branch, every existing branch's side is frozen first and the new branch is
+ * appended after the last branch of its side; a leaf is unchanged.
+ */
+export function addChild(tree: MindmapTree, path: number[], opts?: { side?: VisualSide }): MindmapTree {
   const children = tree.children ?? [];
 
   if (path.length === 0) {
     if (children.length >= MAX_BRANCHES) return { ...tree, children: children.slice() };
-    return { ...tree, children: [...children, { label: NEW_BRANCH_LABEL }] };
+    const sides = effectiveBranchSides(children);
+    const frozen = children.map((child, i) => ({ ...child, side: sides[i] }));
+    const side = opts?.side ?? 'right';
+    let at = frozen.length;
+    if (opts?.side) {
+      for (let i = frozen.length - 1; i >= 0; i -= 1) {
+        if (frozen[i].side === side) { at = i + 1; break; }
+      }
+    }
+    frozen.splice(at, 0, { label: NEW_BRANCH_LABEL, side });
+    return { ...tree, children: frozen };
   }
 
   const branchIndex = path[0];
@@ -145,7 +187,9 @@ export function removeNode(tree: MindmapTree, path: number[]): MindmapTree {
 
   if (path.length === 1) {
     if (children.length <= MIN_BRANCHES) return { ...tree, children: children.slice() };
-    return { ...tree, children: children.filter((_, i) => i !== branchIndex) };
+    const sides = effectiveBranchSides(children);
+    const frozen = children.map((child, i) => ({ ...child, side: sides[i] }));
+    return { ...tree, children: frozen.filter((_, i) => i !== branchIndex) };
   }
 
   const leafIndex = path[1];

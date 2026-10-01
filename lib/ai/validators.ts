@@ -96,8 +96,17 @@ export const FlowDiagramSchema: z.ZodType<FlowDiagramData> = z.object({
 
 const MindmapLeafSchema = z.object({ label: z.string().min(1) });
 
+/**
+ * PATCH-242. An optional branch side. A known value is kept; anything else is
+ * dropped to undefined so a stored post is never rejected over it.
+ */
+const MindmapBranchSideSchema = z
+  .unknown()
+  .transform((value): 'left' | 'right' | undefined => (value === 'left' || value === 'right' ? value : undefined));
+
 const MindmapBranchSchema = z.object({
   label: z.string().min(1),
+  side: MindmapBranchSideSchema,
   children: z.array(MindmapLeafSchema).optional(),
 });
 
@@ -117,6 +126,7 @@ const MindmapTreeSchema = z
       ?.slice(0, 8)
       .map((branch) => ({
         label: branch.label,
+        ...(branch.side ? { side: branch.side } : {}),
         children: branch.children ? branch.children.slice(0, 6) : undefined,
       })),
   }));

@@ -7,11 +7,25 @@
 
 import { themeById, themeColor, type VisualTheme } from './visualThemes';
 import type { VisualColor } from './visualPalette';
+import type { VisualSide } from './outline';
 import { wrapLabel } from './infographic/text';
 
 export interface MindmapTree {
   label: string;
-  children?: Array<{ label: string; children?: Array<{ label: string }> }>;
+  /**
+   * PATCH-242. A branch may store the side it sits on (`side`), so adding or
+   * removing a branch never moves the others. Absent means today's split.
+   */
+  children?: Array<{ label: string; side?: VisualSide; children?: Array<{ label: string }> }>;
+}
+
+/**
+ * PATCH-242. The side each branch is drawn on: its stored `side` when present,
+ * else today's default (the first `ceil(n/2)` branches to the right).
+ */
+export function effectiveBranchSides(branches: ReadonlyArray<{ label?: string; side?: VisualSide }>): VisualSide[] {
+  const rightCount = Math.ceil(branches.length / 2);
+  return branches.map((branch, index) => branch.side ?? (index < rightCount ? 'right' : 'left'));
 }
 
 export interface MindmapLayoutNode {
@@ -91,6 +105,7 @@ export function layoutMindmap(tree: MindmapTree): MindmapLayout {
 
   const branches = (tree.children ?? []).slice(0, MAX_BRANCHES).map((branch, ordinal) => ({
     ordinal,
+    side: branch.side,
     node: measure(branch.label ?? '', NODE_CHAR, BRANCH_MAX),
     leaves: (branch.children ?? [])
       .slice(0, MAX_LEAVES)
@@ -103,10 +118,12 @@ export function layoutMindmap(tree: MindmapTree): MindmapLayout {
   const maxBranchW = allBranchWidths.length ? Math.max(...allBranchWidths) : 0;
   const maxLeafW = allLeafWidths.length ? Math.max(...allLeafWidths) : 0;
 
-  const rightCount = Math.ceil(branches.length / 2);
+  // PATCH-242: each branch keeps its stored side (else today's default); the
+  // two groups list their branches in outline order, top to bottom.
+  const branchSides = effectiveBranchSides(branches);
   const sides: Array<{ dir: 1 | -1; items: typeof branches }> = [
-    { dir: 1, items: branches.slice(0, rightCount) },
-    { dir: -1, items: branches.slice(rightCount) },
+    { dir: 1, items: branches.filter((_, i) => branchSides[i] === 'right') },
+    { dir: -1, items: branches.filter((_, i) => branchSides[i] === 'left') },
   ];
 
   for (const { dir, items } of sides) {

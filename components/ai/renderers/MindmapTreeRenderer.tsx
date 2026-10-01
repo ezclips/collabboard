@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 
 import type { MindmapDiagramData } from '@/lib/ai/contracts';
-import { colorForNode, layoutMindmap, type MindmapLayoutNode, type MindmapTree } from '@/lib/ai/mindmapLayout';
+import { colorForNode, effectiveBranchSides, layoutMindmap, type MindmapLayoutNode, type MindmapTree } from '@/lib/ai/mindmapLayout';
+import type { VisualSide } from '@/lib/ai/outline';
 import { OUTLINE_LIMITS } from '@/lib/ai/outline';
 import {
   MAX_BRANCHES,
@@ -47,27 +48,46 @@ function maxForPath(path: number[]): number {
   return path.length === 0 ? OUTLINE_LIMITS.title : OUTLINE_LIMITS.label;
 }
 
+/**
+ * PATCH-242. Handles sit fully OUTSIDE their node's box (centre at the box edge
+ * plus the handle radius and a 3-unit gap), so no circle covers a word. The +
+ * goes on the OUTER edge (where the children grow), the − on the inner edge.
+ */
+const HANDLE_RADIUS = 9;
+const HANDLE_GAP = 3;
+const HANDLE_OFFSET = HANDLE_RADIUS + HANDLE_GAP;
+
 function nodeHandles(node: MindmapLayoutNode, tree: MindmapTree, width: number, height: number, onChange: (next: MindmapTree) => void): EditHandle[] {
   const pctX = (x: number) => (width ? (x / width) * 100 : 0);
   const pctY = (y: number) => (height ? (y / height) * 100 : 0);
   const branches = tree.children ?? [];
   const handles: EditHandle[] = [];
   const key = pathKey(node.path);
+  const top = pctY(node.y);
 
-  if (node.depth === 0 && branches.length < MAX_BRANCHES) {
-    handles.push({ key: `add-${key}`, kind: 'add', left: pctX(node.x + node.w / 2), top: pctY(node.y), target: key, onActivate: () => onChange(addChild(tree, [])) });
+  if (node.depth === 0) {
+    if (branches.length < MAX_BRANCHES) {
+      handles.push({ key: 'add-root-left', kind: 'add', left: pctX(node.x - node.w / 2 - HANDLE_OFFSET), top, target: 'root:left', onActivate: () => onChange(addChild(tree, [], { side: 'left' })) });
+      handles.push({ key: 'add-root-right', kind: 'add', left: pctX(node.x + node.w / 2 + HANDLE_OFFSET), top, target: 'root:right', onActivate: () => onChange(addChild(tree, [], { side: 'right' })) });
+    }
+    return handles;
   }
+
+  const dir: VisualSide = effectiveBranchSides(branches)[node.path[0]] ?? 'right';
+  const outerX = dir === 'right' ? node.x + node.w / 2 + HANDLE_OFFSET : node.x - node.w / 2 - HANDLE_OFFSET;
+  const innerX = dir === 'right' ? node.x - node.w / 2 - HANDLE_OFFSET : node.x + node.w / 2 + HANDLE_OFFSET;
+
   if (node.depth === 1) {
     const leaves = branches[node.path[0]]?.children ?? [];
     if (leaves.length < MAX_LEAVES) {
-      handles.push({ key: `add-${key}`, kind: 'add', left: pctX(node.x + node.w / 2), top: pctY(node.y), target: key, onActivate: () => onChange(addChild(tree, node.path)) });
+      handles.push({ key: `add-${key}`, kind: 'add', left: pctX(outerX), top, target: key, onActivate: () => onChange(addChild(tree, node.path, { side: dir })) });
     }
     if (branches.length > MIN_BRANCHES) {
-      handles.push({ key: `remove-${key}`, kind: 'remove', left: pctX(node.x - node.w / 2), top: pctY(node.y), target: key, onActivate: () => onChange(removeNode(tree, node.path)) });
+      handles.push({ key: `remove-${key}`, kind: 'remove', left: pctX(innerX), top, target: key, onActivate: () => onChange(removeNode(tree, node.path)) });
     }
   }
   if (node.depth === 2) {
-    handles.push({ key: `remove-${key}`, kind: 'remove', left: pctX(node.x - node.w / 2), top: pctY(node.y), target: key, onActivate: () => onChange(removeNode(tree, node.path)) });
+    handles.push({ key: `remove-${key}`, kind: 'remove', left: pctX(innerX), top, target: key, onActivate: () => onChange(removeNode(tree, node.path)) });
   }
   return handles;
 }
@@ -117,7 +137,9 @@ function MindmapTreeRenderer({
       }
     : null;
 
-  const handles = edit
+  // PATCH-242: while a rename input is open the +/− circles are hidden (the
+  // input can cover a neighbouring handle otherwise); they return on commit.
+  const handles = edit && !editingKey
     ? layout.nodes.flatMap((node) => nodeHandles(node, tree, layout.width, layout.height, edit.onChange))
     : [];
 

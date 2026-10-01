@@ -105,6 +105,26 @@ describe('PATCH-237 outline icons', () => {
   });
 });
 
+describe('PATCH-242 outline item side', () => {
+  it('keeps a valid side and drops anything else, never failing the post', () => {
+    const out = parseOutline({
+      title: 'T',
+      items: [
+        { label: 'A', side: 'left' },
+        { label: 'B', side: 'right' },
+        { label: 'C', side: 'up' },
+        { label: 'D' },
+        { label: 'E', side: 3 },
+      ],
+    });
+    expect(out.items[0].side).toBe('left');
+    expect(out.items[1].side).toBe('right');
+    expect(out.items[2].side).toBeUndefined();
+    expect(out.items[3].side).toBeUndefined();
+    expect(out.items[4].side).toBeUndefined();
+  });
+});
+
 describe('PATCH-240 outline item colour', () => {
   it('keeps a palette slot 0..5 and drops an invalid one', () => {
     const out = parseOutline({

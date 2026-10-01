@@ -137,6 +137,56 @@ describe('PATCH-240 InfographicRenderer edit handles', () => {
   });
 });
 
+const hubOutline: VisualOutline = {
+  title: 'Seasons',
+  ordered: false,
+  kind: 'levels',
+  items: [
+    { label: 'Spring' },
+    { label: 'Summer' },
+    { label: 'Autumn' },
+    { label: 'Winter' },
+  ],
+};
+
+describe('PATCH-242 InfographicRenderer hub sides', () => {
+  it('+ after item 0 inserts below it on item 0\u2019s side and freezes every side', () => {
+    const onChange = vi.fn();
+    const c = mount(<InfographicRenderer data={data('hub', hubOutline)} edit={{ onChange }} />);
+    click(c.querySelector('[data-ai-edit-add="0"]') as Element);
+    const next = onChange.mock.calls[0][0] as VisualOutline;
+    expect(next.items.map((i) => i.label)).toEqual(['Spring', 'New item', 'Summer', 'Autumn', 'Winter']);
+    expect(next.items[1].side).toBe('right');
+    expect(next.items.map((i) => i.side)).toEqual(['right', 'right', 'left', 'right', 'left']);
+  });
+
+  it('the centre gets a left and a right +, each appending on that side', () => {
+    const onChange = vi.fn();
+    const c = mount(<InfographicRenderer data={data('hub', hubOutline)} edit={{ onChange }} />);
+    expect(c.querySelector('[data-ai-edit-add="hub:left"]')).not.toBeNull();
+    expect(c.querySelector('[data-ai-edit-add="hub:right"]')).not.toBeNull();
+
+    click(c.querySelector('[data-ai-edit-add="hub:left"]') as Element);
+    const left = onChange.mock.calls[0][0] as VisualOutline;
+    expect(left.items.map((i) => i.label)).toEqual(['Spring', 'Summer', 'Autumn', 'Winter', 'New item']);
+    expect(left.items[left.items.length - 1].side).toBe('left');
+
+    onChange.mockClear();
+    click(c.querySelector('[data-ai-edit-add="hub:right"]') as Element);
+    const right = onChange.mock.calls[0][0] as VisualOutline;
+    expect(right.items[right.items.length - 1].side).toBe('right');
+  });
+
+  it('hides every +/− handle while a rename input is open', () => {
+    const c = mount(<InfographicRenderer data={data()} edit={{ onChange: vi.fn() }} />);
+    expect(c.querySelector('[data-ai-edit-add]')).not.toBeNull();
+    click(c.querySelector('[data-ai-edit-ref="label:0"]') as Element);
+    expect(c.querySelector('[data-ai-edit-input="true"]')).not.toBeNull();
+    expect(c.querySelector('[data-ai-edit-add]')).toBeNull();
+    expect(c.querySelector('[data-ai-edit-remove]')).toBeNull();
+  });
+});
+
 describe('PATCH-240 InfographicRenderer non-editable stays chrome-free', () => {
   it('has data-ai-edit-ref attributes but no handles, overlay or shape click chrome', () => {
     const c = mount(<InfographicRenderer data={data()} />);

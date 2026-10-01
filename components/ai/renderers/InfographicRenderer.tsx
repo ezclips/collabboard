@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { isAntvTemplate, type InfographicDiagramData, type InfographicTemplate } from '@/lib/ai/contracts';
 import { layoutInfographic, TEMPLATE_RANGE, type InfographicShape, type InfographicText, type InfographicIcon } from '@/lib/ai/infographic';
 import {
+  effectiveOutlineSides,
   insertItem,
   recolorItem,
   removeItem,
@@ -112,11 +113,56 @@ function editHandles(
   layout: ReturnType<typeof layoutInfographic>,
   range: { min: number; max: number },
   onChange: (next: VisualOutline) => void,
+  template: InfographicTemplate,
 ): EditHandle[] {
   const count = outline.items.length;
   const pctX = (x: number) => (layout.width ? (x / layout.width) * 100 : 0);
   const pctY = (y: number) => (layout.height ? (y / layout.height) * 100 : 0);
   const handles: EditHandle[] = [];
+
+  if (template === 'hub') {
+    // PATCH-242. + adds directly below its item on that item's own side, so no
+    // other card moves; the centre circle gets a + on each edge to append.
+    const sides = effectiveOutlineSides(outline.items);
+    if (count > range.min) {
+      for (const shape of layout.shapes) {
+        if (shape.item == null || shape.item >= count) continue;
+        const bounds = shapeBounds(shape);
+        if (!bounds) continue;
+        handles.push({
+          key: `remove-${shape.item}`,
+          kind: 'remove',
+          left: pctX(bounds.left),
+          top: pctY(bounds.top + bounds.height / 2),
+          target: String(shape.item),
+          onActivate: () => onChange(removeItem(outline, shape.item as number)),
+        });
+      }
+    }
+    if (count < range.max) {
+      for (let i = 0; i < count; i += 1) {
+        const shape = layout.shapes.find((candidate) => candidate.item === i);
+        const bounds = shape ? shapeBounds(shape) : null;
+        const side = sides[i];
+        handles.push({
+          key: `add-${i}`,
+          kind: 'add',
+          left: bounds ? pctX(side === 'right' ? bounds.right : bounds.left) : 0,
+          top: bounds ? pctY(bounds.bottom) : 50,
+          target: String(i),
+          onActivate: () => onChange(insertItem(outline, i + 1, { side })),
+        });
+      }
+      const centre = layout.shapes.find((shape) => shape.id === 'hub');
+      const centreBounds = centre ? shapeBounds(centre) : null;
+      if (centreBounds) {
+        const centreY = pctY((centreBounds.top + centreBounds.bottom) / 2);
+        handles.push({ key: 'add-hub-left', kind: 'add', left: pctX(centreBounds.left), top: centreY, target: 'hub:left', onActivate: () => onChange(insertItem(outline, count, { side: 'left' })) });
+        handles.push({ key: 'add-hub-right', kind: 'add', left: pctX(centreBounds.right), top: centreY, target: 'hub:right', onActivate: () => onChange(insertItem(outline, count, { side: 'right' })) });
+      }
+    }
+    return handles;
+  }
 
   if (count > range.min) {
     for (const shape of layout.shapes) {
@@ -251,7 +297,7 @@ function OurInfographicRenderer({
           <div className="group relative w-full">
             {svg}
             <PictureEditOverlay
-              handles={editHandles(outline, layout, TEMPLATE_RANGE[data.template], edit.onChange)}
+              handles={editingKey ? [] : editHandles(outline, layout, TEMPLATE_RANGE[data.template], edit.onChange, data.template)}
               activeEdit={activeEdit}
               colorPopover={colorPopover}
             />

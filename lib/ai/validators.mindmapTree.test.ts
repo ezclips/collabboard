@@ -30,6 +30,27 @@ describe('PATCH-234 mindmap optional tree', () => {
     }
   });
 
+  it('PATCH-242 keeps a valid branch side and drops an invalid one, still validating', () => {
+    const result = MindmapDiagramSchema.safeParse({
+      ...base,
+      tree: {
+        label: 'Root',
+        children: [
+          { label: 'Left branch', side: 'left' },
+          { label: 'Right branch', side: 'right' },
+          { label: 'Bad branch', side: 'up' },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const branches = result.data.tree!.children as Array<{ label: string; side?: string }>;
+      expect(branches[0].side).toBe('left');
+      expect(branches[1].side).toBe('right');
+      expect(branches[2].side).toBeUndefined();
+    }
+  });
+
   it('trims an over-long tree (9 branches -> 8) rather than rejecting it', () => {
     // Consistent with parseOutline, which caps the outline at 8 items / 6 children.
     const result = MindmapDiagramSchema.safeParse({

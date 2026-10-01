@@ -3,7 +3,8 @@
 import React from 'react';
 
 import { OUTLINE_LIMITS } from '@/lib/ai/outline';
-import type { MindmapTree } from '@/lib/ai/mindmapLayout';
+import { effectiveBranchSides, type MindmapTree } from '@/lib/ai/mindmapLayout';
+import { addChild as addTreeChild } from '@/lib/ai/infographic/edit';
 
 /**
  * PATCH-239. Edit a mind map as a tree -- the centre topic, then branches with
@@ -47,7 +48,12 @@ export default function MindmapTreeEditor({
 
   const addBranch = () => {
     if (branches.length >= MAX_BRANCHES) return;
-    setBranches([...branches, { label: 'New branch' }]);
+    // PATCH-242: add on the side with fewer branches (tie -> right), after the
+    // helper has frozen every existing branch's current side.
+    const sides = effectiveBranchSides(branches);
+    const left = sides.filter((side) => side === 'left').length;
+    const side = left < sides.length - left ? 'left' : 'right';
+    onChange(addTreeChild(tree, [], { side }));
   };
 
   const updateChild = (branchIndex: number, childIndex: number, label: string) => {

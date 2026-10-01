@@ -34,6 +34,10 @@ function setInputValue(input: HTMLInputElement, value: string) {
   });
 }
 
+function click(el: Element) {
+  act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+}
+
 const TREE: MindmapTree = {
   label: 'Water cycle',
   children: [{ label: 'Evaporation' }, { label: 'Condensation' }],
@@ -53,5 +57,27 @@ describe('PATCH-241 MindmapTreeEditor', () => {
     const next = onChange.mock.calls[0][0] as MindmapTree;
     expect(next.label).toBe('Water cycle');
     expect(next.children?.[0].label).toBe('Evaporation X');
+  });
+});
+
+describe('PATCH-242 MindmapTreeEditor "+ Add branch" side', () => {
+  const newNode = (t: MindmapTree) => t.children!.find((b) => b.label === 'New branch')!;
+
+  it('adds on the side with fewer branches (one right branch -> left)', () => {
+    const onChange = vi.fn();
+    const c = mount(<MindmapTreeEditor tree={{ label: 'Root', children: [{ label: 'A' }] }} onChange={onChange} />);
+    click(c.querySelector('[data-ai-mindmap-add-branch="true"]') as Element);
+    const next = onChange.mock.calls[0][0] as MindmapTree;
+    expect(newNode(next).side).toBe('left');
+  });
+
+  it('breaks a tie to the right (one per side -> right)', () => {
+    const onChange = vi.fn();
+    const c = mount(<MindmapTreeEditor tree={{ label: 'Root', children: [{ label: 'A' }, { label: 'B' }] }} onChange={onChange} />);
+    click(c.querySelector('[data-ai-mindmap-add-branch="true"]') as Element);
+    const next = onChange.mock.calls[0][0] as MindmapTree;
+    expect(newNode(next).side).toBe('right');
+    // New branch sits after the last right branch; the rest are frozen.
+    expect(next.children!.map((b) => b.side)).toEqual(['right', 'right', 'left']);
   });
 });

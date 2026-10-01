@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { OUTLINE_LIMITS, type VisualOutline } from '@/lib/ai/outline';
-import type { MindmapTree } from '@/lib/ai/mindmapLayout';
+import { effectiveBranchSides, type MindmapTree } from '@/lib/ai/mindmapLayout';
 import {
   addChild,
+  effectiveOutlineSides,
   insertItem,
   recolorItem,
   removeItem,
@@ -125,6 +126,94 @@ describe('PATCH-240 recolorItem', () => {
     const base = outline();
     expect(recolorItem(base, 0, 9).items[0].color).toBeUndefined();
     expect(recolorItem(base, 0, -1).items[0].color).toBeUndefined();
+  });
+});
+
+function hub(): VisualOutline {
+  return deepFreeze({
+    title: 'Seasons',
+    ordered: false,
+    kind: 'levels',
+    items: [
+      { label: 'Spring' },
+      { label: 'Summer' },
+      { label: 'Autumn' },
+      { label: 'Winter' },
+    ],
+  });
+}
+
+describe('PATCH-242 stored sides (outline)', () => {
+  it('effectiveOutlineSides defaults to even right / odd left', () => {
+    expect(effectiveOutlineSides(hub().items)).toEqual(['right', 'left', 'right', 'left']);
+  });
+
+  it('insert after a right hub item puts the new item right, and freezes every side', () => {
+    const base = hub();
+    const beforeSides = effectiveOutlineSides(base.items);
+    const next = insertItem(base, 1, { side: 'right' });
+
+    expect(base.items.length).toBe(4);
+    expect(next.items.map((i) => i.label)).toEqual(['Spring', 'New item', 'Summer', 'Autumn', 'Winter']);
+    expect(next.items.map((i) => i.side)).toEqual(['right', 'right', 'left', 'right', 'left']);
+    // The new item sits directly below item 0 on the right side (index 1 of the
+    // right group), and every original item keeps its effective side.
+    const withoutNew = next.items.filter((_, i) => i !== 1);
+    expect(effectiveOutlineSides(withoutNew)).toEqual(beforeSides);
+  });
+
+  it('new side defaults to the side of the item before it, else right', () => {
+    const base = hub();
+    expect(insertItem(base, 2, undefined).items[2].side).toBe('left'); // item 1 is left
+    expect(insertItem(base, 0, undefined).items[0].side).toBe('right'); // no item before
+  });
+
+  it('removeItem freezes sides first, so no other item changes side', () => {
+    const base = hub();
+    const beforeSides = effectiveOutlineSides(base.items);
+    const next = removeItem(base, 1);
+    expect(next.items.map((i) => i.label)).toEqual(['Spring', 'Autumn', 'Winter']);
+    expect(next.items.map((i) => i.side)).toEqual(['right', 'right', 'left']);
+    expect(effectiveOutlineSides(next.items)).toEqual(
+      beforeSides.filter((_, i) => i !== 1),
+    );
+    expect(base.items.some((i) => i.side !== undefined)).toBe(false);
+  });
+});
+
+describe('PATCH-242 stored sides (tree)', () => {
+  it('effectiveBranchSides defaults to first ceil(n/2) right', () => {
+    expect(effectiveBranchSides([
+      { label: 'A' },
+      { label: 'B' },
+      { label: 'C' },
+    ])).toEqual(['right', 'right', 'left']);
+  });
+
+  it('adds a branch on the side asked for, after the last of that side, freezing the rest', () => {
+    const base = tree();
+    const withRight = addChild(base, [], { side: 'right' });
+    expect(withRight.children!.map((b) => b.label)).toEqual(['Evaporation', 'New branch', 'Condensation']);
+    expect(withRight.children!.map((b) => b.side)).toEqual(['right', 'right', 'left']);
+
+    const withLeft = addChild(base, [], { side: 'left' });
+    expect(withLeft.children!.map((b) => b.label)).toEqual(['Evaporation', 'Condensation', 'New branch']);
+    expect(withLeft.children!.map((b) => b.side)).toEqual(['right', 'left', 'left']);
+
+    // Nothing else moved: the original branches keep their effective side.
+    const beforeSides = effectiveBranchSides(base.children!);
+    const originals = withLeft.children!.filter((b) => b.label !== 'New branch');
+    expect(effectiveBranchSides(originals)).toEqual(beforeSides);
+    expect(base.children!.some((b) => b.side !== undefined)).toBe(false);
+  });
+
+  it('removeNode on a branch freezes the remaining sides first', () => {
+    const base = tree();
+    const beforeSides = effectiveBranchSides(base.children!);
+    const next = removeNode(base, [0]);
+    expect(next.children!.map((b) => b.label)).toEqual(['Condensation']);
+    expect(next.children![0].side).toBe('left');
+    expect(effectiveBranchSides(next.children!)).toEqual(beforeSides.filter((_, i) => i !== 0));
   });
 });
 

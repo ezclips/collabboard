@@ -480,6 +480,117 @@ function FreeformImageResizeBox({
   );
 }
 
+/**
+ * PATCH-242. The AI post's action cluster (Expand, Edit, Regen, Convert when
+ * targets exist, Export), rendered by BOTH the top strip and the frameless
+ * floating bar so the two can never drift. The caller owns the handlers and
+ * state; this is presentation only.
+ */
+function AIPostStripActions({
+  padlet,
+  iconColor,
+  expanded,
+  variant,
+  canEdit,
+  onToggleExpand,
+  onEdit,
+  onRegen,
+  onConvert,
+  getExportTarget,
+}: {
+  padlet: Padlet;
+  iconColor: string;
+  expanded: boolean;
+  variant: 'strip' | 'floating';
+  canEdit: boolean;
+  onToggleExpand: () => void;
+  onEdit: () => void;
+  onRegen: () => void;
+  onConvert: () => void;
+  getExportTarget: () => HTMLElement | null;
+}) {
+  const reveal = variant === 'floating'
+    ? 'opacity-100'
+    : 'opacity-0 transition-opacity group-hover:opacity-100';
+  const aiContent = extractAIContentFromPadletMetadata(padlet.metadata);
+  const normalized = normalizeAIContent(aiContent);
+  const env = normalized.kind === 'structured' ? normalized.envelope : null;
+  const envSubtype = env && env.mode === 'diagram'
+    ? ((env.data as unknown as Record<string, unknown>).subtype as DiagramSubtype | undefined)
+    : undefined;
+  const showConvert = !!env && getConversionTargets(env.mode, envSubtype).length > 0;
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        data-no-drag="true"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
+        className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-colors"
+        style={{ color: iconColor }}
+        title={expanded ? 'Collapse' : 'Expand'}
+        aria-label={expanded ? 'Collapse' : 'Expand'}
+      >
+        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+      {canEdit && (
+        <>
+          <button
+            type="button"
+            data-no-drag="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            className={`inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium hover:bg-black/10 ${reveal}`}
+            style={{ color: iconColor }}
+            title="Edit fields"
+          >
+            <Pencil className="h-3 w-3" />
+            <span>Edit</span>
+          </button>
+          <button
+            type="button"
+            data-no-drag="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onRegen(); }}
+            className={`inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium hover:bg-black/10 ${reveal}`}
+            style={{ color: iconColor }}
+            title="Regenerate with AI"
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>Regen</span>
+          </button>
+          {showConvert && (
+            <button
+              type="button"
+              data-no-drag="true"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onConvert(); }}
+              className={`inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium hover:bg-black/10 ${reveal}`}
+              style={{ color: iconColor }}
+              title="Convert to another format"
+            >
+              <ArrowLeftRight className="h-3 w-3" />
+              <span>Convert</span>
+            </button>
+          )}
+          <div
+            data-no-drag="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ color: iconColor }}
+          >
+            <AIComponentExportMenu
+              title={padlet.title || 'AI Post'}
+              code={resolveSavedAIHtmlFromMetadata(padlet.metadata)}
+              getTargetElement={getExportTarget}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // -- Component -----------------------------------------------------------------
 function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const {
@@ -3604,6 +3715,48 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           const initialEditRef = (e.target as HTMLElement).closest('[data-ai-edit-ref]')?.getAttribute('data-ai-edit-ref') ?? null;
           props.onAIContentEdit?.(padlet, initialEditRef);
         };
+        // PATCH-242. Hiding the frame hides the whole top strip, and with it
+        // every control. For an AI post or a drawing, a small floating bar on
+        // hover (and while selected) brings them back, outside the picture.
+        const showFramelessControls = isFullView && canUseFreeformEditButton && !(isLineMode || isGraphConnectMode);
+        const framelessActions = showFramelessControls ? (
+          <div
+            data-frameless-actions="true"
+            data-no-drag="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            className={`absolute -top-8 right-0 z-30 flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-1 py-0.5 shadow-md transition-opacity ${isPadletSelected(padlet.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+          >
+            {padlet.type === 'ai-component' && (
+              <AIPostStripActions
+                padlet={padlet}
+                iconColor="#374151"
+                expanded={expandedAIPosts[padlet.id] ?? false}
+                variant="floating"
+                canEdit
+                onToggleExpand={() => setExpandedAIPosts(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }))}
+                onEdit={() => { setPadletToEdit(padlet); setIsAIContentEditModalOpen(true); }}
+                onRegen={() => { setPadletToEdit(padlet); setIsAIComponentEditorOpen(true); }}
+                onConvert={() => { setPadletToEdit(padlet); setIsAIContentConvertModalOpen(true); }}
+                getExportTarget={() => aiExportTargetsRef.current[padlet.id] ?? null}
+              />
+            )}
+            <button
+              type="button"
+              data-no-drag="true"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDetachedPopupOpen(false);
+                openFreeformPadletModal(padlet);
+              }}
+              className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10"
+              style={{ color: '#374151' }}
+              title="Edit"
+            >
+              <Edit2 size={12} />
+            </button>
+          </div>
+        ) : null;
         const content = (
           <div
             ref={(el) => { genericCardRefs.current[padlet.id] = el; }}
@@ -3760,106 +3913,40 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         </span>
                       );
                     })()}
-                    {showExpandButton || isAIPost ? (
+                    {isAIPost ? (
+                      <AIPostStripActions
+                        padlet={padlet}
+                        iconColor={freeformIconColor}
+                        expanded={isAIPostExpanded}
+                        variant="strip"
+                        canEdit={canUseFreeformEditButton}
+                        onToggleExpand={() => setExpandedAIPosts(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }))}
+                        onEdit={() => { setPadletToEdit(padlet); setIsAIContentEditModalOpen(true); }}
+                        onRegen={() => { setPadletToEdit(padlet); setIsAIComponentEditorOpen(true); }}
+                        onConvert={() => { setPadletToEdit(padlet); setIsAIContentConvertModalOpen(true); }}
+                        getExportTarget={() => aiExportTargetsRef.current[padlet.id] ?? null}
+                      />
+                    ) : showExpandButton ? (
                       <div className="flex items-center gap-1">
-                        {showExpandButton && (
-                          <button
-                            type="button"
-                            data-no-drag="true"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isContainer) {
-                                setExpandedContainers(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
-                              } else if (isAIPost) {
-                                setExpandedAIPosts(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
-                              } else if (isTablePost) {
-                                setExpandedTables(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
-                              }
-                            }}
-                            className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-colors"
-                            style={{ color: freeformIconColor }}
-                            title={isExpanded ? 'Collapse' : 'Expand'}
-                            aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                          >
-                            {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                          </button>
-                        )}
-                        {isAIPost && canUseFreeformEditButton && (
-                          <>
-                            <button
-                              type="button"
-                              data-no-drag="true"
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPadletToEdit(padlet);
-                                setIsAIContentEditModalOpen(true);
-                              }}
-                              className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
-                              style={{ color: freeformIconColor }}
-                              title="Edit fields"
-                            >
-                              <Pencil className="h-3 w-3" />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              type="button"
-                              data-no-drag="true"
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPadletToEdit(padlet);
-                                setIsAIComponentEditorOpen(true);
-                              }}
-                              className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
-                              style={{ color: freeformIconColor }}
-                              title="Regenerate with AI"
-                            >
-                              <RefreshCw className="h-3 w-3" />
-                              <span>Regen</span>
-                            </button>
-                            {(() => {
-                              const aiContent = extractAIContentFromPadletMetadata(padlet.metadata);
-                              const normalized = normalizeAIContent(aiContent);
-                              if (normalized.kind !== 'structured' || !normalized.envelope) return null;
-                              const env = normalized.envelope;
-                              const envSubtype = env.mode === 'diagram'
-                                ? (env.data as unknown as Record<string, unknown>).subtype as DiagramSubtype | undefined
-                                : undefined;
-                              if (getConversionTargets(env.mode, envSubtype).length === 0) return null;
-                              return (
-                                <button
-                                  type="button"
-                                  data-no-drag="true"
-                                  onPointerDown={(e) => e.stopPropagation()}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setPadletToEdit(padlet);
-                                    setIsAIContentConvertModalOpen(true);
-                                  }}
-                                  className="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
-                                  style={{ color: freeformIconColor }}
-                                  title="Convert to another format"
-                                >
-                                  <ArrowLeftRight className="h-3 w-3" />
-                                  <span>Convert</span>
-                                </button>
-                              );
-                            })()}
-                            <div
-                              data-no-drag="true"
-                              onPointerDown={(e) => e.stopPropagation()}
-                              style={{ color: freeformIconColor }}
-                            >
-                              <AIComponentExportMenu
-                                title={padlet.title || 'AI Post'}
-                                code={resolveSavedAIHtmlFromMetadata(padlet.metadata)}
-                                getTargetElement={() => aiExportTargetsRef.current[padlet.id] ?? null}
-                              />
-                            </div>
-                          </>
-                        )}
+                        <button
+                          type="button"
+                          data-no-drag="true"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isContainer) {
+                              setExpandedContainers(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
+                            } else if (isTablePost) {
+                              setExpandedTables(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
+                            }
+                          }}
+                          className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-colors"
+                          style={{ color: freeformIconColor }}
+                          title={isExpanded ? 'Collapse' : 'Expand'}
+                          aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                        >
+                          {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
                       </div>
                     ) : canUseFreeformEditButton ? (
                       <div className="w-5 h-5 shrink-0" aria-hidden="true" />
@@ -5357,10 +5444,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 PATCH-223: Drawing joins this guard now that its own click
                 no longer stops propagation (its zoom moved to its menu). */}
             <div
-              className="relative"
+              className="relative group"
               onClick={(padlet.type === 'text' || padlet.type === 'ai-component' || padlet.type === 'file' || padlet.type === 'drawing') ? (e) => e.stopPropagation() : undefined}
             >
               {content}
+              {framelessActions}
               {resizeHandle}
 
               {/* Comment Badge - yellow indicator with count */}
