@@ -21,7 +21,33 @@ export interface VisualOutline {
   title: string;
   ordered: boolean;
   items: VisualOutlineItem[];
+  kind: OutlineKind;
 }
+
+/**
+ * PATCH-236. WHAT KIND of text this is. Napkin's AI never draws; it says the
+ * SHAPE, and the design library suggests templates that can hold it.
+ */
+export type OutlineKind =
+  | 'list'
+  | 'steps'
+  | 'levels'
+  | 'cycle'
+  | 'parts'
+  | 'comparison'
+  | 'timeline'
+  | 'cause_effect';
+
+export const OUTLINE_KINDS: readonly OutlineKind[] = [
+  'list',
+  'steps',
+  'levels',
+  'cycle',
+  'parts',
+  'comparison',
+  'timeline',
+  'cause_effect',
+];
 
 export const OUTLINE_LIMITS = {
   title: 80,
@@ -46,6 +72,7 @@ You extract the STRUCTURE of the user's text so it can be drawn as a diagram.
 Return valid JSON only, matching this exact shape:
 {
   "title": "Short title (<= 80 characters)",
+  "kind": "list",
   "ordered": false,
   "items": [
     {
@@ -56,6 +83,15 @@ Return valid JSON only, matching this exact shape:
     }
   ]
 }
+"kind" says what KIND of text this is. Pick exactly one:
+- "list": a plain set of points with no order.
+- "steps": a process or sequence to follow in order.
+- "levels": ranked or nested levels, from broad to specific (headings, tiers).
+- "cycle": a process that repeats back to its start.
+- "parts": the components of one whole.
+- "comparison": two or more things compared side by side.
+- "timeline": points in time, usually with dates.
+- "cause_effect": one thing causes another.
 Rules:
 - Give 2 to 8 items. Keep every label short.
 - Do not invent facts that are not in the text.
@@ -77,6 +113,7 @@ const OutlineItemSchema = z.object({
 
 const OutlineSchema = z.object({
   title: z.string().optional(),
+  kind: z.string().optional(),
   ordered: z.boolean().optional(),
   items: z.array(OutlineItemSchema).optional(),
 });
@@ -130,10 +167,29 @@ export function parseOutline(raw: unknown): VisualOutline {
   }
 
   const title = trimTo(data.title, OUTLINE_LIMITS.title) || 'Untitled';
+  const ordered = data.ordered === true;
+  const kind = resolveKind(data.kind, ordered, items);
 
   return {
     title,
-    ordered: data.ordered === true,
+    ordered,
     items,
+    kind,
   };
+}
+
+/**
+ * PATCH-236. A known `kind` wins; a missing or unknown one falls back by rule:
+ * a dated ordered outline is a timeline, an ordered one is steps, else a list.
+ * Never throws for `kind`.
+ */
+function resolveKind(raw: unknown, ordered: boolean, items: VisualOutlineItem[]): OutlineKind {
+  if (typeof raw === 'string' && (OUTLINE_KINDS as readonly string[]).includes(raw)) {
+    return raw as OutlineKind;
+  }
+  if (ordered && items.some((item) => typeof item.date === 'string' && item.date.length > 0)) {
+    return 'timeline';
+  }
+  if (ordered) return 'steps';
+  return 'list';
 }

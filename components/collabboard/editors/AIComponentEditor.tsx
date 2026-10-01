@@ -11,6 +11,7 @@ import type {
   AIGenerationAttribution,
   DiagramSubtype,
   GenerateAIContentRequest,
+  InfographicDiagramData,
   LoadedAIContent,
   PhotoCardData,
   PhotoCardTextStyle,
@@ -22,7 +23,8 @@ import {
   isDiagramModeConfig,
 } from '@/lib/ai/mode-registry';
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
-import { outlineToVisuals, type VisualOption } from '@/lib/ai/outlineToVisuals';
+import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
+import OutlineSuggestionsPanel from './OutlineSuggestionsPanel';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import {
   trackAIAutoModeCorrectedByUser,
@@ -107,6 +109,20 @@ function isQuotaExceededMessage(message: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+/**
+ * PATCH-236. Opening a stored infographic: its shape is already saved, so the
+ * editor can offer the designs again with no AI call.
+ */
+function readStoredInfographic(initialContent?: unknown): InfographicDiagramData | null {
+  const normalized = normalizeAIContent(initialContent);
+  if (normalized.kind !== 'structured') return null;
+  const data = normalized.envelope?.data ?? normalized.data;
+  if (isRecord(data) && data.type === 'diagram' && data.subtype === 'infographic') {
+    return data as InfographicDiagramData;
+  }
+  return null;
 }
 
 function inferInitialSelection(initialContent?: unknown): {
@@ -324,7 +340,7 @@ export default function AIComponentEditor({
   const [autoResolved, setAutoResolved] = useState<AutoResolved | null>(null);
   // PATCH-233. "Show options": one outline call draws several pictures locally.
   const [showOptions, setShowOptions] = useState(false);
-  const [outlineOptions, setOutlineOptions] = useState<VisualOption[]>([]);
+  const [outlineOptions, setOutlineOptions] = useState<DesignSuggestion[]>([]);
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
   const [outlineGeneratedBy, setOutlineGeneratedBy] = useState<AIGenerationAttribution | null>(null);
   const [outlineCreatedAt, setOutlineCreatedAt] = useState<string | null>(null);
@@ -378,6 +394,22 @@ export default function AIComponentEditor({
       setSelectedOptionKey(null);
     }
 
+    // PATCH-236: opening a stored infographic shows its designs, its template
+    // preselected, with NO AI call (the shape is already stored).
+    const storedInfographic = readStoredInfographic(initialContent);
+    if (storedInfographic) {
+      const options = suggestDesigns(storedInfographic.outline);
+      setUiMode('diagram');
+      setMode('diagram');
+      setSubtype(undefined);
+      setShowOptions(true);
+      setOutlineOptions(options);
+      setSelectedOptionKey(`infographic:${storedInfographic.template}`);
+      setOutlineGeneratedBy(readAIGenerationAttribution(initialContent) ?? null);
+      setOutlineCreatedAt(new Date().toISOString());
+      visualizeAutoRanRef.current = true; // no auto-run for a stored shape
+    }
+
     setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
     setTopStrip(typeof initialMetadata?.topStrip === 'string' ? initialMetadata.topStrip : 'transparent');
     setTitleStyle((initialMetadata?.titleStyle as Record<string, unknown>) || {});
@@ -416,7 +448,7 @@ export default function AIComponentEditor({
     : null;
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
-  const optionEnvelope = (option: VisualOption): LoadedAIContent => ({
+  const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => ({
     mode: 'diagram',
     version: 1,
     data: option.envelopeData,
@@ -617,7 +649,7 @@ export default function AIComponentEditor({
         setStage('rendering');
         await new Promise((resolve) => setTimeout(resolve, 200));
 
-        const options = outlineToVisuals(data.outline);
+        const options = suggestDesigns(data.outline);
         setOutlineOptions(options);
         setSelectedOptionKey(options[0]?.key ?? null);
         setOutlineGeneratedBy((data.generatedBy as AIGenerationAttribution) ?? null);
@@ -1107,7 +1139,10 @@ export default function AIComponentEditor({
                                 </div>
                                 <div className="mt-1 text-[11px] text-gray-500">Draw the same content several ways and pick one.</div>
                               </button>
-                              {(Object.keys(diagramConfig.subtypes) as DiagramSubtype[]).map((subtypeId) => {
+                              {(Object.keys(diagramConfig.subtypes) as DiagramSubtype[])
+                                // PATCH-236: an infographic is only produced by Show options.
+                                .filter((subtypeId) => subtypeId !== 'infographic')
+                                .map((subtypeId) => {
                                 const config = diagramConfig.subtypes[subtypeId];
                                 const isSelected = !showOptions && activeSubtype === subtypeId;
 
@@ -1263,46 +1298,15 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {/* PATCH-234: one large preview of the selected option, then the
-                  other options as buttons below it. */}
+              {/* PATCH-236: the Suggestions panel -- one large preview of the
+                  selected design, then "Suggested" and per-category headings. */}
               {showOptions && outlineOptions.length > 0 && !isLoading && (
-                <div data-ai-outline-options="true" className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
-                  <div
-                    data-ai-outline-preview="true"
-                    className="min-h-0 flex-1 overflow-auto rounded-xl border border-gray-200 bg-white"
-                    style={{ maxHeight: 460 }}
-                  >
-                    {selectedOption && <AIContentRenderer content={optionEnvelope(selectedOption)} />}
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    {outlineOptions.map((option) => {
-                      const isSelected = (selectedOptionKey ?? outlineOptions[0]?.key) === option.key;
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          data-ai-outline-option={option.key}
-                          aria-pressed={isSelected}
-                          onClick={() => setSelectedOptionKey(option.key)}
-                          className={`w-[160px] shrink-0 overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
-                            isSelected
-                              ? 'border-purple-500 ring-2 ring-purple-200'
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                        >
-                          <div className="h-20 overflow-hidden bg-gray-50/50">
-                            <div style={{ transform: 'scale(0.28)', transformOrigin: 'top left', width: '357%' }}>
-                              <AIContentRenderer content={optionEnvelope(option)} />
-                            </div>
-                          </div>
-                          <div className="border-t border-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
-                            {option.label}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <OutlineSuggestionsPanel
+                  options={outlineOptions}
+                  selectedKey={selectedOptionKey}
+                  onSelect={setSelectedOptionKey}
+                  envelopeFor={(option) => optionEnvelope(option)}
+                />
               )}
 
               {!showOptions && !!content && (

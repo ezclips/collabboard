@@ -6,6 +6,7 @@
  */
 
 import { paletteAt, type VisualColor } from './visualPalette';
+import { wrapLabel } from './infographic/text';
 
 export interface MindmapTree {
   label: string;
@@ -54,39 +55,6 @@ const GAP_LEVEL = 48;
 const OUTER_PAD = 16;
 const MAX_BRANCHES = 8;
 const MAX_LEAVES = 6;
-
-function wrapLabel(label: string, maxWidth: number, charWidth: number): string[] {
-  const words = label.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [''];
-
-  const maxChars = Math.max(1, Math.floor(maxWidth / charWidth));
-  const lines: string[] = [];
-  let current = '';
-
-  const flush = () => {
-    if (current) lines.push(current);
-    current = '';
-  };
-
-  for (const word of words) {
-    let remaining = word;
-    while (remaining.length > maxChars) {
-      flush();
-      lines.push(remaining.slice(0, maxChars));
-      remaining = remaining.slice(maxChars);
-    }
-    const candidate = current ? `${current} ${remaining}` : remaining;
-    if (candidate.length * charWidth <= maxWidth) {
-      current = candidate;
-    } else {
-      flush();
-      current = remaining;
-    }
-  }
-  flush();
-
-  return lines.length > 0 ? lines : [''];
-}
 
 function measure(label: string, charWidth: number, maxWidth: number) {
   const lines = wrapLabel(label, maxWidth, charWidth);

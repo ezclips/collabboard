@@ -43,6 +43,9 @@ function isAIMode(value: unknown): value is AIMode {
 
 function isDiagramSubtype(value: unknown): value is DiagramSubtype {
   return typeof value === 'string'
+    // PATCH-236: the classifier never resolves to an infographic; a reply that
+    // names one falls back as for any invalid subtype.
+    && value !== 'infographic'
     && Object.prototype.hasOwnProperty.call(DIAGRAM_SUBTYPE_SCHEMAS, value);
 }
 

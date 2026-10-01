@@ -15,6 +15,9 @@ export default defineConfig({
       // RUN, which is worse than a failing one -- it reports nothing and looks
       // green. lib/ai held no test files at all until this was added.
       'lib/ai/*.test.ts',
+      // PATCH-236: the infographic design library lives one level down; without
+      // this line its tests are silently NOT RUN (the trap the note above warns of).
+      'lib/ai/infographic/**/*.test.ts',
       'lib/domain/**/*.test.ts',
       // PATCH-183: the permissions layer's plan tests.
       'lib/auth/**/*.test.ts',

@@ -27,6 +27,9 @@ const CONVERSION_MATRIX: Record<ConversionKey, ConversionTarget[]> = {
   'diagram:bar_chart': [
     { mode: 'diagram', subtype: 'pie_chart', label: 'Pie Chart' },
   ],
+  // PATCH-236. An infographic is only produced by Show options (a saved shape);
+  // the convert menu never offers it in either direction.
+  'diagram:infographic': [],
 };
 
 /** Returns allowed conversion targets for a given source mode/subtype. */

@@ -17,6 +17,7 @@ describe('PATCH-233 parseOutline', () => {
     expect(out).toEqual({
       title: 'Water cycle',
       ordered: true,
+      kind: 'timeline',
       items: [
         { label: 'Evaporation', detail: 'Sun heats water', date: 'morning', children: [{ label: 'Oceans' }] },
         { label: 'Condensation' },
@@ -58,5 +59,32 @@ describe('PATCH-233 parseOutline', () => {
     expect(() => parseOutline({ title: 'x', items: [{ label: 'only' }] })).toThrow(OutlineParseError);
     expect(() => parseOutline({ title: 'x' })).toThrow(OutlineParseError);
     expect(() => parseOutline('not an object')).toThrow(OutlineParseError);
+  });
+});
+
+describe('PATCH-236 outline kind', () => {
+  const items = [{ label: 'A' }, { label: 'B' }];
+  const valid = ['list', 'steps', 'levels', 'cycle', 'parts', 'comparison', 'timeline', 'cause_effect'];
+
+  it('parses a known kind', () => {
+    for (const kind of valid) {
+      expect(parseOutline({ title: 'T', kind, items }).kind).toBe(kind);
+    }
+  });
+
+  it('an unknown kind falls back by rule', () => {
+    // items with a date + ordered -> timeline
+    expect(parseOutline({ title: 'T', kind: 'bogus', ordered: true, items: [{ label: 'A', date: 'Jan' }, { label: 'B' }] }).kind)
+      .toBe('timeline');
+    // ordered, no date -> steps
+    expect(parseOutline({ title: 'T', kind: 'bogus', ordered: true, items }).kind).toBe('steps');
+    // unordered, no date -> list
+    expect(parseOutline({ title: 'T', kind: 'bogus', items }).kind).toBe('list');
+  });
+
+  it('a missing kind falls back by the same rule', () => {
+    expect(parseOutline({ title: 'T', ordered: true, items: [{ label: 'A', date: '2020' }, { label: 'B' }] }).kind).toBe('timeline');
+    expect(parseOutline({ title: 'T', ordered: true, items }).kind).toBe('steps');
+    expect(parseOutline({ title: 'T', items }).kind).toBe('list');
   });
 });

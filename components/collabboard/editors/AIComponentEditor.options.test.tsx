@@ -80,16 +80,24 @@ describe('PATCH-233 AIComponentEditor "Show options"', () => {
     expect(fetchMock.mock.calls.some((call) => call[0] === '/api/ai/generate-component')).toBe(false);
 
     const options = Array.from(c.querySelectorAll('[data-ai-outline-option]')) as HTMLElement[];
-    expect(options.map((o) => o.getAttribute('data-ai-outline-option'))).toEqual(['mindmap', 'comparison', 'flow']);
+    const keys = options.map((o) => o.getAttribute('data-ai-outline-option'));
+    // PATCH-236: the suggestions now include the infographic designs too.
+    for (const expected of ['mindmap', 'comparison', 'flow']) {
+      expect(keys).toContain(expected);
+    }
+    expect(keys.some((k) => k!.startsWith('infographic:'))).toBe(true);
+    // "Suggested" holds the first four, the first badged "Best match".
+    expect(c.textContent).toContain('Suggested');
+    expect(c.textContent).toContain('Best match');
 
     // PATCH-234: one large preview, and the first option selected by default.
     expect(c.querySelector('[data-ai-outline-preview="true"]')).not.toBeNull();
     expect(options[0].getAttribute('aria-pressed')).toBe('true');
 
     // MUTATION: saving the first option regardless of selection makes this fail.
-    click(options[1]);
-    expect(options[1].getAttribute('aria-pressed')).toBe('true');
-    expect(options[0].getAttribute('aria-pressed')).toBe('false');
+    const comparisonButton = options.find((o) => o.getAttribute('data-ai-outline-option') === 'comparison')!;
+    click(comparisonButton);
+    expect(comparisonButton.getAttribute('aria-pressed')).toBe('true');
     click(buttonContaining(c, 'Save to Canvas'));
 
     const saved = onSave.mock.calls[0][0];

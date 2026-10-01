@@ -61,6 +61,9 @@ function isAIMode(value: unknown): value is AIMode {
 
 function isDiagramSubtype(value: unknown): value is DiagramSubtype {
   return typeof value === 'string'
+    // PATCH-236: an infographic is only produced by Show options, never a
+    // conversion source or target.
+    && value !== 'infographic'
     && Object.prototype.hasOwnProperty.call(DIAGRAM_SUBTYPE_SCHEMAS, value);
 }
 

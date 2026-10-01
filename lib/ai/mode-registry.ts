@@ -235,6 +235,18 @@ Do not add prose outside the JSON structure.
         `.trim(),
         defaultRenderer: 'comparison',
       },
+
+      // PATCH-236. An infographic is only produced by Show options (a saved
+      // shape), never generated directly; this entry only satisfies the
+      // exhaustive Record<DiagramSubtype> and is not shown as a subtype chip.
+      infographic: {
+        id: 'infographic',
+        label: 'Infographic',
+        description: 'A shape drawn by one of our own designs.',
+        placeholder: 'Describe the content to visualize.',
+        systemPrompt: '',
+        defaultRenderer: 'infographic',
+      },
     },
   },
 

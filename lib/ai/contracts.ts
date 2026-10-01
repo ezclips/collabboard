@@ -12,7 +12,8 @@ export type DiagramSubtype =
   | 'pie_chart'
   | 'bar_chart'
   | 'timeline'
-  | 'comparison';
+  | 'comparison'
+  | 'infographic';
 
 export type AIRendererKey =
   | 'lesson_board'
@@ -20,6 +21,7 @@ export type AIRendererKey =
   | 'chart'
   | 'timeline'
   | 'comparison'
+  | 'infographic'
   | 'photo'
   | 'workshop_board'
   | 'legacy_html';
@@ -148,6 +150,20 @@ export interface ComparisonDiagramData extends DiagramDataBase {
   columns: ComparisonColumn[];
 }
 
+/**
+ * PATCH-236. A design drawn by our own code that KEEPS the extracted shape, so
+ * the design can be switched later without another AI call.
+ */
+export type InfographicTemplate = 'stack' | 'pyramid' | 'stairs' | 'cycle' | 'funnel' | 'hub';
+
+export interface InfographicDiagramData extends DiagramDataBase {
+  subtype: 'infographic';
+  renderer: 'infographic';
+  template: InfographicTemplate;
+  outline: import('./outline').VisualOutline;
+  explanation?: string;
+}
+
 // Mirrors CaptionStyle (lib/domain/canvas/captionStyle.ts) -- the same
 // heading-preset system every other post type's title/caption uses -- so
 // the Photo Card's text goes through the one real "Text style" panel
@@ -199,7 +215,8 @@ export type DiagramData =
   | PieChartDiagramData
   | BarChartDiagramData
   | TimelineDiagramData
-  | ComparisonDiagramData;
+  | ComparisonDiagramData
+  | InfographicDiagramData;
 
 export type AIContentData =
   | LessonBoardData

@@ -6,6 +6,7 @@ import type {
   BarChartDiagramData,
   ComparisonDiagramData,
   FlowDiagramData,
+  InfographicDiagramData,
   LessonBoardData,
   MindmapDiagramData,
   PhotoCardData,
@@ -13,6 +14,7 @@ import type {
   TimelineDiagramData,
   WorkshopBoardData,
 } from './contracts';
+import { parseOutline } from './outline';
 
 const LessonBoardSectionSchema = z.object({
   title: z.string().min(1),
@@ -148,6 +150,33 @@ export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.objec
   columns: z.array(ComparisonColumnSchema).min(2),
 });
 
+/**
+ * PATCH-236. The infographic keeps the extracted outline. Its `outline` is run
+ * through the SAME `parseOutline` every model reply uses, so the limits live in
+ * one place; an unknown template is rejected.
+ */
+const INfographicTemplateSchema = z.enum(['stack', 'pyramid', 'stairs', 'cycle', 'funnel', 'hub']);
+
+export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = z.object({
+  type: z.literal('diagram'),
+  subtype: z.literal('infographic'),
+  title: z.string().min(1),
+  renderer: z.literal('infographic'),
+  template: INfographicTemplateSchema,
+  outline: z.unknown().transform((value, ctx) => {
+    try {
+      return parseOutline(value);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error instanceof Error ? error.message : 'Invalid outline.',
+      });
+      return z.NEVER;
+    }
+  }),
+  explanation: z.string().optional(),
+});
+
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({
   type: z.literal('photo'),
   title: z.string(),
@@ -170,6 +199,7 @@ export const DIAGRAM_SUBTYPE_SCHEMAS = {
   bar_chart: BarChartDiagramSchema,
   timeline: TimelineDiagramSchema,
   comparison: ComparisonDiagramSchema,
+  infographic: InfographicDiagramSchema,
 } as const;
 
 export const MODE_SCHEMAS = {
@@ -260,6 +290,7 @@ export function safeValidateAIContentWithSubtypeCheck(input: {
       | BarChartDiagramData
       | TimelineDiagramData
       | ComparisonDiagramData
+      | InfographicDiagramData
     >
   | ValidationMissingSubtypeError {
   if (input.mode === 'diagram') {

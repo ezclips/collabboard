@@ -7,6 +7,7 @@ function outline(overrides: Partial<VisualOutline> = {}): VisualOutline {
   return {
     title: 'Water cycle',
     ordered: false,
+    kind: 'list',
     items: [{ label: 'A' }, { label: 'B' }],
     ...overrides,
   };
