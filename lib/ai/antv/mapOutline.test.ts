@@ -4,7 +4,11 @@ import type { VisualOutline } from '@/lib/ai/outline';
 import { OUTLINE_LIMITS } from '@/lib/ai/outline';
 import {
   antvThemeFor,
+  applyAntvButton,
   applyAntvChange,
+  isMindmapTemplate,
+  mapAntvButton,
+  STABLE_MINDMAP_STRUCTURE,
   toAntvOptions,
   type AntvChangeEvent,
 } from './mapOutline';
@@ -78,6 +82,129 @@ describe('PATCH-241 toAntvOptions', () => {
     const options = toAntvOptions(outline(), 'list-row-simple', 'forest');
     expect(options.palette).toBe('patch241-forest');
     expect(options.themeConfig.palette).toBe('patch241-forest');
+  });
+});
+
+describe('PATCH-243 toAntvOptions mind map structure', () => {
+  it('swaps in the side-stable structure for hierarchy-mindmap templates only', () => {
+    expect(isMindmapTemplate('hierarchy-mindmap-branch-gradient-capsule-item')).toBe(true);
+    expect(isMindmapTemplate('hierarchy-tree-basic')).toBe(false);
+
+    const mindmap = toAntvOptions(
+      outline(),
+      'hierarchy-mindmap-branch-gradient-capsule-item',
+    );
+    expect(mindmap.design?.structure.type).toBe(STABLE_MINDMAP_STRUCTURE);
+    expect(mindmap.design?.structure.colorMode).toBe('branch');
+    expect(mindmap.design?.structure.edgeAlign).toBeUndefined();
+
+    const level = toAntvOptions(outline(), 'hierarchy-mindmap-level-gradient-lined-palette');
+    expect(level.design?.structure.colorMode).toBe('level');
+    expect(level.design?.structure.edgeAlign).toBe('bottom');
+
+    const tree = toAntvOptions(outline(), 'hierarchy-tree-basic');
+    expect(tree.design).toBeUndefined();
+  });
+
+  it('carries each item side into the AntV data', () => {
+    const options = toAntvOptions(
+      outline({ items: [{ label: 'A', side: 'left' }, { label: 'B', side: 'right' }] }),
+      'hierarchy-mindmap-branch-gradient-capsule-item',
+    );
+    expect(options.data.items[0].children?.[0].side).toBe('left');
+    expect(options.data.items[0].children?.[1].side).toBe('right');
+  });
+});
+
+describe('PATCH-243 AntV button mapping', () => {
+  it('maps a flat list button to an item insert/remove', () => {
+    expect(mapAntvButton([0], 'add', 'list-grid-badge-card')).toEqual({
+      op: 'add',
+      kind: 'item',
+      itemIndex: 0,
+      index: 0,
+    });
+    expect(mapAntvButton([2], 'add', 'list-grid-badge-card')).toEqual({
+      op: 'add',
+      kind: 'item',
+      itemIndex: 2,
+      index: 2,
+    });
+    expect(mapAntvButton([1], 'remove', 'list-grid-badge-card')).toEqual({
+      op: 'remove',
+      kind: 'item',
+      itemIndex: 1,
+      index: 1,
+    });
+  });
+
+  it('inserts at 0, middle and end on a flat template', () => {
+    const base = outline({ items: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] });
+    expect(applyAntvButton(base, [0], 'add', 'list-row-simple').items.map((i) => i.label)).toEqual([
+      'New item',
+      'A',
+      'B',
+      'C',
+    ]);
+    expect(applyAntvButton(base, [1], 'add', 'list-row-simple').items.map((i) => i.label)).toEqual([
+      'A',
+      'New item',
+      'B',
+      'C',
+    ]);
+    expect(applyAntvButton(base, [3], 'add', 'list-row-simple').items.map((i) => i.label)).toEqual([
+      'A',
+      'B',
+      'C',
+      'New item',
+    ]);
+  });
+
+  it('removes a flat item, freezing every remaining side', () => {
+    const base = outline({ items: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] });
+    const next = applyAntvButton(base, [1], 'remove', 'list-row-simple');
+    expect(next.items.map((i) => i.label)).toEqual(['A', 'C']);
+    expect(next.items.every((i) => i.side !== undefined)).toBe(true);
+    expect(base.items.map((i) => i.side)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('maps a mind-map button through its single root', () => {
+    const base = outline({ items: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] });
+    const mm = 'hierarchy-mindmap-branch-gradient-capsule-item';
+    expect(mapAntvButton([0, 2], 'add', mm)).toEqual({ op: 'add', kind: 'item', itemIndex: 2, index: 2 });
+    expect(mapAntvButton([0, 1], 'remove', mm)).toEqual({ op: 'remove', kind: 'item', itemIndex: 1, index: 1 });
+    expect(mapAntvButton([0, 0, 1], 'add', mm)).toEqual({ op: 'add', kind: 'child', itemIndex: 0, index: 1 });
+
+    expect(applyAntvButton(base, [0, 2], 'add', mm).items.map((i) => i.label)).toEqual(['A', 'B', 'New item', 'C']);
+    expect(applyAntvButton(base, [0, 1], 'remove', mm).items.map((i) => i.label)).toEqual(['A', 'C']);
+  });
+
+  it('maps a nested child button and returns unchanged for impossible edits', () => {
+    const base = outline({
+      items: [{ label: 'A', children: [{ label: 'A1' }] }, { label: 'B' }],
+    });
+    const next = applyAntvButton(base, [0, 1], 'add', 'list-row-simple');
+    expect(next.items[0].children!.map((c) => c.label)).toEqual(['A1', 'New point']);
+
+    const removed = applyAntvButton(next, [0, 0], 'remove', 'list-row-simple');
+    expect(removed.items[0].children!.map((c) => c.label)).toEqual(['New point']);
+
+    // The title/root is never edited, and impossible indexes are no-ops.
+    expect(mapAntvButton([0], 'remove', 'hierarchy-mindmap-branch-gradient-capsule-item')).toBeNull();
+    expect(applyAntvButton(base, [0], 'remove', 'hierarchy-mindmap-branch-gradient-capsule-item')).toBe(base);
+    expect(applyAntvButton(base, [9], 'remove', 'list-row-simple')).toBe(base);
+    expect(applyAntvButton(base, [0, 9], 'remove', 'list-row-simple')).toBe(base);
+    expect(applyAntvButton(base, [], 'add', 'list-row-simple')).toBe(base);
+    expect(mapAntvButton([1.5], 'add', 'list-row-simple')).toBeNull();
+  });
+
+  it('honours the item ceiling and floor', () => {
+    const full = outline({
+      items: Array.from({ length: OUTLINE_LIMITS.items }, (_, i) => ({ label: `P${i}` })),
+    });
+    expect(applyAntvButton(full, [0], 'add', 'list-row-simple')).toBe(full);
+    const pair = outline({ items: [{ label: 'A' }, { label: 'B' }] });
+    expect(applyAntvButton(pair, [0], 'remove', 'list-row-simple')).toBe(pair);
   });
 });
 

@@ -6,7 +6,7 @@ import type {
   TimelineDiagramData,
 } from './contracts';
 import type { MindmapTree } from './mindmapLayout';
-import type { VisualOutline } from './outline';
+import { OUTLINE_LIMITS, type VisualOutline, type VisualOutlineItem, type VisualSide } from './outline';
 import { paletteAt } from './visualPalette';
 
 /**
@@ -100,14 +100,51 @@ function flowchartCode(outline: VisualOutline, direction: 'LR' | 'TD' = 'LR'): s
   });
 }
 
-function mindmapTree(outline: VisualOutline): NonNullable<MindmapDiagramData['tree']> {
-  return {
-    label: outline.title,
-    children: outline.items.slice(0, 8).map((item) => ({
-      label: item.label,
-      children: item.children?.slice(0, 6).map((child) => ({ label: child.label })),
-    })),
-  };
+/**
+ * PATCH-243. The outline -> tree the mind-map preview edits. Each branch keeps
+ * the side (and, as extra fields the tree helper preserves through edits, the
+ * detail/date/icon/colour), so `outlineFromMindmapTree` can map an edit back
+ * without losing the rest of the item.
+ */
+function mindmapTree(outline: VisualOutline): MindmapTree {
+  const children = outline.items.slice(0, OUTLINE_LIMITS.items).map((item) => ({
+    label: item.label,
+    ...(item.side ? { side: item.side } : {}),
+    ...(item.detail !== undefined ? { detail: item.detail } : {}),
+    ...(item.date !== undefined ? { date: item.date } : {}),
+    ...(item.icon !== undefined ? { icon: item.icon } : {}),
+    ...(item.color !== undefined ? { color: item.color } : {}),
+    ...(item.children?.length
+      ? { children: item.children.slice(0, OUTLINE_LIMITS.children).map((child) => ({ label: child.label })) }
+      : {}),
+  }));
+  return { label: outline.title, children } as MindmapTree;
+}
+
+/**
+ * PATCH-243. A mind-map tree edit (root -> title, branches -> items, leaves ->
+ * children) mapped back to a NEW outline, carrying each branch's side and any
+ * extra fields the tree preserved. Pure.
+ */
+export function outlineFromMindmapTree(outline: VisualOutline, tree: MindmapTree): VisualOutline {
+  const items: VisualOutlineItem[] = (tree.children ?? [])
+    .slice(0, OUTLINE_LIMITS.items)
+    .map((branch) => {
+      const raw = branch as VisualOutlineItem & { side?: VisualSide };
+      const item: VisualOutlineItem = { label: raw.label };
+      if (raw.detail !== undefined) item.detail = raw.detail;
+      if (raw.date !== undefined) item.date = raw.date;
+      if (raw.icon !== undefined) item.icon = raw.icon;
+      if (raw.color !== undefined) item.color = raw.color;
+      if (raw.side === 'left' || raw.side === 'right') item.side = raw.side;
+      if (branch.children?.length) {
+        item.children = branch.children
+          .slice(0, OUTLINE_LIMITS.children)
+          .map((child) => ({ label: child.label }));
+      }
+      return item;
+    });
+  return { ...outline, title: tree.label, items };
 }
 
 function mindmap(outline: VisualOutline): MindmapDiagramData {

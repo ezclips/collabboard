@@ -4,10 +4,12 @@ import { OUTLINE_LIMITS, type VisualOutline } from '@/lib/ai/outline';
 import { effectiveBranchSides, type MindmapTree } from '@/lib/ai/mindmapLayout';
 import {
   addChild,
+  addItemChild,
   effectiveOutlineSides,
   insertItem,
   recolorItem,
   removeItem,
+  removeItemChild,
   removeNode,
   renameNode,
   renameOutline,
@@ -214,6 +216,50 @@ describe('PATCH-242 stored sides (tree)', () => {
     expect(next.children!.map((b) => b.label)).toEqual(['Condensation']);
     expect(next.children![0].side).toBe('left');
     expect(effectiveBranchSides(next.children!)).toEqual(beforeSides.filter((_, i) => i !== 0));
+  });
+});
+
+describe('PATCH-243 item child helpers', () => {
+  it('adds a child at the given position, appending when omitted, capped at the limit', () => {
+    const base = deepFreeze({
+      title: 'T',
+      ordered: false,
+      kind: 'list' as const,
+      items: [
+        { label: 'A', children: [{ label: 'A1' }, { label: 'A2' }] },
+        { label: 'B' },
+      ],
+    });
+    expect(addItemChild(base, 0, 1).items[0].children!.map((c) => c.label)).toEqual(['A1', 'New point', 'A2']);
+    expect(addItemChild(base, 1).items[1].children!.map((c) => c.label)).toEqual(['New point']);
+    expect(base.items[0].children!.length).toBe(2);
+
+    const full = deepFreeze({
+      title: 'T',
+      ordered: false,
+      kind: 'list' as const,
+      items: [
+        { label: 'A', children: Array.from({ length: OUTLINE_LIMITS.children }, (_, i) => ({ label: `C${i}` })) },
+        { label: 'B' },
+      ],
+    });
+    expect(addItemChild(full, 0).items[0].children!.length).toBe(OUTLINE_LIMITS.children);
+  });
+
+  it('removes a child, and drops the children array when the last one goes', () => {
+    const base = deepFreeze({
+      title: 'T',
+      ordered: false,
+      kind: 'list' as const,
+      items: [
+        { label: 'A', children: [{ label: 'A1' }, { label: 'A2' }] },
+        { label: 'B' },
+      ],
+    });
+    expect(removeItemChild(base, 0, 0).items[0].children!.map((c) => c.label)).toEqual(['A2']);
+    expect(removeItemChild(base, 0, 1).items[0].children!.map((c) => c.label)).toEqual(['A1']);
+    expect(removeItemChild(base, 0, 9).items[0].children!.length).toBe(2);
+    expect(base.items[0].children!.length).toBe(2);
   });
 });
 

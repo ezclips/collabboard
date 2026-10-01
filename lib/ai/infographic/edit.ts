@@ -177,6 +177,49 @@ export function addChild(tree: MindmapTree, path: number[], opts?: { side?: Visu
   };
 }
 
+/**
+ * PATCH-243. Add a child (leaf) under an outline item, capped by
+ * `OUTLINE_LIMITS.children`. `childIndex` inserts at that position when given,
+ * else appends. Pure; never mutates the input.
+ */
+export function addItemChild(
+  outline: VisualOutline,
+  itemIndex: number,
+  childIndex?: number,
+  label: string = NEW_POINT_LABEL,
+): VisualOutline {
+  const target = outline.items[itemIndex];
+  if (!target) return { ...outline, items: outline.items.slice() };
+  if ((target.children?.length ?? 0) >= OUTLINE_LIMITS.children) {
+    return { ...outline, items: outline.items.slice() };
+  }
+  const items = outline.items.map((item, i) => {
+    if (i !== itemIndex) return item;
+    const children = (item.children ?? []).map((child) => ({ ...child }));
+    const at = childIndex === undefined ? children.length : Math.max(0, Math.min(childIndex, children.length));
+    children.splice(at, 0, { label: clampText(label, OUTLINE_LIMITS.label) || NEW_POINT_LABEL });
+    return { ...item, children };
+  });
+  return { ...outline, items };
+}
+
+/** PATCH-243. Remove the child at `childIndex` from an outline item. Pure. */
+export function removeItemChild(outline: VisualOutline, itemIndex: number, childIndex: number): VisualOutline {
+  const target = outline.items[itemIndex];
+  if (!target || childIndex < 0 || childIndex >= (target.children?.length ?? 0)) {
+    return { ...outline, items: outline.items.slice() };
+  }
+  const items = outline.items.map((item, i) => {
+    if (i !== itemIndex) return item;
+    const children = (item.children ?? []).filter((_, j) => j !== childIndex);
+    if (children.length > 0) return { ...item, children };
+    const cleared: VisualOutlineItem = { ...item };
+    delete cleared.children;
+    return cleared;
+  });
+  return { ...outline, items };
+}
+
 /** Remove a branch ([b]) or a leaf ([b, l]); the root and the last branch stay. */
 export function removeNode(tree: MindmapTree, path: number[]): MindmapTree {
   const children = tree.children ?? [];

@@ -6,7 +6,14 @@
  */
 
 import { isVisualIconName } from '@/lib/ai/visualIcons';
-import { OUTLINE_LIMITS, type VisualOutline, type VisualOutlineChild, type VisualOutlineItem } from '@/lib/ai/outline';
+import { addItemChild, insertItem, removeItem, removeItemChild } from '@/lib/ai/infographic/edit';
+import {
+  OUTLINE_LIMITS,
+  type VisualOutline,
+  type VisualOutlineChild,
+  type VisualOutlineItem,
+  type VisualSide,
+} from '@/lib/ai/outline';
 import type { VisualThemeId } from '@/lib/ai/visualThemes';
 import { ANTV_ICON_PREFIX } from './icons';
 
@@ -14,6 +21,8 @@ export interface AntvDatum {
   label: string;
   desc?: string;
   icon?: string;
+  /** PATCH-243. The side a mind-map branch sits on, when one was stored. */
+  side?: VisualSide;
   children?: AntvDatum[];
 }
 
@@ -24,6 +33,8 @@ export interface AntvOptions {
   palette: string;
   themeConfig: { palette: string };
   data: { title: string; items: AntvDatum[] };
+  /** PATCH-243. Swaps the structure to our side-stable mind map. */
+  design?: { structure: { type: string; [key: string]: unknown } };
 }
 
 export type AntvThemeName = 'light' | 'dark' | 'hand-drawn';
@@ -67,6 +78,36 @@ export function isHierarchyTemplate(name: string): boolean {
   return name.startsWith('hierarchy-');
 }
 
+/** PATCH-243. Our side-stable copy of AntV's `hierarchy-mindmap` structure. */
+export const STABLE_MINDMAP_STRUCTURE = 'stable-hierarchy-mindmap';
+
+/** PATCH-243. The mind-map family whose branches keep their stored side. */
+export function isMindmapTemplate(name: string): boolean {
+  return name.startsWith('hierarchy-mindmap-');
+}
+
+/**
+ * PATCH-243. The structure parameters AntV's built-in mind-map templates use,
+ * reproduced so that swapping in `stable-hierarchy-mindmap` keeps the exact
+ * colours/geometry ("branch" vs "level" colouring, gradient edges, the two
+ * `edgeAlign` variants). Mirrors @antv/infographic 0.2.20
+ * `templates/hierarchy-mindmap.ts`.
+ */
+export function mindmapStructureConfig(name: string): { type: string; [key: string]: unknown } {
+  const config: { type: string; [key: string]: unknown } = {
+    type: STABLE_MINDMAP_STRUCTURE,
+    edgeType: 'curved',
+    edgeColorMode: 'gradient',
+    edgeWidth: 2,
+    levelGap: 80,
+    nodeGap: 18,
+    colorMode: name.includes('-level-gradient-') ? 'level' : 'branch',
+  };
+  if (name.endsWith('-lined-palette')) config.edgeAlign = 'bottom';
+  else if (name.endsWith('-circle-progress')) config.edgeAlign = 0.4;
+  return config;
+}
+
 export function isCompareTemplate(name: string): boolean {
   return name.startsWith('compare-');
 }
@@ -75,6 +116,7 @@ function datumForItem(item: VisualOutlineItem, withChildren: boolean): AntvDatum
   const datum: AntvDatum = { label: item.label };
   if (item.detail) datum.desc = item.detail;
   if (item.icon) datum.icon = `${ANTV_ICON_PREFIX}${item.icon}`;
+  if (item.side) datum.side = item.side;
   if (withChildren && item.children?.length) {
     datum.children = item.children.map((child) => ({ label: child.label }));
   }
@@ -105,13 +147,100 @@ export function toAntvOptions(
     items = outline.items.map((item) => datumForItem(item, false));
   }
 
-  return {
+  const options: AntvOptions = {
     template: templateName,
     theme: choice.theme,
     palette: choice.palette,
     themeConfig: { palette: choice.palette },
     data: { title: outline.title, items },
   };
+  if (isMindmapTemplate(templateName)) {
+    options.design = { structure: mindmapStructureConfig(templateName) };
+  }
+  return options;
+}
+
+// ── PATCH-243. AntV's on-picture + / − buttons -> an outline edit ────────────
+
+export type AntvButtonOp = 'add' | 'remove';
+
+export interface AntvButtonEdit {
+  op: AntvButtonOp;
+  kind: 'item' | 'child';
+  /** For `child`: the parent item. For `item`: the position being changed. */
+  itemIndex: number;
+  /** Insertion/removal position (item position, or child position). */
+  index: number;
+}
+
+function parseIndexPath(indexes: number[] | undefined): number[] | null {
+  if (!indexes || indexes.length === 0) return null;
+  if (!indexes.every((value) => Number.isInteger(value) && value >= 0)) return null;
+  return indexes;
+}
+
+/**
+ * PATCH-243. Maps AntV's `data-indexes` on a `btn-add`/`btn-remove` to the
+ * outline change it means. Hierarchy templates keep a single root
+ * (`[0, i, j]`), flat templates have no root (`[i]`, `[i, j]`); anything else
+ * (or the root/title itself) is not an edit. Pure.
+ */
+export function mapAntvButton(
+  indexes: number[] | undefined,
+  op: AntvButtonOp,
+  templateName: string,
+): AntvButtonEdit | null {
+  const path = parseIndexPath(indexes);
+  if (!path) return null;
+
+  if (isHierarchyTemplate(templateName)) {
+    if (path[0] !== 0) return null;
+    if (path.length === 1) return null; // the title / root is never edited
+    if (path.length === 2) return { op, kind: 'item', itemIndex: path[1], index: path[1] };
+    if (path.length === 3) return { op, kind: 'child', itemIndex: path[1], index: path[2] };
+    return null;
+  }
+
+  if (path.length === 1) return { op, kind: 'item', itemIndex: path[0], index: path[0] };
+  if (path.length === 2) return { op, kind: 'child', itemIndex: path[0], index: path[1] };
+  return null;
+}
+
+/**
+ * PATCH-243. Applies an AntV button edit to the outline with the PATCH-242
+ * freezing helpers. Out-of-range or impossible edits return the SAME outline
+ * (no change), so the renderer can skip `onChange`.
+ */
+export function applyAntvButton(
+  outline: VisualOutline,
+  indexes: number[] | undefined,
+  op: AntvButtonOp,
+  templateName: string,
+): VisualOutline {
+  const edit = mapAntvButton(indexes, op, templateName);
+  if (!edit) return outline;
+
+  if (edit.kind === 'item') {
+    if (edit.op === 'add') {
+      if (outline.items.length >= OUTLINE_LIMITS.items) return outline;
+      if (edit.index < 0 || edit.index > outline.items.length) return outline;
+      return insertItem(outline, edit.index);
+    }
+    if (outline.items.length <= OUTLINE_LIMITS.minItems) return outline;
+    if (edit.index < 0 || edit.index >= outline.items.length) return outline;
+    return removeItem(outline, edit.index);
+  }
+
+  const item = outline.items[edit.itemIndex];
+  if (!item) return outline;
+  if (edit.op === 'add') {
+    const count = item.children?.length ?? 0;
+    if (count >= OUTLINE_LIMITS.children) return outline;
+    if (edit.index < 0 || edit.index > count) return outline;
+    return addItemChild(outline, edit.itemIndex, edit.index);
+  }
+  if (!item.children || edit.index < 0 || edit.index >= item.children.length) return outline;
+  return removeItemChild(outline, edit.itemIndex, edit.index);
 }
 
 // ── Change handling ──────────────────────────────────────────────────────────

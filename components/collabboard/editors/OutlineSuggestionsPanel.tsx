@@ -4,10 +4,13 @@ import React from 'react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
-import type { InfographicDiagramData } from '@/lib/ai/contracts';
+import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
+import type { InfographicDiagramData, MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
+import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import type { VisualOutline } from '@/lib/ai/outline';
+import { outlineFromMindmapTree } from '@/lib/ai/outlineToVisuals';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from './OutlineTextEditor';
 /**
@@ -160,6 +163,12 @@ export default function OutlineSuggestionsPanel({
     outline && onEditOutline && selectedData?.subtype === 'infographic'
       ? (selectedData as InfographicDiagramData)
       : null;
+  // PATCH-243. The tree option edits on the large preview too: a tree edit maps
+  // back to the outline (no AI call).
+  const editableMindmap: MindmapDiagramData | null =
+    outline && onEditOutline && selectedData?.subtype === 'mindmap' && (selectedData as MindmapDiagramData).tree
+      ? (selectedData as MindmapDiagramData)
+      : null;
   const suggested = options.slice(0, 4);
   const rest = options.slice(4);
 
@@ -201,6 +210,11 @@ export default function OutlineSuggestionsPanel({
       >
         {selected && (editableInfographic ? (
           <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
+        ) : editableMindmap ? (
+          <MindmapTreeRenderer
+            data={editableMindmap}
+            edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
+          />
         ) : (
           <AIContentRenderer content={envelopeFor(selected)} />
         ))}

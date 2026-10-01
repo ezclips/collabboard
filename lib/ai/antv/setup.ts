@@ -16,6 +16,9 @@
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import { ANTV_ICON_PREFIX, iconSymbolSvg } from './icons';
 import { antvPaletteName, antvThemeFor } from './mapOutline';
+// PATCH-243: importing the copy registers `stable-hierarchy-mindmap` once (ES
+// module caching), so an AntV mind map keeps each branch on its stored side.
+import './stableMindmap';
 
 export type AntvModule = typeof import('@antv/infographic');
 

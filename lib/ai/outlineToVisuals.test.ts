@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { MindmapTree } from './mindmapLayout';
 import type { VisualOutline } from './outline';
-import { flowCode, flowCodeFromGraph, mermaidLabel, mindmapCodeFromTree, outlineToVisuals } from './outlineToVisuals';
+import {
+  flowCode,
+  flowCodeFromGraph,
+  mermaidLabel,
+  mindmapCodeFromTree,
+  outlineFromMindmapTree,
+  outlineToVisuals,
+} from './outlineToVisuals';
 
 function outline(overrides: Partial<VisualOutline> = {}): VisualOutline {
   return {
@@ -123,6 +130,65 @@ describe('PATCH-233 outlineToVisuals', () => {
       { title: 'Kickoff', description: 'Scope the work', dateLabel: 'Jan' },
       { title: 'Ship', description: undefined, dateLabel: 'Feb' },
     ]);
+  });
+});
+
+describe('PATCH-243 tree <-> outline mapping', () => {
+  function richOutline(): VisualOutline {
+    return {
+      title: 'Water cycle',
+      ordered: false,
+      kind: 'levels',
+      items: [
+        { label: 'Evaporation', side: 'right', detail: 'the sun', icon: 'sun', color: 2, children: [{ label: 'Oceans' }] },
+        { label: 'Condensation', side: 'left' },
+      ],
+    };
+  }
+
+  function treeOf(o: VisualOutline): MindmapTree {
+    const option = outlineToVisuals(o).find((candidate) => candidate.key === 'mindmap')!;
+    const data = option.envelopeData;
+    if (data.subtype !== 'mindmap' || !data.tree) throw new Error('expected a mindmap tree');
+    return data.tree as MindmapTree;
+  }
+
+  it('carries the side (and the rest of the item) into the tree', () => {
+    const tree = treeOf(richOutline());
+    expect(tree.children?.[0]).toEqual({
+      label: 'Evaporation',
+      side: 'right',
+      detail: 'the sun',
+      icon: 'sun',
+      color: 2,
+      children: [{ label: 'Oceans' }],
+    });
+    expect(tree.children?.[1].side).toBe('left');
+  });
+
+  it('round-trips the outline through the tree unchanged', () => {
+    const base = richOutline();
+    const back = outlineFromMindmapTree(base, treeOf(base));
+    expect(back).toEqual(base);
+  });
+
+  it('maps a tree edit back to the outline, carrying sides and title', () => {
+    const base = richOutline();
+    const edited = {
+      label: 'The cycle',
+      children: [
+        { label: 'Evap', side: 'right', detail: 'the sun', icon: 'sun', color: 2, children: [{ label: 'Oceans' }] },
+        { label: 'Condensation', side: 'left' },
+        { label: 'New branch', side: 'left' },
+      ],
+    } as unknown as MindmapTree;
+    const next = outlineFromMindmapTree(base, edited);
+    expect(next.title).toBe('The cycle');
+    expect(next.items.map((item) => item.label)).toEqual(['Evap', 'Condensation', 'New branch']);
+    expect(next.items.map((item) => item.side)).toEqual(['right', 'left', 'left']);
+    expect(next.items[0].detail).toBe('the sun');
+    expect(next.items[0].children).toEqual([{ label: 'Oceans' }]);
+    expect(next.items[2].side).toBe('left');
   });
 });
 
