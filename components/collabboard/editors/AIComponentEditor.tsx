@@ -83,6 +83,9 @@ interface AIComponentEditorProps {
   currentUserName?: string;
   /** PATCH-188. The board this card is built on; the owner's plan pays. */
   boardId?: string;
+  // PATCH-235. Opened by "Visualize…": starts in Diagram + Show options with the
+  // post's text and generates once, automatically.
+  initialVisualize?: boolean;
 }
 
 type CommentDraft = {
@@ -229,6 +232,7 @@ export default function AIComponentEditor({
   currentUserId = 'anon',
   currentUserName = 'You',
   boardId,
+  initialVisualize = false,
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
   const [title, setTitle] = useState(initialTitle);
@@ -335,6 +339,8 @@ export default function AIComponentEditor({
   const [modelError, setModelError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  // PATCH-235: the Visualize auto-run fires exactly once per open.
+  const visualizeAutoRanRef = useRef(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -361,6 +367,16 @@ export default function AIComponentEditor({
     setStage(initialContent ? 'done' : 'idle');
     setError(null);
     setErrorIsPlanLimit(false);
+    // PATCH-235: a Visualize request opens straight into Diagram + Show options.
+    visualizeAutoRanRef.current = false;
+    if (initialVisualize) {
+      setUiMode('diagram');
+      setMode('diagram');
+      setSubtype(undefined);
+      setShowOptions(true);
+      setOutlineOptions([]);
+      setSelectedOptionKey(null);
+    }
 
     setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
     setTopStrip(typeof initialMetadata?.topStrip === 'string' ? initialMetadata.topStrip : 'transparent');
@@ -379,7 +395,7 @@ export default function AIComponentEditor({
     setActiveStyleTarget('title');
     setDetachedPopupPos(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialTitle, initialPrompt, initialContent, initialMetadata]);
+  }, [isOpen, initialTitle, initialPrompt, initialContent, initialMetadata, initialVisualize]);
 
   const isLoading = stage === 'classifying' || stage === 'generating' || stage === 'rendering';
 
@@ -684,6 +700,16 @@ export default function AIComponentEditor({
       abortRef.current = null;
     }
   };
+
+  // PATCH-235: a Visualize request runs the outline exactly once per open.
+  useEffect(() => {
+    if (!isOpen || !initialVisualize || !showOptions) return;
+    if (visualizeAutoRanRef.current) return;
+    if (!prompt.trim()) return;
+    visualizeAutoRanRef.current = true;
+    void generate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialVisualize, showOptions]);
 
   const cancel = () => {
     abortRef.current?.abort();

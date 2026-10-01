@@ -87,6 +87,7 @@ import {
 } from '@/lib/ai/normalize-ai-content';
 import { getConversionTargets } from '@/lib/ai/conversion-matrix';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
+import { visualizeSourceText } from '@/lib/ai/visualizeSource';
 import type { AIContentData, DiagramSubtype } from '@/lib/ai/contracts';
 import type { StableCanvasActions } from '@/hooks/canvas/useStableCanvasActions';
 import { useCanvasEditor } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
@@ -298,6 +299,9 @@ export interface FreeformPadletCardsProps {
   // bump its graph refresh token and the new line appears. Optional so existing
   // test harnesses that mount without it keep working.
   onGraphEdgesChanged?: () => void;
+  // PATCH-235: "Visualize…" on a Note/Document opens the AI generator pre-filled
+  // from that post's text; CanvasClient places and links the result next to it.
+  onVisualizePost?: (padlet: Padlet) => void;
 
   // Callbacks
   closeAllToolbars: (except?: Record<string, boolean>) => void;
@@ -5298,6 +5302,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onSelect={() => setSelectedPadletId(padlet.id)}
             disabled={!canUseFreeformEditButton}
             onEdit={() => openFreeformPadletModal(padlet)}
+            onVisualize={
+              canUseFreeformEditButton
+                && (padlet.type === 'text' || isDocumentPost(padlet))
+                && visualizeSourceText(padlet).trim().length >= 20
+                ? () => props.onVisualizePost?.(padlet)
+                : undefined
+            }
             onDuplicate={() => duplicatePadlet(padlet.id)}
             onAddToLibrary={() => addPadletToLibrary(padlet.id)}
             onDelete={() => requestDeletePadlet(padlet.id)}

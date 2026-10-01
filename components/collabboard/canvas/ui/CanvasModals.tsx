@@ -102,6 +102,11 @@ export interface CanvasModalsProps {
   // panel only. Optional/defaulted so every other editor this shell renders
   // is unaffected.
   commentAccessMode?: CommentAccessMode;
+  // PATCH-235. True when this AI editor was opened by "Visualize…": it starts in
+  // Diagram + Show options with the post's text and generates once, automatically.
+  initialVisualize?: boolean;
+  // PATCH-235. The source post's plain text, prefilled as the generator's prompt.
+  visualizePrompt?: string;
 
   // Save callbacks (signatures determined by editor components)
   saveNote: (...args: any[]) => any;
@@ -149,6 +154,8 @@ export default function CanvasModals({
   canvasLayout, canvasId,
   onImportAsDocument,
   commentAccessMode = 'manage',
+  initialVisualize = false,
+  visualizePrompt,
   saveNote, saveLink, saveTable, saveTodo, saveContainer,
   saveComment, saveImage, saveDrawing,
   saveAIComponent,
@@ -574,7 +581,7 @@ export default function CanvasModals({
           }}
           onSave={saveAIComponent}
           initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
-          initialPrompt={padletToEdit?.metadata?.aiPrompt || ''}
+          initialPrompt={visualizePrompt || padletToEdit?.metadata?.aiPrompt || ''}
           initialContent={extractAIContentFromPadletMetadata(padletToEdit?.metadata)}
           initialMetadata={padletToEdit?.metadata || {}}
           lockedMode={lockedMode}
@@ -583,6 +590,7 @@ export default function CanvasModals({
           currentUserId={user?.id || 'anon'}
           currentUserName={user?.email?.split('@')[0] || 'You'}
           boardId={canvasId}
+          initialVisualize={initialVisualize}
         />
       </div>
 

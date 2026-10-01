@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
-import { Lock, LockOpen } from 'lucide-react';
+import { Lock, LockOpen, Sparkles } from 'lucide-react';
 import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
 interface NotePostContextMenuProps {
@@ -21,6 +21,9 @@ interface NotePostContextMenuProps {
     // Opens the same modal/editor this post's own pencil button opens --
     // the "adding" editor reused for editing (openFreeformPadletModal).
     onEdit?: () => void;
+    // PATCH-235. Only passed for a Note/Document with enough plain text to
+    // visualize; renders "Visualize…" right after "Edit Post".
+    onVisualize?: () => void;
     // Actions passed as props for easy wiring to existing state
     onDuplicate?: () => void;
     onDelete?: () => void;
@@ -50,6 +53,7 @@ export function NotePostContextMenu({
     padlet,
     onSelect,
     onEdit,
+    onVisualize,
     onDuplicate,
     onDelete,
     onCut,
@@ -111,6 +115,11 @@ export function NotePostContextMenu({
                         <ContextMenuItem onClick={onEdit}>
                             Edit Post
                         </ContextMenuItem>
+                        {onVisualize && (
+                            <ContextMenuItem icon={<Sparkles className="h-4 w-4" />} onClick={onVisualize}>
+                                Visualize…
+                            </ContextMenuItem>
+                        )}
                         <ContextMenuSeparator />
                     </>
                 )}
