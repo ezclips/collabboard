@@ -5,6 +5,7 @@ import React from 'react';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import type { InfographicDiagramData } from '@/lib/ai/contracts';
+import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
@@ -39,6 +40,9 @@ const TILE_WIDTH = 160;
 // PATCH-236 Addendum 4: render each tile's preview at a fixed natural width and
 // scale it DOWN to the tile -- never up, which showed only the giant header.
 const NATURAL_WIDTH = 560;
+// PATCH-241: at most this many tiles per category before "Show more".
+const MAX_PER_CATEGORY = 12;
+const ANTV_PREFIX = 'antv:';
 
 function ThumbButton({
   option,
@@ -61,13 +65,35 @@ function ThumbButton({
   const [aspect, setAspect] = React.useState(1);
   const innerRef = React.useRef<HTMLDivElement | null>(null);
 
+  // PATCH-241. The heavy per-tile preview is built only when the tile is on
+  // screen. Without IntersectionObserver (tests/SSR) the tile renders at once.
+  const [visible, setVisible] = React.useState(() => typeof IntersectionObserver === 'undefined');
+  const wrapRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (visible) return;
+    const el = wrapRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visible]);
+
   React.useLayoutEffect(() => {
+    if (!visible) return;
     const el = innerRef.current;
     if (!el) return;
     const measuredW = el.offsetWidth || NATURAL_WIDTH;
     const measuredH = el.offsetHeight || NATURAL_WIDTH;
     if (measuredW > 0 && measuredH > 0) setAspect(measuredH / measuredW);
-  }, [envelope]);
+  }, [envelope, visible]);
 
   const tileHeight = Math.min(120, Math.round(NATURAL_WIDTH * aspect * scale));
 
@@ -81,14 +107,16 @@ function ThumbButton({
         isSelected ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-200 hover:border-gray-300'
       }`}
     >
-      <div className="overflow-hidden bg-gray-50/50" style={{ height: tileHeight }}>
-        <div
-          ref={innerRef}
-          data-ai-thumb-scale={scale}
-          style={{ width: `${NATURAL_WIDTH}px`, transform: `scale(${scale})`, transformOrigin: 'top left' }}
-        >
-          <AIContentRenderer content={envelope} />
-        </div>
+      <div ref={wrapRef} className="overflow-hidden bg-gray-50/50" style={{ height: tileHeight }}>
+        {visible && (
+          <div
+            ref={innerRef}
+            data-ai-thumb-scale={scale}
+            style={{ width: `${NATURAL_WIDTH}px`, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+          >
+            <AIContentRenderer content={envelope} />
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-1.5 border-t border-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
         <span className="truncate">{option.label}</span>
@@ -140,6 +168,20 @@ export default function OutlineSuggestionsPanel({
   const [detail, setDetail] = React.useState<'auto' | 'summary' | 'detailed'>('auto');
   const [keepWording, setKeepWording] = React.useState(false);
   const [visualHint, setVisualHint] = React.useState('');
+  // PATCH-241. Categories start at 12 tiles; "Show more" reveals the rest.
+  const [expandedCategories, setExpandedCategories] = React.useState<Set<string>>(new Set());
+  // PATCH-241. "Similar visuals" for the selected AntV design.
+  const [similarOpen, setSimilarOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setSimilarOpen(false);
+  }, [selectedKey]);
+
+  const selectedAntvName =
+    selected && selected.key.startsWith(ANTV_PREFIX) ? selected.key.slice(ANTV_PREFIX.length) : null;
+  const similarPresent = selectedAntvName
+    ? similarTemplates(selectedAntvName).filter((name) => options.some((option) => option.key === `${ANTV_PREFIX}${name}`))
+    : [];
 
   const byCategory = new Map<string, SuggestionOption[]>();
   for (const option of rest) {
@@ -163,6 +205,36 @@ export default function OutlineSuggestionsPanel({
           <AIContentRenderer content={envelopeFor(selected)} />
         ))}
       </div>
+
+      {/* PATCH-241: same-family AntV designs for the selected one. */}
+      {selectedAntvName && similarPresent.length > 0 && (
+        <div className="shrink-0">
+          <button
+            type="button"
+            data-ai-similar-toggle="true"
+            aria-expanded={similarOpen}
+            onClick={() => setSimilarOpen((v) => !v)}
+            className="text-xs font-semibold text-purple-600 hover:text-purple-800"
+          >
+            Similar visuals
+          </button>
+          {similarOpen && (
+            <div data-ai-similar-row="true" className="mt-2 flex flex-wrap gap-2">
+              {similarPresent.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  data-ai-similar-template={name}
+                  onClick={() => onSelect(`${ANTV_PREFIX}${name}`)}
+                  className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  {antvTemplateLabel(name)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {outline && onEditOutline && (
         <div>
@@ -194,24 +266,38 @@ export default function OutlineSuggestionsPanel({
           ))}
         </div>
 
-        {[...byCategory.entries()].map(([category, designs]) => (
-          <div key={category} className="mt-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
-            <div className="flex flex-wrap gap-2">
-              {designs.map((option) => (
-                <ThumbButton
-                  key={option.key}
-                  option={option}
-                  best={false}
-                  isSelected={effectiveSelectedKey === option.key}
-                  envelope={envelopeFor(option)}
-                  onSelect={() => onSelect(option.key)}
-                  note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-                />
-              ))}
+        {[...byCategory.entries()].map(([category, designs]) => {
+          const expanded = expandedCategories.has(category);
+          const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
+          return (
+            <div key={category} className="mt-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
+              <div className="flex flex-wrap gap-2">
+                {shown.map((option) => (
+                  <ThumbButton
+                    key={option.key}
+                    option={option}
+                    best={false}
+                    isSelected={effectiveSelectedKey === option.key}
+                    envelope={envelopeFor(option)}
+                    onSelect={() => onSelect(option.key)}
+                    note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
+                  />
+                ))}
+              </div>
+              {!expanded && designs.length > MAX_PER_CATEGORY && (
+                <button
+                  type="button"
+                  data-ai-show-more={category}
+                  onClick={() => setExpandedCategories((prev) => new Set(prev).add(category))}
+                  className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
+                >
+                  Show more ({designs.length - MAX_PER_CATEGORY})
+                </button>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* PATCH-238: Colours -- local only, re-derives every option with a theme. */}

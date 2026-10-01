@@ -203,6 +203,8 @@ describe('PATCH-239 AIContentEditModal structured editors', () => {
   it('an infographic shows the text form, design row and colours, and saves all three', () => {
     const onSave = vi.fn();
     const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={INFOGRAPHIC_ENVELOPE} onSave={onSave} />);
+    // PATCH-241: the form is behind "List view".
+    click(c.querySelector('[data-ai-list-view-toggle="true"]') as Element);
     expect(c.querySelector('[data-ai-outline-editor]')).not.toBeNull();
     expect(c.querySelector('[data-ai-infographic-design="stairs"]')).not.toBeNull();
     expect(c.querySelector('[data-ai-theme="teal-night"]')).not.toBeNull();
@@ -267,6 +269,8 @@ describe('PATCH-240 AIContentEditModal edits the picture directly', () => {
     setInputValue(input, 'Springtime');
     keydown(input, 'Enter');
 
+    // The form lives behind "List view"; the picture edit is already in the data.
+    click(c.querySelector('[data-ai-list-view-toggle="true"]') as Element);
     expect((c.querySelector('[data-ai-outline-item-label="0"]') as HTMLInputElement).value).toBe('Springtime');
 
     click(buttonContaining(c, 'Save changes'));
@@ -277,6 +281,7 @@ describe('PATCH-240 AIContentEditModal edits the picture directly', () => {
 
   it('editing the form updates the picture', () => {
     const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={STACK_INFOGRAPHIC_ENVELOPE} onSave={() => {}} />);
+    click(c.querySelector('[data-ai-list-view-toggle="true"]') as Element);
     setInputValue(c.querySelector('[data-ai-outline-item-label="1"]') as HTMLInputElement, 'Summertime');
     expect((c.querySelector('[data-ai-edit-ref="label:1"]') as Element).textContent).toContain('Summertime');
   });
@@ -298,5 +303,46 @@ describe('PATCH-240 AIContentEditModal edits the picture directly', () => {
     setInputValue(input, 'Evap');
     keydown(input, 'Enter');
     expect((c.querySelector('[data-ai-mindmap-branch="0"]') as HTMLInputElement).value).toBe('Evap');
+  });
+});
+
+const ANTV_INFOGRAPHIC_ENVELOPE: StoredAIContent = {
+  mode: 'diagram',
+  version: 1,
+  data: {
+    type: 'diagram',
+    subtype: 'infographic',
+    renderer: 'infographic',
+    title: 'Seasons',
+    template: 'antv:list-grid-badge-card',
+    outline: OUTLINE,
+  },
+};
+
+describe('PATCH-241 AIContentEditModal picture-first and List view', () => {
+  it('an AntV picture opens picture-first and List view toggles the form', () => {
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={ANTV_INFOGRAPHIC_ENVELOPE} onSave={() => {}} />);
+    expect(c.querySelector('[data-ai-picture-first="true"]')).not.toBeNull();
+    expect(c.querySelector('[data-ai-outline-editor]')).toBeNull();
+
+    click(c.querySelector('[data-ai-list-view-toggle="true"]') as Element);
+    expect(c.querySelector('[data-ai-picture-first="true"]')).toBeNull();
+    expect(c.querySelector('[data-ai-outline-editor]')).not.toBeNull();
+  });
+
+  it('the mind map form has no Centre topic and keeps the title equal to the tree label', () => {
+    const onSave = vi.fn();
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={onSave} />);
+    expect(c.querySelector('[data-ai-mindmap-title]')).toBeNull();
+
+    const titleInput = Array.from(c.querySelectorAll('input')).find((i) => i.value === 'Water cycle') as HTMLInputElement;
+    expect(titleInput).toBeTruthy();
+    setInputValue(titleInput, 'The water cycle');
+
+    click(buttonContaining(c, 'Save changes'));
+    const saved = onSave.mock.calls[0][0].aiComponentJson as StoredAIContent;
+    const data = saved.data as typeof MINDMAP_DATA;
+    expect(data.tree.label).toBe('The water cycle');
+    expect(data.title).toBe('The water cycle');
   });
 });

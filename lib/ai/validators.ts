@@ -7,13 +7,16 @@ import type {
   ComparisonDiagramData,
   FlowDiagramData,
   InfographicDiagramData,
+  InfographicTemplate,
   LessonBoardData,
   MindmapDiagramData,
   PhotoCardData,
   PieChartDiagramData,
+  StoredInfographicTemplate,
   TimelineDiagramData,
   WorkshopBoardData,
 } from './contracts';
+import { isKnownAntvTemplate } from './antv/catalog';
 import { parseOutline } from './outline';
 import { VISUAL_THEMES, type VisualThemeId } from './visualThemes';
 
@@ -170,7 +173,24 @@ export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.objec
  * through the SAME `parseOutline` every model reply uses, so the limits live in
  * one place; an unknown template is rejected.
  */
-const INfographicTemplateSchema = z.enum(['stack', 'pyramid', 'stairs', 'cycle', 'funnel', 'hub']);
+const OUR_INFographic_TEMPLATES = ['stack', 'pyramid', 'stairs', 'cycle', 'funnel', 'hub'] as const;
+
+/**
+ * PATCH-241. Our six names stay exact; an `antv:<name>` is kept only when it is
+ * in the generated catalogue. Anything else falls back to a known-good AntV
+ * template, so an old/new post is never rejected over its design.
+ */
+export const INfographicFallbackTemplate: StoredInfographicTemplate = 'antv:list-grid-badge-card';
+
+const INfographicTemplateSchema = z.string().transform((value): StoredInfographicTemplate => {
+  if ((OUR_INFographic_TEMPLATES as readonly string[]).includes(value)) {
+    return value as InfographicTemplate;
+  }
+  if (/^antv:[a-z0-9-]{3,80}$/.test(value) && isKnownAntvTemplate(value.slice('antv:'.length))) {
+    return value as StoredInfographicTemplate;
+  }
+  return INfographicFallbackTemplate;
+});
 
 export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = z.object({
   type: z.literal('diagram'),

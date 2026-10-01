@@ -74,21 +74,10 @@ export default function MindmapTreeEditor({
     }));
   };
 
+  // PATCH-241. The centre topic is no longer edited here: the caller's Title
+  // field IS the centre, and the two are kept equal in saved data.
   return (
     <div data-ai-mindmap-editor="true" className="space-y-4">
-      <div className="space-y-1">
-        <label className="block text-xs font-medium uppercase tracking-wide text-gray-500">Centre topic</label>
-        <input
-          type="text"
-          data-ai-mindmap-title="true"
-          value={tree.label}
-          maxLength={OUTLINE_LIMITS.title}
-          onChange={(e) => onChange({ ...tree, label: e.target.value })}
-          placeholder="Centre topic"
-          className={inputClass}
-        />
-      </div>
-
       <div className="space-y-3">
         <label className="block text-xs font-medium uppercase tracking-wide text-gray-500">Branches</label>
         {branches.map((branch, branchIndex) => (

@@ -432,7 +432,12 @@ export default function AIComponentEditor({
       setActiveOutline(storedInfographic.outline);
       // PATCH-238: preselect the stored theme (unknown/absent -> classic).
       setVisualTheme(themeById(storedInfographic.theme).id);
-      setSelectedOptionKey(`infographic:${storedInfographic.template}`);
+      // PATCH-241. An AntV template's suggestion key already carries `antv:`.
+      setSelectedOptionKey(
+        storedInfographic.template.startsWith('antv:')
+          ? storedInfographic.template
+          : `infographic:${storedInfographic.template}`,
+      );
       setOutlineGeneratedBy(readAIGenerationAttribution(initialContent) ?? null);
       setOutlineCreatedAt(new Date().toISOString());
       visualizeAutoRanRef.current = true; // no auto-run for a stored shape

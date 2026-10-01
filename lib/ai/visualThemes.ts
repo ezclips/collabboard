@@ -15,7 +15,8 @@ export type VisualThemeId =
   | 'forest'
   | 'mono'
   | 'teal-night'
-  | 'midnight';
+  | 'midnight'
+  | 'hand-drawn';
 
 export interface VisualTheme {
   id: VisualThemeId;
@@ -182,6 +183,22 @@ export const VISUAL_THEMES: Record<VisualThemeId, VisualTheme> = {
       trio('#F0ABFC', '#FAE8FF', '#5A1A66'),
       trio('#FDE68A', '#FDF3D0', '#5A4206'),
     ],
+  },
+
+  // PATCH-241. AntV's rough, hand-sketched style on a warm paper ground. Text
+  // on its light ground meets 4.5:1. Reuses the classic six-colour palette.
+  'hand-drawn': {
+    id: 'hand-drawn',
+    name: 'Hand-drawn',
+    dark: false,
+    background: '#FDFBF6',
+    title: '#2B2B2B',
+    text: '#333333',
+    muted: '#5F5F5F',
+    line: '#4B4B4B',
+    centreFill: '#2B2B2B',
+    centreText: '#FFFFFF',
+    palette: VISUAL_PALETTE,
   },
 };
 

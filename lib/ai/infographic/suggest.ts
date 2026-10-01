@@ -1,6 +1,7 @@
-import type { DiagramData, InfographicDiagramData, InfographicTemplate } from '@/lib/ai/contracts';
+import type { DiagramData, InfographicDiagramData, InfographicTemplate, StoredInfographicTemplate } from '@/lib/ai/contracts';
 import type { OutlineKind, VisualOutline } from '@/lib/ai/outline';
 import { outlineToVisuals } from '@/lib/ai/outlineToVisuals';
+import { antvTemplateInfo, antvTemplateLabel, antvTemplatesFor } from '@/lib/ai/antv/catalog';
 import { ALL_TEMPLATES, TEMPLATE_LABELS, TEMPLATE_RANGE } from './index';
 
 /**
@@ -115,6 +116,30 @@ export function suggestDesigns(outline: VisualOutline, options?: { preferKey?: s
       envelopeData,
     });
   }
+
+  // PATCH-241. The AntV design library, ranked by the catalogue. They sit after
+  // our swift built-ins but before the rest, so our first choice per kind is
+  // still first while the breadth is one scroll away.
+  const ANTV_FIT_BASE = 20;
+  antvTemplatesFor(outline).forEach((name, rank) => {
+    const info = antvTemplateInfo(name);
+    const key = `antv:${name}`;
+    const envelopeData: InfographicDiagramData = {
+      type: 'diagram',
+      subtype: 'infographic',
+      renderer: 'infographic',
+      title: outline.title,
+      template: key as StoredInfographicTemplate,
+      outline,
+    };
+    suggestions.push({
+      key,
+      label: antvTemplateLabel(name),
+      category: info?.category ?? 'infographic',
+      fit: hintedKey === key ? 0 : ANTV_FIT_BASE + rank,
+      envelopeData,
+    });
+  });
 
   // Stable sort by fit, with a user-hinted design ranked first.
   return suggestions

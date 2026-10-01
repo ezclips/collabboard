@@ -1,32 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
-import { InfographicDiagramSchema } from './validators';
+import { INfographicFallbackTemplate, InfographicDiagramSchema } from './validators';
 
 const outline = { title: 'T', ordered: false, kind: 'levels', items: [{ label: 'A' }, { label: 'B' }] };
 
-describe('PATCH-236 infographic validation', () => {
-  it('a valid infographic validates', () => {
-    const result = InfographicDiagramSchema.safeParse({
-      type: 'diagram',
-      subtype: 'infographic',
-      title: 'Water cycle',
-      renderer: 'infographic',
-      template: 'pyramid',
-      outline,
-    });
+function parse(template: unknown) {
+  return InfographicDiagramSchema.safeParse({
+    type: 'diagram',
+    subtype: 'infographic',
+    title: 'X',
+    renderer: 'infographic',
+    template,
+    outline,
+  });
+}
+
+describe('PATCH-236/241 infographic validation', () => {
+  it('a valid infographic with one of our six templates validates unchanged', () => {
+    const result = parse('pyramid');
     expect(result.success).toBe(true);
+    if (result.success) expect(result.data.template).toBe('pyramid');
   });
 
-  it('rejects an unknown template', () => {
-    const result = InfographicDiagramSchema.safeParse({
-      type: 'diagram',
-      subtype: 'infographic',
-      title: 'X',
-      renderer: 'infographic',
-      template: 'hexagon',
-      outline,
-    });
-    expect(result.success).toBe(false);
+  it('PATCH-241 keeps a known antv: template', () => {
+    const result = parse('antv:list-grid-badge-card');
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.template).toBe('antv:list-grid-badge-card');
+  });
+
+  it('PATCH-241 falls back to a default antv template for an unknown antv: name', () => {
+    const result = parse('antv:not-a-real-template');
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.template).toBe(INfographicFallbackTemplate);
+  });
+
+  it('PATCH-241 falls back rather than rejecting any other unknown template', () => {
+    const result = parse('hexagon');
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.template).toBe(INfographicFallbackTemplate);
   });
 
   it('rejects an outline with too few items (same limits as parseOutline)', () => {

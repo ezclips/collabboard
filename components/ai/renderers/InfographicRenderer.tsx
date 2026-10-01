@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 
-import type { InfographicDiagramData } from '@/lib/ai/contracts';
+import { isAntvTemplate, type InfographicDiagramData, type InfographicTemplate } from '@/lib/ai/contracts';
 import { layoutInfographic, TEMPLATE_RANGE, type InfographicShape, type InfographicText, type InfographicIcon } from '@/lib/ai/infographic';
 import {
   insertItem,
@@ -15,6 +15,7 @@ import { OUTLINE_LIMITS, type VisualOutline } from '@/lib/ai/outline';
 import { shapeBounds, textBox } from '@/lib/ai/infographic/shared';
 import { themeById, type VisualTheme } from '@/lib/ai/visualThemes';
 import { getVisualIcon } from './visualIconMap';
+import AntvInfographicRenderer from './AntvInfographicRenderer';
 import PictureEditOverlay, { type ActiveEdit, type ColorPopoverState, type EditHandle } from './PictureEditOverlay';
 
 /**
@@ -151,12 +152,18 @@ function editHandles(
   return handles;
 }
 
-function InfographicRenderer({
+interface InfographicRendererProps {
+  data: InfographicDiagramData;
+  edit?: { onChange: (next: VisualOutline) => void };
+  initialEditRef?: string | null;
+}
+
+function OurInfographicRenderer({
   data,
   edit,
   initialEditRef,
 }: {
-  data: InfographicDiagramData;
+  data: InfographicDiagramData & { template: InfographicTemplate };
   edit?: { onChange: (next: VisualOutline) => void };
   initialEditRef?: string | null;
 }) {
@@ -254,6 +261,28 @@ function InfographicRenderer({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * PATCH-241. Dispatch: `antv:<name>` pictures are drawn by the AntV engine; our
+ * six designs keep the original renderer untouched.
+ */
+function InfographicRenderer(props: InfographicRendererProps) {
+  if (isAntvTemplate(props.data.template)) {
+    return (
+      <AntvInfographicRenderer
+        data={props.data}
+        edit={props.edit}
+        initialEditRef={props.initialEditRef}
+      />
+    );
+  }
+  return (
+    <OurInfographicRenderer
+      {...props}
+      data={props.data as InfographicDiagramData & { template: InfographicTemplate }}
+    />
   );
 }
 

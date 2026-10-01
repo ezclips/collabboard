@@ -18,6 +18,9 @@ export default defineConfig({
       // PATCH-236: the infographic design library lives one level down; without
       // this line its tests are silently NOT RUN (the trap the note above warns of).
       'lib/ai/infographic/**/*.test.ts',
+      // PATCH-241: the AntV adapter lives one level down; without this line its
+      // tests are silently NOT RUN (the trap the note above warns of).
+      'lib/ai/antv/**/*.test.ts',
       'lib/domain/**/*.test.ts',
       // PATCH-183: the permissions layer's plan tests.
       'lib/auth/**/*.test.ts',

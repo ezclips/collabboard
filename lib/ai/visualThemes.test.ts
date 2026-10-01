@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { VISUAL_PALETTE } from './visualPalette';
 import { VISUAL_THEMES, contrastRatio, themeById, type VisualThemeId } from './visualThemes';
 
-const IDS: VisualThemeId[] = ['classic', 'ocean', 'sunset', 'forest', 'mono', 'teal-night', 'midnight'];
+const IDS: VisualThemeId[] = ['classic', 'ocean', 'sunset', 'forest', 'mono', 'teal-night', 'midnight', 'hand-drawn'];
 
-describe('PATCH-238 visual themes', () => {
-  it('exposes exactly the seven themes', () => {
+describe('PATCH-238/241 visual themes', () => {
+  it('exposes exactly the eight themes', () => {
     expect(Object.keys(VISUAL_THEMES).sort()).toEqual([...IDS].sort());
     for (const id of IDS) expect(VISUAL_THEMES[id].id).toBe(id);
   });
@@ -26,6 +26,13 @@ describe('PATCH-238 visual themes', () => {
   it('two of the themes are dark', () => {
     expect(VISUAL_THEMES['teal-night'].dark).toBe(true);
     expect(VISUAL_THEMES.midnight.dark).toBe(true);
+  });
+
+  it('PATCH-241 hand-drawn is light, reuses the classic palette, and is readable', () => {
+    const handDrawn = VISUAL_THEMES['hand-drawn'];
+    expect(handDrawn.dark).toBe(false);
+    expect(handDrawn.palette).toEqual(VISUAL_PALETTE);
+    expect(contrastRatio(handDrawn.text, handDrawn.background)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('themeById falls back to classic for unknown or missing ids', () => {

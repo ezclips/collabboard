@@ -163,14 +163,27 @@ export interface ComparisonDiagramData extends DiagramDataBase {
  */
 export type InfographicTemplate = 'stack' | 'pyramid' | 'stairs' | 'cycle' | 'funnel' | 'hub';
 
+/**
+ * PATCH-241. A design drawn by the bundled AntV Infographic engine. The stored
+ * value is `antv:<template-name>`; the validator keeps only catalogue names.
+ */
+export type AntvInfographicTemplate = `antv:${string}`;
+
+export type StoredInfographicTemplate = InfographicTemplate | AntvInfographicTemplate;
+
 export interface InfographicDiagramData extends DiagramDataBase {
   subtype: 'infographic';
   renderer: 'infographic';
-  template: InfographicTemplate;
+  template: StoredInfographicTemplate;
   outline: import('./outline').VisualOutline;
   explanation?: string;
   /** PATCH-238. The colour theme; absent means classic. */
   theme?: VisualThemeId;
+}
+
+/** True when a stored template belongs to the AntV engine. */
+export function isAntvTemplate(template: string): template is AntvInfographicTemplate {
+  return template.startsWith('antv:');
 }
 
 // Mirrors CaptionStyle (lib/domain/canvas/captionStyle.ts) -- the same

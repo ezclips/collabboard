@@ -11,8 +11,8 @@ import type {
   BarChartDiagramData,
   ChartDataPoint,
   ComparisonColumn,
-  InfographicTemplate,
   LessonBoardData,
+  StoredInfographicTemplate,
   LessonBoardSection,
   LoadedAIContent,
   MindmapDiagramData,
@@ -634,6 +634,9 @@ export default function AIContentEditModal({
   const [diagramRenderPhase, setDiagramRenderPhase] = useState<DiagramRenderPhase>({ phase: 'idle' });
   // PATCH-239. The Mermaid textarea is an escape hatch, closed by default.
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // PATCH-241. Infographic pictures open picture-first; the form sits behind a
+  // "List view" toggle (closed by default).
+  const [listView, setListView] = useState(false);
 
   // Debounce ref for diagram code preview
   const diagramDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -646,6 +649,7 @@ export default function AIContentEditModal({
     setValidationError(null);
     setDiagramRenderPhase({ phase: 'idle' });
     setAdvancedOpen(false);
+    setListView(false);
 
     trackAIEditOpened({
       mode: envelope.mode,
@@ -695,6 +699,16 @@ export default function AIContentEditModal({
       const parsed = parseMindmapCode(draftData.code);
       if (parsed) saveData = { ...draftData, tree: parsed, code: mindmapCodeFromTree(parsed) };
     }
+    // PATCH-241. The title IS the mind map's centre topic; keep them equal. The
+    // tree (its root may have come from Advanced code) wins.
+    if (
+      saveData.type === 'diagram' &&
+      saveData.subtype === 'mindmap' &&
+      saveData.tree &&
+      saveData.tree.label !== saveData.title
+    ) {
+      saveData = { ...saveData, title: saveData.tree.label };
+    }
 
     const subtype = saveData.type === 'diagram' ? saveData.subtype : undefined;
     const validation = safeValidateAIContentWithSubtypeCheck({
@@ -729,6 +743,7 @@ export default function AIContentEditModal({
   if (!isOpen) return null;
 
   const draftEnvelope = buildDraftEnvelope(envelope, draftData);
+  const isInfographic = draftData.type === 'diagram' && draftData.subtype === 'infographic';
   const subtypeLabel = getSubtypeForData(draftData);
   const modeLabel = envelope.mode.replace('_', ' ');
   const contentTypeLabel = subtypeLabel
@@ -778,7 +793,16 @@ export default function AIContentEditModal({
           <div className="space-y-4">
             <div className="space-y-1">
               <FieldLabel>Title</FieldLabel>
-              <TextInput value={draftData.title} onChange={(v) => setDraftData({ ...draftData, title: v })} />
+              <TextInput
+                value={draftData.title}
+                onChange={(v) =>
+                  setDraftData(
+                    tree
+                      ? { ...draftData, title: v, tree: { ...tree, label: v }, code: mindmapCodeFromTree({ ...tree, label: v }) }
+                      : { ...draftData, title: v },
+                  )
+                }
+              />
             </div>
             {tree ? (
               <MindmapTreeEditor
@@ -809,7 +833,11 @@ export default function AIContentEditModal({
       }
       if (sub === 'infographic') {
         const suggestions = suggestDesigns(draftData.outline);
-        const designs = suggestions.filter((option) => option.key.startsWith('infographic:'));
+        // Our six first, then the top AntV designs (the Suggestions panel has the
+        // full library). Both are switchable without another AI call.
+        const ourDesigns = suggestions.filter((option) => option.key.startsWith('infographic:'));
+        const antvDesigns = suggestions.filter((option) => option.key.startsWith('antv:')).slice(0, 12);
+        const designs = [...ourDesigns, ...antvDesigns];
         return (
           <div className="space-y-4">
             <OutlineTextEditor
@@ -820,7 +848,9 @@ export default function AIContentEditModal({
               <FieldLabel>Design</FieldLabel>
               <div className="flex flex-wrap gap-2">
                 {designs.map((option) => {
-                  const template = option.key.slice('infographic:'.length) as InfographicTemplate;
+                  const template = (
+                    option.key.startsWith('infographic:') ? option.key.slice('infographic:'.length) : option.key
+                  ) as StoredInfographicTemplate;
                   return (
                     <button
                       key={option.key}
@@ -963,33 +993,58 @@ export default function AIContentEditModal({
             <h2 className="text-xl font-semibold text-gray-800">Edit AI Component</h2>
             <p className="mt-0.5 text-xs capitalize text-gray-500">{contentTypeLabel}</p>
           </div>
-          <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-gray-200">
-            <X className="h-5 w-5 text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2">
+            {isInfographic && (
+              <button
+                type="button"
+                data-ai-list-view-toggle="true"
+                aria-pressed={listView}
+                onClick={() => setListView((v) => !v)}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+              >
+                {listView ? 'Picture view' : 'List view'}
+              </button>
+            )}
+            <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-gray-200">
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Left: form */}
-          <div className="w-[380px] shrink-0 overflow-y-auto border-r bg-gray-50/30 p-6">
-            <div className="space-y-6">
-              {renderFormFields()}
+          {isInfographic && !listView ? (
+            /* PATCH-241: picture-first -- the picture fills the window and is
+               edited directly; the form is behind "List view". */
+            <div data-ai-picture-first="true" className="flex flex-1 flex-col overflow-hidden bg-white p-6">
+              <div className="relative flex-1 overflow-auto rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-4 shadow-inner">
+                {renderPreview()}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Left: form */}
+              <div className="w-[380px] shrink-0 overflow-y-auto border-r bg-gray-50/30 p-6">
+                <div className="space-y-6">
+                  {renderFormFields()}
 
-              {validationError && (
-                <div className="rounded-lg border border-red-100 bg-red-50 p-3">
-                  <p className="text-xs text-red-600">{validationError}</p>
+                  {validationError && (
+                    <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+                      <p className="text-xs text-red-600">{validationError}</p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Right: live preview */}
-          <div className="flex flex-1 flex-col overflow-hidden bg-white p-6">
-            <p className="block text-sm font-medium text-gray-700">Live preview</p>
-            <div className="relative mt-4 flex-1 overflow-auto rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-4 shadow-inner">
-              {renderPreview()}
-            </div>
-          </div>
+              {/* Right: live preview */}
+              <div className="flex flex-1 flex-col overflow-hidden bg-white p-6">
+                <p className="block text-sm font-medium text-gray-700">Live preview</p>
+                <div className="relative mt-4 flex-1 overflow-auto rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-4 shadow-inner">
+                  {renderPreview()}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}

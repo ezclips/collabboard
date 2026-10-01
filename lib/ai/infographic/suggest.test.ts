@@ -53,6 +53,34 @@ describe('PATCH-236 suggestDesigns', () => {
   });
 });
 
+describe('PATCH-241 suggestDesigns AntV options', () => {
+  it('adds antv: options with readable labels, a category and the outline', () => {
+    const suggestions = suggestDesigns(outline('list', 3));
+    const antv = suggestions.filter((s) => s.key.startsWith('antv:'));
+    expect(antv.length).toBeGreaterThan(0);
+    for (const suggestion of antv) {
+      expect(suggestion.label.charAt(0)).toBe(suggestion.label.charAt(0).toUpperCase());
+      expect(suggestion.category.length).toBeGreaterThan(0);
+      expect(suggestion.envelopeData.subtype).toBe('infographic');
+      if (suggestion.envelopeData.subtype === 'infographic') {
+        expect(suggestion.envelopeData.template).toBe(suggestion.key);
+      }
+    }
+  });
+
+  it('keeps our first choice first', () => {
+    expect(firstKey('levels', 4)).toBe('infographic:pyramid');
+    expect(firstKey('steps', 5)).toBe('infographic:stairs');
+  });
+
+  it('never offers chart or relation antv options', () => {
+    const keys = suggestDesigns(outline('list', 4))
+      .map((s) => s.key)
+      .filter((k) => k.startsWith('antv:'));
+    expect(keys.some((k) => k.includes('chart-') || k.includes('relation-'))).toBe(false);
+  });
+});
+
 describe('PATCH-237 suggestDesigns preferKey (Customize hint)', () => {
   const first = (outline: ReturnType<typeof makeOutline>, preferKey?: string) =>
     suggestDesigns(outline, preferKey ? { preferKey } : undefined)[0];
