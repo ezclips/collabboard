@@ -59,8 +59,11 @@ export default defineConfig({
       // than a failing one -- it reports nothing and looks green.
       'components/ai/*.test.tsx',
       // PATCH-232: the diagram renderer's tests live one level down; without
-      // this line they are silently NOT RUN (the trap the note above describes).
+      // this line they are silently NOT RUN, which is worse than a failing one.
       'components/ai/renderers/*.test.tsx',
+      // PATCH-239: the AI content editors' tests live one level down; without
+      // this line a test file here is silently NOT RUN (the trap above).
+      'components/ai/editors/*.test.tsx',
       // PATCH-188: the shared plan-limit refusal.
       'components/billing/*.test.tsx',
       // PATCH-189: the billing page's trial lines and Free plan card.

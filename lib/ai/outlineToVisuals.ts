@@ -5,6 +5,7 @@ import type {
   MindmapDiagramData,
   TimelineDiagramData,
 } from './contracts';
+import type { MindmapTree } from './mindmapLayout';
 import type { VisualOutline } from './outline';
 import { paletteAt } from './visualPalette';
 
@@ -41,34 +42,62 @@ function quotedRound(value: string): string {
   return `("${mermaidLabel(value)}")`;
 }
 
-function mindmapCode(outline: VisualOutline): string {
-  const lines = ['mindmap', `  root((${quoted(outline.title)}))`];
-  outline.items.forEach((item, index) => {
-    lines.push(`    i${index}[${quoted(item.label)}]`);
-    (item.children ?? []).forEach((child, childIndex) => {
-      lines.push(`      i${index}c${childIndex}[${quoted(child.label)}]`);
+/**
+ * PATCH-239. The tree -> Mermaid text builder, exported so an editor can
+ * regenerate `code` from an edited `tree` and keep the two in sync.
+ */
+export function mindmapCodeFromTree(tree: MindmapTree): string {
+  const lines = ['mindmap', `  root((${quoted(tree.label)}))`];
+  (tree.children ?? []).forEach((branch, branchIndex) => {
+    lines.push(`    i${branchIndex}[${quoted(branch.label)}]`);
+    (branch.children ?? []).forEach((leaf, leafIndex) => {
+      lines.push(`      i${branchIndex}c${leafIndex}[${quoted(leaf.label)}]`);
     });
+  });
+  return lines.join('\n');
+}
+
+function mindmapCode(outline: VisualOutline): string {
+  return mindmapCodeFromTree(mindmapTree(outline));
+}
+
+/** PATCH-239. The editable flow graph: steps and the connections between them. */
+export interface FlowGraph {
+  direction: 'LR' | 'TD';
+  nodes: Array<{ id: string; label: string }>;
+  edges: Array<{ from: string; to: string; label?: string }>;
+}
+
+/**
+ * PATCH-239. A flow graph -> Mermaid text, with every label neutralised through
+ * `mermaidLabel` and the same palette `classDef`s today's Flow option uses.
+ */
+export function flowCodeFromGraph(graph: FlowGraph): string {
+  const lines = [`flowchart ${graph.direction}`];
+  graph.nodes.forEach((node) => {
+    lines.push(`  ${node.id}${quotedRound(node.label)}`);
+  });
+  graph.nodes.forEach((_, index) => {
+    const color = paletteAt(index);
+    lines.push(`  classDef c${index} fill:${color.fill},stroke:${color.stroke},color:${color.text}`);
+  });
+  graph.edges.forEach((edge) => {
+    const label = edge.label ? `|${mermaidLabel(edge.label)}|` : '';
+    lines.push(`  ${edge.from} -->${label} ${edge.to}`);
+  });
+  graph.nodes.forEach((node, index) => {
+    lines.push(`  class ${node.id} c${index}`);
   });
   return lines.join('\n');
 }
 
 function flowchartCode(outline: VisualOutline, direction: 'LR' | 'TD' = 'LR'): string {
   const items = outline.items.slice(0, 8);
-  const lines = [`flowchart ${direction}`];
-  items.forEach((item, index) => {
-    lines.push(`  N${index}${quotedRound(item.label)}`);
+  return flowCodeFromGraph({
+    direction,
+    nodes: items.map((item, index) => ({ id: `N${index}`, label: item.label })),
+    edges: items.slice(0, -1).map((_, index) => ({ from: `N${index}`, to: `N${index + 1}` })),
   });
-  items.forEach((_, index) => {
-    const color = paletteAt(index);
-    lines.push(`  classDef c${index} fill:${color.fill},stroke:${color.stroke},color:${color.text}`);
-  });
-  for (let index = 0; index + 1 < items.length; index += 1) {
-    lines.push(`  N${index} --> N${index + 1}`);
-  }
-  items.forEach((_, index) => {
-    lines.push(`  class N${index} c${index}`);
-  });
-  return lines.join('\n');
 }
 
 function mindmapTree(outline: VisualOutline): NonNullable<MindmapDiagramData['tree']> {

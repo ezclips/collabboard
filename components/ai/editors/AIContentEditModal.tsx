@@ -9,9 +9,11 @@ import type {
   BarChartDiagramData,
   ChartDataPoint,
   ComparisonColumn,
+  InfographicTemplate,
   LessonBoardData,
   LessonBoardSection,
   LoadedAIContent,
+  MindmapDiagramData,
   PhotoCardData,
   PieChartDiagramData,
   StoredAIContent,
@@ -28,6 +30,15 @@ import {
 } from '@/lib/ai/telemetry';
 import { safeValidateAIContentWithSubtypeCheck } from '@/lib/ai/validators';
 import { renderDiagramCode } from '@/lib/ai/diagram-engine';
+import { suggestDesigns } from '@/lib/ai/infographic/suggest';
+import type { MindmapTree } from '@/lib/ai/mindmapLayout';
+import { parseMindmapCode } from '@/lib/ai/mermaidMindmapParse';
+import { parseFlowCode } from '@/lib/ai/mermaidFlowParse';
+import { flowCodeFromGraph, mindmapCodeFromTree } from '@/lib/ai/outlineToVisuals';
+import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
+import OutlineTextEditor from '@/components/collabboard/editors/OutlineTextEditor';
+import FlowStepsEditor from './FlowStepsEditor';
+import MindmapTreeEditor from './MindmapTreeEditor';
 
 export interface AIContentEditModalProps {
   isOpen: boolean;
@@ -117,39 +128,51 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-// ── Code diagram editor (flowchart / mindmap) ──────────────────────────────────
+// ── Advanced: the Mermaid code, only as an escape hatch ───────────────────────
 
 type DiagramRenderPhase = { phase: 'idle' } | { phase: 'loading' } | { phase: 'done'; svg: string } | { phase: 'failed' };
 
-function CodeDiagramEditor({
-  title,
+function AdvancedCodeEditor({
   code,
-  onTitleChange,
   onCodeChange,
+  open,
+  onToggle,
   renderPhase,
 }: {
-  title: string;
   code: string;
-  onTitleChange: (v: string) => void;
   onCodeChange: (v: string) => void;
+  open: boolean;
+  onToggle: () => void;
   renderPhase: DiagramRenderPhase;
 }) {
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <FieldLabel>Title</FieldLabel>
-        <TextInput value={title} onChange={onTitleChange} placeholder="Diagram title" />
-      </div>
-      <div className="space-y-1">
-        <FieldLabel>Diagram code</FieldLabel>
-        <TextArea value={code} onChange={onCodeChange} rows={14} placeholder="flowchart LR\n  A --> B" />
-        {renderPhase.phase === 'failed' && (
-          <p className="text-xs text-red-500">Diagram code has a syntax error — fix it before saving.</p>
-        )}
-        {renderPhase.phase === 'loading' && (
-          <p className="text-xs text-gray-400">Checking diagram syntax…</p>
-        )}
-      </div>
+    <div className="rounded-xl border border-gray-200">
+      <button
+        type="button"
+        data-ai-advanced-toggle="true"
+        onClick={onToggle}
+        className="w-full px-3 py-2 text-left text-xs font-medium text-gray-600 hover:bg-gray-50"
+      >
+        Advanced: edit diagram code
+      </button>
+      {open && (
+        <div className="space-y-1 border-t border-gray-100 p-3">
+          <textarea
+            data-ai-diagram-code="true"
+            value={code}
+            onChange={(e) => onCodeChange(e.target.value)}
+            rows={12}
+            placeholder="flowchart LR\n  A --> B"
+            className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300"
+          />
+          {renderPhase.phase === 'failed' && (
+            <p className="text-xs text-red-500">Diagram code has a syntax error — fix it before saving.</p>
+          )}
+          {renderPhase.phase === 'loading' && (
+            <p className="text-xs text-gray-400">Checking diagram syntax…</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -604,6 +627,8 @@ export default function AIContentEditModal({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [diagramRenderPhase, setDiagramRenderPhase] = useState<DiagramRenderPhase>({ phase: 'idle' });
+  // PATCH-239. The Mermaid textarea is an escape hatch, closed by default.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Debounce ref for diagram code preview
   const diagramDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -615,6 +640,7 @@ export default function AIContentEditModal({
     setPrompt(initialPrompt);
     setValidationError(null);
     setDiagramRenderPhase({ phase: 'idle' });
+    setAdvancedOpen(false);
 
     trackAIEditOpened({
       mode: envelope.mode,
@@ -657,11 +683,19 @@ export default function AIContentEditModal({
   ]);
 
   const handleSave = () => {
-    const subtype = draftData.type === 'diagram' ? draftData.subtype : undefined;
+    // PATCH-239: a code-only mind map that parses is upgraded to our tree
+    // renderer on save, so the picture never ignores the stored tree.
+    let saveData: AIContentData = draftData;
+    if (draftData.type === 'diagram' && draftData.subtype === 'mindmap' && !draftData.tree) {
+      const parsed = parseMindmapCode(draftData.code);
+      if (parsed) saveData = { ...draftData, tree: parsed, code: mindmapCodeFromTree(parsed) };
+    }
+
+    const subtype = saveData.type === 'diagram' ? saveData.subtype : undefined;
     const validation = safeValidateAIContentWithSubtypeCheck({
       mode: envelope.mode,
       subtype,
-      data: draftData,
+      data: saveData,
     });
 
     if (!validation.success) {
@@ -669,20 +703,20 @@ export default function AIContentEditModal({
       setValidationError(reason);
       trackAIEditValidationFailed({
         mode: envelope.mode,
-        subtype: getSubtypeForData(draftData),
+        subtype: getSubtypeForData(saveData),
         reason,
       });
       return;
     }
 
-    const draftEnvelope = buildDraftEnvelope(envelope, draftData);
+    const draftEnvelope = buildDraftEnvelope(envelope, saveData);
     const persisted = serializeAIContentForPersistence(draftEnvelope);
     if (!persisted) {
       setValidationError('Could not serialize the edited content. Please check all required fields.');
       return;
     }
 
-    trackAIEditSaved({ mode: envelope.mode, subtype: getSubtypeForData(draftData) });
+    trackAIEditSaved({ mode: envelope.mode, subtype: getSubtypeForData(saveData) });
     onSave({ aiPrompt: prompt, aiComponentJson: persisted });
     onClose();
   };
@@ -705,15 +739,129 @@ export default function AIContentEditModal({
   function renderFormFields() {
     if (draftData.type === 'diagram') {
       const sub = draftData.subtype;
-      if (sub === 'flowchart' || sub === 'mindmap') {
+      if (sub === 'flowchart') {
+        const graph = parseFlowCode(draftData.code);
         return (
-          <CodeDiagramEditor
-            title={draftData.title}
-            code={draftData.code}
-            onTitleChange={(v) => setDraftData({ ...draftData, title: v })}
-            onCodeChange={(v) => setDraftData({ ...draftData, code: v })}
-            renderPhase={diagramRenderPhase}
-          />
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <FieldLabel>Title</FieldLabel>
+              <TextInput value={draftData.title} onChange={(v) => setDraftData({ ...draftData, title: v })} />
+            </div>
+            {graph ? (
+              <FlowStepsEditor
+                graph={graph}
+                onChange={(next) => setDraftData({ ...draftData, code: flowCodeFromGraph(next) })}
+              />
+            ) : (
+              <p data-ai-advanced-note="true" className="text-xs text-gray-500">
+                This diagram was written in code; edit it under Advanced.
+              </p>
+            )}
+            <AdvancedCodeEditor
+              code={draftData.code}
+              open={advancedOpen || !graph}
+              onToggle={() => setAdvancedOpen((v) => !v)}
+              onCodeChange={(v) => setDraftData({ ...draftData, code: v })}
+              renderPhase={diagramRenderPhase}
+            />
+          </div>
+        );
+      }
+      if (sub === 'mindmap') {
+        const tree: MindmapTree | null = draftData.tree ?? parseMindmapCode(draftData.code);
+        return (
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <FieldLabel>Title</FieldLabel>
+              <TextInput value={draftData.title} onChange={(v) => setDraftData({ ...draftData, title: v })} />
+            </div>
+            {tree ? (
+              <MindmapTreeEditor
+                tree={tree}
+                onChange={(next) => setDraftData({ ...draftData, tree: next, code: mindmapCodeFromTree(next) })}
+              />
+            ) : (
+              <p data-ai-advanced-note="true" className="text-xs text-gray-500">
+                This diagram was written in code; edit it under Advanced.
+              </p>
+            )}
+            <AdvancedCodeEditor
+              code={draftData.code}
+              open={advancedOpen || !tree}
+              onToggle={() => setAdvancedOpen((v) => !v)}
+              onCodeChange={(v) => {
+                // The picture draws from `tree`; keep it in step with the code.
+                const next: MindmapDiagramData = { ...draftData, code: v };
+                const parsed = parseMindmapCode(v);
+                if (parsed) next.tree = parsed;
+                else delete next.tree;
+                setDraftData(next);
+              }}
+              renderPhase={diagramRenderPhase}
+            />
+          </div>
+        );
+      }
+      if (sub === 'infographic') {
+        const suggestions = suggestDesigns(draftData.outline);
+        const designs = suggestions.filter((option) => option.key.startsWith('infographic:'));
+        return (
+          <div className="space-y-4">
+            <OutlineTextEditor
+              outline={draftData.outline}
+              onChange={(next) => setDraftData({ ...draftData, outline: next, title: next.title })}
+            />
+            <div className="space-y-1">
+              <FieldLabel>Design</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {designs.map((option) => {
+                  const template = option.key.slice('infographic:'.length) as InfographicTemplate;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      data-ai-infographic-design={template}
+                      onClick={() => setDraftData({ ...draftData, template })}
+                      className={`rounded-lg border px-3 py-1 text-xs font-medium ${
+                        draftData.template === template
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <FieldLabel>Colours</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
+                  const swatch = VISUAL_THEMES[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      data-ai-theme={id}
+                      aria-label={swatch.name}
+                      aria-pressed={(draftData.theme ?? 'classic') === id}
+                      title={swatch.name}
+                      onClick={() => setDraftData({ ...draftData, theme: id })}
+                      className={`h-5 w-5 rounded-full border ${
+                        (draftData.theme ?? 'classic') === id
+                          ? 'border-indigo-500 ring-2 ring-indigo-200'
+                          : 'border-gray-300'
+                      }`}
+                      style={{
+                        background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         );
       }
       if (sub === 'pie_chart' || sub === 'bar_chart') {

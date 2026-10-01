@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import type { MindmapTree } from './mindmapLayout';
 import type { VisualOutline } from './outline';
-import { flowCode, mermaidLabel, outlineToVisuals } from './outlineToVisuals';
+import { flowCode, flowCodeFromGraph, mermaidLabel, mindmapCodeFromTree, outlineToVisuals } from './outlineToVisuals';
 
 function outline(overrides: Partial<VisualOutline> = {}): VisualOutline {
   return {
@@ -134,5 +135,40 @@ describe('PATCH-237 flow direction', () => {
     expect(td.startsWith('flowchart TD\n')).toBe(true);
     // Everything after the first line is identical.
     expect(lr.split('\n').slice(1).join('\n')).toBe(td.split('\n').slice(1).join('\n'));
+  });
+});
+
+describe('PATCH-239 mindmapCodeFromTree / flowCodeFromGraph', () => {
+  it('mindmapCodeFromTree builds the same indented Mermaid we store', () => {
+    const tree: MindmapTree = {
+      label: 'Water cycle',
+      children: [
+        { label: 'Evaporation', children: [{ label: 'Oceans' }] },
+        { label: 'Condensation' },
+      ],
+    };
+    const code = mindmapCodeFromTree(tree);
+    expect(code.startsWith('mindmap\n')).toBe(true);
+    expect(code).toContain('  root(("Water cycle"))');
+    expect(code).toContain('    i0["Evaporation"]');
+    expect(code).toContain('      i0c0["Oceans"]');
+    expect(code).toContain('    i1["Condensation"]');
+  });
+
+  it('flowCodeFromGraph neutralises hostile labels (PATCH-233 assertions)', () => {
+    const hostile = 'a"b]c{d}|e';
+    const code = flowCodeFromGraph({
+      direction: 'LR',
+      nodes: [{ id: 'N0', label: hostile }, { id: 'N1', label: 'Safe' }],
+      edges: [{ from: 'N0', to: 'N1' }],
+    });
+    expect(code).toContain('N0("abcde")');
+    expect(code).toContain('N0 --> N1');
+    expect(code).toContain('classDef c0 fill:');
+    expect(code).toContain('class N0 c0');
+    expect(code).toContain('class N1 c1');
+    expect(code).not.toContain('a"b');
+    expect(code).not.toContain(']c');
+    expect(code).not.toContain('}');
   });
 });
