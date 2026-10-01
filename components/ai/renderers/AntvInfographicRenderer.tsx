@@ -7,6 +7,7 @@ import {
   applyAntvButton,
   applyAntvChange,
   isMindmapTemplate,
+  outlinesEqual,
   toAntvOptions,
   type AntvButtonOp,
   type AntvChangeEvent,
@@ -356,9 +357,11 @@ function AntvInfographicRenderer({
         });
         if (editable) {
           instance.on('options:change', (event) => {
-            editRef.current?.onChange(
-              applyAntvChange(outlineRef.current, templateName, event as AntvChangeEvent),
-            );
+            const next = applyAntvChange(outlineRef.current, templateName, event as AntvChangeEvent);
+            // PATCH-244: an unmapped toolbar action must not trigger a redraw
+            // from the unchanged outline, which would wipe what AntV just drew.
+            if (outlinesEqual(next, outlineRef.current)) return;
+            editRef.current?.onChange(next);
           });
         }
         instanceRef.current = instance;

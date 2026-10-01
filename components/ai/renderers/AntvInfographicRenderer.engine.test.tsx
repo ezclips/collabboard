@@ -126,6 +126,55 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
     expect(next.items[1].label).toBe('High summer');
   });
 
+  it('maps an options:change text-attribute update to textStyle.label.fill', async () => {
+    const onChange = vi.fn();
+    mount(<AntvInfographicRenderer data={data()} edit={{ onChange }} />);
+    await flush();
+    const instance = h.instances[0];
+
+    act(() => {
+      instance.emit('options:change', {
+        type: 'options:change',
+        changes: [
+          {
+            op: 'update',
+            path: 'data.items[0].attributes.label',
+            indexes: [0],
+            value: { attributes: { fill: '#ff0000' } },
+          },
+        ],
+      });
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0] as VisualOutline;
+    expect(next.items[0].textStyle?.label?.fill).toBe('#ff0000');
+  });
+
+  it('does not call onChange when a change maps to no change', async () => {
+    const onChange = vi.fn();
+    mount(<AntvInfographicRenderer data={data()} edit={{ onChange }} />);
+    await flush();
+    const instance = h.instances[0];
+
+    act(() => {
+      instance.emit('options:change', {
+        type: 'options:change',
+        changes: [
+          // A hostile fill is not a colour we store: nothing changes.
+          {
+            op: 'update',
+            path: 'data.items[0].attributes.label',
+            indexes: [0],
+            value: { attributes: { fill: 'url(javascript:alert(1))' } },
+          },
+          // And an op/path we do not understand is ignored.
+          { op: 'frobnicate', path: 'data.items', indexes: [1], value: {} },
+        ],
+      });
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('updates the engine when the outline changes', async () => {
     const { root } = mount(<AntvInfographicRenderer data={data()} />);
     await flush();

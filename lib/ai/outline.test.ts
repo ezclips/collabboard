@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { OUTLINE_LIMITS, OutlineParseError, parseOutline } from './outline';
+import { ALL_TEMPLATES, layoutInfographic } from './infographic';
+import { OUTLINE_LIMITS, OutlineParseError, parseOutline, sanitizeTextStyle } from './outline';
+import { outlineToVisuals } from './outlineToVisuals';
+import { VISUAL_THEMES } from './visualThemes';
 
 describe('PATCH-233 parseOutline', () => {
   it('passes a valid outline and drops extra fields', () => {
@@ -142,5 +145,90 @@ describe('PATCH-240 outline item colour', () => {
     expect(out.items[2].color).toBeUndefined();
     expect(out.items[3].color).toBeUndefined();
     expect(out.items[4].color).toBeUndefined();
+  });
+});
+
+describe('PATCH-244 sanitizeTextStyle', () => {
+  it('keeps a real hex/rgb(a) colour, size, font family and align', () => {
+    expect(sanitizeTextStyle({ fill: '#f00', fontSize: 14, fontFamily: 'Alibaba PuHuiTi', align: 'center' })).toEqual({
+      fill: '#f00',
+      fontSize: 14,
+      fontFamily: 'Alibaba PuHuiTi',
+      align: 'center',
+    });
+    expect(sanitizeTextStyle({ fill: '#a1b2c3' })).toEqual({ fill: '#a1b2c3' });
+    expect(sanitizeTextStyle({ fill: '#a1b2c3dd' })).toEqual({ fill: '#a1b2c3dd' });
+    expect(sanitizeTextStyle({ fill: 'rgb(255, 0, 0)' })).toEqual({ fill: 'rgb(255, 0, 0)' });
+    expect(sanitizeTextStyle({ fill: 'rgba(1, 2, 3, 0.5)' })).toEqual({ fill: 'rgba(1, 2, 3, 0.5)' });
+  });
+
+  it('drops a hostile or malformed fill', () => {
+    for (const fill of ['red', 'url(x)', '#12', 'rgb(300,0,0)', '#fff;x', 'javascript:alert(1)']) {
+      expect(sanitizeTextStyle({ fill }), fill).toBeUndefined();
+    }
+  });
+
+  it('drops an out-of-range or non-integer font size', () => {
+    expect(sanitizeTextStyle({ fontSize: 7 })).toBeUndefined();
+    expect(sanitizeTextStyle({ fontSize: 73 })).toBeUndefined();
+    expect(sanitizeTextStyle({ fontSize: 12.5 })).toBeUndefined();
+    expect(sanitizeTextStyle({ fontSize: 14 })).toEqual({ fontSize: 14 });
+  });
+
+  it('drops an unknown font family and an unknown align', () => {
+    expect(sanitizeTextStyle({ fontFamily: 'Comic Sans MS' })).toBeUndefined();
+    expect(sanitizeTextStyle({ align: 'justify' })).toBeUndefined();
+    expect(sanitizeTextStyle({ align: 'right' })).toEqual({ align: 'right' });
+  });
+
+  it('never throws on hostile stored data, and an empty style is removed', () => {
+    expect(sanitizeTextStyle('nonsense')).toBeUndefined();
+    expect(sanitizeTextStyle(null)).toBeUndefined();
+    expect(sanitizeTextStyle({})).toBeUndefined();
+    expect(sanitizeTextStyle({ fill: { toString: () => { throw new Error('boom'); } } })).toBeUndefined();
+  });
+});
+
+describe('PATCH-244 parseOutline text style', () => {
+  it('keeps a valid stored style and drops a hostile fill', () => {
+    const out = parseOutline({
+      title: 'T',
+      titleStyle: { fill: '#00ff00', fontSize: 20 },
+      items: [
+        {
+          label: 'A',
+          textStyle: { label: { fill: '#123456' }, detail: { fontSize: 12 }, icon: { fill: 'rgb(1,2,3)' } },
+        },
+        { label: 'B', textStyle: { label: { fill: 'url(evil)' }, detail: { fontSize: 999 } } },
+      ],
+    });
+    expect(out.titleStyle).toEqual({ fill: '#00ff00', fontSize: 20 });
+    expect(out.items[0].textStyle).toEqual({
+      label: { fill: '#123456' },
+      detail: { fontSize: 12 },
+      icon: { fill: 'rgb(1,2,3)' },
+    });
+    expect(out.items[1].textStyle).toBeUndefined();
+  });
+
+  it('removes an empty style object', () => {
+    const out = parseOutline({ title: 'T', items: [{ label: 'A', textStyle: {} }, { label: 'B' }] });
+    expect(out.items[0].textStyle).toBeUndefined();
+  });
+
+  it('our own six layouts and the tree ignore AntV textStyle', () => {
+    const o = parseOutline({
+      title: 'T',
+      titleStyle: { fill: '#ff0000' },
+      items: [
+        { label: 'A', textStyle: { label: { fill: '#ff0000' } } },
+        { label: 'B', textStyle: { label: { fill: '#ff0000' } } },
+      ],
+    });
+    for (const template of ALL_TEMPLATES) {
+      const layout = layoutInfographic(template, o, VISUAL_THEMES.classic);
+      expect(layout.texts.every((text) => text.color !== '#ff0000'), template).toBe(true);
+    }
+    expect(JSON.stringify(outlineToVisuals(o))).not.toContain('#ff0000');
   });
 });

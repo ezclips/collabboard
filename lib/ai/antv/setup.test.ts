@@ -3,6 +3,7 @@ import * as antv from '@antv/infographic';
 import { describe, expect, it } from 'vitest';
 
 import { VISUAL_ICON_NAMES } from '@/lib/ai/visualIcons';
+import { sanitizeTextStyle } from '@/lib/ai/outline';
 import { ANTV_FONT_STACK, ANTV_HAND_DRAWN_FONT_STACK, configureAntv, makeAntvResourceLoader } from './setup';
 
 describe('PATCH-241 configureAntv', () => {
@@ -22,6 +23,16 @@ describe('PATCH-241 configureAntv', () => {
       expect(font.baseUrl).toBe('');
       expect(Object.keys(font.fontWeight ?? {})).toHaveLength(0);
     }
+  });
+
+  // PATCH-244. The text-style validator's font allowlist must keep our two
+  // stacks (see outline.ts TEXT_STYLE_FONT_FAMILIES), or a stored font would be
+  // silently dropped. This pins the two definitions together.
+  it('accepts our own font stacks as a storable font family', () => {
+    expect(sanitizeTextStyle({ fontFamily: ANTV_FONT_STACK })?.fontFamily).toBe(ANTV_FONT_STACK);
+    expect(sanitizeTextStyle({ fontFamily: ANTV_HAND_DRAWN_FONT_STACK })?.fontFamily).toBe(
+      ANTV_HAND_DRAWN_FONT_STACK,
+    );
   });
 
   it('the icon loader returns a symbol for every name and for an unknown one, never null', async () => {

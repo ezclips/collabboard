@@ -8,6 +8,7 @@ import {
   applyAntvChange,
   isMindmapTemplate,
   mapAntvButton,
+  outlinesEqual,
   STABLE_MINDMAP_STRUCTURE,
   toAntvOptions,
   type AntvChangeEvent,
@@ -338,5 +339,179 @@ describe('PATCH-241 applyAntvChange', () => {
       }),
     ).not.toThrow();
     expect(frozen.items[0].label).toBe('Spring');
+  });
+});
+
+describe('PATCH-244 applyAntvChange text attributes', () => {
+  const LIST = 'list-row-simple';
+  const MINDMAP = 'hierarchy-mindmap-branch-gradient-capsule-item';
+
+  it('merges a label fill into the right item', () => {
+    const next = applyAntvChange(outline(), LIST, {
+      op: 'update',
+      path: 'data.items[1].attributes.label',
+      indexes: [1],
+      value: { attributes: { fill: '#ff0000' } },
+    });
+    expect(next.items[1].textStyle?.label?.fill).toBe('#ff0000');
+    expect(next.items[0].textStyle).toBeUndefined();
+  });
+
+  it('maps a desc font-size onto the detail style', () => {
+    const next = applyAntvChange(outline(), LIST, {
+      op: 'update',
+      path: 'data.items[0].attributes.desc',
+      indexes: [0],
+      value: { attributes: { 'font-size': 20 } },
+    });
+    expect(next.items[0].textStyle?.detail?.fontSize).toBe(20);
+  });
+
+  it('maps an icon fill onto the icon style', () => {
+    const next = applyAntvChange(outline(), LIST, {
+      op: 'update',
+      path: 'data.items[1].attributes.icon',
+      indexes: [1],
+      value: { attributes: { fill: 'rgb(0, 255, 0)' } },
+    });
+    expect(next.items[1].textStyle?.icon).toEqual({ fill: 'rgb(0, 255, 0)' });
+  });
+
+  it('maps the title font-family from data.attributes.title', () => {
+    const next = applyAntvChange(outline(), LIST, {
+      op: 'update',
+      path: 'data.attributes.title',
+      value: { attributes: { 'font-family': 'Alibaba PuHuiTi' } },
+    });
+    expect(next.titleStyle).toEqual({ fontFamily: 'Alibaba PuHuiTi' });
+  });
+
+  it('maps a horizontal align and ignores the vertical one', () => {
+    const next = applyAntvChange(outline(), LIST, {
+      op: 'update',
+      path: 'data.items[0].attributes.label',
+      indexes: [0],
+      value: { attributes: { 'data-horizontal-align': 'CENTER', 'data-vertical-align': 'TOP' } },
+    });
+    expect(next.items[0].textStyle?.label).toEqual({ align: 'center' });
+  });
+
+  it('merges into an existing style without dropping what is already there', () => {
+    const withFill = applyAntvChange(outline(), LIST, {
+      op: 'update',
+      path: 'data.items[0].attributes.label',
+      indexes: [0],
+      value: { attributes: { fill: '#ff0000' } },
+    });
+    const next = applyAntvChange(withFill, LIST, {
+      op: 'update',
+      path: 'data.items[0].attributes.label',
+      indexes: [0],
+      value: { attributes: { 'font-size': 16 } },
+    });
+    expect(next.items[0].textStyle?.label).toEqual({ fill: '#ff0000', fontSize: 16 });
+  });
+
+  it('drops a hostile fill, leaving the outline structurally unchanged', () => {
+    const base = outline();
+    const next = applyAntvChange(base, LIST, {
+      op: 'update',
+      path: 'data.items[0].attributes.label',
+      indexes: [0],
+      value: { attributes: { fill: 'url(javascript:alert(1))' } },
+    });
+    expect(next.items[0].textStyle).toBeUndefined();
+    expect(outlinesEqual(next, base)).toBe(true);
+  });
+
+  it('ignores an unknown role key', () => {
+    const base = outline();
+    const next = applyAntvChange(base, LIST, {
+      op: 'update',
+      path: 'data.items[0].attributes.value',
+      indexes: [0],
+      value: { attributes: { fill: '#ff0000' } },
+    });
+    expect(outlinesEqual(next, base)).toBe(true);
+  });
+
+  it('maps a mind-map item through its root and the root title to titleStyle', () => {
+    const fromChild = applyAntvChange(outline(), MINDMAP, {
+      op: 'update',
+      path: 'data.items[0].children[1].attributes.label',
+      indexes: [0, 1],
+      value: { attributes: { fill: '#0000ff' } },
+    });
+    expect(fromChild.items[1].textStyle?.label?.fill).toBe('#0000ff');
+
+    const fromRoot = applyAntvChange(outline(), MINDMAP, {
+      op: 'update',
+      path: 'data.items[0].attributes.label',
+      indexes: [0],
+      value: { attributes: { fill: '#0000ff' } },
+    });
+    expect(fromRoot.titleStyle).toEqual({ fill: '#0000ff' });
+  });
+});
+
+describe('PATCH-244 toAntvOptions round-trip', () => {
+  function styled(): VisualOutline {
+    return outline({
+      titleStyle: { fontFamily: 'Alibaba PuHuiTi' },
+      items: [
+        {
+          label: 'Spring',
+          textStyle: {
+            label: { fill: '#ff0000' },
+            detail: { fontSize: 20 },
+            icon: { fill: '#00ff00' },
+          },
+        },
+        { label: 'Summer' },
+      ],
+    });
+  }
+
+  it('passes a list item style back as AntV attributes and the title as data.attributes.title', () => {
+    const options = toAntvOptions(styled(), 'list-row-simple');
+    expect(options.data.items[0].attributes).toEqual({
+      label: { fill: '#ff0000' },
+      desc: { 'font-size': 20 },
+      icon: { fill: '#00ff00' },
+    });
+    expect(options.data.items[1].attributes).toBeUndefined();
+    expect(options.data.attributes?.title).toEqual({ 'font-family': 'Alibaba PuHuiTi' });
+  });
+
+  it('passes a mind-map item style into the root children and the title into the root label', () => {
+    const options = toAntvOptions(styled(), 'hierarchy-mindmap-branch-gradient-capsule-item');
+    expect(options.data.items[0].attributes?.label).toEqual({ 'font-family': 'Alibaba PuHuiTi' });
+    expect(options.data.items[0].children?.[0].attributes?.label).toEqual({ fill: '#ff0000' });
+    expect(options.data.items[0].children?.[1].attributes).toBeUndefined();
+  });
+});
+
+describe('PATCH-244 outlinesEqual', () => {
+  it('is true for a no-op change and false once a style is added', () => {
+    const base = outline();
+    expect(
+      outlinesEqual(
+        base,
+        applyAntvChange(base, 'list-row-simple', {
+          op: 'update',
+          path: 'data.items[0].attributes.label',
+          indexes: [0],
+          value: { attributes: { fill: 'not-a-colour' } },
+        }),
+      ),
+    ).toBe(true);
+
+    const changed = applyAntvChange(base, 'list-row-simple', {
+      op: 'update',
+      path: 'data.items[0].attributes.label',
+      indexes: [0],
+      value: { attributes: { fill: '#ff0000' } },
+    });
+    expect(outlinesEqual(base, changed)).toBe(false);
   });
 });

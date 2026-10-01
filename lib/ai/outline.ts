@@ -15,6 +15,27 @@ export interface VisualOutlineChild {
 /** PATCH-242. Which side of a hub/tree picture an item sits on. */
 export type VisualSide = 'left' | 'right';
 
+/** PATCH-244. The three horizontal alignments AntV's text toolbar offers. */
+export type TextStyleAlign = 'left' | 'center' | 'right';
+
+/**
+ * PATCH-244. A small, validated text style AntV's text toolbar can change. Only
+ * AntV pictures read it; our own layouts and the mind-map tree ignore it.
+ */
+export interface TextStyle {
+  fill?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  align?: TextStyleAlign;
+}
+
+/** PATCH-244. Per-part styles: label, detail and the icon's fill. */
+export interface VisualOutlineItemTextStyle {
+  label?: TextStyle;
+  detail?: TextStyle;
+  icon?: { fill?: string };
+}
+
 export interface VisualOutlineItem {
   label: string;
   detail?: string;
@@ -29,6 +50,8 @@ export interface VisualOutlineItem {
    * ignores it. Kept leniently by `parseOutline`.
    */
   side?: VisualSide;
+  /** PATCH-244. AntV-toolbar text style, kept only for AntV designs. */
+  textStyle?: VisualOutlineItemTextStyle;
   children?: VisualOutlineChild[];
 }
 
@@ -37,6 +60,92 @@ export interface VisualOutline {
   ordered: boolean;
   items: VisualOutlineItem[];
   kind: OutlineKind;
+  /** PATCH-244. AntV-toolbar text style for the picture's title. */
+  titleStyle?: TextStyle;
+}
+
+/**
+ * PATCH-244. The bounds a stored `fontSize` must fall in. Values outside are
+ * dropped rather than rejecting the post.
+ */
+export const OUTLINE_FONT_SIZE_MIN = 8;
+export const OUTLINE_FONT_SIZE_MAX = 72;
+
+/**
+ * PATCH-244. The font families AntV's toolbar can set: its five registered
+ * faces plus our two system-only stacks (see `antv/setup.ts`). A family outside
+ * this list is dropped.
+ */
+const TEXT_STYLE_FONT_FAMILIES = new Set<string>([
+  'Alibaba PuHuiTi',
+  'Source Han Sans',
+  'Source Han Serif',
+  'LXGW WenKai',
+  '851tegakizatsu',
+  'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+  "'Segoe Print', 'Comic Sans MS', 'Bradley Hand', cursive",
+]);
+
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+const RGB_COLOR =
+  /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)\s*)?\)$/i;
+
+/**
+ * PATCH-244. True only for a real, self-contained colour literal: hex or
+ * rgb(a) with every number in range. No `url(`, no trailing `;`.
+ */
+export function isSafeTextColor(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (HEX_COLOR.test(value)) return true;
+  const match = RGB_COLOR.exec(value);
+  if (!match) return false;
+  const channels = [match[1], match[2], match[3]];
+  if (channels.some((channel) => Number(channel) > 255)) return false;
+  if (match[4] !== undefined && Number(match[4]) > 1) return false;
+  return true;
+}
+
+/**
+ * PATCH-244. The one shared, pure text-style validator. Keeps a real colour,
+ * an integer size in range, a known font family and a known alignment; drops
+ * everything else. Returns `undefined` for an empty/absent style. Never throws.
+ */
+export function sanitizeTextStyle(raw: unknown): TextStyle | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const input = raw as { fill?: unknown; fontSize?: unknown; fontFamily?: unknown; align?: unknown };
+  const style: TextStyle = {};
+  if (isSafeTextColor(input.fill)) style.fill = input.fill;
+  if (
+    typeof input.fontSize === 'number' &&
+    Number.isInteger(input.fontSize) &&
+    input.fontSize >= OUTLINE_FONT_SIZE_MIN &&
+    input.fontSize <= OUTLINE_FONT_SIZE_MAX
+  ) {
+    style.fontSize = input.fontSize;
+  }
+  if (typeof input.fontFamily === 'string' && TEXT_STYLE_FONT_FAMILIES.has(input.fontFamily)) {
+    style.fontFamily = input.fontFamily;
+  }
+  if (input.align === 'left' || input.align === 'center' || input.align === 'right') {
+    style.align = input.align;
+  }
+  return Object.keys(style).length ? style : undefined;
+}
+
+/** PATCH-244. Sanitises an item's `textStyle`; an empty result is removed. */
+export function sanitizeItemTextStyle(raw: unknown): VisualOutlineItemTextStyle | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const input = raw as { label?: unknown; detail?: unknown; icon?: unknown };
+  const style: VisualOutlineItemTextStyle = {};
+  const label = sanitizeTextStyle(input.label);
+  if (label) style.label = label;
+  const detail = sanitizeTextStyle(input.detail);
+  if (detail) style.detail = detail;
+  if (input.icon && typeof input.icon === 'object') {
+    const fill = (input.icon as { fill?: unknown }).fill;
+    if (isSafeTextColor(fill)) style.icon = { fill };
+  }
+  return Object.keys(style).length ? style : undefined;
 }
 
 /**
@@ -128,6 +237,7 @@ const OutlineItemSchema = z.object({
   icon: z.string().optional(),
   color: z.number().optional(),
   side: z.unknown().optional(),
+  textStyle: z.unknown().optional(),
   children: z.array(OutlineChildSchema).optional(),
 });
 
@@ -135,6 +245,7 @@ const OutlineSchema = z.object({
   title: z.string().optional(),
   kind: z.string().optional(),
   ordered: z.boolean().optional(),
+  titleStyle: z.unknown().optional(),
   items: z.array(OutlineItemSchema).optional(),
 });
 
@@ -165,6 +276,10 @@ function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineIte
 
   // PATCH-242: keep only a valid side; anything else is dropped, never throws.
   if (raw.side === 'left' || raw.side === 'right') item.side = raw.side;
+
+  // PATCH-244: keep only a validated text style; an empty one is removed.
+  const textStyle = sanitizeItemTextStyle(raw.textStyle);
+  if (textStyle) item.textStyle = textStyle;
 
   const children = (raw.children ?? [])
     .map((child) => trimTo(child.label, OUTLINE_LIMITS.label))
@@ -201,11 +316,15 @@ export function parseOutline(raw: unknown): VisualOutline {
   const ordered = data.ordered === true;
   const kind = resolveKind(data.kind, ordered, items);
 
+  // PATCH-244: keep a validated title style; absent when there is none.
+  const titleStyle = sanitizeTextStyle(data.titleStyle);
+
   return {
     title,
     ordered,
     items,
     kind,
+    ...(titleStyle ? { titleStyle } : {}),
   };
 }
 

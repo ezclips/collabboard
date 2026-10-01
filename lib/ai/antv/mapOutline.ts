@@ -8,14 +8,21 @@
 import { isVisualIconName } from '@/lib/ai/visualIcons';
 import { addItemChild, insertItem, removeItem, removeItemChild } from '@/lib/ai/infographic/edit';
 import {
+  isSafeTextColor,
   OUTLINE_LIMITS,
+  sanitizeTextStyle,
+  type TextStyle,
   type VisualOutline,
   type VisualOutlineChild,
   type VisualOutlineItem,
+  type VisualOutlineItemTextStyle,
   type VisualSide,
 } from '@/lib/ai/outline';
 import type { VisualThemeId } from '@/lib/ai/visualThemes';
 import { ANTV_ICON_PREFIX } from './icons';
+
+/** PATCH-244. AntV's own text attribute names (fill, font-size, …). */
+export type AntvTextAttributes = Record<string, unknown>;
 
 export interface AntvDatum {
   label: string;
@@ -23,6 +30,8 @@ export interface AntvDatum {
   icon?: string;
   /** PATCH-243. The side a mind-map branch sits on, when one was stored. */
   side?: VisualSide;
+  /** PATCH-244. Stored text styles AntV applies on a redraw. */
+  attributes?: { label?: AntvTextAttributes; desc?: AntvTextAttributes; icon?: { fill?: string } };
   children?: AntvDatum[];
 }
 
@@ -32,7 +41,12 @@ export interface AntvOptions {
   /** The registered palette id; AntV reads it through `themeConfig.palette`. */
   palette: string;
   themeConfig: { palette: string };
-  data: { title: string; items: AntvDatum[] };
+  data: {
+    title: string;
+    items: AntvDatum[];
+    /** PATCH-244. The picture's title text attributes. */
+    attributes?: { title?: AntvTextAttributes };
+  };
   /** PATCH-243. Swaps the structure to our side-stable mind map. */
   design?: { structure: { type: string; [key: string]: unknown } };
 }
@@ -112,11 +126,40 @@ export function isCompareTemplate(name: string): boolean {
   return name.startsWith('compare-');
 }
 
+/**
+ * PATCH-244. Our stored `TextStyle` -> AntV's attribute names. AntV encodes the
+ * font family itself on the way out, so the decoded family is passed through.
+ */
+function antvTextAttributes(style: TextStyle | undefined): AntvTextAttributes | undefined {
+  if (!style) return undefined;
+  const attrs: AntvTextAttributes = {};
+  if (style.fill !== undefined) attrs.fill = style.fill;
+  if (style.fontSize !== undefined) attrs['font-size'] = style.fontSize;
+  if (style.fontFamily !== undefined) attrs['font-family'] = style.fontFamily;
+  if (style.align !== undefined) attrs['data-horizontal-align'] = style.align.toUpperCase();
+  return Object.keys(attrs).length ? attrs : undefined;
+}
+
+/** PATCH-244. An item's stored parts -> the `datum.attributes` AntV reads. */
+function datumAttributes(item: VisualOutlineItem): AntvDatum['attributes'] | undefined {
+  const style = item.textStyle;
+  if (!style) return undefined;
+  const attributes: NonNullable<AntvDatum['attributes']> = {};
+  const label = antvTextAttributes(style.label);
+  if (label) attributes.label = label;
+  const desc = antvTextAttributes(style.detail);
+  if (desc) attributes.desc = desc;
+  if (style.icon?.fill) attributes.icon = { fill: style.icon.fill };
+  return Object.keys(attributes).length ? attributes : undefined;
+}
+
 function datumForItem(item: VisualOutlineItem, withChildren: boolean): AntvDatum {
   const datum: AntvDatum = { label: item.label };
   if (item.detail) datum.desc = item.detail;
   if (item.icon) datum.icon = `${ANTV_ICON_PREFIX}${item.icon}`;
   if (item.side) datum.side = item.side;
+  const attributes = datumAttributes(item);
+  if (attributes) datum.attributes = attributes;
   if (withChildren && item.children?.length) {
     datum.children = item.children.map((child) => ({ label: child.label }));
   }
@@ -134,10 +177,14 @@ export function toAntvOptions(
   themeId?: VisualThemeId | null,
 ): AntvOptions {
   const choice = antvThemeFor(themeId);
+  const hierarchy = isHierarchyTemplate(templateName);
+  const titleAttributes = antvTextAttributes(outline.titleStyle);
   let items: AntvDatum[];
 
-  if (isHierarchyTemplate(templateName)) {
+  if (hierarchy) {
     const root: AntvDatum = { label: outline.title };
+    // The hierarchy root is itself an item-label, so the title style goes there.
+    if (titleAttributes) root.attributes = { label: titleAttributes };
     const children = outline.items.map((item) => datumForItem(item, true));
     if (children.length) root.children = children;
     items = [root];
@@ -154,6 +201,8 @@ export function toAntvOptions(
     themeConfig: { palette: choice.palette },
     data: { title: outline.title, items },
   };
+  // The flat templates draw `data.title` as a separate title element.
+  if (!hierarchy && titleAttributes) options.data.attributes = { title: titleAttributes };
   if (isMindmapTemplate(templateName)) {
     options.design = { structure: mindmapStructureConfig(templateName) };
   }
@@ -284,6 +333,103 @@ function trimTo(value: unknown, limit: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
+/** PATCH-244. AntV's element update value: `{ attributes: {...} }`. */
+function attributesOf(value: unknown): AntvTextAttributes | null {
+  if (!value || typeof value !== 'object') return null;
+  const attributes = (value as { attributes?: unknown }).attributes;
+  if (!attributes || typeof attributes !== 'object') return null;
+  return attributes as AntvTextAttributes;
+}
+
+/**
+ * PATCH-244. Which text style an AntV attribute path targets:
+ * `data.items[0].attributes.label` (an item part) or `data.attributes.title`.
+ */
+function attributePathTarget(path: string | undefined): { scope: 'item' | 'title'; key: string } | null {
+  if (!path) return null;
+  const parts = path.split('.');
+  if (parts.length < 3 || parts[parts.length - 2] !== 'attributes') return null;
+  const key = parts[parts.length - 1];
+  const segment = parts[1] ?? '';
+  if (segment === 'attributes') return { scope: 'title', key };
+  if (segment === 'items' || segment.startsWith('items[')) return { scope: 'item', key };
+  return null;
+}
+
+/** PATCH-244. AntV's own horizontal align (`LEFT`) -> our stored alignment. */
+function antvAlign(value: unknown): 'left' | 'center' | 'right' | undefined {
+  if (typeof value !== 'string') return undefined;
+  const lower = value.toLowerCase();
+  return lower === 'left' || lower === 'center' || lower === 'right' ? lower : undefined;
+}
+
+/** PATCH-244. Merges a validated patch into a `TextStyle`, keeping old keys. */
+function mergeStyle(style: TextStyle | undefined, patch: TextStyle): TextStyle {
+  return { ...(style ?? {}), ...patch };
+}
+
+/**
+ * PATCH-244. Applies an AntV text-attribute update to an outline. `scope`
+ * 'title' is `data.attributes.title`; otherwise `target` resolves the item
+ * (including a mind map's root, which is the title).
+ */
+function applyTextAttributes(
+  outline: VisualOutline,
+  target: Target,
+  scope: 'item' | 'title',
+  key: string,
+  attributes: AntvTextAttributes,
+): VisualOutline {
+  if (scope === 'title') {
+    if (key !== 'title') return outline;
+    const patch = sanitizeTextStyle({
+      fill: attributes.fill,
+      fontSize: attributes['font-size'],
+      fontFamily: attributes['font-family'],
+      align: antvAlign(attributes['data-horizontal-align']),
+    });
+    if (!patch) return outline;
+    return { ...outline, titleStyle: mergeStyle(outline.titleStyle, patch) };
+  }
+
+  if (!target || target.kind === 'child') return outline;
+  if (target.kind === 'title') {
+    const patch = sanitizeTextStyle({
+      fill: attributes.fill,
+      fontSize: attributes['font-size'],
+      fontFamily: attributes['font-family'],
+      align: antvAlign(attributes['data-horizontal-align']),
+    });
+    if (!patch) return outline;
+    return { ...outline, titleStyle: mergeStyle(outline.titleStyle, patch) };
+  }
+
+  const items = outline.items.map(cloneItem);
+  const item = items[target.i];
+  if (!item) return outline;
+
+  const textStyle: VisualOutlineItemTextStyle = { ...(item.textStyle ?? {}) };
+  if (key === 'icon') {
+    if (!isSafeTextColor(attributes.fill)) return outline;
+    textStyle.icon = { ...(textStyle.icon ?? {}), fill: attributes.fill };
+  } else if (key === 'label' || key === 'desc') {
+    const patch = sanitizeTextStyle({
+      fill: attributes.fill,
+      fontSize: attributes['font-size'],
+      fontFamily: attributes['font-family'],
+      align: antvAlign(attributes['data-horizontal-align']),
+    });
+    if (!patch) return outline;
+    if (key === 'label') textStyle.label = mergeStyle(textStyle.label, patch);
+    else textStyle.detail = mergeStyle(textStyle.detail, patch);
+  } else {
+    return outline;
+  }
+
+  items[target.i] = { ...item, textStyle };
+  return { ...outline, items };
+}
+
 /** An AntV icon value (`'lucide/x'` or `{ data: 'lucide/x' }`) -> our icon name. */
 function iconNameFrom(value: unknown): { present: boolean; name: string | null } {
   let raw: unknown = value;
@@ -301,6 +447,8 @@ function cloneItem(item: VisualOutlineItem): VisualOutlineItem {
   if (item.date !== undefined) next.date = item.date;
   if (item.icon !== undefined) next.icon = item.icon;
   if (item.color !== undefined) next.color = item.color;
+  if (item.side !== undefined) next.side = item.side;
+  if (item.textStyle !== undefined) next.textStyle = item.textStyle;
   if (item.children !== undefined) next.children = item.children.map((child) => ({ label: child.label }));
   return next;
 }
@@ -378,6 +526,26 @@ export function applyAntvChange(
   let next = cloneOutline(outline);
 
   for (const entry of normaliseChanges(change)) {
+    // PATCH-244: an element update (`{ attributes }`) is a text style, not text.
+    if (entry.op === 'update') {
+      const attributes = attributesOf(entry.value);
+      const parsed = attributePathTarget(entry.path);
+      if (attributes && parsed) {
+        if (parsed.scope === 'title') {
+          next = applyTextAttributes(next, null, 'title', parsed.key, attributes);
+        } else {
+          next = applyTextAttributes(
+            next,
+            resolveTarget(entry.indexes, templateName),
+            'item',
+            parsed.key,
+            attributes,
+          );
+        }
+        continue;
+      }
+    }
+
     if (entry.op === 'update' && entry.path === 'data.title') {
       const title = trimTo(entry.value, OUTLINE_LIMITS.title);
       if (title) next = { ...next, title };
@@ -450,4 +618,28 @@ export function applyAntvChange(
   }
 
   return next;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null || typeof a !== 'object') return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((value, index) => deepEqual(value, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => deepEqual(left[key], right[key]));
+}
+
+/**
+ * PATCH-244. Structural equality, ignoring key order. The renderer uses it to
+ * skip `onChange` for a toolbar action we do not store, so an unmapped action
+ * never triggers a redraw that would wipe what AntV just drew.
+ */
+export function outlinesEqual(a: VisualOutline, b: VisualOutline): boolean {
+  return deepEqual(a, b);
 }

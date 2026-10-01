@@ -52,3 +52,43 @@ describe('PATCH-236/241 infographic validation', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('PATCH-244 stored text style validation', () => {
+  function parseOutlinePost(itemTextStyle: unknown) {
+    return InfographicDiagramSchema.safeParse({
+      type: 'diagram',
+      subtype: 'infographic',
+      title: 'X',
+      renderer: 'infographic',
+      template: 'hub',
+      outline: {
+        title: 'X',
+        ordered: false,
+        kind: 'list',
+        titleStyle: { fill: '#112233' },
+        items: [
+          { label: 'A', textStyle: itemTextStyle },
+          { label: 'B' },
+        ],
+      },
+    });
+  }
+
+  it('keeps a valid stored style', () => {
+    const result = parseOutlinePost({ label: { fill: '#ff0000', fontSize: 20 }, icon: { fill: 'rgb(1,2,3)' } });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.outline.items[0].textStyle).toEqual({
+        label: { fill: '#ff0000', fontSize: 20 },
+        icon: { fill: 'rgb(1,2,3)' },
+      });
+      expect(result.data.outline.titleStyle).toEqual({ fill: '#112233' });
+    }
+  });
+
+  it('drops a hostile fill and still validates the post', () => {
+    const result = parseOutlinePost({ label: { fill: 'url(javascript:alert(1))' } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.outline.items[0].textStyle).toBeUndefined();
+  });
+});
