@@ -64,6 +64,14 @@ interface AutoResolved {
   confidence: 'high' | 'low';
 }
 
+/** PATCH-256. The optional Customize options an outline request can carry. */
+interface OutlineRequestBody {
+  detail?: 'auto' | 'summary' | 'detailed';
+  keepWording?: boolean;
+  visualHint?: string;
+  estimateValues?: boolean;
+}
+
 interface AIComponentEditorProps {
   isOpen: boolean;
   onClose: () => void;
@@ -400,6 +408,10 @@ export default function AIComponentEditor({
   const abortRef = useRef<AbortController | null>(null);
   // PATCH-235: the Visualize auto-run fires exactly once per open.
   const visualizeAutoRanRef = useRef(false);
+  // PATCH-256. The options the last outline attempt used, so the preview's
+  // Try again replays exactly that request (a bare Generate, or a Customize /
+  // estimated-values one) rather than always sending no options.
+  const lastOutlineRequestBodyRef = useRef<OutlineRequestBody | undefined>(undefined);
 
   useEffect(() => {
     if (!isOpen) {
@@ -496,6 +508,11 @@ export default function AIComponentEditor({
   // Every other mode keeps the spinner below.
   const isOutlineLoading = isLoading && mode === 'diagram' && showOptions;
   const outlineProgressText = stage === 'rendering' ? 'Drawing designs…' : 'Reading your text…';
+
+  // PATCH-256. An outline request that failed with no designs on screen: the
+  // preview area (where the user is looking) shows the message and Try again,
+  // instead of silently falling back to the empty placeholder.
+  const showPreviewError = showOptions && !!error && outlineOptions.length === 0 && !isLoading;
 
   // PATCH-252. The docked side panel's host element (callback ref) and whether
   // it is open, so the modal can widen while the panel is docked on the right.
@@ -731,12 +748,7 @@ export default function AIComponentEditor({
   };
 
   const generate = async (
-    outlineOptionsBody?: {
-      detail?: 'auto' | 'summary' | 'detailed';
-      keepWording?: boolean;
-      visualHint?: string;
-      estimateValues?: boolean;
-    },
+    outlineOptionsBody?: OutlineRequestBody,
     componentOverride?: { subtype: DiagramSubtype },
   ) => {
     if (!prompt.trim()) return;
@@ -786,6 +798,8 @@ export default function AIComponentEditor({
     // locally, so the AI draws nothing. One call, several options.
     // PATCH-248: a forced chart subtype always takes the component path below.
     if (!forcedSubtype && effectiveMode === 'diagram' && showOptions) {
+      // PATCH-256. Remembered so the preview's Try again replays this request.
+      lastOutlineRequestBodyRef.current = outlineOptionsBody;
       setStage('generating');
       try {
         const res = await fetch('/api/ai/generate-outline', {
@@ -1469,7 +1483,7 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {!content && !isLoading && !(showOptions && outlineOptions.length > 0) && (
+              {!content && !isLoading && !(showOptions && outlineOptions.length > 0) && !showPreviewError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
                   <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
                     <Sparkles className="h-8 w-8 text-gray-300" />
@@ -1495,6 +1509,30 @@ export default function AIComponentEditor({
                       )}
                     </>
                   )}
+                </div>
+              )}
+
+              {/* PATCH-256. A failed outline with no designs yet shows its
+                  message here, where the user is looking, plus a Try again that
+                  replays the same request. */}
+              {showPreviewError && error && (
+                <div
+                  data-ai-preview-error="true"
+                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 px-6 text-center"
+                >
+                  <div className="w-full max-w-md rounded-xl border border-red-100 bg-red-50 p-4 text-sm">
+                    {errorIsPlanLimit
+                      ? <PlanLimitNotice message={error} />
+                      : <p className="text-sm text-red-600">{error}</p>}
+                  </div>
+                  <button
+                    type="button"
+                    data-ai-preview-retry="true"
+                    onClick={() => { void generate(lastOutlineRequestBodyRef.current); }}
+                    className="rounded-xl bg-purple-600 px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-purple-200 transition-all hover:bg-purple-700 active:scale-95"
+                  >
+                    Try again
+                  </button>
                 </div>
               )}
 

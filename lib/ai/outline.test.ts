@@ -194,6 +194,19 @@ describe('PATCH-248 outline prompt value rule', () => {
   });
 });
 
+describe('PATCH-256 outline prompt short-text rule', () => {
+  it('still asks for at least two items on a very short text, right after the item-count rule', () => {
+    const rule =
+      '- If the text is very short or has only one idea, still return at least 2 items: split it into its parts (for example the main subject, its source or link, and what it says).';
+    expect(OUTLINE_SYSTEM_PROMPT).toContain(rule);
+
+    const lines = OUTLINE_SYSTEM_PROMPT.split('\n');
+    const anchor = lines.indexOf('- Give 2 to 8 items. Keep every label short.');
+    expect(anchor).toBeGreaterThanOrEqual(0);
+    expect(lines[anchor + 1]).toBe(rule);
+  });
+});
+
 describe('PATCH-250 valuesEstimated', () => {
   it('withValuesEstimated returns a new flagged object and never mutates its input', () => {
     const base = parseOutline({

@@ -229,6 +229,7 @@ Return valid JSON only, matching this exact shape:
 - "cause_effect": one thing causes another.
 Rules:
 - Give 2 to 8 items. Keep every label short.
+- If the text is very short or has only one idea, still return at least 2 items: split it into its parts (for example the main subject, its source or link, and what it says).
 - Do not invent facts that are not in the text.
 - Set "ordered" to true ONLY when the points are steps or a sequence in time.
 - When the text gives a number, amount or percentage for a point, put it in "value" as a plain number (40% → 40). Never invent a value.
