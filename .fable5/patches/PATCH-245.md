@@ -167,3 +167,9 @@ NOT verified live: the side fix on a FRESH side-less AntV mind map — `generate
 ("The provider request failed", provider stage, ~25 s) during this check; covered by the real-engine test in
 `AntvInfographicRenderer.mindmap.test.tsx` (side-less map → root right + keeps every drawn side). Re-check live when
 the provider is back. Gate `.opencode-vitest-245d.json`: extra [] missing []; tsc clean; no mutation text.
+
+## Addendum 5 (CTO, 2026-10-02): deferred live check done
+Provider back. Fresh side-less AntV capsule mind map (test post `f72a95c9`): sides before Venue/Food left,
+Agenda/Travel right; root right + → new branch right, root left + → new branch left, every existing branch kept its
+side; drag (+90, +30) moved "Food" by (90, 30); saved (PATCH 204) and the board showed the same sides. Test post
+deleted (DELETE 204).
