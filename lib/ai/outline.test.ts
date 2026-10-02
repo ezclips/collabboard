@@ -7,6 +7,7 @@ import {
   OutlineParseError,
   parseOutline,
   sanitizeTextStyle,
+  withValuesEstimated,
 } from './outline';
 import { outlineToVisuals } from './outlineToVisuals';
 import { VISUAL_THEMES } from './visualThemes';
@@ -190,6 +191,37 @@ describe('PATCH-248 outline prompt value rule', () => {
   it('shows an optional value in the example and forbids inventing one', () => {
     expect(OUTLINE_SYSTEM_PROMPT).toContain('"value": 40');
     expect(OUTLINE_SYSTEM_PROMPT).toContain('Never invent a value');
+  });
+});
+
+describe('PATCH-250 valuesEstimated', () => {
+  it('withValuesEstimated returns a new flagged object and never mutates its input', () => {
+    const base = parseOutline({
+      title: 'Budget',
+      items: [
+        { label: 'Venue', value: 60 },
+        { label: 'Food', value: 40 },
+      ],
+    });
+    const next = withValuesEstimated(base);
+
+    expect(next).not.toBe(base);
+    expect(next.valuesEstimated).toBe(true);
+    expect(base.valuesEstimated).toBeUndefined();
+    expect(next.items).toBe(base.items);
+  });
+
+  it('parseOutline drops a model-supplied valuesEstimated flag', () => {
+    const out = parseOutline({
+      title: 'Budget',
+      valuesEstimated: true,
+      items: [
+        { label: 'Venue', value: 60 },
+        { label: 'Food', value: 40 },
+      ],
+    });
+
+    expect(out.valuesEstimated).toBeUndefined();
   });
 });
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
-import { OUTLINE_SYSTEM_PROMPT, OutlineParseError, parseOutline } from '@/lib/ai/outline';
+import { OUTLINE_SYSTEM_PROMPT, OutlineParseError, parseOutline, withValuesEstimated } from '@/lib/ai/outline';
 import {
   trackAIGenerationFailed,
   trackAIGenerationStarted,
@@ -57,6 +57,7 @@ interface OutlineOptions {
   detail?: 'auto' | 'summary' | 'detailed';
   keepWording?: boolean;
   visualHint?: string;
+  estimateValues?: boolean;
 }
 
 /**
@@ -89,6 +90,11 @@ function parseOutlineOptions(raw: unknown): OutlineOptions {
     if (cleaned) options.visualHint = cleaned;
   }
 
+  if (raw.estimateValues !== undefined) {
+    if (typeof raw.estimateValues !== 'boolean') throw new Error('options.estimateValues must be a boolean.');
+    if (raw.estimateValues) options.estimateValues = true;
+  }
+
   return options;
 }
 
@@ -102,6 +108,11 @@ function buildPreferenceBlock(options: OutlineOptions): string {
   if (options.detail === 'summary') lines.push('Keep labels to at most 4 words and omit details unless essential.');
   if (options.detail === 'detailed') lines.push('Give every item a detail sentence (up to 140 characters).');
   if (options.keepWording) lines.push("Use the user's own words for labels and details; do not paraphrase.");
+  if (options.estimateValues) {
+    lines.push(
+      'The user asked for a chart. Give EVERY item a "value": your best estimate of its share in percent, based on the text, all values together about 100. This replaces the rule "Never invent a value" for this request.',
+    );
+  }
   if (options.visualHint) {
     const hint = options.visualHint.replace(/"/g, '');
     lines.push(`The user wants this drawn as: "${hint}". Choose the kind and items that suit it.`);
@@ -265,7 +276,16 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const outline = parseOutline(parsed);
+      let outline = parseOutline(parsed);
+      // PATCH-250. Only the server sets valuesEstimated, and only when the
+      // caller asked for estimates and the model actually gave at least two
+      // values. The model's own flag (if any) was dropped by parseOutline.
+      if (
+        options.estimateValues &&
+        outline.items.filter((item) => typeof item.value === 'number').length >= 2
+      ) {
+        outline = withValuesEstimated(outline);
+      }
       return NextResponse.json({ outline, generatedBy });
     } catch (error) {
       const message = error instanceof OutlineParseError

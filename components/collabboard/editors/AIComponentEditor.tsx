@@ -677,16 +677,18 @@ export default function AIComponentEditor({
     if (outlineOptions.length === 0) setSelectedOptionKey(null);
   };
 
-  // PATCH-248. "Make pie/bar chart" runs today's chart generator once, then
-  // shows the result in the preview exactly like a direct chart generation.
+  // PATCH-250. "Make pie/bar chart" on text without numbers asks the outline
+  // route for estimated values and opens the chart designs; it never runs the
+  // old single-picture generator.
   const makeChart = (chartSubtype: 'pie_chart' | 'bar_chart') => {
-    setShowOptions(false);
-    setActiveFamily(null);
-    setActiveFamilyLabel(null);
-    setActiveFamilyDescription(null);
-    setChartMakeSubtype(null);
-    setSubtype(chartSubtype);
-    void generate(undefined, { subtype: chartSubtype });
+    setError(null);
+    setErrorIsPlanLimit(false);
+    setActiveFamily('chart');
+    setActiveFamilyLabel(getDiagramSubtypeConfig(chartSubtype).label);
+    setActiveFamilyDescription(getDiagramSubtypeConfig(chartSubtype).description);
+    setChartMakeSubtype(chartSubtype);
+    setShowOptions(true);
+    void generate({ estimateValues: true });
   };
 
   const generate = async (
@@ -694,6 +696,7 @@ export default function AIComponentEditor({
       detail?: 'auto' | 'summary' | 'detailed';
       keepWording?: boolean;
       visualHint?: string;
+      estimateValues?: boolean;
     },
     componentOverride?: { subtype: DiagramSubtype },
   ) => {

@@ -37,6 +37,7 @@ vi.mock('@/lib/server/ai/componentGeneration', () => {
 });
 
 import { POST } from './route';
+import { OUTLINE_SYSTEM_PROMPT } from '@/lib/ai/outline';
 import { ComponentCreditRefusal } from '@/lib/server/ai/componentGeneration';
 
 let ipSeq = 0;
@@ -153,5 +154,68 @@ describe('PATCH-237 generate-outline options', () => {
     await POST(makeRequest({ prompt: 'x' }));
     // No "User preferences" block is appended when there are no options.
     expect(systemSent()).not.toContain('User preferences');
+  });
+});
+
+describe('PATCH-250 generate-outline estimateValues', () => {
+  const ESTIMATE_LINE =
+    'The user asked for a chart. Give EVERY item a "value": your best estimate of its share in percent, based on the text, all values together about 100. This replaces the rule "Never invent a value" for this request.';
+  const systemSent = () => String((h.generate.mock.calls[0][0] as { user: string }).user);
+  const VALUED_OUTLINE = {
+    title: 'Budget',
+    ordered: false,
+    items: [
+      { label: 'Venue', value: 40 },
+      { label: 'Food', value: 30 },
+      { label: 'Travel', value: 20 },
+    ],
+  };
+
+  it('rejects a non-boolean estimateValues with 400', async () => {
+    const res = await POST(makeRequest({ prompt: 'x', options: { estimateValues: 'yes' } }));
+    expect(res.status).toBe(400);
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+
+  it('estimateValues: true adds the fixed line to the prompt', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALUED_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x', options: { estimateValues: true } }));
+    expect(systemSent()).toContain(ESTIMATE_LINE);
+  });
+
+  it('no options leaves the prompt byte-identical', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x' }));
+    expect(systemSent()).toBe(`${OUTLINE_SYSTEM_PROMPT}\n\nUser request:\nx\n\nReturn valid JSON only.`);
+  });
+
+  it('with estimateValues and at least two values the outline is flagged', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALUED_OUTLINE), generatedBy: ATTR });
+    const res = await POST(makeRequest({ prompt: 'x', options: { estimateValues: true } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.outline.valuesEstimated).toBe(true);
+  });
+
+  it('with estimateValues and fewer than two values there is no flag', async () => {
+    h.generate.mockResolvedValue({
+      text: JSON.stringify({ title: 'T', items: [{ label: 'A', value: 60 }, { label: 'B' }] }),
+      generatedBy: ATTR,
+    });
+    const res = await POST(makeRequest({ prompt: 'x', options: { estimateValues: true } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.outline.valuesEstimated).toBeUndefined();
+  });
+
+  it('a model-supplied valuesEstimated flag is dropped when the option is absent', async () => {
+    h.generate.mockResolvedValue({
+      text: JSON.stringify({ ...VALUED_OUTLINE, valuesEstimated: true }),
+      generatedBy: ATTR,
+    });
+    const res = await POST(makeRequest({ prompt: 'x' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.outline.valuesEstimated).toBeUndefined();
   });
 });

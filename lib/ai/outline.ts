@@ -67,6 +67,11 @@ export interface VisualOutline {
   kind: OutlineKind;
   /** PATCH-244. AntV-toolbar text style for the picture's title. */
   titleStyle?: TextStyle;
+  /**
+   * PATCH-250. Set by the server when the AI estimated the values; never read
+   * from the model.
+   */
+  valuesEstimated?: boolean;
 }
 
 /**
@@ -339,6 +344,15 @@ export function parseOutline(raw: unknown): VisualOutline {
     kind,
     ...(titleStyle ? { titleStyle } : {}),
   };
+}
+
+/**
+ * PATCH-250. Returns a NEW outline carrying the estimate flag, without touching
+ * the input. The model can never set this flag itself; only the route does, and
+ * only when the caller asked for estimated values.
+ */
+export function withValuesEstimated(outline: VisualOutline): VisualOutline {
+  return { ...outline, valuesEstimated: true };
 }
 
 /**

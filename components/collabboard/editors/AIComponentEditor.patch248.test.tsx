@@ -201,7 +201,7 @@ describe('PATCH-248 AIComponentEditor subtype buttons drive the designs', () => 
     expect(fetchMock.mock.calls.some((call) => call[0] === '/api/ai/generate-component')).toBe(false);
   });
 
-  it('Pie Chart with no chart designs shows the note in place of the empty stage; Make pie chart posts pie_chart once', async () => {
+  it('Pie Chart with no chart designs shows the note in place of the empty stage; Make pie chart asks for estimated values', async () => {
     const fetchMock = stubFetch(NO_CHART_OUTLINE);
     const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
     await openGallery(c, fetchMock);
@@ -220,13 +220,17 @@ describe('PATCH-248 AIComponentEditor subtype buttons drive the designs', () => 
     click(make);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
 
-    const chartCall = fetchMock.mock.calls.find((call) => call[0] === '/api/ai/generate-component');
-    expect(chartCall).toBeTruthy();
-    expect(JSON.parse(String(chartCall![1]?.body)).subtype).toBe('pie_chart');
-    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/ai/generate-component')).toHaveLength(1);
+    // PATCH-250: this button now asks the outline route to estimate values; the
+    // old single-picture generator is never called from here.
+    const estimateCall = fetchMock.mock.calls.find(
+      (call) => call[0] === '/api/ai/generate-outline'
+        && JSON.parse(String(call[1]?.body)).options?.estimateValues === true,
+    );
+    expect(estimateCall).toBeTruthy();
+    expect(fetchMock.mock.calls.some((call) => call[0] === '/api/ai/generate-component')).toBe(false);
   });
 
-  it('Bar Chart offers Make bar chart and posts bar_chart', async () => {
+  it('Bar Chart offers Make bar chart and asks for estimated values', async () => {
     const fetchMock = stubFetch(NO_CHART_OUTLINE);
     const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
     await openGallery(c, fetchMock);
@@ -239,9 +243,12 @@ describe('PATCH-248 AIComponentEditor subtype buttons drive the designs', () => 
     click(make);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
 
-    const chartCall = fetchMock.mock.calls.find((call) => call[0] === '/api/ai/generate-component');
-    expect(chartCall).toBeTruthy();
-    expect(JSON.parse(String(chartCall![1]?.body)).subtype).toBe('bar_chart');
+    const estimateCall = fetchMock.mock.calls.find(
+      (call) => call[0] === '/api/ai/generate-outline'
+        && JSON.parse(String(call[1]?.body)).options?.estimateValues === true,
+    );
+    expect(estimateCall).toBeTruthy();
+    expect(fetchMock.mock.calls.some((call) => call[0] === '/api/ai/generate-component')).toBe(false);
   });
 
   it('the "Showing: ... · Show all" line appears for a family and disappears under Show options', async () => {

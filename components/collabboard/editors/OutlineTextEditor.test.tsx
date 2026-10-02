@@ -30,6 +30,14 @@ function click(el: Element) {
   act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 }
 
+function setInputValue(input: HTMLInputElement, value: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 function outline(count: number): VisualOutline {
   return {
     title: 'Seasons',
@@ -56,5 +64,54 @@ describe('PATCH-242 OutlineTextEditor "Add item" side', () => {
     click(c.querySelector('[data-ai-outline-add-item="true"]') as Element);
     const next = onChange.mock.calls[0][0] as VisualOutline;
     expect(next.items.map((i) => i.side)).toEqual(['right', 'left', 'right']);
+  });
+});
+
+describe('PATCH-250 OutlineTextEditor value inputs', () => {
+  const valued = (): VisualOutline => ({
+    title: 'Budget',
+    ordered: false,
+    kind: 'list',
+    items: [
+      { label: 'Venue', value: 50 },
+      { label: 'Food', value: 50 },
+    ],
+  });
+
+  it('shows a value input on every row only when some item has a value', () => {
+    const none = mount(<OutlineTextEditor outline={outline(2)} onChange={() => {}} />);
+    expect(none.querySelectorAll('[data-ai-outline-item-value]')).toHaveLength(0);
+
+    const some = mount(<OutlineTextEditor outline={valued()} onChange={() => {}} />);
+    expect(some.querySelectorAll('[data-ai-outline-item-value]')).toHaveLength(2);
+    expect((some.querySelector('[data-ai-outline-item-value="0"]') as HTMLInputElement).type).toBe('number');
+  });
+
+  it('typing 25 sets value 25 and never mutates the outline it was given', () => {
+    const onChange = vi.fn();
+    const input = valued();
+    const snapshot = JSON.parse(JSON.stringify(input));
+    const c = mount(<OutlineTextEditor outline={input} onChange={onChange} />);
+
+    const valueInput = c.querySelector('[data-ai-outline-item-value="0"]') as HTMLInputElement;
+    expect(valueInput.value).toBe('50');
+    setInputValue(valueInput, '25');
+
+    const next = onChange.mock.calls[0][0] as VisualOutline;
+    expect(next.items[0].value).toBe(25);
+    expect(next.items[1].value).toBe(50);
+    expect(input).toEqual(snapshot);
+  });
+
+  it('clearing the input removes the value entirely', () => {
+    const onChange = vi.fn();
+    const c = mount(<OutlineTextEditor outline={valued()} onChange={onChange} />);
+
+    setInputValue(c.querySelector('[data-ai-outline-item-value="1"]') as HTMLInputElement, '');
+
+    const next = onChange.mock.calls[0][0] as VisualOutline;
+    expect(next.items[1].value).toBeUndefined();
+    expect('value' in next.items[1]).toBe(false);
+    expect(next.items[0].value).toBe(50);
   });
 });

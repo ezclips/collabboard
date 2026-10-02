@@ -26,6 +26,24 @@ export default function OutlineTextEditor({
     update({ items });
   };
 
+  // PATCH-250. Empty removes the value; a finite number >= 0 sets it; anything
+  // else is ignored. Never mutates the outline it was given.
+  const updateItemValue = (index: number, raw: string) => {
+    const items = outline.items.map((item, i) => {
+      if (i !== index) return item;
+      if (raw === '') {
+        const { value: _drop, ...rest } = item;
+        return rest;
+      }
+      const next = Number(raw);
+      if (Number.isFinite(next) && next >= 0) return { ...item, value: next };
+      return item;
+    });
+    update({ items });
+  };
+
+  const showValues = outline.items.some((item) => typeof item.value === 'number');
+
   const addItem = () => {
     if (outline.items.length >= OUTLINE_LIMITS.items) return;
     // PATCH-242: add on the side with fewer items (tie -> right), after the
@@ -79,6 +97,20 @@ export default function OutlineTextEditor({
                   <option key={name} value={name}>{name}</option>
                 ))}
               </select>
+              {showValues && (
+                <input
+                  type="number"
+                  data-ai-outline-item-value={index}
+                  value={item.value ?? ''}
+                  min={0}
+                  step="any"
+                  onChange={(e) => updateItemValue(index, e.target.value)}
+                  aria-label="Value"
+                  title="Value"
+                  className="w-20 rounded border border-gray-300 px-2 py-1 text-xs"
+                  style={{ width: '5rem' }}
+                />
+              )}
               <button
                 type="button"
                 data-ai-outline-item-remove={index}

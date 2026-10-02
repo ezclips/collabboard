@@ -102,6 +102,8 @@ function ThumbButton({
   best,
   envelope,
   onSelect,
+  onPointerEnter,
+  onPointerLeave,
   note,
 }: {
   option: SuggestionOption;
@@ -109,6 +111,9 @@ function ThumbButton({
   best: boolean;
   envelope: unknown;
   onSelect: () => void;
+  /** PATCH-250. Mouse hover previews this design in the large stage. */
+  onPointerEnter?: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerLeave?: (event: React.PointerEvent<HTMLButtonElement>) => void;
   note?: string;
 }) {
   // PATCH-236 Addendum 4: a fixed 560px natural render, scaled by tile/560 (≤1).
@@ -155,6 +160,8 @@ function ThumbButton({
       data-ai-outline-option={option.key}
       aria-pressed={isSelected}
       onClick={onSelect}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
       className={`w-[160px] shrink-0 overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
         isSelected ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-200 hover:border-gray-300'
       }`}
@@ -230,6 +237,43 @@ export default function OutlineSuggestionsPanel({
   // ABOVE the word clouds when the text has no numbers.
   const showNoNumbersNote =
     familyFilter === 'chart' && !visibleOptions.some((option) => isNumericChartKey(option.key));
+
+  // PATCH-250. A mouse hover (held 120 ms so a sweep does not redraw each tile)
+  // previews a design read-only. Touch/pen never hover; leaving is immediate.
+  const [hoverKey, setHoverKey] = React.useState<string | null>(null);
+  const hoverTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHover = () => {
+    if (hoverTimerRef.current !== null) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoverKey(null);
+  };
+
+  const startHover = (key: string) => (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== 'mouse') return;
+    if (hoverTimerRef.current !== null) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      hoverTimerRef.current = null;
+      setHoverKey(key);
+    }, 120);
+  };
+
+  // PATCH-250. Clean up the delay timer on unmount and when the list changes.
+  React.useEffect(() => {
+    setHoverKey(null);
+    return () => {
+      if (hoverTimerRef.current !== null) {
+        clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+      }
+    };
+  }, [options, familyFilter]);
+
+  const hoverOption = hoverKey ? (visibleOptions.find((option) => option.key === hoverKey) ?? null) : null;
+  const previewOption = hoverOption ?? effectiveSelected;
+  const previewKey = previewOption?.key ?? null;
 
   // Keep the editor's selection in step with what the filtered list shows.
   React.useEffect(() => {
@@ -325,16 +369,19 @@ export default function OutlineSuggestionsPanel({
       ) : (
         <div
           data-ai-outline-preview="true"
+          data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
           className="min-h-0 shrink-0"
           style={{ height: '55%', maxHeight: '55%' }}
         >
           <PictureStage
             mode={previewMode}
-            resetKey={`${effectiveSelectedKey ?? ''}:${theme}`}
+            resetKey={`${previewKey ?? ''}:${theme}`}
             aria-label="Design preview"
             className="h-full"
           >
-            {effectiveSelected && (editableInfographic ? (
+            {previewOption && (hoverOption ? (
+              <AIContentRenderer content={envelopeFor(hoverOption)} />
+            ) : editableInfographic ? (
               <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
             ) : editableMindmap ? (
               <MindmapTreeRenderer
@@ -342,7 +389,7 @@ export default function OutlineSuggestionsPanel({
                 edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
               />
             ) : (
-              <AIContentRenderer content={envelopeFor(effectiveSelected)} />
+              <AIContentRenderer content={envelopeFor(previewOption)} />
             ))}
           </PictureStage>
         </div>
@@ -407,6 +454,13 @@ export default function OutlineSuggestionsPanel({
         </div>
       )}
 
+      {/* PATCH-250. The server flagged estimated values: say so, above the designs. */}
+      {outline?.valuesEstimated && (
+        <div data-ai-values-estimated="true" className="shrink-0 text-xs text-gray-500">
+          The AI estimated these numbers. Check them under Edit text.
+        </div>
+      )}
+
       {!familyEmpty && (
         <div ref={tilesRef} data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto pb-4" style={{ minHeight: 220 }}>
           {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
@@ -419,7 +473,9 @@ export default function OutlineSuggestionsPanel({
                 best={index === 0}
                 isSelected={effectiveSelectedKey === option.key}
                 envelope={envelopeFor(option)}
-                onSelect={() => onSelect(option.key)}
+                onSelect={() => { clearHover(); onSelect(option.key); }}
+                onPointerEnter={startHover(option.key)}
+                onPointerLeave={clearHover}
                 note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
               />
             ))}
@@ -439,7 +495,9 @@ export default function OutlineSuggestionsPanel({
                       best={false}
                       isSelected={effectiveSelectedKey === option.key}
                       envelope={envelopeFor(option)}
-                      onSelect={() => onSelect(option.key)}
+                      onSelect={() => { clearHover(); onSelect(option.key); }}
+                      onPointerEnter={startHover(option.key)}
+                      onPointerLeave={clearHover}
                       note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
                     />
                   ))}
