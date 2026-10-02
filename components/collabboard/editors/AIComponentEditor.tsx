@@ -24,6 +24,7 @@ import {
 } from '@/lib/ai/mode-registry';
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
+import { familyForSubtype, type PictureFamily } from '@/lib/ai/pictureFamilies';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
@@ -365,6 +366,13 @@ export default function AIComponentEditor({
   // PATCH-238. The chosen colour theme; local to the picture, saved with it.
   const [visualTheme, setVisualTheme] = useState<VisualThemeId>('classic');
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
+  // PATCH-248. A Diagram subtype button filters the designs locally (no fetch).
+  const [activeFamily, setActiveFamily] = useState<PictureFamily | null>(null);
+  const [activeFamilyLabel, setActiveFamilyLabel] = useState<string | null>(null);
+  // PATCH-248 Addendum 2. The selected button's own description line.
+  const [activeFamilyDescription, setActiveFamilyDescription] = useState<string | null>(null);
+  // PATCH-248. Which chart button opened the list, so the note offers that chart.
+  const [chartMakeSubtype, setChartMakeSubtype] = useState<'pie_chart' | 'bar_chart' | null>(null);
   const [outlineGeneratedBy, setOutlineGeneratedBy] = useState<AIGenerationAttribution | null>(null);
   const [outlineCreatedAt, setOutlineCreatedAt] = useState<string | null>(null);
   const [content, setContent] = useState<unknown>(initialContent ?? null);
@@ -400,6 +408,10 @@ export default function AIComponentEditor({
     setShowOptions(false);
     setOutlineOptions([]);
     setActiveVisualHint(undefined);
+    setActiveFamily(null);
+    setActiveFamilyLabel(null);
+    setActiveFamilyDescription(null);
+    setChartMakeSubtype(null);
     setVisualTheme('classic');
     setSelectedOptionKey(null);
     setOutlineGeneratedBy(null);
@@ -475,7 +487,11 @@ export default function AIComponentEditor({
   const activeSubtype = mode === 'diagram' ? (subtype ?? getDefaultDiagramSubtype()) : undefined;
   const subtypeConfig = activeSubtype ? getDiagramSubtypeConfig(activeSubtype) : undefined;
   const placeholder = subtypeConfig?.placeholder ?? modeConfig.placeholder;
-  const helperDescription = subtypeConfig?.description ?? modeConfig.description;
+  const helperDescription = activeFamily
+    ? (activeFamilyDescription ?? modeConfig.description)
+    : showOptions
+      ? 'Draw the same content several ways and pick one.'
+      : (subtypeConfig?.description ?? modeConfig.description);
   const selectedOption = showOptions
     ? (outlineOptions.find((option) => option.key === selectedOptionKey) ?? outlineOptions[0] ?? null)
     : null;
@@ -614,6 +630,10 @@ export default function AIComponentEditor({
     setShowOptions(false);
     setOutlineOptions([]);
     setSelectedOptionKey(null);
+    setActiveFamily(null);
+    setActiveFamilyLabel(null);
+    setActiveFamilyDescription(null);
+    setChartMakeSubtype(null);
 
     if (nextUiMode === 'auto') {
       // Don't change mode/subtype yet -- resolved at generate time
@@ -628,11 +648,55 @@ export default function AIComponentEditor({
     }
   };
 
-  const generate = async (outlineOptionsBody?: {
-    detail?: 'auto' | 'summary' | 'detailed';
-    keepWording?: boolean;
-    visualHint?: string;
-  }) => {
+  // PATCH-248. "Show options": show every design again, keeping the current
+  // selection when it is still visible (nothing is fetched or cleared then).
+  const showAllDesigns = () => {
+    setActiveFamily(null);
+    setActiveFamilyLabel(null);
+    setActiveFamilyDescription(null);
+    setChartMakeSubtype(null);
+    setShowOptions(true);
+    if (outlineOptions.length === 0) setSelectedOptionKey(null);
+    setError(null);
+    setErrorIsPlanLimit(false);
+  };
+
+  // PATCH-248. A subtype button opens the gallery filtered to its family. With
+  // designs already on screen this is local (no fetch); before that it just
+  // remembers the family so Generate draws the outline once, like Show options.
+  const openFamily = (subtypeId: DiagramSubtype) => {
+    const family = familyForSubtype(subtypeId);
+    if (!family) return;
+    setError(null);
+    setErrorIsPlanLimit(false);
+    setActiveFamily(family);
+    setActiveFamilyLabel(getDiagramSubtypeConfig(subtypeId).label);
+    setActiveFamilyDescription(getDiagramSubtypeConfig(subtypeId).description);
+    setChartMakeSubtype(subtypeId === 'pie_chart' || subtypeId === 'bar_chart' ? subtypeId : null);
+    setShowOptions(true);
+    if (outlineOptions.length === 0) setSelectedOptionKey(null);
+  };
+
+  // PATCH-248. "Make pie/bar chart" runs today's chart generator once, then
+  // shows the result in the preview exactly like a direct chart generation.
+  const makeChart = (chartSubtype: 'pie_chart' | 'bar_chart') => {
+    setShowOptions(false);
+    setActiveFamily(null);
+    setActiveFamilyLabel(null);
+    setActiveFamilyDescription(null);
+    setChartMakeSubtype(null);
+    setSubtype(chartSubtype);
+    void generate(undefined, { subtype: chartSubtype });
+  };
+
+  const generate = async (
+    outlineOptionsBody?: {
+      detail?: 'auto' | 'summary' | 'detailed';
+      keepWording?: boolean;
+      visualHint?: string;
+    },
+    componentOverride?: { subtype: DiagramSubtype },
+  ) => {
     if (!prompt.trim()) return;
 
     setError(null);
@@ -643,10 +707,11 @@ export default function AIComponentEditor({
     const timeout = setTimeout(() => controller.abort(), 55_000);
 
     // Auto mode: classify intent first, then generate with the resolved target
-    let effectiveMode = mode;
-    let effectiveSubtype = activeSubtype;
+    const forcedSubtype = componentOverride?.subtype;
+    let effectiveMode = forcedSubtype ? 'diagram' : mode;
+    let effectiveSubtype = forcedSubtype ?? activeSubtype;
 
-    if (uiMode === 'auto') {
+    if (!forcedSubtype && uiMode === 'auto') {
       setStage('classifying');
       try {
         const classifyRes = await fetch('/api/ai/classify-intent', {
@@ -677,7 +742,8 @@ export default function AIComponentEditor({
 
     // PATCH-233: "Show options" asks for the outline; the pictures are drawn
     // locally, so the AI draws nothing. One call, several options.
-    if (effectiveMode === 'diagram' && showOptions) {
+    // PATCH-248: a forced chart subtype always takes the component path below.
+    if (!forcedSubtype && effectiveMode === 'diagram' && showOptions) {
       setStage('generating');
       try {
         const res = await fetch('/api/ai/generate-outline', {
@@ -1190,15 +1256,11 @@ export default function AIComponentEditor({
                                 key="options"
                                 type="button"
                                 data-ai-subtype-chip="options"
-                                onClick={() => {
-                                  setShowOptions(true);
-                                  setOutlineOptions([]);
-                                  setSelectedOptionKey(null);
-                                  setError(null);
-                                }}
+                                aria-pressed={showOptions && !activeFamily}
+                                onClick={showAllDesigns}
                                 disabled={isLoading}
                                 className={`rounded-xl border px-3 py-3 text-left transition-all ${
-                                  showOptions
+                                  showOptions && !activeFamily
                                     ? 'border-purple-500 bg-purple-50 shadow-sm'
                                     : 'border-gray-200 bg-white hover:border-gray-300'
                                 }`}
@@ -1214,18 +1276,22 @@ export default function AIComponentEditor({
                                 .filter((subtypeId) => subtypeId !== 'infographic')
                                 .map((subtypeId) => {
                                 const config = diagramConfig.subtypes[subtypeId];
-                                const isSelected = !showOptions && activeSubtype === subtypeId;
+                                // PATCH-248: a clicked family button stays selected
+                                // while its designs are shown; chart subtypes keep
+                                // whichever of pie/bar was clicked.
+                                const isSelected = activeFamily
+                                  ? (subtypeId === 'pie_chart' || subtypeId === 'bar_chart'
+                                    ? subtypeId === chartMakeSubtype
+                                    : familyForSubtype(subtypeId) === activeFamily)
+                                  : (!showOptions && activeSubtype === subtypeId);
 
                                 return (
                                   <button
                                     key={subtypeId}
                                     type="button"
-                                    onClick={() => {
-                                      setShowOptions(false);
-                                      setOutlineOptions([]);
-                                      setSelectedOptionKey(null);
-                                      setSubtype(subtypeId);
-                                    }}
+                                    data-ai-subtype-chip={subtypeId}
+                                    aria-pressed={isSelected}
+                                    onClick={() => openFamily(subtypeId)}
                                     disabled={isLoading}
                                     className={`rounded-xl border px-3 py-3 text-left transition-all ${
                                       isSelected
@@ -1277,7 +1343,7 @@ export default function AIComponentEditor({
                   className="h-40 w-full resize-none rounded-xl border border-gray-300 p-3 text-sm outline-none transition-all shadow-sm focus:border-transparent focus:ring-2 focus:ring-purple-500"
                   disabled={isLoading}
                 />
-                <p className="mt-2 text-xs text-gray-500">{helperDescription}</p>
+                <p data-ai-prompt-helper="true" className="mt-2 text-xs text-gray-500">{helperDescription}</p>
               </div>
 
               <div className="flex gap-2">
@@ -1352,18 +1418,26 @@ export default function AIComponentEditor({
                   <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
                     <Sparkles className="h-8 w-8 text-gray-300" />
                   </div>
-                  <p className="text-sm text-gray-400">Your component will appear here</p>
-                  {EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS] && (
-                    <p className="mt-3 text-xs text-gray-400">
-                      Try:{' '}
-                      <button
-                        type="button"
-                        className="italic text-purple-400 hover:text-purple-600 hover:underline"
-                        onClick={() => setPrompt(EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS]!)}
-                      >
-                        &ldquo;{EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS]}&rdquo;
-                      </button>
+                  {activeFamilyLabel && showOptions && outlineOptions.length === 0 ? (
+                    <p className="text-sm text-gray-500">
+                      {activeFamilyLabel} selected – write or paste your text and press Generate.
                     </p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-400">Your component will appear here</p>
+                      {EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS] && (
+                        <p className="mt-3 text-xs text-gray-400">
+                          Try:{' '}
+                          <button
+                            type="button"
+                            className="italic text-purple-400 hover:text-purple-600 hover:underline"
+                            onClick={() => setPrompt(EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS]!)}
+                          >
+                            &ldquo;{EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS]}&rdquo;
+                          </button>
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -1383,6 +1457,11 @@ export default function AIComponentEditor({
                   onApplyCustomize={(options) => { void generate(options); }}
                   theme={visualTheme}
                   onThemeChange={setVisualTheme}
+                  familyFilter={activeFamily}
+                  familyLabel={activeFamilyLabel}
+                  onShowAll={showAllDesigns}
+                  onMakeChart={makeChart}
+                  makeChartSubtype={chartMakeSubtype ?? undefined}
                 />
               )}
 

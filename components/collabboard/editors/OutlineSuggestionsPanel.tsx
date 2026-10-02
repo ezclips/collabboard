@@ -9,6 +9,7 @@ import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/P
 import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
+import { PICTURE_FAMILY_LABELS, pictureFamily, type PictureFamily } from '@/lib/ai/pictureFamilies';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { outlineFromMindmapTree } from '@/lib/ai/outlineToVisuals';
@@ -38,6 +39,16 @@ interface OutlineSuggestionsPanelProps {
   /** PATCH-238. Colour themes. */
   theme?: VisualThemeId;
   onThemeChange?: (id: VisualThemeId) => void;
+  /** PATCH-248. Filter the gallery locally into one picture family (null = all). */
+  familyFilter?: PictureFamily | null;
+  /** PATCH-248. Human label for the filter line, e.g. "Flowchart". */
+  familyLabel?: string | null;
+  /** PATCH-248. "Show all" in the filter line is Show options. */
+  onShowAll?: () => void;
+  /** PATCH-248. Run today's chart generator when a chart family has no designs. */
+  onMakeChart?: (subtype: 'pie_chart' | 'bar_chart') => void;
+  /** PATCH-248. Which chart subtype button was clicked (labels the make-chart button). */
+  makeChartSubtype?: 'pie_chart' | 'bar_chart';
 }
 
 const TILE_WIDTH = 160;
@@ -47,6 +58,43 @@ const NATURAL_WIDTH = 560;
 // PATCH-241: at most this many tiles per category before "Show more".
 const MAX_PER_CATEGORY = 12;
 const ANTV_PREFIX = 'antv:';
+
+/** PATCH-248 Addendum 2. The AntV chart name behind a suggestion key. */
+function antvChartName(key: string): string {
+  return key.startsWith(ANTV_PREFIX) ? key.slice(ANTV_PREFIX.length) : key;
+}
+
+/** A pie/bar/column/line chart needs numbers; a word cloud does not. */
+function isNumericChartKey(key: string): boolean {
+  const name = antvChartName(key);
+  return (
+    name.startsWith('chart-pie-') ||
+    name.startsWith('chart-bar-') ||
+    name.startsWith('chart-column-') ||
+    name.startsWith('chart-line-')
+  );
+}
+
+/**
+ * PATCH-248 Addendum 2. The clicked chart type leads the chart family; word
+ * clouds always come last.
+ */
+function chartOrder(key: string, subtype: 'pie_chart' | 'bar_chart'): number {
+  const name = antvChartName(key);
+  if (name.startsWith('chart-wordcloud')) return 100;
+  if (subtype === 'bar_chart') {
+    if (name.startsWith('chart-bar-')) return 0;
+    if (name.startsWith('chart-column-')) return 1;
+    if (name.startsWith('chart-line-')) return 2;
+    if (name.startsWith('chart-pie-')) return 3;
+    return 4;
+  }
+  if (name.startsWith('chart-pie-')) return 0;
+  if (name.startsWith('chart-bar-')) return 1;
+  if (name.startsWith('chart-column-')) return 2;
+  if (name.startsWith('chart-line-')) return 3;
+  return 4;
+}
 
 function ThumbButton({
   option,
@@ -151,19 +199,59 @@ export default function OutlineSuggestionsPanel({
   onApplyCustomize,
   theme = 'classic',
   onThemeChange,
+  familyFilter = null,
+  familyLabel = null,
+  onShowAll,
+  onMakeChart,
+  makeChartSubtype = 'pie_chart',
 }: OutlineSuggestionsPanelProps) {
-  const selected = options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
-  const effectiveSelectedKey = selected?.key ?? null;
+  // PATCH-248. The family filter is controlled by the editor's subtype buttons;
+  // the panel only shows the matching designs and keeps the selection valid.
+  // Addendum 2: within the chart family, the clicked subtype's designs come
+  // first (and word clouds last).
+  const familyOptions =
+    familyFilter === 'chart'
+      ? options
+          .filter((option) => pictureFamily(option) === 'chart')
+          .sort((a, b) => chartOrder(a.key, makeChartSubtype) - chartOrder(b.key, makeChartSubtype))
+      : familyFilter
+        ? options.filter((option) => pictureFamily(option) === familyFilter)
+        : options;
+  const visibleOptions = familyOptions;
+  const selected = options.find((o) => o.key === selectedKey) ?? null;
+  const selectedVisible = Boolean(selected && visibleOptions.some((o) => o.key === selected!.key));
+  const effectiveSelected = selectedVisible ? selected : visibleOptions[0] ?? null;
+  const effectiveSelectedKey = effectiveSelected?.key ?? null;
+
+  // PATCH-248 Addendum 1. A family with no designs at all shows the note in
+  // place of the preview, not an empty dotted stage.
+  const familyEmpty = familyFilter === 'chart' && visibleOptions.length === 0;
+  // Addendum 2. The note decides by "no numeric chart design", so it also shows
+  // ABOVE the word clouds when the text has no numbers.
+  const showNoNumbersNote =
+    familyFilter === 'chart' && !visibleOptions.some((option) => isNumericChartKey(option.key));
+
+  // Keep the editor's selection in step with what the filtered list shows.
+  React.useEffect(() => {
+    if (effectiveSelectedKey && effectiveSelectedKey !== selectedKey) onSelect(effectiveSelectedKey);
+  }, [effectiveSelectedKey, selectedKey, onSelect]);
+
+  // PATCH-248. A family click opens the list at the top.
+  const tilesRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (tilesRef.current) tilesRef.current.scrollTop = 0;
+  }, [familyFilter]);
+
   // PATCH-245. The large preview is zoomable/movable like the Edit window.
   const selectedTemplate =
-    selected && 'template' in selected.envelopeData ? selected.envelopeData.template : undefined;
+    effectiveSelected && 'template' in effectiveSelected.envelopeData ? effectiveSelected.envelopeData.template : undefined;
   const previewMode: PictureStageMode =
     selectedTemplate && isAntvTemplate(selectedTemplate) ? 'antv' : 'css';
   // PATCH-240. The selected infographic edits on the picture itself, bound to the
   // same active outline as "Edit text" (no AI call). Every other option keeps the
   // plain preview.
-  const selectedData = selected
-    ? (envelopeFor(selected) as { data?: { subtype?: string } } | null)?.data
+  const selectedData = effectiveSelected
+    ? (envelopeFor(effectiveSelected) as { data?: { subtype?: string } } | null)?.data
     : null;
   const editableInfographic: InfographicDiagramData | null =
     outline && onEditOutline && selectedData?.subtype === 'infographic'
@@ -175,8 +263,8 @@ export default function OutlineSuggestionsPanel({
     outline && onEditOutline && selectedData?.subtype === 'mindmap' && (selectedData as MindmapDiagramData).tree
       ? (selectedData as MindmapDiagramData)
       : null;
-  const suggested = options.slice(0, 4);
-  const rest = options.slice(4);
+  const suggested = visibleOptions.slice(0, 4);
+  const rest = visibleOptions.slice(4);
 
   const [editing, setEditing] = React.useState(false);
   const [customizeOpen, setCustomizeOpen] = React.useState(false);
@@ -193,7 +281,9 @@ export default function OutlineSuggestionsPanel({
   }, [selectedKey]);
 
   const selectedAntvName =
-    selected && selected.key.startsWith(ANTV_PREFIX) ? selected.key.slice(ANTV_PREFIX.length) : null;
+    effectiveSelected && effectiveSelected.key.startsWith(ANTV_PREFIX)
+      ? effectiveSelected.key.slice(ANTV_PREFIX.length)
+      : null;
   const similarPresent = selectedAntvName
     ? similarTemplates(selectedAntvName).filter((name) => options.some((option) => option.key === `${ANTV_PREFIX}${name}`))
     : [];
@@ -205,33 +295,58 @@ export default function OutlineSuggestionsPanel({
     byCategory.set(option.category, list);
   }
 
+  // PATCH-248 Addendum 2. The no-numbers note, shown in the preview when there
+  // are no chart designs at all, or above the word clouds when only those fit.
+  const chartNote = (
+    <div data-ai-chart-note="true" className="shrink-0 rounded-xl border border-gray-200 bg-white p-4">
+      <p className="text-sm text-gray-600">
+        Your text has no numbers to split into slices. Add some (e.g. &ldquo;Venue 40%, Food 30%&rdquo;) and
+        press Generate again, or let the AI estimate them:
+      </p>
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          data-ai-make-chart={makeChartSubtype === 'bar_chart' ? 'bar' : 'pie'}
+          onClick={() => onMakeChart?.(makeChartSubtype)}
+          className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
+        >
+          {makeChartSubtype === 'bar_chart' ? 'Make bar chart' : 'Make pie chart'}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div data-ai-outline-options="true" className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
       {/* PATCH-236 Addendum 4: the preview is the fixed top part; only the tiles
           area scrolls, so selecting a tile never scrolls the preview away. */}
-      <div
-        data-ai-outline-preview="true"
-        className="min-h-0 shrink-0"
-        style={{ height: '55%', maxHeight: '55%' }}
-      >
-        <PictureStage
-          mode={previewMode}
-          resetKey={`${effectiveSelectedKey ?? ''}:${theme}`}
-          aria-label="Design preview"
-          className="h-full"
+      {familyEmpty ? (
+        chartNote
+      ) : (
+        <div
+          data-ai-outline-preview="true"
+          className="min-h-0 shrink-0"
+          style={{ height: '55%', maxHeight: '55%' }}
         >
-          {selected && (editableInfographic ? (
-            <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
-          ) : editableMindmap ? (
-            <MindmapTreeRenderer
-              data={editableMindmap}
-              edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
-            />
-          ) : (
-            <AIContentRenderer content={envelopeFor(selected)} />
-          ))}
-        </PictureStage>
-      </div>
+          <PictureStage
+            mode={previewMode}
+            resetKey={`${effectiveSelectedKey ?? ''}:${theme}`}
+            aria-label="Design preview"
+            className="h-full"
+          >
+            {effectiveSelected && (editableInfographic ? (
+              <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
+            ) : editableMindmap ? (
+              <MindmapTreeRenderer
+                data={editableMindmap}
+                edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
+              />
+            ) : (
+              <AIContentRenderer content={envelopeFor(effectiveSelected)} />
+            ))}
+          </PictureStage>
+        </div>
+      )}
 
       {/* PATCH-241: same-family AntV designs for the selected one. */}
       {selectedAntvName && similarPresent.length > 0 && (
@@ -277,55 +392,73 @@ export default function OutlineSuggestionsPanel({
         </div>
       )}
 
-      <div data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto" style={{ minHeight: 220 }}>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
-        <div className="flex flex-wrap gap-2">
-          {suggested.map((option, index) => (
-            <ThumbButton
-              key={option.key}
-              option={option}
-              best={index === 0}
-              isSelected={effectiveSelectedKey === option.key}
-              envelope={envelopeFor(option)}
-              onSelect={() => onSelect(option.key)}
-              note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-            />
-          ))}
+      {familyFilter && (
+        <div data-ai-family-filter="true" className="flex shrink-0 items-center gap-1 text-xs text-gray-500">
+          <span>Showing: {familyLabel ?? PICTURE_FAMILY_LABELS[familyFilter]} designs</span>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            data-ai-show-all="true"
+            onClick={() => onShowAll?.()}
+            className="font-semibold text-purple-600 hover:text-purple-800"
+          >
+            Show all
+          </button>
         </div>
+      )}
 
-        {[...byCategory.entries()].map(([category, designs]) => {
-          const expanded = expandedCategories.has(category);
-          const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
-          return (
-            <div key={category} className="mt-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
-              <div className="flex flex-wrap gap-2">
-                {shown.map((option) => (
-                  <ThumbButton
-                    key={option.key}
-                    option={option}
-                    best={false}
-                    isSelected={effectiveSelectedKey === option.key}
-                    envelope={envelopeFor(option)}
-                    onSelect={() => onSelect(option.key)}
-                    note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-                  />
-                ))}
+      {!familyEmpty && (
+        <div ref={tilesRef} data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto" style={{ minHeight: 220 }}>
+          {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
+          <div className="flex flex-wrap gap-2">
+            {suggested.map((option, index) => (
+              <ThumbButton
+                key={option.key}
+                option={option}
+                best={index === 0}
+                isSelected={effectiveSelectedKey === option.key}
+                envelope={envelopeFor(option)}
+                onSelect={() => onSelect(option.key)}
+                note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
+              />
+            ))}
+          </div>
+
+          {[...byCategory.entries()].map(([category, designs]) => {
+            const expanded = expandedCategories.has(category);
+            const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
+            return (
+              <div key={category} className="mt-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
+                <div className="flex flex-wrap gap-2">
+                  {shown.map((option) => (
+                    <ThumbButton
+                      key={option.key}
+                      option={option}
+                      best={false}
+                      isSelected={effectiveSelectedKey === option.key}
+                      envelope={envelopeFor(option)}
+                      onSelect={() => onSelect(option.key)}
+                      note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
+                    />
+                  ))}
+                </div>
+                {!expanded && designs.length > MAX_PER_CATEGORY && (
+                  <button
+                    type="button"
+                    data-ai-show-more={category}
+                    onClick={() => setExpandedCategories((prev) => new Set(prev).add(category))}
+                    className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
+                  >
+                    Show more ({designs.length - MAX_PER_CATEGORY})
+                  </button>
+                )}
               </div>
-              {!expanded && designs.length > MAX_PER_CATEGORY && (
-                <button
-                  type="button"
-                  data-ai-show-more={category}
-                  onClick={() => setExpandedCategories((prev) => new Set(prev).add(category))}
-                  className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
-                >
-                  Show more ({designs.length - MAX_PER_CATEGORY})
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* PATCH-238: Colours -- local only, re-derives every option with a theme. */}
       {onThemeChange && (

@@ -86,6 +86,27 @@ describe('PATCH-241 toAntvOptions', () => {
   });
 });
 
+describe('PATCH-248 toAntvOptions value', () => {
+  it('carries each item value into the AntV datum', () => {
+    const options = toAntvOptions(
+      outline({ items: [{ label: 'Venue', value: 40 }, { label: 'Food', value: 30 }] }),
+      'chart-pie-plain-text',
+    );
+    expect(options.data.items).toEqual([
+      { label: 'Venue', value: 40 },
+      { label: 'Food', value: 30 },
+    ]);
+  });
+
+  it('omits value when the item has none', () => {
+    const options = toAntvOptions(
+      outline({ items: [{ label: 'A' }, { label: 'B' }] }),
+      'chart-bar-plain-text',
+    );
+    expect(options.data.items[0].value).toBeUndefined();
+  });
+});
+
 describe('PATCH-243 toAntvOptions mind map structure', () => {
   it('swaps in the side-stable structure for hierarchy-mindmap templates only', () => {
     expect(isMindmapTemplate('hierarchy-mindmap-branch-gradient-capsule-item')).toBe(true);

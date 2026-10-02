@@ -38,10 +38,11 @@ describe('PATCH-241 catalogue data', () => {
 });
 
 describe('PATCH-241 antvTemplatesFor shape filters', () => {
-  it('never offers chart or relation templates', () => {
+  it('never offers relation templates; value-less outlines only get a word cloud', () => {
     for (const kind of ['list', 'steps', 'levels', 'cycle', 'parts', 'comparison', 'timeline'] as OutlineKind[]) {
       const names = antvTemplatesFor(outline(kind, 4));
-      expect(names.some((n) => n.startsWith('chart-') || n.startsWith('relation-'))).toBe(false);
+      expect(names.some((n) => n.startsWith('relation-'))).toBe(false);
+      expect(names.filter((n) => n.startsWith('chart-')).every((n) => n.startsWith('chart-wordcloud'))).toBe(true);
     }
   });
 
@@ -66,6 +67,45 @@ describe('PATCH-241 antvTemplatesFor shape filters', () => {
     expect(antvTemplatesFor(outline('list', 8)).every((n) => !n.startsWith('list-') || true)).toBe(true);
     const nine = { ...outline('list', 9), items: Array.from({ length: 9 }, (_, i) => ({ label: `I${i}` })) };
     expect(antvTemplatesFor(nine).some((n) => n.startsWith('list-') || n.startsWith('sequence-'))).toBe(false);
+  });
+});
+
+describe('PATCH-248 antvTemplatesFor valued charts', () => {
+  function valued(count: number): VisualOutline {
+    return {
+      title: 'T',
+      ordered: false,
+      kind: 'list',
+      items: Array.from({ length: count }, (_, i) => ({ label: `I${i}`, value: i + 1 })),
+    };
+  }
+
+  it('offers all six pie designs and the bar/column/line ones when 2+ items have a value', () => {
+    const names = antvTemplatesFor(valued(4));
+    for (const expected of [
+      'chart-pie-plain-text',
+      'chart-pie-compact-card',
+      'chart-pie-pill-badge',
+      'chart-pie-donut-plain-text',
+      'chart-pie-donut-compact-card',
+      'chart-pie-donut-pill-badge',
+      'chart-bar-plain-text',
+      'chart-column-simple',
+      'chart-line-plain-text',
+    ]) {
+      expect(names, expected).toContain(expected);
+    }
+  });
+
+  it('offers no pie/bar/column/line design without values', () => {
+    const names = antvTemplatesFor(outline('list', 4));
+    expect(names.some((n) => /^chart-(pie|bar|column|line)/.test(n))).toBe(false);
+  });
+
+  it('offers a word cloud only from three items, with or without values', () => {
+    expect(antvTemplatesFor(outline('list', 2)).some((n) => n.startsWith('chart-wordcloud'))).toBe(false);
+    expect(antvTemplatesFor(outline('list', 3)).some((n) => n.startsWith('chart-wordcloud'))).toBe(true);
+    expect(antvTemplatesFor(valued(3)).some((n) => n.startsWith('chart-wordcloud'))).toBe(true);
   });
 });
 

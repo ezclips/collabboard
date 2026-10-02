@@ -45,6 +45,11 @@ export interface VisualOutlineItem {
   /** PATCH-240. A palette slot (0..5) overriding the item's index colour. */
   color?: number;
   /**
+   * PATCH-248. A plain number the text gave for this point (40% -> 40), so a
+   * chart can be drawn. Kept only when finite and >= 0. Never invented.
+   */
+  value?: number;
+  /**
    * PATCH-242. The side this item was placed on, so adding/removing an item
    * never moves the others. Only the hub design uses it; every other design
    * ignores it. Kept leniently by `parseOutline`.
@@ -203,6 +208,7 @@ Return valid JSON only, matching this exact shape:
       "label": "Main point (<= 40 characters)",
       "detail": "Optional one-line detail (<= 140 characters)",
       "date": "Optional date as written, only when the text gives one",
+      "value": 40,
       "children": [{ "label": "Optional sub-point (<= 40 characters)" }]
     }
   ]
@@ -220,6 +226,7 @@ Rules:
 - Give 2 to 8 items. Keep every label short.
 - Do not invent facts that are not in the text.
 - Set "ordered" to true ONLY when the points are steps or a sequence in time.
+- When the text gives a number, amount or percentage for a point, put it in "value" as a plain number (40% → 40). Never invent a value.
 - Include "children" only when a point genuinely has sub-points.
 - "icon" is optional: when a fitting icon exists, use ONE of these exact names, otherwise omit it.
   Allowed icons: ${VISUAL_ICON_NAMES.join(', ')}.
@@ -236,6 +243,7 @@ const OutlineItemSchema = z.object({
   date: z.string().optional(),
   icon: z.string().optional(),
   color: z.number().optional(),
+  value: z.unknown().optional(),
   side: z.unknown().optional(),
   textStyle: z.unknown().optional(),
   children: z.array(OutlineChildSchema).optional(),
@@ -272,6 +280,11 @@ function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineIte
   // PATCH-240: keep only an integer palette slot 0..5; anything else is dropped.
   if (typeof raw.color === 'number' && Number.isInteger(raw.color) && raw.color >= 0 && raw.color <= 5) {
     item.color = raw.color;
+  }
+
+  // PATCH-248: keep only a finite number >= 0; a string like "40%" is dropped.
+  if (typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value >= 0) {
+    item.value = raw.value;
   }
 
   // PATCH-242: keep only a valid side; anything else is dropped, never throws.

@@ -54,11 +54,18 @@ function rankFor(prefs: Array<(name: string) => boolean>, name: string): number 
 /**
  * The data shape a template can hold. Compare is only sensible for a two-sided
  * comparison; quadrant needs exactly four; lists/sequences hold 2..8 flat items;
- * hierarchy/mind-map templates need at least two items.
+ * hierarchy/mind-map templates need at least two items. PATCH-248: the chart
+ * designs need numbers -- pie/bar/column/line fit when 2..8 items carry a
+ * `value`; word clouds fit any 3+ item outline.
  */
 function shapeAllows(name: string, outline: VisualOutline): boolean {
   const count = outline.items.length;
-  if (name.startsWith('chart-') || name.startsWith('relation-')) return false;
+  if (name.startsWith('relation-')) return false;
+  if (name.startsWith('chart-wordcloud')) return count >= 3;
+  if (name.startsWith('chart-')) {
+    const valued = outline.items.filter((item) => typeof item.value === 'number').length;
+    return valued >= 2 && count >= 2 && count <= 8;
+  }
   if (name.startsWith('quadrant-')) return count === 4;
   if (name.startsWith('compare-')) return outline.kind === 'comparison' && count === 2;
   if (name.startsWith('hierarchy-')) return count >= 2;

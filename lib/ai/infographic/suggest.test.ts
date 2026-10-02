@@ -73,11 +73,12 @@ describe('PATCH-241 suggestDesigns AntV options', () => {
     expect(firstKey('steps', 5)).toBe('infographic:stairs');
   });
 
-  it('never offers chart or relation antv options', () => {
+  it('never offers relation options; a value-less outline only gets word clouds (PATCH-248)', () => {
     const keys = suggestDesigns(outline('list', 4))
       .map((s) => s.key)
       .filter((k) => k.startsWith('antv:'));
-    expect(keys.some((k) => k.includes('chart-') || k.includes('relation-'))).toBe(false);
+    expect(keys.some((k) => k.includes('relation-'))).toBe(false);
+    expect(keys.filter((k) => k.includes('chart-')).every((k) => k.includes('chart-wordcloud'))).toBe(true);
   });
 });
 

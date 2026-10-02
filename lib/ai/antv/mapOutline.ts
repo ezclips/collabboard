@@ -34,6 +34,8 @@ export interface AntvDatum {
   label: string;
   desc?: string;
   icon?: string;
+  /** PATCH-248. A numeric value the text gave, read by chart templates. */
+  value?: number;
   /** PATCH-243. The side a mind-map branch sits on, when one was stored. */
   side?: VisualSide;
   /** PATCH-244. Stored text styles AntV applies on a redraw. */
@@ -163,6 +165,8 @@ function datumForItem(item: VisualOutlineItem, withChildren: boolean): AntvDatum
   const datum: AntvDatum = { label: item.label };
   if (item.detail) datum.desc = item.detail;
   if (item.icon) datum.icon = `${ANTV_ICON_PREFIX}${item.icon}`;
+  // PATCH-248. Charts read `value`; other templates ignore it.
+  if (item.value !== undefined) datum.value = item.value;
   if (item.side) datum.side = item.side;
   const attributes = datumAttributes(item);
   if (attributes) datum.attributes = attributes;
@@ -457,6 +461,7 @@ function cloneItem(item: VisualOutlineItem): VisualOutlineItem {
   if (item.date !== undefined) next.date = item.date;
   if (item.icon !== undefined) next.icon = item.icon;
   if (item.color !== undefined) next.color = item.color;
+  if (item.value !== undefined) next.value = item.value;
   if (item.side !== undefined) next.side = item.side;
   if (item.textStyle !== undefined) next.textStyle = item.textStyle;
   if (item.children !== undefined) next.children = item.children.map((child) => ({ label: child.label }));
@@ -495,11 +500,13 @@ function patchItem(item: VisualOutlineItem, value: unknown): VisualOutlineItem {
 
 function itemFromDatum(value: unknown): VisualOutlineItem | null {
   if (!value || typeof value !== 'object') return null;
-  const raw = value as { label?: unknown; desc?: unknown; icon?: unknown; children?: unknown };
+  const raw = value as { label?: unknown; desc?: unknown; icon?: unknown; value?: unknown; children?: unknown };
   const label = trimTo(raw.label, OUTLINE_LIMITS.label) || 'New point';
   const item: VisualOutlineItem = { label };
   const detail = trimTo(raw.desc, OUTLINE_LIMITS.detail);
   if (detail) item.detail = detail;
+  // PATCH-248. Keep a numeric value AntV sends back; charts are not edited yet.
+  if (typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value >= 0) item.value = raw.value;
   const icon = iconNameFrom(raw.icon);
   if (icon.present && icon.name) item.icon = icon.name;
   if (Array.isArray(raw.children)) {

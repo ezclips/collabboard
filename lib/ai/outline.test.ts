@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { ALL_TEMPLATES, layoutInfographic } from './infographic';
-import { OUTLINE_LIMITS, OutlineParseError, parseOutline, sanitizeTextStyle } from './outline';
+import {
+  OUTLINE_LIMITS,
+  OUTLINE_SYSTEM_PROMPT,
+  OutlineParseError,
+  parseOutline,
+  sanitizeTextStyle,
+} from './outline';
 import { outlineToVisuals } from './outlineToVisuals';
 import { VISUAL_THEMES } from './visualThemes';
 
@@ -145,6 +151,45 @@ describe('PATCH-240 outline item colour', () => {
     expect(out.items[2].color).toBeUndefined();
     expect(out.items[3].color).toBeUndefined();
     expect(out.items[4].color).toBeUndefined();
+  });
+});
+
+describe('PATCH-248 outline item value', () => {
+  it('keeps a finite number, drops a string, a negative and NaN', () => {
+    const out = parseOutline({
+      title: 'Budget',
+      items: [
+        { label: 'Venue', value: 40 },
+        { label: 'Food', value: '40%' },
+        { label: 'Travel', value: -1 },
+        { label: 'Other', value: Number.NaN },
+        { label: 'Misc' },
+      ],
+    });
+    expect(out.items[0].value).toBe(40);
+    expect(out.items[1].value).toBeUndefined();
+    expect(out.items[2].value).toBeUndefined();
+    expect(out.items[3].value).toBeUndefined();
+    expect(out.items[4].value).toBeUndefined();
+  });
+
+  it('keeps a zero and a decimal', () => {
+    const out = parseOutline({
+      title: 'T',
+      items: [
+        { label: 'A', value: 0 },
+        { label: 'B', value: 12.5 },
+      ],
+    });
+    expect(out.items[0].value).toBe(0);
+    expect(out.items[1].value).toBe(12.5);
+  });
+});
+
+describe('PATCH-248 outline prompt value rule', () => {
+  it('shows an optional value in the example and forbids inventing one', () => {
+    expect(OUTLINE_SYSTEM_PROMPT).toContain('"value": 40');
+    expect(OUTLINE_SYSTEM_PROMPT).toContain('Never invent a value');
   });
 });
 
