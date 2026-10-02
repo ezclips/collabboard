@@ -251,7 +251,7 @@ describe('PATCH-248 AIComponentEditor subtype buttons drive the designs', () => 
     expect(fetchMock.mock.calls.some((call) => call[0] === '/api/ai/generate-component')).toBe(false);
   });
 
-  it('the "Showing: ... · Show all" line appears for a family and disappears under Show options', async () => {
+  it('the family chip appears for a family and disappears under Show all', async () => {
     const fetchMock = stubFetch();
     const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
     await openGallery(c, fetchMock);
@@ -259,12 +259,12 @@ describe('PATCH-248 AIComponentEditor subtype buttons drive the designs', () => 
     expect(c.querySelector('[data-ai-family-filter]')).toBeNull();
 
     click(c.querySelector('[data-ai-subtype-chip="timeline"]') as HTMLElement);
-    const line = c.querySelector('[data-ai-family-filter="true"]') as HTMLElement;
-    expect(line).not.toBeNull();
-    expect(line.textContent).toContain('Showing:');
-    expect(line.textContent).toContain('Timeline');
+    // PATCH-251: the old "Showing: ... · Show all" line is now a compact chip.
+    const chip = c.querySelector('[data-ai-family-filter="true"]') as HTMLElement;
+    expect(chip).not.toBeNull();
+    expect(chip.textContent).toContain('Timeline');
 
-    click(buttonContaining(line, 'Show all'));
+    click(c.querySelector('[data-ai-show-all="true"]') as HTMLElement);
     expect(c.querySelector('[data-ai-family-filter]')).toBeNull();
   });
 

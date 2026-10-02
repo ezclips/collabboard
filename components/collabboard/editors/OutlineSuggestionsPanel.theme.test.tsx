@@ -98,6 +98,8 @@ describe('PATCH-238 OutlineSuggestionsPanel colours', () => {
     const before = c.querySelector('[data-ai-outline-preview] [data-ai-theme-background]') as HTMLElement;
     expect(before.getAttribute('data-ai-theme-background')).toBe('classic');
 
+    // PATCH-251: the swatches now live inside the Colours popover.
+    click(c.querySelector('[data-ai-colours-toggle="true"]') as HTMLElement);
     click(c.querySelector('[data-ai-theme="teal-night"]') as HTMLElement);
 
     const after = c.querySelector('[data-ai-outline-preview] [data-ai-theme-background]') as HTMLElement;
@@ -109,6 +111,8 @@ describe('PATCH-238 OutlineSuggestionsPanel colours', () => {
   it('a dark theme notes that Flow keeps its colours', () => {
     const c = mount(<Harness />);
     expect(c.textContent).not.toContain('keeps its colours');
+    // PATCH-251: the swatches now live inside the Colours popover.
+    click(c.querySelector('[data-ai-colours-toggle="true"]') as HTMLElement);
     click(c.querySelector('[data-ai-theme="teal-night"]') as HTMLElement);
     expect(c.textContent).toContain('keeps its colours');
   });

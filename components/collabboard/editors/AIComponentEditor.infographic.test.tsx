@@ -194,6 +194,8 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     const c = mount(<AIComponentEditor isOpen initialContent={STORED} initialPrompt="p" onClose={() => {}} onSave={() => {}} />);
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
+    // PATCH-251: Flow direction now lives inside the Customize popover.
+    click(c.querySelector('[data-ai-customize-toggle="true"]') as HTMLElement);
     const select = c.querySelector('[data-ai-flow-direction="true"]') as HTMLSelectElement;
     expect(select).not.toBeNull();
     act(() => {
@@ -223,13 +225,13 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     expect(first.textContent).toContain('Best match');
   });
 
-  it('PATCH-237 Addendum 1: preview is capped at 55% and the tiles keep a 220px min-height', async () => {
+  it('PATCH-237 Addendum 1: preview is capped at 60% and the tiles keep a 220px min-height', async () => {
     const c = mount(<AIComponentEditor isOpen initialContent={STORED} initialPrompt="p" onClose={() => {}} onSave={() => {}} />);
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
     const preview = c.querySelector('[data-ai-outline-preview]') as HTMLElement;
     const tiles = c.querySelector('[data-ai-outline-tiles]') as HTMLElement;
-    expect(preview.style.maxHeight).toBe('55%');
+    expect(preview.style.maxHeight).toBe('60%');
     expect(tiles.style.minHeight).toBe('220px');
   });
 
@@ -240,6 +242,8 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     const c = mount(<AIComponentEditor isOpen initialContent={STORED} initialPrompt="p" onClose={() => {}} onSave={onSave} />);
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
+    // PATCH-251: the swatches now live inside the Colours popover.
+    click(c.querySelector('[data-ai-colours-toggle="true"]') as HTMLElement);
     const teal = c.querySelector('[data-ai-theme="teal-night"]') as HTMLElement;
     expect(teal.getAttribute('aria-pressed')).toBe('false');
     click(teal);
@@ -255,6 +259,8 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     const c = mount(<AIComponentEditor isOpen initialContent={STORED_TEAL} initialPrompt="p" onClose={() => {}} onSave={() => {}} />);
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
+    // PATCH-251: the swatches now live inside the Colours popover.
+    click(c.querySelector('[data-ai-colours-toggle="true"]') as HTMLElement);
     const teal = c.querySelector('[data-ai-theme="teal-night"]') as HTMLElement;
     expect(teal.getAttribute('aria-pressed')).toBe('true');
   });

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Palette, Pencil, Shapes, SlidersHorizontal, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
@@ -194,6 +195,45 @@ function ThumbButton({
   );
 }
 
+/**
+ * PATCH-251. One preview toolbar icon: 28x28, with its name as a hint below on
+ * hover/focus (CSS only) and as `title`. `aria-pressed` marks the open popover.
+ */
+function PreviewToolButton({
+  label,
+  active,
+  onClick,
+  dataAi,
+  children,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  dataAi: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      {...{ [dataAi]: 'true' }}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+        active ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
+      }`}
+    >
+      {children}
+      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        {label}
+      </span>
+    </button>
+  );
+}
+
+type PreviewPopover = 'edit' | 'similar' | 'colours' | 'customize';
+
 export default function OutlineSuggestionsPanel({
   options,
   selectedKey,
@@ -310,19 +350,15 @@ export default function OutlineSuggestionsPanel({
   const suggested = visibleOptions.slice(0, 4);
   const rest = visibleOptions.slice(4);
 
-  const [editing, setEditing] = React.useState(false);
-  const [customizeOpen, setCustomizeOpen] = React.useState(false);
+  // PATCH-251. One toolbar icon at most is open, as a popover under the toolbar.
+  const [openPopover, setOpenPopover] = React.useState<PreviewPopover | null>(null);
+  const toolbarRef = React.useRef<HTMLDivElement | null>(null);
+  const popoverRef = React.useRef<HTMLDivElement | null>(null);
   const [detail, setDetail] = React.useState<'auto' | 'summary' | 'detailed'>('auto');
   const [keepWording, setKeepWording] = React.useState(false);
   const [visualHint, setVisualHint] = React.useState('');
   // PATCH-241. Categories start at 12 tiles; "Show more" reveals the rest.
   const [expandedCategories, setExpandedCategories] = React.useState<Set<string>>(new Set());
-  // PATCH-241. "Similar visuals" for the selected AntV design.
-  const [similarOpen, setSimilarOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    setSimilarOpen(false);
-  }, [selectedKey]);
 
   const selectedAntvName =
     effectiveSelected && effectiveSelected.key.startsWith(ANTV_PREFIX)
@@ -331,6 +367,41 @@ export default function OutlineSuggestionsPanel({
   const similarPresent = selectedAntvName
     ? similarTemplates(selectedAntvName).filter((name) => options.some((option) => option.key === `${ANTV_PREFIX}${name}`))
     : [];
+
+  const togglePopover = (id: PreviewPopover) =>
+    setOpenPopover((current) => (current === id ? null : id));
+
+  // PATCH-251. Close a popover whose icon is no longer there.
+  React.useEffect(() => {
+    setOpenPopover((current) => {
+      if (current === 'edit' && !(outline && onEditOutline)) return null;
+      if (current === 'similar' && similarPresent.length === 0) return null;
+      if (current === 'colours' && !onThemeChange) return null;
+      return current;
+    });
+  }, [outline, onEditOutline, onThemeChange, similarPresent.length]);
+
+  // PATCH-251. Escape closes the open popover.
+  React.useEffect(() => {
+    if (!openPopover) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenPopover(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [openPopover]);
+
+  // PATCH-251. A pointerdown outside the popover and the toolbar closes it.
+  React.useEffect(() => {
+    if (!openPopover) return;
+    const onPointerDown = (event: Event) => {
+      const target = event.target as Node | null;
+      if (target && (popoverRef.current?.contains(target) || toolbarRef.current?.contains(target))) return;
+      setOpenPopover(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [openPopover]);
 
   const byCategory = new Map<string, SuggestionOption[]>();
   for (const option of rest) {
@@ -370,8 +441,8 @@ export default function OutlineSuggestionsPanel({
         <div
           data-ai-outline-preview="true"
           data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
-          className="min-h-0 shrink-0"
-          style={{ height: '55%', maxHeight: '55%' }}
+          className="relative min-h-0 shrink-0"
+          style={{ height: '60%', maxHeight: '60%' }}
         >
           <PictureStage
             mode={previewMode}
@@ -392,72 +463,222 @@ export default function OutlineSuggestionsPanel({
               <AIContentRenderer content={envelopeFor(previewOption)} />
             ))}
           </PictureStage>
-        </div>
-      )}
 
-      {/* PATCH-241: same-family AntV designs for the selected one. */}
-      {selectedAntvName && similarPresent.length > 0 && (
-        <div className="shrink-0">
-          <button
-            type="button"
-            data-ai-similar-toggle="true"
-            aria-expanded={similarOpen}
-            onClick={() => setSimilarOpen((v) => !v)}
-            className="text-xs font-semibold text-purple-600 hover:text-purple-800"
+          {/* PATCH-251. The design filter and the estimated note, compact, top-left. */}
+          <div
+            data-ai-preview-chips="true"
+            className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-start gap-1"
           >
-            Similar visuals
-          </button>
-          {similarOpen && (
-            <div data-ai-similar-row="true" className="mt-2 flex flex-wrap gap-2">
-              {similarPresent.map((name) => (
+            {familyFilter && (
+              <div
+                data-ai-family-filter="true"
+                className="flex items-center gap-1 rounded-full border border-gray-200 bg-white/95 py-1 pl-2 pr-1 text-[11px] font-medium text-gray-700 shadow-md backdrop-blur"
+              >
+                <span>{familyLabel ?? PICTURE_FAMILY_LABELS[familyFilter]}</span>
                 <button
-                  key={name}
                   type="button"
-                  data-ai-similar-template={name}
-                  onClick={() => onSelect(`${ANTV_PREFIX}${name}`)}
-                  className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                  data-ai-show-all="true"
+                  aria-label="Show all designs"
+                  title="Show all designs"
+                  onClick={() => onShowAll?.()}
+                  className="group relative flex h-5 w-5 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
                 >
-                  {antvTemplateLabel(name)}
+                  <X size={12} aria-hidden="true" />
+                  <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    Show all designs
+                  </span>
                 </button>
-              ))}
+              </div>
+            )}
+            {outline?.valuesEstimated && (
+              <div
+                data-ai-values-estimated="true"
+                title="The AI estimated these numbers. Check them under Edit text."
+                className="group relative flex items-center rounded-full border border-gray-200 bg-white/95 px-2 py-1 text-[11px] font-medium text-gray-700 shadow-md backdrop-blur"
+              >
+                <span>≈ Estimated</span>
+                <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                  The AI estimated these numbers. Check them under Edit text.
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* PATCH-251. One icon toolbar top-right; each icon opens its popover. */}
+          <div
+            ref={toolbarRef}
+            data-ai-preview-toolbar="true"
+            className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-gray-200 bg-white/95 px-1.5 py-1 shadow-md backdrop-blur"
+          >
+            {outline && onEditOutline && (
+              <PreviewToolButton
+                label="Edit text"
+                dataAi="data-ai-edit-text-toggle"
+                active={openPopover === 'edit'}
+                onClick={() => togglePopover('edit')}
+              >
+                <Pencil size={16} aria-hidden="true" />
+              </PreviewToolButton>
+            )}
+            {similarPresent.length > 0 && (
+              <PreviewToolButton
+                label="Similar visuals"
+                dataAi="data-ai-similar-toggle"
+                active={openPopover === 'similar'}
+                onClick={() => togglePopover('similar')}
+              >
+                <Shapes size={16} aria-hidden="true" />
+              </PreviewToolButton>
+            )}
+            {onThemeChange && (
+              <PreviewToolButton
+                label="Colours"
+                dataAi="data-ai-colours-toggle"
+                active={openPopover === 'colours'}
+                onClick={() => togglePopover('colours')}
+              >
+                <Palette size={16} aria-hidden="true" />
+              </PreviewToolButton>
+            )}
+            <PreviewToolButton
+              label="Customize"
+              dataAi="data-ai-customize-toggle"
+              active={openPopover === 'customize'}
+              onClick={() => togglePopover('customize')}
+            >
+              <SlidersHorizontal size={16} aria-hidden="true" />
+            </PreviewToolButton>
+          </div>
+
+          {/* PATCH-251. The open popover, anchored under the toolbar. */}
+          {openPopover && (
+            <div
+              ref={popoverRef}
+              data-ai-preview-popover={openPopover}
+              className="absolute right-2 top-11 z-20 overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-xl"
+              style={{ width: 'min(26rem, calc(100% - 1rem))', maxHeight: 'calc(100% - 3.5rem)' }}
+            >
+              {openPopover === 'edit' && outline && onEditOutline && (
+                <OutlineTextEditor outline={outline} onChange={onEditOutline} />
+              )}
+
+              {openPopover === 'similar' && (
+                <div data-ai-similar-row="true" className="flex flex-wrap gap-2">
+                  {similarPresent.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      data-ai-similar-template={name}
+                      onClick={() => onSelect(`${ANTV_PREFIX}${name}`)}
+                      className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                    >
+                      {antvTemplateLabel(name)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {openPopover === 'colours' && onThemeChange && (
+                <div data-ai-colours="true" className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colours</span>
+                  {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
+                    const swatch = VISUAL_THEMES[id];
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        data-ai-theme={id}
+                        aria-label={swatch.name}
+                        aria-pressed={theme === id}
+                        title={swatch.name}
+                        onClick={() => onThemeChange(id)}
+                        className={`h-5 w-5 rounded-full border ${theme === id ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-300'}`}
+                        style={{
+                          background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+
+              {openPopover === 'customize' && (
+                <div data-ai-customize="true" className="space-y-3">
+                  {onFlowDirectionChange && (
+                    <div className="flex items-center gap-1 text-[11px] text-gray-600">
+                      <span>Flow</span>
+                      <select
+                        data-ai-flow-direction="true"
+                        value={flowDirection}
+                        onChange={(e) => onFlowDirectionChange(e.target.value as 'LR' | 'TD')}
+                        className="rounded border border-gray-300 px-1 py-0.5 text-[11px]"
+                      >
+                        <option value="LR">Left to right</option>
+                        <option value="TD">Top to bottom</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="mb-1 text-[11px] font-medium text-gray-600">Detail</div>
+                    <div className="inline-flex rounded-lg border border-gray-300">
+                      {(['auto', 'summary', 'detailed'] as const).map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          data-ai-customize-detail={value}
+                          onClick={() => setDetail(value)}
+                          className={`px-3 py-1 text-xs capitalize ${detail === value ? 'bg-purple-100 text-purple-700' : 'text-gray-600'}`}
+                        >
+                          {value}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      data-ai-customize-keep-wording="true"
+                      checked={keepWording}
+                      onChange={(e) => setKeepWording(e.target.checked)}
+                    />
+                    Keep my wording
+                  </label>
+
+                  <div>
+                    <div className="mb-1 text-[11px] font-medium text-gray-600">Make it a…</div>
+                    <input
+                      type="text"
+                      data-ai-customize-hint="true"
+                      value={visualHint}
+                      maxLength={60}
+                      placeholder="e.g. pyramid, cycle, timeline"
+                      onChange={(e) => setVisualHint(e.target.value)}
+                      className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    data-ai-customize-apply="true"
+                    onClick={() => {
+                      const options = {
+                        detail,
+                        ...(keepWording ? { keepWording: true } : {}),
+                        ...(visualHint.trim() ? { visualHint: visualHint.trim() } : {}),
+                      };
+                      onApplyCustomize?.(options);
+                      setOpenPopover(null);
+                    }}
+                    className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
+                  >
+                    Apply
+                  </button>
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {outline && onEditOutline && (
-        <div>
-          <button
-            type="button"
-            data-ai-edit-text-toggle="true"
-            onClick={() => setEditing((v) => !v)}
-            className="text-xs font-semibold text-purple-600 hover:text-purple-800"
-          >
-            {editing ? 'Done editing' : 'Edit text'}
-          </button>
-          {editing && <OutlineTextEditor outline={outline} onChange={onEditOutline} />}
-        </div>
-      )}
-
-      {familyFilter && (
-        <div data-ai-family-filter="true" className="flex shrink-0 items-center gap-1 text-xs text-gray-500">
-          <span>Showing: {familyLabel ?? PICTURE_FAMILY_LABELS[familyFilter]} designs</span>
-          <span aria-hidden="true">·</span>
-          <button
-            type="button"
-            data-ai-show-all="true"
-            onClick={() => onShowAll?.()}
-            className="font-semibold text-purple-600 hover:text-purple-800"
-          >
-            Show all
-          </button>
-        </div>
-      )}
-
-      {/* PATCH-250. The server flagged estimated values: say so, above the designs. */}
-      {outline?.valuesEstimated && (
-        <div data-ai-values-estimated="true" className="shrink-0 text-xs text-gray-500">
-          The AI estimated these numbers. Check them under Edit text.
         </div>
       )}
 
@@ -517,120 +738,6 @@ export default function OutlineSuggestionsPanel({
           })}
         </div>
       )}
-
-      {/* PATCH-238: Colours -- local only, re-derives every option with a theme. */}
-      {onThemeChange && (
-        <div data-ai-colours="true" className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-3">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colours</span>
-          {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
-            const swatch = VISUAL_THEMES[id];
-            return (
-              <button
-                key={id}
-                type="button"
-                data-ai-theme={id}
-                aria-label={swatch.name}
-                aria-pressed={theme === id}
-                title={swatch.name}
-                onClick={() => onThemeChange(id)}
-                className={`h-5 w-5 rounded-full border ${theme === id ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-300'}`}
-                style={{
-                  background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
-                }}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {/* PATCH-237: Customize -- one new AI call only when Apply is pressed. */}
-      <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Customize</span>
-          {onFlowDirectionChange && (
-            <div className="flex items-center gap-1 text-[11px] text-gray-600">
-              <span>Flow</span>
-              <select
-                data-ai-flow-direction="true"
-                value={flowDirection}
-                onChange={(e) => onFlowDirectionChange(e.target.value as 'LR' | 'TD')}
-                className="rounded border border-gray-300 px-1 py-0.5 text-[11px]"
-              >
-                <option value="LR">Left to right</option>
-                <option value="TD">Top to bottom</option>
-              </select>
-            </div>
-          )}
-          <button
-            type="button"
-            data-ai-customize-toggle="true"
-            onClick={() => setCustomizeOpen((v) => !v)}
-            className="text-xs font-semibold text-purple-600 hover:text-purple-800"
-          >
-            {customizeOpen ? 'Hide' : 'Customize'}
-          </button>
-        </div>
-
-        {customizeOpen && (
-          <div data-ai-customize="true" className="mt-3 space-y-3">
-            <div>
-              <div className="mb-1 text-[11px] font-medium text-gray-600">Detail</div>
-              <div className="inline-flex rounded-lg border border-gray-300">
-                {(['auto', 'summary', 'detailed'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    data-ai-customize-detail={value}
-                    onClick={() => setDetail(value)}
-                    className={`px-3 py-1 text-xs capitalize ${detail === value ? 'bg-purple-100 text-purple-700' : 'text-gray-600'}`}
-                  >
-                    {value}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 text-xs text-gray-700">
-              <input
-                type="checkbox"
-                data-ai-customize-keep-wording="true"
-                checked={keepWording}
-                onChange={(e) => setKeepWording(e.target.checked)}
-              />
-              Keep my wording
-            </label>
-
-            <div>
-              <div className="mb-1 text-[11px] font-medium text-gray-600">Make it a…</div>
-              <input
-                type="text"
-                data-ai-customize-hint="true"
-                value={visualHint}
-                maxLength={60}
-                placeholder="e.g. pyramid, cycle, timeline"
-                onChange={(e) => setVisualHint(e.target.value)}
-                className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
-              />
-            </div>
-
-            <button
-              type="button"
-              data-ai-customize-apply="true"
-              onClick={() => {
-                const options = {
-                  detail,
-                  ...(keepWording ? { keepWording: true } : {}),
-                  ...(visualHint.trim() ? { visualHint: visualHint.trim() } : {}),
-                };
-                onApplyCustomize?.(options);
-              }}
-              className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
-            >
-              Apply
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
