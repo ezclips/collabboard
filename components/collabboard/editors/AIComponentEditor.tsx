@@ -501,6 +501,12 @@ export default function AIComponentEditor({
   // it is open, so the modal can widen while the panel is docked on the right.
   const [sidePanelHost, setSidePanelHost] = useState<HTMLDivElement | null>(null);
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
+  // PATCH-255. The window only widens while the suggestions panel is actually
+  // rendered (the exact condition below, including the PATCH-254 loading case)
+  // and reports itself open. Switching mode unmounts the panel but not its open
+  // state, which used to strand an empty wide column on the right.
+  const suggestionsMounted = showOptions && (outlineOptions.length > 0 || isOutlineLoading);
+  const sidePanelVisible = sidePanelOpen && suggestionsMounted;
 
   // Read off the content in hand -- a fresh response, or a saved card that
   // recorded its own. Null while nothing has been generated, and the renderer
@@ -1142,7 +1148,7 @@ export default function AIComponentEditor({
           </button>
           <div
             ref={modalRef}
-            className={`flex max-h-[90vh] ${sidePanelOpen ? 'w-[1320px]' : 'w-[980px]'} max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition-[width] animate-in fade-in zoom-in duration-200`}
+            className={`flex max-h-[90vh] ${sidePanelVisible ? 'w-[1320px]' : 'w-[980px]'} max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition-[width] animate-in fade-in zoom-in duration-200`}
           >
         {/* Top strip -- Title lives inside it, same as the canvas card's own
             top strip, matching every other post type's edit window. AI
@@ -1589,7 +1595,7 @@ export default function AIComponentEditor({
           {/* PATCH-252. The docked panel host is a sibling of the preview column
               in the main row, so it sits to the RIGHT of the picture, not below
               it inside the dashed box; the panel portals into it. */}
-          {sidePanelOpen && (
+          {sidePanelVisible && (
             <div
               ref={setSidePanelHost}
               data-ai-side-panel-host="true"

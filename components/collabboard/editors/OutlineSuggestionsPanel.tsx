@@ -429,6 +429,12 @@ export default function OutlineSuggestionsPanel({
     onSidePanelChange?.(panel !== null);
   }, [panel, onSidePanelChange]);
 
+  // PATCH-255. On unmount report closed, so a stale open state cannot outlive
+  // the panel (the editor unmounts it when switching away from Show options).
+  React.useEffect(() => {
+    return () => { onSidePanelChange?.(false); };
+  }, [onSidePanelChange]);
+
   // PATCH-254. A running outline request opens Designs, where the skeleton (or
   // the dimmed existing designs) lives.
   React.useEffect(() => {
