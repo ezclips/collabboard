@@ -997,7 +997,10 @@ export default function AIContentEditModal({
   ].join(':');
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onWheel={(e) => e.stopPropagation()}
+    >
       <div
         className="flex max-h-[90vh] w-[1020px] max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200"
         onClick={(e) => e.stopPropagation()}

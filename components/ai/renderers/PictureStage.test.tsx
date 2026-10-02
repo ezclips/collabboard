@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 //
-// PATCH-245. The shared stage fits a picture to its box, zooms around the
-// pointer, pans on the wheel/empty background, and never writes or fetches.
+// PATCH-245/247. The shared stage fits a picture to its box, zooms around the
+// pointer on Ctrl+wheel, pans on the empty background (or Space+drag), leaves a
+// plain wheel to scroll the window, and never writes or fetches.
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -160,15 +161,55 @@ describe('PATCH-245 PictureStage', () => {
     expect((p.y - after.y) / after.zoom).toBeCloseTo(contentBefore.y, 5);
   });
 
-  it('plain wheel pans', () => {
+  it('plain wheel does NOT pan or zoom, and is not defaultPrevented (the window scrolls)', () => {
     const { container } = mount(<PictureStage>picture</PictureStage>);
     setup(container, { pictureW: 800, pictureH: 300 });
     const before = parseTransform(container)!;
-    wheel(container.querySelector('[data-picture-stage]') as Element, { deltaY: 50, deltaX: 10 });
+    const stage = container.querySelector('[data-picture-stage]') as Element;
+    const event = new WheelEvent('wheel', {
+      deltaY: 50, deltaX: 10, bubbles: true, cancelable: true,
+    });
+    act(() => { stage.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
     const after = parseTransform(container)!;
     expect(after.zoom).toBe(before.zoom);
-    expect(after.x).not.toBe(before.x);
-    expect(after.y).not.toBe(before.y);
+    expect(after.x).toBe(before.x);
+    expect(after.y).toBe(before.y);
+  });
+
+  it('ctrl+wheel is defaultPrevented and does NOT propagate to a parent listener', () => {
+    const parentWheel = vi.fn();
+    const { container } = mount(<PictureStage>picture</PictureStage>);
+    setup(container, { pictureW: 800, pictureH: 300 });
+    // Stand-in for the canvas: a listener on the stage's parent.
+    container.addEventListener('wheel', parentWheel);
+    const stage = container.querySelector('[data-picture-stage]') as Element;
+    const event = new WheelEvent('wheel', {
+      ctrlKey: true, deltaY: -100, clientX: 400, clientY: 300, bubbles: true, cancelable: true,
+    });
+    act(() => { stage.dispatchEvent(event); });
+    container.removeEventListener('wheel', parentWheel);
+    expect(event.defaultPrevented).toBe(true);
+    expect(parentWheel).not.toHaveBeenCalled();
+  });
+
+  it('Space+drag pans even when the press starts on a word', () => {
+    const { container } = mount(
+      <PictureStage>
+        <span data-ai-edit-ref="label:0">Spring</span>
+      </PictureStage>,
+    );
+    setup(container, { pictureW: 800, pictureH: 300 });
+    const before = parseTransform(container)!;
+    const word = container.querySelector('[data-ai-edit-ref="label:0"]') as Element;
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true })); });
+    pointer(word, 'pointerdown', 0, 0);
+    pointer(window, 'pointermove', 30, 20);
+    pointer(window, 'pointerup', 30, 20);
+    act(() => { window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true })); });
+    const after = parseTransform(container)!;
+    expect(after.x).toBeCloseTo(before.x + 30, 5);
+    expect(after.y).toBeCloseTo(before.y + 20, 5);
   });
 
   it('dragging the empty background pans', () => {
@@ -368,6 +409,24 @@ describe('PATCH-245 PictureStage', () => {
       expect(content.style.transform).toBe('');
       expect(zoomValue(container)).toBeGreaterThan(100);
       expect(onViewBoxChange).toHaveBeenCalled();
+    });
+
+    it('plain wheel does NOT change the viewBox (the window scrolls)', () => {
+      const { container } = mount(
+        <PictureStage mode="antv">
+          <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+        </PictureStage>,
+      );
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+      setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+      const before = svg.getAttribute('viewBox');
+      const event = new WheelEvent('wheel', {
+        deltaY: 80, deltaX: 20, bubbles: true, cancelable: true,
+      });
+      act(() => { (container.querySelector('[data-picture-stage]') as Element).dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(false);
+      expect(svg.getAttribute('viewBox')).toBe(before);
     });
 
     it('fills the stage (svg 100% x 100%) and Fits the clamped meet scale', () => {

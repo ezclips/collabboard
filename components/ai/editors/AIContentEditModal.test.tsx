@@ -379,3 +379,35 @@ describe('PATCH-245 AIContentEditModal stages the picture', () => {
     expect((live as Element).closest('[data-ai-modal-body="true"]')).not.toBeNull();
   });
 });
+
+describe('PATCH-247 AIContentEditModal isolates wheel from the board', () => {
+  it('a ctrl+wheel inside the window does not reach a wheel listener on its parent', () => {
+    const parentWheel = vi.fn();
+    function Parent({ children }: { children: React.ReactNode }) {
+      return <div onWheel={parentWheel}>{children}</div>;
+    }
+    const c = mount(
+      <Parent>
+        <AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={() => {}} />
+      </Parent>,
+    );
+    const target = c.querySelector('[data-ai-modal-body="true"]') as Element;
+    const event = new WheelEvent('wheel', {
+      ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true,
+    });
+    act(() => { target.dispatchEvent(event); });
+    expect(parentWheel).not.toHaveBeenCalled();
+  });
+
+  it('a plain wheel inside the window is not defaultPrevented (the window still scrolls)', () => {
+    const c = mount(
+      <AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={() => {}} />,
+    );
+    const target = c.querySelector('[data-ai-modal-body="true"]') as Element;
+    const event = new WheelEvent('wheel', {
+      deltaY: 100, bubbles: true, cancelable: true,
+    });
+    act(() => { target.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+  });
+});

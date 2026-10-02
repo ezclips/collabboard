@@ -335,36 +335,6 @@ function PictureStage({
     [stagePoint, zoomAntvAt, zoomCssAt],
   );
 
-  const panBy = useCallback(
-    (dx: number, dy: number) => {
-      if (modeRef.current === 'antv') {
-        const currentBox = boxRef.current;
-        if (!currentBox) return;
-        const next = { ...currentBox, x: currentBox.x + dx, y: currentBox.y + dy };
-        setBoxValue(next);
-        applyBox(next);
-      } else {
-        const current = panRef.current;
-        setPanValue({ x: current.x + dx, y: current.y + dy });
-      }
-    },
-    [applyBox, setBoxValue, setPanValue],
-  );
-
-  const panByPixels = useCallback(
-    (dx: number, dy: number) => {
-      if (modeRef.current === 'antv') {
-        const currentBox = boxRef.current;
-        if (!currentBox) return;
-        const scale = antvScale(currentBox) || 1;
-        panBy(dx / scale, dy / scale);
-      } else {
-        panBy(dx, dy);
-      }
-    },
-    [antvScale, panBy],
-  );
-
   const centreClient = useCallback(() => {
     const rect = stageRef.current?.getBoundingClientRect();
     return {
@@ -377,21 +347,21 @@ function PictureStage({
 
   const handleWheel = useCallback(
     (event: WheelEvent) => {
+      // PATCH-247. A plain wheel belongs to the window: no pan, no preventDefault,
+      // so the surrounding panel scrolls as usual. Only Ctrl/⌘+wheel (a trackpad
+      // pinch also arrives as ctrl+wheel) zooms at the pointer, and it is kept
+      // from reaching the board behind the window.
+      if (!(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
-      if (event.ctrlKey || event.metaKey) {
-        const factor = event.deltaY < 0 ? STAGE_ZOOM_STEP : 1 / STAGE_ZOOM_STEP;
-        applyZoomAt(factor, event.clientX, event.clientY);
-        return;
-      }
-      if (modeRef.current === 'antv') panByPixels(event.deltaX, event.deltaY);
-      else panBy(-event.deltaX, -event.deltaY);
+      event.stopPropagation();
+      const factor = event.deltaY < 0 ? STAGE_ZOOM_STEP : 1 / STAGE_ZOOM_STEP;
+      applyZoomAt(factor, event.clientX, event.clientY);
     },
-    [applyZoomAt, panBy, panByPixels],
+    [applyZoomAt],
   );
 
-  // PATCH-245 Addendum 1. React's `onWheel` is passive, so Ctrl+wheel also zoomed
-  // the page and plain wheel scrolled the modal. Attach explicitly non-passive
-  // (and preventDefault every wheel over the stage).
+  // PATCH-245 Addendum 1. React's `onWheel` is passive, so the Ctrl+wheel case
+  // attaches explicitly non-passive to be able to preventDefault.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;

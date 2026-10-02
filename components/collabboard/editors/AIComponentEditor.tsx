@@ -841,7 +841,11 @@ export default function AIComponentEditor({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      onWheel={(e) => e.stopPropagation()}
+    >
       <div className="flex max-h-[90vh] items-start gap-6" onClick={(e) => e.stopPropagation()}>
         {/* Left toolbar -- Text style/Color/Reaction/Comment/Caption, same
             detached-vertical-icon-strip placement every other post type
