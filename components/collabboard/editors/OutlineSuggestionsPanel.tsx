@@ -408,7 +408,7 @@ export default function OutlineSuggestionsPanel({
       )}
 
       {!familyEmpty && (
-        <div ref={tilesRef} data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto" style={{ minHeight: 220 }}>
+        <div ref={tilesRef} data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto pb-4" style={{ minHeight: 220 }}>
           {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
           <div className="flex flex-wrap gap-2">

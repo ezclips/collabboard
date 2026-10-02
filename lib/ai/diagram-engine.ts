@@ -58,6 +58,34 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
 // to create and clean up a temporary SVG element.
 let _seq = 0;
 
+// PATCH-249: Mermaid appends its temporary render element to <body> when no
+// container is given, which briefly grows the page and makes the board jump.
+// Draw into one fixed, offscreen host instead: created on the first render,
+// reused for the life of the page, never removed. `display: none` is
+// deliberately avoided because Mermaid measures label text with getBBox.
+let _host: HTMLDivElement | null = null;
+
+function getMermaidHost(): HTMLElement | undefined {
+  if (typeof document === 'undefined') return undefined;
+  if (!_host || !_host.isConnected) {
+    _host = document.createElement('div');
+    _host.setAttribute('data-ai-mermaid-host', '');
+    Object.assign(_host.style, {
+      position: 'fixed',
+      left: '-10000px',
+      top: '0',
+      width: '1200px',
+      height: '0',
+      overflow: 'hidden',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      contain: 'layout size',
+    });
+    document.body.appendChild(_host);
+  }
+  return _host;
+}
+
 export async function renderDiagramCode(code: string): Promise<DiagramRenderResult> {
   try {
     const mermaid = await loadMermaid();
@@ -73,7 +101,7 @@ export async function renderDiagramCode(code: string): Promise<DiagramRenderResu
       await new Promise((resolve) => setTimeout(resolve, renderHoldMs));
     }
     const id = `ai-diagram-${++_seq}`;
-    const { svg } = await mermaid.render(id, code);
+    const { svg } = await mermaid.render(id, code, getMermaidHost());
     return { ok: true, svg };
   } catch (error) {
     return {
