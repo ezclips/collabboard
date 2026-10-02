@@ -72,15 +72,15 @@ describe('PATCH-241 OutlineSuggestionsPanel AntV library', () => {
     expect(c.querySelector('[data-ai-outline-option^="antv:"]')).not.toBeNull();
   });
 
-  it('caps a category at 12 tiles and reveals the rest with Show more', () => {
+  it('caps a family at 12 tiles and reveals the rest with Show more', () => {
     const c = render();
     const showMore = c.querySelector('[data-ai-show-more="hierarchy"]') as HTMLElement;
     expect(showMore).not.toBeNull();
 
-    const count = () =>
-      Array.from(c.querySelectorAll('[data-ai-outline-option]')).filter((el) =>
-        (el.getAttribute('data-ai-outline-option') ?? '').startsWith('antv:hierarchy-'),
-      ).length;
+    // PATCH-246: headings group by picture family, so count the tiles inside
+    // this group (the Show more button's parent), not by key prefix.
+    const group = showMore.parentElement as HTMLElement;
+    const count = () => group.querySelectorAll('[data-ai-outline-option]').length;
     const before = count();
     expect(before).toBe(12);
     click(showMore);

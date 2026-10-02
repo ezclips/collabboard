@@ -115,13 +115,14 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('Diagram mode shows no "Infographic" subtype chip', async () => {
+  it('PATCH-246: the new window has no direct subtype grid', async () => {
     const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-    click(buttonContaining(c, 'Diagram'));
-    // The chip grid lists every subtype EXCEPT infographic.
+    // The old "Choose a mode / Diagram subtype" grid is gone: no subtype chips
+    // and no direct "Flowchart"/"Infographic" generators.
+    expect(c.querySelector('[data-ai-subtype-chip]')).toBeNull();
     const labels = Array.from(c.querySelectorAll('button')).map((b) => b.textContent ?? '');
-    expect(labels.some((l) => l.includes('Flowchart'))).toBe(true);
+    expect(labels.some((l) => l.includes('Flowchart'))).toBe(false);
     expect(labels.some((l) => l.trim().startsWith('Infographic'))).toBe(false);
   });
 

@@ -9,6 +9,12 @@ import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/P
 import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
+import {
+  PICTURE_FAMILIES,
+  PICTURE_FAMILY_LABELS,
+  pictureFamily,
+  type PictureFamily,
+} from '@/lib/ai/pictureFamilies';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { outlineFromMindmapTree } from '@/lib/ai/outlineToVisuals';
@@ -38,6 +44,10 @@ interface OutlineSuggestionsPanelProps {
   /** PATCH-238. Colour themes. */
   theme?: VisualThemeId;
   onThemeChange?: (id: VisualThemeId) => void;
+  /** PATCH-246. Filter the gallery locally into picture families. */
+  hintFamily?: PictureFamily | null;
+  /** PATCH-246. Run today's chart generator for the Chart chip's empty state. */
+  onMakeChart?: (subtype: 'pie_chart' | 'bar_chart') => void;
 }
 
 const TILE_WIDTH = 160;
@@ -151,19 +161,58 @@ export default function OutlineSuggestionsPanel({
   onApplyCustomize,
   theme = 'classic',
   onThemeChange,
+  hintFamily = null,
+  onMakeChart,
 }: OutlineSuggestionsPanelProps) {
-  const selected = options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
-  const effectiveSelectedKey = selected?.key ?? null;
+  // PATCH-246. Filter the gallery by picture family; "all" shows everything.
+  const [family, setFamily] = React.useState<'all' | PictureFamily>('all');
+  const lastHintRef = React.useRef<PictureFamily | null>(null);
+
+  const familiesPresent = React.useMemo(() => {
+    const present = new Set<PictureFamily>();
+    for (const option of options) present.add(pictureFamily(option));
+    return present;
+  }, [options]);
+
+  // A family chip is hidden when no design belongs to it, except Chart, which
+  // is always offered once there are results (PATCH-246 C).
+  const chipFamilies = PICTURE_FAMILIES.filter(
+    (id) => familiesPresent.has(id) || (id === 'chart' && options.length > 0),
+  );
+
+  const visibleOptions = family === 'all' ? options : options.filter((o) => pictureFamily(o) === family);
+
+  // The preview keeps the selected design unless it was filtered out, in which
+  // case the first visible design takes over.
+  const selected = options.find((o) => o.key === selectedKey) ?? null;
+  const selectedIsVisible = Boolean(selected && visibleOptions.some((o) => o.key === selected!.key));
+  const effectiveSelected = selectedIsVisible ? selected : visibleOptions[0] ?? null;
+  const effectiveSelectedKey = effectiveSelected?.key ?? null;
+
+  React.useEffect(() => {
+    if (effectiveSelectedKey && effectiveSelectedKey !== selectedKey) onSelect(effectiveSelectedKey);
+  }, [effectiveSelectedKey, selectedKey, onSelect]);
+
+  // A Customize hint that names a family selects that chip once its designs arrive.
+  React.useEffect(() => {
+    if (!hintFamily || lastHintRef.current === hintFamily) return;
+    if (!options.some((option) => pictureFamily(option) === hintFamily)) return;
+    lastHintRef.current = hintFamily;
+    setFamily(hintFamily);
+  }, [hintFamily, options]);
+
   // PATCH-245. The large preview is zoomable/movable like the Edit window.
   const selectedTemplate =
-    selected && 'template' in selected.envelopeData ? selected.envelopeData.template : undefined;
+    effectiveSelected && 'template' in effectiveSelected.envelopeData
+      ? effectiveSelected.envelopeData.template
+      : undefined;
   const previewMode: PictureStageMode =
     selectedTemplate && isAntvTemplate(selectedTemplate) ? 'antv' : 'css';
   // PATCH-240. The selected infographic edits on the picture itself, bound to the
   // same active outline as "Edit text" (no AI call). Every other option keeps the
   // plain preview.
-  const selectedData = selected
-    ? (envelopeFor(selected) as { data?: { subtype?: string } } | null)?.data
+  const selectedData = effectiveSelected
+    ? (envelopeFor(effectiveSelected) as { data?: { subtype?: string } } | null)?.data
     : null;
   const editableInfographic: InfographicDiagramData | null =
     outline && onEditOutline && selectedData?.subtype === 'infographic'
@@ -175,8 +224,8 @@ export default function OutlineSuggestionsPanel({
     outline && onEditOutline && selectedData?.subtype === 'mindmap' && (selectedData as MindmapDiagramData).tree
       ? (selectedData as MindmapDiagramData)
       : null;
-  const suggested = options.slice(0, 4);
-  const rest = options.slice(4);
+  const suggested = visibleOptions.slice(0, 4);
+  const rest = visibleOptions.slice(4);
 
   const [editing, setEditing] = React.useState(false);
   const [customizeOpen, setCustomizeOpen] = React.useState(false);
@@ -193,16 +242,21 @@ export default function OutlineSuggestionsPanel({
   }, [selectedKey]);
 
   const selectedAntvName =
-    selected && selected.key.startsWith(ANTV_PREFIX) ? selected.key.slice(ANTV_PREFIX.length) : null;
+    effectiveSelected && effectiveSelected.key.startsWith(ANTV_PREFIX)
+      ? effectiveSelected.key.slice(ANTV_PREFIX.length)
+      : null;
   const similarPresent = selectedAntvName
     ? similarTemplates(selectedAntvName).filter((name) => options.some((option) => option.key === `${ANTV_PREFIX}${name}`))
     : [];
 
-  const byCategory = new Map<string, SuggestionOption[]>();
+  // PATCH-246. The remaining designs are grouped under the same family names
+  // used by the chips, replacing the old mixed categories.
+  const byFamily = new Map<PictureFamily, SuggestionOption[]>();
   for (const option of rest) {
-    const list = byCategory.get(option.category) ?? [];
+    const id = pictureFamily(option);
+    const list = byFamily.get(id) ?? [];
     list.push(option);
-    byCategory.set(option.category, list);
+    byFamily.set(id, list);
   }
 
   return (
@@ -220,7 +274,7 @@ export default function OutlineSuggestionsPanel({
           aria-label="Design preview"
           className="h-full"
         >
-          {selected && (editableInfographic ? (
+          {effectiveSelected && (editableInfographic ? (
             <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
           ) : editableMindmap ? (
             <MindmapTreeRenderer
@@ -228,7 +282,7 @@ export default function OutlineSuggestionsPanel({
               edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
             />
           ) : (
-            <AIContentRenderer content={envelopeFor(selected)} />
+            <AIContentRenderer content={envelopeFor(effectiveSelected)} />
           ))}
         </PictureStage>
       </div>
@@ -277,54 +331,117 @@ export default function OutlineSuggestionsPanel({
         </div>
       )}
 
-      <div data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto" style={{ minHeight: 220 }}>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
-        <div className="flex flex-wrap gap-2">
-          {suggested.map((option, index) => (
-            <ThumbButton
-              key={option.key}
-              option={option}
-              best={index === 0}
-              isSelected={effectiveSelectedKey === option.key}
-              envelope={envelopeFor(option)}
-              onSelect={() => onSelect(option.key)}
-              note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-            />
+      {/* PATCH-246. The family chips filter the tiles locally -- no fetch. */}
+      {options.length > 0 && (
+        <div data-ai-family-chips="true" className="flex shrink-0 flex-wrap gap-1.5">
+          <button
+            type="button"
+            data-ai-family-chip="all"
+            aria-pressed={family === 'all'}
+            onClick={() => setFamily('all')}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              family === 'all'
+                ? 'border-purple-500 bg-purple-100 text-purple-700'
+                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+            }`}
+          >
+            All
+          </button>
+          {chipFamilies.map((id) => (
+            <button
+              key={id}
+              type="button"
+              data-ai-family-chip={id}
+              aria-pressed={family === id}
+              onClick={() => setFamily(id)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                family === id
+                  ? 'border-purple-500 bg-purple-100 text-purple-700'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {PICTURE_FAMILY_LABELS[id]}
+            </button>
           ))}
         </div>
+      )}
 
-        {[...byCategory.entries()].map(([category, designs]) => {
-          const expanded = expandedCategories.has(category);
-          const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
-          return (
-            <div key={category} className="mt-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
-              <div className="flex flex-wrap gap-2">
-                {shown.map((option) => (
-                  <ThumbButton
-                    key={option.key}
-                    option={option}
-                    best={false}
-                    isSelected={effectiveSelectedKey === option.key}
-                    envelope={envelopeFor(option)}
-                    onSelect={() => onSelect(option.key)}
-                    note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-                  />
-                ))}
-              </div>
-              {!expanded && designs.length > MAX_PER_CATEGORY && (
-                <button
-                  type="button"
-                  data-ai-show-more={category}
-                  onClick={() => setExpandedCategories((prev) => new Set(prev).add(category))}
-                  className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
-                >
-                  Show more ({designs.length - MAX_PER_CATEGORY})
-                </button>
-              )}
+      <div data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto" style={{ minHeight: 220 }}>
+        {family === 'chart' && visibleOptions.length === 0 ? (
+          <div data-ai-chart-note="true" className="rounded-xl border border-gray-200 bg-white p-4">
+            <p className="text-sm text-gray-600">Charts need numbers. Make a pie or bar chart from your text:</p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                data-ai-make-chart="pie"
+                onClick={() => onMakeChart?.('pie_chart')}
+                className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
+              >
+                Pie chart
+              </button>
+              <button
+                type="button"
+                data-ai-make-chart="bar"
+                onClick={() => onMakeChart?.('bar_chart')}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Bar chart
+              </button>
             </div>
-          );
-        })}
+          </div>
+        ) : (
+          <>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
+            <div className="flex flex-wrap gap-2">
+              {suggested.map((option, index) => (
+                <ThumbButton
+                  key={option.key}
+                  option={option}
+                  best={index === 0}
+                  isSelected={effectiveSelectedKey === option.key}
+                  envelope={envelopeFor(option)}
+                  onSelect={() => onSelect(option.key)}
+                  note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
+                />
+              ))}
+            </div>
+
+            {[...byFamily.entries()].map(([familyId, designs]) => {
+              const expanded = expandedCategories.has(familyId);
+              const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
+              return (
+                <div key={familyId} className="mt-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {PICTURE_FAMILY_LABELS[familyId]}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {shown.map((option) => (
+                      <ThumbButton
+                        key={option.key}
+                        option={option}
+                        best={false}
+                        isSelected={effectiveSelectedKey === option.key}
+                        envelope={envelopeFor(option)}
+                        onSelect={() => onSelect(option.key)}
+                        note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
+                      />
+                    ))}
+                  </div>
+                  {!expanded && designs.length > MAX_PER_CATEGORY && (
+                    <button
+                      type="button"
+                      data-ai-show-more={familyId}
+                      onClick={() => setExpandedCategories((prev) => new Set(prev).add(familyId))}
+                      className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
+                    >
+                      Show more ({designs.length - MAX_PER_CATEGORY})
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
 
       {/* PATCH-238: Colours -- local only, re-derives every option with a theme. */}

@@ -3,6 +3,10 @@
 // PATCH-233 -- "Show options": the outline route draws several pictures locally,
 // the editor shows them as a grid, and Save stores the SELECTED one with the
 // same envelope a normal diagram generation would.
+//
+// PATCH-246: the toolbar now opens the picture window directly (no "Choose a
+// mode" step and no "Diagram subtype" grid), so the test types the prompt and
+// presses Generate without selecting Diagram / Show options first.
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -68,8 +72,7 @@ describe('PATCH-233 AIComponentEditor "Show options"', () => {
     const onSave = vi.fn();
     const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={onSave} />);
 
-    click(buttonContaining(c, 'Diagram'));
-    click(c.querySelector('[data-ai-subtype-chip="options"]') as HTMLElement);
+    // The toolbar entry opens the picture window straight away (PATCH-246).
     setTextareaValue(c.querySelector('textarea') as HTMLTextAreaElement, 'Water cycle for 7th grade');
     click(buttonContaining(c, 'Generate'));
 
