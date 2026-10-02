@@ -260,13 +260,6 @@ describe('AIComponentEditor -- PATCH-188 the board pays', () => {
 
   function mountAndGenerate(boardId: string) {
     const c = mount(<AIComponentEditor isOpen onClose={noop} onSave={noop} boardId={boardId} />);
-    // PATCH-246: the toolbar opens the picture window (outline). A non-picture
-    // mode (Lesson Board) still generates a component, which is what this
-    // PATCH-188 test covers.
-    click(c.querySelector('[data-ai-other-formats-toggle="true"]') as HTMLElement);
-    const lessonBoard = Array.from(c.querySelectorAll('button'))
-      .find((b) => (b.textContent ?? '').includes('Lesson Board'))!;
-    click(lessonBoard);
     setTextareaValue(c.querySelector('textarea') as HTMLTextAreaElement, 'Photosynthesis for middle school');
     click(buttonByText(c, 'Generate'));
     return c;

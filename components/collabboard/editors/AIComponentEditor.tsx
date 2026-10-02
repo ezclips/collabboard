@@ -20,10 +20,10 @@ import {
   MODE_REGISTRY,
   getDiagramSubtypeConfig,
   getModeConfig,
+  isDiagramModeConfig,
 } from '@/lib/ai/mode-registry';
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
-import { preferKeyFromHint, suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
-import { pictureFamily } from '@/lib/ai/pictureFamilies';
+import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
@@ -231,11 +231,6 @@ const EXAMPLE_PROMPTS: Partial<Record<AIMode | 'auto', string>> = {
   workshop_board: '90-minute design sprint agenda',
 };
 
-/** PATCH-246. The one window's prompt placeholders and non-picture formats. */
-const PICTURE_PLACEHOLDER = 'Paste or type your text, e.g. the steps of a morning routine';
-const OTHER_FORMATS: AIMode[] = ['lesson_board', 'workshop_board', 'photo_card'];
-
-
 function buildRequestBody(
   prompt: string,
   mode: AIMode,
@@ -362,10 +357,6 @@ export default function AIComponentEditor({
   // PATCH-233. "Show options": one outline call draws several pictures locally.
   const [showOptions, setShowOptions] = useState(false);
   const [outlineOptions, setOutlineOptions] = useState<DesignSuggestion[]>([]);
-  // PATCH-246. The non-picture products live behind a closed disclosure.
-  const [otherFormatsOpen, setOtherFormatsOpen] = useState(false);
-  // PATCH-246. A chart made from the Chart chip's empty state joins the gallery.
-  const [chartOption, setChartOption] = useState<DesignSuggestion | null>(null);
   // PATCH-237. The CURRENT outline, so Edit text can redraw locally with no AI call.
   const [activeOutline, setActiveOutline] = useState<VisualOutline | null>(null);
   // PATCH-237 Addendum 1. The Customize hint named on the last Apply, kept so
@@ -408,8 +399,6 @@ export default function AIComponentEditor({
     setAutoResolved(null);
     setShowOptions(false);
     setOutlineOptions([]);
-    setOtherFormatsOpen(false);
-    setChartOption(null);
     setActiveVisualHint(undefined);
     setVisualTheme('classic');
     setSelectedOptionKey(null);
@@ -454,15 +443,6 @@ export default function AIComponentEditor({
       visualizeAutoRanRef.current = true; // no auto-run for a stored shape
     }
 
-    // PATCH-246: a brand-new picture (toolbar button) opens the same simple
-    // window as Visualize -- text first, then the design gallery.
-    if (!lockedMode && !initialContent && !initialVisualize) {
-      setUiMode('diagram');
-      setMode('diagram');
-      setSubtype(undefined);
-      setShowOptions(true);
-    }
-
     setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
     setTopStrip(typeof initialMetadata?.topStrip === 'string' ? initialMetadata.topStrip : 'transparent');
     setTitleStyle((initialMetadata?.titleStyle as Record<string, unknown>) || {});
@@ -496,10 +476,9 @@ export default function AIComponentEditor({
   const subtypeConfig = activeSubtype ? getDiagramSubtypeConfig(activeSubtype) : undefined;
   const placeholder = subtypeConfig?.placeholder ?? modeConfig.placeholder;
   const helperDescription = subtypeConfig?.description ?? modeConfig.description;
-  const promptPlaceholder = !isLocked && showOptions ? PICTURE_PLACEHOLDER : placeholder;
-  // PATCH-246 live review: the picture window shows no subtype description;
-  // locked regenerates and Other-formats flows keep their own helper text.
-  const promptHelperDescription = !isLocked && showOptions ? null : helperDescription;
+  const selectedOption = showOptions
+    ? (outlineOptions.find((option) => option.key === selectedOptionKey) ?? outlineOptions[0] ?? null)
+    : null;
   // PATCH-237: Edit text redraws locally from the edited outline -- no AI call.
   const applyEditedOutline = (next: VisualOutline) => {
     setActiveOutline(next);
@@ -519,15 +498,6 @@ export default function AIComponentEditor({
     envelopeData: applyThemeToData(option.envelopeData, visualTheme),
   }));
   const displayOptions = directionOptions(themedOptions);
-  // PATCH-246: a chart made from the Chart chip joins the gallery as a design.
-  const galleryOptions = chartOption ? [...displayOptions, chartOption] : displayOptions;
-  const selectedOption = showOptions
-    ? (galleryOptions.find((option) => option.key === selectedOptionKey) ?? galleryOptions[0] ?? null)
-    : null;
-
-  // PATCH-246. If a Customize hint names a family, the gallery selects that chip.
-  const hintKey = activeVisualHint ? preferKeyFromHint(activeVisualHint) : null;
-  const hintFamily = hintKey ? pictureFamily({ key: hintKey }) : null;
 
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
@@ -643,7 +613,6 @@ export default function AIComponentEditor({
     // PATCH-233: changing mode invalidates any outline options.
     setShowOptions(false);
     setOutlineOptions([]);
-    setChartOption(null);
     setSelectedOptionKey(null);
 
     if (nextUiMode === 'auto') {
@@ -656,97 +625,6 @@ export default function AIComponentEditor({
       setSubtype((current) => current ?? getDefaultDiagramSubtype());
     } else {
       setSubtype(undefined);
-    }
-  };
-
-  // PATCH-246. The "Other formats" cards switch to that mode's own flow.
-  const handleOtherFormat = (nextMode: AIMode) => {
-    setOtherFormatsOpen(false);
-    handleUIModeChange(nextMode);
-  };
-
-  // PATCH-246. "Back to pictures" returns to the outline-driven window.
-  const backToPictures = () => {
-    setUiMode('diagram');
-    setMode('diagram');
-    setSubtype(undefined);
-    setShowOptions(true);
-    setChartOption(null);
-    setError(null);
-    setErrorIsPlanLimit(false);
-  };
-
-  /**
-   * PATCH-246 C. The Chart chip's empty state runs today's chart generator for
-   * the chosen subtype and shows the result as the selected design.
-   */
-  const makeChart = async (chartSubtype: 'pie_chart' | 'bar_chart') => {
-    if (!prompt.trim()) return;
-
-    setError(null);
-    setErrorIsPlanLimit(false);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 55_000);
-
-    setStage('generating');
-    try {
-      const res = await fetch('/api/ai/generate-component', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          mode: 'diagram',
-          subtype: chartSubtype,
-          ...(boardId ? { boardId } : {}),
-        }),
-        signal: controller.signal,
-      });
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        const planLimit = planLimitFromResponse(res.status, data);
-        if (planLimit) {
-          setError(planLimit.message);
-          setErrorIsPlanLimit(true);
-          setStage('error');
-          return;
-        }
-        const message = getErrorMessage(data);
-        if (isQuotaExceededMessage(message)) {
-          throw new Error('API quota exceeded. Please try again later or upgrade your plan.');
-        }
-        throw new Error(message);
-      }
-
-      setStage('rendering');
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      setContent(data as LoadedAIContent);
-      const chartSuggestion: DesignSuggestion = {
-        key: `chart:${chartSubtype}`,
-        label: chartSubtype === 'pie_chart' ? 'Pie chart' : 'Bar chart',
-        category: 'chart',
-        fit: 0,
-        envelopeData: (data as { data: DesignSuggestion['envelopeData'] }).data,
-      };
-      setChartOption(chartSuggestion);
-      setSelectedOptionKey(chartSuggestion.key);
-      setOutlineGeneratedBy((data as { generatedBy?: AIGenerationAttribution }).generatedBy ?? null);
-      setOutlineCreatedAt(new Date().toISOString());
-      setStage('done');
-    } catch (err: unknown) {
-      const e = err as Error;
-      if (e.name === 'AbortError') {
-        setError('Request timed out. Please try again.');
-      } else {
-        setError(e.message || 'Unknown error');
-      }
-      setStage('error');
-    } finally {
-      clearTimeout(timeout);
-      abortRef.current = null;
     }
   };
 
@@ -842,7 +720,6 @@ export default function AIComponentEditor({
         setSelectedOptionKey(options[0]?.key ?? null);
         setOutlineGeneratedBy((data.generatedBy as AIGenerationAttribution) ?? null);
         setOutlineCreatedAt(new Date().toISOString());
-        setChartOption(null);
         setContent(null);
         setStage('done');
       } catch (err: unknown) {
@@ -1204,7 +1081,7 @@ export default function AIComponentEditor({
         <div className="flex flex-1 overflow-hidden">
           <div className="w-[360px] shrink-0 overflow-y-auto border-r bg-gray-50/30 p-6">
             <div className="space-y-5">
-              {isLocked && (
+              {isLocked ? (
                 <div className="flex items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3">
                   <Lock className="h-4 w-4 shrink-0 text-purple-500" />
                   <div>
@@ -1216,52 +1093,195 @@ export default function AIComponentEditor({
                     )}
                   </div>
                 </div>
-              )}
+              ) : (
+                <>
+                  <div>
+                    <label className="mb-3 block text-sm font-medium text-gray-700">
+                      Choose a mode
+                    </label>
+                    <div className="grid gap-2">
+                      {/* Auto mode option */}
+                      <button
+                        key="auto"
+                        type="button"
+                        onClick={() => handleUIModeChange('auto')}
+                        disabled={isLoading}
+                        className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                          uiMode === 'auto'
+                            ? 'border-purple-500 bg-purple-50 shadow-sm'
+                            : 'border-gray-200 bg-white hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                          <span>Auto</span>
+                          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">recommended</span>
+                        </div>
+                        <div className="mt-1 text-xs text-gray-500">Picks the best format for your prompt — shown before generating.</div>
+                      </button>
 
-              {!isLocked && !showOptions && (
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-                  <button
-                    type="button"
-                    data-ai-back-to-pictures="true"
-                    onClick={backToPictures}
-                    className="text-xs font-semibold text-purple-600 hover:text-purple-800"
-                  >
-                    ← Back to pictures
-                  </button>
-                  <div className="mt-2 text-sm font-semibold text-gray-900">{modeConfig.label}</div>
-                  <div className="mt-1 text-xs text-gray-500">{modeConfig.description}</div>
-                </div>
+                      {(Object.keys(MODE_REGISTRY) as AIMode[]).map((modeId) => {
+                        const config = MODE_REGISTRY[modeId];
+                        const isSelected = uiMode === modeId;
+
+                        return (
+                          <button
+                            key={modeId}
+                            type="button"
+                            onClick={() => handleUIModeChange(modeId)}
+                            disabled={isLoading}
+                            className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                              isSelected
+                                ? 'border-purple-500 bg-purple-50 shadow-sm'
+                                : 'border-gray-200 bg-white hover:border-gray-300'
+                            }`}
+                          >
+                            <div className="text-sm font-semibold text-gray-900">{config.label}</div>
+                            <div className="mt-1 text-xs text-gray-500">{config.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Auto-resolved badge — shown after classification */}
+                  {uiMode === 'auto' && autoResolved && (
+                    <div className={`rounded-xl border px-4 py-3 ${
+                      autoResolved.confidence === 'low'
+                        ? 'border-amber-200 bg-amber-50'
+                        : 'border-purple-200 bg-purple-50'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        <Sparkles className={`h-4 w-4 shrink-0 ${autoResolved.confidence === 'low' ? 'text-amber-500' : 'text-purple-500'}`} />
+                        <div>
+                          <span className={`text-[11px] font-medium ${autoResolved.confidence === 'low' ? 'text-amber-600' : 'text-purple-500'}`}>
+                            Auto selected
+                          </span>
+                          <span className={`ml-1.5 font-semibold capitalize text-sm ${autoResolved.confidence === 'low' ? 'text-amber-900' : 'text-purple-900'}`}>
+                            {autoResolved.mode.replace(/_/g, ' ')}
+                            {autoResolved.subtype ? ` \u2192 ${autoResolved.subtype.replace(/_/g, ' ')}` : ''}
+                          </span>
+                        </div>
+                      </div>
+                      {autoResolved.confidence === 'low' && (
+                        <p className="mt-1.5 text-[11px] text-amber-600">
+                          Low confidence — not sure this is the best format. Choose a mode above to override.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {uiMode !== 'auto' && mode === 'diagram' && (
+                    <div>
+                      <label className="mb-3 block text-sm font-medium text-gray-700">
+                        Diagram subtype
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(() => {
+                          const diagramConfig = MODE_REGISTRY.diagram;
+                          if (!isDiagramModeConfig(diagramConfig)) return null;
+                          return (
+                            <>
+                              {/* PATCH-233: one outline call, several pictures. */}
+                              <button
+                                key="options"
+                                type="button"
+                                data-ai-subtype-chip="options"
+                                onClick={() => {
+                                  setShowOptions(true);
+                                  setOutlineOptions([]);
+                                  setSelectedOptionKey(null);
+                                  setError(null);
+                                }}
+                                disabled={isLoading}
+                                className={`rounded-xl border px-3 py-3 text-left transition-all ${
+                                  showOptions
+                                    ? 'border-purple-500 bg-purple-50 shadow-sm'
+                                    : 'border-gray-200 bg-white hover:border-gray-300'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                  <span>Show options</span>
+                                  <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">recommended</span>
+                                </div>
+                                <div className="mt-1 text-[11px] text-gray-500">Draw the same content several ways and pick one.</div>
+                              </button>
+                              {(Object.keys(diagramConfig.subtypes) as DiagramSubtype[])
+                                // PATCH-236: an infographic is only produced by Show options.
+                                .filter((subtypeId) => subtypeId !== 'infographic')
+                                .map((subtypeId) => {
+                                const config = diagramConfig.subtypes[subtypeId];
+                                const isSelected = !showOptions && activeSubtype === subtypeId;
+
+                                return (
+                                  <button
+                                    key={subtypeId}
+                                    type="button"
+                                    onClick={() => {
+                                      setShowOptions(false);
+                                      setOutlineOptions([]);
+                                      setSelectedOptionKey(null);
+                                      setSubtype(subtypeId);
+                                    }}
+                                    disabled={isLoading}
+                                    className={`rounded-xl border px-3 py-3 text-left transition-all ${
+                                      isSelected
+                                        ? 'border-purple-500 bg-purple-50 shadow-sm'
+                                        : 'border-gray-200 bg-white hover:border-gray-300'
+                                    }`}
+                                  >
+                                    <div className="text-sm font-semibold text-gray-900">{config.label}</div>
+                                    <div className="mt-1 text-[11px] text-gray-500">{config.description}</div>
+                                  </button>
+                                );
+                              })}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               <div>
-                {isLocked && (
-                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="block text-sm font-medium text-gray-700">
                     What should the AI build?
                   </label>
-                )}
-                {!isLocked && showOptions && (
-                  <label className="mb-2 block text-sm font-medium text-gray-700">
-                    What do you want to visualize?
-                  </label>
+                  {/* The model this surface uses, changeable here rather than
+                      only in Settings. It writes the Component Generation role
+                      preference the server resolves per request -- for the
+                      classifier and the generation alike -- so the requests
+                      themselves are unchanged: no provider, model or key
+                      travels with them. */}
+                  <AIRoleModelChooser
+                    role={AI_ROLE_COMPONENT}
+                    label="Component model"
+                    attributePrefix="ai-component"
+                    saveErrorMessage="Could not change the model."
+                    disabled={isLoading}
+                    onError={setModelError}
+                  />
+                </div>
+                {modelError && (
+                  <div role="alert" className="mb-2 text-xs text-red-600">{modelError}</div>
                 )}
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={promptPlaceholder}
+                  placeholder={placeholder}
                   className="h-40 w-full resize-none rounded-xl border border-gray-300 p-3 text-sm outline-none transition-all shadow-sm focus:border-transparent focus:ring-2 focus:ring-purple-500"
                   disabled={isLoading}
                 />
-                {promptHelperDescription && (
-                  <p className="mt-2 text-xs text-gray-500">{promptHelperDescription}</p>
-                )}
+                <p className="mt-2 text-xs text-gray-500">{helperDescription}</p>
               </div>
 
               <div className="flex gap-2">
                 <button
                   onClick={() => { void generate(); }}
-                  disabled={isLoading || !prompt.trim()}
+                  disabled={isLoading || !prompt.trim() || (uiMode !== 'auto' && mode === 'diagram' && !activeSubtype)}
                   className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 font-medium transition-all ${
-                    isLoading || !prompt.trim()
+                    isLoading || !prompt.trim() || (uiMode !== 'auto' && mode === 'diagram' && !activeSubtype)
                       ? 'cursor-not-allowed bg-gray-200 text-gray-400'
                       : 'bg-purple-600 text-white shadow-lg shadow-purple-200 hover:bg-purple-700 active:scale-95'
                   }`}
@@ -1298,59 +1318,6 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {/* The model this surface uses, changeable here rather than only
-                  in Settings. It writes the Component Generation role preference
-                  the server resolves per request, so no provider, model or key
-                  travels with the request. */}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-gray-700">Component model</span>
-                <AIRoleModelChooser
-                  role={AI_ROLE_COMPONENT}
-                  label="Component model"
-                  attributePrefix="ai-component"
-                  saveErrorMessage="Could not change the model."
-                  disabled={isLoading}
-                  onError={setModelError}
-                />
-              </div>
-              {modelError && (
-                <div role="alert" className="text-xs text-red-600">{modelError}</div>
-              )}
-
-              {!isLocked && showOptions && (
-                <div data-ai-other-formats="true" className="rounded-xl border border-gray-200 bg-white">
-                  <button
-                    type="button"
-                    data-ai-other-formats-toggle="true"
-                    aria-expanded={otherFormatsOpen}
-                    onClick={() => setOtherFormatsOpen((v) => !v)}
-                    className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700"
-                  >
-                    <span>Other formats</span>
-                    <span className="text-gray-400">{otherFormatsOpen ? '−' : '+'}</span>
-                  </button>
-                  {otherFormatsOpen && (
-                    <div className="grid gap-2 px-3 pb-3">
-                      {OTHER_FORMATS.map((formatId) => {
-                        const config = MODE_REGISTRY[formatId];
-                        return (
-                          <button
-                            key={formatId}
-                            type="button"
-                            data-ai-other-format={formatId}
-                            onClick={() => handleOtherFormat(formatId)}
-                            className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-all hover:border-gray-300"
-                          >
-                            <div className="text-sm font-semibold text-gray-900">{config.label}</div>
-                            <div className="mt-1 text-xs text-gray-500">{config.description}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* WAS a hardcoded "Generated by DeepSeek". It named a provider
                   nobody had read, and once the chooser above exists it would
                   have been wrong for any user who moved this role. It now
@@ -1376,14 +1343,12 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {!content && !isLoading && !(showOptions && galleryOptions.length > 0) && (
+              {!content && !isLoading && !(showOptions && outlineOptions.length > 0) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
                   <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
                     <Sparkles className="h-8 w-8 text-gray-300" />
                   </div>
-                  <p className="text-sm text-gray-400">
-                    {showOptions ? 'Your pictures will appear here' : 'Your component will appear here'}
-                  </p>
+                  <p className="text-sm text-gray-400">Your component will appear here</p>
                   {EXAMPLE_PROMPTS[uiMode as keyof typeof EXAMPLE_PROMPTS] && (
                     <p className="mt-3 text-xs text-gray-400">
                       Try:{' '}
@@ -1400,12 +1365,10 @@ export default function AIComponentEditor({
               )}
 
               {/* PATCH-236: the Suggestions panel -- one large preview of the
-                  selected design, then "Suggested" and per-category headings.
-                  PATCH-246: family chips filter it, and the Chart chip's empty
-                  state can generate a chart. */}
-              {showOptions && galleryOptions.length > 0 && !isLoading && (
+                  selected design, then "Suggested" and per-category headings. */}
+              {showOptions && outlineOptions.length > 0 && !isLoading && (
                 <OutlineSuggestionsPanel
-                  options={galleryOptions}
+                  options={displayOptions}
                   selectedKey={selectedOptionKey}
                   onSelect={setSelectedOptionKey}
                   envelopeFor={(option) => optionEnvelope(option)}
@@ -1416,8 +1379,6 @@ export default function AIComponentEditor({
                   onApplyCustomize={(options) => { void generate(options); }}
                   theme={visualTheme}
                   onThemeChange={setVisualTheme}
-                  hintFamily={hintFamily}
-                  onMakeChart={(subtype) => { void makeChart(subtype); }}
                 />
               )}
 
