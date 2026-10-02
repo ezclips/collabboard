@@ -60,3 +60,40 @@ describe('PATCH-253 toAntvOptions style', () => {
     expect(options.data.items[0].attributes).toEqual({ label: { fill: '#ff0000' } });
   });
 });
+
+describe('PATCH-254 Addendum C hierarchy title font', () => {
+  it('puts the style title font on the hierarchy root datum label', () => {
+    const options = toAntvOptions(outline(), 'hierarchy-mindmap', undefined, {
+      fonts: { title: { family: 'serif', weight: 700 } },
+    });
+    // The title is drawn as the ROOT item, so the font must reach that label.
+    expect(options.data.items[0].attributes?.label).toEqual({
+      'font-family': fontStack('serif'),
+      'font-weight': 700,
+    });
+  });
+
+  it('a stored PATCH-244 title style still wins for the keys it sets', () => {
+    const base = outline({ titleStyle: { fontFamily: 'Alibaba PuHuiTi', fontSize: 20 } });
+    const options = toAntvOptions(base, 'hierarchy-mindmap', undefined, {
+      fonts: { title: { family: 'serif', weight: 700 } },
+    });
+    // The stored family wins; the style-only weight is still applied.
+    expect(options.data.items[0].attributes?.label).toMatchObject({
+      'font-family': 'Alibaba PuHuiTi',
+      'font-size': 20,
+      'font-weight': 700,
+    });
+  });
+
+  it('a flat template is unchanged', () => {
+    const options = toAntvOptions(outline(), 'list-row-simple', undefined, {
+      fonts: { title: { family: 'serif', weight: 700 } },
+    });
+    expect(options.data.items[0].attributes).toBeUndefined();
+    expect(options.themeConfig.title).toEqual({
+      'font-family': fontStack('serif'),
+      'font-weight': 700,
+    });
+  });
+});

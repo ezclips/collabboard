@@ -491,6 +491,12 @@ export default function AIComponentEditor({
 
   const isLoading = stage === 'classifying' || stage === 'generating' || stage === 'rendering';
 
+  // PATCH-254. The outline path (Show options and the family buttons) gets a calm
+  // progress placeholder and a design skeleton instead of the generic spinner.
+  // Every other mode keeps the spinner below.
+  const isOutlineLoading = isLoading && mode === 'diagram' && showOptions;
+  const outlineProgressText = stage === 'rendering' ? 'Drawing designs…' : 'Reading your text…';
+
   // PATCH-252. The docked side panel's host element (callback ref) and whether
   // it is open, so the modal can widen while the panel is docked on the right.
   const [sidePanelHost, setSidePanelHost] = useState<HTMLDivElement | null>(null);
@@ -1436,7 +1442,21 @@ export default function AIComponentEditor({
             <label className="block text-sm font-medium text-gray-700">Preview</label>
 
             <div className="relative mt-4 flex-1 overflow-hidden rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 shadow-inner">
-              {isLoading && (
+              {isLoading && isOutlineLoading && (
+                <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-3">
+                  {outlineOptions.length === 0 && (
+                    <div
+                      aria-hidden="true"
+                      className="h-40 w-60 max-w-[80%] rounded-2xl bg-gray-200 animate-pulse motion-reduce:animate-none"
+                    />
+                  )}
+                  <p data-ai-outline-progress="true" aria-live="polite" className="font-medium text-gray-600">
+                    {outlineProgressText}
+                  </p>
+                </div>
+              )}
+
+              {isLoading && !isOutlineLoading && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/80">
                   <div className="h-12 w-12 animate-spin rounded-full border-4 border-purple-200 border-t-purple-600" />
                   <p className="font-medium text-purple-600 animate-pulse">{stageMessage()}</p>
@@ -1474,7 +1494,7 @@ export default function AIComponentEditor({
 
               {/* PATCH-236: the Suggestions panel -- one large preview of the
                   selected design, then "Suggested" and per-category headings. */}
-              {showOptions && outlineOptions.length > 0 && !isLoading && (
+              {showOptions && (outlineOptions.length > 0 || isOutlineLoading) && (
                 <OutlineSuggestionsPanel
                   options={displayOptions}
                   selectedKey={selectedOptionKey}
@@ -1494,6 +1514,7 @@ export default function AIComponentEditor({
                   onShowAll={showAllDesigns}
                   onMakeChart={makeChart}
                   makeChartSubtype={chartMakeSubtype ?? undefined}
+                  loading={isOutlineLoading}
                   sidePanelHost={sidePanelHost}
                   onSidePanelChange={setSidePanelOpen}
                 />

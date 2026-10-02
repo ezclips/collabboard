@@ -58,6 +58,13 @@ export interface ComponentGenerationInput {
   /** The calling route's existing deadline, unchanged by this move. */
   readonly timeoutMs: number;
   /**
+   * PATCH-254. The provider's documented no-thinking switch; only adapters that
+   * support it read it. Omitted means the provider's own default -- for some
+   * models that is to think first, which spends the completion budget before any
+   * answer is written. Forwarded only when set, so no other caller gains the key.
+   */
+  readonly reasoning?: 'off';
+  /**
    * PATCH-188. The board this generation runs on, when the caller named one.
    * The board owner's plan pays (PRICING.md Rule 1); a byok caller needs none.
    */
@@ -143,6 +150,7 @@ export async function generateComponentText(
       maxTokens: input.maxTokens,
       temperature: input.temperature,
       signal: controller.signal,
+      ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     });
   } finally {
     clearTimeout(timer);

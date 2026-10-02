@@ -211,8 +211,11 @@ export function toAntvOptions(
 
   if (hierarchy) {
     const root: AntvDatum = { label: outline.title };
-    // The hierarchy root is itself an item-label, so the title style goes there.
-    if (titleAttributes) root.attributes = { label: titleAttributes };
+    // The hierarchy root is itself an item-label, so BOTH the stored title style
+    // (PATCH-244) and the style's title font (PATCH-253, Addendum C) go there.
+    // A stored title style still wins for the keys it sets.
+    const rootLabel = { ...antvFontAttributes(style?.fonts?.title), ...titleAttributes };
+    if (Object.keys(rootLabel).length) root.attributes = { label: rootLabel };
     const children = outline.items.map((item) => datumForItem(item, true));
     if (children.length) root.children = children;
     items = [root];

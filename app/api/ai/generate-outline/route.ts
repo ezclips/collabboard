@@ -220,6 +220,9 @@ export async function POST(req: NextRequest) {
         maxTokens: COMPONENT_MAX_TOKENS,
         temperature: 0.4,
         timeoutMs: 25_000,
+        // PATCH-254. The outline is a short list, not a reasoning puzzle; the
+        // managed default's thinking step was measured at 3-6x the wait.
+        reasoning: 'off',
         boardId,
         canReadBoard: (id) => canReadBoardKnowledge(
           supabase as unknown as KnowledgeBoardReadAuthorizationClient,

@@ -101,6 +101,12 @@ describe('PATCH-233 POST /api/ai/generate-outline', () => {
     const res = await POST(makeRequest({ prompt: 'x' }));
     expect(res.status).toBe(502);
   });
+
+  it('PATCH-254 runs the outline call without thinking', async () => {
+    h.generate.mockResolvedValue({ text: JSON.stringify(VALID_OUTLINE), generatedBy: ATTR });
+    await POST(makeRequest({ prompt: 'x' }));
+    expect(h.generate.mock.calls[0][0]).toMatchObject({ reasoning: 'off' });
+  });
 });
 
 describe('PATCH-237 generate-outline options', () => {

@@ -56,6 +56,10 @@ interface OutlineSuggestionsPanelProps {
   onMakeChart?: (subtype: 'pie_chart' | 'bar_chart') => void;
   /** PATCH-248. Which chart subtype button was clicked (labels the make-chart button). */
   makeChartSubtype?: 'pie_chart' | 'bar_chart';
+  /** PATCH-254. An outline request is running: the Designs panel opens, shows 8
+   *  skeleton tiles when there are no designs yet, and dims the existing designs
+   *  (a regenerate) instead of replacing them. */
+  loading?: boolean;
   /** PATCH-252. When given, the side panel portals into this docked host; when
    *  absent (unit tests, other callers) it renders inline as a right column. */
   sidePanelHost?: HTMLElement | null;
@@ -292,6 +296,7 @@ export default function OutlineSuggestionsPanel({
   onShowAll,
   onMakeChart,
   makeChartSubtype = 'pie_chart',
+  loading = false,
   sidePanelHost = null,
   onSidePanelChange,
 }: OutlineSuggestionsPanelProps) {
@@ -399,7 +404,7 @@ export default function OutlineSuggestionsPanel({
   // PATCH-252. The docked panel is open on Designs by default (the editor
   // unmounts the panel while loading, so a new Generate reopens it; a theme
   // change or local re-rank leaves a user-closed panel closed).
-  const [panel, setPanel] = React.useState<SidePanelId | null>(() => (options.length > 0 ? 'designs' : null));
+  const [panel, setPanel] = React.useState<SidePanelId | null>(() => (options.length > 0 || loading ? 'designs' : null));
   const toolbarRef = React.useRef<HTMLDivElement | null>(null);
   const [detail, setDetail] = React.useState<'auto' | 'summary' | 'detailed'>('auto');
   const [keepWording, setKeepWording] = React.useState(false);
@@ -423,6 +428,12 @@ export default function OutlineSuggestionsPanel({
   React.useEffect(() => {
     onSidePanelChange?.(panel !== null);
   }, [panel, onSidePanelChange]);
+
+  // PATCH-254. A running outline request opens Designs, where the skeleton (or
+  // the dimmed existing designs) lives.
+  React.useEffect(() => {
+    if (loading) setPanel('designs');
+  }, [loading]);
 
   // PATCH-252. Close a panel whose icon is no longer there.
   React.useEffect(() => {
@@ -545,33 +556,43 @@ export default function OutlineSuggestionsPanel({
         <div
           ref={tilesRef}
           data-ai-outline-tiles="true"
-          className="min-h-0 flex-1 overflow-y-auto p-4 pb-4"
+          className={`min-h-0 flex-1 overflow-y-auto p-4 pb-4 ${loading && options.length > 0 ? 'pointer-events-none opacity-50' : ''}`}
           style={{ minHeight: 220 }}
         >
-          {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
-          {tilesFor(suggested, true)}
+          {loading && options.length === 0 ? (
+            <div data-ai-designs-skeleton="true" aria-hidden="true" className="grid grid-cols-2 gap-2">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="h-[104px] rounded-xl bg-gray-100 animate-pulse motion-reduce:animate-none" />
+              ))}
+            </div>
+          ) : (
+            <>
+              {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
+              {tilesFor(suggested, true)}
 
-          {[...byCategory.entries()].map(([category, designs]) => {
-            const expanded = expandedCategories.has(category);
-            const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
-            return (
-              <div key={category} className="mt-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
-                {tilesFor(shown, false)}
-                {!expanded && designs.length > MAX_PER_CATEGORY && (
-                  <button
-                    type="button"
-                    data-ai-show-more={category}
-                    onClick={() => setExpandedCategories((prev) => new Set(prev).add(category))}
-                    className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
-                  >
-                    Show more ({designs.length - MAX_PER_CATEGORY})
-                  </button>
-                )}
-              </div>
-            );
-          })}
+              {[...byCategory.entries()].map(([category, designs]) => {
+                const expanded = expandedCategories.has(category);
+                const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
+                return (
+                  <div key={category} className="mt-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
+                    {tilesFor(shown, false)}
+                    {!expanded && designs.length > MAX_PER_CATEGORY && (
+                      <button
+                        type="button"
+                        data-ai-show-more={category}
+                        onClick={() => setExpandedCategories((prev) => new Set(prev).add(category))}
+                        className="mt-2 text-xs font-semibold text-purple-600 hover:text-purple-800"
+                      >
+                        Show more ({designs.length - MAX_PER_CATEGORY})
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -691,7 +712,7 @@ export default function OutlineSuggestionsPanel({
           <div
             data-ai-outline-preview="true"
             data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
-            className="relative min-h-0 flex-1"
+            className={`relative min-h-0 flex-1 ${loading && options.length > 0 ? 'pointer-events-none opacity-50' : ''}`}
           >
             <PictureStage
               mode={previewMode}
