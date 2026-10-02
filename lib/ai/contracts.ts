@@ -1,5 +1,6 @@
 import type { CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import type { VisualThemeId } from './visualThemes';
+import type { VisualStyle } from './visualStyle';
 
 export type AIMode =
   | 'lesson_board'
@@ -109,6 +110,8 @@ export interface MindmapDiagramData extends DiagramDataBase {
   };
   /** PATCH-238. The tree renderer's colour theme; absent means classic. */
   theme?: VisualThemeId;
+  /** PATCH-253. Per-colour / per-font overrides for the tree renderer. */
+  style?: VisualStyle;
 }
 
 export interface ChartDataPoint {
@@ -142,6 +145,8 @@ export interface TimelineDiagramData extends DiagramDataBase {
   items: TimelineItem[];
   /** PATCH-238. The colour theme; absent means classic. */
   theme?: VisualThemeId;
+  /** PATCH-253. Stored with the picture; Timeline keeps its own colours. */
+  style?: VisualStyle;
 }
 
 export interface ComparisonColumn {
@@ -155,6 +160,8 @@ export interface ComparisonDiagramData extends DiagramDataBase {
   columns: ComparisonColumn[];
   /** PATCH-238. The colour theme; absent means classic. */
   theme?: VisualThemeId;
+  /** PATCH-253. Stored with the picture; Comparison keeps its own colours. */
+  style?: VisualStyle;
 }
 
 /**
@@ -179,6 +186,8 @@ export interface InfographicDiagramData extends DiagramDataBase {
   explanation?: string;
   /** PATCH-238. The colour theme; absent means classic. */
   theme?: VisualThemeId;
+  /** PATCH-253. Per-colour / per-font overrides for our own/AntV designs. */
+  style?: VisualStyle;
 }
 
 /** True when a stored template belongs to the AntV engine. */

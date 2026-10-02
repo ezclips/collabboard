@@ -15,6 +15,7 @@ import {
 import { OUTLINE_LIMITS, type VisualOutline } from '@/lib/ai/outline';
 import { shapeBounds, textBox } from '@/lib/ai/infographic/shared';
 import { themeById, type VisualTheme } from '@/lib/ai/visualThemes';
+import { themeWithStyle } from '@/lib/ai/visualStyle';
 import { getVisualIcon } from './visualIconMap';
 import AntvInfographicRenderer from './AntvInfographicRenderer';
 import PictureEditOverlay, { type ActiveEdit, type ColorPopoverState, type EditHandle } from './PictureEditOverlay';
@@ -75,9 +76,10 @@ function maxForRef(ref: OutlineTextRef): number {
   return ref.field === 'label' ? OUTLINE_LIMITS.label : OUTLINE_LIMITS.detail;
 }
 
-function textEl(text: InfographicText, onActivate?: () => void) {
+function textEl(text: InfographicText, fonts: VisualTheme['fonts'], onActivate?: () => void) {
   const firstLineY = text.y - ((text.lines.length - 1) * 18) / 2;
   const key = refKey(text);
+  const font = text.ref?.field === 'title' ? fonts?.title : text.ref?.field === 'detail' ? fonts?.desc : fonts?.label;
   return (
     <text
       key={text.id}
@@ -85,9 +87,9 @@ function textEl(text: InfographicText, onActivate?: () => void) {
       y={firstLineY}
       textAnchor={text.anchor}
       fontSize={text.fontSize}
-      fontWeight={text.fontWeight}
+      fontWeight={font?.weight ?? text.fontWeight}
       fill={text.color}
-      fontFamily="ui-sans-serif, system-ui, -apple-system, sans-serif"
+      fontFamily={font?.family ?? 'ui-sans-serif, system-ui, -apple-system, sans-serif'}
       {...(key ? { 'data-ai-edit-ref': key } : {})}
       {...(onActivate ? { onClick: onActivate, style: { cursor: 'text' as const } } : {})}
     >
@@ -213,7 +215,9 @@ function OurInfographicRenderer({
   edit?: { onChange: (next: VisualOutline) => void };
   initialEditRef?: string | null;
 }) {
-  const theme: VisualTheme = themeById(data.theme);
+  const theme: VisualTheme = themeWithStyle(themeById(data.theme), data.style);
+  const titleFont = theme.fonts?.title;
+  const descFont = theme.fonts?.desc;
   const layout = layoutInfographic(data.template, data.outline, theme);
   const outline = data.outline;
 
@@ -275,7 +279,7 @@ function OurInfographicRenderer({
         ),
       )}
       {layout.texts.map((text) =>
-        textEl(text, edit && refKey(text) ? () => setEditingKey(refKey(text) as string) : undefined),
+        textEl(text, theme.fonts, edit && refKey(text) ? () => setEditingKey(refKey(text) as string) : undefined),
       )}
       {layout.icons?.map(iconEl)}
     </svg>
@@ -290,8 +294,20 @@ function OurInfographicRenderer({
       <div className="space-y-4">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>infographic</div>
-          <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
-          {data.explanation && <p className="mt-2 text-sm" style={{ color: theme.text }}>{data.explanation}</p>}
+          <h2
+            className="mt-1 text-lg font-semibold"
+            style={{ color: theme.title, ...(titleFont ? { fontFamily: titleFont.family, fontWeight: titleFont.weight } : {}) }}
+          >
+            {data.title}
+          </h2>
+          {data.explanation && (
+            <p
+              className="mt-2 text-sm"
+              style={{ color: theme.text, ...(descFont ? { fontFamily: descFont.family, fontWeight: descFont.weight } : {}) }}
+            >
+              {data.explanation}
+            </p>
+          )}
         </div>
         {edit ? (
           <div className="group relative w-full">

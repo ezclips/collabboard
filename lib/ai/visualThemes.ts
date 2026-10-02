@@ -7,6 +7,7 @@
  */
 
 import { VISUAL_PALETTE, type VisualColor } from './visualPalette';
+import type { FontRole } from './visualStyle';
 
 export type VisualThemeId =
   | 'classic'
@@ -37,6 +38,12 @@ export interface VisualTheme {
   centreText: string;
   /** Six `{ stroke, fill, text, detail }` entries, index-cycled. */
   palette: readonly VisualColor[];
+  /**
+   * PATCH-253. Resolved system font stacks for the title / labels / details,
+   * filled by `themeWithStyle` from a stored `VisualStyle`. Absent means the
+   * renderer's own default.
+   */
+  fonts?: Partial<Record<FontRole, { family: string; weight: number }>>;
 }
 
 /** A palette entry: the label `text` is also the card's body `detail` colour. */

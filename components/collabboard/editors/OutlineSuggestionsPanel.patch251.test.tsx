@@ -96,9 +96,10 @@ describe('PATCH-251/252 OutlineSuggestionsPanel preview toolbar', () => {
     const toolbar = c.querySelector('[data-ai-preview-toolbar="true"]');
     expect(toolbar).not.toBeNull();
 
-    for (const label of ['Designs', 'Edit text', 'Similar visuals', 'Colours', 'Customize']) {
-      const button = toolbar!.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement | null;
-      expect(button, `missing ${label}`).not.toBeNull();
+    const buttons = Array.from(toolbar!.querySelectorAll('button'));
+    for (const label of ['Designs', 'Edit text', 'Similar visuals', 'Colours & Fonts', 'Customize']) {
+      const button = buttons.find((b) => b.getAttribute('aria-label') === label) as HTMLButtonElement | undefined;
+      expect(button, `missing ${label}`).not.toBeUndefined();
       expect(button!.textContent ?? '').toContain(label);
       expect(button!.title).toBe(label);
     }

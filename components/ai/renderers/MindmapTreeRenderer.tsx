@@ -15,6 +15,7 @@ import {
   renameNode,
 } from '@/lib/ai/infographic/edit';
 import { themeById, themeColor } from '@/lib/ai/visualThemes';
+import { themeWithStyle } from '@/lib/ai/visualStyle';
 import PictureEditOverlay, { type ActiveEdit, type EditHandle } from './PictureEditOverlay';
 
 /**
@@ -101,7 +102,10 @@ function MindmapTreeRenderer({
   edit?: { onChange: (next: MindmapTree) => void };
   initialEditRef?: string | null;
 }) {
-  const theme = themeById(data.theme);
+  const theme = themeWithStyle(themeById(data.theme), data.style);
+  const titleFont = theme.fonts?.title;
+  const labelFont = theme.fonts?.label;
+  const descFont = theme.fonts?.desc;
   const [editingKey, setEditingKey] = useState<string | null>(edit && initialEditRef ? initialEditRef : null);
 
   if (!data.tree) {
@@ -112,7 +116,12 @@ function MindmapTreeRenderer({
         style={{ backgroundColor: theme.background }}
       >
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>mindmap</div>
-        <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
+        <h2
+          className="mt-1 text-lg font-semibold"
+          style={{ color: theme.title, ...(titleFont ? { fontFamily: titleFont.family, fontWeight: titleFont.weight } : {}) }}
+        >
+          {data.title}
+        </h2>
       </div>
     );
   }
@@ -173,8 +182,10 @@ function MindmapTreeRenderer({
         const fill = isRoot ? theme.centreFill : (color?.fill ?? theme.background);
         const stroke = isRoot ? theme.centreFill : (color?.stroke ?? theme.line);
         const textColor = isRoot ? theme.centreText : (color?.text ?? theme.text);
+        const font = isRoot ? titleFont : labelFont;
         const fontSize = isRoot ? 15 : isBranch ? 13 : 12;
-        const fontWeight = isRoot ? 700 : isBranch ? 600 : 500;
+        const fontWeight = font?.weight ?? (isRoot ? 700 : isBranch ? 600 : 500);
+        const fontFamily = font?.family ?? 'ui-sans-serif, system-ui, -apple-system, sans-serif';
         const firstLineY = node.y - ((node.lines.length - 1) * 18) / 2 + 5;
         const key = pathKey(node.path);
 
@@ -197,7 +208,7 @@ function MindmapTreeRenderer({
               fontSize={fontSize}
               fontWeight={fontWeight}
               fill={textColor}
-              fontFamily="ui-sans-serif, system-ui, -apple-system, sans-serif"
+              fontFamily={fontFamily}
               data-ai-edit-ref={key}
               style={edit ? { cursor: 'text' } : undefined}
               onClick={edit ? () => setEditingKey(key) : undefined}
@@ -223,8 +234,20 @@ function MindmapTreeRenderer({
       <div className="space-y-4">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>mindmap</div>
-          <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
-          {data.explanation && <p className="mt-2 text-sm" style={{ color: theme.text }}>{data.explanation}</p>}
+          <h2
+            className="mt-1 text-lg font-semibold"
+            style={{ color: theme.title, ...(titleFont ? { fontFamily: titleFont.family, fontWeight: titleFont.weight } : {}) }}
+          >
+            {data.title}
+          </h2>
+          {data.explanation && (
+            <p
+              className="mt-2 text-sm"
+              style={{ color: theme.text, ...(descFont ? { fontFamily: descFont.family, fontWeight: descFont.weight } : {}) }}
+            >
+              {data.explanation}
+            </p>
+          )}
         </div>
 
         {edit ? (

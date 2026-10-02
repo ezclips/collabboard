@@ -113,9 +113,9 @@ describe('PATCH-252 OutlineSuggestionsPanel side panel', () => {
     expect(c.querySelector('[data-ai-preview-chips]')).toBeNull();
   });
 
-  it('orders the toolbar Designs, Edit text, Similar visuals, Colours, Customize', () => {
+  it('orders the toolbar Designs, Edit text, Similar visuals, Colours & Fonts, Customize', () => {
     const c = render();
-    expect(toolbarLabels(c)).toEqual(['Designs', 'Edit text', 'Similar visuals', 'Colours', 'Customize']);
+    expect(toolbarLabels(c)).toEqual(['Designs', 'Edit text', 'Similar visuals', 'Colours & Fonts', 'Customize']);
   });
 
   it('switches to Edit text and clicking the icon again closes the panel', () => {

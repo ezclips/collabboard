@@ -15,7 +15,9 @@ import { PICTURE_FAMILY_LABELS, pictureFamily, type PictureFamily } from '@/lib/
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { outlineFromMindmapTree } from '@/lib/ai/outlineToVisuals';
-import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
+import type { VisualStyle } from '@/lib/ai/visualStyle';
+import { type VisualThemeId } from '@/lib/ai/visualThemes';
+import ColoursFontsPanel from './ColoursFontsPanel';
 import OutlineTextEditor from './OutlineTextEditor';
 /**
  * PATCH-236/237. The Suggestions panel for Show options: one large preview of
@@ -41,6 +43,9 @@ interface OutlineSuggestionsPanelProps {
   /** PATCH-238. Colour themes. */
   theme?: VisualThemeId;
   onThemeChange?: (id: VisualThemeId) => void;
+  /** PATCH-253. Background / element / font overrides, saved with the picture. */
+  visualStyle?: VisualStyle;
+  onVisualStyleChange?: (style: VisualStyle | undefined) => void;
   /** PATCH-248. Filter the gallery locally into one picture family (null = all). */
   familyFilter?: PictureFamily | null;
   /** PATCH-248. Human label for the filter line, e.g. "Flowchart". */
@@ -256,7 +261,7 @@ const SIDE_PANEL_TITLES: Record<SidePanelId, string> = {
   designs: 'Designs',
   edit: 'Edit text',
   similar: 'Similar visuals',
-  colours: 'Colours',
+  colours: 'Colours & Fonts',
   customize: 'Customize',
 };
 
@@ -280,6 +285,8 @@ export default function OutlineSuggestionsPanel({
   onApplyCustomize,
   theme = 'classic',
   onThemeChange,
+  visualStyle,
+  onVisualStyleChange,
   familyFilter = null,
   familyLabel = null,
   onShowAll,
@@ -589,27 +596,13 @@ export default function OutlineSuggestionsPanel({
           )}
 
           {panel === 'colours' && onThemeChange && (
-            <div data-ai-colours="true" className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colours</span>
-              {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
-                const swatch = VISUAL_THEMES[id];
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    data-ai-theme={id}
-                    aria-label={swatch.name}
-                    aria-pressed={theme === id}
-                    title={swatch.name}
-                    onClick={() => onThemeChange(id)}
-                    className={`h-5 w-5 rounded-full border ${theme === id ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-300'}`}
-                    style={{
-                      background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
-                    }}
-                  />
-                );
-              })}
-            </div>
+            <ColoursFontsPanel
+              theme={theme}
+              visualStyle={visualStyle}
+              onVisualStyleChange={onVisualStyleChange ?? (() => {})}
+              onThemeChange={onThemeChange}
+              slotCount={Math.min(outline?.items.length ?? 0, 6)}
+            />
           )}
 
           {panel === 'customize' && (
@@ -770,7 +763,7 @@ export default function OutlineSuggestionsPanel({
               )}
               {onThemeChange && (
                 <PreviewToolButton
-                  label="Colours"
+                  label="Colours & Fonts"
                   dataAi="data-ai-colours-toggle"
                   active={panel === 'colours'}
                   onClick={() => togglePanel('colours')}

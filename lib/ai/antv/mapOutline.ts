@@ -25,6 +25,7 @@ import {
   type VisualSide,
 } from '@/lib/ai/outline';
 import type { VisualThemeId } from '@/lib/ai/visualThemes';
+import { fontStack, type VisualFont, type VisualStyle } from '@/lib/ai/visualStyle';
 import { ANTV_ICON_PREFIX } from './icons';
 
 /** PATCH-244. AntV's own text attribute names (fill, font-size, …). */
@@ -43,12 +44,22 @@ export interface AntvDatum {
   children?: AntvDatum[];
 }
 
+/** PATCH-253. The `themeConfig` keys our styles set, in AntV's own names. */
+export interface AntvThemeConfig {
+  /** The registered palette id, or an explicit colour array when a style gave one. */
+  palette: string | string[];
+  colorBg?: string;
+  title?: AntvTextAttributes;
+  desc?: AntvTextAttributes;
+  item?: { label?: AntvTextAttributes; desc?: AntvTextAttributes };
+}
+
 export interface AntvOptions {
   template: string;
   theme: AntvThemeName;
   /** The registered palette id; AntV reads it through `themeConfig.palette`. */
   palette: string;
-  themeConfig: { palette: string };
+  themeConfig: AntvThemeConfig;
   data: {
     title: string;
     items: AntvDatum[];
@@ -148,6 +159,12 @@ function antvTextAttributes(style: TextStyle | undefined): AntvTextAttributes | 
   return Object.keys(attrs).length ? attrs : undefined;
 }
 
+/** PATCH-253. A stored font -> AntV's own `font-family` / `font-weight` keys. */
+function antvFontAttributes(font: VisualFont | undefined): AntvTextAttributes | undefined {
+  if (!font) return undefined;
+  return { 'font-family': fontStack(font.family), 'font-weight': font.weight };
+}
+
 /** PATCH-244. An item's stored parts -> the `datum.attributes` AntV reads. */
 function datumAttributes(item: VisualOutlineItem): AntvDatum['attributes'] | undefined {
   const style = item.textStyle;
@@ -185,6 +202,7 @@ export function toAntvOptions(
   outline: VisualOutline,
   templateName: string,
   themeId?: VisualThemeId | null,
+  style?: VisualStyle,
 ): AntvOptions {
   const choice = antvThemeFor(themeId);
   const hierarchy = isHierarchyTemplate(templateName);
@@ -204,11 +222,28 @@ export function toAntvOptions(
     items = outline.items.map((item) => datumForItem(item, false));
   }
 
+  const themeConfig: AntvThemeConfig = { palette: choice.palette };
+  if (style) {
+    if (style.background) themeConfig.colorBg = style.background;
+    if (style.colors?.length) themeConfig.palette = style.colors;
+    const titleFont = antvFontAttributes(style.fonts?.title);
+    if (titleFont) themeConfig.title = titleFont;
+    const labelFont = antvFontAttributes(style.fonts?.label);
+    const descFont = antvFontAttributes(style.fonts?.desc);
+    if (descFont) themeConfig.desc = descFont;
+    if (labelFont || descFont) {
+      themeConfig.item = {
+        ...(labelFont ? { label: labelFont } : {}),
+        ...(descFont ? { desc: descFont } : {}),
+      };
+    }
+  }
+
   const options: AntvOptions = {
     template: templateName,
     theme: choice.theme,
     palette: choice.palette,
-    themeConfig: { palette: choice.palette },
+    themeConfig,
     data: { title: outline.title, items },
   };
   // The flat templates draw `data.title` as a separate title element.

@@ -16,6 +16,7 @@ import { stageInteractions } from '@/lib/ai/antv/interactions';
 import { insertItem } from '@/lib/ai/infographic/edit';
 import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/outline';
 import { themeById } from '@/lib/ai/visualThemes';
+import { themeWithStyle } from '@/lib/ai/visualStyle';
 import PictureEditOverlay, { type EditHandle } from './PictureEditOverlay';
 
 /**
@@ -261,7 +262,7 @@ function AntvInfographicRenderer({
   edit?: { onChange: (next: VisualOutline) => void };
   initialEditRef?: string | null;
 }) {
-  const theme = themeById(data.theme);
+  const theme = themeWithStyle(themeById(data.theme), data.style);
   const templateName = data.template.slice('antv:'.length);
   const isMindmap = isMindmapTemplate(templateName);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -349,7 +350,7 @@ function AntvInfographicRenderer({
         // engine keeps only the editing interactions (ZoomWheel/DragCanvas off).
         const interactions = editable ? stageInteractions(mod) : [];
         const options: Record<string, unknown> = {
-          ...toAntvOptions(outlineRef.current, templateName, data.theme),
+          ...toAntvOptions(outlineRef.current, templateName, data.theme, data.style),
           container,
           width: '100%',
           height: 'auto',
@@ -406,14 +407,14 @@ function AntvInfographicRenderer({
     // Re-created only when the engine input changes; the outline edits go through
     // `update` below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateName, data.theme, Boolean(edit)]);
+  }, [templateName, data.theme, data.style, Boolean(edit)]);
 
   // Outline changes (an edit committed to our data) re-render through update().
   useEffect(() => {
     const instance = instanceRef.current;
     if (!instance) return;
-    instance.update(toAntvOptions(data.outline, templateName, data.theme));
-  }, [data.outline, templateName, data.theme]);
+    instance.update(toAntvOptions(data.outline, templateName, data.theme, data.style));
+  }, [data.outline, templateName, data.theme, data.style]);
 
   return (
     <div

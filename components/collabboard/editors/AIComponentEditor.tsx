@@ -28,6 +28,7 @@ import { familyForSubtype, type PictureFamily } from '@/lib/ai/pictureFamilies';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
+import type { VisualStyle } from '@/lib/ai/visualStyle';
 import OutlineTextEditor from './OutlineTextEditor';
 import OutlineSuggestionsPanel from './OutlineSuggestionsPanel';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
@@ -140,6 +141,15 @@ const THEMED_SUBTYPES: ReadonlySet<string> = new Set(['infographic', 'mindmap', 
 function applyThemeToData<T extends { subtype: string }>(data: T, theme: VisualThemeId): T {
   if (!THEMED_SUBTYPES.has(data.subtype) || theme === 'classic') return data;
   return { ...data, theme } as T;
+}
+
+/**
+ * PATCH-253. Stamps the chosen colour / font style onto a themed diagram's
+ * envelope data. No style (or an unthemed design) leaves it byte-identical.
+ */
+function applyStyleToData<T extends { subtype: string }>(data: T, style?: VisualStyle): T {
+  if (!style || !THEMED_SUBTYPES.has(data.subtype)) return data;
+  return { ...data, style } as T;
 }
 
 function inferInitialSelection(initialContent?: unknown): {
@@ -365,6 +375,8 @@ export default function AIComponentEditor({
   const [activeVisualHint, setActiveVisualHint] = useState<string | undefined>(undefined);
   // PATCH-238. The chosen colour theme; local to the picture, saved with it.
   const [visualTheme, setVisualTheme] = useState<VisualThemeId>('classic');
+  // PATCH-253. Custom background / element colours / fonts, saved with it.
+  const [visualStyle, setVisualStyle] = useState<VisualStyle | undefined>(undefined);
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
   // PATCH-248. A Diagram subtype button filters the designs locally (no fetch).
   const [activeFamily, setActiveFamily] = useState<PictureFamily | null>(null);
@@ -413,6 +425,7 @@ export default function AIComponentEditor({
     setActiveFamilyDescription(null);
     setChartMakeSubtype(null);
     setVisualTheme('classic');
+    setVisualStyle(undefined);
     setSelectedOptionKey(null);
     setOutlineGeneratedBy(null);
     setOutlineCreatedAt(null);
@@ -444,6 +457,8 @@ export default function AIComponentEditor({
       setActiveOutline(storedInfographic.outline);
       // PATCH-238: preselect the stored theme (unknown/absent -> classic).
       setVisualTheme(themeById(storedInfographic.theme).id);
+      // PATCH-253: preselect the stored style so the previews and panel show it.
+      setVisualStyle(storedInfographic.style);
       // PATCH-241. An AntV template's suggestion key already carries `antv:`.
       setSelectedOptionKey(
         storedInfographic.template.startsWith('antv:')
@@ -516,7 +531,7 @@ export default function AIComponentEditor({
   // PATCH-238: stamp the chosen theme onto every themed option (local, no AI).
   const themedOptions = outlineOptions.map((option) => ({
     ...option,
-    envelopeData: applyThemeToData(option.envelopeData, visualTheme),
+    envelopeData: applyStyleToData(applyThemeToData(option.envelopeData, visualTheme), visualStyle),
   }));
   const displayOptions = directionOptions(themedOptions);
 
@@ -525,7 +540,7 @@ export default function AIComponentEditor({
   const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => ({
     mode: 'diagram',
     version: 1,
-    data: applyThemeToData(option.envelopeData, visualTheme),
+    data: applyStyleToData(applyThemeToData(option.envelopeData, visualTheme), visualStyle),
     meta: {
       renderer: option.envelopeData.renderer,
       subtype: option.envelopeData.subtype,
@@ -694,6 +709,13 @@ export default function AIComponentEditor({
     setChartMakeSubtype(chartSubtype);
     setShowOptions(true);
     void generate({ estimateValues: true });
+  };
+
+  // PATCH-253. Picking a preset theme clears any custom background / colours /
+  // fonts, so the two panel sections never fight.
+  const changeTheme = (id: VisualThemeId) => {
+    setVisualTheme(id);
+    setVisualStyle(undefined);
   };
 
   const generate = async (
@@ -1464,7 +1486,9 @@ export default function AIComponentEditor({
                   onFlowDirectionChange={setFlowDirection}
                   onApplyCustomize={(options) => { void generate(options); }}
                   theme={visualTheme}
-                  onThemeChange={setVisualTheme}
+                  onThemeChange={changeTheme}
+                  visualStyle={visualStyle}
+                  onVisualStyleChange={setVisualStyle}
                   familyFilter={activeFamily}
                   familyLabel={activeFamilyLabel}
                   onShowAll={showAllDesigns}

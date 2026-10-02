@@ -19,6 +19,7 @@ import type {
 import { isKnownAntvTemplate } from './antv/catalog';
 import { parseOutline } from './outline';
 import { VISUAL_THEMES, type VisualThemeId } from './visualThemes';
+import { sanitizeVisualStyle } from './visualStyle';
 
 /**
  * PATCH-238. An optional colour theme. A known id is kept; an unknown string is
@@ -30,6 +31,13 @@ const ThemeSchema = z
   .transform((value): VisualThemeId | undefined =>
     value && Object.prototype.hasOwnProperty.call(VISUAL_THEMES, value) ? (value as VisualThemeId) : undefined,
   );
+
+/**
+ * PATCH-253. An optional, lenient per-picture visual style. Only real `#rrggbb`
+ * colours and known system fonts survive; an entirely invalid style becomes
+ * undefined rather than rejecting the post.
+ */
+const StyleSchema = z.unknown().optional().transform(sanitizeVisualStyle);
 
 const LessonBoardSectionSchema = z.object({
   title: z.string().min(1),
@@ -140,6 +148,7 @@ export const MindmapDiagramSchema: z.ZodType<MindmapDiagramData> = z.object({
   explanation: z.string().optional(),
   tree: MindmapTreeSchema.optional(),
   theme: ThemeSchema,
+  style: StyleSchema,
 });
 
 export const PieChartDiagramSchema: z.ZodType<PieChartDiagramData> = z.object({
@@ -167,6 +176,7 @@ export const TimelineDiagramSchema: z.ZodType<TimelineDiagramData> = z.object({
   renderer: z.literal('timeline'),
   items: z.array(TimelineItemSchema).min(1),
   theme: ThemeSchema,
+  style: StyleSchema,
 });
 
 export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.object({
@@ -176,6 +186,7 @@ export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.objec
   renderer: z.literal('comparison'),
   columns: z.array(ComparisonColumnSchema).min(2),
   theme: ThemeSchema,
+  style: StyleSchema,
 });
 
 /**
@@ -221,6 +232,7 @@ export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = z.obj
   }),
   explanation: z.string().optional(),
   theme: ThemeSchema,
+  style: StyleSchema,
 });
 
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({
