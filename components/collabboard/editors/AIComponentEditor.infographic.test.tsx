@@ -147,10 +147,11 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     expect(tiles).not.toBeNull();
     // The whole panel does NOT scroll; only the tiles area does.
     expect(panel.className).toContain('overflow-hidden');
-    expect(tiles.className).toContain('overflow-auto');
-    // The preview is a sibling BEFORE the tiles, so it stays put above them.
+    expect(tiles.className).toContain('overflow-y-auto');
+    // PATCH-252: the tiles live in the right-hand side panel, apart from the
+    // preview, so the picture keeps the full height of the preview column.
     expect(tiles.contains(preview)).toBe(false);
-    expect(preview.compareDocumentPosition(tiles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(c.querySelector('[data-ai-side-panel="designs"]')!.contains(tiles)).toBe(true);
   });
 
   it('PATCH-237: Edit text changes the outline with NO fetch', async () => {
@@ -225,13 +226,16 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     expect(first.textContent).toContain('Best match');
   });
 
-  it('PATCH-237 Addendum 1: preview is capped at 60% and the tiles keep a 220px min-height', async () => {
+  it('PATCH-237 Addendum 1 / PATCH-252: the preview uses the full height and the tiles keep a 220px min-height', async () => {
     const c = mount(<AIComponentEditor isOpen initialContent={STORED} initialPrompt="p" onClose={() => {}} onSave={() => {}} />);
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
     const preview = c.querySelector('[data-ai-outline-preview]') as HTMLElement;
     const tiles = c.querySelector('[data-ai-outline-tiles]') as HTMLElement;
-    expect(preview.style.maxHeight).toBe('60%');
+    // PATCH-252: the list moved into the side panel, so the preview no longer
+    // shares its height with it and takes the whole preview column instead.
+    expect(preview.className).toContain('flex-1');
+    expect(preview.style.maxHeight).toBe('');
     expect(tiles.style.minHeight).toBe('220px');
   });
 

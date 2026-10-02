@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Palette, Pencil, Shapes, SlidersHorizontal, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { LayoutGrid, Palette, Pencil, Shapes, SlidersHorizontal, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
@@ -50,6 +51,11 @@ interface OutlineSuggestionsPanelProps {
   onMakeChart?: (subtype: 'pie_chart' | 'bar_chart') => void;
   /** PATCH-248. Which chart subtype button was clicked (labels the make-chart button). */
   makeChartSubtype?: 'pie_chart' | 'bar_chart';
+  /** PATCH-252. When given, the side panel portals into this docked host; when
+   *  absent (unit tests, other callers) it renders inline as a right column. */
+  sidePanelHost?: HTMLElement | null;
+  /** PATCH-252. The editor sizes its modal from this open/closed notification. */
+  onSidePanelChange?: (open: boolean) => void;
 }
 
 const TILE_WIDTH = 160;
@@ -106,6 +112,7 @@ function ThumbButton({
   onPointerEnter,
   onPointerLeave,
   note,
+  fullWidth = false,
 }: {
   option: SuggestionOption;
   isSelected: boolean;
@@ -116,11 +123,16 @@ function ThumbButton({
   onPointerEnter?: (event: React.PointerEvent<HTMLButtonElement>) => void;
   onPointerLeave?: (event: React.PointerEvent<HTMLButtonElement>) => void;
   note?: string;
+  /** PATCH-252. `w-full` for the 2-column panel grid instead of a fixed 160px. */
+  fullWidth?: boolean;
 }) {
   // PATCH-236 Addendum 4: a fixed 560px natural render, scaled by tile/560 (≤1).
-  const innerW = TILE_WIDTH - 4;
+  // PATCH-252. A full-width tile measures its own column; a fixed tile keeps 160.
+  const [tileWidth, setTileWidth] = React.useState(TILE_WIDTH);
+  const innerW = Math.max(1, tileWidth - 4);
   const scale = innerW / NATURAL_WIDTH;
   const [aspect, setAspect] = React.useState(1);
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const innerRef = React.useRef<HTMLDivElement | null>(null);
 
   // PATCH-241. The heavy per-tile preview is built only when the tile is on
@@ -146,24 +158,29 @@ function ThumbButton({
 
   React.useLayoutEffect(() => {
     if (!visible) return;
+    if (fullWidth) {
+      const width = buttonRef.current?.offsetWidth;
+      if (width && width > 0) setTileWidth(width);
+    }
     const el = innerRef.current;
     if (!el) return;
     const measuredW = el.offsetWidth || NATURAL_WIDTH;
     const measuredH = el.offsetHeight || NATURAL_WIDTH;
     if (measuredW > 0 && measuredH > 0) setAspect(measuredH / measuredW);
-  }, [envelope, visible]);
+  }, [envelope, visible, fullWidth]);
 
   const tileHeight = Math.min(120, Math.round(NATURAL_WIDTH * aspect * scale));
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       data-ai-outline-option={option.key}
       aria-pressed={isSelected}
       onClick={onSelect}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
-      className={`w-[160px] shrink-0 overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
+      className={`${fullWidth ? 'w-full' : 'w-[160px] shrink-0'} overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
         isSelected ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-200 hover:border-gray-300'
       }`}
     >
@@ -232,7 +249,24 @@ function PreviewToolButton({
   );
 }
 
-type PreviewPopover = 'edit' | 'similar' | 'colours' | 'customize';
+// PATCH-252. One docked side panel; exactly one of these is open at a time.
+type SidePanelId = 'designs' | 'edit' | 'similar' | 'colours' | 'customize';
+
+const SIDE_PANEL_TITLES: Record<SidePanelId, string> = {
+  designs: 'Designs',
+  edit: 'Edit text',
+  similar: 'Similar visuals',
+  colours: 'Colours',
+  customize: 'Customize',
+};
+
+const SIDE_PANEL_ICONS: Record<SidePanelId, React.ReactNode> = {
+  designs: <LayoutGrid size={16} aria-hidden="true" />,
+  edit: <Pencil size={16} aria-hidden="true" />,
+  similar: <Shapes size={16} aria-hidden="true" />,
+  colours: <Palette size={16} aria-hidden="true" />,
+  customize: <SlidersHorizontal size={16} aria-hidden="true" />,
+};
 
 export default function OutlineSuggestionsPanel({
   options,
@@ -251,6 +285,8 @@ export default function OutlineSuggestionsPanel({
   onShowAll,
   onMakeChart,
   makeChartSubtype = 'pie_chart',
+  sidePanelHost = null,
+  onSidePanelChange,
 }: OutlineSuggestionsPanelProps) {
   // PATCH-248. The family filter is controlled by the editor's subtype buttons;
   // the panel only shows the matching designs and keeps the selection valid.
@@ -314,6 +350,9 @@ export default function OutlineSuggestionsPanel({
   const hoverOption = hoverKey ? (visibleOptions.find((option) => option.key === hoverKey) ?? null) : null;
   const previewOption = hoverOption ?? effectiveSelected;
   const previewKey = previewOption?.key ?? null;
+  // PATCH-252. "≈ Estimated" only makes sense on a numeric chart, and only when
+  // the outline's numbers were estimated -- not on a Flow or an unflagged one.
+  const showEstimated = Boolean(outline?.valuesEstimated && previewOption && isNumericChartKey(previewOption.key));
 
   // Keep the editor's selection in step with what the filtered list shows.
   React.useEffect(() => {
@@ -350,10 +389,11 @@ export default function OutlineSuggestionsPanel({
   const suggested = visibleOptions.slice(0, 4);
   const rest = visibleOptions.slice(4);
 
-  // PATCH-251. One toolbar icon at most is open, as a popover under the toolbar.
-  const [openPopover, setOpenPopover] = React.useState<PreviewPopover | null>(null);
+  // PATCH-252. The docked panel is open on Designs by default (the editor
+  // unmounts the panel while loading, so a new Generate reopens it; a theme
+  // change or local re-rank leaves a user-closed panel closed).
+  const [panel, setPanel] = React.useState<SidePanelId | null>(() => (options.length > 0 ? 'designs' : null));
   const toolbarRef = React.useRef<HTMLDivElement | null>(null);
-  const popoverRef = React.useRef<HTMLDivElement | null>(null);
   const [detail, setDetail] = React.useState<'auto' | 'summary' | 'detailed'>('auto');
   const [keepWording, setKeepWording] = React.useState(false);
   const [visualHint, setVisualHint] = React.useState('');
@@ -368,12 +408,18 @@ export default function OutlineSuggestionsPanel({
     ? similarTemplates(selectedAntvName).filter((name) => options.some((option) => option.key === `${ANTV_PREFIX}${name}`))
     : [];
 
-  const togglePopover = (id: PreviewPopover) =>
-    setOpenPopover((current) => (current === id ? null : id));
+  const togglePanel = (id: SidePanelId) =>
+    setPanel((current) => (current === id ? null : id));
+  const closePanel = () => setPanel(null);
 
-  // PATCH-251. Close a popover whose icon is no longer there.
+  // PATCH-252. Report the open/closed state so the editor can size its modal.
   React.useEffect(() => {
-    setOpenPopover((current) => {
+    onSidePanelChange?.(panel !== null);
+  }, [panel, onSidePanelChange]);
+
+  // PATCH-252. Close a panel whose icon is no longer there.
+  React.useEffect(() => {
+    setPanel((current) => {
       if (current === 'edit' && !(outline && onEditOutline)) return null;
       if (current === 'similar' && similarPresent.length === 0) return null;
       if (current === 'colours' && !onThemeChange) return null;
@@ -381,27 +427,15 @@ export default function OutlineSuggestionsPanel({
     });
   }, [outline, onEditOutline, onThemeChange, similarPresent.length]);
 
-  // PATCH-251. Escape closes the open popover.
+  // PATCH-252. Escape closes the docked panel; an outside pointerdown does not.
   React.useEffect(() => {
-    if (!openPopover) return;
+    if (!panel) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpenPopover(null);
+      if (event.key === 'Escape') setPanel(null);
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [openPopover]);
-
-  // PATCH-251. A pointerdown outside the popover and the toolbar closes it.
-  React.useEffect(() => {
-    if (!openPopover) return;
-    const onPointerDown = (event: Event) => {
-      const target = event.target as Node | null;
-      if (target && (popoverRef.current?.contains(target) || toolbarRef.current?.contains(target))) return;
-      setOpenPopover(null);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [openPopover]);
+  }, [panel]);
 
   const byCategory = new Map<string, SuggestionOption[]>();
   for (const option of rest) {
@@ -431,276 +465,85 @@ export default function OutlineSuggestionsPanel({
     </div>
   );
 
-  return (
-    <div data-ai-outline-options="true" className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
-      {/* PATCH-236 Addendum 4: the preview is the fixed top part; only the tiles
-          area scrolls, so selecting a tile never scrolls the preview away. */}
-      {familyEmpty ? (
-        chartNote
-      ) : (
-        <div
-          data-ai-outline-preview="true"
-          data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
-          className="relative min-h-0 shrink-0"
-          style={{ height: '60%', maxHeight: '60%' }}
+  // PATCH-252. The family filter chip lives in the Designs panel header.
+  const familyChip = familyFilter ? (
+    <div
+      data-ai-family-filter="true"
+      className="flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 py-0.5 pl-2 pr-1 text-[11px] font-medium text-gray-700"
+    >
+      <span>{familyLabel ?? PICTURE_FAMILY_LABELS[familyFilter]}</span>
+      <button
+        type="button"
+        data-ai-show-all="true"
+        aria-label="Show all designs"
+        title="Show all designs"
+        onClick={() => onShowAll?.()}
+        className="group relative flex h-5 w-5 items-center justify-center rounded-full text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+      >
+        <X size={12} aria-hidden="true" />
+        <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          Show all designs
+        </span>
+      </button>
+    </div>
+  ) : null;
+
+  // PATCH-252. The designs are a 2-column grid that fills the panel width.
+  const tilesFor = (list: SuggestionOption[], bestFirst: boolean) => (
+    <div className="grid grid-cols-2 gap-2">
+      {list.map((option, index) => (
+        <ThumbButton
+          key={option.key}
+          option={option}
+          best={bestFirst && index === 0}
+          fullWidth
+          isSelected={effectiveSelectedKey === option.key}
+          envelope={envelopeFor(option)}
+          onSelect={() => { clearHover(); onSelect(option.key); }}
+          onPointerEnter={startHover(option.key)}
+          onPointerLeave={clearHover}
+          note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
+        />
+      ))}
+    </div>
+  );
+
+  // PATCH-252. One docked panel; the designs list is the scrolling tiles area.
+  // Portalled into the host the panel fills it absolutely (the host is only as
+  // tall as the row); inline it is a normal flex child bounded by min-h-0. In
+  // both cases the root is a flex column whose body is height-bounded so it can
+  // scroll instead of growing the column with its content.
+  const sidePanel = panel ? (
+    <section
+      data-ai-side-panel={panel}
+      className={`flex w-full flex-col bg-white ${sidePanelHost ? 'absolute inset-0' : 'h-full min-h-0'}`}
+    >
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 px-3">
+        <span className="text-gray-500">{SIDE_PANEL_ICONS[panel]}</span>
+        <span className="text-sm font-semibold text-gray-700">{SIDE_PANEL_TITLES[panel]}</span>
+        {panel === 'designs' && familyChip}
+        <button
+          type="button"
+          data-ai-side-panel-close="true"
+          aria-label="Close panel"
+          title="Close panel"
+          onClick={closePanel}
+          className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600"
         >
-          <PictureStage
-            mode={previewMode}
-            resetKey={`${previewKey ?? ''}:${theme}`}
-            aria-label="Design preview"
-            className="h-full"
-          >
-            {previewOption && (hoverOption ? (
-              <AIContentRenderer content={envelopeFor(hoverOption)} />
-            ) : editableInfographic ? (
-              <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
-            ) : editableMindmap ? (
-              <MindmapTreeRenderer
-                data={editableMindmap}
-                edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
-              />
-            ) : (
-              <AIContentRenderer content={envelopeFor(previewOption)} />
-            ))}
-          </PictureStage>
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
 
-          {/* PATCH-251. The design filter and the estimated note, compact, top-left. */}
-          <div
-            data-ai-preview-chips="true"
-            className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-start gap-1"
-          >
-            {familyFilter && (
-              <div
-                data-ai-family-filter="true"
-                className="flex items-center gap-1 rounded-full border border-gray-200 bg-white/95 py-1 pl-2 pr-1 text-[11px] font-medium text-gray-700 shadow-md backdrop-blur"
-              >
-                <span>{familyLabel ?? PICTURE_FAMILY_LABELS[familyFilter]}</span>
-                <button
-                  type="button"
-                  data-ai-show-all="true"
-                  aria-label="Show all designs"
-                  title="Show all designs"
-                  onClick={() => onShowAll?.()}
-                  className="group relative flex h-5 w-5 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                >
-                  <X size={12} aria-hidden="true" />
-                  <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                    Show all designs
-                  </span>
-                </button>
-              </div>
-            )}
-            {outline?.valuesEstimated && (
-              <div
-                data-ai-values-estimated="true"
-                title="The AI estimated these numbers. Check them under Edit text."
-                className="group relative flex items-center rounded-full border border-gray-200 bg-white/95 px-2 py-1 text-[11px] font-medium text-gray-700 shadow-md backdrop-blur"
-              >
-                <span>≈ Estimated</span>
-                <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                  The AI estimated these numbers. Check them under Edit text.
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* PATCH-251. One icon toolbar top-right; each icon opens its popover. */}
-          <div
-            ref={toolbarRef}
-            data-ai-preview-toolbar="true"
-            className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-gray-200 bg-white/95 px-1.5 py-1 shadow-md backdrop-blur"
-          >
-            {outline && onEditOutline && (
-              <PreviewToolButton
-                label="Edit text"
-                dataAi="data-ai-edit-text-toggle"
-                active={openPopover === 'edit'}
-                onClick={() => togglePopover('edit')}
-              >
-                <Pencil size={16} aria-hidden="true" />
-              </PreviewToolButton>
-            )}
-            {similarPresent.length > 0 && (
-              <PreviewToolButton
-                label="Similar visuals"
-                dataAi="data-ai-similar-toggle"
-                active={openPopover === 'similar'}
-                onClick={() => togglePopover('similar')}
-              >
-                <Shapes size={16} aria-hidden="true" />
-              </PreviewToolButton>
-            )}
-            {onThemeChange && (
-              <PreviewToolButton
-                label="Colours"
-                dataAi="data-ai-colours-toggle"
-                active={openPopover === 'colours'}
-                onClick={() => togglePopover('colours')}
-              >
-                <Palette size={16} aria-hidden="true" />
-              </PreviewToolButton>
-            )}
-            <PreviewToolButton
-              label="Customize"
-              dataAi="data-ai-customize-toggle"
-              active={openPopover === 'customize'}
-              onClick={() => togglePopover('customize')}
-            >
-              <SlidersHorizontal size={16} aria-hidden="true" />
-            </PreviewToolButton>
-          </div>
-
-          {/* PATCH-251. The open popover, anchored under the toolbar. */}
-          {openPopover && (
-            <div
-              ref={popoverRef}
-              data-ai-preview-popover={openPopover}
-              className="absolute right-2 top-11 z-20 overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-xl"
-              style={{ width: 'min(26rem, calc(100% - 1rem))', maxHeight: 'calc(100% - 3.5rem)' }}
-            >
-              {openPopover === 'edit' && outline && onEditOutline && (
-                <OutlineTextEditor outline={outline} onChange={onEditOutline} />
-              )}
-
-              {openPopover === 'similar' && (
-                <div data-ai-similar-row="true" className="flex flex-wrap gap-2">
-                  {similarPresent.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      data-ai-similar-template={name}
-                      onClick={() => onSelect(`${ANTV_PREFIX}${name}`)}
-                      className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                    >
-                      {antvTemplateLabel(name)}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {openPopover === 'colours' && onThemeChange && (
-                <div data-ai-colours="true" className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colours</span>
-                  {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
-                    const swatch = VISUAL_THEMES[id];
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        data-ai-theme={id}
-                        aria-label={swatch.name}
-                        aria-pressed={theme === id}
-                        title={swatch.name}
-                        onClick={() => onThemeChange(id)}
-                        className={`h-5 w-5 rounded-full border ${theme === id ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-300'}`}
-                        style={{
-                          background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-
-              {openPopover === 'customize' && (
-                <div data-ai-customize="true" className="space-y-3">
-                  {onFlowDirectionChange && (
-                    <div className="flex items-center gap-1 text-[11px] text-gray-600">
-                      <span>Flow</span>
-                      <select
-                        data-ai-flow-direction="true"
-                        value={flowDirection}
-                        onChange={(e) => onFlowDirectionChange(e.target.value as 'LR' | 'TD')}
-                        className="rounded border border-gray-300 px-1 py-0.5 text-[11px]"
-                      >
-                        <option value="LR">Left to right</option>
-                        <option value="TD">Top to bottom</option>
-                      </select>
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="mb-1 text-[11px] font-medium text-gray-600">Detail</div>
-                    <div className="inline-flex rounded-lg border border-gray-300">
-                      {(['auto', 'summary', 'detailed'] as const).map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          data-ai-customize-detail={value}
-                          onClick={() => setDetail(value)}
-                          className={`px-3 py-1 text-xs capitalize ${detail === value ? 'bg-purple-100 text-purple-700' : 'text-gray-600'}`}
-                        >
-                          {value}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <label className="flex items-center gap-2 text-xs text-gray-700">
-                    <input
-                      type="checkbox"
-                      data-ai-customize-keep-wording="true"
-                      checked={keepWording}
-                      onChange={(e) => setKeepWording(e.target.checked)}
-                    />
-                    Keep my wording
-                  </label>
-
-                  <div>
-                    <div className="mb-1 text-[11px] font-medium text-gray-600">Make it a…</div>
-                    <input
-                      type="text"
-                      data-ai-customize-hint="true"
-                      value={visualHint}
-                      maxLength={60}
-                      placeholder="e.g. pyramid, cycle, timeline"
-                      onChange={(e) => setVisualHint(e.target.value)}
-                      className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    data-ai-customize-apply="true"
-                    onClick={() => {
-                      const options = {
-                        detail,
-                        ...(keepWording ? { keepWording: true } : {}),
-                        ...(visualHint.trim() ? { visualHint: visualHint.trim() } : {}),
-                      };
-                      onApplyCustomize?.(options);
-                      setOpenPopover(null);
-                    }}
-                    className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
-                  >
-                    Apply
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!familyEmpty && (
-        <div ref={tilesRef} data-ai-outline-tiles="true" className="min-h-0 flex-1 overflow-auto pb-4" style={{ minHeight: 220 }}>
+      {panel === 'designs' ? (
+        <div
+          ref={tilesRef}
+          data-ai-outline-tiles="true"
+          className="min-h-0 flex-1 overflow-y-auto p-4 pb-4"
+          style={{ minHeight: 220 }}
+        >
           {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
-          <div className="flex flex-wrap gap-2">
-            {suggested.map((option, index) => (
-              <ThumbButton
-                key={option.key}
-                option={option}
-                best={index === 0}
-                isSelected={effectiveSelectedKey === option.key}
-                envelope={envelopeFor(option)}
-                onSelect={() => { clearHover(); onSelect(option.key); }}
-                onPointerEnter={startHover(option.key)}
-                onPointerLeave={clearHover}
-                note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-              />
-            ))}
-          </div>
+          {tilesFor(suggested, true)}
 
           {[...byCategory.entries()].map(([category, designs]) => {
             const expanded = expandedCategories.has(category);
@@ -708,21 +551,7 @@ export default function OutlineSuggestionsPanel({
             return (
               <div key={category} className="mt-3">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
-                <div className="flex flex-wrap gap-2">
-                  {shown.map((option) => (
-                    <ThumbButton
-                      key={option.key}
-                      option={option}
-                      best={false}
-                      isSelected={effectiveSelectedKey === option.key}
-                      envelope={envelopeFor(option)}
-                      onSelect={() => { clearHover(); onSelect(option.key); }}
-                      onPointerEnter={startHover(option.key)}
-                      onPointerLeave={clearHover}
-                      note={option.key === 'flow' && theme !== 'classic' ? 'keeps its colours' : undefined}
-                    />
-                  ))}
-                </div>
+                {tilesFor(shown, false)}
                 {!expanded && designs.length > MAX_PER_CATEGORY && (
                   <button
                     type="button"
@@ -737,7 +566,235 @@ export default function OutlineSuggestionsPanel({
             );
           })}
         </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {panel === 'edit' && outline && onEditOutline && (
+            <OutlineTextEditor outline={outline} onChange={onEditOutline} />
+          )}
+
+          {panel === 'similar' && (
+            <div data-ai-similar-row="true" className="flex flex-wrap gap-2">
+              {similarPresent.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  data-ai-similar-template={name}
+                  onClick={() => onSelect(`${ANTV_PREFIX}${name}`)}
+                  className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  {antvTemplateLabel(name)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {panel === 'colours' && onThemeChange && (
+            <div data-ai-colours="true" className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colours</span>
+              {(Object.keys(VISUAL_THEMES) as VisualThemeId[]).map((id) => {
+                const swatch = VISUAL_THEMES[id];
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    data-ai-theme={id}
+                    aria-label={swatch.name}
+                    aria-pressed={theme === id}
+                    title={swatch.name}
+                    onClick={() => onThemeChange(id)}
+                    className={`h-5 w-5 rounded-full border ${theme === id ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-300'}`}
+                    style={{
+                      background: `conic-gradient(${swatch.background} 0 33.33%, ${swatch.palette[0].stroke} 33.33% 66.66%, ${swatch.palette[1].stroke} 66.66% 100%)`,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {panel === 'customize' && (
+            <div data-ai-customize="true" className="space-y-3">
+              {onFlowDirectionChange && (
+                <div className="flex items-center gap-1 text-[11px] text-gray-600">
+                  <span>Flow</span>
+                  <select
+                    data-ai-flow-direction="true"
+                    value={flowDirection}
+                    onChange={(e) => onFlowDirectionChange(e.target.value as 'LR' | 'TD')}
+                    className="rounded border border-gray-300 px-1 py-0.5 text-[11px]"
+                  >
+                    <option value="LR">Left to right</option>
+                    <option value="TD">Top to bottom</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <div className="mb-1 text-[11px] font-medium text-gray-600">Detail</div>
+                <div className="inline-flex rounded-lg border border-gray-300">
+                  {(['auto', 'summary', 'detailed'] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      data-ai-customize-detail={value}
+                      onClick={() => setDetail(value)}
+                      className={`px-3 py-1 text-xs capitalize ${detail === value ? 'bg-purple-100 text-purple-700' : 'text-gray-600'}`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  data-ai-customize-keep-wording="true"
+                  checked={keepWording}
+                  onChange={(e) => setKeepWording(e.target.checked)}
+                />
+                Keep my wording
+              </label>
+
+              <div>
+                <div className="mb-1 text-[11px] font-medium text-gray-600">Make it a…</div>
+                <input
+                  type="text"
+                  data-ai-customize-hint="true"
+                  value={visualHint}
+                  maxLength={60}
+                  placeholder="e.g. pyramid, cycle, timeline"
+                  onChange={(e) => setVisualHint(e.target.value)}
+                  className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                />
+              </div>
+
+              <button
+                type="button"
+                data-ai-customize-apply="true"
+                onClick={() => {
+                  const options = {
+                    detail,
+                    ...(keepWording ? { keepWording: true } : {}),
+                    ...(visualHint.trim() ? { visualHint: visualHint.trim() } : {}),
+                  };
+                  onApplyCustomize?.(options);
+                }}
+                className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+        </div>
       )}
+    </section>
+  ) : null;
+
+  return (
+    <div data-ai-outline-options="true" className="flex h-full w-full flex-row gap-3 overflow-hidden p-4">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {!familyEmpty && (
+          <div
+            data-ai-outline-preview="true"
+            data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
+            className="relative min-h-0 flex-1"
+          >
+            <PictureStage
+              mode={previewMode}
+              resetKey={`${previewKey ?? ''}:${theme}`}
+              aria-label="Design preview"
+              className="h-full"
+            >
+              {previewOption && (hoverOption ? (
+                <AIContentRenderer content={envelopeFor(hoverOption)} />
+              ) : editableInfographic ? (
+                <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
+              ) : editableMindmap ? (
+                <MindmapTreeRenderer
+                  data={editableMindmap}
+                  edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
+                />
+              ) : (
+                <AIContentRenderer content={envelopeFor(previewOption)} />
+              ))}
+            </PictureStage>
+
+            {/* PATCH-252. One icon toolbar top-right; each icon opens its panel. */}
+            <div
+              ref={toolbarRef}
+              data-ai-preview-toolbar="true"
+              className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-gray-200 bg-white/95 px-1.5 py-1 shadow-md backdrop-blur"
+            >
+              {/* PATCH-252. The estimated label sits left of the icons, only on a
+                  numeric chart whose outline estimated its numbers. */}
+              {showEstimated && (
+                <div
+                  data-ai-values-estimated="true"
+                  title="The AI estimated these numbers. Check them under Edit text."
+                  className="group relative mr-0.5 flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+                >
+                  <span>≈ Estimated</span>
+                  <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    The AI estimated these numbers. Check them under Edit text.
+                  </span>
+                </div>
+              )}
+              <PreviewToolButton
+                label="Designs"
+                dataAi="data-ai-designs-toggle"
+                active={panel === 'designs'}
+                onClick={() => togglePanel('designs')}
+              >
+                <LayoutGrid size={16} aria-hidden="true" />
+              </PreviewToolButton>
+              {outline && onEditOutline && (
+                <PreviewToolButton
+                  label="Edit text"
+                  dataAi="data-ai-edit-text-toggle"
+                  active={panel === 'edit'}
+                  onClick={() => togglePanel('edit')}
+                >
+                  <Pencil size={16} aria-hidden="true" />
+                </PreviewToolButton>
+              )}
+              {similarPresent.length > 0 && (
+                <PreviewToolButton
+                  label="Similar visuals"
+                  dataAi="data-ai-similar-toggle"
+                  active={panel === 'similar'}
+                  onClick={() => togglePanel('similar')}
+                >
+                  <Shapes size={16} aria-hidden="true" />
+                </PreviewToolButton>
+              )}
+              {onThemeChange && (
+                <PreviewToolButton
+                  label="Colours"
+                  dataAi="data-ai-colours-toggle"
+                  active={panel === 'colours'}
+                  onClick={() => togglePanel('colours')}
+                >
+                  <Palette size={16} aria-hidden="true" />
+                </PreviewToolButton>
+              )}
+              <PreviewToolButton
+                label="Customize"
+                dataAi="data-ai-customize-toggle"
+                active={panel === 'customize'}
+                onClick={() => togglePanel('customize')}
+              >
+                <SlidersHorizontal size={16} aria-hidden="true" />
+              </PreviewToolButton>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!sidePanelHost && sidePanel && (
+        <div className="flex h-full min-h-0 w-[340px] shrink-0 flex-col border-l border-gray-200 bg-white">{sidePanel}</div>
+      )}
+      {sidePanelHost && sidePanel && createPortal(sidePanel, sidePanelHost)}
     </div>
   );
 }

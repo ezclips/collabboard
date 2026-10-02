@@ -108,10 +108,9 @@ describe('PATCH-243 OutlineSuggestionsPanel editable tree', () => {
     const preview = c.querySelector('[data-ai-outline-preview]') as HTMLElement;
     expect(c.querySelector('[data-ai-outline-preview] [data-picture-zoom-value]')).not.toBeNull();
     expect(c.querySelector('[data-picture-mode="css"]')).not.toBeNull();
-    // The preview has a definite height so the stage fills a real box.
-    // PATCH-251: the preview grows from 55% to 60%.
-    expect(preview.style.height).toBe('60%');
-    expect(preview.style.maxHeight).toBe('60%');
+    // The preview takes the whole panel height so the stage fills a real box.
+    // PATCH-252: the docked list no longer shares its height with the preview.
+    expect(preview.className).toContain('flex-1');
   });
 
   it('adds a right-side branch from the root + and nothing else moves', () => {

@@ -476,6 +476,11 @@ export default function AIComponentEditor({
 
   const isLoading = stage === 'classifying' || stage === 'generating' || stage === 'rendering';
 
+  // PATCH-252. The docked side panel's host element (callback ref) and whether
+  // it is open, so the modal can widen while the panel is docked on the right.
+  const [sidePanelHost, setSidePanelHost] = useState<HTMLDivElement | null>(null);
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
+
   // Read off the content in hand -- a fresh response, or a saved card that
   // recorded its own. Null while nothing has been generated, and the renderer
   // must then make no claim: the chooser above says what WILL run, which is a
@@ -1109,7 +1114,7 @@ export default function AIComponentEditor({
           </button>
           <div
             ref={modalRef}
-            className="flex max-h-[90vh] w-[980px] max-w-[94vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200"
+            className={`flex max-h-[90vh] ${sidePanelOpen ? 'w-[1320px]' : 'w-[980px]'} max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition-[width] animate-in fade-in zoom-in duration-200`}
           >
         {/* Top strip -- Title lives inside it, same as the canvas card's own
             top strip, matching every other post type's edit window. AI
@@ -1465,6 +1470,8 @@ export default function AIComponentEditor({
                   onShowAll={showAllDesigns}
                   onMakeChart={makeChart}
                   makeChartSubtype={chartMakeSubtype ?? undefined}
+                  sidePanelHost={sidePanelHost}
+                  onSidePanelChange={setSidePanelOpen}
                 />
               )}
 
@@ -1533,6 +1540,17 @@ export default function AIComponentEditor({
               </button>
             </div>
           </div>
+
+          {/* PATCH-252. The docked panel host is a sibling of the preview column
+              in the main row, so it sits to the RIGHT of the picture, not below
+              it inside the dashed box; the panel portals into it. */}
+          {sidePanelOpen && (
+            <div
+              ref={setSidePanelHost}
+              data-ai-side-panel-host="true"
+              className="relative w-[340px] shrink-0 border-l border-gray-200 bg-white"
+            />
+          )}
         </div>
       </div>
       </div>
