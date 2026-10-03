@@ -5,11 +5,10 @@ import { createPortal } from 'react-dom';
 import { LayoutGrid, Palette, Pencil, Plus, Shapes, SlidersHorizontal, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
-import { DiagramKickerReadOnly } from '@/components/ai/renderers/DiagramKicker';
 import AntvAddPanel from '@/components/ai/renderers/AntvAddPanel';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
-import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/PictureStage';
+import type { PictureStageMode } from '@/components/ai/renderers/PictureStage';
 import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import { appendAddition, createAddition, type AdditionKind } from '@/lib/ai/antv/additions';
@@ -22,6 +21,7 @@ import type { VisualStyle } from '@/lib/ai/visualStyle';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import type { VisualIconName } from '@/lib/ai/visualIcons';
 import ColoursFontsPanel from './ColoursFontsPanel';
+import OutlinePreviewLayers from './OutlinePreviewLayers';
 import OutlineTextEditor from './OutlineTextEditor';
 import { PreviewToolButton, SuggestionThumbButton, type SuggestionOption } from './SuggestionThumbButton';
 /**
@@ -235,7 +235,6 @@ export default function OutlineSuggestionsPanel({
 
   const hoverOption = hoverKey ? (visibleOptions.find((option) => option.key === hoverKey) ?? null) : null;
   const previewOption = hoverOption ?? effectiveSelected;
-  const previewKey = previewOption?.key ?? null;
   // PATCH-252. "≈ Estimated" only makes sense on a numeric chart, and only when
   // the outline's numbers were estimated -- not on a Flow or an unflagged one.
   const showEstimated = Boolean(outline?.valuesEstimated && previewOption && isNumericChartKey(previewOption.key));
@@ -259,6 +258,13 @@ export default function OutlineSuggestionsPanel({
     effectiveSelected && 'template' in effectiveSelected.envelopeData ? effectiveSelected.envelopeData.template : undefined;
   const previewMode: PictureStageMode =
     selectedTemplate && isAntvTemplate(selectedTemplate) ? 'antv' : 'css';
+  // PATCH-271. The hover layer's backend follows the HOVERED design, not the
+  // selected one, so an AntV tile hovered over a native picture (or vice versa)
+  // draws with the right stage.
+  const hoverTemplate =
+    hoverOption && 'template' in hoverOption.envelopeData ? hoverOption.envelopeData.template : undefined;
+  const hoverMode: PictureStageMode =
+    hoverTemplate && isAntvTemplate(hoverTemplate) ? 'antv' : 'css';
   // PATCH-240. The selected infographic edits on the picture itself, bound to the
   // same active outline as "Edit text" (no AI call). Every other option keeps the
   // plain preview.
@@ -663,27 +669,30 @@ export default function OutlineSuggestionsPanel({
             data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
             className={`relative min-h-0 flex-1 ${loading && options.length > 0 ? 'pointer-events-none opacity-50' : ''}`}
           >
-            <PictureStage
-              mode={previewMode}
-              resetKey={`${previewKey ?? ''}:${theme}`}
-              aria-label="Design preview"
-              className="h-full"
+            <OutlinePreviewLayers
+              selectedMode={previewMode}
+              selectedResetKey={`${effectiveSelectedKey ?? ''}:${theme}`}
+              hover={
+                hoverOption
+                  ? {
+                      mode: hoverMode,
+                      resetKey: `${hoverOption.key}:${theme}`,
+                      content: envelopeFor(hoverOption),
+                    }
+                  : null
+              }
             >
-              {previewOption && (hoverOption ? (
-                <DiagramKickerReadOnly>
-                  <AIContentRenderer content={envelopeFor(hoverOption)} />
-                </DiagramKickerReadOnly>
-              ) : editableInfographic ? (
+              {editableInfographic ? (
                 <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
               ) : editableMindmap ? (
                 <MindmapTreeRenderer
                   data={editableMindmap}
                   edit={{ onChange: (next: MindmapTree) => onEditOutline!(outlineFromMindmapTree(outline!, next)) }}
                 />
-              ) : (
+              ) : previewOption ? (
                 <AIContentRenderer content={envelopeFor(previewOption)} />
-              ))}
-            </PictureStage>
+              ) : null}
+            </OutlinePreviewLayers>
 
             {/* PATCH-252. One icon toolbar top-right; each icon opens its panel. */}
             <div
