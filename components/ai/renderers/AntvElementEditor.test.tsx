@@ -1275,3 +1275,60 @@ describe('PATCH-263 Addendum 3 popover clamp', () => {
     expect(left).toBeCloseTo(25, 3);
   });
 });
+
+// ── PATCH-265: Escape priority (deselect) ─────────────────────────────────────
+
+function keydownOn(target: EventTarget, key: string): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  act(() => { target.dispatchEvent(event); });
+  return event;
+}
+
+describe('PATCH-265 AntvElementEditor Escape priority', () => {
+  it('Escape with a selection is defaultPrevented and a document listener sees it prevented', () => {
+    mountEditor(vi.fn());
+    selectTitle();
+    expect(selectedAttr()).toBe('title#0');
+
+    const seen: boolean[] = [];
+    const listener = (event: KeyboardEvent) => seen.push(event.defaultPrevented);
+    document.addEventListener('keydown', listener);
+    const event = keydownOn(document.body, 'Escape');
+    document.removeEventListener('keydown', listener);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(seen).toEqual([true]);
+    expect(selectedAttr()).toBe('');
+  });
+
+  it('Escape with the popover open closes the popover, keeps the selection and is prevented', () => {
+    mountEditor(vi.fn());
+    selectShape();
+    openColour();
+    expect(colourPopover()).not.toBeNull();
+    expect(selectedAttr()).toBe('shape@0#0');
+
+    const first = keydownOn(document.body, 'Escape');
+    expect(first.defaultPrevented).toBe(true);
+    expect(colourPopover()).toBeNull();
+    expect(selectedAttr()).toBe('shape@0#0');
+
+    // A second Escape now deselects.
+    const second = keydownOn(document.body, 'Escape');
+    expect(second.defaultPrevented).toBe(true);
+    expect(selectedAttr()).toBe('');
+  });
+
+  it('Escape with nothing selected is not prevented', () => {
+    mountEditor(vi.fn());
+
+    const seen: boolean[] = [];
+    const listener = (event: KeyboardEvent) => seen.push(event.defaultPrevented);
+    document.addEventListener('keydown', listener);
+    const event = keydownOn(document.body, 'Escape');
+    document.removeEventListener('keydown', listener);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(seen).toEqual([false]);
+  });
+});

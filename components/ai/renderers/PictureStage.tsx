@@ -261,27 +261,63 @@ function PictureStage({
     setPanValue({ x: 0, y: 0 });
   }, [applyBox, setBoxValue, setPanValue, setZoomValue]);
 
+  // PATCH-265. A stage resize (a side panel opening/closing, a window resize,
+  // the modal changing width) must not throw away a user's zoom/pan. A fitted
+  // view re-fits as before; a user-chosen view keeps its on-screen scale and the
+  // content point that was at the old stage centre at the new stage centre.
+  const keepViewOnResize = useCallback(() => {
+    const prev = sizesRef.current;
+    measure();
+    if (atFitRef.current) {
+      fit();
+      return;
+    }
+    const next = sizesRef.current;
+    if (modeRef.current === 'antv') {
+      const current = boxRef.current;
+      const scale = current && prev.stageW > 0 ? prev.stageW / current.width : 0;
+      if (!current || !(scale > 0) || !(next.stageW > 0) || !(next.stageH > 0)) {
+        fit();
+        return;
+      }
+      const width = next.stageW / scale;
+      const height = next.stageH / scale;
+      const centreX = current.x + current.width / 2;
+      const centreY = current.y + current.height / 2;
+      const box = { x: centreX - width / 2, y: centreY - height / 2, width, height };
+      setBoxValue(box);
+      applyBox(box);
+      return;
+    }
+    if (!(prev.stageW > 0) || !(prev.stageH > 0)) {
+      fit();
+      return;
+    }
+    // CSS: keep the zoom; the fitted picture is always centred, so pan only
+    // shifts if the measured picture size itself changed.
+    const zoom = zoomRef.current;
+    const pan = panRef.current;
+    setPanValue({
+      x: pan.x + ((next.pictureW - prev.pictureW) * zoom) / 2,
+      y: pan.y + ((next.pictureH - prev.pictureH) * zoom) / 2,
+    });
+  }, [applyBox, fit, measure, setBoxValue, setPanValue]);
+
   // Keep Fit correct when the box resizes.
   useLayoutEffect(() => {
     measure();
-    const onResize = () => {
-      measure();
-      fit();
-    };
+    const onResize = () => keepViewOnResize();
     window.addEventListener('resize', onResize);
     const observer =
       typeof ResizeObserver === 'undefined'
         ? null
-        : new ResizeObserver(() => {
-            measure();
-            fit();
-          });
+        : new ResizeObserver(() => keepViewOnResize());
     if (observer && stageRef.current) observer.observe(stageRef.current);
     return () => {
       window.removeEventListener('resize', onResize);
       observer?.disconnect();
     };
-  }, [measure, fit]);
+  }, [measure, keepViewOnResize]);
 
   // Reset to Fit when the design/theme changes.
   useEffect(() => {
@@ -369,6 +405,7 @@ function PictureStage({
       const nextOriginY = point.y - contentY * nextZoom;
       const nextBaseX = (s.stageW - s.pictureW * nextZoom) / 2;
       const nextBaseY = (s.stageH - s.pictureH * nextZoom) / 2;
+      atFitRef.current = false;
       setZoomValue(nextZoom);
       setPanValue({ x: nextOriginX - nextBaseX, y: nextOriginY - nextBaseY });
     },
@@ -481,6 +518,7 @@ function PictureStage({
         setBox(next);
         applyBox(next);
       } else {
+        atFitRef.current = false;
         setPanValue({ x: drag.startPan.x + dx, y: drag.startPan.y + dy });
       }
     };

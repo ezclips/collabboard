@@ -732,3 +732,117 @@ describe('PATCH-245 PictureStage', () => {
     });
   });
 });
+
+// ── PATCH-265: a stage resize keeps the user's zoom and position ─────────────
+
+describe('PATCH-265 PictureStage resize keeps a user-chosen view', () => {
+  it('antv mode: resizing the stage keeps the content-to-screen scale, the centre point and the zoom display', () => {
+    const { container } = mount(
+      <PictureStage mode="antv">
+        <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+      </PictureStage>,
+    );
+    const svg = container.querySelector('svg') as SVGSVGElement;
+    svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+    setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+    expect(zoomValue(container)).toBe(100);
+
+    wheel(container.querySelector('[data-picture-stage]') as Element, {
+      ctrlKey: true, deltaY: -100, clientX: 500, clientY: 250,
+    });
+    const zoomed = viewBoxOf(container);
+    const zoomedDisplay = zoomValue(container);
+    expect(zoomedDisplay).toBeGreaterThan(100);
+    const oldScale = 1000 / zoomed.width;
+    const oldCentre = { x: zoomed.x + zoomed.width / 2, y: zoomed.y + zoomed.height / 2 };
+
+    // Open a side panel: the stage widens.
+    setup(container, { stageW: 1200, stageH: 500, pictureW: 1000, pictureH: 500 });
+
+    const after = viewBoxOf(container);
+    // Same content-to-screen scale on both axes.
+    expect(1200 / after.width).toBeCloseTo(oldScale, 5);
+    expect(500 / after.height).toBeCloseTo(oldScale, 5);
+    // Same content point at the stage centre.
+    expect(after.x + after.width / 2).toBeCloseTo(oldCentre.x, 5);
+    expect(after.y + after.height / 2).toBeCloseTo(oldCentre.y, 5);
+    // The zoom display does not jump.
+    expect(zoomValue(container)).toBe(zoomedDisplay);
+  });
+
+  it('antv mode: after Fit, a stage resize re-fits as before', () => {
+    const { container } = mount(
+      <PictureStage mode="antv">
+        <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+      </PictureStage>,
+    );
+    const svg = container.querySelector('svg') as SVGSVGElement;
+    svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+    setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+
+    wheel(container.querySelector('[data-picture-stage]') as Element, {
+      ctrlKey: true, deltaY: -100, clientX: 500, clientY: 250,
+    });
+    expect(zoomValue(container)).toBeGreaterThan(100);
+    click(container.querySelector('[data-picture-zoom-fit]') as Element);
+    expect(zoomValue(container)).toBe(100);
+
+    setup(container, { stageW: 1200, stageH: 500, pictureW: 1000, pictureH: 500 });
+
+    // Fit of the natural 1000x500 into 1200x500 is 1: the box fills the stage.
+    const after = viewBoxOf(container);
+    expect(after.width).toBeCloseTo(1200, 5);
+    expect(after.height).toBeCloseTo(500, 5);
+    expect(after.x + after.width / 2).toBeCloseTo(500, 5);
+    expect(zoomValue(container)).toBe(100);
+  });
+
+  it('css mode: resizing the stage keeps the zoom, the pan and the centre point', () => {
+    const { container } = mount(<PictureStage>picture</PictureStage>);
+    setup(container, { stageW: 800, stageH: 600, pictureW: 800, pictureH: 300 });
+    click(container.querySelector('[data-picture-zoom-in]') as Element);
+
+    const stage = container.querySelector('[data-picture-stage]') as Element;
+    pointer(stage, 'pointerdown', 100, 100);
+    pointer(window, 'pointermove', 150, 130);
+    pointer(window, 'pointerup', 150, 130);
+
+    const before = parseTransform(container)!;
+    expect(before.zoom).toBeGreaterThan(1);
+    const oldCentre = { x: 400, y: 300 };
+    const contentAtOldCentre = {
+      x: (oldCentre.x - before.x) / before.zoom,
+      y: (oldCentre.y - before.y) / before.zoom,
+    };
+
+    setup(container, { stageW: 1000, stageH: 700, pictureW: 800, pictureH: 300 });
+
+    const after = parseTransform(container)!;
+    expect(after.zoom).toBeCloseTo(before.zoom, 6);
+    const screenAfter = {
+      x: after.x + contentAtOldCentre.x * after.zoom,
+      y: after.y + contentAtOldCentre.y * after.zoom,
+    };
+    expect(screenAfter.x).toBeCloseTo(500, 4);
+    expect(screenAfter.y).toBeCloseTo(350, 4);
+  });
+
+  it('css mode: after Fit, a stage resize re-fits as before', () => {
+    const { container } = mount(<PictureStage>picture</PictureStage>);
+    setup(container, { stageW: 800, stageH: 600, pictureW: 800, pictureH: 300 });
+    click(container.querySelector('[data-picture-zoom-in]') as Element);
+    click(container.querySelector('[data-picture-zoom-in]') as Element);
+    expect(zoomValue(container)).toBeGreaterThan(100);
+
+    click(container.querySelector('[data-picture-zoom-fit]') as Element);
+    expect(zoomValue(container)).toBe(100);
+
+    // Fit of 800x300 into 1000x700 is min(1.25, 2.333) = 1.25.
+    setup(container, { stageW: 1000, stageH: 700, pictureW: 800, pictureH: 300 });
+    expect(zoomValue(container)).toBe(125);
+    const after = parseTransform(container)!;
+    // Re-centred on the new stage (pan is 0), not left at the old view.
+    expect(after.x).toBe(0);
+    expect(after.y).toBeCloseTo((700 - 300 * 1.25) / 2, 6);
+  });
+});

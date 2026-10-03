@@ -79,6 +79,14 @@ const NATURAL_WIDTH = 560;
 const MAX_PER_CATEGORY = 12;
 const ANTV_PREFIX = 'antv:';
 
+/** PATCH-265. Escape belongs to a focused text field, not to the docked panel. */
+function isTextEntryFocus(): boolean {
+  const element = document.activeElement as HTMLElement | null;
+  if (!element?.tagName) return false;
+  const tag = element.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || element.isContentEditable === true;
+}
+
 /** PATCH-248 Addendum 2. The AntV chart name behind a suggestion key. */
 function antvChartName(key: string): string {
   return key.startsWith(ANTV_PREFIX) ? key.slice(ANTV_PREFIX.length) : key;
@@ -463,9 +471,14 @@ export default function OutlineSuggestionsPanel({
   }, [outline, onEditOutline, onThemeChange, similarPresent.length]);
 
   // PATCH-252. Escape closes the docked panel; an outside pointerdown does not.
+  // PATCH-265. It yields to an Escape another layer has already handled
+  // (defaultPrevented) and to Escape typed into a text field -- the AntV inline
+  // text editor, the hex field -- which use the key themselves.
   React.useEffect(() => {
     if (!panel) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (isTextEntryFocus()) return;
       if (event.key === 'Escape') setPanel(null);
     };
     document.addEventListener('keydown', onKeyDown);

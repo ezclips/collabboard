@@ -552,9 +552,17 @@ export default function AntvElementEditor({
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
       if (event.key === 'Escape') {
-        selectionRef.current = null;
-        setSelection(null);
-        setColourOpen(false);
+        // PATCH-265. The editor owns Escape while it has a selection: the colour
+        // popover closes first, then a second Escape deselects. Prevent the key
+        // in the capture phase so a document listener -- the docked panel's
+        // close-on-Escape -- yields to it.
+        event.preventDefault();
+        if (colourOpen) {
+          setColourOpen(false);
+        } else {
+          selectionRef.current = null;
+          setSelection(null);
+        }
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         commitHidden(keys);
@@ -566,9 +574,9 @@ export default function AntvElementEditor({
         redo();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [commitHidden, redo, rootElement, selection, undo]);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [colourOpen, commitHidden, redo, rootElement, selection, undo]);
 
   const handleDelete = () => commitHidden(selectedKeys(selectionRef.current));
   const handleReset = () => commitReset(selectedKeys(selectionRef.current));
