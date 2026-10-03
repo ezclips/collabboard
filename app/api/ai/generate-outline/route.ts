@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
 import { OUTLINE_SYSTEM_PROMPT, OutlineParseError, parseOutline, withValuesEstimated } from '@/lib/ai/outline';
-import { withoutElementOverrides } from '@/lib/ai/antv/elementOverrides';
+import { withoutElementOverrides } from '@/lib/ai/antv/templateOverrides';
 import {
   trackAIGenerationFailed,
   trackAIGenerationStarted,

@@ -63,6 +63,9 @@ describe('PATCH-272 generate-component strips server-only model fields', () => {
         valuesEstimated: true,
         valuesExample: true,
         elementOverrides: { template: 'list-grid-badge-card', items: { 'item-label@0': { dx: 12 } } },
+        elementOverridesByTemplate: {
+          'list-grid-badge-card': { template: 'list-grid-badge-card', items: { 'item-label@0': { dx: 12 } } },
+        },
       }),
       generatedBy: { source: 'collabboard-default', model: 'm' },
     });
@@ -74,5 +77,6 @@ describe('PATCH-272 generate-component strips server-only model fields', () => {
     expect(body.data.valuesEstimated).toBeUndefined();
     expect(body.data.valuesExample).toBeUndefined();
     expect(body.data.elementOverrides).toBeUndefined();
+    expect(body.data.elementOverridesByTemplate).toBeUndefined();
   });
 });

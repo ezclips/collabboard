@@ -18,9 +18,9 @@ import {
   resizeOverrides,
   sanitizeElementOverrides,
   unionScreenBoxes,
-  withoutElementOverrides,
   type ElementOverride,
 } from './elementOverrides';
+import { withoutElementOverrides } from './templateOverrides';
 import type { VisualOutline } from '@/lib/ai/outline';
 
 const FIXTURE = `

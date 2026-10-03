@@ -6,13 +6,16 @@ import {
   applyElementOverrides,
   elementKey,
   elementScreenBox,
-  outlineWithOverrides,
   unionScreenBoxes,
-  withoutElementOverrides,
   type ElementHandle,
   type ElementOverrides,
   type ScreenBox,
 } from '@/lib/ai/antv/elementOverrides';
+import {
+  outlineWithTemplateOverrides,
+  overridesForTemplate,
+  withoutElementOverrides,
+} from '@/lib/ai/antv/templateOverrides';
 import {
   findAdditionByKey,
   isAdditionKey,
@@ -209,11 +212,13 @@ export default function AntvElementEditor({
 
   const emit = React.useCallback(
     (nextOverrides: ElementOverrides | undefined, content: VisualOutline) => {
-      const next = outlineWithOverrides(content, nextOverrides);
+      // PATCH-273. The editor's edits belong to the design it is on (`template`),
+      // so they are written into that design's own slot -- never replacing another.
+      const next = outlineWithTemplateOverrides(content, template, nextOverrides);
       outlineRef.current = next;
       onChange(next);
     },
-    [onChange],
+    [onChange, template],
   );
 
   // PATCH-260, defect 1. The editor OWNS `elementOverrides`; the outline prop can
@@ -303,10 +308,10 @@ export default function AntvElementEditor({
     [emit, recordEdit],
   );
 
-  /** PATCH-270. Applies a restored outline: local overrides, DOM and parent. */
+  /** PATCH-270/273. Applies a restored outline: this design's overrides, DOM and parent. */
   const applyRestored = React.useCallback(
     (next: VisualOutline) => {
-      const nextOverrides = next.elementOverrides;
+      const nextOverrides = overridesForTemplate(next, template);
       overridesRef.current = nextOverrides;
       setOverrides(nextOverrides);
       outlineRef.current = next;

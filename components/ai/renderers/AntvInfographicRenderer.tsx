@@ -13,7 +13,8 @@ import {
   type AntvChangeEvent,
 } from '@/lib/ai/antv/mapOutline';
 import { stageInteractions } from '@/lib/ai/antv/interactions';
-import { applyElementOverrides, withoutElementOverrides } from '@/lib/ai/antv/elementOverrides';
+import { applyElementOverrides } from '@/lib/ai/antv/elementOverrides';
+import { overridesForTemplate, withoutElementOverrides } from '@/lib/ai/antv/templateOverrides';
 import type { ContentEditReporter } from '@/lib/ai/antv/editHistory';
 import { insertItem } from '@/lib/ai/infographic/edit';
 import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/outline';
@@ -344,12 +345,13 @@ function AntvInfographicRenderer({
       }
       const container = containerRef.current;
       if (container) {
+        const active = overridesForTemplate(next, templateName);
         container.setAttribute('data-ai-last-emit', source);
-        container.setAttribute('data-ai-outline-overrides', String(Object.keys(next.elementOverrides?.items ?? {}).length));
+        container.setAttribute('data-ai-outline-overrides', String(Object.keys(active?.items ?? {}).length));
       }
       editRef.current?.onChange(next);
     },
-    [],
+    [templateName],
   );
 
   useEffect(() => {
@@ -368,7 +370,9 @@ function AntvInfographicRenderer({
     // PATCH-260. Re-apply the user's element overrides after every draw, also
     // when the picture is not editable (board, thumbnails, preview).
     const applyOverrides = () => {
-      if (!cancelled) applyElementOverrides(container, outlineRef.current.elementOverrides, templateName);
+      if (!cancelled) {
+        applyElementOverrides(container, overridesForTemplate(outlineRef.current, templateName), templateName);
+      }
     };
     // PATCH-260 fix. AntV re-creates `<use>`/`<foreignObject>` nodes when its
     // icons and text reload, which drops the transform we just wrote. Re-apply
@@ -519,10 +523,13 @@ function AntvInfographicRenderer({
     if (!instance) return;
     const container = containerRef.current;
     const reapply = () => {
-      if (container) applyElementOverrides(container, outlineRef.current.elementOverrides, templateName);
+      if (container) {
+        applyElementOverrides(container, overridesForTemplate(outlineRef.current, templateName), templateName);
+      }
     };
     if (container) {
-      container.setAttribute('data-ai-outline-overrides', String(Object.keys(data.outline.elementOverrides?.items ?? {}).length));
+      const active = overridesForTemplate(data.outline, templateName);
+      container.setAttribute('data-ai-outline-overrides', String(Object.keys(active?.items ?? {}).length));
     }
 
     const comparable = JSON.stringify(withoutElementOverrides(data.outline));
@@ -579,7 +586,9 @@ function AntvInfographicRenderer({
           <div
             ref={containerRef}
             data-antv-container={templateName}
-            data-ai-outline-overrides={String(Object.keys(data.outline.elementOverrides?.items ?? {}).length)}
+            data-ai-outline-overrides={String(
+              Object.keys(overridesForTemplate(data.outline, templateName)?.items ?? {}).length,
+            )}
             className="w-full"
           />
           {edit && isMindmap && handles.length > 0 && (

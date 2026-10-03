@@ -124,6 +124,7 @@ function injectStructuralMetadata(
   delete obj.valuesEstimated;
   delete obj.valuesExample;
   delete obj.elementOverrides;
+  delete obj.elementOverridesByTemplate;
   if (mode === 'diagram' && subtype) {
     obj.subtype = subtype;
     if (renderer) obj.renderer = renderer;

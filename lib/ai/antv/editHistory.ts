@@ -12,11 +12,8 @@
 import type { VisualOutline, VisualOutlineChild } from '@/lib/ai/outline';
 
 import type { Addition } from './additions';
-import {
-  outlineWithOverrides,
-  type ElementOverride,
-  type ElementOverrides,
-} from './elementOverrides';
+import { type ElementOverride, type ElementOverrides } from './elementOverrides';
+import { outlineWithTemplateOverrides, overridesForTemplate } from './templateOverrides';
 
 export type EditField = 'icon' | 'label' | 'detail' | 'textStyle';
 
@@ -111,17 +108,19 @@ function sameOverride(a: ElementOverride | undefined, b: ElementOverride | undef
 }
 
 /**
- * PATCH-270 Addendum 1. Applies only `entry`'s keys/ids onto the CURRENT
- * elementOverrides, leaving every other key and addition as it is. The map's
- * template is preserved (or taken from the entry when there is none yet).
+ * PATCH-270 Addendum 1 / PATCH-273. Applies only `entry`'s keys/ids onto the
+ * current EDIT MAP of the entry's OWN template, leaving every other key,
+ * addition and design as it is. The entry records its template, so an undo
+ * reverses the edit in the design it was made on. When the entry has no items
+ * and no additions left, the design's slot is removed.
  */
 function applyOverrides(
   outline: VisualOutline,
   entry: OverridesEditEntry,
   direction: 'undo' | 'redo',
 ): VisualOutline {
-  const current = outline.elementOverrides;
-  const template = current?.template ?? entry.template;
+  const template = entry.template;
+  const current = overridesForTemplate(outline, template);
   const items: Record<string, ElementOverride> = { ...(current?.items ?? {}) };
   const additions: Addition[] = (current?.additions ?? []).map((addition) => ({ ...addition }));
 
@@ -143,9 +142,13 @@ function applyOverrides(
     }
   }
 
-  const next: ElementOverrides = { template, items };
-  if (additions.length) next.additions = additions;
-  return outlineWithOverrides(outline, next);
+  const empty = Object.keys(items).length === 0 && additions.length === 0;
+  const next: ElementOverrides | undefined = empty
+    ? undefined
+    : additions.length
+      ? { template, items, additions }
+      : { template, items };
+  return outlineWithTemplateOverrides(outline, template, next);
 }
 
 /**

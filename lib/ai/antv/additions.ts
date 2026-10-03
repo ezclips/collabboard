@@ -13,7 +13,8 @@ import { VISUAL_PALETTE } from '@/lib/ai/visualPalette';
 
 import type { VisualOutline } from '@/lib/ai/outline';
 
-import { normalizeHex, outlineWithOverrides, type ElementOverrides } from './elementOverrides';
+import { normalizeHex, type ElementOverrides } from './elementOverrides';
+import { outlineWithTemplateOverrides, overridesForTemplate } from './templateOverrides';
 import { iconNodeChildren, type IconNode } from './icons';
 
 export type AdditionKind =
@@ -223,11 +224,10 @@ export function appendAddition(
   template: string,
   addition: Addition,
 ): VisualOutline {
-  const stored = outline.elementOverrides;
-  const existing = stored && stored.template === template ? stored : undefined;
+  const existing = overridesForTemplate(outline, template);
   const current = existing?.additions ?? [];
   if (current.length >= ADDITION_MAX) return outline;
-  return outlineWithOverrides(outline, {
+  return outlineWithTemplateOverrides(outline, template, {
     template,
     items: existing ? { ...existing.items } : {},
     additions: [...current, addition],

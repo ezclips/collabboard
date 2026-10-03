@@ -139,14 +139,6 @@ export function sanitizeElementOverrides(raw: unknown): ElementOverrides | undef
   return additions ? { template, items, additions } : { template, items };
 }
 
-/** PATCH-260. A NEW outline without `elementOverrides` (never mutates input). */
-export function withoutElementOverrides(outline: VisualOutline): VisualOutline {
-  if (outline.elementOverrides === undefined) return outline;
-  const next: VisualOutline = { ...outline };
-  delete next.elementOverrides;
-  return next;
-}
-
 /**
  * PATCH-260. A NEW outline carrying `overrides`. An empty/absent map removes the
  * field, so a reset outline is indistinguishable from one never changed.
@@ -155,7 +147,8 @@ export function outlineWithOverrides(
   outline: VisualOutline,
   overrides: ElementOverrides | undefined,
 ): VisualOutline {
-  const clean = withoutElementOverrides(outline);
+  const clean = { ...outline };
+  delete clean.elementOverrides;
   const empty =
     !overrides ||
     (Object.keys(overrides.items).length === 0 && (overrides.additions?.length ?? 0) === 0);

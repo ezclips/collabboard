@@ -1,9 +1,7 @@
 import { z } from 'zod';
 
-import {
-  sanitizeElementOverrides,
-  type ElementOverrides,
-} from './antv/elementOverrides';
+import { sanitizeElementOverrides, type ElementOverrides } from './antv/elementOverrides';
+import { sanitizeElementOverridesByTemplate } from './antv/templateOverrides';
 import { VISUAL_ICON_NAMES, isVisualIconName } from './visualIcons';
 
 /**
@@ -92,8 +90,17 @@ export interface VisualOutline {
    * PATCH-260. Per-element move/resize/delete overrides, stored INSIDE the
    * outline so every save path carries them. The model never sets it: the
    * outline route strips it, and `parseOutline` keeps only a sanitized copy.
+   * PATCH-273. Always mirrors the entry of the most recently edited design, so
+   * every existing reader keeps working.
    */
   elementOverrides?: ElementOverrides;
+  /**
+   * PATCH-273. One edit map per design, keyed by template, so switching designs
+   * never loses another design's work. The model never sets it: the generate
+   * routes strip it, and `parseOutline` keeps only a sanitized copy (stored
+   * path) or drops it (model path). At most 12 entries, by recency.
+   */
+  elementOverridesByTemplate?: Record<string, ElementOverrides>;
 }
 
 /**
@@ -283,6 +290,8 @@ const OutlineSchema = z.object({
   ordered: z.boolean().optional(),
   titleStyle: z.unknown().optional(),
   elementOverrides: z.unknown().optional(),
+  // PATCH-273. Read only on the stored-data path; the model path drops it.
+  elementOverridesByTemplate: z.unknown().optional(),
   // PATCH-272. Read only on the stored-data path; the model path drops it.
   valuesEstimated: z.unknown().optional(),
   items: z.array(OutlineItemSchema).optional(),
@@ -377,6 +386,11 @@ export function parseOutline(raw: unknown, options: ParseOutlineOptions = {}): V
   // PATCH-260: keep only a sanitized override map; absent when there is none.
   const elementOverrides = sanitizeElementOverrides(data.elementOverrides);
 
+  // PATCH-273. Only the stored path treats the per-design map as data the app
+  // itself wrote; the model path drops it like the flat slot.
+  const elementOverridesByTemplate =
+    options.source === 'stored' ? sanitizeElementOverridesByTemplate(data.elementOverridesByTemplate) : undefined;
+
   // PATCH-272. The stored-data path keeps the server-set estimate provenance;
   // the model path never does.
   const keepValuesEstimated = options.source === 'stored' && data.valuesEstimated === true;
@@ -388,6 +402,7 @@ export function parseOutline(raw: unknown, options: ParseOutlineOptions = {}): V
     kind,
     ...(titleStyle ? { titleStyle } : {}),
     ...(elementOverrides ? { elementOverrides } : {}),
+    ...(elementOverridesByTemplate ? { elementOverridesByTemplate } : {}),
     ...(keepValuesEstimated ? { valuesEstimated: true } : {}),
   };
 }

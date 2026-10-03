@@ -14,6 +14,7 @@ import {
   type ElementOverrides,
   type ScreenBox,
 } from '@/lib/ai/antv/elementOverrides';
+import { overridesForTemplate } from '@/lib/ai/antv/templateOverrides';
 import type { VisualOutline } from '@/lib/ai/outline';
 
 /**
@@ -140,8 +141,7 @@ export function sameOverrides(a: ElementOverrides | undefined, b: ElementOverrid
 }
 
 export function initialOverrides(outline: VisualOutline, template: string): ElementOverrides | undefined {
-  const stored = outline.elementOverrides;
-  return stored && stored.template === template ? stored : undefined;
+  return overridesForTemplate(outline, template);
 }
 
 export function selectedKeys(selection: Selection | null): string[] {

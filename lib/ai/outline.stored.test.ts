@@ -19,6 +19,17 @@ const RAW_STORED_OUTLINE = {
     template: 'list-grid-badge-card',
     items: { 'item-label@0': { dx: 12 } },
   },
+  elementOverridesByTemplate: {
+    'list-grid-badge-card': {
+      template: 'list-grid-badge-card',
+      items: { 'item-label@0': { dx: 12 } },
+    },
+    'chart-pie-compact-card': {
+      template: 'chart-pie-compact-card',
+      items: { 'title#0': { fill: '#112233' } },
+    },
+    'mismatched-key': { template: 'other-template', items: { 'title#0': { dx: 1 } } },
+  },
   items: [
     { label: 'A', value: 50, valueExample: true },
     { label: 'B' },
@@ -53,6 +64,25 @@ describe('PATCH-272 parseOutline model vs stored', () => {
     expect(out.valuesExample).toBeUndefined();
     expect(out.items[0].valueExample).toBeUndefined();
     expect(out.items[0].value).toBe(50);
+  });
+
+  it('the model path strips elementOverridesByTemplate entirely', () => {
+    const out = parseOutline(RAW_STORED_OUTLINE);
+    expect(out.elementOverridesByTemplate).toBeUndefined();
+  });
+
+  it('the stored path keeps and sanitizes elementOverridesByTemplate, dropping a mismatched key', () => {
+    const out = parseOutline(RAW_STORED_OUTLINE, { source: 'stored' });
+    expect(out.elementOverridesByTemplate).toEqual({
+      'list-grid-badge-card': {
+        template: 'list-grid-badge-card',
+        items: { 'item-label@0': { dx: 12 } },
+      },
+      'chart-pie-compact-card': {
+        template: 'chart-pie-compact-card',
+        items: { 'title#0': { fill: '#112233' } },
+      },
+    });
   });
 });
 

@@ -11,7 +11,7 @@ import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
 import type { PictureStageMode } from '@/components/ai/renderers/PictureStage';
 import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
-import { appendAddition, createAddition, type AdditionKind } from '@/lib/ai/antv/additions';
+import { createAddition } from '@/lib/ai/antv/additions';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import { PICTURE_FAMILY_LABELS, pictureFamily, type PictureFamily } from '@/lib/ai/pictureFamilies';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
@@ -19,8 +19,12 @@ import type { VisualOutline } from '@/lib/ai/outline';
 import { outlineFromMindmapTree } from '@/lib/ai/outlineToVisuals';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
-import type { VisualIconName } from '@/lib/ai/visualIcons';
 import ColoursFontsPanel from './ColoursFontsPanel';
+import {
+  antvViewCentre,
+  createAddPanelInserter,
+  type ViewCentre,
+} from './insertOutlineAddition';
 import OutlinePreviewLayers from './OutlinePreviewLayers';
 import OutlineTextEditor from './OutlineTextEditor';
 import { PreviewToolButton, SuggestionThumbButton, type SuggestionOption } from './SuggestionThumbButton';
@@ -307,36 +311,22 @@ export default function OutlineSuggestionsPanel({
   // AntV design can be edited this way; the preview's own svg supplies the box.
   const previewStageRef = React.useRef<HTMLDivElement | null>(null);
   const canAdd = Boolean(selectedAntvName && outline && onEditOutline);
-  const addViewCentre = React.useCallback((): { x: number; y: number } => {
+  const addViewCentre = React.useCallback((): ViewCentre => {
     const svg = previewStageRef.current?.querySelector('[data-antv-container] svg');
-    const parts = (svg?.getAttribute('viewBox') ?? '').split(/[\s,]+/).map(Number);
-    if (parts.length === 4 && parts.every((value) => Number.isFinite(value))) {
-      return { x: parts[0] + parts[2] / 2, y: parts[1] + parts[3] / 2 };
-    }
-    return { x: 240, y: 160 };
+    return antvViewCentre(svg);
   }, []);
   const addFill = themeById(theme).palette[0]?.stroke;
   const addTextColour = themeById(theme).text;
 
-  const insertAddition = React.useCallback(
-    (addition: ReturnType<typeof createAddition>) => {
-      if (!outline || !onEditOutline || !selectedAntvName) return;
-      onEditOutline(appendAddition(outline, selectedAntvName, addition));
-    },
-    [outline, onEditOutline, selectedAntvName],
-  );
-  const handleAddShape = React.useCallback(
-    (kind: AdditionKind) => insertAddition(createAddition(kind, addViewCentre(), { fill: addFill })),
-    [insertAddition, addViewCentre, addFill],
-  );
-  const handleAddText = React.useCallback(
-    () => insertAddition(createAddition('text', addViewCentre(), { text: addTextColour })),
-    [insertAddition, addViewCentre, addTextColour],
-  );
-  const handleAddIcon = React.useCallback(
-    (name: VisualIconName) => insertAddition(createAddition('icon', addViewCentre(), { icon: name, fill: addFill })),
-    [insertAddition, addViewCentre, addFill],
-  );
+  const { addShape: handleAddShape, addText: handleAddText, addIcon: handleAddIcon } =
+    createAddPanelInserter({
+      outline,
+      template: selectedAntvName,
+      colours: { fill: addFill, text: addTextColour },
+      centre: addViewCentre,
+      create: createAddition,
+      onEditOutline: onEditOutline ?? (() => {}),
+    });
 
   const togglePanel = (id: SidePanelId) =>
     setPanel((current) => (current === id ? null : id));

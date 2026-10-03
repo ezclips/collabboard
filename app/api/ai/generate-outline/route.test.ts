@@ -232,6 +232,9 @@ describe('PATCH-260 generate-outline strips model element overrides', () => {
       text: JSON.stringify({
         ...VALID_OUTLINE,
         elementOverrides: { template: 'list-grid-badge-card', items: { 'title#0': { dx: 20 } } },
+        elementOverridesByTemplate: {
+          'list-grid-badge-card': { template: 'list-grid-badge-card', items: { 'title#0': { dx: 20 } } },
+        },
       }),
       generatedBy: ATTR,
     });
@@ -239,5 +242,6 @@ describe('PATCH-260 generate-outline strips model element overrides', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.outline.elementOverrides).toBeUndefined();
+    expect(body.outline.elementOverridesByTemplate).toBeUndefined();
   });
 });
