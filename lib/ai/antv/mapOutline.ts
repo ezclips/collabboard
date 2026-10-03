@@ -24,7 +24,7 @@ import {
   type VisualOutlineItemTextStyle,
   type VisualSide,
 } from '@/lib/ai/outline';
-import type { VisualThemeId } from '@/lib/ai/visualThemes';
+import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import { fontStack, type VisualFont, type VisualStyle } from '@/lib/ai/visualStyle';
 import { ANTV_ICON_PREFIX } from './icons';
 
@@ -226,6 +226,11 @@ export function toAntvOptions(
   }
 
   const themeConfig: AntvThemeConfig = { palette: choice.palette };
+  // PATCH-259. Dark themes paint AntV's own background in its near-black
+  // default, so a black box sits inside our coloured frame. Use the theme's own
+  // background instead; a custom style background still wins (PATCH-253).
+  const theme = themeById(themeId);
+  if (theme.dark && !style?.background) themeConfig.colorBg = theme.background;
   if (style) {
     if (style.background) themeConfig.colorBg = style.background;
     if (style.colors?.length) themeConfig.palette = style.colors;

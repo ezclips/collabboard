@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { VisualOutline } from '@/lib/ai/outline';
 import { fontStack } from '@/lib/ai/visualStyle';
+import { VISUAL_THEMES } from '@/lib/ai/visualThemes';
 import { toAntvOptions } from './mapOutline';
 
 function outline(over: Partial<VisualOutline> = {}): VisualOutline {
@@ -95,5 +96,46 @@ describe('PATCH-254 Addendum C hierarchy title font', () => {
       'font-family': fontStack('serif'),
       'font-weight': 700,
     });
+  });
+});
+
+describe('PATCH-259 dark theme background', () => {
+  it('teal-night without a style uses the theme background as colorBg', () => {
+    const options = toAntvOptions(outline(), 'list-grid-badge-card', 'teal-night');
+    expect(options.themeConfig.colorBg).toBe(VISUAL_THEMES['teal-night'].background);
+  });
+
+  it('midnight without a style uses the theme background as colorBg', () => {
+    const options = toAntvOptions(outline(), 'list-grid-badge-card', 'midnight');
+    expect(options.themeConfig.colorBg).toBe(VISUAL_THEMES.midnight.background);
+  });
+
+  it('classic has no colorBg key', () => {
+    const options = toAntvOptions(outline(), 'list-grid-badge-card', 'classic');
+    expect('colorBg' in options.themeConfig).toBe(false);
+  });
+
+  it('a custom style background still wins for a dark theme', () => {
+    const options = toAntvOptions(outline(), 'list-grid-badge-card', 'teal-night', {
+      background: '#112233',
+    });
+    expect(options.themeConfig.colorBg).toBe('#112233');
+  });
+});
+
+describe('PATCH-259 light themes stay byte-identical', () => {
+  it('the PATCH-253 without-a-style call is unchanged for a light theme', () => {
+    expect(toAntvOptions(outline(), 'list-row-simple')).toEqual({
+      template: 'list-row-simple',
+      theme: 'light',
+      palette: 'patch241-classic',
+      themeConfig: { palette: 'patch241-classic' },
+      data: { title: 'Seasons', items: [{ label: 'Spring' }, { label: 'Summer' }] },
+    });
+  });
+
+  it('forest without a style still has no colorBg key', () => {
+    const options = toAntvOptions(outline(), 'list-row-simple', 'forest');
+    expect('colorBg' in options.themeConfig).toBe(false);
   });
 });
