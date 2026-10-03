@@ -11,6 +11,8 @@
 
 import type { VisualOutline } from '@/lib/ai/outline';
 
+import { applyElementColours, restoreElementColours } from './elementColours';
+
 export interface ElementOverride {
   /** Translation in viewBox units, |v| <= 5000. */
   dx?: number;
@@ -20,6 +22,12 @@ export interface ElementOverride {
   sy?: number;
   /** Deleted. */
   hidden?: true;
+  /** PATCH-261. The element's fill, `#rrggbb` lower-case. */
+  fill?: string;
+  /** PATCH-261. The element's stroke (border / icon line), `#rrggbb`. */
+  stroke?: string;
+  /** PATCH-261. The element's text colour, `#rrggbb`. */
+  text?: string;
 }
 
 /** The named template these overrides belong to; `<= 300` keys. */
@@ -43,6 +51,25 @@ export const ELEMENT_OVERRIDE_KEY_PATTERN = /^[a-z-]{1,40}(@[0-9]{1,3}(,[0-9]{1,
 
 const INDEXES_PATTERN = /^[0-9]+(,[0-9]+)*$/;
 
+const HEX6_PATTERN = /^#[0-9a-f]{6}$/;
+const HEX3_PATTERN = /^#[0-9a-f]{3}$/;
+
+/**
+ * PATCH-261. A plain hex colour (`#rgb` / `#rrggbb`, any case) to the stored
+ * lower-case `#rrggbb`, or `undefined` for anything else (`red`, `url(x)`,
+ * `#12`, `#1234567`). Never throws.
+ */
+export function normalizeHex(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().toLowerCase();
+  if (HEX6_PATTERN.test(trimmed)) return trimmed;
+  if (HEX3_PATTERN.test(trimmed)) {
+    const [r, g, b] = trimmed.slice(1);
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return undefined;
+}
+
 function isTranslation(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= ELEMENT_TRANSLATE_LIMIT;
 }
@@ -60,6 +87,12 @@ function sanitizeOverride(raw: unknown): ElementOverride | undefined {
   if (isScale(input.sx)) override.sx = input.sx;
   if (isScale(input.sy)) override.sy = input.sy;
   if (input.hidden === true) override.hidden = true;
+  const fill = normalizeHex(input.fill);
+  if (fill) override.fill = fill;
+  const stroke = normalizeHex(input.stroke);
+  if (stroke) override.stroke = stroke;
+  const text = normalizeHex(input.text);
+  if (text) override.text = text;
   return Object.keys(override).length ? override : undefined;
 }
 
@@ -121,6 +154,24 @@ function isNonSelectableType(type: string): boolean {
   return NON_SELECTABLE_TYPES.has(type) || type.startsWith('btn-');
 }
 
+/**
+ * PATCH-261 fix. AntV's editor appends its own overlay group
+ * (`<g data-element-type="transient-container">`, the selection/hover highlight
+ * rects) to the picture's svg. It is not part of the picture: it and everything
+ * inside it is never selectable or keyed, and the keying passes skip the whole
+ * subtree so real keys never shift when AntV adds or removes it.
+ */
+const TRANSIENT_CONTAINER_TYPE = 'transient-container';
+
+export function isTransientElement(el: Element | null): boolean {
+  let node: Element | null = el;
+  while (node) {
+    if (node.getAttribute?.('data-element-type') === TRANSIENT_CONTAINER_TYPE) return true;
+    node = node.parentElement;
+  }
+  return false;
+}
+
 function validIndexesValue(raw: string | null): string | null {
   return raw && INDEXES_PATTERN.test(raw) ? raw : null;
 }
@@ -136,7 +187,7 @@ function ownIndexes(el: Element): string | null {
  */
 export function isSelectableElement(el: Element): boolean {
   const type = el.getAttribute('data-element-type');
-  return Boolean(type) && !isNonSelectableType(type as string);
+  return Boolean(type) && !isNonSelectableType(type as string) && !isTransientElement(el);
 }
 
 /**
@@ -148,6 +199,7 @@ export function isSelectableElement(el: Element): boolean {
 function distinctIndexes(node: Element): Set<string> {
   const distinct = new Set<string>();
   for (const candidate of Array.from(node.querySelectorAll('[data-indexes]'))) {
+    if (isTransientElement(candidate)) continue;
     const value = ownIndexes(candidate);
     if (value) distinct.add(value);
     if (distinct.size > 1) break;
@@ -183,6 +235,7 @@ function scanItemScope(el: Element, root: Element): { scope: string | null; mult
 function nextIndexesAfter(el: Element, root: Element): string | null {
   const all = Array.from(root.querySelectorAll('[data-element-type]'));
   for (let i = all.indexOf(el) + 1; i < all.length; i += 1) {
+    if (isTransientElement(all[i])) continue;
     const value = ownIndexes(all[i]);
     if (value) return value;
   }
@@ -235,7 +288,9 @@ export function elementKey(
   const own = ownIndexes(el);
   if (own) {
     const base = `${type}@${own}`;
-    const same = Array.from(root.querySelectorAll(`[data-element-type="${type}"][data-indexes="${own}"]`));
+    const same = Array.from(root.querySelectorAll(`[data-element-type="${type}"][data-indexes="${own}"]`)).filter(
+      (candidate) => !isTransientElement(candidate),
+    );
     if (same.length <= 1) return base;
     const ordinal = same.indexOf(el);
     return ordinal >= 0 ? `${base}#${ordinal}` : base;
@@ -305,7 +360,7 @@ function styleOf(el: Element): CSSStyleDeclaration | null {
   return styled.style ?? null;
 }
 
-/** PATCH-260. Put an element back to AntV's own transform / visibility. */
+/** PATCH-260. Put an element back to AntV's own transform / visibility / colours. */
 function restoreElement(el: Element): void {
   const base = el.getAttribute('data-ai-base-transform');
   if (base !== null) {
@@ -317,6 +372,7 @@ function restoreElement(el: Element): void {
     if (style) style.display = '';
     el.removeAttribute('data-ai-element-hidden');
   }
+  restoreElementColours(el);
 }
 
 /**
@@ -336,6 +392,9 @@ export function applyElementOverrides(
   const active = overrides && overrides.template === template ? overrides : undefined;
 
   for (const el of Array.from(root.querySelectorAll('[data-element-type]'))) {
+    // PATCH-261 fix. AntV's editor overlay is not part of the picture: never
+    // stamp or touch it (nor anything inside it).
+    if (isTransientElement(el)) continue;
     const key = elementKey(el, root);
     if (key) el.setAttribute('data-ai-element-key', key);
 
@@ -368,6 +427,7 @@ export function applyElementOverrides(
     const base = el.getAttribute('data-ai-base-transform') ?? '';
     const composed = overrideTransform(el, override);
     el.setAttribute('transform', base ? `${base} ${composed}` : composed);
+    applyElementColours(el, override);
   }
 }
 

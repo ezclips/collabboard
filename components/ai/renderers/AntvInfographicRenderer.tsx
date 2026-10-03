@@ -551,6 +551,7 @@ function AntvInfographicRenderer({
               containerRef={containerRef}
               template={templateName}
               outline={data.outline}
+              palette={theme.palette.map((entry) => entry.stroke)}
               onChange={(next) => emitOutline(next, 'element-editor')}
             />
           )}

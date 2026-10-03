@@ -86,6 +86,56 @@ function rerenderEditor(outline: VisualOutline, onChange: (next: VisualOutline) 
   renderEditor(onChange, outline);
 }
 
+/** PATCH-261 fix. The exact selector PictureStage's pan handler blocks on. */
+const PAN_BLOCK_SELECTOR =
+  '[data-ai-edit-ref],[data-ai-edit-add],[data-ai-edit-remove],[data-ai-edit-shape],input,[data-element-type],[data-picture-control]';
+
+let stageCaptures = 0;
+
+/**
+ * PATCH-261 fix. Renders the editor inside a stage-like wrapper that captures the
+ * pointer for a pan unless the press landed on a picture control, exactly like
+ * PictureStage. A NATIVE capture listener models the real setPointerCapture: it
+ * runs before React's synthetic handlers, so a React `stopPropagation` cannot
+ * hide a missing `data-picture-control`.
+ */
+function mountEditorInStage(onChange: (next: VisualOutline) => void, outline: VisualOutline = BASE_OUTLINE) {
+  stageCaptures = 0;
+  reactHost = document.createElement('div');
+  document.body.appendChild(reactHost);
+  root = createRoot(reactHost);
+  editorRef = { current: container };
+  act(() => {
+    root!.render(
+      <div
+        data-test-stage="true"
+        onPointerDown={(event) => {
+          const target = event.target as Element | null;
+          if (target?.closest?.(PAN_BLOCK_SELECTOR)) return;
+          stageCaptures += 1;
+        }}
+      >
+        <AntvElementEditor
+          containerRef={editorRef!}
+          template="list-grid-badge-card"
+          outline={outline}
+          onChange={onChange}
+        />
+      </div>,
+    );
+  });
+  const stage = reactHost.querySelector('[data-test-stage="true"]') as HTMLElement;
+  stage.addEventListener(
+    'pointerdown',
+    (event) => {
+      const target = event.target as Element | null;
+      if (target?.closest?.(PAN_BLOCK_SELECTOR)) return;
+      stageCaptures += 1;
+    },
+    true,
+  );
+}
+
 function svgOf(): SVGSVGElement {
   return container!.querySelector('svg') as SVGSVGElement;
 }
@@ -739,5 +789,298 @@ describe('PATCH-260 AntvElementEditor', () => {
     const override = onChange.mock.calls.at(-1)![0].elementOverrides.items['title#0'];
     expect(override.dx).toBeCloseTo(20, 6);
     expect(override.dy).toBeCloseTo(15, 6);
+  });
+});
+
+// ── PATCH-261: per-element colour menu ───────────────────────────────────────
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** Shape 0 is the big box at (100,150); the other shapes shrink away. */
+function shrinkOtherShapes() {
+  for (const extra of [1, 2]) {
+    (shapeEl(extra) as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 0, width: 1, height: 1 });
+  }
+}
+
+function selectShape() {
+  selectItem();
+  shrinkOtherShapes();
+  pointer(shapeEl(), 'pointerdown', 100, 150, 1);
+  pointer(window, 'pointerup', 100, 150, 1);
+  click(shapeEl());
+}
+
+function selectIcon() {
+  // icon:0 base box (170,140,16,16); two down/up pairs: item, then the icon.
+  pointer(iconEl(), 'pointerdown', 178, 148, 1);
+  pointer(window, 'pointerup', 178, 148, 1);
+  pointer(iconEl(), 'pointerdown', 178, 148, 1);
+  pointer(window, 'pointerup', 178, 148, 1);
+}
+
+function selectLabel() {
+  selectItem();
+  pointer(labelDiv(0), 'pointerdown', ITEM_X, ITEM_Y, 1);
+  pointer(window, 'pointerup', ITEM_X, ITEM_Y, 1);
+  click(labelDiv(0));
+}
+
+function openColour() {
+  click(reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element);
+}
+
+function colourPopover(): Element | null {
+  return reactHost!.querySelector('[data-ai-element-colour]');
+}
+
+describe('PATCH-261 AntvElementEditor colour menu', () => {
+  it('a shape shows a Colour button; picking a Fill swatch commits {fill}', () => {
+    const onChange = vi.fn();
+    mountEditor(onChange);
+    selectShape();
+    openColour();
+    expect(colourPopover()).not.toBeNull();
+
+    const swatch = reactHost!.querySelector('[data-ai-element-swatch="fill"]') as HTMLElement;
+    const value = swatch.getAttribute('data-ai-element-swatch-value')!;
+    click(swatch);
+
+    const override = onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'];
+    expect(override.fill).toBe(value);
+  });
+
+  it('a hex field #ABC commits the normalised #aabbcc', () => {
+    const onChange = vi.fn();
+    mountEditor(onChange);
+    selectShape();
+    openColour();
+
+    const hex = reactHost!.querySelector('[data-ai-element-hex="fill"]') as HTMLInputElement;
+    setInputValue(hex, '#ABC');
+
+    expect(onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'].fill).toBe('#aabbcc');
+  });
+
+  it('an invalid hex shows a red outline and commits nothing', () => {
+    const onChange = vi.fn();
+    mountEditor(onChange);
+    selectShape();
+    openColour();
+    onChange.mockClear();
+
+    const hex = reactHost!.querySelector('[data-ai-element-hex="fill"]') as HTMLInputElement;
+    setInputValue(hex, 'red');
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(hex.getAttribute('data-ai-element-hex-invalid')).toBe('true');
+  });
+
+  it('a text element shows only the Text row', () => {
+    mountEditor(vi.fn());
+    selectLabel();
+    openColour();
+    expect(reactHost!.querySelector('[data-ai-element-hex="text"]')).not.toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-hex="fill"]')).toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-hex="border"]')).toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-hex="icon"]')).toBeNull();
+  });
+
+  it('an icon shows only the Icon colour row', () => {
+    mountEditor(vi.fn());
+    selectIcon();
+    openColour();
+    expect(reactHost!.querySelector('[data-ai-element-hex="icon"]')).not.toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-hex="fill"]')).toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-hex="border"]')).toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-hex="text"]')).toBeNull();
+  });
+
+  it('double-click on a shape opens the popover', () => {
+    mountEditor(vi.fn());
+    shrinkOtherShapes();
+    // Select the shape first so the geometry is measured live.
+    pointer(shapeEl(), 'pointerdown', 100, 150, 1);
+    pointer(window, 'pointerup', 100, 150, 1);
+    act(() => {
+      shapeEl().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: 100, clientY: 150 }));
+    });
+    expect(colourPopover()).not.toBeNull();
+  });
+
+  it('double-click on text does not open the popover and still reaches the svg', () => {
+    mountEditor(vi.fn());
+    const svg = svgOf();
+    const dbl = vi.fn();
+    svg.addEventListener('dblclick', dbl);
+
+    const event = new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: ITEM_X, clientY: ITEM_Y });
+    act(() => { labelDiv(0).dispatchEvent(event); });
+
+    expect(dbl).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(false);
+    expect(colourPopover()).toBeNull();
+  });
+
+  it('Reset colour removes fill/stroke/text from the element override', () => {
+    const onChange = vi.fn();
+    mountEditor(onChange);
+    selectShape();
+    openColour();
+    click(reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element);
+    click(reactHost!.querySelector('[data-ai-element-colour-reset]') as Element);
+
+    const override = onChange.mock.calls.at(-1)![0].elementOverrides?.items['shape@0#0'];
+    expect(override?.fill).toBeUndefined();
+    expect(override?.stroke).toBeUndefined();
+    expect(override?.text).toBeUndefined();
+  });
+
+  it('undo restores the previous colour', () => {
+    const onChange = vi.fn();
+    const committed = { template: 'list-grid-badge-card', items: { 'shape@0#0': { fill: '#111111' } } };
+    mountEditor(onChange, { ...BASE_OUTLINE, elementOverrides: committed });
+
+    selectShape();
+    openColour();
+    click(reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element);
+    const picked = onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'].fill;
+    expect(picked).not.toBe('#111111');
+
+    click(reactHost!.querySelector('[data-ai-element-undo]') as Element);
+    expect(onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'].fill).toBe('#111111');
+  });
+
+  it('sets user-select none on the body for the duration of a drag, then restores it', () => {
+    mountEditor(vi.fn());
+    selectTitle();
+
+    pointer(titleEl(), 'pointerdown', 40, 30, 1);
+    pointer(window, 'pointermove', 60, 45, 1);
+    expect(document.body.style.userSelect).toBe('none');
+
+    pointer(window, 'pointerup', 60, 45, 1);
+    expect(document.body.style.userSelect).toBe('');
+  });
+
+  it('ignores AntV\'s transient-container overlay: a click on the card selects the item, the next narrows to the shape', () => {
+    // AntV's editor appends its selection/hover overlay group LAST; its highlight
+    // rect covers item 0's card. It is not part of the picture.
+    const transient = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    transient.setAttribute('data-element-type', 'transient-container');
+    const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    transient.appendChild(highlight);
+    svgOf().appendChild(transient);
+    (transient as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 100, width: 120, height: 60 });
+    (transient as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(0, 100, 120, 60);
+
+    shrinkOtherShapes();
+    mountEditor(vi.fn());
+
+    // (10,145) is inside item 0's card and under the transient highlight.
+    pointer(svgOf(), 'pointerdown', 10, 145, 1);
+    pointer(window, 'pointerup', 10, 145, 1);
+    expect(selectedAttr()).toBe('item@0');
+
+    pointer(svgOf(), 'pointerdown', 10, 145, 1);
+    pointer(window, 'pointerup', 10, 145, 1);
+    expect(selectedAttr()).toBe('shape@0#0');
+  });
+});
+
+// ── PATCH-261 fix: a press on the bar or popover is a picture control ─────────
+
+describe('PATCH-261 colour controls vs PictureStage pan capture', () => {
+  it('a real pointerdown on the Colour button is not captured, opens the popover and keeps the selection', () => {
+    const onChange = vi.fn();
+    mountEditorInStage(onChange);
+    selectShape();
+    expect(selectedAttr()).toBe('shape@0#0');
+
+    const toggle = reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element;
+    pointer(toggle, 'pointerdown', 0, 0, 1);
+    pointer(window, 'pointerup', 0, 0, 1);
+    click(toggle);
+
+    expect(stageCaptures).toBe(0);
+    expect(colourPopover()).not.toBeNull();
+    expect(selectedAttr()).toBe('shape@0#0');
+  });
+
+  it('a pointerdown on the bar Undo and on a popover swatch is not captured by the stage', () => {
+    mountEditorInStage(vi.fn());
+    selectShape();
+
+    pointer(reactHost!.querySelector('[data-ai-element-undo]') as Element, 'pointerdown', 0, 0, 1);
+    pointer(window, 'pointerup', 0, 0, 1);
+    expect(stageCaptures).toBe(0);
+
+    click(reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element);
+    pointer(reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element, 'pointerdown', 0, 0, 1);
+    pointer(window, 'pointerup', 0, 0, 1);
+    expect(stageCaptures).toBe(0);
+  });
+
+  it('a pointerdown inside the colour popover does not deselect', () => {
+    mountEditorInStage(vi.fn());
+    selectShape();
+    click(reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element);
+    expect(colourPopover()).not.toBeNull();
+
+    pointer(colourPopover() as Element, 'pointerdown', 0, 0, 1);
+    pointer(window, 'pointerup', 0, 0, 1);
+    expect(selectedAttr()).toBe('shape@0#0');
+  });
+});
+
+// ── PATCH-261 fix: a text selection clears AntV's toolbar above it ───────────
+
+function barTopPercent(): number {
+  const bar = reactHost!.querySelector('[data-ai-element-bar]') as HTMLElement;
+  const match = /([\d.]+)%/.exec(bar.style.top);
+  return match ? Number(match[1]) : Number.NaN;
+}
+
+function boxBottomPercent(): number {
+  const box = reactHost!.querySelector('[data-ai-element-box]') as HTMLElement;
+  return parseFloat(box.style.top) + parseFloat(box.style.height);
+}
+
+describe('PATCH-261 text selection bar placement', () => {
+  it("places the bar BELOW the box for a text selection (clear of AntV's toolbar)", () => {
+    mountEditor(vi.fn());
+    selectLabel();
+    expect(selectedAttr()).toBe('item-label@0');
+
+    const bar = reactHost!.querySelector('[data-ai-element-bar]') as HTMLElement;
+    expect(bar.getAttribute('data-ai-element-bar-placement')).toBe('below');
+    expect(barTopPercent()).toBeGreaterThanOrEqual(boxBottomPercent() - 0.001);
+  });
+
+  it('keeps the bar ABOVE the box for a shape selection', () => {
+    mountEditor(vi.fn());
+    selectShape();
+
+    const bar = reactHost!.querySelector('[data-ai-element-bar]') as HTMLElement;
+    expect(bar.getAttribute('data-ai-element-bar-placement')).toBe('above');
+    expect(barTopPercent()).toBeLessThan(boxBottomPercent());
+  });
+
+  it('opens the colour popover below the bar for a text selection', () => {
+    mountEditor(vi.fn());
+    selectLabel();
+    openColour();
+
+    const popover = colourPopover() as HTMLElement;
+    expect(popover).not.toBeNull();
+    const match = /([\d.]+)%/.exec(popover.style.top);
+    // jsdom rounds a calc() percentage to ~4 decimals, so allow a small epsilon.
+    expect(match ? Number(match[1]) : Number.NaN).toBeGreaterThanOrEqual(boxBottomPercent() - 0.01);
   });
 });

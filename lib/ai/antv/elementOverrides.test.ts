@@ -12,6 +12,7 @@ import {
   elementItemScope,
   elementKey,
   elementScreenBox,
+  isSelectableElement,
   itemMemberKeys,
   outlineWithOverrides,
   resizeOverrides,
@@ -438,6 +439,104 @@ describe('PATCH-260 outlineWithOverrides', () => {
   });
 });
 
+describe('PATCH-261 element colours', () => {
+  it('sanitize keeps hex fill/stroke/text (normalised lower-case) and drops junk', () => {
+    const out = sanitizeElementOverrides({
+      template: 't',
+      items: {
+        'shape#0': { fill: '#AABBCC', stroke: 'red', text: '#123' },
+        'shape#1': { fill: '#12', stroke: 'url(x)', text: '#1234567' },
+        'shape#2': { text: '#ABC', junk: 1 },
+      },
+    });
+    expect(out?.items['shape#0']).toEqual({ fill: '#aabbcc', text: '#112233' });
+    expect(out?.items['shape#1']).toBeUndefined();
+    expect(out?.items['shape#2']).toEqual({ text: '#aabbcc' });
+    // A named colour can never survive the sanitizer (the mutation guard).
+    expect(JSON.stringify(out)).not.toContain('red');
+  });
+
+  const COLOUR_FIXTURE = `
+    <svg viewBox="0 0 100 100">
+      <defs><symbol id="lucide"><path d="M0 0" stroke="currentColor" fill="none"/></symbol></defs>
+      <g data-element-type="items-group">
+        <rect data-element-type="shape" data-indexes="0" x="0" y="0" width="10" height="10" fill="#111111" stroke="#222222"/>
+        <use data-element-type="item-icon" data-indexes="0" href="#lucide" fill="#333333"/>
+        <foreignObject data-element-type="item-label" data-indexes="0"><div style="color: #101010">Label</div></foreignObject>
+        <text data-element-type="item-value" data-indexes="0" fill="#444444">10</text>
+      </g>
+    </svg>`;
+
+  function colourFixture(): SVGSVGElement {
+    const host = document.createElement('div');
+    host.innerHTML = COLOUR_FIXTURE;
+    return host.querySelector('svg') as SVGSVGElement;
+  }
+
+  function apply(svg: SVGSVGElement, items: Record<string, ElementOverride>): void {
+    applyElementOverrides(svg, { template: 't', items }, 't');
+  }
+
+  it('applies fill, stroke and text; is idempotent; removing them restores the base', () => {
+    const svg = colourFixture();
+    const shape = svg.querySelector('[data-element-type="shape"]') as Element;
+    const icon = svg.querySelector('[data-element-type="item-icon"]') as SVGElement;
+    const label = svg.querySelector('[data-element-type="item-label"]') as Element;
+    const labelText = label.firstElementChild as HTMLElement;
+    const value = svg.querySelector('[data-element-type="item-value"]') as Element;
+
+    const input: Record<string, ElementOverride> = {
+      'shape@0': { fill: '#aabbcc', stroke: '#001122' },
+      'item-icon@0': { fill: '#ff0000' },
+      'item-label@0': { text: '#00ff00' },
+      'item-value@0': { text: '#0000ff' },
+    };
+    apply(svg, input);
+
+    expect(shape.getAttribute('fill')).toBe('#aabbcc');
+    expect(shape.getAttribute('stroke')).toBe('#001122');
+    expect(icon.getAttribute('fill')).toBe('#ff0000');
+    // The lucide symbol is stroke-drawn: the icon colour is also its line colour.
+    expect(icon.getAttribute('stroke')).toBe('#ff0000');
+    // `color` is set too, so the icon's `currentColor` resolves to it.
+    expect(icon.style.color).toBe('rgb(255, 0, 0)');
+    // A foreignObject's inner text node takes the CSS `color`...
+    expect(labelText.style.color).toBe('rgb(0, 255, 0)');
+    // ...while an SVG <text> takes the `fill` attribute.
+    expect(value.getAttribute('fill')).toBe('#0000ff');
+
+    const snapshot = [
+      shape.getAttribute('fill'),
+      shape.getAttribute('stroke'),
+      icon.getAttribute('fill'),
+      icon.getAttribute('stroke'),
+      icon.style.color,
+      labelText.style.color,
+      value.getAttribute('fill'),
+    ];
+    apply(svg, input);
+    expect([
+      shape.getAttribute('fill'),
+      shape.getAttribute('stroke'),
+      icon.getAttribute('fill'),
+      icon.getAttribute('stroke'),
+      icon.style.color,
+      labelText.style.color,
+      value.getAttribute('fill'),
+    ]).toEqual(snapshot);
+
+    // Reset (an empty override map) restores AntV's own colours.
+    apply(svg, {});
+    expect(shape.getAttribute('fill')).toBe('#111111');
+    expect(shape.getAttribute('stroke')).toBe('#222222');
+    expect(icon.getAttribute('fill')).toBe('#333333');
+    expect(icon.getAttribute('stroke')).toBeNull();
+    expect(icon.style.color).toBe('');
+    expect(labelText.style.color).toBe('rgb(16, 16, 16)');
+    expect(value.getAttribute('fill')).toBe('#444444');
+  });
+});
+
 describe('PATCH-260 resizeOverrides', () => {
   it('makes a corner box exactly old + pointer delta at a non-1 screen CTM', () => {
     // 64.5x26 in local units at CTM scale 2 => 129x52 on screen.
@@ -568,5 +667,60 @@ describe('PATCH-260 resizeOverrides', () => {
     // Size: 1.2x and 1.375x of the base (screen 200+40 over 200, 80+30 over 80).
     expect(next.sx).toBeCloseTo(1.2, 6);
     expect(next.sy).toBeCloseTo(1.375, 6);
+  });
+});
+
+describe('PATCH-261 fix: AntV transient-container overlay', () => {
+  it('a transient-container and its subtree are never selectable or keyed', () => {
+    const host = document.createElement('div');
+    host.innerHTML = `
+      <svg viewBox="0 0 400 300">
+        <g data-element-type="items-group">
+          <rect data-element-type="shape" data-indexes="0" x="0" y="100" width="120" height="60"/>
+          <g data-element-type="item-label" data-indexes="0"><text/></g>
+        </g>
+        <g data-element-type="transient-container">
+          <rect data-element-type="shape" data-indexes="0" x="0" y="100" width="120" height="60"/>
+          <g data-element-type="item-label" data-indexes="0"><text/></g>
+        </g>
+      </svg>`;
+    const svg = host.querySelector('svg') as SVGSVGElement;
+    const transient = svg.querySelector('[data-element-type="transient-container"]') as Element;
+    const transientShape = transient.querySelector('[data-element-type="shape"]') as Element;
+    const transientLabel = transient.querySelector('[data-element-type="item-label"]') as Element;
+    const realShape = svg.querySelector('svg > [data-element-type="items-group"] [data-element-type="shape"]') as Element;
+
+    expect(elementKey(transient, svg)).toBeNull();
+    expect(elementKey(transientShape, svg)).toBeNull();
+    expect(elementKey(transientLabel, svg)).toBeNull();
+    expect(isSelectableElement(transient)).toBe(false);
+    expect(isSelectableElement(transientShape)).toBe(false);
+    // The real card keeps the SAME key with the overlay present (the transient
+    // duplicate must not shift its `#n`).
+    expect(elementKey(realShape, svg)).toBe('shape@0');
+  });
+
+  it('elementAtPoint ignores the transient container and picks the real element', () => {
+    const host = document.createElement('div');
+    host.innerHTML = `
+      <svg viewBox="0 0 400 300">
+        <g data-element-type="items-group">
+          <rect data-element-type="shape" data-indexes="0" id="real" x="0" y="0" width="100" height="100"/>
+        </g>
+        <g data-element-type="transient-container">
+          <rect id="highlight" x="0" y="0" width="100" height="100"/>
+        </g>
+      </svg>`;
+    const svg = host.querySelector('svg') as SVGSVGElement;
+    (svg as unknown as { getScreenCTM: () => unknown }).getScreenCTM = () => ({
+      a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, inverse() { return this; },
+    });
+    const real = svg.querySelector('#real') as Element;
+    const transient = svg.querySelector('[data-element-type="transient-container"]') as Element;
+    (real as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 0, width: 100, height: 100 });
+    (transient as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 0, width: 100, height: 100 });
+
+    // The transient group is LAST, so before the fix its (equal) box won the tie.
+    expect(elementAtPoint(svg, 10, 10)).toBe(real);
   });
 });
