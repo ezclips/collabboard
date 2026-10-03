@@ -78,6 +78,13 @@ function PictureStage({
   // antv view: the SVG's viewBox. `natural` is its fitted viewBox at open.
   const [box, setBox] = useState<ViewBox | null>(null);
   const naturalRef = useRef<ViewBox | null>(null);
+  // PATCH-258. `appliedRef` is the viewBox string the stage last wrote, so a
+  // later AntV write can be told apart from the stage's own write-back (which is
+  // what stops the observer from looping). `atFitRef` records whether the
+  // current view is Fit, so an AntV rewrite re-fits when fitted but restores the
+  // user's view when zoomed/panned.
+  const appliedRef = useRef<string | null>(null);
+  const atFitRef = useRef(true);
 
   const [panning, setPanning] = useState(false);
   const spaceRef = useRef(false);
@@ -137,12 +144,30 @@ function PictureStage({
     return Math.min(width / box.width, height / box.height);
   }, []);
 
+  /**
+   * PATCH-258 addendum. The scale shown in the zoom display. Inside the stage
+   * the svg is forced to fill it, so the STAGE is the real on-screen viewport;
+   * a freshly re-rendered svg is transiently its thin auto-height strip, and
+   * reading that (as `antvScale` must, for pointer math) made a fitted picture
+   * report e.g. 16% instead of 60%. Prefer the measured stage, and only fall
+   * back to the svg rect when the stage has not been measured yet.
+   */
+  const antvDisplayScale = useCallback((box: ViewBox) => {
+    const s = sizesRef.current;
+    if (s.stageW > 0 && s.stageH > 0) {
+      return Math.min(s.stageW / box.width, s.stageH / box.height);
+    }
+    return antvScale(box);
+  }, [antvScale]);
+
   const applyBox = useCallback((next: ViewBox) => {
     const svg = findSvg();
     if (!svg) return;
     fillSvg(svg);
     svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-    svg.setAttribute('viewBox', viewBoxToString(next));
+    const raw = viewBoxToString(next);
+    appliedRef.current = raw;
+    svg.setAttribute('viewBox', raw);
     onViewBoxChangeRef.current?.();
   }, [fillSvg]);
 
@@ -180,6 +205,7 @@ function PictureStage({
   }, []);
 
   const fit = useCallback(() => {
+    atFitRef.current = true;
     if (modeRef.current === 'antv') {
       const natural = naturalRef.current;
       if (!natural) return;
@@ -238,6 +264,7 @@ function PictureStage({
   useEffect(() => {
     if (modeRef.current === 'antv') {
       naturalRef.current = null;
+      atFitRef.current = true;
       setBoxValue(null);
       return;
     }
@@ -252,32 +279,51 @@ function PictureStage({
     const stage = stageRef.current;
     if (!stage) return;
 
-    const tryInit = () => {
+    const syncSvg = () => {
       const svg = findSvg();
       if (!svg) return false;
-      if (naturalRef.current) {
-        fillSvg(svg);
+      fillSvg(svg);
+      const current = svg.getAttribute('viewBox');
+      if (!naturalRef.current) {
+        // PATCH-258 addendum. After a reset the DOM may still hold the box the
+        // stage itself last wrote (the old design's fit). Never take that as the
+        // new natural: wait for AntV to write its own final fitted box, so the
+        // display is computed against the right one.
+        if (current && appliedRef.current && current === appliedRef.current) return true;
+        const viewBox = parseViewBox(current);
+        if (!viewBox) return false;
+        naturalRef.current = viewBox;
+        fit();
+        onViewBoxChangeRef.current?.();
         return true;
       }
-      const viewBox = parseViewBox(svg.getAttribute('viewBox'));
-      if (!viewBox) return false;
-      fillSvg(svg);
-      naturalRef.current = viewBox;
-      fit();
-      onViewBoxChangeRef.current?.();
+      // PATCH-258. The stage's own writes are ignored; anything else is AntV
+      // rewriting the viewBox after an update. Take its box as the new natural
+      // (the content may have changed size) and put the user's view back, so an
+      // edit never resets the zoom/position. A fitted picture instead stays
+      // fitted to the new content.
+      if (!current || current === appliedRef.current) return true;
+      const rewritten = parseViewBox(current);
+      if (!rewritten) return true;
+      naturalRef.current = rewritten;
+      if (atFitRef.current || !boxRef.current) {
+        fit();
+      } else {
+        applyBox(boxRef.current);
+      }
       return true;
     };
 
-    tryInit();
+    syncSvg();
     const observer = new MutationObserver(() => {
       // AntV rewrites width/height on every render/update: re-fill, and fit once
       // the svg first appears.
-      tryInit();
+      syncSvg();
     });
     observer.observe(stage, { childList: true, subtree: true, attributes: true });
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, resetKey, fillSvg, fit]);
+  }, [mode, resetKey, fillSvg, fit, applyBox]);
 
   // ── Zoom / pan operations ──────────────────────────────────────────────────
 
@@ -321,6 +367,7 @@ function PictureStage({
         y: currentBox.y + ((clientY - (rect?.top ?? 0)) / rectHeight) * currentBox.height,
       };
       const next = scaleViewBox(currentBox, currentZoom / nextZoom, pivot);
+      atFitRef.current = false;
       setBoxValue(next);
       applyBox(next);
     },
@@ -407,6 +454,7 @@ function PictureStage({
           y: startBox.y - dy / scale,
         };
         boxRef.current = next;
+        atFitRef.current = false;
         setBox(next);
         applyBox(next);
       } else {
@@ -466,7 +514,7 @@ function PictureStage({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const isAntv = mode === 'antv';
-  const displayZoom = isAntv ? (box ? antvScale(box) : 1) : zoom;
+  const displayZoom = isAntv ? (box ? antvDisplayScale(box) : 1) : zoom;
 
   const transform = (() => {
     const originX = (sizes.stageW - sizes.pictureW * zoom) / 2 + pan.x;

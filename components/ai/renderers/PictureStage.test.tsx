@@ -520,5 +520,186 @@ describe('PATCH-245 PictureStage', () => {
       expect(Math.min(1020 / bw, 600 / bh)).toBeCloseTo(2, 3);
       expect(zoomValue(container)).toBe(200);
     });
+
+    it('keeps the zoomed view when AntV rewrites the viewBox after an edit', async () => {
+      const { container } = mount(
+        <PictureStage mode="antv">
+          <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+        </PictureStage>,
+      );
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+      setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+      expect(zoomValue(container)).toBe(100);
+
+      wheel(container.querySelector('[data-picture-stage]') as Element, {
+        ctrlKey: true, deltaY: -100, clientX: 500, clientY: 250,
+      });
+      const zoomed = viewBoxOf(container);
+      const zoomedDisplay = zoomValue(container);
+      expect(zoomed.width).toBeLessThan(1000);
+      expect(zoomedDisplay).toBeGreaterThan(100);
+
+      // AntV rewrites the SVG's own fit viewBox after any content/colour update.
+      await act(async () => {
+        svg.setAttribute('viewBox', '0 0 1000 500');
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const after = viewBoxOf(container);
+      expect(after.x).toBeCloseTo(zoomed.x, 5);
+      expect(after.y).toBeCloseTo(zoomed.y, 5);
+      expect(after.width).toBeCloseTo(zoomed.width, 5);
+      expect(after.height).toBeCloseTo(zoomed.height, 5);
+      expect(zoomValue(container)).toBe(zoomedDisplay);
+    });
+
+    it('stays at Fit of the NEW natural box when AntV rewrites it (content grew)', async () => {
+      const { container } = mount(
+        <PictureStage mode="antv">
+          <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+        </PictureStage>,
+      );
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+      setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+      expect(zoomValue(container)).toBe(100);
+
+      await act(async () => {
+        svg.setAttribute('viewBox', '0 0 2000 1000');
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Fit of 2000x1000 into 1000x500 is 0.5, so the displayed view is the new
+      // natural box drawn at 50%.
+      const after = viewBoxOf(container);
+      expect(after.x).toBeCloseTo(0, 5);
+      expect(after.y).toBeCloseTo(0, 5);
+      expect(after.width).toBeCloseTo(2000, 5);
+      expect(after.height).toBeCloseTo(1000, 5);
+      expect(zoomValue(container)).toBe(50);
+    });
+
+    it('resets to Fit when the design (resetKey) changes', () => {
+      const { root, container } = mount(
+        <PictureStage mode="antv" resetKey="a">
+          <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+        </PictureStage>,
+      );
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+      setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+
+      wheel(container.querySelector('[data-picture-stage]') as Element, {
+        ctrlKey: true, deltaY: -100, clientX: 500, clientY: 250,
+      });
+      expect(zoomValue(container)).toBeGreaterThan(100);
+
+      // A different design arrives with its own, larger fitted viewBox.
+      act(() => {
+        root.render(
+          <PictureStage mode="antv" resetKey="b">
+            <svg viewBox="0 0 2000 1000" xmlns="http://www.w3.org/2000/svg" />
+          </PictureStage>,
+        );
+      });
+
+      const after = viewBoxOf(container);
+      expect(after.x).toBeCloseTo(0, 5);
+      expect(after.y).toBeCloseTo(0, 5);
+      expect(after.width).toBeCloseTo(2000, 5);
+      expect(after.height).toBeCloseTo(1000, 5);
+      expect(zoomValue(container)).toBe(50);
+    });
+
+    it('after a resetKey change, adopts AntV’s FINAL viewBox for the Fit display', async () => {
+      const { root, container } = mount(
+        <PictureStage mode="antv" resetKey="a">
+          <svg viewBox="0 0 700.7 239.8" xmlns="http://www.w3.org/2000/svg" />
+        </PictureStage>,
+      );
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      svg.getBoundingClientRect = () => rect(0, 0, 492, 389);
+      setup(container, { stageW: 492, stageH: 389, pictureW: 492, pictureH: 389 });
+      // Fit of 700.7 x 239.8 in 492 x 389 -> min(0.702, 1.622) = 0.702 -> 70%.
+      expect(zoomValue(container)).toBe(70);
+
+      // Theme change: resetKey changes. The stage's own fitted box is still in
+      // the DOM, and AntV's freshly re-rendered svg is transiently its thin
+      // auto-height strip (the live regression: the display read that strip).
+      act(() => {
+        root.render(
+          <PictureStage mode="antv" resetKey="b">
+            <svg viewBox="0 0 700.7 239.8" xmlns="http://www.w3.org/2000/svg" />
+          </PictureStage>,
+        );
+      });
+      svg.getBoundingClientRect = () => rect(0, 0, 492, 104);
+
+      await act(async () => {
+        // AntV re-renders: first an intermediate box, then its final fitted box.
+        svg.setAttribute('viewBox', '0 0 700.7 4000');
+        await Promise.resolve();
+        await Promise.resolve();
+        svg.setAttribute('viewBox', '-26.3 -215.3 700.7 649.5');
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Fit of the FINAL natural 700.7 x 649.5 in the 492 x 389 stage is
+      // min(0.702, 0.599) = 0.599 -> 60%. Never the 104/649.5 = 16% the
+      // transient svg strip would produce.
+      const expected = Math.round(Math.max(0.25, Math.min(2, Math.min(492 / 700.7, 389 / 649.5))) * 100);
+      expect(expected).toBe(60);
+      expect(zoomValue(container)).toBe(expected);
+    });
+
+    it('does not loop when the stage writes the user view back', async () => {
+      const RealMutationObserver = globalThis.MutationObserver;
+      let callbacks = 0;
+      class CountingMutationObserver extends RealMutationObserver {
+        constructor(cb: MutationCallback) {
+          super((records, observer) => {
+            callbacks += 1;
+            cb(records, observer);
+          });
+        }
+      }
+      (globalThis as unknown as { MutationObserver: typeof RealMutationObserver }).MutationObserver =
+        CountingMutationObserver;
+      try {
+        const { container } = mount(
+          <PictureStage mode="antv">
+            <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" />
+          </PictureStage>,
+        );
+        const svg = container.querySelector('svg') as SVGSVGElement;
+        svg.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+        setup(container, { stageW: 1000, stageH: 500, pictureW: 1000, pictureH: 500 });
+        wheel(container.querySelector('[data-picture-stage]') as Element, {
+          ctrlKey: true, deltaY: -100, clientX: 500, clientY: 250,
+        });
+
+        const baseline = callbacks;
+        await act(async () => {
+          svg.setAttribute('viewBox', '0 0 1000 500');
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        // One callback for AntV's rewrite, at most one more for the write-back.
+        expect(callbacks - baseline).toBeLessThanOrEqual(4);
+      } finally {
+        (globalThis as unknown as { MutationObserver: typeof RealMutationObserver }).MutationObserver =
+          RealMutationObserver;
+      }
+    });
   });
 });
