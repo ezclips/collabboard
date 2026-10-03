@@ -606,14 +606,18 @@ export default function AIComponentEditor({
 
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
-  // PATCH-260. The envelope's outline is ALWAYS the editor's current
-  // `activeOutline`: a suggestion's `envelopeData.outline` can be a stale copy
-  // (built when the suggestions were ranked, before an element move updated the
-  // outline), so the current outline is the single source for saved overrides.
+  // PATCH-260. The envelope's outline is the editor's CURRENT outline: a
+  // suggestion's `envelopeData.outline` can be a stale copy (built when the
+  // suggestions were ranked, before an element move updated the outline), so
+  // the current outline is the single source for saved overrides.
+  // PATCH-257/267. While the chart family shows example numbers, that current
+  // outline is `derivedOutline` (which carries the same element overrides), so
+  // the preview and every tile actually draw the example values.
   const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => {
+    const currentOutline = needsExampleEnvelopes && derivedOutline ? derivedOutline : activeOutline;
     const baseData =
-      option.envelopeData.subtype === 'infographic' && activeOutline
-        ? { ...option.envelopeData, outline: activeOutline }
+      option.envelopeData.subtype === 'infographic' && currentOutline
+        ? { ...option.envelopeData, outline: currentOutline }
         : option.envelopeData;
     return {
       mode: 'diagram',

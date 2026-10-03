@@ -12,7 +12,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import AIComponentEditor from './AIComponentEditor';
 
 vi.mock('@/components/ai/AIContentRenderer', () => ({
-  default: () => React.createElement('div', { 'data-testid': 'ai-content-stub' }),
+  default: ({ content }: { content?: unknown }) => React.createElement('div', {
+    'data-testid': 'ai-content-stub',
+    'data-ai-envelope': content === undefined ? undefined : JSON.stringify(content),
+  }),
+}));
+
+// PATCH-267. The main preview of a chart is an editable infographic, rendered by
+// the real InfographicRenderer, which dispatches an `antv:` design to
+// AntvInfographicRenderer. Stubbing that leaf lets the test read the exact
+// envelope data the AntV renderer receives.
+vi.mock('@/components/ai/renderers/AntvInfographicRenderer', () => ({
+  default: ({ data }: { data?: unknown }) => React.createElement('div', {
+    'data-testid': 'antv-stub',
+    'data-ai-antv-data': data === undefined ? undefined : JSON.stringify(data),
+  }),
 }));
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -77,6 +91,21 @@ function headings(c: ParentNode): string[] {
     .map((el) => (el.textContent ?? '').trim());
 }
 
+// PATCH-267. The envelope data the main preview's AntV renderer received.
+function previewOutlineData(c: ParentNode): any {
+  const el = c.querySelector('[data-ai-outline-preview] [data-testid="antv-stub"]') as HTMLElement | null;
+  expect(el, 'no AntV renderer in the main preview').not.toBeNull();
+  return JSON.parse(el!.getAttribute('data-ai-antv-data')!);
+}
+// PATCH-267. Every tile's envelope (the object `envelopeFor` builds), parsed.
+function tileEnvelopes(c: ParentNode): any[] {
+  return tiles(c).map((tile) => {
+    const el = tile.querySelector('[data-testid="ai-content-stub"]') as HTMLElement | null;
+    expect(el, `tile ${tile.getAttribute('data-ai-outline-option')} has no envelope`).not.toBeNull();
+    return JSON.parse(el!.getAttribute('data-ai-envelope')!);
+  });
+}
+
 // Two items, no values: too few for a chart on their own (word clouds need 3+).
 const NO_NUMBERS_OUTLINE = {
   title: 'Water cycle',
@@ -88,11 +117,11 @@ async function flush(ms = 300) {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 }
 
-function stubFetch() {
+function stubFetch(outline: unknown = NO_NUMBERS_OUTLINE) {
   const fetchMock = vi.fn(async (url: string) => {
     if (url === '/api/ai/generate-outline') {
       return new Response(
-        JSON.stringify({ outline: NO_NUMBERS_OUTLINE, generatedBy: { source: 'collabboard-default', model: 'm' } }),
+        JSON.stringify({ outline, generatedBy: { source: 'collabboard-default', model: 'm' } }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }
@@ -247,5 +276,89 @@ describe('PATCH-257 Pie and Bar Chart show designs at once', () => {
       expect(c.querySelector('[data-ai-outline-preview]')).not.toBeNull();
       expect(headings(c)).toContain('Suggested');
     }
+  });
+});
+
+describe('PATCH-267 example numbers reach the preview and every tile again', () => {
+  it('Pie Chart: the main preview envelope and every tile envelope carry the example values', async () => {
+    const fetchMock = stubFetch();
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
+    await openGallery(c, fetchMock);
+
+    click(c.querySelector('[data-ai-subtype-chip="pie_chart"]') as HTMLElement);
+
+    const preview = previewOutlineData(c);
+    expect(preview.subtype).toBe('infographic');
+    expect(preview.outline.valuesExample).toBe(true);
+    expect(preview.outline.items.map((item: any) => item.value)).toEqual([50, 50]);
+
+    const envelopes = tileEnvelopes(c);
+    expect(envelopes.length).toBeGreaterThan(0);
+    for (const envelope of envelopes) {
+      expect(envelope.data.outline.valuesExample).toBe(true);
+      expect(envelope.data.outline.items.map((item: any) => item.value)).toEqual([50, 50]);
+    }
+  });
+
+  it('Bar Chart: the main preview envelope and every tile envelope carry the example values', async () => {
+    const fetchMock = stubFetch();
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
+    await openGallery(c, fetchMock);
+
+    click(c.querySelector('[data-ai-subtype-chip="bar_chart"]') as HTMLElement);
+
+    const preview = previewOutlineData(c);
+    expect(preview.outline.valuesExample).toBe(true);
+    expect(preview.outline.items.map((item: any) => item.value)).toEqual([50, 50]);
+
+    const envelopes = tileEnvelopes(c);
+    expect(envelopes.length).toBeGreaterThan(0);
+    for (const envelope of envelopes) {
+      expect(envelope.data.outline.valuesExample).toBe(true);
+      expect(envelope.data.outline.items.map((item: any) => item.value)).toEqual([50, 50]);
+    }
+  });
+
+  it('keeps a PATCH-260 element override alongside the example values', async () => {
+    const overrides = {
+      template: 'antv:chart-pie-basic',
+      items: { 'shape#0': { dx: 7, dy: 3 } },
+    };
+    const fetchMock = stubFetch({ ...NO_NUMBERS_OUTLINE, elementOverrides: overrides });
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
+    await openGallery(c, fetchMock);
+
+    click(c.querySelector('[data-ai-subtype-chip="pie_chart"]') as HTMLElement);
+
+    const preview = previewOutlineData(c);
+    expect(preview.outline.items.map((item: any) => item.value)).toEqual([50, 50]);
+    expect(preview.outline.valuesExample).toBe(true);
+    expect(preview.outline.elementOverrides).toEqual(overrides);
+
+    for (const envelope of tileEnvelopes(c)) {
+      expect(envelope.data.outline.elementOverrides).toEqual(overrides);
+      expect(envelope.data.outline.items.map((item: any) => item.value)).toEqual([50, 50]);
+    }
+  });
+
+  it('a non-chart design keeps the outline unchanged with no example values', async () => {
+    const fetchMock = stubFetch();
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
+    await openGallery(c, fetchMock);
+
+    // Show options is open with no family filter; pick one AntV non-chart design.
+    const listTile = tiles(c).find((tile) => {
+      const key = tile.getAttribute('data-ai-outline-option') ?? '';
+      return key.startsWith('antv:') && !key.includes('chart-');
+    });
+    expect(listTile, 'no non-chart AntV tile').toBeTruthy();
+    click(listTile!);
+
+    expect(c.querySelector('[data-ai-values-example="true"]')).toBeNull();
+
+    const preview = previewOutlineData(c);
+    expect(preview.outline.valuesExample).toBeUndefined();
+    expect(preview.outline.items.map((item: any) => item.value)).toEqual([undefined, undefined]);
+    expect(preview.outline.items.map((item: any) => item.label)).toEqual(['Evaporation', 'Condensation']);
   });
 });
