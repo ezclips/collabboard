@@ -75,3 +75,20 @@ describe('PATCH-236 InfographicRenderer', () => {
     expect(c.textContent).toContain('Evaporation');
   });
 });
+
+describe('PATCH-264 InfographicRenderer kicker', () => {
+  it('shows the default label when the kicker is absent', () => {
+    const c = mount(<InfographicRenderer data={data('stack')} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('infographic');
+  });
+
+  it('shows a custom kicker', () => {
+    const c = mount(<InfographicRenderer data={{ ...data('stack'), kicker: 'Q3 plan' }} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('Q3 plan');
+  });
+
+  it('shows no label for an explicit empty kicker', () => {
+    const c = mount(<InfographicRenderer data={{ ...data('stack'), kicker: '' }} />);
+    expect(c.querySelector('[data-ai-kicker]')).toBeNull();
+  });
+});

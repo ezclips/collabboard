@@ -3,6 +3,7 @@
 import React from 'react';
 import type { TimelineDiagramData } from '@/lib/ai/contracts';
 import { themeById, themeColor } from '@/lib/ai/visualThemes';
+import DiagramKicker from './DiagramKicker';
 
 function TimelineDiagramRenderer({ data }: { data: TimelineDiagramData }) {
   const theme = themeById(data.theme);
@@ -14,7 +15,7 @@ function TimelineDiagramRenderer({ data }: { data: TimelineDiagramData }) {
     >
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>timeline</div>
+          <DiagramKicker value={data.kicker} fallback="timeline" color={theme.muted} />
           <h2 className="mt-1 text-lg font-semibold" style={{ color: theme.title }}>{data.title}</h2>
         </div>
         <div className="space-y-4">

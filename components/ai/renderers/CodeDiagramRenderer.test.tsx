@@ -135,3 +135,23 @@ describe('PATCH-232 CodeDiagramRenderer', () => {
     });
   });
 });
+
+describe('PATCH-264 CodeDiagramRenderer kicker', () => {
+  it('shows the default label when the kicker is absent', () => {
+    renderDiagramCodeMock.mockResolvedValue({ ok: true, svg: '<svg/>' });
+    const { container } = mount(<CodeDiagramRenderer data={flow('graph TD; A-->B')} />);
+    expect(container.querySelector('[data-ai-kicker]')!.textContent).toBe('flowchart');
+  });
+
+  it('shows a custom kicker', () => {
+    renderDiagramCodeMock.mockResolvedValue({ ok: true, svg: '<svg/>' });
+    const { container } = mount(<CodeDiagramRenderer data={{ ...flow('graph TD; A-->B'), kicker: 'Q3 plan' }} />);
+    expect(container.querySelector('[data-ai-kicker]')!.textContent).toBe('Q3 plan');
+  });
+
+  it('shows no label for an explicit empty kicker', () => {
+    renderDiagramCodeMock.mockResolvedValue({ ok: true, svg: '<svg/>' });
+    const { container } = mount(<CodeDiagramRenderer data={{ ...flow('graph TD; A-->B'), kicker: '' }} />);
+    expect(container.querySelector('[data-ai-kicker]')).toBeNull();
+  });
+});

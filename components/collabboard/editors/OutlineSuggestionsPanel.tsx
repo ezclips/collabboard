@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { LayoutGrid, Palette, Pencil, Shapes, SlidersHorizontal, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
+import { DiagramKickerReadOnly } from '@/components/ai/renderers/DiagramKicker';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
 import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/PictureStage';
@@ -203,7 +204,9 @@ function ThumbButton({
             data-ai-thumb-scale={scale}
             style={{ width: `${NATURAL_WIDTH}px`, transform: `scale(${scale})`, transformOrigin: 'top left' }}
           >
-            <AIContentRenderer content={envelope} />
+            <DiagramKickerReadOnly>
+              <AIContentRenderer content={envelope} />
+            </DiagramKickerReadOnly>
           </div>
         )}
       </div>
@@ -745,7 +748,9 @@ export default function OutlineSuggestionsPanel({
               className="h-full"
             >
               {previewOption && (hoverOption ? (
-                <AIContentRenderer content={envelopeFor(hoverOption)} />
+                <DiagramKickerReadOnly>
+                  <AIContentRenderer content={envelopeFor(hoverOption)} />
+                </DiagramKickerReadOnly>
               ) : editableInfographic ? (
                 <InfographicRenderer data={editableInfographic} edit={{ onChange: onEditOutline! }} />
               ) : editableMindmap ? (

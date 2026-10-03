@@ -84,6 +84,10 @@ export interface DiagramDataBase {
   subtype: DiagramSubtype;
   title: string;
   renderer: AIRendererKey;
+  // PATCH-264. The small uppercase label above the title (the renderer's own
+  // name by default). Same meaning as PhotoCardData.kicker: undefined -> the
+  // renderer's default label, '' -> no label at all, any other string -> shown.
+  kicker?: string;
 }
 
 export interface FlowDiagramData extends DiagramDataBase {

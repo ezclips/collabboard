@@ -16,6 +16,7 @@ import {
 } from '@/lib/ai/infographic/edit';
 import { themeById, themeColor } from '@/lib/ai/visualThemes';
 import { themeWithStyle } from '@/lib/ai/visualStyle';
+import DiagramKicker from './DiagramKicker';
 import PictureEditOverlay, { type ActiveEdit, type EditHandle } from './PictureEditOverlay';
 
 /**
@@ -115,7 +116,7 @@ function MindmapTreeRenderer({
         className="h-full w-full overflow-auto rounded-2xl border border-black/10 p-5 shadow-sm"
         style={{ backgroundColor: theme.background }}
       >
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>mindmap</div>
+        <DiagramKicker value={data.kicker} fallback="mindmap" color={theme.muted} />
         <h2
           className="mt-1 text-lg font-semibold"
           style={{ color: theme.title, ...(titleFont ? { fontFamily: titleFont.family, fontWeight: titleFont.weight } : {}) }}
@@ -233,7 +234,7 @@ function MindmapTreeRenderer({
     >
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>mindmap</div>
+          <DiagramKicker value={data.kicker} fallback="mindmap" color={theme.muted} />
           <h2
             className="mt-1 text-lg font-semibold"
             style={{ color: theme.title, ...(titleFont ? { fontFamily: titleFont.family, fontWeight: titleFont.weight } : {}) }}

@@ -380,6 +380,35 @@ describe('PATCH-245 AIContentEditModal stages the picture', () => {
   });
 });
 
+describe('PATCH-264 AIContentEditModal kicker', () => {
+  it('changing the label and saving writes the new kicker', () => {
+    const onSave = vi.fn();
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={onSave} />);
+
+    const label = c.querySelector('[data-ai-kicker]') as Element;
+    expect(label).not.toBeNull();
+    click(label);
+    const input = c.querySelector('[data-ai-kicker-input]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    setInputValue(input, 'Q3');
+    keydown(input, 'Enter');
+
+    click(buttonContaining(c, 'Save changes'));
+    const saved = onSave.mock.calls[0][0].aiComponentJson as StoredAIContent;
+    expect((saved.data as { kicker?: string }).kicker).toBe('Q3');
+  });
+
+  it('removing the label and saving writes an empty kicker', () => {
+    const onSave = vi.fn();
+    const c = mount(<AIContentEditModal isOpen onClose={() => {}} envelope={MINDMAP_ENVELOPE} onSave={onSave} />);
+
+    click(c.querySelector('[data-ai-kicker-remove]') as Element);
+    click(buttonContaining(c, 'Save changes'));
+    const saved = onSave.mock.calls[0][0].aiComponentJson as StoredAIContent;
+    expect((saved.data as { kicker?: string }).kicker).toBe('');
+  });
+});
+
 describe('PATCH-247 AIContentEditModal isolates wheel from the board', () => {
   it('a ctrl+wheel inside the window does not reach a wheel listener on its parent', () => {
     const parentWheel = vi.fn();

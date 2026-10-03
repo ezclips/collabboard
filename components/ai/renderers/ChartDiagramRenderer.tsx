@@ -4,6 +4,7 @@ import React from 'react';
 import type { BarChartDiagramData, PieChartDiagramData } from '@/lib/ai/contracts';
 import { trackAIRenderFallback } from '@/lib/ai/telemetry';
 
+import DiagramKicker from './DiagramKicker';
 import UnsupportedAIContent from './UnsupportedAIContent';
 
 type ChartDiagramData = PieChartDiagramData | BarChartDiagramData;
@@ -154,9 +155,7 @@ function ChartDiagramRenderer({ data }: { data: ChartDiagramData }) {
     <div className="h-full w-full overflow-auto rounded-2xl border border-black/10 bg-white p-5 shadow-sm">
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
-            {data.subtype.replace('_', ' ')}
-          </div>
+          <DiagramKicker value={data.kicker} fallback={data.subtype.replace('_', ' ')} className="text-gray-500" />
           <h2 className="mt-1 text-lg font-semibold text-gray-900">{data.title}</h2>
         </div>
         {data.subtype === 'pie_chart' ? (

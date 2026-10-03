@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom';
 import { Sparkles, X, Loader2, Play, Save, StopCircle, Lock, Palette, Type, Smile, MessageSquare, TextCursor } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
+import { DiagramKickerEditContext } from '@/components/ai/renderers/DiagramKicker';
+import { applyKickerToContent, readDiagramKicker, useDiagramKicker } from '@/components/ai/renderers/useDiagramKicker';
 import type {
   AIContentData,
   AIMode,
@@ -407,6 +409,8 @@ export default function AIComponentEditor({
   const [outlineGeneratedBy, setOutlineGeneratedBy] = useState<AIGenerationAttribution | null>(null);
   const [outlineCreatedAt, setOutlineCreatedAt] = useState<string | null>(null);
   const [content, setContent] = useState<unknown>(initialContent ?? null);
+  // PATCH-264. The diagram type label ("MINDMAP", ...) edits on the preview.
+  const diagramKicker = useDiagramKicker(readDiagramKicker(initialContent));
   const [stage, setStage] = useState<Stage>(initialContent ? 'done' : 'idle');
   const [error, setError] = useState<string | null>(null);
   /** PATCH-188. True when `error` is the server's plan-limit refusal, so it
@@ -455,6 +459,7 @@ export default function AIComponentEditor({
     setContent(initialContent ?? null);
     setStage(initialContent ? 'done' : 'idle');
     setError(null);
+    diagramKicker.reset(readDiagramKicker(initialContent));
     setErrorIsPlanLimit(false);
     // PATCH-235: a Visualize request opens straight into Diagram + Show options.
     visualizeAutoRanRef.current = false;
@@ -613,7 +618,7 @@ export default function AIComponentEditor({
     return {
       mode: 'diagram',
       version: 1,
-      data: applyStyleToData(applyThemeToData(baseData, visualTheme), visualStyle),
+      data: diagramKicker.applyKicker(applyStyleToData(applyThemeToData(baseData, visualTheme), visualStyle)),
       meta: {
         renderer: option.envelopeData.renderer,
         subtype: option.envelopeData.subtype,
@@ -624,9 +629,14 @@ export default function AIComponentEditor({
     };
   };
   const selectedOptionEnvelope = selectedOption ? optionEnvelope(selectedOption) : null;
+  // PATCH-264. The non-outline path previews/saves the content with the label.
+  const kickerContent = useMemo(
+    () => applyKickerToContent(content, diagramKicker.kicker),
+    [content, diagramKicker.kicker],
+  );
   const persistedContent = showOptions
     ? serializeAIContentForPersistence(selectedOptionEnvelope)
-    : serializeAIContentForPersistence(content);
+    : serializeAIContentForPersistence(kickerContent);
   // PATCH-257. Save must follow the design actually shown in the preview: never
   // a fallback the user cannot see, and never a chart drawn from example numbers
   // (fewer than two real values).
@@ -1596,6 +1606,7 @@ export default function AIComponentEditor({
               {/* PATCH-236: the Suggestions panel -- one large preview of the
                   selected design, then "Suggested" and per-category headings. */}
               {showOptions && (outlineOptions.length > 0 || isOutlineLoading) && (
+                <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
                 <OutlineSuggestionsPanel
                   options={displayOptions}
                   selectedKey={selectedOptionKey}
@@ -1620,12 +1631,14 @@ export default function AIComponentEditor({
                   sidePanelHost={sidePanelHost}
                   onSidePanelChange={setSidePanelOpen}
                 />
+                </DiagramKickerEditContext.Provider>
               )}
 
               {!showOptions && !!content && (
                 <div className="h-full w-full overflow-auto p-4">
+                  <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
                   <AIContentRenderer
-                    content={content}
+                    content={kickerContent}
                     editable
                     onContentChange={(nextData: AIContentData) => {
                       const next = serializeAIContentForPersistence(nextData);
@@ -1633,6 +1646,7 @@ export default function AIComponentEditor({
                     }}
                     onFocusField={() => setActiveStyleTarget('photoCard')}
                   />
+                  </DiagramKickerEditContext.Provider>
 
                   {/* Reactions, then caption -- same order and spacing as
                       the Image post's own preview, below the AI content

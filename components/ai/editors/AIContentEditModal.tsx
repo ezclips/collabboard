@@ -6,6 +6,8 @@ import { Plus, Save, Trash2, X } from 'lucide-react';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
+import { DiagramKickerEditContext } from '@/components/ai/renderers/DiagramKicker';
+import { readDiagramKicker, useDiagramKicker } from '@/components/ai/renderers/useDiagramKicker';
 import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/PictureStage';
 import { isAntvTemplate } from '@/lib/ai/contracts';
 import type {
@@ -640,6 +642,9 @@ export default function AIContentEditModal({
   // "List view" toggle (closed by default).
   const [listView, setListView] = useState(false);
 
+  // PATCH-264. The diagram type label ("MINDMAP", ...) edits on the picture.
+  const diagramKicker = useDiagramKicker(readDiagramKicker(envelope));
+
   // Debounce ref for diagram code preview
   const diagramDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -647,6 +652,7 @@ export default function AIContentEditModal({
   useEffect(() => {
     if (!isOpen) return;
     setDraftData(envelope.data);
+    diagramKicker.reset(readDiagramKicker(envelope));
     setPrompt(initialPrompt);
     setValidationError(null);
     setDiagramRenderPhase({ phase: 'idle' });
@@ -712,6 +718,11 @@ export default function AIContentEditModal({
       saveData = { ...saveData, title: saveData.tree.label };
     }
 
+    // PATCH-264. The label the user set on the picture rides into the save.
+    if (saveData.type === 'diagram') {
+      saveData = diagramKicker.applyKicker(saveData);
+    }
+
     const subtype = saveData.type === 'diagram' ? saveData.subtype : undefined;
     const validation = safeValidateAIContentWithSubtypeCheck({
       mode: envelope.mode,
@@ -744,7 +755,10 @@ export default function AIContentEditModal({
 
   if (!isOpen) return null;
 
-  const draftEnvelope = buildDraftEnvelope(envelope, draftData);
+  const draftEnvelope = buildDraftEnvelope(
+    envelope,
+    draftData.type === 'diagram' ? diagramKicker.applyKicker(draftData) : draftData,
+  );
   const isInfographic = draftData.type === 'diagram' && draftData.subtype === 'infographic';
   const subtypeLabel = getSubtypeForData(draftData);
   const modeLabel = envelope.mode.replace('_', ' ');
@@ -951,7 +965,7 @@ export default function AIContentEditModal({
     if (draftData.type === 'diagram' && draftData.subtype === 'infographic') {
       return (
         <InfographicRenderer
-          data={draftData}
+          data={diagramKicker.applyKicker(draftData)}
           initialEditRef={initialEditRef}
           edit={{
             onChange: (next) =>
@@ -967,7 +981,7 @@ export default function AIContentEditModal({
     if (draftData.type === 'diagram' && draftData.subtype === 'mindmap' && draftData.tree) {
       return (
         <MindmapTreeRenderer
-          data={draftData}
+          data={diagramKicker.applyKicker(draftData)}
           initialEditRef={initialEditRef}
           edit={{
             onChange: (next) =>
@@ -1040,14 +1054,16 @@ export default function AIContentEditModal({
             /* PATCH-241: picture-first -- the picture fills the window and is
                edited directly; the form is behind "List view". */
             <div data-ai-picture-first="true" className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white p-6">
-              <PictureStage
-                mode={pictureMode}
-                resetKey={pictureResetKey}
-                aria-label="Picture"
-                className="min-h-0 flex-1"
-              >
-                {renderPreview()}
-              </PictureStage>
+              <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
+                <PictureStage
+                  mode={pictureMode}
+                  resetKey={pictureResetKey}
+                  aria-label="Picture"
+                  className="min-h-0 flex-1"
+                >
+                  {renderPreview()}
+                </PictureStage>
+              </DiagramKickerEditContext.Provider>
             </div>
           ) : (
             <>
@@ -1067,14 +1083,16 @@ export default function AIContentEditModal({
               {/* Right: live preview */}
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white p-6">
                 <p className="block text-sm font-medium text-gray-700">Live preview</p>
-                <PictureStage
-                  mode={pictureMode}
-                  resetKey={pictureResetKey}
-                  aria-label="Live preview"
-                  className="mt-4 min-h-0 flex-1"
-                >
-                  {renderPreview()}
-                </PictureStage>
+                <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
+                  <PictureStage
+                    mode={pictureMode}
+                    resetKey={pictureResetKey}
+                    aria-label="Live preview"
+                    className="mt-4 min-h-0 flex-1"
+                  >
+                    {renderPreview()}
+                  </PictureStage>
+                </DiagramKickerEditContext.Provider>
               </div>
             </>
           )}

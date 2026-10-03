@@ -39,6 +39,13 @@ const ThemeSchema = z
  */
 const StyleSchema = z.unknown().optional().transform(sanitizeVisualStyle);
 
+/**
+ * PATCH-264. The small label above a diagram's title. Optional and capped at 40
+ * characters; an explicit empty string is kept (the user cleared the label).
+ * The AI never sets it -- the generate routes strip any model-supplied value.
+ */
+const KickerSchema = z.string().max(40).optional();
+
 const LessonBoardSectionSchema = z.object({
   title: z.string().min(1),
   bullets: z.array(z.string().min(1)).optional(),
@@ -100,6 +107,7 @@ export const FlowDiagramSchema: z.ZodType<FlowDiagramData> = z.object({
   renderer: z.literal('diagram_code'),
   code: z.string().min(1),
   explanation: z.string().optional(),
+  kicker: KickerSchema,
 });
 
 const MindmapLeafSchema = z.object({ label: z.string().min(1) });
@@ -149,6 +157,7 @@ export const MindmapDiagramSchema: z.ZodType<MindmapDiagramData> = z.object({
   tree: MindmapTreeSchema.optional(),
   theme: ThemeSchema,
   style: StyleSchema,
+  kicker: KickerSchema,
 });
 
 export const PieChartDiagramSchema: z.ZodType<PieChartDiagramData> = z.object({
@@ -157,6 +166,7 @@ export const PieChartDiagramSchema: z.ZodType<PieChartDiagramData> = z.object({
   title: z.string().min(1),
   renderer: z.literal('chart'),
   dataPoints: z.array(ChartDataPointSchema).min(1),
+  kicker: KickerSchema,
 });
 
 export const BarChartDiagramSchema: z.ZodType<BarChartDiagramData> = z.object({
@@ -167,6 +177,7 @@ export const BarChartDiagramSchema: z.ZodType<BarChartDiagramData> = z.object({
   dataPoints: z.array(ChartDataPointSchema).min(1),
   xLabel: z.string().optional(),
   yLabel: z.string().optional(),
+  kicker: KickerSchema,
 });
 
 export const TimelineDiagramSchema: z.ZodType<TimelineDiagramData> = z.object({
@@ -177,6 +188,7 @@ export const TimelineDiagramSchema: z.ZodType<TimelineDiagramData> = z.object({
   items: z.array(TimelineItemSchema).min(1),
   theme: ThemeSchema,
   style: StyleSchema,
+  kicker: KickerSchema,
 });
 
 export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.object({
@@ -187,6 +199,7 @@ export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.objec
   columns: z.array(ComparisonColumnSchema).min(2),
   theme: ThemeSchema,
   style: StyleSchema,
+  kicker: KickerSchema,
 });
 
 /**
@@ -233,6 +246,7 @@ export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = z.obj
   explanation: z.string().optional(),
   theme: ThemeSchema,
   style: StyleSchema,
+  kicker: KickerSchema,
 });
 
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({

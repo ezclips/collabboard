@@ -18,6 +18,7 @@ import { themeById, type VisualTheme } from '@/lib/ai/visualThemes';
 import { themeWithStyle } from '@/lib/ai/visualStyle';
 import { getVisualIcon } from './visualIconMap';
 import AntvInfographicRenderer from './AntvInfographicRenderer';
+import DiagramKicker from './DiagramKicker';
 import PictureEditOverlay, { type ActiveEdit, type ColorPopoverState, type EditHandle } from './PictureEditOverlay';
 
 /**
@@ -293,7 +294,7 @@ function OurInfographicRenderer({
     >
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>infographic</div>
+          <DiagramKicker value={data.kicker} fallback="infographic" color={theme.muted} />
           <h2
             className="mt-1 text-lg font-semibold"
             style={{ color: theme.title, ...(titleFont ? { fontFamily: titleFont.family, fontWeight: titleFont.weight } : {}) }}

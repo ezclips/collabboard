@@ -85,3 +85,20 @@ describe('PATCH-234 ComparisonDiagramRenderer', () => {
     }
   });
 });
+
+describe('PATCH-264 ComparisonDiagramRenderer kicker', () => {
+  it('shows the default label when the kicker is absent', () => {
+    const c = mount(<ComparisonDiagramRenderer data={data} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('comparison');
+  });
+
+  it('shows a custom kicker', () => {
+    const c = mount(<ComparisonDiagramRenderer data={{ ...data, kicker: 'Q3 plan' }} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('Q3 plan');
+  });
+
+  it('shows no label for an explicit empty kicker', () => {
+    const c = mount(<ComparisonDiagramRenderer data={{ ...data, kicker: '' }} />);
+    expect(c.querySelector('[data-ai-kicker]')).toBeNull();
+  });
+});

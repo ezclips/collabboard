@@ -90,3 +90,22 @@ describe('PATCH-234 MindmapTreeRenderer', () => {
     }
   });
 });
+
+describe('PATCH-264 MindmapTreeRenderer kicker', () => {
+  const tree = { label: 'Root', children: [{ label: 'Branch A' }] };
+
+  it('shows the default label when the kicker is absent', () => {
+    const c = mount(<MindmapTreeRenderer data={data(tree)} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('mindmap');
+  });
+
+  it('shows a custom kicker', () => {
+    const c = mount(<MindmapTreeRenderer data={{ ...data(tree), kicker: 'Q3 plan' }} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('Q3 plan');
+  });
+
+  it('shows no label for an explicit empty kicker', () => {
+    const c = mount(<MindmapTreeRenderer data={{ ...data(tree), kicker: '' }} />);
+    expect(c.querySelector('[data-ai-kicker]')).toBeNull();
+  });
+});

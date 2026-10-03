@@ -19,6 +19,7 @@ import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/ou
 import { themeById } from '@/lib/ai/visualThemes';
 import { themeWithStyle } from '@/lib/ai/visualStyle';
 import AntvElementEditor from './AntvElementEditor';
+import DiagramKicker from './DiagramKicker';
 import PictureEditOverlay, { type EditHandle, type NodeBox } from './PictureEditOverlay';
 
 /**
@@ -551,9 +552,7 @@ function AntvInfographicRenderer({
       {edit && <style data-antv-editable-css="true">{ANTV_EDIT_CSS}</style>}
       <div className="space-y-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: theme.muted }}>
-            infographic
-          </div>
+          <DiagramKicker value={data.kicker} fallback="infographic" color={theme.muted} />
           {/* The title is NOT printed here: AntV draws `data.title` inside the
               picture, and that is the one shown and edited on the picture. */}
           {data.explanation && <p className="mt-2 text-sm" style={{ color: theme.text }}>{data.explanation}</p>}

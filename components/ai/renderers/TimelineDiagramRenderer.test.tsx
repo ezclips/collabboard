@@ -80,3 +80,20 @@ describe('PATCH-234 TimelineDiagramRenderer', () => {
     }
   });
 });
+
+describe('PATCH-264 TimelineDiagramRenderer kicker', () => {
+  it('shows the default label when the kicker is absent', () => {
+    const c = mount(<TimelineDiagramRenderer data={data} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('timeline');
+  });
+
+  it('shows a custom kicker', () => {
+    const c = mount(<TimelineDiagramRenderer data={{ ...data, kicker: 'Q3 plan' }} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('Q3 plan');
+  });
+
+  it('shows no label for an explicit empty kicker', () => {
+    const c = mount(<TimelineDiagramRenderer data={{ ...data, kicker: '' }} />);
+    expect(c.querySelector('[data-ai-kicker]')).toBeNull();
+  });
+});

@@ -92,3 +92,20 @@ describe('PATCH-241 AntvInfographicRenderer', () => {
     expect(c.querySelector('[onerror]')).toBeNull();
   }, 30000);
 });
+
+describe('PATCH-264 AntvInfographicRenderer kicker', () => {
+  it('shows the default label when the kicker is absent', () => {
+    const c = mount(<AntvInfographicRenderer data={data(outline)} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('infographic');
+  });
+
+  it('shows a custom kicker', () => {
+    const c = mount(<AntvInfographicRenderer data={{ ...data(outline), kicker: 'Q3 plan' }} />);
+    expect(c.querySelector('[data-ai-kicker]')!.textContent).toBe('Q3 plan');
+  });
+
+  it('shows no label for an explicit empty kicker', () => {
+    const c = mount(<AntvInfographicRenderer data={{ ...data(outline), kicker: '' }} />);
+    expect(c.querySelector('[data-ai-kicker]')).toBeNull();
+  });
+});

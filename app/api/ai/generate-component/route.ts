@@ -138,6 +138,9 @@ function injectStructuralMetadata(
   }
   const obj = { ...(parsed as Record<string, unknown>) };
   obj.type = MODE_TYPE_FIELD[mode];
+  // PATCH-264. The label above a picture's title belongs to the user, never the
+  // model: drop any `kicker` a model reply tried to supply.
+  delete obj.kicker;
   if (mode === 'diagram' && subtype) {
     obj.subtype = subtype;
     if (renderer) obj.renderer = renderer;

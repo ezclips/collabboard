@@ -7,6 +7,7 @@ import type { FlowDiagramData, MindmapDiagramData } from '@/lib/ai/contracts';
 import { renderDiagramCode } from '@/lib/ai/diagram-engine';
 import { trackAIRenderFallback } from '@/lib/ai/telemetry';
 
+import DiagramKicker from './DiagramKicker';
 import UnsupportedAIContent from './UnsupportedAIContent';
 
 type CodeDiagramData = FlowDiagramData | MindmapDiagramData;
@@ -94,9 +95,7 @@ function CodeDiagramRenderer({ data }: { data: CodeDiagramData }) {
       <div className="space-y-4">
 
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
-            {data.subtype.replace('_', ' ')}
-          </div>
+          <DiagramKicker value={data.kicker} fallback={data.subtype.replace('_', ' ')} className="text-gray-500" />
           <h2 className="mt-1 text-lg font-semibold text-gray-900">{data.title}</h2>
           {data.explanation && (
             <p className="mt-2 text-sm text-gray-600">{data.explanation}</p>
@@ -146,8 +145,11 @@ function CodeDiagramRenderer({ data }: { data: CodeDiagramData }) {
   );
 }
 
-// Custom comparator: only re-render when the Mermaid source or subtype changes.
-// Prevents the expensive Mermaid render from firing on unrelated parent updates.
+// Custom comparator: only re-render when the Mermaid source, subtype or kicker
+// changes. Prevents the expensive Mermaid render from firing on unrelated
+// parent updates.
 export default React.memo(CodeDiagramRenderer, (prev, next) =>
-  prev.data.code === next.data.code && prev.data.subtype === next.data.subtype,
+  prev.data.code === next.data.code
+  && prev.data.subtype === next.data.subtype
+  && prev.data.kicker === next.data.kicker,
 );
