@@ -5,6 +5,9 @@
  * inline in the renderer) keeps it importable without pulling AntV into the
  * bundle -- `mod` is the lazily loaded engine.
  *
+ * PATCH-260. `DragElement` and `BrushSelect` are also gone: the element editor
+ * owns selecting/moving/resizing, and the two AntV interactions fought it.
+ *
  * Type-only import: this module has no runtime AntV dependency.
  */
 
@@ -15,8 +18,6 @@ type InteractionCtor = new () => unknown;
 const STAGE_INTERACTION_NAMES = [
   'DblClickEditText',
   'ClickSelect',
-  'BrushSelect',
-  'DragElement',
   'HotkeyHistory',
   'SelectHighlight',
 ] as const;

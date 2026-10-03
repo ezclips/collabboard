@@ -240,6 +240,16 @@ describe('PATCH-250 valuesEstimated', () => {
 });
 
 describe('PATCH-257 withExampleValues', () => {
+  it('PATCH-260 keeps elementOverrides when adding example values', () => {
+    const base = parseOutline({
+      title: 'Water cycle',
+      items: [{ label: 'Evaporation' }, { label: 'Condensation' }, { label: 'Precipitation' }],
+      elementOverrides: { template: 'antv:list-grid-badge-card', items: { 'title#0': { dx: 3 } } },
+    });
+    const next = withExampleValues(base);
+    expect(next.elementOverrides).toEqual({ template: 'antv:list-grid-badge-card', items: { 'title#0': { dx: 3 } } });
+  });
+
   const base = () =>
     parseOutline({
       title: 'Water cycle',
@@ -280,6 +290,36 @@ describe('PATCH-257 withExampleValues', () => {
     });
 
     expect(out.valuesExample).toBeUndefined();
+  });
+});
+
+describe('PATCH-260 parseOutline element overrides', () => {
+  it('keeps a sanitized override map and drops junk keys/values', () => {
+    const out = parseOutline({
+      title: 'T',
+      items: [{ label: 'A' }, { label: 'B' }],
+      elementOverrides: {
+        template: 'list-grid-badge-card',
+        items: {
+          'item-label@0': { dx: 12, dy: -3, sx: 2, sy: 0.5 },
+          'Bad Key': { dx: 999 },
+          'shape#0': { dx: Number.NaN, sx: 50 },
+        },
+      },
+    });
+    expect(out.elementOverrides).toEqual({
+      template: 'list-grid-badge-card',
+      items: { 'item-label@0': { dx: 12, dy: -3, sx: 2, sy: 0.5 } },
+    });
+  });
+
+  it('drops a model-supplied elementOverrides that carries no usable entry', () => {
+    const out = parseOutline({
+      title: 'T',
+      items: [{ label: 'A' }, { label: 'B' }],
+      elementOverrides: { template: 't', items: { 'Bad Key': { dx: 1 } } },
+    });
+    expect(out.elementOverrides).toBeUndefined();
   });
 });
 

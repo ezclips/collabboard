@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
 import { OUTLINE_SYSTEM_PROMPT, OutlineParseError, parseOutline, withValuesEstimated } from '@/lib/ai/outline';
+import { withoutElementOverrides } from '@/lib/ai/antv/elementOverrides';
 import {
   trackAIGenerationFailed,
   trackAIGenerationStarted,
@@ -280,6 +281,9 @@ export async function POST(req: NextRequest) {
 
     try {
       let outline = parseOutline(parsed);
+      // PATCH-260. Element overrides belong to the user's own edits, never the
+      // model: strip anything the model tried to set, like `valuesEstimated`.
+      outline = withoutElementOverrides(outline);
       // PATCH-250. Only the server sets valuesEstimated, and only when the
       // caller asked for estimates and the model actually gave at least two
       // values. The model's own flag (if any) was dropped by parseOutline.

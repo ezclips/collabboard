@@ -13,10 +13,12 @@ import {
   type AntvChangeEvent,
 } from '@/lib/ai/antv/mapOutline';
 import { stageInteractions } from '@/lib/ai/antv/interactions';
+import { applyElementOverrides, withoutElementOverrides } from '@/lib/ai/antv/elementOverrides';
 import { insertItem } from '@/lib/ai/infographic/edit';
 import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/outline';
 import { themeById } from '@/lib/ai/visualThemes';
 import { themeWithStyle } from '@/lib/ai/visualStyle';
+import AntvElementEditor from './AntvElementEditor';
 import PictureEditOverlay, { type EditHandle } from './PictureEditOverlay';
 
 /**
@@ -36,7 +38,7 @@ type RenderPhase = 'loading' | 'done' | 'failed';
 
 interface AntvInstance {
   render(): void;
-  update(options: unknown): void;
+  update(options: unknown): void | Promise<void>;
   on(event: string, listener: (payload: unknown) => void): void;
   destroy(): void;
 }
@@ -272,10 +274,44 @@ function AntvInfographicRenderer({
 
   // Keep the current outline/callback in refs so the create effect can stay
   // keyed on the template/theme and StrictMode's double-run is harmless.
+  //
+  // PATCH-260. `outlineRef` is the SINGLE "latest outline". Every upward emitter
+  // (element editor commit, AntV `options:change`, +/− button, mind-map handle)
+  // reads and writes it SYNCHRONOUSLY, before React re-renders. Without this a
+  // later `options:change` -- often fired by AntV reacting to our own transform
+  // writes -- rebuilt the outline from the still-old props and silently dropped
+  // the just-committed `elementOverrides` (and titleStyle/valuesEstimated).
   const outlineRef = useRef(data.outline);
   outlineRef.current = data.outline;
   const editRef = useRef(edit);
   editRef.current = edit;
+  // AntV reacting to OUR paint (the transform we write) must not look like a data
+  // change: remember the serialized options we last drew and compare on emit.
+  const lastDrawnRef = useRef<string | null>(null);
+  // PATCH-260. The outline we last CALLED update() with, ignoring
+  // `elementOverrides`. An edit that only moves/resizes/deletes an element changes
+  // nothing AntV must redraw, so `update` must be skipped: AntV re-fits the SVG
+  // to the moved content and PictureStage then re-fits the user's zoom/shift
+  // under the pointer after every edit.
+  const lastUpdatedOutlineRef = useRef<string | null>(null);
+
+  /**
+   * PATCH-260. The one place an outline edit leaves this renderer. It records the
+   * latest outline synchronously (so the next emitter never reads a stale props
+   * snapshot), stamps the source for live debugging, and forwards it upward.
+   */
+  const emitOutline = React.useCallback(
+    (next: VisualOutline, source: 'element-editor' | 'antv-change' | 'antv-button' | 'mindmap-handle') => {
+      outlineRef.current = next;
+      const container = containerRef.current;
+      if (container) {
+        container.setAttribute('data-ai-last-emit', source);
+        container.setAttribute('data-ai-outline-overrides', String(Object.keys(next.elementOverrides?.items ?? {}).length));
+      }
+      editRef.current?.onChange(next);
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -290,6 +326,18 @@ function AntvInfographicRenderer({
     const decorate = () => {
       if (!cancelled && editable) decorateAntvButtons(container);
     };
+    // PATCH-260. Re-apply the user's element overrides after every draw, also
+    // when the picture is not editable (board, thumbnails, preview).
+    const applyOverrides = () => {
+      if (!cancelled) applyElementOverrides(container, outlineRef.current.elementOverrides, templateName);
+    };
+    // PATCH-260 fix. AntV re-creates `<use>`/`<foreignObject>` nodes when its
+    // icons and text reload, which drops the transform we just wrote. Re-apply
+    // once more on the next frame (and after `update`'s promise, below).
+    const applyOverridesSoon = () => {
+      applyOverrides();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(applyOverrides);
+    };
     const recompute = () => {
       if (cancelled) return;
       if (!editable || !isMindmap) {
@@ -298,7 +346,7 @@ function AntvInfographicRenderer({
       }
       setHandles(
         buildAntvMindmapHandles(container, outlineRef.current, templateName, (next) =>
-          editRef.current?.onChange(next),
+          emitOutline(next, 'mindmap-handle'),
         ),
       );
     };
@@ -318,7 +366,7 @@ function AntvInfographicRenderer({
       if (next === outlineRef.current) return;
       event.preventDefault();
       event.stopPropagation();
-      editRef.current?.onChange(next);
+      emitOutline(next, 'antv-button');
     };
     if (editable) container.addEventListener('click', handleClick);
 
@@ -367,6 +415,7 @@ function AntvInfographicRenderer({
         instance.on('rendered', () => {
           decorate();
           recompute();
+          applyOverridesSoon();
         });
         instance.on('loaded', () => {
           if (cancelled) return;
@@ -376,19 +425,32 @@ function AntvInfographicRenderer({
           }
           decorate();
           recompute();
+          applyOverridesSoon();
           setPhase('done');
         });
         if (editable) {
           instance.on('options:change', (event) => {
+            // PATCH-260. AntV fires `options:change` when WE paint (we set a
+            // `transform` on its elements) or when a click/selection happens.
+            // Compare the engine's reported options against the last thing we
+            // drew: an unchanged payload is not an edit and must emit nothing.
+            const serialized = JSON.stringify(
+              (event as { options?: unknown } | null | undefined)?.options ?? null,
+            );
+            if (serialized === lastDrawnRef.current) return;
             const next = applyAntvChange(outlineRef.current, templateName, event as AntvChangeEvent);
             // PATCH-244: an unmapped toolbar action must not trigger a redraw
             // from the unchanged outline, which would wipe what AntV just drew.
             if (outlinesEqual(next, outlineRef.current)) return;
-            editRef.current?.onChange(next);
+            emitOutline(next, 'antv-change');
           });
         }
         instanceRef.current = instance;
+        // PATCH-260. Record the drawn outline (without overrides) so the first
+        // overrides-only commit already skips the redundant update().
+        lastUpdatedOutlineRef.current = JSON.stringify(withoutElementOverrides(outlineRef.current));
         instance.render();
+        applyOverridesSoon();
       })
       .catch(() => {
         if (!cancelled) setPhase('failed');
@@ -409,11 +471,44 @@ function AntvInfographicRenderer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateName, data.theme, data.style, Boolean(edit)]);
 
-  // Outline changes (an edit committed to our data) re-render through update().
+  // Outline changes re-render through update(). PATCH-260: an edit that only
+  // changes `elementOverrides` is NOT an engine data change -- skip update() and
+  // re-apply the overrides to the current DOM, so AntV never re-fits its viewBox
+  // and the user's zoom/position stays put.
   useEffect(() => {
     const instance = instanceRef.current;
     if (!instance) return;
-    instance.update(toAntvOptions(data.outline, templateName, data.theme, data.style));
+    const container = containerRef.current;
+    const reapply = () => {
+      if (container) applyElementOverrides(container, outlineRef.current.elementOverrides, templateName);
+    };
+    if (container) {
+      container.setAttribute('data-ai-outline-overrides', String(Object.keys(data.outline.elementOverrides?.items ?? {}).length));
+    }
+
+    const comparable = JSON.stringify(withoutElementOverrides(data.outline));
+    const overridesOnly = lastUpdatedOutlineRef.current !== null && comparable === lastUpdatedOutlineRef.current;
+    if (overridesOnly) {
+      // Same content, only the element overrides moved: repaint the DOM only.
+      reapply();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(reapply);
+      return;
+    }
+    lastUpdatedOutlineRef.current = comparable;
+
+    // PATCH-260 fix. AntV rewrites the SVG on update and then re-creates its
+    // icon/text nodes as resources load, so re-apply the overrides now, after
+    // update's promise (if any) and once more on the next frame.
+    const options = toAntvOptions(data.outline, templateName, data.theme, data.style);
+    // PATCH-260. Remember what we drew so an `options:change` echoing it back
+    // (AntV reacting to our own paint) is recognised as "no data change".
+    lastDrawnRef.current = JSON.stringify(options);
+    const result = instance.update(options);
+    reapply();
+    if (result && typeof (result as Promise<void>).then === 'function') {
+      (result as Promise<void>).then(reapply, reapply);
+    }
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(reapply);
   }, [data.outline, templateName, data.theme, data.style]);
 
   return (
@@ -444,8 +539,21 @@ function AntvInfographicRenderer({
           </div>
         )}
         <div className="group relative w-full">
-          <div ref={containerRef} data-antv-container={templateName} className="w-full" />
+          <div
+            ref={containerRef}
+            data-antv-container={templateName}
+            data-ai-outline-overrides={String(Object.keys(data.outline.elementOverrides?.items ?? {}).length)}
+            className="w-full"
+          />
           {edit && isMindmap && handles.length > 0 && <PictureEditOverlay handles={handles} />}
+          {edit && (
+            <AntvElementEditor
+              containerRef={containerRef}
+              template={templateName}
+              outline={data.outline}
+              onChange={(next) => emitOutline(next, 'element-editor')}
+            />
+          )}
         </div>
       </div>
     </div>

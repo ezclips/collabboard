@@ -225,3 +225,19 @@ describe('PATCH-250 generate-outline estimateValues', () => {
     expect(body.outline.valuesEstimated).toBeUndefined();
   });
 });
+
+describe('PATCH-260 generate-outline strips model element overrides', () => {
+  it('never returns the model\u2019s elementOverrides', async () => {
+    h.generate.mockResolvedValue({
+      text: JSON.stringify({
+        ...VALID_OUTLINE,
+        elementOverrides: { template: 'list-grid-badge-card', items: { 'title#0': { dx: 20 } } },
+      }),
+      generatedBy: ATTR,
+    });
+    const res = await POST(makeRequest({ prompt: 'x' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.outline.elementOverrides).toBeUndefined();
+  });
+});

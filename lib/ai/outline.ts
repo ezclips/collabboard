@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+import {
+  sanitizeElementOverrides,
+  type ElementOverrides,
+} from './antv/elementOverrides';
 import { VISUAL_ICON_NAMES, isVisualIconName } from './visualIcons';
 
 /**
@@ -78,6 +82,12 @@ export interface VisualOutline {
    * `valuesEstimated`.
    */
   valuesExample?: boolean;
+  /**
+   * PATCH-260. Per-element move/resize/delete overrides, stored INSIDE the
+   * outline so every save path carries them. The model never sets it: the
+   * outline route strips it, and `parseOutline` keeps only a sanitized copy.
+   */
+  elementOverrides?: ElementOverrides;
 }
 
 /**
@@ -266,6 +276,7 @@ const OutlineSchema = z.object({
   kind: z.string().optional(),
   ordered: z.boolean().optional(),
   titleStyle: z.unknown().optional(),
+  elementOverrides: z.unknown().optional(),
   items: z.array(OutlineItemSchema).optional(),
 });
 
@@ -344,12 +355,16 @@ export function parseOutline(raw: unknown): VisualOutline {
   // PATCH-244: keep a validated title style; absent when there is none.
   const titleStyle = sanitizeTextStyle(data.titleStyle);
 
+  // PATCH-260: keep only a sanitized override map; absent when there is none.
+  const elementOverrides = sanitizeElementOverrides(data.elementOverrides);
+
   return {
     title,
     ordered,
     items,
     kind,
     ...(titleStyle ? { titleStyle } : {}),
+    ...(elementOverrides ? { elementOverrides } : {}),
   };
 }
 

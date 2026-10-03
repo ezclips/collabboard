@@ -80,6 +80,18 @@ describe('PATCH-241 suggestDesigns AntV options', () => {
     expect(keys.some((k) => k.includes('relation-'))).toBe(false);
     expect(keys.filter((k) => k.includes('chart-')).every((k) => k.includes('chart-wordcloud'))).toBe(true);
   });
+
+  it('PATCH-260 carries elementOverrides into every option envelope', () => {
+    const overrides = { template: 'list-grid-badge-card', items: { 'title#0': { dx: 4, dy: 2 } } };
+    const base = { ...outline('list', 3), elementOverrides: overrides };
+    const suggestions = suggestDesigns(base);
+    expect(suggestions.length).toBeGreaterThan(0);
+    for (const suggestion of suggestions) {
+      if (suggestion.envelopeData.subtype === 'infographic') {
+        expect(suggestion.envelopeData.outline.elementOverrides).toEqual(overrides);
+      }
+    }
+  });
 });
 
 describe('PATCH-237 suggestDesigns preferKey (Customize hint)', () => {

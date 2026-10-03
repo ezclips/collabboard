@@ -129,6 +129,14 @@ describe('PATCH-240 recolorItem', () => {
     expect(recolorItem(base, 0, 9).items[0].color).toBeUndefined();
     expect(recolorItem(base, 0, -1).items[0].color).toBeUndefined();
   });
+
+  it('PATCH-260 keeps elementOverrides through recolor / insert / remove', () => {
+    const overrides = { template: 'antv:list-grid-badge-card', items: { 'title#0': { dx: 4 } } };
+    const base: VisualOutline = { ...outline(), elementOverrides: overrides };
+    expect(recolorItem(base, 0, 2).elementOverrides).toEqual(overrides);
+    expect(insertItem(base, 1).elementOverrides).toEqual(overrides);
+    expect(removeItem(base, 0).elementOverrides).toEqual(overrides);
+  });
 });
 
 function hub(): VisualOutline {

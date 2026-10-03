@@ -236,12 +236,10 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
     expect(h.madeInteractions).toEqual([
       'dblclick-edit-text',
       'click-select',
-      'brush-select',
-      'drag-element',
       'hotkey-history',
       'select-highlight',
     ]);
-    expect((instance.options.interactions as unknown[]).length).toBe(6);
+    expect((instance.options.interactions as unknown[]).length).toBe(4);
   });
 
   it('a viewBox options:change does not call onChange', async () => {
@@ -257,6 +255,31 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
       });
     });
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('PATCH-260 keeps elementOverrides when an options:change text edit maps back', async () => {
+    const onChange = vi.fn();
+    const withOverrides = data({
+      ...outline,
+      elementOverrides: { template: 'list-grid-badge-card', items: { 'item-label@0': { dx: 12, dy: -3 } } },
+    });
+    mount(<AntvInfographicRenderer data={withOverrides} edit={{ onChange }} />);
+    await flush();
+    const instance = h.instances[0];
+
+    act(() => {
+      instance.emit('options:change', {
+        type: 'options:change',
+        changes: [{ op: 'update', path: 'data.items', indexes: [1], value: { label: 'High summer\n' } }],
+      });
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0] as VisualOutline;
+    expect(next.items[1].label).toBe('High summer');
+    expect(next.elementOverrides).toEqual({
+      template: 'list-grid-badge-card',
+      items: { 'item-label@0': { dx: 12, dy: -3 } },
+    });
   });
 
   it('updates the engine when the outline changes', async () => {

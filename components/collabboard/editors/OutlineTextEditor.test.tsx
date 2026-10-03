@@ -38,6 +38,14 @@ function setInputValue(input: HTMLInputElement, value: string) {
   });
 }
 
+function setSelectValue(select: HTMLSelectElement, value: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+    setter.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 function outline(count: number): VisualOutline {
   return {
     title: 'Seasons',
@@ -113,5 +121,36 @@ describe('PATCH-250 OutlineTextEditor value inputs', () => {
     expect(next.items[1].value).toBeUndefined();
     expect('value' in next.items[1]).toBe(false);
     expect(next.items[0].value).toBe(50);
+  });
+});
+
+describe('PATCH-260 OutlineTextEditor keeps elementOverrides', () => {
+  const overrides = { template: 'antv:list-grid-badge-card', items: { 'item-label@0': { dx: 9, dy: 4 } } };
+
+  it('survives a title edit, a label edit, an icon change and a value edit', () => {
+    const onChange = vi.fn();
+    const base: VisualOutline = {
+      title: 'Budget',
+      ordered: false,
+      kind: 'list',
+      items: [
+        { label: 'Venue', value: 50 },
+        { label: 'Food', value: 50 },
+      ],
+      elementOverrides: overrides,
+    };
+    const c = mount(<OutlineTextEditor outline={base} onChange={onChange} />);
+
+    setInputValue(c.querySelector('[data-ai-outline-title="true"]') as HTMLInputElement, 'New budget');
+    expect((onChange.mock.calls.at(-1)![0] as VisualOutline).elementOverrides).toEqual(overrides);
+
+    setInputValue(c.querySelector('[data-ai-outline-item-label="1"]') as HTMLInputElement, 'Meals');
+    expect((onChange.mock.calls.at(-1)![0] as VisualOutline).elementOverrides).toEqual(overrides);
+
+    setSelectValue(c.querySelector('[data-ai-outline-item-icon="1"]') as HTMLSelectElement, 'sun');
+    expect((onChange.mock.calls.at(-1)![0] as VisualOutline).elementOverrides).toEqual(overrides);
+
+    setInputValue(c.querySelector('[data-ai-outline-item-value="1"]') as HTMLInputElement, '25');
+    expect((onChange.mock.calls.at(-1)![0] as VisualOutline).elementOverrides).toEqual(overrides);
   });
 });

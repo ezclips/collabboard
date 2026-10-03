@@ -190,6 +190,17 @@ describe('PATCH-243 tree <-> outline mapping', () => {
     expect(next.items[0].children).toEqual([{ label: 'Oceans' }]);
     expect(next.items[2].side).toBe('left');
   });
+
+  it('PATCH-260 keeps elementOverrides through a tree edit', () => {
+    const base: VisualOutline = {
+      ...richOutline(),
+      elementOverrides: { template: 'hierarchy-mindmap-branch-gradient-capsule-item', items: { 'item-label@0,0': { dx: 5, dy: 6 } } },
+    };
+    const tree = treeOf(base);
+    const edited = { ...tree, label: 'Renamed' } as MindmapTree;
+    const next = outlineFromMindmapTree(base, edited);
+    expect(next.elementOverrides).toEqual(base.elementOverrides);
+  });
 });
 
 describe('PATCH-237 flow direction', () => {

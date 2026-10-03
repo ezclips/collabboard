@@ -11,7 +11,7 @@ function make(name: string, made: string[]) {
 }
 
 describe('PATCH-245 AntV stage interactions', () => {
-  it('keeps the six editing interactions and drops ZoomWheel / DragCanvas', () => {
+  it('keeps the four editing interactions and drops ZoomWheel / DragCanvas / DragElement / BrushSelect', () => {
     const made: string[] = [];
     const mod = {
       DblClickEditText: make('dbl', made),
@@ -26,10 +26,12 @@ describe('PATCH-245 AntV stage interactions', () => {
 
     const built = stageInteractions(mod as never);
 
-    expect(built).toHaveLength(6);
-    expect(made).toEqual(['dbl', 'click', 'brush', 'dragElement', 'hotkey', 'highlight']);
+    expect(built).toHaveLength(4);
+    expect(made).toEqual(['dbl', 'click', 'hotkey', 'highlight']);
     expect(made).not.toContain('zoom');
     expect(made).not.toContain('dragCanvas');
+    expect(made).not.toContain('dragElement');
+    expect(made).not.toContain('brush');
   });
 
   it('tolerates a module that is missing some interactions', () => {

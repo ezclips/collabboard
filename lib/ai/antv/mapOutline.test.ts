@@ -524,6 +524,38 @@ describe('PATCH-244 toAntvOptions round-trip', () => {
   });
 });
 
+describe('PATCH-260 element overrides survive every AntV edit path', () => {
+  const overrides = { template: 'list-grid-badge-card', items: { 'item-label@0': { dx: 12, dy: -3 }, 'shape@0#0': { dx: 12, dy: -3 } } };
+  const base = outline({ elementOverrides: overrides });
+
+  it('survives applyAntvChange text, attributes, add and remove', () => {
+    const text = applyAntvChange(base, 'list-grid-badge-card', {
+      op: 'update', path: 'data.items', indexes: [1], value: { label: 'High summer' },
+    });
+    expect(text.elementOverrides).toEqual(overrides);
+    expect(text.items[1].label).toBe('High summer');
+
+    const attrs = applyAntvChange(base, 'list-grid-badge-card', {
+      op: 'update', path: 'data.items[0].attributes.label', indexes: [0], value: { attributes: { fill: '#ff0000' } },
+    });
+    expect(attrs.elementOverrides).toEqual(overrides);
+
+    const item = { label: 'Autumn' };
+    const add = applyAntvChange(base, 'list-grid-badge-card', { op: 'add', path: 'data.items', indexes: [1], value: [item] });
+    expect(add.elementOverrides).toEqual(overrides);
+
+    const remove = applyAntvChange(base, 'list-grid-badge-card', { op: 'remove', path: 'data.items', indexes: [1] });
+    expect(remove.elementOverrides).toEqual(overrides);
+  });
+
+  it('survives applyAntvButton add and remove', () => {
+    const added = applyAntvButton(base, [0], 'add', 'list-grid-badge-card');
+    expect(added.elementOverrides).toEqual(overrides);
+    const removed = applyAntvButton(base, [1], 'remove', 'list-grid-badge-card');
+    expect(removed.elementOverrides).toEqual(overrides);
+  });
+});
+
 describe('PATCH-244 outlinesEqual', () => {
   it('is true for a no-op change and false once a style is added', () => {
     const base = outline();

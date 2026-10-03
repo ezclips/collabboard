@@ -601,18 +601,28 @@ export default function AIComponentEditor({
 
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
-  const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => ({
-    mode: 'diagram',
-    version: 1,
-    data: applyStyleToData(applyThemeToData(option.envelopeData, visualTheme), visualStyle),
-    meta: {
-      renderer: option.envelopeData.renderer,
-      subtype: option.envelopeData.subtype,
-      prompt,
-      createdAt: outlineCreatedAt ?? new Date().toISOString(),
-      generatedBy: outlineGeneratedBy ?? undefined,
-    },
-  });
+  // PATCH-260. The envelope's outline is ALWAYS the editor's current
+  // `activeOutline`: a suggestion's `envelopeData.outline` can be a stale copy
+  // (built when the suggestions were ranked, before an element move updated the
+  // outline), so the current outline is the single source for saved overrides.
+  const optionEnvelope = (option: DesignSuggestion): LoadedAIContent => {
+    const baseData =
+      option.envelopeData.subtype === 'infographic' && activeOutline
+        ? { ...option.envelopeData, outline: activeOutline }
+        : option.envelopeData;
+    return {
+      mode: 'diagram',
+      version: 1,
+      data: applyStyleToData(applyThemeToData(baseData, visualTheme), visualStyle),
+      meta: {
+        renderer: option.envelopeData.renderer,
+        subtype: option.envelopeData.subtype,
+        prompt,
+        createdAt: outlineCreatedAt ?? new Date().toISOString(),
+        generatedBy: outlineGeneratedBy ?? undefined,
+      },
+    };
+  };
   const selectedOptionEnvelope = selectedOption ? optionEnvelope(selectedOption) : null;
   const persistedContent = showOptions
     ? serializeAIContentForPersistence(selectedOptionEnvelope)
