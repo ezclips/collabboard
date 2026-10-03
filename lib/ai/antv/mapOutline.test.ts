@@ -556,6 +556,30 @@ describe('PATCH-260 element overrides survive every AntV edit path', () => {
   });
 });
 
+describe('PATCH-269 AntV label edits keep the item details', () => {
+  const MINDMAP = 'hierarchy-mindmap-branch-gradient-capsule-item';
+
+  it('keeps value and textStyle when a mind-map branch label is edited', () => {
+    const base = outline({
+      items: [
+        { label: 'Venue', value: 40, textStyle: { label: { fill: '#ff0000' } } },
+        { label: 'Food', value: 30 },
+      ],
+    });
+    const next = applyAntvChange(base, MINDMAP, {
+      op: 'update',
+      path: 'data.items',
+      indexes: [0, 0],
+      value: { label: 'Venue renamed' },
+    });
+    expect(next.items[0].label).toBe('Venue renamed');
+    expect(next.items[0].value).toBe(40);
+    expect(next.items[0].textStyle).toEqual({ label: { fill: '#ff0000' } });
+    // The sibling's own value is untouched.
+    expect(next.items[1].value).toBe(30);
+  });
+});
+
 describe('PATCH-244 outlinesEqual', () => {
   it('is true for a no-op change and false once a style is added', () => {
     const base = outline();

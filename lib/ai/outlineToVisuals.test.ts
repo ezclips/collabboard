@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { addChild, removeNode, renameNode } from './infographic/edit';
 import type { MindmapTree } from './mindmapLayout';
 import type { VisualOutline } from './outline';
 import {
@@ -200,6 +201,87 @@ describe('PATCH-243 tree <-> outline mapping', () => {
     const edited = { ...tree, label: 'Renamed' } as MindmapTree;
     const next = outlineFromMindmapTree(base, edited);
     expect(next.elementOverrides).toEqual(base.elementOverrides);
+  });
+});
+
+describe('PATCH-269 every item field survives a mind-map edit', () => {
+  function richOutline(): VisualOutline {
+    return {
+      title: 'Budget',
+      ordered: false,
+      kind: 'parts',
+      items: [
+        {
+          label: 'Venue',
+          value: 40,
+          textStyle: { label: { fill: '#ff0000' } },
+          icon: 'sun',
+          side: 'right',
+          detail: 'the hall',
+          color: 2,
+        },
+        { label: 'Food', value: 30, side: 'right' },
+        { label: 'Travel', value: 20, side: 'left' },
+        { label: 'Activities', value: 10, side: 'left' },
+      ],
+    };
+  }
+
+  function treeOf(o: VisualOutline): MindmapTree {
+    const option = outlineToVisuals(o).find((candidate) => candidate.key === 'mindmap')!;
+    const data = option.envelopeData;
+    if (data.subtype !== 'mindmap' || !data.tree) throw new Error('expected a mindmap tree');
+    return data.tree as MindmapTree;
+  }
+
+  it('round-trips every field through the tree with no edit', () => {
+    const base = richOutline();
+    expect(outlineFromMindmapTree(base, treeOf(base))).toEqual(base);
+  });
+
+  it('keeps the value and textStyle through a rename', () => {
+    const base = richOutline();
+    const tree = renameNode(treeOf(base), [0], 'Venue renamed');
+    const next = outlineFromMindmapTree(base, tree);
+    expect(next.items[0].label).toBe('Venue renamed');
+    expect(next.items[0].value).toBe(40);
+    expect(next.items[0].textStyle).toEqual({ label: { fill: '#ff0000' } });
+    expect(next.items[0].icon).toBe('sun');
+  });
+
+  it('adding a branch keeps the old items their own values and gives the new one none', () => {
+    const base = richOutline();
+    const tree = addChild(treeOf(base), [], { side: 'right' });
+    const next = outlineFromMindmapTree(base, tree);
+    expect(next.items.map((item) => item.value)).toEqual([40, 30, undefined, 20, 10]);
+    expect(next.items[2].label).toBe('New branch');
+    expect(next.items[2].value).toBeUndefined();
+    expect(next.items[3].value).toBe(20);
+  });
+
+  it('removing a branch leaves the survivors their own values', () => {
+    const base = richOutline();
+    const tree = removeNode(treeOf(base), [0]);
+    const next = outlineFromMindmapTree(base, tree);
+    expect(next.items.map((item) => item.value)).toEqual([30, 20, 10]);
+    expect(next.items[0].label).toBe('Food');
+  });
+
+  it('drops an unknown or invalid field injected on a tree node', () => {
+    const base = richOutline();
+    const tree = treeOf(base);
+    const edited = {
+      ...tree,
+      children: [
+        { ...tree.children![0], label: 'Venue!', bogus: 'x', value: 'nope', icon: 'not-an-icon' },
+        ...tree.children!.slice(1),
+      ],
+    } as unknown as MindmapTree;
+    const next = outlineFromMindmapTree(base, edited);
+    expect('bogus' in next.items[0]).toBe(false);
+    expect(next.items[0].value).toBeUndefined();
+    expect(next.items[0].icon).toBeUndefined();
+    expect(next.items[0].label).toBe('Venue!');
   });
 });
 

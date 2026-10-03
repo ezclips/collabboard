@@ -450,7 +450,7 @@ describe('PATCH-244 parseOutline text style', () => {
     expect(out.items[0].textStyle).toBeUndefined();
   });
 
-  it('our own six layouts and the tree ignore AntV textStyle', () => {
+  it('our own six layouts ignore AntV textStyle; the mind-map tree carries it (PATCH-269)', () => {
     const o = parseOutline({
       title: 'T',
       titleStyle: { fill: '#ff0000' },
@@ -463,6 +463,19 @@ describe('PATCH-244 parseOutline text style', () => {
       const layout = layoutInfographic(template, o, VISUAL_THEMES.classic);
       expect(layout.texts.every((text) => text.color !== '#ff0000'), template).toBe(true);
     }
-    expect(JSON.stringify(outlineToVisuals(o))).not.toContain('#ff0000');
+    const options = outlineToVisuals(o);
+    // The non-tree options still ignore the stored style entirely.
+    expect(JSON.stringify(options.filter((option) => option.key !== 'mindmap'))).not.toContain('#ff0000');
+    // PATCH-269: the editable mind-map tree keeps textStyle so a native rename
+    // can map it back; the renderer itself still ignores it (theme only).
+    const mindmap = options.find((option) => option.key === 'mindmap')!.envelopeData;
+    if (mindmap.subtype !== 'mindmap') throw new Error('expected a mindmap');
+    expect(mindmap.tree).toEqual({
+      label: 'T',
+      children: [
+        { label: 'A', textStyle: { label: { fill: '#ff0000' } } },
+        { label: 'B', textStyle: { label: { fill: '#ff0000' } } },
+      ],
+    });
   });
 });

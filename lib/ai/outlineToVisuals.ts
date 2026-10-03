@@ -6,7 +6,7 @@ import type {
   TimelineDiagramData,
 } from './contracts';
 import type { MindmapTree } from './mindmapLayout';
-import { OUTLINE_LIMITS, type VisualOutline, type VisualOutlineItem, type VisualSide } from './outline';
+import { OUTLINE_LIMITS, parseOutline, type VisualOutline, type VisualOutlineItem } from './outline';
 import { paletteAt } from './visualPalette';
 
 /**
@@ -101,49 +101,65 @@ function flowchartCode(outline: VisualOutline, direction: 'LR' | 'TD' = 'LR'): s
 }
 
 /**
- * PATCH-243. The outline -> tree the mind-map preview edits. Each branch keeps
- * the side (and, as extra fields the tree helper preserves through edits, the
- * detail/date/icon/colour), so `outlineFromMindmapTree` can map an edit back
- * without losing the rest of the item.
+ * PATCH-269. A guaranteed-valid companion item, used only while running one tree
+ * branch through `parseOutline` (which requires at least two items).
+ */
+const TREE_ITEM_PAD = '\u0000outline-item-pad';
+
+/**
+ * PATCH-269. Runs ONE tree branch through the outline's own item validation, so
+ * unknown or invalid fields carried on a tree node are dropped while `value`,
+ * `textStyle`, `side`, `icon`, `detail`, `date`, `color` and `children` survive.
+ * A branch that has no usable label yields null. The outline's parser needs two
+ * items, so a valid pad rides along; a branch it rejects leaves only the pad (or
+ * throws) and is dropped. Pure.
+ */
+function sanitizeTreeBranch(raw: unknown): VisualOutlineItem | null {
+  try {
+    const parsed = parseOutline({ title: 'Outline', items: [raw, { label: TREE_ITEM_PAD }] });
+    const item = parsed.items[0];
+    return item && item.label !== TREE_ITEM_PAD ? item : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PATCH-243/269. The outline -> tree the mind-map preview edits. Each branch
+ * carries EVERY item field (label, children and the rest -- value, textStyle,
+ * side, detail, date, icon, colour) so the native tree helpers keep them through
+ * renames, additions, removals and reorders, and `outlineFromMindmapTree` can
+ * map an edit back without losing anything.
  */
 function mindmapTree(outline: VisualOutline): MindmapTree {
-  const children = outline.items.slice(0, OUTLINE_LIMITS.items).map((item) => ({
-    label: item.label,
-    ...(item.side ? { side: item.side } : {}),
-    ...(item.detail !== undefined ? { detail: item.detail } : {}),
-    ...(item.date !== undefined ? { date: item.date } : {}),
-    ...(item.icon !== undefined ? { icon: item.icon } : {}),
-    ...(item.color !== undefined ? { color: item.color } : {}),
-    ...(item.children?.length
-      ? { children: item.children.slice(0, OUTLINE_LIMITS.children).map((child) => ({ label: child.label })) }
-      : {}),
-  }));
+  const children = outline.items.slice(0, OUTLINE_LIMITS.items).map((item) => {
+    const { label, children: itemChildren, ...rest } = item;
+    return {
+      ...rest,
+      label,
+      ...(itemChildren?.length
+        ? { children: itemChildren.slice(0, OUTLINE_LIMITS.children).map((child) => ({ label: child.label })) }
+        : {}),
+    };
+  });
   return { label: outline.title, children } as MindmapTree;
 }
 
 /**
- * PATCH-243. A mind-map tree edit (root -> title, branches -> items, leaves ->
- * children) mapped back to a NEW outline, carrying each branch's side and any
- * extra fields the tree preserved. Pure.
+ * PATCH-243/269. A mind-map tree edit (root -> title, branches -> items, leaves
+ * -> children) mapped back to a NEW outline. Each branch's fields travel with
+ * its node, then the rebuilt item is passed through the outline's own item
+ * validation, so an unknown or invalid field can never reach the outline. A new
+ * branch added in the tree has only a label (no value). Pure.
  */
 export function outlineFromMindmapTree(outline: VisualOutline, tree: MindmapTree): VisualOutline {
   const items: VisualOutlineItem[] = (tree.children ?? [])
     .slice(0, OUTLINE_LIMITS.items)
     .map((branch) => {
-      const raw = branch as VisualOutlineItem & { side?: VisualSide };
-      const item: VisualOutlineItem = { label: raw.label };
-      if (raw.detail !== undefined) item.detail = raw.detail;
-      if (raw.date !== undefined) item.date = raw.date;
-      if (raw.icon !== undefined) item.icon = raw.icon;
-      if (raw.color !== undefined) item.color = raw.color;
-      if (raw.side === 'left' || raw.side === 'right') item.side = raw.side;
-      if (branch.children?.length) {
-        item.children = branch.children
-          .slice(0, OUTLINE_LIMITS.children)
-          .map((child) => ({ label: child.label }));
-      }
-      return item;
-    });
+      const { label, ...rest } = branch;
+      return sanitizeTreeBranch({ ...rest, label });
+    })
+    .filter((item): item is VisualOutlineItem => item !== null);
   return { ...outline, title: tree.label, items };
 }
 
