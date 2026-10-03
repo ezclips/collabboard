@@ -72,6 +72,12 @@ export interface VisualOutline {
    * from the model.
    */
   valuesEstimated?: boolean;
+  /**
+   * PATCH-257. Set locally when the chart family shows example numbers; never
+   * sent by the server or read from the model. `parseOutline` drops it like
+   * `valuesEstimated`.
+   */
+  valuesExample?: boolean;
 }
 
 /**
@@ -354,6 +360,29 @@ export function parseOutline(raw: unknown): VisualOutline {
  */
 export function withValuesEstimated(outline: VisualOutline): VisualOutline {
   return { ...outline, valuesEstimated: true };
+}
+
+/**
+ * PATCH-257. Returns a NEW outline where every item without a `value` gets an
+ * equal example share (`round(100 / items.length)`, the last taking the rest so
+ * the sum is 100), flagged `valuesExample: true`. Items that already have a
+ * value keep it. The input is never mutated.
+ */
+export function withExampleValues(outline: VisualOutline): VisualOutline {
+  const count = outline.items.length;
+  const share = count > 0 ? Math.round(100 / count) : 0;
+  let assigned = 0;
+  let lastMissing = -1;
+  outline.items.forEach((item, index) => {
+    if (typeof item.value !== 'number') lastMissing = index;
+  });
+  const items = outline.items.map((item, index) => {
+    if (typeof item.value === 'number') return item;
+    const value = index === lastMissing ? 100 - assigned : share;
+    assigned += value;
+    return { ...item, value };
+  });
+  return { ...outline, items, valuesExample: true };
 }
 
 /**

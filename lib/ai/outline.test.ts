@@ -7,6 +7,7 @@ import {
   OutlineParseError,
   parseOutline,
   sanitizeTextStyle,
+  withExampleValues,
   withValuesEstimated,
 } from './outline';
 import { outlineToVisuals } from './outlineToVisuals';
@@ -235,6 +236,50 @@ describe('PATCH-250 valuesEstimated', () => {
     });
 
     expect(out.valuesEstimated).toBeUndefined();
+  });
+});
+
+describe('PATCH-257 withExampleValues', () => {
+  const base = () =>
+    parseOutline({
+      title: 'Water cycle',
+      items: [{ label: 'Evaporation' }, { label: 'Condensation' }, { label: 'Precipitation' }],
+    });
+
+  it('gives equal example shares that sum to 100 and flags the copy', () => {
+    const original = base();
+    const next = withExampleValues(original);
+
+    expect(next).not.toBe(original);
+    expect(next.items).not.toBe(original.items);
+    expect(next.valuesExample).toBe(true);
+    expect(next.items.map((item) => item.value)).toEqual([33, 33, 34]);
+    expect(next.items.reduce((sum, item) => sum + (item.value ?? 0), 0)).toBe(100);
+  });
+
+  it('keeps an item that already has a value, and never mutates the input', () => {
+    const original = parseOutline({
+      title: 'Budget',
+      items: [{ label: 'Venue', value: 60 }, { label: 'Food' }, { label: 'Travel' }],
+    });
+    const next = withExampleValues(original);
+
+    expect(next.items[0].value).toBe(60);
+    expect(original.items[0].value).toBe(60);
+    expect(original.valuesExample).toBeUndefined();
+    expect(original.items.some((item) => item.label === 'Food' && item.value !== undefined)).toBe(false);
+    // The two example shares still sum to the whole.
+    expect((next.items[1].value ?? 0) + (next.items[2].value ?? 0)).toBe(100);
+  });
+
+  it('parseOutline drops a model-supplied valuesExample flag', () => {
+    const out = parseOutline({
+      title: 'Budget',
+      valuesExample: true,
+      items: [{ label: 'Venue' }, { label: 'Food' }],
+    });
+
+    expect(out.valuesExample).toBeUndefined();
   });
 });
 

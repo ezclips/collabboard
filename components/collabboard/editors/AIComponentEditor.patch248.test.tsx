@@ -201,18 +201,22 @@ describe('PATCH-248 AIComponentEditor subtype buttons drive the designs', () => 
     expect(fetchMock.mock.calls.some((call) => call[0] === '/api/ai/generate-component')).toBe(false);
   });
 
-  it('Pie Chart with no chart designs shows the note in place of the empty stage; Make pie chart asks for estimated values', async () => {
+  it('Pie Chart always shows pie designs (example numbers); Make pie chart asks for estimated values', async () => {
     const fetchMock = stubFetch(NO_CHART_OUTLINE);
     const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} />);
     await openGallery(c, fetchMock);
 
     click(c.querySelector('[data-ai-subtype-chip="pie_chart"]') as HTMLElement);
 
-    expect(c.querySelectorAll('[data-ai-outline-option]')).toHaveLength(0);
+    // PATCH-257. The chart designs appear at once with example numbers.
+    const pieTiles = Array.from(c.querySelectorAll('[data-ai-outline-option]')).filter(
+      (tile) => (tile.getAttribute('data-ai-outline-option') ?? '').includes('chart-pie'),
+    );
+    expect(pieTiles.length).toBeGreaterThan(0);
+    expect(c.querySelector('[data-ai-values-example="true"]')).not.toBeNull();
     expect(c.querySelector('[data-ai-chart-note="true"]')).not.toBeNull();
     expect(c.textContent).toContain('Your text has no numbers');
-    // No empty dotted picture stage: the note replaces the preview.
-    expect(c.querySelector('[data-ai-outline-preview]')).toBeNull();
+    expect(c.textContent).toContain('These designs use example numbers');
     const make = c.querySelector('[data-ai-make-chart="pie"]') as HTMLElement;
     expect(make).not.toBeNull();
     expect(make.textContent).toContain('Make pie chart');

@@ -25,7 +25,7 @@ import {
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import { familyForSubtype, type PictureFamily } from '@/lib/ai/pictureFamilies';
-import type { VisualOutline } from '@/lib/ai/outline';
+import { withExampleValues, type VisualOutline } from '@/lib/ai/outline';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
@@ -205,6 +205,17 @@ function inferInitialSelection(initialContent?: unknown): {
 
 function getDefaultDiagramSubtype(): DiagramSubtype {
   return 'flowchart';
+}
+
+/** PATCH-257. A suggestion key that names a pie/bar/column/line chart. */
+function isNumericChartOption(option: DesignSuggestion): boolean {
+  const name = option.key.startsWith('antv:') ? option.key.slice('antv:'.length) : option.key;
+  return (
+    name.startsWith('chart-pie-') ||
+    name.startsWith('chart-bar-') ||
+    name.startsWith('chart-column-') ||
+    name.startsWith('chart-line-')
+  );
 }
 
 function getErrorMessage(payload: unknown): string {
@@ -541,14 +552,24 @@ export default function AIComponentEditor({
     : showOptions
       ? 'Draw the same content several ways and pick one.'
       : (subtypeConfig?.description ?? modeConfig.description);
-  const selectedOption = showOptions
-    ? (outlineOptions.find((option) => option.key === selectedOptionKey) ?? outlineOptions[0] ?? null)
-    : null;
   // PATCH-237: Edit text redraws locally from the edited outline -- no AI call.
   const applyEditedOutline = (next: VisualOutline) => {
     setActiveOutline(next);
     setOutlineOptions(suggestDesigns(next, activeVisualHint ? { preferKey: activeVisualHint } : undefined));
   };
+
+  // PATCH-257. A chart family on an outline with fewer than two real values gets
+  // example numbers locally, so the Pie / Bar designs appear at once.
+  const outlineValueCount = (activeOutline?.items ?? []).filter((item) => typeof item.value === 'number').length;
+  const showExampleValues = activeFamily === 'chart' && outlineValueCount < 2;
+  const derivedOutline = showExampleValues && activeOutline ? withExampleValues(activeOutline) : activeOutline;
+  const derivedOptions = useMemo(
+    () => (derivedOutline
+      ? suggestDesigns(derivedOutline, activeVisualHint ? { preferKey: activeVisualHint } : undefined)
+      : []),
+    [derivedOutline, activeVisualHint],
+  );
+  const needsExampleEnvelopes = showExampleValues && derivedOutline !== activeOutline;
 
   // PATCH-237: Flow direction is local only; it re-derives the Flow option's code.
   const [flowDirection, setFlowDirection] = useState<'LR' | 'TD'>('LR');
@@ -558,11 +579,25 @@ export default function AIComponentEditor({
       return { ...option, envelopeData: { ...option.envelopeData, code: flowCode(activeOutline, flowDirection) } };
     });
   // PATCH-238: stamp the chosen theme onto every themed option (local, no AI).
-  const themedOptions = outlineOptions.map((option) => ({
+  // PATCH-257. A chart drawn from example numbers uses the example designs
+  // (derived from the example outline), so its tiles/preview carry real values.
+  const themedOptions = (needsExampleEnvelopes ? derivedOptions : outlineOptions).map((option) => ({
     ...option,
     envelopeData: applyStyleToData(applyThemeToData(option.envelopeData, visualTheme), visualStyle),
   }));
   const displayOptions = directionOptions(themedOptions);
+
+  // PATCH-257. The design actually shown in the preview (the one the panel will
+  // select). Falling back only to a visible design -- never to an unrelated first
+  // option the user cannot see -- is what makes Save trustworthy.
+  const selectedOption = showOptions
+    ? (
+      displayOptions.find((option) => option.key === selectedOptionKey)
+      ?? (activeFamily
+        ? displayOptions.find((option) => familyForSubtype(option.envelopeData.subtype) === activeFamily) ?? null
+        : displayOptions[0] ?? null)
+    )
+    : null;
 
   // PATCH-233: a chosen option saves exactly as a normal diagram generation of
   // that subtype would -- same envelope shape, so stored data is unchanged.
@@ -582,7 +617,16 @@ export default function AIComponentEditor({
   const persistedContent = showOptions
     ? serializeAIContentForPersistence(selectedOptionEnvelope)
     : serializeAIContentForPersistence(content);
-  const canSave = Boolean(persistedContent) && !isLoading;
+  // PATCH-257. Save must follow the design actually shown in the preview: never
+  // a fallback the user cannot see, and never a chart drawn from example numbers
+  // (fewer than two real values).
+  const chartPreviewIsExample = Boolean(
+    selectedOption && isNumericChartOption(selectedOption) && outlineValueCount < 2,
+  );
+  const canSave = Boolean(persistedContent) && !isLoading && !chartPreviewIsExample;
+  const saveDisabledReason = !showOptions || !selectedOption
+    ? 'Nothing to save yet'
+    : 'Make the chart or type your numbers first';
 
   const normalizedContent = normalizeAIContent(content);
   const photoCardData: PhotoCardData | null =
@@ -723,7 +767,10 @@ export default function AIComponentEditor({
     setActiveFamilyDescription(getDiagramSubtypeConfig(subtypeId).description);
     setChartMakeSubtype(subtypeId === 'pie_chart' || subtypeId === 'bar_chart' ? subtypeId : null);
     setShowOptions(true);
-    if (outlineOptions.length === 0) setSelectedOptionKey(null);
+    // PATCH-257. A subtype button selects the FIRST design of its own ordering,
+    // even when the previous selection is still visible (pie -> bar must show a
+    // bar, not the kept pie). The panel then picks the first of its sorted list.
+    setSelectedOptionKey(null);
   };
 
   // PATCH-250. "Make pie/bar chart" on text without numbers asks the outline
@@ -1544,7 +1591,7 @@ export default function AIComponentEditor({
                   selectedKey={selectedOptionKey}
                   onSelect={setSelectedOptionKey}
                   envelopeFor={(option) => optionEnvelope(option)}
-                  outline={activeOutline}
+                  outline={needsExampleEnvelopes ? derivedOutline : activeOutline}
                   onEditOutline={applyEditedOutline}
                   flowDirection={flowDirection}
                   onFlowDirectionChange={setFlowDirection}
@@ -1558,6 +1605,7 @@ export default function AIComponentEditor({
                   onShowAll={showAllDesigns}
                   onMakeChart={makeChart}
                   makeChartSubtype={chartMakeSubtype ?? undefined}
+                  exampleValues={showExampleValues}
                   loading={isOutlineLoading}
                   sidePanelHost={sidePanelHost}
                   onSidePanelChange={setSidePanelOpen}
@@ -1618,6 +1666,7 @@ export default function AIComponentEditor({
               <button
                 onClick={handleSave}
                 disabled={!canSave}
+                title={canSave ? undefined : saveDisabledReason}
                 className={`flex items-center gap-2 rounded-xl px-8 py-2.5 text-sm font-medium transition-all ${
                   !canSave
                     ? 'cursor-not-allowed bg-gray-100 text-gray-400'

@@ -56,6 +56,9 @@ interface OutlineSuggestionsPanelProps {
   onMakeChart?: (subtype: 'pie_chart' | 'bar_chart') => void;
   /** PATCH-248. Which chart subtype button was clicked (labels the make-chart button). */
   makeChartSubtype?: 'pie_chart' | 'bar_chart';
+  /** PATCH-257. The preview shows a chart drawn from example numbers: mark it and
+   *  word the no-numbers note for the clicked chart. */
+  exampleValues?: boolean;
   /** PATCH-254. An outline request is running: the Designs panel opens, shows 8
    *  skeleton tiles when there are no designs yet, and dims the existing designs
    *  (a regenerate) instead of replacing them. */
@@ -296,6 +299,7 @@ export default function OutlineSuggestionsPanel({
   onShowAll,
   onMakeChart,
   makeChartSubtype = 'pie_chart',
+  exampleValues = false,
   loading = false,
   sidePanelHost = null,
   onSidePanelChange,
@@ -322,9 +326,10 @@ export default function OutlineSuggestionsPanel({
   // place of the preview, not an empty dotted stage.
   const familyEmpty = familyFilter === 'chart' && visibleOptions.length === 0;
   // Addendum 2. The note decides by "no numeric chart design", so it also shows
-  // ABOVE the word clouds when the text has no numbers.
+  // ABOVE the word clouds when the text has no numbers. PATCH-257. It also shows
+  // when the numeric charts on screen are drawn from example numbers.
   const showNoNumbersNote =
-    familyFilter === 'chart' && !visibleOptions.some((option) => isNumericChartKey(option.key));
+    familyFilter === 'chart' && (exampleValues || !visibleOptions.some((option) => isNumericChartKey(option.key)));
 
   // PATCH-250. A mouse hover (held 120 ms so a sweep does not redraw each tile)
   // previews a design read-only. Touch/pen never hover; leaving is immediate.
@@ -365,6 +370,9 @@ export default function OutlineSuggestionsPanel({
   // PATCH-252. "≈ Estimated" only makes sense on a numeric chart, and only when
   // the outline's numbers were estimated -- not on a Flow or an unflagged one.
   const showEstimated = Boolean(outline?.valuesEstimated && previewOption && isNumericChartKey(previewOption.key));
+  // PATCH-257. The same place shows "Example numbers" while the preview is a
+  // chart drawn from locally invented example numbers.
+  const showExampleValues = Boolean(exampleValues && previewOption && isNumericChartKey(previewOption.key));
 
   // Keep the editor's selection in step with what the filtered list shows.
   React.useEffect(() => {
@@ -470,11 +478,14 @@ export default function OutlineSuggestionsPanel({
 
   // PATCH-248 Addendum 2. The no-numbers note, shown in the preview when there
   // are no chart designs at all, or above the word clouds when only those fit.
+  // PATCH-257. Its wording names the clicked chart and explains the example
+  // numbers the designs now show.
   const chartNote = (
     <div data-ai-chart-note="true" className="shrink-0 rounded-xl border border-gray-200 bg-white p-4">
       <p className="text-sm text-gray-600">
-        Your text has no numbers to split into slices. Add some (e.g. &ldquo;Venue 40%, Food 30%&rdquo;) and
-        press Generate again, or let the AI estimate them:
+        {makeChartSubtype === 'bar_chart'
+          ? 'Your text has no numbers to draw bars from. These designs use example numbers. Add your own under Edit text, or let the AI estimate them:'
+          : 'Your text has no numbers to split into slices. These designs use example numbers. Add your own (e.g. "Venue 40%, Food 30%") under Edit text, or let the AI estimate them:'}
       </p>
       <div className="mt-3 flex gap-2">
         <button
@@ -574,12 +585,19 @@ export default function OutlineSuggestionsPanel({
           ) : (
             <>
               {showNoNumbersNote && <div className="mb-3">{chartNote}</div>}
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
-              {tilesFor(suggested, true)}
+              {/* PATCH-257. A heading renders only when it has tiles, so an
+                  empty "SUGGESTED" never appears above nothing. */}
+              {suggested.length > 0 && (
+                <>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested</div>
+                  {tilesFor(suggested, true)}
+                </>
+              )}
 
               {[...byCategory.entries()].map(([category, designs]) => {
                 const expanded = expandedCategories.has(category);
                 const shown = expanded ? designs : designs.slice(0, MAX_PER_CATEGORY);
+                if (shown.length === 0) return null;
                 return (
                   <div key={category} className="mt-3">
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{category}</div>
@@ -746,6 +764,20 @@ export default function OutlineSuggestionsPanel({
               data-ai-preview-toolbar="true"
               className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-gray-200 bg-white/95 px-1.5 py-1 shadow-md backdrop-blur"
             >
+              {/* PATCH-257. The example-numbers label, in the same slot as the
+                  estimated one, while the preview shows example values. */}
+              {showExampleValues && (
+                <div
+                  data-ai-values-example="true"
+                  title="These numbers are examples. Press Make pie chart to let the AI estimate them, or type your own under Edit text."
+                  className="group relative mr-0.5 flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700"
+                >
+                  <span>Example numbers</span>
+                  <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    These numbers are examples. Press Make pie chart to let the AI estimate them, or type your own under Edit text.
+                  </span>
+                </div>
+              )}
               {/* PATCH-252. The estimated label sits left of the icons, only on a
                   numeric chart whose outline estimated its numbers. */}
               {showEstimated && (
