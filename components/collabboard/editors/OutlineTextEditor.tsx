@@ -26,17 +26,21 @@ export default function OutlineTextEditor({
     update({ items });
   };
 
-  // PATCH-250. Empty removes the value; a finite number >= 0 sets it; anything
-  // else is ignored. Never mutates the outline it was given.
+  // PATCH-250/268. Empty removes the value AND any example flag; a finite
+  // number >= 0 sets the value and makes the item real by dropping the flag;
+  // anything else is ignored. Never mutates the outline it was given.
   const updateItemValue = (index: number, raw: string) => {
     const items = outline.items.map((item, i) => {
       if (i !== index) return item;
       if (raw === '') {
-        const { value: _drop, ...rest } = item;
+        const { value: _drop, valueExample: _dropExample, ...rest } = item;
         return rest;
       }
       const next = Number(raw);
-      if (Number.isFinite(next) && next >= 0) return { ...item, value: next };
+      if (Number.isFinite(next) && next >= 0) {
+        const { valueExample: _dropExample, ...rest } = item;
+        return { ...rest, value: next };
+      }
       return item;
     });
     update({ items });
@@ -101,13 +105,14 @@ export default function OutlineTextEditor({
                 <input
                   type="number"
                   data-ai-outline-item-value={index}
+                  data-ai-value-example={item.valueExample === true ? 'true' : undefined}
                   value={item.value ?? ''}
                   min={0}
                   step="any"
                   onChange={(e) => updateItemValue(index, e.target.value)}
                   aria-label="Value"
-                  title="Value"
-                  className="w-20 rounded border border-gray-300 px-2 py-1 text-xs"
+                  title={item.valueExample === true ? 'Example number' : 'Value'}
+                  className={`w-20 rounded border border-gray-300 px-2 py-1 text-xs${item.valueExample === true ? ' italic text-gray-400' : ''}`}
                   style={{ width: '5rem' }}
                 />
               )}

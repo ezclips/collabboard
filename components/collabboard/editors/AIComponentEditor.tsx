@@ -27,7 +27,7 @@ import {
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import { familyForSubtype, type PictureFamily } from '@/lib/ai/pictureFamilies';
-import { withExampleValues, type VisualOutline } from '@/lib/ai/outline';
+import { isPieChartKey, withExampleValues, withoutExampleValues, type VisualOutline } from '@/lib/ai/outline';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
@@ -218,6 +218,12 @@ function isNumericChartOption(option: DesignSuggestion): boolean {
     name.startsWith('chart-column-') ||
     name.startsWith('chart-line-')
   );
+}
+
+/** PATCH-268. A suggestion key that names a pie chart (its zero-total rule). */
+function isPieChartOption(option: DesignSuggestion): boolean {
+  const name = option.key.startsWith('antv:') ? option.key.slice('antv:'.length) : option.key;
+  return name.startsWith('chart-pie-');
 }
 
 function getErrorMessage(payload: unknown): string {
@@ -557,16 +563,24 @@ export default function AIComponentEditor({
     : showOptions
       ? 'Draw the same content several ways and pick one.'
       : (subtypeConfig?.description ?? modeConfig.description);
-  // PATCH-237: Edit text redraws locally from the edited outline -- no AI call.
+  // PATCH-237/268: Edit text redraws locally from the edited outline -- no AI
+  // call. PATCH-268: any outline returning from the UI (Edit text, element
+  // editor moves/colours, the Add panel, icon swaps, the native mind-map tree)
+  // funnels through here, and its example numbers are stripped BEFORE they can
+  // become the canonical source. This is the single UI-return entry point.
   const applyEditedOutline = (next: VisualOutline) => {
-    setActiveOutline(next);
-    setOutlineOptions(suggestDesigns(next, activeVisualHint ? { preferKey: activeVisualHint } : undefined));
+    const source = withoutExampleValues(next);
+    setActiveOutline(source);
+    setOutlineOptions(suggestDesigns(source, activeVisualHint ? { preferKey: activeVisualHint } : undefined));
   };
 
-  // PATCH-257. A chart family on an outline with fewer than two real values gets
-  // example numbers locally, so the Pie / Bar designs appear at once.
-  const outlineValueCount = (activeOutline?.items ?? []).filter((item) => typeof item.value === 'number').length;
-  const showExampleValues = activeFamily === 'chart' && outlineValueCount < 2;
+  // PATCH-257/268. A chart family is in example mode while ANY item lacks a real
+  // value (not merely fewer than two), so a mixed outline never masquerades as
+  // saveable real data.
+  const chartItems = activeOutline?.items ?? [];
+  const showExampleValues =
+    activeFamily === 'chart'
+    && (chartItems.length === 0 || chartItems.some((item) => typeof item.value !== 'number'));
   const derivedOutline = showExampleValues && activeOutline ? withExampleValues(activeOutline) : activeOutline;
   const derivedOptions = useMemo(
     () => (derivedOutline
@@ -641,16 +655,30 @@ export default function AIComponentEditor({
   const persistedContent = showOptions
     ? serializeAIContentForPersistence(selectedOptionEnvelope)
     : serializeAIContentForPersistence(kickerContent);
-  // PATCH-257. Save must follow the design actually shown in the preview: never
-  // a fallback the user cannot see, and never a chart drawn from example numbers
-  // (fewer than two real values).
+  // PATCH-257/268. Save must follow the design actually shown in the preview:
+  // never a fallback the user cannot see, and never a chart while any item is
+  // missing a real number (a gap or an example value).
+  const chartHasMissingOrExampleValue =
+    chartItems.length === 0
+    || chartItems.some((item) => typeof item.value !== 'number' || item.valueExample === true);
   const chartPreviewIsExample = Boolean(
-    selectedOption && isNumericChartOption(selectedOption) && outlineValueCount < 2,
+    selectedOption && isNumericChartOption(selectedOption) && chartHasMissingOrExampleValue,
   );
-  const canSave = Boolean(persistedContent) && !isLoading && !chartPreviewIsExample;
+  // PATCH-268. An all-zero pie draws no slices, so it cannot be saved; bars and
+  // columns keep legitimate zeros.
+  const chartRealTotal = chartItems.reduce(
+    (sum, item) => sum + (typeof item.value === 'number' && item.valueExample !== true ? item.value : 0),
+    0,
+  );
+  const chartPieZeroTotal = Boolean(
+    selectedOption && isPieChartKey(selectedOption.key) && !chartHasMissingOrExampleValue && chartRealTotal === 0,
+  );
+  const canSave = Boolean(persistedContent) && !isLoading && !chartPreviewIsExample && !chartPieZeroTotal;
   const saveDisabledReason = !showOptions || !selectedOption
     ? 'Nothing to save yet'
-    : 'Make the chart or type your numbers first';
+    : chartPieZeroTotal
+      ? 'A pie needs at least one number above 0'
+      : 'Make the chart or type your numbers first';
 
   const normalizedContent = normalizeAIContent(content);
   const photoCardData: PhotoCardData | null =
@@ -1631,6 +1659,7 @@ export default function AIComponentEditor({
                   onMakeChart={makeChart}
                   makeChartSubtype={chartMakeSubtype ?? undefined}
                   exampleValues={showExampleValues}
+                  zeroValues={chartPieZeroTotal}
                   loading={isOutlineLoading}
                   sidePanelHost={sidePanelHost}
                   onSidePanelChange={setSidePanelOpen}

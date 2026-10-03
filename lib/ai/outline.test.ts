@@ -9,6 +9,7 @@ import {
   sanitizeTextStyle,
   withExampleValues,
   withValuesEstimated,
+  withoutExampleValues,
 } from './outline';
 import { outlineToVisuals } from './outlineToVisuals';
 import { VISUAL_THEMES } from './visualThemes';
@@ -278,8 +279,9 @@ describe('PATCH-257 withExampleValues', () => {
     expect(original.items[0].value).toBe(60);
     expect(original.valuesExample).toBeUndefined();
     expect(original.items.some((item) => item.label === 'Food' && item.value !== undefined)).toBe(false);
-    // The two example shares still sum to the whole.
-    expect((next.items[1].value ?? 0) + (next.items[2].value ?? 0)).toBe(100);
+    // PATCH-268. With a real value present, each missing item takes the rounded
+    // mean of the real values, so a real number is never scaled down to fit 100.
+    expect(next.items.map((item) => item.value)).toEqual([60, 60, 60]);
   });
 
   it('parseOutline drops a model-supplied valuesExample flag', () => {
@@ -290,6 +292,63 @@ describe('PATCH-257 withExampleValues', () => {
     });
 
     expect(out.valuesExample).toBeUndefined();
+  });
+});
+
+describe('PATCH-268 per-item example provenance', () => {
+  it('gives missing items the rounded mean of the real values, min 1, and flags them', () => {
+    const original = parseOutline({
+      title: 'Budget',
+      items: [{ label: 'Venue', value: 70 }, { label: 'Food' }, { label: 'Travel' }],
+    });
+    const next = withExampleValues(original);
+
+    expect(next.items.map((item) => item.value)).toEqual([70, 70, 70]);
+    expect(next.items.map((item) => item.valueExample)).toEqual([undefined, true, true]);
+    expect(next.valuesExample).toBe(true);
+    expect(original.items.some((item) => item.valueExample !== undefined)).toBe(false);
+  });
+
+  it('with no real values still splits 100 equally and flags each filled item', () => {
+    const next = withExampleValues(
+      parseOutline({ title: 'T', items: [{ label: 'A' }, { label: 'B' }] }),
+    );
+    expect(next.items.map((item) => item.value)).toEqual([50, 50]);
+    expect(next.items.map((item) => item.valueExample)).toEqual([true, true]);
+  });
+
+  it('withoutExampleValues strips only flagged values and the outline flag, restoring the original', () => {
+    const original = parseOutline({
+      title: 'Budget',
+      items: [{ label: 'Venue', value: 60 }, { label: 'Food' }, { label: 'Travel' }],
+    });
+    const withExamples = withExampleValues(original);
+    const restored = withoutExampleValues(withExamples);
+
+    expect(restored).toEqual(original);
+    expect(restored.valuesExample).toBeUndefined();
+    expect(withExamples.items[1].value).toBe(60);
+    expect(original.items[1].value).toBeUndefined();
+  });
+
+  it('withoutExampleValues is identity-preserving when nothing is flagged', () => {
+    const original = parseOutline({
+      title: 'T',
+      items: [{ label: 'A', value: 1 }, { label: 'B', value: 2 }],
+    });
+    expect(withoutExampleValues(original)).toBe(original);
+  });
+
+  it('parseOutline drops a model-supplied valueExample flag', () => {
+    const out = parseOutline({
+      title: 'Budget',
+      items: [
+        { label: 'Venue', value: 40, valueExample: true },
+        { label: 'Food', value: 60 },
+      ],
+    });
+    expect(out.items[0].valueExample).toBeUndefined();
+    expect(out.items[1].valueExample).toBeUndefined();
   });
 });
 

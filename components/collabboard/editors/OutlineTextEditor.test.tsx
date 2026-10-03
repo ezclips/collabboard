@@ -124,6 +124,59 @@ describe('PATCH-250 OutlineTextEditor value inputs', () => {
   });
 });
 
+describe('PATCH-268 OutlineTextEditor example-value provenance', () => {
+  const exampleOutline = (): VisualOutline => ({
+    title: 'Budget',
+    ordered: false,
+    kind: 'list',
+    valuesExample: true,
+    items: [
+      { label: 'Venue', value: 50, valueExample: true },
+      { label: 'Food', value: 50, valueExample: true },
+    ],
+  });
+
+  it('marks an example value in the field so the user can tell it apart', () => {
+    const c = mount(<OutlineTextEditor outline={exampleOutline()} onChange={() => {}} />);
+    const input = c.querySelector('[data-ai-outline-item-value="0"]') as HTMLInputElement;
+    expect(input.getAttribute('data-ai-value-example')).toBe('true');
+  });
+
+  it('typing a number makes that item real by removing its valueExample flag', () => {
+    const onChange = vi.fn();
+    const c = mount(<OutlineTextEditor outline={exampleOutline()} onChange={onChange} />);
+
+    setInputValue(c.querySelector('[data-ai-outline-item-value="0"]') as HTMLInputElement, '40');
+
+    const next = onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(next.items[0]).toEqual({ label: 'Venue', value: 40 });
+    expect(next.items[0].valueExample).toBeUndefined();
+    expect(next.items[1].valueExample).toBe(true);
+  });
+
+  it('clearing an example value removes the value AND the flag', () => {
+    const onChange = vi.fn();
+    const c = mount(<OutlineTextEditor outline={exampleOutline()} onChange={onChange} />);
+
+    setInputValue(c.querySelector('[data-ai-outline-item-value="1"]') as HTMLInputElement, '');
+
+    const next = onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(next.items[1]).toEqual({ label: 'Food' });
+    expect(next.items[1].valueExample).toBeUndefined();
+  });
+
+  it('a label edit keeps the example flag', () => {
+    const onChange = vi.fn();
+    const c = mount(<OutlineTextEditor outline={exampleOutline()} onChange={onChange} />);
+
+    setInputValue(c.querySelector('[data-ai-outline-item-label="0"]') as HTMLInputElement, 'Venue cost');
+
+    const next = onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(next.items[0].valueExample).toBe(true);
+    expect(next.items[0].value).toBe(50);
+  });
+});
+
 describe('PATCH-260 OutlineTextEditor keeps elementOverrides', () => {
   const overrides = { template: 'antv:list-grid-badge-card', items: { 'item-label@0': { dx: 9, dy: 4 } } };
 

@@ -54,6 +54,12 @@ export interface VisualOutlineItem {
    */
   value?: number;
   /**
+   * PATCH-268. Set ONLY locally by `withExampleValues` on a value it invented.
+   * Never read from the model (`parseOutline` drops it) and never saved:
+   * `withoutExampleValues` strips the value and this flag from every item.
+   */
+  valueExample?: true;
+  /**
    * PATCH-242. The side this item was placed on, so adding/removing an item
    * never moves the others. Only the hub design uses it; every other design
    * ignores it. Kept leniently by `parseOutline`.
@@ -378,12 +384,39 @@ export function withValuesEstimated(outline: VisualOutline): VisualOutline {
 }
 
 /**
- * PATCH-257. Returns a NEW outline where every item without a `value` gets an
- * equal example share (`round(100 / items.length)`, the last taking the rest so
- * the sum is 100), flagged `valuesExample: true`. Items that already have a
- * value keep it. The input is never mutated.
+ * PATCH-268. True when an AntV suggestion key names a pie chart. The editor uses
+ * it for the all-zero-pie save rule; kept here so the oversized editor only
+ * carries wiring.
+ */
+export function isPieChartKey(key: string): boolean {
+  const name = key.startsWith('antv:') ? key.slice('antv:'.length) : key;
+  return name.startsWith('chart-pie-');
+}
+
+/**
+ * PATCH-257/268. Returns a NEW outline where every item without a `value` gets
+ * an example value, flagged `valueExample: true`, and the outline is flagged
+ * `valuesExample: true` (the badge). Items that already have a value keep it
+ * (no flag). The input is never mutated.
+ *
+ * PATCH-268. When at least one real value exists, each missing item gets the
+ * rounded mean of the real values (min 1) instead of a share of 100, so a real
+ * number is never scaled down to make the examples fit a 100 total. With no
+ * real values at all the old equal-share behaviour is kept.
  */
 export function withExampleValues(outline: VisualOutline): VisualOutline {
+  const existing = outline.items
+    .map((item) => item.value)
+    .filter((value): value is number => typeof value === 'number');
+
+  if (existing.length > 0) {
+    const mean = Math.max(1, Math.round(existing.reduce((sum, value) => sum + value, 0) / existing.length));
+    const items = outline.items.map((item) =>
+      typeof item.value === 'number' ? item : { ...item, value: mean, valueExample: true as const },
+    );
+    return { ...outline, items, valuesExample: true };
+  }
+
   const count = outline.items.length;
   const share = count > 0 ? Math.round(100 / count) : 0;
   let assigned = 0;
@@ -395,9 +428,29 @@ export function withExampleValues(outline: VisualOutline): VisualOutline {
     if (typeof item.value === 'number') return item;
     const value = index === lastMissing ? 100 - assigned : share;
     assigned += value;
-    return { ...item, value };
+    return { ...item, value, valueExample: true as const };
   });
   return { ...outline, items, valuesExample: true };
+}
+
+/**
+ * PATCH-268. Returns a NEW outline with every example value removed: each item
+ * flagged `valueExample` loses BOTH its `value` and the flag, and the
+ * outline-level `valuesExample` is dropped. Items the user made real (no flag)
+ * are untouched. Identity-preserving when nothing is flagged, and the input is
+ * never mutated.
+ */
+export function withoutExampleValues(outline: VisualOutline): VisualOutline {
+  const flagged = outline.valuesExample === true || outline.items.some((item) => item.valueExample === true);
+  if (!flagged) return outline;
+
+  const items = outline.items.map((item) => {
+    if (item.valueExample !== true) return item;
+    const { value: _value, valueExample: _valueExample, ...rest } = item;
+    return rest;
+  });
+  const { valuesExample: _valuesExample, ...rest } = outline;
+  return { ...rest, items };
 }
 
 /**

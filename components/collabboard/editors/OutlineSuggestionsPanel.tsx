@@ -64,6 +64,9 @@ interface OutlineSuggestionsPanelProps {
   /** PATCH-257. The preview shows a chart drawn from example numbers: mark it and
    *  word the no-numbers note for the clicked chart. */
   exampleValues?: boolean;
+  /** PATCH-268. The preview is a pie whose real values are all zero: it would
+   *  draw no slices, so show the zero note. */
+  zeroValues?: boolean;
   /** PATCH-254. An outline request is running: the Designs panel opens, shows 8
    *  skeleton tiles when there are no designs yet, and dims the existing designs
    *  (a regenerate) instead of replacing them. */
@@ -165,6 +168,7 @@ export default function OutlineSuggestionsPanel({
   onMakeChart,
   makeChartSubtype = 'pie_chart',
   exampleValues = false,
+  zeroValues = false,
   loading = false,
   sidePanelHost = null,
   onSidePanelChange,
@@ -642,6 +646,16 @@ export default function OutlineSuggestionsPanel({
   return (
     <div data-ai-outline-options="true" className="flex h-full w-full flex-row gap-3 overflow-hidden p-4">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* PATCH-268. An all-zero pie has no slices to draw; say so in the chart
+            info area instead of showing an empty disk. */}
+        {!familyEmpty && zeroValues && previewOption && isNumericChartKey(previewOption.key) && (
+          <div
+            data-ai-chart-zero-note="true"
+            className="mb-2 shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800"
+          >
+            A pie needs at least one number above 0 to show slices.
+          </div>
+        )}
         {!familyEmpty && (
           <div
             ref={previewStageRef}
