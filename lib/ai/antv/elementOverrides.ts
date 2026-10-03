@@ -45,9 +45,16 @@ export interface ElementOverrides {
   items: Record<string, ElementOverride>;
   /** PATCH-262. Shapes/icons/text drawn on top; at most 50. */
   additions?: Addition[];
+  /**
+   * PATCH-274. Overrides whose item was REMOVED by a structural edit: kept as
+   * recoverable data (keyed by their old element key), never applied. At most
+   * `ELEMENT_ORPHANED_MAX_KEYS`.
+   */
+  orphaned?: Record<string, ElementOverride>;
 }
 
 export const ELEMENT_OVERRIDE_MAX_KEYS = 300;
+export const ELEMENT_ORPHANED_MAX_KEYS = 50;
 export const ELEMENT_TRANSLATE_LIMIT = 5000;
 export const ELEMENT_SCALE_MIN = 0.1;
 export const ELEMENT_SCALE_MAX = 10;
@@ -108,6 +115,29 @@ function sanitizeOverride(raw: unknown): ElementOverride | undefined {
 }
 
 /**
+ * PATCH-274. Validates an orphaned-override map: keys matching the element-key
+ * pattern, values a real override, at most `ELEMENT_ORPHANED_MAX_KEYS`. Never
+ * throws; an empty result is `undefined`.
+ */
+export function sanitizeOrphanedOverrides(
+  raw: unknown,
+): Record<string, ElementOverride> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const out: Record<string, ElementOverride> = {};
+  let kept = 0;
+  for (const key of Object.keys(source)) {
+    if (kept >= ELEMENT_ORPHANED_MAX_KEYS) break;
+    if (!ELEMENT_OVERRIDE_KEY_PATTERN.test(key)) continue;
+    const override = sanitizeOverride(source[key]);
+    if (!override) continue;
+    out[key] = override;
+    kept += 1;
+  }
+  return kept > 0 ? out : undefined;
+}
+
+/**
  * PATCH-260. Validates stored overrides leniently: a real `template` string, a
  * map of keys matching `ELEMENT_OVERRIDE_KEY_PATTERN` with finite in-bounds
  * numbers. Unknown fields are dropped, junk keys skipped, at most 300 kept.
@@ -135,8 +165,16 @@ export function sanitizeElementOverrides(raw: unknown): ElementOverrides | undef
   // PATCH-262. Additions live beside the per-element overrides and are enough
   // on their own to keep the map.
   const additions = sanitizeAdditions((input as { additions?: unknown }).additions);
-  if (kept === 0 && !additions) return undefined;
-  return additions ? { template, items, additions } : { template, items };
+  // PATCH-274. Orphaned edits (their item was removed) are also enough to keep
+  // the map, so recoverable data survives a save/reload.
+  const orphaned = sanitizeOrphanedOverrides((input as { orphaned?: unknown }).orphaned);
+  if (kept === 0 && !additions && !orphaned) return undefined;
+  return {
+    template,
+    items,
+    ...(additions ? { additions } : {}),
+    ...(orphaned ? { orphaned } : {}),
+  };
 }
 
 /**
@@ -151,7 +189,9 @@ export function outlineWithOverrides(
   delete clean.elementOverrides;
   const empty =
     !overrides ||
-    (Object.keys(overrides.items).length === 0 && (overrides.additions?.length ?? 0) === 0);
+    (Object.keys(overrides.items).length === 0 &&
+      (overrides.additions?.length ?? 0) === 0 &&
+      Object.keys(overrides.orphaned ?? {}).length === 0);
   if (empty) return clean;
   return { ...clean, elementOverrides: overrides };
 }

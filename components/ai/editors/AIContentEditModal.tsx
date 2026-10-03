@@ -41,6 +41,8 @@ import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import { parseMindmapCode } from '@/lib/ai/mermaidMindmapParse';
 import { parseFlowCode } from '@/lib/ai/mermaidFlowParse';
 import { flowCodeFromGraph, mindmapCodeFromTree } from '@/lib/ai/outlineToVisuals';
+import { withItemIds } from '@/lib/ai/outline';
+import { remapOverridesForItems } from '@/lib/ai/antv/remapOverrides';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from '@/components/collabboard/editors/OutlineTextEditor';
 import FlowStepsEditor from './FlowStepsEditor';
@@ -624,6 +626,18 @@ function getSubtypeForData(data: AIContentData): string | undefined {
   return data.type === 'diagram' ? data.subtype : undefined;
 }
 
+/**
+ * PATCH-274. A stored infographic enters the Edit window with stable item ids,
+ * so its positional override keys can follow their items on a later structural
+ * edit. Every other content type is returned as-is.
+ */
+function withOutlineItemIds(data: AIContentData): AIContentData {
+  if (data.type === 'diagram' && data.subtype === 'infographic') {
+    return { ...data, outline: withItemIds(data.outline) };
+  }
+  return data;
+}
+
 export default function AIContentEditModal({
   isOpen,
   onClose,
@@ -640,7 +654,7 @@ export default function AIContentEditModal({
     [envelope],
   );
 
-  const [draftData, setDraftData] = useState<AIContentData>(parsedEnvelope.data);
+  const [draftData, setDraftData] = useState<AIContentData>(() => withOutlineItemIds(parsedEnvelope.data));
   const [prompt, setPrompt] = useState(initialPrompt);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [diagramRenderPhase, setDiagramRenderPhase] = useState<DiagramRenderPhase>({ phase: 'idle' });
@@ -659,7 +673,7 @@ export default function AIContentEditModal({
   // Reset state when modal opens with new envelope
   useEffect(() => {
     if (!isOpen) return;
-    setDraftData(parsedEnvelope.data);
+    setDraftData(withOutlineItemIds(parsedEnvelope.data));
     diagramKicker.reset(readDiagramKicker(parsedEnvelope));
     setPrompt(initialPrompt);
     setValidationError(null);
@@ -866,7 +880,15 @@ export default function AIContentEditModal({
           <div className="space-y-4">
             <OutlineTextEditor
               outline={draftData.outline}
-              onChange={(next) => setDraftData({ ...draftData, outline: next, title: next.title })}
+              onChange={(next) =>
+                setDraftData({
+                  ...draftData,
+                  // PATCH-274. A structural edit remaps positional override keys
+                  // against the outline they came from, before it becomes source.
+                  outline: remapOverridesForItems(draftData.outline, withItemIds(next)),
+                  title: next.title,
+                })
+              }
             />
             <div className="space-y-1">
               <FieldLabel>Design</FieldLabel>
@@ -979,7 +1001,13 @@ export default function AIContentEditModal({
             onChange: (next) =>
               setDraftData((prev) =>
                 prev.type === 'diagram' && prev.subtype === 'infographic'
-                  ? { ...prev, outline: next, title: next.title }
+                  ? {
+                      ...prev,
+                      // PATCH-274. A structural picture edit remaps positional
+                      // override keys against the outline it came from.
+                      outline: remapOverridesForItems(prev.outline, withItemIds(next)),
+                      title: next.title,
+                    }
                   : prev,
               ),
           }}

@@ -20,11 +20,13 @@ import { sanitizeElementOverrides, type ElementOverrides } from './elementOverri
  */
 export const ELEMENT_OVERRIDES_BY_TEMPLATE_MAX = 12;
 
-/** PATCH-273. True when an overrides map holds no item and no addition. */
+/** PATCH-273. True when an overrides map holds no item, addition or orphan. */
 export function isEmptyElementOverrides(overrides: ElementOverrides | undefined): boolean {
   return (
     !overrides ||
-    (Object.keys(overrides.items).length === 0 && (overrides.additions?.length ?? 0) === 0)
+    (Object.keys(overrides.items).length === 0 &&
+      (overrides.additions?.length ?? 0) === 0 &&
+      Object.keys(overrides.orphaned ?? {}).length === 0)
   );
 }
 

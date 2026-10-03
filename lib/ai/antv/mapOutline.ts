@@ -282,6 +282,26 @@ function parseIndexPath(indexes: number[] | undefined): number[] | null {
 }
 
 /**
+ * PATCH-274. The OUTLINE item index an AntV element path points at, unwrapping a
+ * hierarchy root: flat templates address items as `[i]`, hierarchy/mind-map
+ * templates as `[0, i]` (the title is the root). Returns `null` for the root,
+ * a title, or an unusable path. This is the single home of the root-offset rule
+ * shared with `mapAntvButton` / `resolveTarget`.
+ */
+export function outlineItemIndexForElementPath(
+  indexes: number[] | undefined,
+  templateName: string,
+): number | null {
+  const path = parseIndexPath(indexes);
+  if (!path) return null;
+  if (isHierarchyTemplate(templateName)) {
+    if (path[0] !== 0 || path.length < 2) return null;
+    return path[1];
+  }
+  return path[0];
+}
+
+/**
  * PATCH-243. Maps AntV's `data-indexes` on a `btn-add`/`btn-remove` to the
  * outline change it means. Hierarchy templates keep a single root
  * (`[0, i, j]`), flat templates have no root (`[i]`, `[i, j]`); anything else
@@ -500,6 +520,7 @@ function iconNameFrom(value: unknown): { present: boolean; name: string | null }
 
 function cloneItem(item: VisualOutlineItem): VisualOutlineItem {
   const next: VisualOutlineItem = { label: item.label };
+  if (item.id !== undefined) next.id = item.id;
   if (item.detail !== undefined) next.detail = item.detail;
   if (item.date !== undefined) next.date = item.date;
   if (item.icon !== undefined) next.icon = item.icon;

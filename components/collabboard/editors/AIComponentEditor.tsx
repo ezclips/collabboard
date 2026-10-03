@@ -27,7 +27,8 @@ import {
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import { familyForSubtype, type PictureFamily } from '@/lib/ai/pictureFamilies';
-import { isPieChartKey, withExampleValues, withoutExampleValues, type VisualOutline } from '@/lib/ai/outline';
+import { isPieChartKey, withExampleValues, withItemIds, withoutExampleValues, type VisualOutline } from '@/lib/ai/outline';
+import { remapOverridesForItems } from '@/lib/ai/antv/remapOverrides';
 import { flowCode } from '@/lib/ai/outlineToVisuals';
 import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
@@ -482,13 +483,16 @@ export default function AIComponentEditor({
     // preselected, with NO AI call (the shape is already stored).
     const storedInfographic = readStoredInfographic(initialContent);
     if (storedInfographic) {
-      const options = suggestDesigns(storedInfographic.outline);
+      // PATCH-274. A stored outline enters editing with stable item ids so its
+      // positional override keys can follow their items on later edits.
+      const outline = withItemIds(storedInfographic.outline);
+      const options = suggestDesigns(outline);
       setUiMode('diagram');
       setMode('diagram');
       setSubtype(undefined);
       setShowOptions(true);
       setOutlineOptions(options);
-      setActiveOutline(storedInfographic.outline);
+      setActiveOutline(outline);
       // PATCH-238: preselect the stored theme (unknown/absent -> classic).
       setVisualTheme(themeById(storedInfographic.theme).id);
       // PATCH-253: preselect the stored style so the previews and panel show it.
@@ -568,8 +572,12 @@ export default function AIComponentEditor({
   // editor moves/colours, the Add panel, icon swaps, the native mind-map tree)
   // funnels through here, and its example numbers are stripped BEFORE they can
   // become the canonical source. This is the single UI-return entry point.
+  // PATCH-274. A structural edit shifts item positions, so the edited outline's
+  // positional override keys are remapped against the outline they came from
+  // (stable item ids), and any item that arrived without an id gets one.
   const applyEditedOutline = (next: VisualOutline) => {
-    const source = withoutExampleValues(next);
+    const withoutExamples = withItemIds(withoutExampleValues(next));
+    const source = activeOutline ? remapOverridesForItems(activeOutline, withoutExamples) : withoutExamples;
     setActiveOutline(source);
     setOutlineOptions(suggestDesigns(source, activeVisualHint ? { preferKey: activeVisualHint } : undefined));
   };
@@ -935,9 +943,12 @@ export default function AIComponentEditor({
         // for the session so local re-ranks keep the named design first.
         const preferKey = outlineOptionsBody?.visualHint;
         setActiveVisualHint(preferKey);
-        const options = suggestDesigns(data.outline, preferKey ? { preferKey } : undefined);
+        // PATCH-274. A freshly generated (or regenerated) outline enters editing
+        // with stable item ids.
+        const outline = withItemIds(data.outline);
+        const options = suggestDesigns(outline, preferKey ? { preferKey } : undefined);
         setOutlineOptions(options);
-        setActiveOutline(data.outline);
+        setActiveOutline(outline);
         setSelectedOptionKey(options[0]?.key ?? null);
         setOutlineGeneratedBy((data.generatedBy as AIGenerationAttribution) ?? null);
         setOutlineCreatedAt(new Date().toISOString());

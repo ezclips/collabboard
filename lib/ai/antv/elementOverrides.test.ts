@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyElementOverrides,
+  ELEMENT_ORPHANED_MAX_KEYS,
   ELEMENT_OVERRIDE_MAX_KEYS,
   elementAtPoint,
   elementBaseBox,
@@ -534,6 +535,42 @@ describe('PATCH-261 element colours', () => {
     expect(icon.style.color).toBe('');
     expect(labelText.style.color).toBe('rgb(16, 16, 16)');
     expect(value.getAttribute('fill')).toBe('#444444');
+  });
+});
+
+describe('PATCH-274 orphaned overrides', () => {
+  it('sanitizes an orphaned map: valid keys kept, junk dropped, capped', () => {
+    const orphaned: Record<string, ElementOverride> = {
+      'item-label@1': { fill: '#AABBCC' },
+      'Bad Key': { dx: 1 },
+      'shape#9': { dx: Number.NaN },
+      'shape@2': { hidden: true },
+    };
+    for (let i = 0; i < 60; i += 1) orphaned[`item-value@${i}`] = { dx: 1 };
+    const out = sanitizeElementOverrides({ template: 't', items: {}, orphaned });
+    expect(out?.items).toEqual({});
+    expect(out?.orphaned!['item-label@1']).toEqual({ fill: '#aabbcc' });
+    expect(out?.orphaned!['Bad Key']).toBeUndefined();
+    expect(out?.orphaned!['shape#9']).toBeUndefined();
+    expect(Object.keys(out!.orphaned!)).toHaveLength(ELEMENT_ORPHANED_MAX_KEYS);
+  });
+
+  it('an orphaned-only map is still a real map, and never applied to the DOM', () => {
+    const out = sanitizeElementOverrides({
+      template: 't',
+      items: {},
+      orphaned: { 'item-label@0': { fill: '#ff0000' } },
+    });
+    expect(out?.orphaned).toEqual({ 'item-label@0': { fill: '#ff0000' } });
+    expect(
+      outlineWithOverrides({ title: 'T', ordered: false, kind: 'list', items: [{ label: 'A' }] }, out).elementOverrides,
+    ).toEqual(out);
+
+    const svg = fixture();
+    const label = svg.querySelector('[data-element-type="item-label"]') as Element;
+    applyElementOverrides(svg, out, 't');
+    // The live item is untouched: orphaned edits are never applied.
+    expect(label.getAttribute('fill')).toBeNull();
   });
 });
 

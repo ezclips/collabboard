@@ -65,6 +65,14 @@ export interface VisualOutlineItem {
   side?: VisualSide;
   /** PATCH-244. AntV-toolbar text style, kept only for AntV designs. */
   textStyle?: VisualOutlineItemTextStyle;
+  /**
+   * PATCH-274. A stable identity for this item, so a presentation edit (a
+   * colour, move or hide) follows the item when others are added, removed or
+   * reordered. Assigned by `withItemIds` when an outline enters editing; the
+   * model never sets one and the model path of `parseOutline` drops it.
+   * `6..12` lower-case letters/digits.
+   */
+  id?: string;
   children?: VisualOutlineChild[];
 }
 
@@ -222,6 +230,49 @@ export const OUTLINE_LIMITS = {
   children: 6,
 } as const;
 
+/** PATCH-274. A stable item id: 6..12 lower-case letters/digits. */
+const ITEM_ID_PATTERN = /^[a-z0-9]{6,12}$/;
+
+/** PATCH-274. True only for a well-formed stable item id. Never throws. */
+export function isValidItemId(value: unknown): value is string {
+  return typeof value === 'string' && ITEM_ID_PATTERN.test(value);
+}
+
+const ITEM_ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** PATCH-274. A fresh random 10-character id (pattern-conformant). */
+function randomItemId(): string {
+  let id = '';
+  for (let i = 0; i < 10; i += 1) {
+    id += ITEM_ID_CHARS[Math.floor(Math.random() * ITEM_ID_CHARS.length)];
+  }
+  return id;
+}
+
+/**
+ * PATCH-274. A NEW outline where every item without a valid id gets a fresh
+ * random one. Existing valid ids are kept; a duplicate id keeps its FIRST
+ * occurrence and later duplicates get new ids. Children get no ids in this
+ * patch. Pure apart from randomness; identity when every id is already valid
+ * and unique.
+ */
+export function withItemIds(outline: VisualOutline): VisualOutline {
+  const used = new Set<string>();
+  let changed = false;
+  const items = outline.items.map((item) => {
+    if (isValidItemId(item.id) && !used.has(item.id)) {
+      used.add(item.id);
+      return item;
+    }
+    changed = true;
+    let id = randomItemId();
+    while (used.has(id)) id = randomItemId();
+    used.add(id);
+    return { ...item, id };
+  });
+  return changed ? { ...outline, items } : outline;
+}
+
 /** Thrown when the model's outline has too little usable content to draw. */
 export class OutlineParseError extends Error {
   constructor(message: string) {
@@ -281,6 +332,8 @@ const OutlineItemSchema = z.object({
   value: z.unknown().optional(),
   side: z.unknown().optional(),
   textStyle: z.unknown().optional(),
+  // PATCH-274. Read only on the stored-data path; the model path drops it.
+  id: z.unknown().optional(),
   children: z.array(OutlineChildSchema).optional(),
 });
 
@@ -313,11 +366,15 @@ function trimTo(value: unknown, limit: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
-function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineItem | null {
+function normalizeItem(raw: z.infer<typeof OutlineItemSchema>, keepId: boolean): VisualOutlineItem | null {
   const label = trimTo(raw.label, OUTLINE_LIMITS.label);
   if (!label) return null;
 
   const item: VisualOutlineItem = { label };
+
+  // PATCH-274. Stable item ids survive the stored-data path only; the model can
+  // never set one.
+  if (keepId && isValidItemId(raw.id)) item.id = raw.id;
 
   const detail = trimTo(raw.detail, OUTLINE_LIMITS.detail);
   if (detail) item.detail = detail;
@@ -367,8 +424,9 @@ export function parseOutline(raw: unknown, options: ParseOutlineOptions = {}): V
   }
 
   const data = parsed.data;
+  const keepIds = options.source === 'stored';
   const items = (data.items ?? [])
-    .map(normalizeItem)
+    .map((item) => normalizeItem(item, keepIds))
     .filter((item): item is VisualOutlineItem => item !== null)
     .slice(0, OUTLINE_LIMITS.items);
 

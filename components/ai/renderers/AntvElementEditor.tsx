@@ -538,6 +538,18 @@ export default function AntvElementEditor({
     return () => observer.disconnect();
   }, [measureKeys, rootElement]);
 
+  // PATCH-274. A structural edit (add/remove/reorder) remaps every positional
+  // override key, so this design's history entries would replay stale keys onto
+  // whatever now sits at that position. Clear the history when the item id
+  // sequence changes; the editor's own commits never change item ids.
+  const itemIdSignature = outline.items.map((item) => item.id ?? '').join('|');
+  const lastItemIdSignatureRef = React.useRef(itemIdSignature);
+  React.useEffect(() => {
+    if (lastItemIdSignatureRef.current === itemIdSignature) return;
+    lastItemIdSignatureRef.current = itemIdSignature;
+    historyRef.current.clear();
+  }, [itemIdSignature]);
+
   // Reset local state when the design changes.
   React.useEffect(() => {
     const next = initialOverrides(outlineRef.current, template);

@@ -111,7 +111,9 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
     const saved = onSave.mock.calls[0][0];
     expect(saved.aiComponentJson.data.subtype).toBe('infographic');
     expect(saved.aiComponentJson.data.template).toBe('stairs');
-    expect(saved.aiComponentJson.data.outline).toEqual(OUTLINE);
+    // PATCH-274: a saved post now also carries stable item ids; the semantic
+    // fields are unchanged.
+    expect(saved.aiComponentJson.data.outline).toMatchObject(OUTLINE);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
