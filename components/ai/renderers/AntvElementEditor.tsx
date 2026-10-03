@@ -4,48 +4,49 @@ import React from 'react';
 
 import {
   applyElementOverrides,
-  elementAtPoint,
-  elementItemScope,
   elementKey,
   elementScreenBox,
-  isTransientElement,
   outlineWithOverrides,
   unionScreenBoxes,
   withoutElementOverrides,
-  type ElementOverride,
+  type ElementHandle,
   type ElementOverrides,
   type ScreenBox,
 } from '@/lib/ai/antv/elementOverrides';
 import {
-  additionKindOf,
   findAdditionByKey,
   isAdditionKey,
   removeAddition,
   resetAdditionColour,
   updateAddition,
 } from '@/lib/ai/antv/additions';
-import { outlinesEqual } from '@/lib/ai/antv/mapOutline';
-import { isIconElement } from '@/lib/ai/antv/elementColours';
+import {
+  applyEntry,
+  createEditHistory,
+  diffContentEntries,
+  diffOverrides,
+  type ContentEditReporter,
+  type EditEntry,
+} from '@/lib/ai/antv/editHistory';
 import { VISUAL_PALETTE } from '@/lib/ai/visualPalette';
 import type { VisualOutline } from '@/lib/ai/outline';
 import {
   AntvElementChrome,
-  HISTORY_MAX,
   ZERO_BOX,
   hasActiveAntvTextEditor,
   initialOverrides,
   isTextElement,
   isTextEntry,
-  resolveAntvPointerDown,
-  sameOverrides,
   selectedKeys,
   type ChromeRect,
   type Selection,
 } from './AntvElementChrome';
 import AntvAddedTextInput from './AntvAddedTextInput';
-import AntvElementColourMenu, { type ColourRow } from './AntvElementColourMenu';
+import AntvElementColourMenu from './AntvElementColourMenu';
 import AntvIconPicker from './AntvIconPicker';
+import { useAntvElementColour } from './useAntvElementColour';
 import { useAntvElementDrag } from './useAntvElementDrag';
+import { useAntvElementSelection } from './useAntvElementSelection';
 import { useAntvIconSwap } from './useAntvIconSwap';
 import { useLayerCounterScale } from './PictureEditOverlay';
 
@@ -63,6 +64,10 @@ import { useLayerCounterScale } from './PictureEditOverlay';
  * commit is a plain outline change -- no AI call, no credit -- and it is NOT part
  * of the saved picture. Presentational chrome and the drag machine are split into
  * AntvElementChrome / useAntvElementDrag.
+ *
+ * PATCH-270. History is scoped and shared (editHistory.ts + the colour hook): an
+ * entry records only what changed, so Undo reverses that one change on the
+ * CURRENT outline instead of restoring an older copy of the whole picture.
  */
 
 export interface AntvElementEditorProps {
@@ -77,30 +82,16 @@ export interface AntvElementEditorProps {
    * the mind-map +/− overlay can show that node's controls.
    */
   onSelectionChange?: (scope: string | null) => void;
+  /**
+   * PATCH-270. The renderer writes its AntV inline text edits here, so they are
+   * recorded in the SAME history as the editor's own commits.
+   */
+  contentEditRef?: React.MutableRefObject<ContentEditReporter | null>;
 }
 
 const DEFAULT_PALETTE: readonly string[] = VISUAL_PALETTE.map((entry) => entry.stroke);
 
 type Rect = ChromeRect;
-
-/** PATCH-262. One undoable state: overrides plus the outline content (no overrides). */
-interface Snapshot {
-  overrides: ElementOverrides | undefined;
-  content: VisualOutline;
-}
-
-/** PATCH-261/262. The row a value of this element type should land on. */
-function rowApplies(row: ColourRow, el: Element): boolean {
-  const kind = additionKindOf(el);
-  if (kind) {
-    if (row === 'text') return kind === 'text';
-    if (row === 'icon') return kind === 'icon';
-    return kind !== 'text' && kind !== 'icon';
-  }
-  if (row === 'text') return isTextElement(el);
-  if (row === 'icon') return isIconElement(el);
-  return !isTextElement(el) && !isIconElement(el);
-}
 
 export default function AntvElementEditor({
   containerRef,
@@ -109,6 +100,7 @@ export default function AntvElementEditor({
   onChange,
   palette = DEFAULT_PALETTE,
   onSelectionChange,
+  contentEditRef,
 }: AntvElementEditorProps) {
   // PATCH-263 Addendum 2. The chrome counter-scales from the layer's REAL
   // on-screen scale; `1 / PictureZoomContext` drew it 1.85-2.7x too big on the
@@ -120,10 +112,8 @@ export default function AntvElementEditor({
   );
   const [selection, setSelection] = React.useState<Selection | null>(null);
   const [rect, setRect] = React.useState<Rect | null>(null);
-  const [colourOpen, setColourOpen] = React.useState(false);
   const [iconOpen, setIconOpen] = React.useState(false);
   const [editingText, setEditingText] = React.useState<{ key: string; value: string } | null>(null);
-  const [recent, setRecent] = React.useState<string[]>([]);
 
   // Refs keep the native (window/container) listeners reading fresh values. The
   // state is NOT mirrored here during render: an interrupted/concurrent render
@@ -141,10 +131,17 @@ export default function AntvElementEditor({
   }, [selection]);
   const pendingNarrowRef = React.useRef<Selection | null>(null);
   const suppressClickRef = React.useRef(false);
-  const pastRef = React.useRef<Snapshot[]>([]);
-  const futureRef = React.useRef<Snapshot[]>([]);
-  /** PATCH-261. Rows already given a history entry in the open colour session. */
-  const colourSessionRef = React.useRef<Set<ColourRow>>(new Set());
+  /** PATCH-270. One scoped history for the picture (past/future, max 50). */
+  const historyRef = React.useRef(createEditHistory());
+  /**
+   * PATCH-270 Addendum 1. The full overrides at drag start, so a drag commit
+   * records the dragged keys' `before` and nothing else.
+   */
+  const dragBaseRef = React.useRef<ElementOverrides | undefined>(undefined);
+
+  const recordEdit = React.useCallback((entry: EditEntry) => {
+    historyRef.current.record(entry);
+  }, []);
 
   const rootElement = React.useCallback((): HTMLElement | null => containerRef.current, [containerRef]);
 
@@ -210,12 +207,6 @@ export default function AntvElementEditor({
     [rootElement, template],
   );
 
-  /** The undoable state right now: overrides + the outline's content only. */
-  const snapshot = React.useCallback(
-    (): Snapshot => ({ overrides: overridesRef.current, content: withoutElementOverrides(outlineRef.current) }),
-    [],
-  );
-
   const emit = React.useCallback(
     (nextOverrides: ElementOverrides | undefined, content: VisualOutline) => {
       const next = outlineWithOverrides(content, nextOverrides);
@@ -259,11 +250,8 @@ export default function AntvElementEditor({
       if (fresh.length) {
         // The Add panel wrote the addition straight into the outline: make the
         // insertion undoable here, where the editor owns the history.
-        pastRef.current = [
-          ...pastRef.current,
-          { overrides: local, content: withoutElementOverrides(outline) },
-        ].slice(-HISTORY_MAX);
-        futureRef.current = [];
+        const entry = diffOverrides(template, local, merged);
+        if (entry) recordEdit(entry);
         const key = `ai-addition@${fresh[fresh.length - 1].id}`;
         const nextSelection: Selection = { kind: 'element', key, scope: null };
         selectionRef.current = nextSelection;
@@ -271,7 +259,7 @@ export default function AntvElementEditor({
         setRect(measureKeys([key]));
       }
     }
-  }, [outline, template, rootElement, measureKeys]);
+  }, [outline, template, rootElement, measureKeys, recordEdit]);
 
   const setPresent = React.useCallback(
     (next: ElementOverrides | undefined) => {
@@ -284,67 +272,81 @@ export default function AntvElementEditor({
 
   const commit = React.useCallback(
     (next: ElementOverrides | undefined) => {
-      if (sameOverrides(overridesRef.current, next)) return;
-      pastRef.current = [...pastRef.current, snapshot()].slice(-HISTORY_MAX);
-      futureRef.current = [];
+      const entry = diffOverrides(template, overridesRef.current, next);
+      if (!entry) return;
+      recordEdit(entry);
       setPresent(next);
     },
-    [setPresent, snapshot],
+    [recordEdit, setPresent, template],
   );
 
-  const commitDrag = React.useCallback(
-    (base: ElementOverrides | undefined) => {
-      const next = overridesRef.current;
-      if (sameOverrides(base, next)) return;
-      pastRef.current = [
-        ...pastRef.current,
-        { overrides: base, content: withoutElementOverrides(outlineRef.current) },
-      ].slice(-HISTORY_MAX);
-      futureRef.current = [];
-      setPresent(next);
-    },
-    [setPresent],
-  );
+  const commitDrag = React.useCallback(() => {
+    const next = overridesRef.current;
+    // Addendum 1: only the keys that changed since drag start are recorded, so
+    // undoing a move never touches an unrelated element or a redone addition.
+    const entry = diffOverrides(template, dragBaseRef.current, next);
+    if (!entry) return;
+    recordEdit(entry);
+    setPresent(next);
+  }, [recordEdit, setPresent, template]);
 
   /** PATCH-262. A content-only change (an outline item's icon), undoable. */
   const commitContent = React.useCallback(
     (content: VisualOutline) => {
-      if (outlinesEqual(withoutElementOverrides(content), withoutElementOverrides(outlineRef.current))) return;
-      pastRef.current = [...pastRef.current, snapshot()].slice(-HISTORY_MAX);
-      futureRef.current = [];
-      emit(overridesRef.current, content);
+      const prev = withoutElementOverrides(outlineRef.current);
+      const next = withoutElementOverrides(content);
+      const entries = diffContentEntries(prev, next);
+      if (entries.length === 0) return;
+      recordEdit({ kind: 'group', entries });
+      emit(overridesRef.current, next);
     },
-    [emit, snapshot],
+    [emit, recordEdit],
   );
 
-  const restore = React.useCallback(
-    (snap: Snapshot) => {
-      overridesRef.current = snap.overrides;
-      setOverrides(snap.overrides);
-      emit(snap.overrides, snap.content);
+  /** PATCH-270. Applies a restored outline: local overrides, DOM and parent. */
+  const applyRestored = React.useCallback(
+    (next: VisualOutline) => {
+      const nextOverrides = next.elementOverrides;
+      overridesRef.current = nextOverrides;
+      setOverrides(nextOverrides);
+      outlineRef.current = next;
+      onChange(next);
       const root = rootElement();
-      if (root) applyElementOverrides(root, snap.overrides, template);
+      if (root) applyElementOverrides(root, nextOverrides, template);
     },
-    [emit, rootElement, template],
+    [onChange, rootElement, template],
   );
 
   const undo = React.useCallback(() => {
-    const past = pastRef.current;
-    if (past.length === 0) return;
-    const previous = past[past.length - 1];
-    pastRef.current = past.slice(0, -1);
-    futureRef.current = [snapshot(), ...futureRef.current].slice(0, HISTORY_MAX);
-    restore(previous);
-  }, [restore, snapshot]);
+    const entry = historyRef.current.undoEntry();
+    if (!entry) return;
+    applyRestored(applyEntry(outlineRef.current, entry, 'undo'));
+  }, [applyRestored]);
 
   const redo = React.useCallback(() => {
-    const future = futureRef.current;
-    if (future.length === 0) return;
-    const next = future[0];
-    futureRef.current = future.slice(1);
-    pastRef.current = [...pastRef.current, snapshot()].slice(-HISTORY_MAX);
-    restore(next);
-  }, [restore, snapshot]);
+    const entry = historyRef.current.redoEntry();
+    if (!entry) return;
+    applyRestored(applyEntry(outlineRef.current, entry, 'redo'));
+  }, [applyRestored]);
+
+  // PATCH-270. AntV inline text edits arrive from the renderer; record the
+  // field-level diff in this same history.
+  const recordContentEdit = React.useCallback<ContentEditReporter>(
+    (previous, next) => {
+      const entries = diffContentEntries(withoutElementOverrides(previous), withoutElementOverrides(next));
+      if (entries.length === 0) return;
+      recordEdit({ kind: 'group', entries });
+    },
+    [recordEdit],
+  );
+
+  React.useEffect(() => {
+    if (!contentEditRef) return;
+    contentEditRef.current = recordContentEdit;
+    return () => {
+      if (contentEditRef.current === recordContentEdit) contentEditRef.current = null;
+    };
+  }, [contentEditRef, recordContentEdit]);
 
   const commitHidden = React.useCallback(
     (keys: string[]) => {
@@ -372,16 +374,32 @@ export default function AntvElementEditor({
 
   // ── Colour (PATCH-261) ─────────────────────────────────────────────────────
 
-  const colourKeys = selectedKeys(selection);
-  const colourCurrent: ElementOverride = (() => {
-    const key = colourKeys[0];
-    if (!key) return {};
-    if (isAdditionKey(key)) {
-      const addition = findAdditionByKey(overrides, key);
-      return addition ? { fill: addition.fill, stroke: addition.stroke, text: addition.text } : {};
-    }
-    return overrides?.items[key] ?? {};
-  })();
+  const {
+    colourOpen,
+    recent,
+    colourKeys,
+    colourCurrent,
+    colourRows,
+    setColourOpen,
+    openColour,
+    resetSession,
+    toggleColour,
+    applyColour,
+    resetColour,
+  } = useAntvElementColour({
+    template,
+    selection,
+    selectionRef,
+    overrides,
+    overridesRef,
+    findElement,
+    cloneOverrides,
+    commit,
+    recordEdit,
+    setOverrides,
+    getContent: () => outlineRef.current,
+    emit,
+  });
 
   // PATCH-261 fix. AntV's own text toolbar sits directly above a selected text
   // element (z-index 9999), exactly where our bar would be, so a text-only
@@ -389,84 +407,6 @@ export default function AntvElementEditor({
   // back to the normal above-left placement.
   const textOnlySelection = colourKeys.length > 0 && colourKeys.every((key) => isTextElement(findElement(key)));
   const barBelow = rect !== null && textOnlySelection && rect.top + rect.height < 80;
-
-  const colourRows = React.useMemo<ColourRow[]>(() => {
-    if (!colourOpen) return [];
-    const rows = new Set<ColourRow>();
-    for (const key of selectedKeys(selection)) {
-      const el = findElement(key);
-      if (!el) continue;
-      const kind = additionKindOf(el);
-      if (kind === 'text' || (!kind && isTextElement(el))) rows.add('text');
-      else if (kind === 'icon' || (!kind && isIconElement(el))) rows.add('icon');
-      else {
-        rows.add('fill');
-        rows.add('border');
-      }
-    }
-    return [...rows];
-  }, [colourOpen, selection, findElement, overrides]);
-
-  const applyColour = React.useCallback(
-    (row: ColourRow, hex: string) => {
-      const keys = selectedKeys(selectionRef.current);
-      if (keys.length === 0) return;
-      let next = cloneOverrides();
-      let changed = false;
-      for (const key of keys) {
-        const el = findElement(key);
-        if (!el || !rowApplies(row, el)) continue;
-        const patch: ElementOverride = row === 'border' ? { stroke: hex } : row === 'text' ? { text: hex } : { fill: hex };
-        if (isAdditionKey(key)) next = updateAddition(next, key, patch);
-        else next.items[key] = { ...(next.items[key] ?? {}), ...patch };
-        changed = true;
-      }
-      if (!changed || sameOverrides(overridesRef.current, next)) return;
-      if (!colourSessionRef.current.has(row)) {
-        colourSessionRef.current.add(row);
-        pastRef.current = [...pastRef.current, snapshot()].slice(-HISTORY_MAX);
-        futureRef.current = [];
-      }
-      overridesRef.current = next;
-      setOverrides(next);
-      emit(next, outlineRef.current);
-      setRecent((prev) => [hex, ...prev.filter((value) => value !== hex)].slice(0, 6));
-    },
-    [cloneOverrides, emit, findElement, snapshot],
-  );
-
-  const resetColour = React.useCallback(() => {
-    const keys = selectedKeys(selectionRef.current);
-    if (keys.length === 0) return;
-    let next = cloneOverrides();
-    let changed = false;
-    for (const key of keys) {
-      if (isAdditionKey(key)) {
-        next = resetAdditionColour(next, key);
-        changed = true;
-        continue;
-      }
-      const item = next.items[key];
-      if (!item) continue;
-      const rest: ElementOverride = { ...item };
-      delete rest.fill;
-      delete rest.stroke;
-      delete rest.text;
-      if (Object.keys(rest).length) next.items[key] = rest;
-      else delete next.items[key];
-      changed = true;
-    }
-    if (!changed) return;
-    colourSessionRef.current = new Set();
-    commit(next);
-  }, [cloneOverrides, commit]);
-
-  const toggleColour = React.useCallback(() => {
-    setColourOpen((open) => {
-      colourSessionRef.current = new Set();
-      return !open;
-    });
-  }, []);
 
   // ── Change icon (PATCH-262) ────────────────────────────────────────────────
   const { iconItemIndex, iconCurrent, applyIcon } = useAntvIconSwap({
@@ -482,7 +422,7 @@ export default function AntvElementEditor({
   const toggleIcon = React.useCallback(() => {
     setIconOpen((open) => !open);
     setColourOpen(false);
-  }, []);
+  }, [setColourOpen]);
 
   // Added text: double-click opens a small inline input (Enter/blur commit,
   // Escape cancels). The input is an <input>, so the editor's key handler yields.
@@ -506,13 +446,6 @@ export default function AntvElementEditor({
     [measureKeys],
   );
 
-  const measureSelection = React.useCallback(
-    (next: Selection | null) => {
-      setRect(measureKeys(selectedKeys(next)));
-    },
-    [measureKeys],
-  );
-
   // Move/resize pointer machine (PATCH-260), and its text-selection guard.
   const { beginMove, beginResize } = useAntvElementDrag({
     rootElement,
@@ -531,13 +464,23 @@ export default function AntvElementEditor({
     setRect,
   });
 
-  const resolvePointerDown = React.useCallback(
-    (target: Element | null, clientX: number, clientY: number): { selection: Selection | null; narrowTo: Selection | null } => {
-      const root = rootElement();
-      if (!root) return { selection: null, narrowTo: null };
-      return resolveAntvPointerDown(root, selectionRef.current, target, clientX, clientY);
+  // Addendum 1. Snapshot the full overrides at drag start (including additions),
+  // so the drag commit records each dragged key's `before` against the state it
+  // actually started from.
+  const beginMoveTracked = React.useCallback(
+    (event: PointerEvent, next: Selection, narrowTo: Selection | null) => {
+      dragBaseRef.current = cloneOverrides();
+      beginMove(event, next, narrowTo);
     },
-    [rootElement],
+    [beginMove, cloneOverrides],
+  );
+
+  const beginResizeTracked = React.useCallback(
+    (event: React.PointerEvent, handle: ElementHandle) => {
+      dragBaseRef.current = cloneOverrides();
+      beginResize(event, handle);
+    },
+    [beginResize, cloneOverrides],
   );
 
   const selectionLabel = selection ? (selection.kind === 'item' ? `item@${selection.scope}` : selection.key) : '';
@@ -548,98 +491,22 @@ export default function AntvElementEditor({
     onSelectionChange?.(selection ? selection.scope : null);
   }, [selection, onSelectionChange]);
 
-  // Container listeners: pick a selection, start an item/element move, or open
-  // the colour menu on a double-click of a shape/icon.
-  React.useEffect(() => {
-    const root = rootElement();
-    if (!root) return;
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
-      if (hasActiveAntvTextEditor(root)) return;
-      const target = event.target as Element | null;
-      if (target?.closest?.('[data-element-type^="btn-"]')) return;
-      const { selection: next, narrowTo } = resolvePointerDown(target, event.clientX, event.clientY);
-      selectionRef.current = next;
-      setSelection(next);
-      measureSelection(next);
-      if (next) beginMove(event, next, narrowTo);
-    };
-
-    const onClick = (event: MouseEvent) => {
-      if (hasActiveAntvTextEditor(root)) return;
-      const text = isTextElement(event.target as Element | null);
-      // A pending narrow from a no-move pointerdown is applied here too, so a
-      // real browser click always narrows even if the pointerup did not reach our
-      // window listener. It must NOT swallow a text element's own click/dblclick.
-      if (pendingNarrowRef.current) {
-        const next = pendingNarrowRef.current;
-        pendingNarrowRef.current = null;
-        applyNarrow(next);
-        if (!text) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        return;
-      }
-      if (!suppressClickRef.current) return;
-      suppressClickRef.current = false;
-      if (!text) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-
-    // PATCH-261. Double-click on a shape/icon is Napkin's colour gesture. Text
-    // keeps AntV's inline editor, so a text double-click is left untouched.
-    const onDoubleClick = (event: MouseEvent) => {
-      if (hasActiveAntvTextEditor(root)) return;
-      const target = event.target as Element | null;
-      const hit = elementAtPoint(root, event.clientX, event.clientY) ?? target?.closest?.('[data-element-type]') ?? null;
-      // PATCH-262. Our additions: double-click text edits it inline; any other
-      // addition opens the colour menu (not AntV's text editor).
-      const additionHit = hit && !isTransientElement(hit) ? additionKindOf(hit) : null;
-      if (hit && additionHit) {
-        const key = elementKey(hit, root);
-        if (!key) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const next: Selection = { kind: 'element', key, scope: null };
-        selectionRef.current = next;
-        setSelection(next);
-        setRect(measureKeys([key]));
-        if (additionHit === 'text') {
-          const addition = findAdditionByKey(overridesRef.current, key);
-          setEditingText({ key, value: addition?.label ?? '' });
-        } else {
-          colourSessionRef.current = new Set();
-          setColourOpen(true);
-        }
-        return;
-      }
-      if (isTextElement(target)) return;
-      if (!hit || isTransientElement(hit)) return;
-      const key = elementKey(hit, root);
-      if (!key) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const next: Selection = { kind: 'element', key, scope: elementItemScope(hit, root) };
-      selectionRef.current = next;
-      setSelection(next);
-      setRect(measureKeys([key]));
-      colourSessionRef.current = new Set();
-      setColourOpen(true);
-    };
-
-    root.addEventListener('pointerdown', onPointerDown, true);
-    root.addEventListener('click', onClick, true);
-    root.addEventListener('dblclick', onDoubleClick, true);
-    return () => {
-      root.removeEventListener('pointerdown', onPointerDown, true);
-      root.removeEventListener('click', onClick, true);
-      root.removeEventListener('dblclick', onDoubleClick, true);
-    };
-  }, [applyNarrow, beginMove, measureKeys, measureSelection, resolvePointerDown, rootElement]);
+  // Container listeners: select + start a move, narrow on a click, and open the
+  // colour menu on a double-click of a shape/icon (PATCH-270: extracted hook).
+  useAntvElementSelection({
+    rootElement,
+    selectionRef,
+    overridesRef,
+    pendingNarrowRef,
+    suppressClickRef,
+    measureKeys,
+    setSelection,
+    setRect,
+    applyNarrow,
+    beginMove: beginMoveTracked,
+    openColour,
+    setEditingText,
+  });
 
   // Draw the overrides (including additions) once the container exists.
   React.useEffect(() => {
@@ -676,20 +543,22 @@ export default function AntvElementEditor({
     setColourOpen(false);
     setIconOpen(false);
     setEditingText(null);
-    colourSessionRef.current = new Set();
-    pastRef.current = [];
-    futureRef.current = [];
-  }, [template]);
+    resetSession();
+    historyRef.current.clear();
+  }, [template, resetSession, setColourOpen]);
 
-  // Keyboard: Escape deselects; Delete hides; Ctrl/⌘+Z / Shift+Z / Y.
+  // Keyboard: Escape deselects; Delete hides; Ctrl/⌘+Z / Shift+Z / Y. PATCH-270:
+  // attached with OR without a selection, so Ctrl+Z reaches our history whenever
+  // focus is not in an input / contenteditable / AntV's inline editor.
   React.useEffect(() => {
-    if (!selection) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTextEntry(document.activeElement) || hasActiveAntvTextEditor(rootElement())) return;
-      const keys = selectedKeys(selectionRef.current);
+      const current = selectionRef.current;
+      const keys = selectedKeys(current);
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
       if (event.key === 'Escape') {
+        if (!current) return;
         // PATCH-265. The editor owns Escape while it has a selection: the open
         // popover closes first, then a second Escape deselects. PATCH-262 adds
         // the icon picker to that order (and the added-text input consumes its
@@ -706,6 +575,7 @@ export default function AntvElementEditor({
           setSelection(null);
         }
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (keys.length === 0) return;
         event.preventDefault();
         commitHidden(keys);
       } else if (mod && !event.shiftKey && key === 'z') {
@@ -718,7 +588,7 @@ export default function AntvElementEditor({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [colourOpen, iconOpen, commitHidden, redo, rootElement, selection, undo]);
+  }, [colourOpen, iconOpen, commitHidden, redo, rootElement, setColourOpen, undo]);
 
   const handleDelete = () => commitHidden(selectedKeys(selectionRef.current));
   const handleReset = () => commitReset(selectedKeys(selectionRef.current));
@@ -753,7 +623,7 @@ export default function AntvElementEditor({
       barBelow={barBelow}
       showIconButton={iconItemIndex != null}
       iconOpen={iconOpen}
-      onResize={beginResize}
+      onResize={beginResizeTracked}
       onUndo={undo}
       onRedo={redo}
       onReset={handleReset}

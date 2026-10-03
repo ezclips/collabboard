@@ -1332,3 +1332,244 @@ describe('PATCH-265 AntvElementEditor Escape priority', () => {
     expect(seen).toEqual([false]);
   });
 });
+
+// ── PATCH-270: Undo reverses only its own change ─────────────────────────────
+
+type ContentEditReporter = (previous: VisualOutline, next: VisualOutline) => void;
+
+interface ControlledEditor {
+  onChange: ReturnType<typeof vi.fn>;
+  reportAntvEdit: (previous: VisualOutline, next: VisualOutline) => void;
+  setOutline: (next: VisualOutline) => void;
+  getOutline: () => VisualOutline;
+}
+
+interface ControlledApi {
+  getOutline(): VisualOutline;
+  setOutline(next: VisualOutline): void;
+  reportAntvEdit(previous: VisualOutline, next: VisualOutline): void;
+}
+
+/** A real controlled host: onChange updates the prop the editor reads back. */
+function ControlledHost({
+  initial,
+  onChange,
+  contentEditRef,
+  apiRef,
+}: {
+  initial: VisualOutline;
+  onChange: (next: VisualOutline) => void;
+  contentEditRef: { current: ContentEditReporter | null };
+  apiRef: { current: ControlledApi | null };
+}) {
+  const [outline, setOutline] = React.useState(initial);
+  const stateRef = React.useRef(initial);
+  const handleChange = React.useCallback(
+    (next: VisualOutline) => {
+      stateRef.current = next;
+      setOutline(next);
+      onChange(next);
+    },
+    [onChange],
+  );
+  apiRef.current = {
+    getOutline: () => stateRef.current,
+    setOutline: (next) => {
+      act(() => {
+        stateRef.current = next;
+        setOutline(next);
+      });
+    },
+    reportAntvEdit: (previous, next) => {
+      contentEditRef.current?.(previous, next);
+      act(() => {
+        stateRef.current = next;
+        setOutline(next);
+      });
+    },
+  };
+  return (
+    <AntvElementEditor
+      containerRef={editorRef!}
+      template="list-grid-badge-card"
+      outline={outline}
+      onChange={handleChange}
+      contentEditRef={contentEditRef}
+    />
+  );
+}
+
+function mountControlledEditor(initial: VisualOutline): ControlledEditor {
+  reactHost = document.createElement('div');
+  document.body.appendChild(reactHost);
+  root = createRoot(reactHost);
+  editorRef = { current: container };
+  const onChange = vi.fn();
+  const contentEditRef: { current: ContentEditReporter | null } = { current: null };
+  const apiRef: { current: ControlledApi | null } = { current: null };
+  act(() => {
+    root!.render(
+      <ControlledHost
+        initial={initial}
+        onChange={onChange}
+        contentEditRef={contentEditRef}
+        apiRef={apiRef}
+      />,
+    );
+  });
+  const api = apiRef.current!;
+  return {
+    onChange,
+    getOutline: () => api.getOutline(),
+    setOutline: (next) => api.setOutline(next),
+    reportAntvEdit: (previous, next) => api.reportAntvEdit(previous, next),
+  };
+}
+
+function ctrlKeydown(key: string, shift = false) {
+  act(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key, ctrlKey: true, shiftKey: shift, bubbles: true, cancelable: true }),
+    );
+  });
+}
+
+const CIRCLE = { id: 'abc123', kind: 'circle' as const, x: 200, y: 200, w: 60, h: 40 };
+
+function withCircle(base: VisualOutline): VisualOutline {
+  return {
+    ...base,
+    elementOverrides: { template: 'list-grid-badge-card', items: {}, additions: [CIRCLE] },
+  };
+}
+
+describe('PATCH-270 AntvElementEditor scoped undo', () => {
+  it('add circle -> outside title change -> Undo removes the circle but keeps the title; Redo restores it', () => {
+    const harness = mountControlledEditor(BASE_OUTLINE);
+    harness.setOutline(withCircle(BASE_OUTLINE));
+    harness.setOutline(withCircle({ ...BASE_OUTLINE, title: 'New title' }));
+
+    click(reactHost!.querySelector('[data-ai-element-undo]') as Element);
+    const undone = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(undone.title).toBe('New title');
+    expect(undone.elementOverrides?.additions ?? []).toEqual([]);
+
+    click(reactHost!.querySelector('[data-ai-element-redo]') as Element);
+    const redone = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(redone.title).toBe('New title');
+    expect(redone.elementOverrides?.additions).toEqual([CIRCLE]);
+  });
+
+  it('AntV text edit -> move -> Undo reverses the move, then the text edit; Redo restores both in order', () => {
+    const harness = mountControlledEditor(BASE_OUTLINE);
+    const edited: VisualOutline = { ...BASE_OUTLINE, items: [{ label: 'A2' }, { label: 'B' }] };
+    harness.reportAntvEdit(BASE_OUTLINE, edited);
+
+    selectTitle();
+    pointer(titleEl(), 'pointerdown', 40, 30, 1);
+    pointer(window, 'pointermove', 60, 45, 1);
+    pointer(window, 'pointerup', 60, 45, 1);
+    expect((harness.onChange.mock.calls.at(-1)![0] as VisualOutline).elementOverrides?.items['title#0']).toEqual({
+      dx: 20,
+      dy: 15,
+    });
+
+    // First undo reverses the move only; the label edit stays.
+    click(reactHost!.querySelector('[data-ai-element-undo]') as Element);
+    const afterMoveUndo = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(afterMoveUndo.elementOverrides).toBeUndefined();
+    expect(afterMoveUndo.items[0].label).toBe('A2');
+
+    // Second undo reverses the label edit.
+    click(reactHost!.querySelector('[data-ai-element-undo]') as Element);
+    const afterTextUndo = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(afterTextUndo.items[0].label).toBe('A');
+
+    // Two redos restore the label edit, then the move.
+    click(reactHost!.querySelector('[data-ai-element-redo]') as Element);
+    expect((harness.onChange.mock.calls.at(-1)![0] as VisualOutline).items[0].label).toBe('A2');
+
+    click(reactHost!.querySelector('[data-ai-element-redo]') as Element);
+    const afterRedo = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(afterRedo.items[0].label).toBe('A2');
+    expect(afterRedo.elementOverrides?.items['title#0']).toEqual({ dx: 20, dy: 15 });
+  });
+
+  it('Ctrl+Z with nothing selected undoes the last entry', () => {
+    const harness = mountControlledEditor(BASE_OUTLINE);
+    selectTitle();
+    pointer(titleEl(), 'pointerdown', 40, 30, 1);
+    pointer(window, 'pointermove', 60, 45, 1);
+    pointer(window, 'pointerup', 60, 45, 1);
+    keydown('Escape');
+    expect(selectedAttr()).toBe('');
+
+    ctrlKeydown('z');
+    const undone = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(undone.elementOverrides).toBeUndefined();
+  });
+
+  it('an icon swap undo restores only that icon while a later side-panel label edit stays', () => {
+    const withIcons: VisualOutline = {
+      ...BASE_OUTLINE,
+      items: [
+        { label: 'A', icon: 'sun' },
+        { label: 'B', icon: 'moon' },
+      ],
+    };
+    const harness = mountControlledEditor(withIcons);
+
+    selectIcon();
+    expect(selectedAttr()).toBe('item-icon@0');
+    click(reactHost!.querySelector('[data-ai-element-icon-toggle]') as Element);
+    click(reactHost!.querySelector('[data-ai-icon-picker] [data-ai-icon-name="flower-2"]') as Element);
+    expect((harness.onChange.mock.calls.at(-1)![0] as VisualOutline).items[0].icon).toBe('flower-2');
+
+    // A later side-panel edit on a DIFFERENT item (not recorded in our history).
+    const swapped = harness.getOutline();
+    harness.setOutline({
+      ...swapped,
+      items: [swapped.items[0], { ...swapped.items[1], label: 'B2' }],
+    });
+
+    click(reactHost!.querySelector('[data-ai-element-undo]') as Element);
+    const undone = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(undone.items[0].icon).toBe('sun');
+    expect(undone.items[1].label).toBe('B2');
+  });
+
+  it('add circle -> Undo -> Redo -> content edit -> move -> Undo keeps the redone circle (Addendum 1)', () => {
+    const harness = mountControlledEditor(BASE_OUTLINE);
+    harness.setOutline(withCircle(BASE_OUTLINE));
+
+    ctrlKeydown('z');
+    expect(harness.getOutline().elementOverrides?.additions ?? []).toEqual([]);
+
+    ctrlKeydown('z', true);
+    expect(harness.getOutline().elementOverrides?.additions).toEqual([CIRCLE]);
+
+    // A content edit recorded in the same history (as the renderer reports AntV).
+    const beforeEdit = harness.getOutline();
+    harness.reportAntvEdit(beforeEdit, { ...beforeEdit, items: [{ label: 'A' }, { label: 'B2' }] });
+
+    // Move another element.
+    selectTitle();
+    pointer(titleEl(), 'pointerdown', 40, 30, 1);
+    pointer(window, 'pointermove', 60, 45, 1);
+    pointer(window, 'pointerup', 60, 45, 1);
+    expect(harness.getOutline().elementOverrides?.items['title#0']).toEqual({ dx: 20, dy: 15 });
+
+    // Undo the move only: the redone circle and the text edit stay.
+    ctrlKeydown('z');
+    const afterUndo = harness.getOutline();
+    expect(afterUndo.elementOverrides?.items?.['title#0']).toBeUndefined();
+    expect(afterUndo.elementOverrides?.additions).toEqual([CIRCLE]);
+    expect(afterUndo.items[1].label).toBe('B2');
+
+    // Redo the move: the circle is still there.
+    ctrlKeydown('z', true);
+    const afterRedo = harness.getOutline();
+    expect(afterRedo.elementOverrides?.items['title#0']).toEqual({ dx: 20, dy: 15 });
+    expect(afterRedo.elementOverrides?.additions).toEqual([CIRCLE]);
+  });
+});

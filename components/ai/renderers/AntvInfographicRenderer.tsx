@@ -14,6 +14,7 @@ import {
 } from '@/lib/ai/antv/mapOutline';
 import { stageInteractions } from '@/lib/ai/antv/interactions';
 import { applyElementOverrides, withoutElementOverrides } from '@/lib/ai/antv/elementOverrides';
+import type { ContentEditReporter } from '@/lib/ai/antv/editHistory';
 import { insertItem } from '@/lib/ai/infographic/edit';
 import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/outline';
 import { themeById } from '@/lib/ai/visualThemes';
@@ -318,6 +319,9 @@ function AntvInfographicRenderer({
   // to the moved content and PictureStage then re-fits the user's zoom/shift
   // under the pointer after every edit.
   const lastUpdatedOutlineRef = useRef<string | null>(null);
+  // PATCH-270. The element editor registers its history recorder here, so an
+  // AntV inline text edit is recorded in the SAME scoped history as our commits.
+  const contentEditRef = useRef<ContentEditReporter | null>(null);
 
   /**
    * PATCH-260. The one place an outline edit leaves this renderer. It records the
@@ -326,6 +330,7 @@ function AntvInfographicRenderer({
    */
   const emitOutline = React.useCallback(
     (next: VisualOutline, source: 'element-editor' | 'antv-change' | 'antv-button' | 'mindmap-handle') => {
+      const previous = outlineRef.current;
       outlineRef.current = next;
       // PATCH-263 Addendum 2. An AntV-originated edit (an inline text edit) has
       // ALREADY been drawn by AntV itself. Record it as drawn so the echo of the
@@ -333,6 +338,9 @@ function AntvInfographicRenderer({
       // re-fitting the view (which reset the user's zoom 54% -> 37%).
       if (source === 'antv-change') {
         lastUpdatedOutlineRef.current = JSON.stringify(withoutElementOverrides(next));
+        // PATCH-270. Record the field-level content diff in the editor's history,
+        // so its Undo reverses exactly this text edit and nothing else.
+        contentEditRef.current?.(previous, next);
       }
       const container = containerRef.current;
       if (container) {
@@ -585,6 +593,7 @@ function AntvInfographicRenderer({
               palette={theme.palette.map((entry) => entry.stroke)}
               onChange={(next) => emitOutline(next, 'element-editor')}
               onSelectionChange={setSelectedNodeKey}
+              contentEditRef={contentEditRef}
             />
           )}
         </div>

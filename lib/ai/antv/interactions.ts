@@ -8,6 +8,10 @@
  * PATCH-260. `DragElement` and `BrushSelect` are also gone: the element editor
  * owns selecting/moving/resizing, and the two AntV interactions fought it.
  *
+ * PATCH-270. `HotkeyHistory` is gone too: it was a second undo history restoring
+ * AntV's whole options, so Ctrl+Z acted on whichever history a selection happened
+ * to route to. The element editor's one scoped history owns undo/redo now.
+ *
  * Type-only import: this module has no runtime AntV dependency.
  */
 
@@ -18,7 +22,6 @@ type InteractionCtor = new () => unknown;
 const STAGE_INTERACTION_NAMES = [
   'DblClickEditText',
   'ClickSelect',
-  'HotkeyHistory',
   'SelectHighlight',
 ] as const;
 

@@ -204,6 +204,30 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
     expect(next.items[0].textStyle?.label?.fill).toBe('#ff0000');
   });
 
+  it('records an options:change text edit in the editor history, so Ctrl+Z reverses it (PATCH-270)', async () => {
+    const onChange = vi.fn();
+    mount(<AntvInfographicRenderer data={data()} edit={{ onChange }} />);
+    await flush();
+    const instance = h.instances[0];
+
+    act(() => {
+      instance.emit('options:change', {
+        type: 'options:change',
+        changes: [{ op: 'update', path: 'data.items', indexes: [1], value: { label: 'High summer' } }],
+      });
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect((onChange.mock.calls[0][0] as VisualOutline).items[1].label).toBe('High summer');
+
+    // Ctrl+Z with nothing selected reaches the SAME history the AntV edit was
+    // recorded in, so the edit is reversed rather than ignored.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect((onChange.mock.calls[1][0] as VisualOutline).items[1].label).toBe('Summer');
+  });
+
   it('does not call onChange when a change maps to no change', async () => {
     const onChange = vi.fn();
     mount(<AntvInfographicRenderer data={data()} edit={{ onChange }} />);
@@ -229,17 +253,16 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('keeps the editing interactions but drops ZoomWheel / DragCanvas (the stage owns those)', async () => {
+  it('keeps the editing interactions but drops ZoomWheel / DragCanvas / HotkeyHistory (the stage and our history own those)', async () => {
     mount(<AntvInfographicRenderer data={data()} edit={{ onChange: vi.fn() }} />);
     await flush();
     const instance = h.instances[0];
     expect(h.madeInteractions).toEqual([
       'dblclick-edit-text',
       'click-select',
-      'hotkey-history',
       'select-highlight',
     ]);
-    expect((instance.options.interactions as unknown[]).length).toBe(4);
+    expect((instance.options.interactions as unknown[]).length).toBe(3);
   });
 
   it('a viewBox options:change does not call onChange', async () => {
