@@ -2,24 +2,28 @@
 
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { LayoutGrid, Palette, Pencil, Shapes, SlidersHorizontal, X } from 'lucide-react';
+import { LayoutGrid, Palette, Pencil, Plus, Shapes, SlidersHorizontal, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import { DiagramKickerReadOnly } from '@/components/ai/renderers/DiagramKicker';
+import AntvAddPanel from '@/components/ai/renderers/AntvAddPanel';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
 import PictureStage, { type PictureStageMode } from '@/components/ai/renderers/PictureStage';
 import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
+import { appendAddition, createAddition, type AdditionKind } from '@/lib/ai/antv/additions';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import { PICTURE_FAMILY_LABELS, pictureFamily, type PictureFamily } from '@/lib/ai/pictureFamilies';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import type { VisualOutline } from '@/lib/ai/outline';
 import { outlineFromMindmapTree } from '@/lib/ai/outlineToVisuals';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
-import { type VisualThemeId } from '@/lib/ai/visualThemes';
+import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
+import type { VisualIconName } from '@/lib/ai/visualIcons';
 import ColoursFontsPanel from './ColoursFontsPanel';
 import OutlineTextEditor from './OutlineTextEditor';
+import { PreviewToolButton, SuggestionThumbButton, type SuggestionOption } from './SuggestionThumbButton';
 /**
  * PATCH-236/237. The Suggestions panel for Show options: one large preview of
  * the selected design, then "Suggested" (the top 4 by fit, the first badged
@@ -27,7 +31,7 @@ import OutlineTextEditor from './OutlineTextEditor';
  * a "Customize" section (one new AI call) and an "Edit text" form (local only).
  */
 
-export type SuggestionOption = DesignSuggestion;
+export type { SuggestionOption } from './SuggestionThumbButton';
 
 interface OutlineSuggestionsPanelProps {
   options: DesignSuggestion[];
@@ -71,10 +75,6 @@ interface OutlineSuggestionsPanelProps {
   onSidePanelChange?: (open: boolean) => void;
 }
 
-const TILE_WIDTH = 160;
-// PATCH-236 Addendum 4: render each tile's preview at a fixed natural width and
-// scale it DOWN to the tile -- never up, which showed only the giant header.
-const NATURAL_WIDTH = 560;
 // PATCH-241: at most this many tiles per category before "Show more".
 const MAX_PER_CATEGORY = 12;
 const ANTV_PREFIX = 'antv:';
@@ -124,156 +124,8 @@ function chartOrder(key: string, subtype: 'pie_chart' | 'bar_chart'): number {
   return 4;
 }
 
-function ThumbButton({
-  option,
-  isSelected,
-  best,
-  envelope,
-  onSelect,
-  onPointerEnter,
-  onPointerLeave,
-  note,
-  fullWidth = false,
-}: {
-  option: SuggestionOption;
-  isSelected: boolean;
-  best: boolean;
-  envelope: unknown;
-  onSelect: () => void;
-  /** PATCH-250. Mouse hover previews this design in the large stage. */
-  onPointerEnter?: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerLeave?: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  note?: string;
-  /** PATCH-252. `w-full` for the 2-column panel grid instead of a fixed 160px. */
-  fullWidth?: boolean;
-}) {
-  // PATCH-236 Addendum 4: a fixed 560px natural render, scaled by tile/560 (≤1).
-  // PATCH-252. A full-width tile measures its own column; a fixed tile keeps 160.
-  const [tileWidth, setTileWidth] = React.useState(TILE_WIDTH);
-  const innerW = Math.max(1, tileWidth - 4);
-  const scale = innerW / NATURAL_WIDTH;
-  const [aspect, setAspect] = React.useState(1);
-  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
-  const innerRef = React.useRef<HTMLDivElement | null>(null);
-
-  // PATCH-241. The heavy per-tile preview is built only when the tile is on
-  // screen. Without IntersectionObserver (tests/SSR) the tile renders at once.
-  const [visible, setVisible] = React.useState(() => typeof IntersectionObserver === 'undefined');
-  const wrapRef = React.useRef<HTMLDivElement | null>(null);
-  React.useEffect(() => {
-    if (visible) return;
-    const el = wrapRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisible(true);
-        observer.disconnect();
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible]);
-
-  React.useLayoutEffect(() => {
-    if (!visible) return;
-    if (fullWidth) {
-      const width = buttonRef.current?.offsetWidth;
-      if (width && width > 0) setTileWidth(width);
-    }
-    const el = innerRef.current;
-    if (!el) return;
-    const measuredW = el.offsetWidth || NATURAL_WIDTH;
-    const measuredH = el.offsetHeight || NATURAL_WIDTH;
-    if (measuredW > 0 && measuredH > 0) setAspect(measuredH / measuredW);
-  }, [envelope, visible, fullWidth]);
-
-  const tileHeight = Math.min(120, Math.round(NATURAL_WIDTH * aspect * scale));
-
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      data-ai-outline-option={option.key}
-      aria-pressed={isSelected}
-      onClick={onSelect}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
-      className={`${fullWidth ? 'w-full' : 'w-[160px] shrink-0'} overflow-hidden rounded-xl border-2 bg-white text-left transition-all ${
-        isSelected ? 'border-purple-500 ring-2 ring-purple-200' : 'border-gray-200 hover:border-gray-300'
-      }`}
-    >
-      <div ref={wrapRef} className="overflow-hidden bg-gray-50/50" style={{ height: tileHeight }}>
-        {visible && (
-          <div
-            ref={innerRef}
-            data-ai-thumb-scale={scale}
-            style={{ width: `${NATURAL_WIDTH}px`, transform: `scale(${scale})`, transformOrigin: 'top left' }}
-          >
-            <DiagramKickerReadOnly>
-              <AIContentRenderer content={envelope} />
-            </DiagramKickerReadOnly>
-          </div>
-        )}
-      </div>
-      <div className="flex items-center gap-1.5 border-t border-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
-        <span className="truncate">{option.label}</span>
-        {best && (
-          <span className="shrink-0 rounded bg-purple-100 px-1 py-0.5 text-[9px] font-semibold text-purple-700">
-            Best match
-          </span>
-        )}
-      </div>
-      {note && (
-        <div data-ai-theme-note="true" className="px-3 pb-1.5 text-[9px] text-gray-500">
-          {note}
-        </div>
-      )}
-    </button>
-  );
-}
-
-/**
- * PATCH-251. One preview toolbar icon: 28x28, with its name as a hint below on
- * hover/focus (CSS only) and as `title`. `aria-pressed` marks the open popover.
- */
-function PreviewToolButton({
-  label,
-  active,
-  onClick,
-  dataAi,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  dataAi: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      {...{ [dataAi]: 'true' }}
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      onClick={onClick}
-      className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-        active ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
-      }`}
-    >
-      {children}
-      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-        {label}
-      </span>
-    </button>
-  );
-}
-
 // PATCH-252. One docked side panel; exactly one of these is open at a time.
-type SidePanelId = 'designs' | 'edit' | 'similar' | 'colours' | 'customize';
+type SidePanelId = 'designs' | 'edit' | 'similar' | 'colours' | 'customize' | 'add';
 
 const SIDE_PANEL_TITLES: Record<SidePanelId, string> = {
   designs: 'Designs',
@@ -281,6 +133,7 @@ const SIDE_PANEL_TITLES: Record<SidePanelId, string> = {
   similar: 'Similar visuals',
   colours: 'Colours & Fonts',
   customize: 'Customize',
+  add: 'Add',
 };
 
 const SIDE_PANEL_ICONS: Record<SidePanelId, React.ReactNode> = {
@@ -289,6 +142,7 @@ const SIDE_PANEL_ICONS: Record<SidePanelId, React.ReactNode> = {
   similar: <Shapes size={16} aria-hidden="true" />,
   colours: <Palette size={16} aria-hidden="true" />,
   customize: <SlidersHorizontal size={16} aria-hidden="true" />,
+  add: <Plus size={16} aria-hidden="true" />,
 };
 
 export default function OutlineSuggestionsPanel({
@@ -439,6 +293,41 @@ export default function OutlineSuggestionsPanel({
     ? similarTemplates(selectedAntvName).filter((name) => options.some((option) => option.key === `${ANTV_PREFIX}${name}`))
     : [];
 
+  // PATCH-262. The Add panel inserts at the centre of the CURRENT view. Only an
+  // AntV design can be edited this way; the preview's own svg supplies the box.
+  const previewStageRef = React.useRef<HTMLDivElement | null>(null);
+  const canAdd = Boolean(selectedAntvName && outline && onEditOutline);
+  const addViewCentre = React.useCallback((): { x: number; y: number } => {
+    const svg = previewStageRef.current?.querySelector('[data-antv-container] svg');
+    const parts = (svg?.getAttribute('viewBox') ?? '').split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && parts.every((value) => Number.isFinite(value))) {
+      return { x: parts[0] + parts[2] / 2, y: parts[1] + parts[3] / 2 };
+    }
+    return { x: 240, y: 160 };
+  }, []);
+  const addFill = themeById(theme).palette[0]?.stroke;
+  const addTextColour = themeById(theme).text;
+
+  const insertAddition = React.useCallback(
+    (addition: ReturnType<typeof createAddition>) => {
+      if (!outline || !onEditOutline || !selectedAntvName) return;
+      onEditOutline(appendAddition(outline, selectedAntvName, addition));
+    },
+    [outline, onEditOutline, selectedAntvName],
+  );
+  const handleAddShape = React.useCallback(
+    (kind: AdditionKind) => insertAddition(createAddition(kind, addViewCentre(), { fill: addFill })),
+    [insertAddition, addViewCentre, addFill],
+  );
+  const handleAddText = React.useCallback(
+    () => insertAddition(createAddition('text', addViewCentre(), { text: addTextColour })),
+    [insertAddition, addViewCentre, addTextColour],
+  );
+  const handleAddIcon = React.useCallback(
+    (name: VisualIconName) => insertAddition(createAddition('icon', addViewCentre(), { icon: name, fill: addFill })),
+    [insertAddition, addViewCentre, addFill],
+  );
+
   const togglePanel = (id: SidePanelId) =>
     setPanel((current) => (current === id ? null : id));
   const closePanel = () => setPanel(null);
@@ -466,9 +355,10 @@ export default function OutlineSuggestionsPanel({
       if (current === 'edit' && !(outline && onEditOutline)) return null;
       if (current === 'similar' && similarPresent.length === 0) return null;
       if (current === 'colours' && !onThemeChange) return null;
+      if (current === 'add' && !canAdd) return null;
       return current;
     });
-  }, [outline, onEditOutline, onThemeChange, similarPresent.length]);
+  }, [outline, onEditOutline, onThemeChange, similarPresent.length, canAdd]);
 
   // PATCH-252. Escape closes the docked panel; an outside pointerdown does not.
   // PATCH-265. It yields to an Escape another layer has already handled
@@ -543,7 +433,7 @@ export default function OutlineSuggestionsPanel({
   const tilesFor = (list: SuggestionOption[], bestFirst: boolean) => (
     <div className="grid grid-cols-2 gap-2">
       {list.map((option, index) => (
-        <ThumbButton
+        <SuggestionThumbButton
           key={option.key}
           option={option}
           best={bestFirst && index === 0}
@@ -740,6 +630,10 @@ export default function OutlineSuggestionsPanel({
               </button>
             </div>
           )}
+
+          {panel === 'add' && canAdd && (
+            <AntvAddPanel onAddShape={handleAddShape} onAddText={handleAddText} onAddIcon={handleAddIcon} />
+          )}
         </div>
       )}
     </section>
@@ -750,6 +644,7 @@ export default function OutlineSuggestionsPanel({
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {!familyEmpty && (
           <div
+            ref={previewStageRef}
             data-ai-outline-preview="true"
             data-ai-preview-hover={hoverOption ? hoverOption.key : undefined}
             className={`relative min-h-0 flex-1 ${loading && options.length > 0 ? 'pointer-events-none opacity-50' : ''}`}
@@ -856,6 +751,16 @@ export default function OutlineSuggestionsPanel({
               >
                 <SlidersHorizontal size={16} aria-hidden="true" />
               </PreviewToolButton>
+              {canAdd && (
+                <PreviewToolButton
+                  label="Add"
+                  dataAi="data-ai-add-toggle"
+                  active={panel === 'add'}
+                  onClick={() => togglePanel('add')}
+                >
+                  <Plus size={16} aria-hidden="true" />
+                </PreviewToolButton>
+              )}
             </div>
           </div>
         )}

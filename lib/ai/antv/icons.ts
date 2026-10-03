@@ -153,7 +153,8 @@ const ICON_NODES: Record<VisualIconName, IconNode> = {
   sprout,
 };
 
-const DOT_SYMBOL = '<circle cx="12" cy="12" r="3" />';
+/** PATCH-262. The neutral dot as data, so additions can build it without a string. */
+const DOT_NODE: IconNode = [['circle', { cx: 12, cy: 12, r: 3 }]];
 
 function escapeXml(value: string | number): string {
   return String(value)
@@ -172,12 +173,20 @@ function renderChild([tag, attrs]: IconNodeChild): string {
 }
 
 /**
+ * PATCH-262. The raw `[tag, attrs]` geometry for one of our icon names, or the
+ * neutral dot. Additions build these into DOM nodes (never a nested `<svg>`).
+ */
+export function iconNodeChildren(name: string | undefined | null): IconNode {
+  const node = name ? (ICON_NODES as Record<string, IconNode>)[name] : undefined;
+  return node ?? DOT_NODE;
+}
+
+/**
  * An SVG `<symbol>` for one of our icon names, or a neutral dot for anything
  * else. Stroke-only like Lucide (round caps/joins, width 2).
  */
 export function iconSymbolSvg(name: string | undefined | null): string {
-  const node = name ? (ICON_NODES as Record<string, IconNode>)[name] : undefined;
-  const body = node ? node.map(renderChild).join('') : DOT_SYMBOL;
+  const body = iconNodeChildren(name).map(renderChild).join('');
   return (
     '<symbol viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     `stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`

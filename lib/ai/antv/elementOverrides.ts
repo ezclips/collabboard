@@ -11,6 +11,15 @@
 
 import type { VisualOutline } from '@/lib/ai/outline';
 
+import {
+  ADDITION_ID_PATTERN,
+  ADDITION_KEY_PREFIX,
+  ADDITION_TYPE,
+  applyAdditions,
+  isAdditionSubtree,
+  sanitizeAdditions,
+  type Addition,
+} from './additions';
 import { applyElementColours, restoreElementColours } from './elementColours';
 
 export interface ElementOverride {
@@ -34,6 +43,8 @@ export interface ElementOverride {
 export interface ElementOverrides {
   template: string;
   items: Record<string, ElementOverride>;
+  /** PATCH-262. Shapes/icons/text drawn on top; at most 50. */
+  additions?: Addition[];
 }
 
 export const ELEMENT_OVERRIDE_MAX_KEYS = 300;
@@ -121,7 +132,11 @@ export function sanitizeElementOverrides(raw: unknown): ElementOverrides | undef
     items[key] = override;
     kept += 1;
   }
-  return kept > 0 ? { template, items } : undefined;
+  // PATCH-262. Additions live beside the per-element overrides and are enough
+  // on their own to keep the map.
+  const additions = sanitizeAdditions((input as { additions?: unknown }).additions);
+  if (kept === 0 && !additions) return undefined;
+  return additions ? { template, items, additions } : { template, items };
 }
 
 /** PATCH-260. A NEW outline without `elementOverrides` (never mutates input). */
@@ -141,7 +156,10 @@ export function outlineWithOverrides(
   overrides: ElementOverrides | undefined,
 ): VisualOutline {
   const clean = withoutElementOverrides(outline);
-  if (!overrides || Object.keys(overrides.items).length === 0) return clean;
+  const empty =
+    !overrides ||
+    (Object.keys(overrides.items).length === 0 && (overrides.additions?.length ?? 0) === 0);
+  if (empty) return clean;
   return { ...clean, elementOverrides: overrides };
 }
 
@@ -249,6 +267,9 @@ function nextIndexesAfter(el: Element, root: Element): string | null {
  * a title, a pie slice or a line outside any item.
  */
 export function elementItemScope(el: Element, root: Element): string | null {
+  // PATCH-262. An addition belongs to no item, even though the picture's single
+  // item-index set is an ancestor of it.
+  if (el.getAttribute('data-element-type') === ADDITION_TYPE) return null;
   const own = ownIndexes(el);
   if (own) return own;
   const scan = scanItemScope(el, root);
@@ -284,6 +305,13 @@ export function elementKey(
 ): string | null {
   const type = el.getAttribute('data-element-type');
   if (!type || !isSelectableElement(el)) return null;
+
+  // PATCH-262. An addition is keyed by its own stable id, not by numeric
+  // indexes, so the same id round-trips through save/reload.
+  if (type === ADDITION_TYPE) {
+    const id = el.getAttribute('data-ai-addition');
+    return id && ADDITION_ID_PATTERN.test(id) ? `${ADDITION_KEY_PREFIX}${id}` : null;
+  }
 
   const own = ownIndexes(el);
   if (own) {
@@ -395,6 +423,9 @@ export function applyElementOverrides(
     // PATCH-261 fix. AntV's editor overlay is not part of the picture: never
     // stamp or touch it (nor anything inside it).
     if (isTransientElement(el)) continue;
+    // PATCH-262. Additions have their own renderer below; never treat them as
+    // AntV elements (that would clobber the shape we just drew).
+    if (isAdditionSubtree(el)) continue;
     const key = elementKey(el, root);
     if (key) el.setAttribute('data-ai-element-key', key);
 
@@ -429,6 +460,9 @@ export function applyElementOverrides(
     el.setAttribute('transform', base ? `${base} ${composed}` : composed);
     applyElementColours(el, override);
   }
+
+  // PATCH-262. Additions are a separate top layer, redrawn after every pass.
+  applyAdditions(root, overrides, template);
 }
 
 // ── Geometry shared with the editor (still DOM-only, no React) ───────────────

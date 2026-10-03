@@ -1,9 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Palette, Redo2, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { Palette, Redo2, RotateCcw, Shapes, Trash2, Undo2 } from 'lucide-react';
 
 import {
+  elementAtPoint,
+  elementItemScope,
+  elementKey,
+  isTransientElement,
+  itemMemberKeys,
   type ElementHandle,
   type ElementOverride,
   type ElementOverrides,
@@ -124,6 +129,9 @@ export function sameOverrides(a: ElementOverrides | undefined, b: ElementOverrid
   if (a === b) return true;
   if (!a || !b) return false;
   if (a.template !== b.template) return false;
+  // PATCH-262. Additions are part of the map, so a move/resize/recolour of one
+  // is a real change even when `items` is unchanged.
+  if (JSON.stringify(a.additions ?? []) !== JSON.stringify(b.additions ?? [])) return false;
   const keys = new Set([...Object.keys(a.items), ...Object.keys(b.items)]);
   for (const key of keys) {
     if (!sameOverride(a.items[key], b.items[key])) return false;
@@ -139,6 +147,51 @@ export function initialOverrides(outline: VisualOutline, template: string): Elem
 export function selectedKeys(selection: Selection | null): string[] {
   if (!selection) return [];
   return selection.kind === 'item' ? selection.keys : [selection.key];
+}
+
+/**
+ * PATCH-260, defect 4.1 / PATCH-262. What a pointerdown should drag, and (for
+ * an already-selected item) what a click WITHOUT movement should narrow to.
+ * Narrowing never happens on pointerdown, so a drag on a selected item moves
+ * the whole item. Pure with respect to the DOM read; extracted from the editor
+ * (which is at the 800-line ceiling).
+ */
+export function resolveAntvPointerDown(
+  root: Element,
+  current: Selection | null,
+  target: Element | null,
+  clientX: number,
+  clientY: number,
+): { selection: Selection | null; narrowTo: Selection | null } {
+  if (target?.closest?.('[data-element-type^="btn-"]')) {
+    return { selection: current, narrowTo: null };
+  }
+
+  // Defect 5.2. The pointer, not event.target: a big title box can cover an
+  // icon, so pick the smallest SVG box containing the point.
+  const hit = elementAtPoint(root, clientX, clientY);
+  const candidate = hit ?? target?.closest?.('[data-element-type]') ?? null;
+  // AntV's editor overlay is not part of the picture: never select it.
+  if (!candidate || isTransientElement(candidate)) return { selection: null, narrowTo: null };
+  const key = elementKey(candidate, root);
+  if (!key) return { selection: null, narrowTo: null };
+
+  const elementSelection: Selection = { kind: 'element', key, scope: elementItemScope(candidate, root) };
+  const scope = elementSelection.scope;
+  if (!scope) return { selection: elementSelection, narrowTo: null };
+
+  const itemActive =
+    current !== null &&
+    ((current.kind === 'item' && current.scope === scope) ||
+      (current.kind === 'element' && current.scope === scope));
+  if (!itemActive) {
+    return { selection: { kind: 'item', scope, keys: itemMemberKeys(scope, root) }, narrowTo: null };
+  }
+  if (current.kind === 'element') {
+    return { selection: elementSelection, narrowTo: null };
+  }
+  // The whole item is selected: drag it now, narrow only on a no-move click.
+  return { selection: current, narrowTo: elementSelection };
 }
 
 /**
@@ -192,12 +245,16 @@ export interface AntvElementChromeProps {
    * therefore drops BELOW the box; other selections keep it above.
    */
   barBelow?: boolean;
+  /** PATCH-262. The selection is an item icon: offer "Change icon". */
+  showIconButton?: boolean;
+  iconOpen?: boolean;
   onResize: (event: React.PointerEvent, handle: ElementHandle) => void;
   onUndo: () => void;
   onRedo: () => void;
   onReset: () => void;
   onDelete: () => void;
   onToggleColour: () => void;
+  onToggleIcon?: () => void;
   children?: React.ReactNode;
 }
 
@@ -211,12 +268,15 @@ export function AntvElementChrome({
   counterScale,
   colourOpen,
   barBelow = false,
+  showIconButton = false,
+  iconOpen = false,
   onResize,
   onUndo,
   onRedo,
   onReset,
   onDelete,
   onToggleColour,
+  onToggleIcon,
   children,
 }: AntvElementChromeProps) {
   const barRef = React.useRef<HTMLDivElement>(null);
@@ -316,6 +376,19 @@ export function AntvElementChrome({
         <button type="button" data-ai-element-reset="true" title="Reset element" onClick={onReset} className="rounded p-1 text-gray-600 hover:bg-gray-100">
           <RotateCcw size={14} />
         </button>
+        {showIconButton && (
+          <button
+            type="button"
+            data-ai-element-icon-toggle="true"
+            title="Change icon"
+            aria-label="Change icon"
+            aria-expanded={iconOpen}
+            onClick={onToggleIcon}
+            className={`rounded p-1 hover:bg-gray-100 ${iconOpen ? 'text-blue-600' : 'text-gray-600'}`}
+          >
+            <Shapes size={14} />
+          </button>
+        )}
         <button
           type="button"
           data-ai-element-colour-toggle="true"

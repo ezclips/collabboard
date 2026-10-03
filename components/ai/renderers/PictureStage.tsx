@@ -43,7 +43,7 @@ export const PictureZoomContext = React.createContext(1);
  * stretched to the popover width (the ~250px "Reset colour" icon).
  */
 export const ANTV_PICTURE_SVG_SELECTOR =
-  '[data-picture-stage][data-picture-mode="antv"] [data-picture-content] [data-antv-container] svg';
+  '[data-picture-stage][data-picture-mode="antv"] [data-picture-content] [data-antv-container] > svg';
 
 /**
  * PATCH-263 Addendum 3. The picture's own svg, never an overlay icon even when

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { VISUAL_ICON_NAMES } from '@/lib/ai/visualIcons';
-import { iconSymbolSvg } from './icons';
+import { iconNodeChildren, iconSymbolSvg } from './icons';
 
 const UNKNOWN = iconSymbolSvg('definitely-not-an-icon');
 
@@ -27,5 +27,10 @@ describe('PATCH-241 icon symbols', () => {
       expect(svg, `${name} must build`).toContain('<symbol');
       expect(svg, `${name} must not be the fallback`).not.toBe(UNKNOWN);
     }
+  });
+
+  it('PATCH-262 exposes the raw node list, with the neutral dot as fallback', () => {
+    expect(iconNodeChildren('sun').some(([tag]) => tag === 'circle')).toBe(true);
+    expect(iconNodeChildren(null)).toEqual([['circle', { cx: 12, cy: 12, r: 3 }]]);
   });
 });

@@ -110,4 +110,42 @@ describe('PATCH-260 AntvInfographicRenderer element overrides', () => {
     const after = (container.querySelector('[data-element-type="title"]') as Element).getAttribute('transform')!;
     expect(after).toContain('translate(30 20)');
   });
+
+  // PATCH-262 Addendum 1.6: an addition is an elementOverrides-only change, so
+  // the engine must not redraw (and the view must not jump).
+  const ADDITION = { id: 'abc123', kind: 'circle' as const, x: 10, y: 10, w: 60, h: 40 };
+
+  it('an additions-only change never calls update()', async () => {
+    const { root, container } = mount(<AntvInfographicRenderer data={data()} />);
+    await flush();
+    const instance = h.instances[0];
+    const update = vi.spyOn(instance, 'update');
+
+    act(() => {
+      root.render(
+        <AntvInfographicRenderer
+          data={data({ template: 'list-grid-badge-card', items: {}, additions: [ADDITION] })}
+        />,
+      );
+    });
+    await flush();
+
+    expect(update).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-ai-addition="abc123"]')).not.toBeNull();
+  });
+
+  // PATCH-262 Addendum 1.8: a read-only preview shows the additions but no
+  // editing controls.
+  it('a read-only preview draws additions with no editing controls', async () => {
+    const { container } = mount(
+      <AntvInfographicRenderer
+        data={data({ template: 'list-grid-badge-card', items: {}, additions: [ADDITION] })}
+      />,
+    );
+    await flush();
+    expect(container.querySelector('[data-ai-additions]')).not.toBeNull();
+    expect(container.querySelector('[data-ai-addition="abc123"]')).not.toBeNull();
+    expect(container.querySelector('[data-ai-element-bar]')).toBeNull();
+    expect(container.querySelector('[data-ai-element-overlay]')).toBeNull();
+  });
 });

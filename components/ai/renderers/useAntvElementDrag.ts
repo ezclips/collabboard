@@ -13,6 +13,7 @@ import {
   type ResizeMember,
   type ScreenBox,
 } from '@/lib/ai/antv/elementOverrides';
+import { findAdditionByKey, isAdditionKey, updateAddition } from '@/lib/ai/antv/additions';
 import {
   DRAG_THRESHOLD,
   MIN_SCREEN_SIZE,
@@ -111,7 +112,16 @@ export function useAntvElementDrag(options: UseAntvElementDragOptions): {
       const root = rootElement();
       const svg = (root?.querySelector('svg') ?? null) as SVGSVGElement | null;
       const startItems: Record<string, ElementOverride> = {};
-      for (const key of keys) startItems[key] = overridesRef.current?.items[key] ?? {};
+      for (const key of keys) {
+        // PATCH-262. An addition's position is its own x/y, carried here as
+        // dx/dy so the move maths is shared.
+        if (isAdditionKey(key)) {
+          const addition = findAdditionByKey(overridesRef.current, key);
+          startItems[key] = addition ? { dx: addition.x, dy: addition.y } : {};
+        } else {
+          startItems[key] = overridesRef.current?.items[key] ?? {};
+        }
+      }
       pendingNarrowRef.current = narrowTo;
       dragRef.current = {
         kind: 'move',
@@ -144,6 +154,17 @@ export function useAntvElementDrag(options: UseAntvElementDragOptions): {
       for (const key of keys) {
         const el = findElement(key);
         if (!el) continue;
+        // PATCH-262. An addition resizes from its own box/position.
+        if (isAdditionKey(key)) {
+          const addition = findAdditionByKey(overridesRef.current, key);
+          if (!addition) continue;
+          members.push({
+            key,
+            baseBox: { x: 0, y: 0, w: addition.w, h: addition.h },
+            override: { dx: addition.x, dy: addition.y },
+          });
+          continue;
+        }
         const override = overridesRef.current?.items[key] ?? {};
         if (override.hidden) continue;
         members.push({ key, baseBox: elementBaseBox(el), override });
@@ -185,7 +206,7 @@ export function useAntvElementDrag(options: UseAntvElementDragOptions): {
 
       const root = rootElement();
       if (!root) return;
-      const next = cloneOverrides();
+      let next = cloneOverrides();
 
       if (drag.kind === 'move') {
         // Defect 5.3. Recompute the screen->viewBox matrix FRESH here (and for
@@ -197,11 +218,10 @@ export function useAntvElementDrag(options: UseAntvElementDragOptions): {
         const viewDy = point.y - startPoint.y;
         for (const key of drag.keys) {
           const base = drag.startItems[key] ?? {};
-          next.items[key] = {
-            ...base,
-            dx: (base.dx ?? 0) + viewDx,
-            dy: (base.dy ?? 0) + viewDy,
-          };
+          const x = (base.dx ?? 0) + viewDx;
+          const y = (base.dy ?? 0) + viewDy;
+          if (isAdditionKey(key)) next = updateAddition(next, key, { x, y });
+          else next.items[key] = { ...base, dx: x, dy: y };
         }
         applyLive(next);
         setRect(
@@ -221,7 +241,22 @@ export function useAntvElementDrag(options: UseAntvElementDragOptions): {
         members: drag.members,
         minScreenSize: MIN_SCREEN_SIZE,
       });
-      for (const key of Object.keys(result)) next.items[key] = result[key];
+      // PATCH-262. An addition stores x/y/w/h directly; use the member captured
+      // at pointerdown as the base so repeated moves do not compound.
+      for (const key of Object.keys(result)) {
+        if (isAdditionKey(key)) {
+          const member = drag.members.find((candidate) => candidate.key === key);
+          if (!member) continue;
+          next = updateAddition(next, key, {
+            x: result[key].dx ?? member.override.dx ?? 0,
+            y: result[key].dy ?? member.override.dy ?? 0,
+            w: member.baseBox.w * (result[key].sx ?? 1),
+            h: member.baseBox.h * (result[key].sy ?? 1),
+          });
+        } else {
+          next.items[key] = result[key];
+        }
+      }
       applyLive(next);
 
       const { fx, fy } = resizeFactors(
