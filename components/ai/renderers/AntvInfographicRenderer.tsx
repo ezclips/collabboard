@@ -19,7 +19,7 @@ import { OUTLINE_LIMITS, type VisualOutline, type VisualSide } from '@/lib/ai/ou
 import { themeById } from '@/lib/ai/visualThemes';
 import { themeWithStyle } from '@/lib/ai/visualStyle';
 import AntvElementEditor from './AntvElementEditor';
-import PictureEditOverlay, { type EditHandle } from './PictureEditOverlay';
+import PictureEditOverlay, { type EditHandle, type NodeBox } from './PictureEditOverlay';
 
 /**
  * PATCH-241. Draws a stored outline with the bundled AntV Infographic engine.
@@ -186,6 +186,16 @@ export function buildAntvMindmapHandles(
   const items = outline.items;
   const handles: EditHandle[] = [];
 
+  // PATCH-263 Addendum 1. Every handle names its node and carries the node box,
+  // so PictureEditOverlay can show only the hovered/selected node's controls.
+  const nodeKey = (node: AntvNodeBox) => node.indexes.join(',');
+  const nodeBox = (node: AntvNodeBox): NodeBox => ({
+    left: pctX(node.x),
+    top: pctY(node.y),
+    width: (node.w / viewBox.width) * 100,
+    height: (node.h / viewBox.height) * 100,
+  });
+
   if (items.length < OUTLINE_LIMITS.items) {
     const y = root.y + root.h / 2;
     handles.push({
@@ -194,6 +204,8 @@ export function buildAntvMindmapHandles(
       left: pctX(root.x - offset),
       top: pctY(y),
       target: 'root:left',
+      nodeKey: nodeKey(root),
+      nodeBox: nodeBox(root),
       onActivate: () => onChange(insertItem(outline, items.length, { side: 'left', rule: 'antv-mindmap' })),
     });
     handles.push({
@@ -202,6 +214,8 @@ export function buildAntvMindmapHandles(
       left: pctX(root.x + root.w + offset),
       top: pctY(y),
       target: 'root:right',
+      nodeKey: nodeKey(root),
+      nodeBox: nodeBox(root),
       onActivate: () => onChange(insertItem(outline, items.length, { side: 'right', rule: 'antv-mindmap' })),
     });
   }
@@ -223,6 +237,8 @@ export function buildAntvMindmapHandles(
           left: pctX(outerX),
           top: pctY(y),
           target: `add:${i}`,
+          nodeKey: nodeKey(node),
+          nodeBox: nodeBox(node),
           onActivate: () => {
             const next = applyAntvButton(outline, [0, i, item.children?.length ?? 0], 'add', templateName);
             if (next !== outline) onChange(next);
@@ -236,6 +252,8 @@ export function buildAntvMindmapHandles(
           left: pctX(innerX),
           top: pctY(y),
           target: `rm:${i}`,
+          nodeKey: nodeKey(node),
+          nodeBox: nodeBox(node),
           onActivate: () => onChange(applyAntvButton(outline, [0, i], 'remove', templateName)),
         });
       }
@@ -248,6 +266,8 @@ export function buildAntvMindmapHandles(
         left: pctX(innerX),
         top: pctY(y),
         target: `rm:${i},${j}`,
+        nodeKey: nodeKey(node),
+        nodeBox: nodeBox(node),
         onActivate: () => onChange(applyAntvButton(outline, [0, i, j], 'remove', templateName)),
       });
     }
@@ -271,6 +291,9 @@ function AntvInfographicRenderer({
   const instanceRef = useRef<AntvInstance | null>(null);
   const [phase, setPhase] = useState<RenderPhase>('loading');
   const [handles, setHandles] = useState<EditHandle[]>([]);
+  // PATCH-263 Addendum 1. The scope the element editor has selected, so the
+  // +/− overlay can keep that node's controls visible.
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
 
   // Keep the current outline/callback in refs so the create effect can stay
   // keyed on the template/theme and StrictMode's double-run is harmless.
@@ -303,6 +326,13 @@ function AntvInfographicRenderer({
   const emitOutline = React.useCallback(
     (next: VisualOutline, source: 'element-editor' | 'antv-change' | 'antv-button' | 'mindmap-handle') => {
       outlineRef.current = next;
+      // PATCH-263 Addendum 2. An AntV-originated edit (an inline text edit) has
+      // ALREADY been drawn by AntV itself. Record it as drawn so the echo of the
+      // outline prop takes the no-update path instead of calling update() and
+      // re-fitting the view (which reset the user's zoom 54% -> 37%).
+      if (source === 'antv-change') {
+        lastUpdatedOutlineRef.current = JSON.stringify(withoutElementOverrides(next));
+      }
       const container = containerRef.current;
       if (container) {
         container.setAttribute('data-ai-last-emit', source);
@@ -545,7 +575,9 @@ function AntvInfographicRenderer({
             data-ai-outline-overrides={String(Object.keys(data.outline.elementOverrides?.items ?? {}).length)}
             className="w-full"
           />
-          {edit && isMindmap && handles.length > 0 && <PictureEditOverlay handles={handles} />}
+          {edit && isMindmap && handles.length > 0 && (
+            <PictureEditOverlay handles={handles} selectedNodeKey={selectedNodeKey} />
+          )}
           {edit && (
             <AntvElementEditor
               containerRef={containerRef}
@@ -553,6 +585,7 @@ function AntvInfographicRenderer({
               outline={data.outline}
               palette={theme.palette.map((entry) => entry.stroke)}
               onChange={(next) => emitOutline(next, 'element-editor')}
+              onSelectionChange={setSelectedNodeKey}
             />
           )}
         </div>

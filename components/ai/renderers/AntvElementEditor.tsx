@@ -34,7 +34,7 @@ import {
 } from './AntvElementChrome';
 import AntvElementColourMenu, { type ColourRow } from './AntvElementColourMenu';
 import { useAntvElementDrag } from './useAntvElementDrag';
-import { PictureZoomContext } from './PictureStage';
+import { useLayerCounterScale } from './PictureEditOverlay';
 
 /**
  * PATCH-260. The HTML editing layer over an AntV picture. Defects fixed live:
@@ -59,6 +59,11 @@ export interface AntvElementEditorProps {
   onChange: (next: VisualOutline) => void;
   /** PATCH-261. The picture's six palette swatches (`theme.palette` strokes). */
   palette?: readonly string[];
+  /**
+   * PATCH-263 Addendum 1. The scope of the currently selected item/element, so
+   * the mind-map +/− overlay can show that node's controls.
+   */
+  onSelectionChange?: (scope: string | null) => void;
 }
 
 const DEFAULT_PALETTE: readonly string[] = VISUAL_PALETTE.map((entry) => entry.stroke);
@@ -78,9 +83,12 @@ export default function AntvElementEditor({
   outline,
   onChange,
   palette = DEFAULT_PALETTE,
+  onSelectionChange,
 }: AntvElementEditorProps) {
-  const zoom = React.useContext(PictureZoomContext) || 1;
-  const counterScale = 1 / zoom;
+  // PATCH-263 Addendum 2. The chrome counter-scales from the layer's REAL
+  // on-screen scale; `1 / PictureZoomContext` drew it 1.85-2.7x too big on the
+  // AntV path, where the stage zooms the viewBox instead of CSS-scaling the layer.
+  const counterScale = useLayerCounterScale(containerRef);
 
   const [overrides, setOverrides] = React.useState<ElementOverrides | undefined>(() =>
     initialOverrides(outline, template),
@@ -425,6 +433,12 @@ export default function AntvElementEditor({
 
   const selectionLabel = selection ? (selection.kind === 'item' ? `item@${selection.scope}` : selection.key) : '';
 
+  // PATCH-263 Addendum 1. Publish the selected scope so the mind-map +/− overlay
+  // can reveal the controls of the selected node.
+  React.useEffect(() => {
+    onSelectionChange?.(selection ? selection.scope : null);
+  }, [selection, onSelectionChange]);
+
   // Container listeners: pick a selection, start an item/element move, or open
   // the colour menu on a double-click of a shape/icon.
   React.useEffect(() => {
@@ -570,11 +584,20 @@ export default function AntvElementEditor({
     );
   }
 
+  // PATCH-263. The handles need the container's on-screen size to convert the
+  // outward offset (half handle + 2px) into the percent geometry the overlay
+  // uses. `rect` is already relative to this same host.
+  const hostRect = rootElement()?.getBoundingClientRect();
+  const screenWidth = hostRect?.width ?? 0;
+  const screenHeight = hostRect?.height ?? 0;
+
   return (
     <AntvElementChrome
       selectionLabel={selectionLabel}
       members={selection.kind === 'item' ? selection.keys.join(',') : undefined}
       rect={rect}
+      screenWidth={screenWidth}
+      screenHeight={screenHeight}
       counterScale={counterScale}
       colourOpen={colourOpen}
       barBelow={barBelow}

@@ -4,7 +4,7 @@ import React from 'react';
 import { RotateCcw } from 'lucide-react';
 
 import { normalizeHex, type ElementOverride } from '@/lib/ai/antv/elementOverrides';
-import type { ChromeRect } from './AntvElementChrome';
+import { useClampedLeft, type ChromeRect } from './AntvElementChrome';
 
 /**
  * PATCH-261. The small popover under the selection bar: one row per applicable
@@ -56,6 +56,9 @@ export default function AntvElementColourMenu({
 }: AntvElementColourMenuProps) {
   const [drafts, setDrafts] = React.useState<Partial<Record<ColourRow, string>>>({});
   const [invalid, setInvalid] = React.useState<Partial<Record<ColourRow, boolean>>>({});
+  // PATCH-263 Addendum 3. Keep the popover inside the preview at the right edge.
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const menuLeft = useClampedLeft(menuRef, rect.left, counterScale);
 
   const pick = (row: ColourRow, hex: string) => {
     setDrafts((drafts) => ({ ...drafts, [row]: undefined }));
@@ -72,13 +75,14 @@ export default function AntvElementColourMenu({
 
   return (
     <div
+      ref={menuRef}
       data-ai-element-colour="true"
       data-picture-control="true"
       onPointerDown={(event) => event.stopPropagation()}
       className="absolute z-20 flex flex-col gap-1.5 rounded-lg border border-gray-200 bg-white p-2 shadow-xl"
       style={{
         pointerEvents: 'auto',
-        left: `${rect.left}%`,
+        left: `${menuLeft}%`,
         top: below
           ? `calc(${rect.top + rect.height}% + 36px)`
           : `calc(${Math.max(rect.top, 0)}% + 6px)`,

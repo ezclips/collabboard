@@ -299,4 +299,43 @@ describe('PATCH-241 AntvInfographicRenderer engine wiring', () => {
     const last = instance.updates.at(-1) as { data: { items: unknown[] } };
     expect(last.data.items).toHaveLength(3);
   });
+
+  // PATCH-263 Addendum 2, defect 2. AntV draws its own text edit; when that
+  // edited outline is echoed back as a prop it must NOT trigger update() (which
+  // would re-fit the view and reset the user's zoom). An outside edit still must.
+  it('does not update the engine for the echo of an AntV text edit, but still updates for an outside edit', async () => {
+    const onChange = vi.fn();
+    const { root } = mount(<AntvInfographicRenderer data={data()} edit={{ onChange }} />);
+    await flush();
+    const instance = h.instances[0];
+    const baseline = instance.updates.length;
+
+    act(() => {
+      instance.emit('options:change', {
+        type: 'options:change',
+        changes: [{ op: 'update', path: 'data.items', indexes: [1], value: { label: 'High summer\n' } }],
+      });
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const edited = onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(edited.items[1].label).toBe('High summer');
+
+    // The parent passes AntV's own edit back: AntV already drew it, no update.
+    act(() => {
+      root.render(<AntvInfographicRenderer data={data(edited)} edit={{ onChange }} />);
+    });
+    await flush();
+    act(() => {
+      root.render(<AntvInfographicRenderer data={data(edited)} edit={{ onChange }} />);
+    });
+    await flush();
+    expect(instance.updates.length).toBe(baseline);
+
+    // A side-panel (outside AntV) edit still reaches the engine.
+    act(() => {
+      root.render(<AntvInfographicRenderer data={data({ ...edited, title: 'New title' })} edit={{ onChange }} />);
+    });
+    await flush();
+    expect(instance.updates.length).toBeGreaterThan(baseline);
+  });
 });

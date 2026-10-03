@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { InfographicDiagramData } from '@/lib/ai/contracts';
 import type { VisualOutline } from '@/lib/ai/outline';
 import InfographicRenderer from './InfographicRenderer';
-import PictureStage from './PictureStage';
+import PictureStage, { ANTV_PICTURE_SVG_SELECTOR, findPictureSvg } from './PictureStage';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -490,6 +490,35 @@ describe('PATCH-245 PictureStage', () => {
       const after = screenPoint(probe, viewBoxOf(container), r);
       expect(after.x - before.x).toBeCloseTo(90, 0);
       expect(after.y - before.y).toBeCloseTo(30, 0);
+    });
+
+    it('fills only the picture svg, never an overlay icon, and findSvg skips overlays', () => {
+      const { container } = mount(
+        <PictureStage mode="antv">
+          <div data-ai-edit-overlay="true">
+            <div data-picture-control="true">
+              <svg data-testid="overlay-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M0 0h24v24H0z" />
+              </svg>
+            </div>
+          </div>
+          <div data-antv-container="mindmap">
+            <svg data-testid="picture" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+              <rect width="10" height="10" />
+            </svg>
+          </div>
+        </PictureStage>,
+      );
+      const overlayIcon = container.querySelector('[data-testid="overlay-icon"]') as SVGElement;
+      const picture = container.querySelector('[data-testid="picture"]') as SVGElement;
+      const stage = container.querySelector('[data-picture-stage]') as HTMLElement;
+
+      // The fill stylesheet scoped to the picture's own svg never matches the icon.
+      expect(overlayIcon.matches(ANTV_PICTURE_SVG_SELECTOR)).toBe(false);
+      expect(picture.matches(ANTV_PICTURE_SVG_SELECTOR)).toBe(true);
+
+      // findSvg (findPictureSvg) returns the picture even though the overlay precedes it.
+      expect(findPictureSvg(stage)).toBe(picture);
     });
 
     it('never renders the PATCH-243 renderer <style> as a visible layout child', () => {

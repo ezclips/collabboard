@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyElementOverrides } from '@/lib/ai/antv/elementOverrides';
 import type { VisualOutline } from '@/lib/ai/outline';
 import AntvElementEditor from './AntvElementEditor';
+import { PictureZoomContext } from './PictureStage';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -80,6 +81,29 @@ function mountEditor(onChange: (next: VisualOutline) => void, outline: VisualOut
   root = createRoot(reactHost);
   editorRef = { current: container };
   renderEditor(onChange, outline);
+}
+
+function mountEditorInZoom(
+  zoom: number,
+  onChange: (next: VisualOutline) => void,
+  outline: VisualOutline = BASE_OUTLINE,
+) {
+  reactHost = document.createElement('div');
+  document.body.appendChild(reactHost);
+  root = createRoot(reactHost);
+  editorRef = { current: container };
+  act(() => {
+    root!.render(
+      <PictureZoomContext.Provider value={zoom}>
+        <AntvElementEditor
+          containerRef={editorRef!}
+          template="list-grid-badge-card"
+          outline={outline}
+          onChange={onChange}
+        />
+      </PictureZoomContext.Provider>,
+    );
+  });
 }
 
 function rerenderEditor(outline: VisualOutline, onChange: (next: VisualOutline) => void) {
@@ -1082,5 +1106,172 @@ describe('PATCH-261 text selection bar placement', () => {
     const match = /([\d.]+)%/.exec(popover.style.top);
     // jsdom rounds a calc() percentage to ~4 decimals, so allow a small epsilon.
     expect(match ? Number(match[1]) : Number.NaN).toBeGreaterThanOrEqual(boxBottomPercent() - 0.01);
+  });
+});
+
+// ── PATCH-263: the resize handles sit outside a small selection ──────────────
+
+const SCREEN_W = 400;
+const SCREEN_H = 300;
+/** Tailwind h-2.5 = 10px; counterScale is 1 without a PictureStage. */
+const HANDLE_HALF = 5;
+
+interface ScreenRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+function handleNames(): string[] {
+  return Array.from(reactHost!.querySelectorAll('[data-ai-element-handle]')).map(
+    (el) => el.getAttribute('data-ai-element-handle') as string,
+  );
+}
+
+/** Each rendered handle's on-screen rect, read from its inline percent position. */
+function handleRects(): Array<{ name: string } & ScreenRect> {
+  return Array.from(reactHost!.querySelectorAll('[data-ai-element-handle]')).map((el) => {
+    const name = el.getAttribute('data-ai-element-handle') as string;
+    const cx = (parseFloat((el as HTMLElement).style.left) / 100) * SCREEN_W;
+    const cy = (parseFloat((el as HTMLElement).style.top) / 100) * SCREEN_H;
+    return { name, left: cx - HANDLE_HALF, top: cy - HANDLE_HALF, right: cx + HANDLE_HALF, bottom: cy + HANDLE_HALF };
+  });
+}
+
+function selectionScreenBox(): ScreenRect {
+  const box = reactHost!.querySelector('[data-ai-element-box]') as HTMLElement;
+  const left = (parseFloat(box.style.left) / 100) * SCREEN_W;
+  const top = (parseFloat(box.style.top) / 100) * SCREEN_H;
+  const width = (parseFloat(box.style.width) / 100) * SCREEN_W;
+  const height = (parseFloat(box.style.height) / 100) * SCREEN_H;
+  return { left, top, right: left + width, bottom: top + height };
+}
+
+/** Strict interior overlap: touching edges is not an intersection. */
+function intersectsInterior(a: ScreenRect, b: ScreenRect): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function selectTitleAt(x: number, y: number) {
+  pointer(titleEl(), 'pointerdown', x, y, 1);
+  pointer(window, 'pointerup', x, y, 1);
+}
+
+describe('PATCH-263 handles clear the selection box', () => {
+  it('a 100x14 selection hides n/s and no handle overlaps the interior', () => {
+    (titleEl() as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 0, width: 100, height: 14 });
+    mountEditor(vi.fn());
+    selectTitleAt(40, 7);
+    expect(selectedAttr()).toBe('title#0');
+
+    const names = handleNames();
+    expect(names).not.toContain('n');
+    expect(names).not.toContain('s');
+    expect(new Set(names)).toEqual(new Set(['nw', 'ne', 'e', 'se', 'sw', 'w']));
+
+    const box = selectionScreenBox();
+    expect(box.right - box.left).toBeCloseTo(100, 6);
+    expect(box.bottom - box.top).toBeCloseTo(14, 6);
+    for (const handle of handleRects()) {
+      expect(intersectsInterior(handle, box), `${handle.name} overlaps the box`).toBe(false);
+    }
+  });
+
+  it('a 100x100 selection keeps all 8 handles and none overlaps the interior', () => {
+    (titleEl() as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 0, width: 100, height: 100 });
+    mountEditor(vi.fn());
+    selectTitleAt(40, 30);
+    expect(selectedAttr()).toBe('title#0');
+
+    expect(new Set(handleNames())).toEqual(new Set(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']));
+    const box = selectionScreenBox();
+    for (const handle of handleRects()) {
+      expect(intersectsInterior(handle, box), `${handle.name} overlaps the box`).toBe(false);
+    }
+  });
+
+  it('a click at the centre of a small selected label reaches the svg and narrows to the label', () => {
+    // Item 0's label shrinks to 100x14 centred exactly on ITEM_X/ITEM_Y.
+    (labelEl(0) as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 150, y: 143, width: 100, height: 14 });
+    mountEditor(vi.fn());
+    const svgClicks = vi.fn();
+    svgOf().addEventListener('click', svgClicks);
+
+    selectItem();
+    expect(selectedAttr()).toBe('item@0');
+    svgClicks.mockClear();
+
+    pointer(labelDiv(0), 'pointerdown', ITEM_X, ITEM_Y, 1);
+    pointer(window, 'pointerup', ITEM_X, ITEM_Y, 1);
+    click(labelDiv(0));
+
+    expect(selectedAttr()).toBe('item-label@0');
+    expect(svgClicks).toHaveBeenCalledTimes(1);
+  });
+
+  it('a dblclick at the centre of a selected small text element reaches the svg untouched', () => {
+    (labelEl(0) as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 150, y: 143, width: 100, height: 14 });
+    mountEditor(vi.fn());
+    selectLabel();
+    expect(selectedAttr()).toBe('item-label@0');
+
+    const dbl = vi.fn();
+    svgOf().addEventListener('dblclick', dbl);
+    const event = new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: ITEM_X, clientY: ITEM_Y });
+    act(() => { labelDiv(0).dispatchEvent(event); });
+
+    expect(dbl).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+// ── PATCH-263 Addendum 2: the chrome uses the layer's real counter-scale ─────
+
+describe('PATCH-263 Addendum 2 editor chrome scale', () => {
+  function transformScale(el: HTMLElement): number {
+    const match = /scale\(([\d.]+)\)/.exec(el.style.transform);
+    return match ? Number(match[1]) : Number.NaN;
+  }
+
+  it('sizes the handles and bar from the layer real scale, not the context zoom', () => {
+    mountEditorInZoom(0.5, vi.fn());
+    selectTitle();
+    expect(selectedAttr()).toBe('title#0');
+
+    const handle = reactHost!.querySelector('[data-ai-element-handle="se"]') as HTMLElement;
+    const bar = reactHost!.querySelector('[data-ai-element-bar]') as HTMLElement;
+    // The layer is not css-scaled (rect === offsetWidth), so the real scale is
+    // 1: the 0.5 context zoom must be ignored.
+    Object.defineProperty(container!, 'offsetWidth', { value: 400, configurable: true });
+    act(() => { window.dispatchEvent(new Event('resize')); });
+
+    expect(10 * transformScale(handle)).toBeCloseTo(10, 6);
+    expect(transformScale(bar)).toBeCloseTo(1, 6);
+  });
+});
+
+// ── PATCH-263 Addendum 3: the popover stays inside the preview ───────────────
+
+describe('PATCH-263 Addendum 3 popover clamp', () => {
+  it('clamps the colour popover left so its right edge stays inside the preview', () => {
+    (titleEl() as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 360, y: 0, width: 40, height: 40 });
+    mountEditor(vi.fn());
+    selectTitleAt(380, 20);
+    expect(selectedAttr()).toBe('title#0');
+    openColour();
+
+    const popover = colourPopover() as HTMLElement;
+    expect(popover).not.toBeNull();
+    const overlay = reactHost!.querySelector('[data-ai-element-overlay]') as HTMLElement;
+    (overlay as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () =>
+      rect(0, 0, 400, 300);
+    Object.defineProperty(popover, 'offsetWidth', { value: 300, configurable: true });
+    act(() => { window.dispatchEvent(new Event('resize')); });
+
+    const left = parseFloat(popover.style.left);
+    const renderedWidthPercent = (300 / 400) * 100;
+    expect(left + renderedWidthPercent).toBeLessThanOrEqual(100.0001);
+    expect(left).toBeCloseTo(25, 3);
   });
 });

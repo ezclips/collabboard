@@ -36,6 +36,29 @@ export type PictureStageMode = 'css' | 'antv';
  */
 export const PictureZoomContext = React.createContext(1);
 
+/**
+ * PATCH-263 Addendum 3. The SVG-fill rule must match only the picture's own AntV
+ * svg, never a lucide icon inside our overlay chrome (`[data-picture-control]`,
+ * `[data-ai-edit-overlay]`), which the old bare `[data-picture-content] svg`
+ * stretched to the popover width (the ~250px "Reset colour" icon).
+ */
+export const ANTV_PICTURE_SVG_SELECTOR =
+  '[data-picture-stage][data-picture-mode="antv"] [data-picture-content] [data-antv-container] svg';
+
+/**
+ * PATCH-263 Addendum 3. The picture's own svg, never an overlay icon even when
+ * the overlay (with its own svgs) precedes the picture in the DOM.
+ */
+export function findPictureSvg(stage: HTMLElement | null): SVGSVGElement | null {
+  if (!stage) return null;
+  const scoped = stage.querySelector('[data-antv-container] svg');
+  if (scoped) return scoped as SVGSVGElement;
+  const fallback = Array.from(stage.querySelectorAll('svg')).find(
+    (svg) => !svg.closest('[data-picture-control], [data-ai-edit-overlay]'),
+  );
+  return (fallback as SVGSVGElement | undefined) ?? null;
+}
+
 export interface PictureStageProps {
   mode?: PictureStageMode;
   /** Changing this resets to Fit (design/theme identity). */
@@ -111,7 +134,7 @@ function PictureStage({
   const onViewBoxChangeRef = useRef(onViewBoxChange);
   onViewBoxChangeRef.current = onViewBoxChange;
 
-  const findSvg = (): SVGSVGElement | null => stageRef.current?.querySelector('svg') ?? null;
+  const findSvg = (): SVGSVGElement | null => findPictureSvg(stageRef.current);
 
   /**
    * PATCH-245 Addendum 2. AntV renders the svg at `height: auto` (a thin strip in
@@ -547,7 +570,7 @@ function PictureStage({
 [data-picture-stage][data-picture-mode="antv"] [data-picture-content] > *:not(style) > div { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 [data-picture-stage][data-picture-mode="antv"] [data-picture-content] > *:not(style) > div > *:last-child { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 [data-picture-stage][data-picture-mode="antv"] [data-picture-content] [data-antv-container] { flex: 1 1 auto; min-height: 0; height: 100%; }
-[data-picture-stage][data-picture-mode="antv"] [data-picture-content] svg { width: 100% !important; height: 100% !important; max-height: none !important; display: block; }
+${ANTV_PICTURE_SVG_SELECTOR} { width: 100% !important; height: 100% !important; max-height: none !important; display: block; }
 [data-picture-stage][data-picture-mode="antv"] [data-picture-content] style { display: none !important; }
 `}</style>
       )}

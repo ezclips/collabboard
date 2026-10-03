@@ -64,6 +64,16 @@ export const HISTORY_MAX = 50;
 export const ZERO_BOX: ScreenBox = { left: 0, top: 0, width: 0, height: 0 };
 
 /**
+ * PATCH-263. The on-screen handle box (matches the h-2.5/w-2.5 Tailwind class)
+ * and the outward gap between a handle's centre and the selection edge. The
+ * n/s handles are dropped on a short box and the e/w handles on a narrow one,
+ * so a mind map node (12-20 px tall) is never covered by its own handles.
+ */
+export const HANDLE_SIZE = 10;
+export const HANDLE_GAP = 2;
+export const HANDLE_EDGE_MIN = 28;
+
+/**
  * PATCH-260, defect 6.1. Text elements whose own AntV interactions (the inline
  * text editor on double-click, the text toolbar on a single click) must not be
  * swallowed by our layer unless a real drag started.
@@ -131,10 +141,49 @@ export function selectedKeys(selection: Selection | null): string[] {
   return selection.kind === 'item' ? selection.keys : [selection.key];
 }
 
+/**
+ * PATCH-263 Addendum 3. A left-percent clamped so the control stays fully inside
+ * its container. The bar and the colour popover are anchored at the selection's
+ * left edge and grew rightward, so a node near the right edge had its right side
+ * cut off by the preview's overflow. Measured after mount and on resize against
+ * the parent's on-screen width; returns the desired position when unmeasurable.
+ */
+export function useClampedLeft(
+  ref: React.RefObject<HTMLElement | null>,
+  desiredLeft: number,
+  counterScale: number,
+): number {
+  const [left, setLeft] = React.useState(desiredLeft);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const parent = el.parentElement;
+      const parentWidth = parent?.getBoundingClientRect().width ?? 0;
+      const ownWidth = el.offsetWidth || 0;
+      if (parentWidth <= 0 || ownWidth <= 0) {
+        setLeft(desiredLeft);
+        return;
+      }
+      const renderedWidth = ownWidth * (counterScale || 1);
+      const maxLeft = Math.max(0, 100 - (renderedWidth / parentWidth) * 100);
+      const next = Math.min(Math.max(desiredLeft, 0), maxLeft);
+      setLeft((previous) => (Math.abs(previous - next) > 0.001 ? next : previous));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [ref, desiredLeft, counterScale]);
+  return left;
+}
+
 export interface AntvElementChromeProps {
   selectionLabel: string;
   members?: string;
   rect: ChromeRect;
+  /** PATCH-263. The container's on-screen size, so handle offsets are true px. */
+  screenWidth: number;
+  screenHeight: number;
   counterScale: number;
   colourOpen: boolean;
   /**
@@ -157,6 +206,8 @@ export function AntvElementChrome({
   selectionLabel,
   members,
   rect,
+  screenWidth,
+  screenHeight,
   counterScale,
   colourOpen,
   barBelow = false,
@@ -168,9 +219,41 @@ export function AntvElementChrome({
   onToggleColour,
   children,
 }: AntvElementChromeProps) {
+  const barRef = React.useRef<HTMLDivElement>(null);
+  const barLeft = useClampedLeft(barRef, rect.left, counterScale);
   const barTop = barBelow
     ? `calc(${rect.top + rect.height}% + 6px)`
     : `calc(${Math.max(rect.top, 0)}% - 30px)`;
+
+  // PATCH-263. Compute the selection box in screen pixels (from the overlay's
+  // own units), then place each handle centre OUTSIDE the box by half the
+  // handle size plus the gap. Corners move diagonally, edge handles
+  // perpendicular to their edge; the visible edges drop out on a small box.
+  const screenKnown = screenWidth > 0 && screenHeight > 0;
+  const boxLeft = (rect.left / 100) * screenWidth;
+  const boxTop = (rect.top / 100) * screenHeight;
+  const boxWidth = (rect.width / 100) * screenWidth;
+  const boxHeight = (rect.height / 100) * screenHeight;
+  const handleOffset = HANDLE_SIZE / 2 + HANDLE_GAP;
+  const showVerticalEdges = !screenKnown || boxHeight >= HANDLE_EDGE_MIN;
+  const showHorizontalEdges = !screenKnown || boxWidth >= HANDLE_EDGE_MIN;
+
+  const handles = HANDLES.filter((handle) => {
+    if (handle.name === 'n' || handle.name === 's') return showVerticalEdges;
+    if (handle.name === 'e' || handle.name === 'w') return showHorizontalEdges;
+    return true;
+  }).map((handle) => {
+    const outwardX = Math.sign(handle.fx - 0.5) * handleOffset;
+    const outwardY = Math.sign(handle.fy - 0.5) * handleOffset;
+    const centreX = boxLeft + handle.fx * boxWidth + outwardX;
+    const centreY = boxTop + handle.fy * boxHeight + outwardY;
+    return {
+      ...handle,
+      left: screenKnown ? (centreX / screenWidth) * 100 : rect.left + handle.fx * rect.width,
+      top: screenKnown ? (centreY / screenHeight) * 100 : rect.top + handle.fy * rect.height,
+    };
+  });
+
   return (
     <div
       data-ai-element-overlay="true"
@@ -191,7 +274,7 @@ export function AntvElementChrome({
         }}
       />
 
-      {HANDLES.map((handle) => (
+      {handles.map((handle) => (
         <button
           key={handle.name}
           type="button"
@@ -201,8 +284,8 @@ export function AntvElementChrome({
           className="absolute h-2.5 w-2.5 rounded-full border border-white bg-blue-500 shadow"
           style={{
             pointerEvents: 'auto',
-            left: `${rect.left + handle.fx * rect.width}%`,
-            top: `${rect.top + handle.fy * rect.height}%`,
+            left: `${handle.left}%`,
+            top: `${handle.top}%`,
             transform: `translate(-50%, -50%) scale(${counterScale})`,
             cursor: CURSORS[handle.name],
           }}
@@ -210,6 +293,7 @@ export function AntvElementChrome({
       ))}
 
       <div
+        ref={barRef}
         data-ai-element-bar="true"
         data-ai-element-bar-placement={barBelow ? 'below' : 'above'}
         data-picture-control="true"
@@ -217,7 +301,7 @@ export function AntvElementChrome({
         className="absolute z-10 flex items-center gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5 shadow-lg"
         style={{
           pointerEvents: 'auto',
-          left: `${rect.left}%`,
+          left: `${barLeft}%`,
           top: barTop,
           transform: `scale(${counterScale})`,
           transformOrigin: barBelow ? 'left top' : 'left bottom',
