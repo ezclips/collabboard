@@ -8,7 +8,7 @@ import type {
   StoredAIContent,
 } from '@/lib/ai/contracts';
 import { trackAIUnsupportedVersion } from '@/lib/ai/telemetry';
-import { safeValidateAIContent } from '@/lib/ai/validators';
+import { DIAGRAM_SUBTYPE_SCHEMAS, safeValidateStoredAIContent } from '@/lib/ai/validators';
 
 export const CURRENT_AI_CONTENT_VERSION = 1 as const;
 
@@ -48,21 +48,34 @@ export function isLegacyHTMLContent(value: unknown): value is LegacyHTMLContent 
   return isRecord(value) && typeof value.html === 'string';
 }
 
-export function isStructuredAIContentData(value: unknown): value is AIContentData {
+/**
+ * PATCH-272. The validated, TRANSFORMED data for a structured value, or null.
+ * Unlike the old boolean check, the callers that load/render/save use this so the
+ * schema's cleanups (unknown AntV design -> fallback, sanitized element edits,
+ * bounded text) actually take effect. This is the STORED path: trusted fields
+ * such as `valuesEstimated` survive; example flags are still dropped.
+ */
+export function parseStructuredAIContentData(value: unknown): AIContentData | null {
   if (!isRecord(value) || typeof value.type !== 'string') {
-    return false;
+    return null;
   }
 
   if (value.type === 'diagram') {
     if (typeof value.subtype !== 'string') {
-      return false;
+      return null;
     }
 
-    return safeValidateAIContent({
+    if (!Object.prototype.hasOwnProperty.call(DIAGRAM_SUBTYPE_SCHEMAS, value.subtype)) {
+      return null;
+    }
+
+    const result = safeValidateStoredAIContent({
       mode: 'diagram',
       subtype: value.subtype as DiagramSubtype,
       data: value,
-    }).success;
+    });
+
+    return result.success ? (result.data as AIContentData) : null;
   }
 
   const modeByType: Record<Exclude<AIContentData['type'], 'diagram'>, Exclude<AIMode, 'diagram'>> = {
@@ -72,13 +85,19 @@ export function isStructuredAIContentData(value: unknown): value is AIContentDat
   };
 
   if (!(value.type in modeByType)) {
-    return false;
+    return null;
   }
 
-  return safeValidateAIContent({
+  const result = safeValidateStoredAIContent({
     mode: modeByType[value.type as keyof typeof modeByType],
     data: value,
-  }).success;
+  });
+
+  return result.success ? (result.data as AIContentData) : null;
+}
+
+export function isStructuredAIContentData(value: unknown): value is AIContentData {
+  return parseStructuredAIContentData(value) !== null;
 }
 
 export function getAIContentVersion(value: unknown): number | null {
@@ -93,20 +112,43 @@ export function isSupportedAIContentVersion(version: number | null): version is 
   return version === CURRENT_AI_CONTENT_VERSION;
 }
 
-export function isPersistedAIContentEnvelope(value: unknown): value is StoredAIContent {
-  const version = getAIContentVersion(value);
+/**
+ * PATCH-272. The envelope with its `data` replaced by the validated, transformed
+ * data, or null. `mode`, `version` and `meta` are carried through unchanged.
+ */
+export function parsePersistedAIContentEnvelope(value: unknown): StoredAIContent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
 
-  return isRecord(value)
-    && isSupportedAIContentVersion(version)
-    && isAIMode(value.mode)
-    && isStructuredAIContentData(value.data);
+  const version = getAIContentVersion(value);
+  if (!isSupportedAIContentVersion(version) || !isAIMode(value.mode)) {
+    return null;
+  }
+
+  const data = parseStructuredAIContentData(value.data);
+  if (!data) {
+    return null;
+  }
+
+  return {
+    mode: value.mode,
+    version: CURRENT_AI_CONTENT_VERSION,
+    data,
+    meta: value.meta as AIContentMeta | undefined,
+  };
+}
+
+export function isPersistedAIContentEnvelope(value: unknown): value is StoredAIContent {
+  return parsePersistedAIContentEnvelope(value) !== null;
 }
 
 export function migrateAIContentEnvelope(value: unknown): DeserializedPersistedAIContent {
-  if (isPersistedAIContentEnvelope(value)) {
+  const envelope = parsePersistedAIContentEnvelope(value);
+  if (envelope) {
     return {
       kind: 'structured',
-      envelope: value,
+      envelope,
     };
   }
 
@@ -154,14 +196,17 @@ export function serializeAIContentForPersistence(
     return value;
   }
 
-  if (isPersistedAIContentEnvelope(value)) {
+  const envelope = parsePersistedAIContentEnvelope(value);
+  if (envelope) {
     return serializeAIContentEnvelope({
-      mode: value.mode,
-      data: value.data,
-      meta: value.meta,
+      mode: envelope.mode,
+      data: envelope.data,
+      meta: envelope.meta,
     });
   }
 
+  // PATCH-272. A bare, unversioned structured object keeps today's behaviour:
+  // accepted as-is rather than re-validated, so legacy saves are not rewritten.
   if (isStructuredAIContentData(value)) {
     return serializeAIContentEnvelope({
       mode: options?.mode ?? inferModeFromData(value),

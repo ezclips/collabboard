@@ -141,6 +141,11 @@ function injectStructuralMetadata(
   // PATCH-264. The label above a picture's title belongs to the user, never the
   // model: drop any `kicker` a model reply tried to supply.
   delete obj.kicker;
+  // PATCH-272. The same is true of the outline's server-only provenance/editing
+  // fields: a model reply never sets these.
+  delete obj.valuesEstimated;
+  delete obj.valuesExample;
+  delete obj.elementOverrides;
   if (mode === 'diagram' && subtype) {
     obj.subtype = subtype;
     if (renderer) obj.renderer = renderer;

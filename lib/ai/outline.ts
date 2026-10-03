@@ -283,8 +283,21 @@ const OutlineSchema = z.object({
   ordered: z.boolean().optional(),
   titleStyle: z.unknown().optional(),
   elementOverrides: z.unknown().optional(),
+  // PATCH-272. Read only on the stored-data path; the model path drops it.
+  valuesEstimated: z.unknown().optional(),
   items: z.array(OutlineItemSchema).optional(),
 });
+
+/**
+ * PATCH-272. Which pipeline an outline is being validated for. `'model'`
+ * (default) treats every server-only field as untrusted and drops it. `'stored'`
+ * treats data the app itself wrote as trusted: `valuesEstimated` (the provenance
+ * of AI-estimated numbers) survives, while example flags (`valuesExample` /
+ * `valueExample`) are still dropped because examples are never real data.
+ */
+export interface ParseOutlineOptions {
+  source?: 'model' | 'stored';
+}
 
 function trimTo(value: unknown, limit: number): string {
   if (typeof value !== 'string') return '';
@@ -338,7 +351,7 @@ function normalizeItem(raw: z.infer<typeof OutlineItemSchema>): VisualOutlineIte
  * and dropping empty children. Throws a typed error only when fewer than two
  * usable items remain -- too little to draw anything.
  */
-export function parseOutline(raw: unknown): VisualOutline {
+export function parseOutline(raw: unknown, options: ParseOutlineOptions = {}): VisualOutline {
   const parsed = OutlineSchema.safeParse(raw);
   if (!parsed.success) {
     throw new OutlineParseError('The AI outline did not match the expected shape.');
@@ -364,6 +377,10 @@ export function parseOutline(raw: unknown): VisualOutline {
   // PATCH-260: keep only a sanitized override map; absent when there is none.
   const elementOverrides = sanitizeElementOverrides(data.elementOverrides);
 
+  // PATCH-272. The stored-data path keeps the server-set estimate provenance;
+  // the model path never does.
+  const keepValuesEstimated = options.source === 'stored' && data.valuesEstimated === true;
+
   return {
     title,
     ordered,
@@ -371,6 +388,7 @@ export function parseOutline(raw: unknown): VisualOutline {
     kind,
     ...(titleStyle ? { titleStyle } : {}),
     ...(elementOverrides ? { elementOverrides } : {}),
+    ...(keepValuesEstimated ? { valuesEstimated: true } : {}),
   };
 }
 

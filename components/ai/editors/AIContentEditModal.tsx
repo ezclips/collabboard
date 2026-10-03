@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Save, Trash2, X } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
@@ -28,7 +28,7 @@ import type {
   WorkshopBoardBlock,
   WorkshopBoardData,
 } from '@/lib/ai/contracts';
-import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
+import { parsePersistedAIContentEnvelope, serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import {
   trackAIEditOpened,
   trackAIEditSaved,
@@ -632,7 +632,15 @@ export default function AIContentEditModal({
   initialEditRef = null,
   onSave,
 }: AIContentEditModalProps) {
-  const [draftData, setDraftData] = useState<AIContentData>(envelope.data);
+  // PATCH-272. Load and save the validated, transformed data, not the raw
+  // stored object: an unknown template, an out-of-range element edit or an
+  // over-long label is cleaned once here and then shown and saved that way.
+  const parsedEnvelope = useMemo(
+    () => parsePersistedAIContentEnvelope(envelope) ?? envelope,
+    [envelope],
+  );
+
+  const [draftData, setDraftData] = useState<AIContentData>(parsedEnvelope.data);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [diagramRenderPhase, setDiagramRenderPhase] = useState<DiagramRenderPhase>({ phase: 'idle' });
@@ -643,7 +651,7 @@ export default function AIContentEditModal({
   const [listView, setListView] = useState(false);
 
   // PATCH-264. The diagram type label ("MINDMAP", ...) edits on the picture.
-  const diagramKicker = useDiagramKicker(readDiagramKicker(envelope));
+  const diagramKicker = useDiagramKicker(readDiagramKicker(parsedEnvelope));
 
   // Debounce ref for diagram code preview
   const diagramDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -651,8 +659,8 @@ export default function AIContentEditModal({
   // Reset state when modal opens with new envelope
   useEffect(() => {
     if (!isOpen) return;
-    setDraftData(envelope.data);
-    diagramKicker.reset(readDiagramKicker(envelope));
+    setDraftData(parsedEnvelope.data);
+    diagramKicker.reset(readDiagramKicker(parsedEnvelope));
     setPrompt(initialPrompt);
     setValidationError(null);
     setDiagramRenderPhase({ phase: 'idle' });
@@ -660,8 +668,8 @@ export default function AIContentEditModal({
     setListView(false);
 
     trackAIEditOpened({
-      mode: envelope.mode,
-      subtype: getSubtypeForData(envelope.data),
+      mode: parsedEnvelope.mode,
+      subtype: getSubtypeForData(parsedEnvelope.data),
     });
   // Only reset when the modal opens or envelope identity changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -725,7 +733,7 @@ export default function AIContentEditModal({
 
     const subtype = saveData.type === 'diagram' ? saveData.subtype : undefined;
     const validation = safeValidateAIContentWithSubtypeCheck({
-      mode: envelope.mode,
+      mode: parsedEnvelope.mode,
       subtype,
       data: saveData,
     });
@@ -734,21 +742,21 @@ export default function AIContentEditModal({
       const reason = 'error' in validation ? validation.error.message : 'Validation failed';
       setValidationError(reason);
       trackAIEditValidationFailed({
-        mode: envelope.mode,
+        mode: parsedEnvelope.mode,
         subtype: getSubtypeForData(saveData),
         reason,
       });
       return;
     }
 
-    const draftEnvelope = buildDraftEnvelope(envelope, saveData);
+    const draftEnvelope = buildDraftEnvelope(parsedEnvelope, saveData);
     const persisted = serializeAIContentForPersistence(draftEnvelope);
     if (!persisted) {
       setValidationError('Could not serialize the edited content. Please check all required fields.');
       return;
     }
 
-    trackAIEditSaved({ mode: envelope.mode, subtype: getSubtypeForData(saveData) });
+    trackAIEditSaved({ mode: parsedEnvelope.mode, subtype: getSubtypeForData(saveData) });
     onSave({ aiPrompt: prompt, aiComponentJson: persisted });
     onClose();
   };
@@ -756,12 +764,12 @@ export default function AIContentEditModal({
   if (!isOpen) return null;
 
   const draftEnvelope = buildDraftEnvelope(
-    envelope,
+    parsedEnvelope,
     draftData.type === 'diagram' ? diagramKicker.applyKicker(draftData) : draftData,
   );
   const isInfographic = draftData.type === 'diagram' && draftData.subtype === 'infographic';
   const subtypeLabel = getSubtypeForData(draftData);
-  const modeLabel = envelope.mode.replace('_', ' ');
+  const modeLabel = parsedEnvelope.mode.replace('_', ' ');
   const contentTypeLabel = subtypeLabel
     ? subtypeLabel.replace('_', ' ')
     : modeLabel;

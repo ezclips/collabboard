@@ -226,28 +226,41 @@ const INfographicTemplateSchema = z.string().transform((value): StoredInfographi
   return INfographicFallbackTemplate;
 });
 
-export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = z.object({
-  type: z.literal('diagram'),
-  subtype: z.literal('infographic'),
-  title: z.string().min(1),
-  renderer: z.literal('infographic'),
-  template: INfographicTemplateSchema,
-  outline: z.unknown().transform((value, ctx) => {
-    try {
-      return parseOutline(value);
-    } catch (error) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: error instanceof Error ? error.message : 'Invalid outline.',
-      });
-      return z.NEVER;
-    }
-  }),
-  explanation: z.string().optional(),
-  theme: ThemeSchema,
-  style: StyleSchema,
-  kicker: KickerSchema,
-});
+function infographicOutlineValue(value: unknown, ctx: z.RefinementCtx, source: 'model' | 'stored') {
+  try {
+    return parseOutline(value, { source });
+  } catch (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : 'Invalid outline.',
+    });
+    return z.NEVER;
+  }
+}
+
+function buildInfographicDiagramSchema(source: 'model' | 'stored'): z.ZodType<InfographicDiagramData> {
+  return z.object({
+    type: z.literal('diagram'),
+    subtype: z.literal('infographic'),
+    title: z.string().min(1),
+    renderer: z.literal('infographic'),
+    template: INfographicTemplateSchema,
+    outline: z.unknown().transform((value, ctx) => infographicOutlineValue(value, ctx, source)),
+    explanation: z.string().optional(),
+    theme: ThemeSchema,
+    style: StyleSchema,
+    kicker: KickerSchema,
+  });
+}
+
+export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = buildInfographicDiagramSchema('model');
+
+/**
+ * PATCH-272. The same infographic shape, validated as data the app itself wrote:
+ * the stored outline keeps `valuesEstimated` and its sanitized overrides instead
+ * of having `parseOutline` drop them as untrusted model fields.
+ */
+export const StoredInfographicDiagramSchema: z.ZodType<InfographicDiagramData> = buildInfographicDiagramSchema('stored');
 
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({
   type: z.literal('photo'),
@@ -344,6 +357,29 @@ export function safeValidateDiagramData<S extends DiagramSubtype>(
 export function safeValidateAIContent(input: ValidationInput) {
   if (input.mode === 'diagram') {
     return safeValidateDiagramData(input.subtype, input.data);
+  }
+
+  return safeValidateModeData(input.mode, input.data);
+}
+
+/**
+ * PATCH-272. Validates data the app itself wrote. Identical to
+ * `safeValidateDiagramData` except for an infographic, whose stored outline is
+ * parsed with `{ source: 'stored' }` so trusted fields survive.
+ */
+export function safeValidateStoredDiagramData<S extends DiagramSubtype>(
+  subtype: S,
+  input: unknown,
+): ValidationResult<ParsedDiagramData<S>> {
+  const schema = (subtype === 'infographic'
+    ? StoredInfographicDiagramSchema
+    : DIAGRAM_SUBTYPE_SCHEMAS[subtype]) as z.ZodType<ParsedDiagramData<S>>;
+  return schema.safeParse(input);
+}
+
+export function safeValidateStoredAIContent(input: ValidationInput) {
+  if (input.mode === 'diagram') {
+    return safeValidateStoredDiagramData(input.subtype, input.data);
   }
 
   return safeValidateModeData(input.mode, input.data);
