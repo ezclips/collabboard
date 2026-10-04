@@ -24,6 +24,9 @@ import {
   getModeConfig,
   isDiagramModeConfig,
 } from '@/lib/ai/mode-registry';
+import { isAntvTemplate } from '@/lib/ai/contracts';
+import type { DrawingPostData } from '@/lib/ai/antv/toExcalidraw/drawingPost';
+import EditAsDrawingButton from '@/components/ai/renderers/EditAsDrawingButton';
 import { normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { suggestDesigns, type DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import { familyForSubtype, type PictureFamily } from '@/lib/ai/pictureFamilies';
@@ -105,6 +108,8 @@ interface AIComponentEditorProps {
   // PATCH-235. Opened by "Visualize…": starts in Diagram + Show options with the
   // post's text and generates once, automatically.
   initialVisualize?: boolean;
+  /** PATCH-278. Turns the selected AntV picture into a drawing post. */
+  onEditAsDrawing?: (data: DrawingPostData) => void | Promise<void>;
 }
 
 type CommentDraft = {
@@ -304,6 +309,7 @@ export default function AIComponentEditor({
   currentUserName = 'You',
   boardId,
   initialVisualize = false,
+  onEditAsDrawing,
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
   const [title, setTitle] = useState(initialTitle);
@@ -687,6 +693,24 @@ export default function AIComponentEditor({
     : chartPieZeroTotal
       ? 'A pie needs at least one number above 0'
       : 'Make the chart or type your numbers first';
+
+  // PATCH-278. The picture the "Edit as drawing" button converts is the SELECTED
+  // preview layer's AntV svg -- never the hover layer (OutlinePreviewLayers marks
+  // the selected one with `data-ai-preview-selected-layer`). The ground is the
+  // renderer's `[data-ai-theme-background]` computed background.
+  const editAsDrawingSvg = () =>
+    document.querySelector<SVGSVGElement>(
+      '[data-ai-preview-selected-layer] [data-antv-container] svg',
+    );
+  const editAsDrawingBackground = () => {
+    const ground = document.querySelector<HTMLElement>('[data-ai-theme-background]');
+    return ground ? window.getComputedStyle(ground).backgroundColor : '#ffffff';
+  };
+  const selectedTemplate =
+    selectedOption && 'template' in selectedOption.envelopeData
+      ? selectedOption.envelopeData.template
+      : undefined;
+  const showEditAsDrawing = Boolean(onEditAsDrawing) && typeof selectedTemplate === 'string' && isAntvTemplate(selectedTemplate);
 
   const normalizedContent = normalizeAIContent(content);
   const photoCardData: PhotoCardData | null =
@@ -1731,6 +1755,15 @@ export default function AIComponentEditor({
               >
                 Cancel
               </button>
+              {showEditAsDrawing && (
+                <EditAsDrawingButton
+                  getSvg={editAsDrawingSvg}
+                  getBackground={editAsDrawingBackground}
+                  title={title.trim() || undefined}
+                  disabledReason={canSave ? undefined : saveDisabledReason}
+                  onDrawing={onEditAsDrawing!}
+                />
+              )}
               <button
                 onClick={handleSave}
                 disabled={!canSave}

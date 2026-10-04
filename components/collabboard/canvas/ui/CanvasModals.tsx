@@ -31,6 +31,7 @@ import AIContentEditModal from '@/components/ai/editors/AIContentEditModal';
 import AIContentConvertModal from '@/components/ai/editors/AIContentConvertModal';
 import type { DiagramData, StoredAIContent } from '@/lib/ai/contracts';
 import { SaveAIComponentData, SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
+import type { DrawingPostData } from '@/lib/ai/antv/toExcalidraw/drawingPost';
 import {
   extractAIContentFromPadletMetadata,
   normalizeAIContent,
@@ -122,6 +123,11 @@ export interface CanvasModalsProps {
   saveDrawing: (...args: any[]) => any;
   saveAIComponent: (data: SaveAIComponentData) => void;
   saveCard: (data: SaveCardData) => Promise<SaveCardResult>;
+  /** PATCH-278. Creates the drawing post from a converted picture. */
+  createDrawingPost: (
+    data: DrawingPostData,
+    opts?: { placement?: { x: number; y: number }; size?: { width: number; height: number }; openEditor?: boolean },
+  ) => Promise<unknown>;
   // PATCH-149B2-ii §34.6: threaded straight through to DocumentEditor.
   onDirtyChange?: (isDirty: boolean) => void;
 
@@ -164,6 +170,7 @@ export default function CanvasModals({
   saveComment, saveImage, saveDrawing,
   saveAIComponent,
   saveCard,
+  createDrawingPost,
   onDirtyChange,
   closeAllToolbars,
   openPadletInTypeEditor,
@@ -189,11 +196,26 @@ export default function CanvasModals({
       : undefined;
   const lockedMode = lockedEnvelope?.mode;
   const lockedSubtype = lockedEnvelope
-    ? ((lockedEnvelope.meta?.subtype as DiagramData['subtype'] | undefined) ??
+      ? ((lockedEnvelope.meta?.subtype as DiagramData['subtype'] | undefined) ??
         (lockedEnvelope.data?.type === 'diagram'
           ? (lockedEnvelope.data as DiagramData).subtype
           : undefined))
     : undefined;
+
+  // PATCH-278. "Edit as drawing": close the AI modal exactly as its Cancel does
+  // (without saving the AI post), then create a NEW drawing post from the
+  // converted picture and open it. The AI post is never modified. `placement`
+  // is passed only from the Edit window (next to the AI post); the generator
+  // uses the default new-post position.
+  const handleEditAsDrawing = (
+    data: DrawingPostData,
+    placement?: { x: number; y: number },
+    close: () => void = () => {},
+  ) => {
+    close();
+    setPadletToEdit(null);
+    void createDrawingPost(data, { size: data.size, openEditor: true, placement });
+  };
 
   return (
     <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
@@ -595,6 +617,9 @@ export default function CanvasModals({
           currentUserName={user?.email?.split('@')[0] || 'You'}
           boardId={canvasId}
           initialVisualize={initialVisualize}
+          onEditAsDrawing={(data) =>
+            handleEditAsDrawing(data, undefined, () => setIsAIComponentEditorOpen(false))
+          }
         />
       </div>
 
@@ -611,6 +636,19 @@ export default function CanvasModals({
             initialPrompt={padletToEdit?.metadata?.aiPrompt || ''}
             initialEditRef={initialEditRef ?? null}
             onSave={saveAIComponent}
+            onEditAsDrawing={(data) =>
+              handleEditAsDrawing(
+                data,
+                // Next to the AI post being edited: x = post.position_x + post.width + 40, y = post.position_y.
+                padletToEdit
+                  ? {
+                      x: Number(padletToEdit.position_x) + Number(padletToEdit.width) + 40,
+                      y: Number(padletToEdit.position_y),
+                    }
+                  : undefined,
+                () => setIsAIContentEditModalOpen(false),
+              )
+            }
           />
         </div>
       )}

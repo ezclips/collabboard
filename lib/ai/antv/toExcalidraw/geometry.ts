@@ -5,6 +5,8 @@
  * without a real layout engine. Every method returns root USER units already.
  */
 
+import { samplePathD } from './pathSampler';
+
 export interface GeometryRect {
   x: number;
   y: number;
@@ -65,6 +67,11 @@ export interface SvgGeometry {
   firstTextHost(el: Element): Element | null;
   /** Resolve a `<symbol>` by id, within the document or the root subtree. */
   symbol(id: string, root: Element): SVGSymbolElement | null;
+  /**
+   * PATCH-278 A.1. How many paths fell back to `getPointAtLength` because their
+   * `d` could not be parsed analytically. Optional so test stubs stay simple.
+   */
+  pathFallbackCount?(): number;
 }
 
 function boundingRectOf(points: readonly GeometryPoint[]): GeometryRect | null {
@@ -91,6 +98,10 @@ function parseViewBox(raw: string | null): GeometrySize | null {
 
 /** The real browser implementation. Never imported by tests. */
 export function browserSvgGeometry(): SvgGeometry {
+  // PATCH-278 A.1. Paths whose `d` could not be parsed analytically, counted so
+  // the report can tell whether the fast sampler actually handled the picture.
+  let pathFallback = 0;
+
   function matrixIntoRoot(root: Element, el: Element): DOMMatrix | null {
     const rootEl = root as SVGGraphicsElement;
     const targetEl = el as SVGGraphicsElement;
@@ -124,8 +135,7 @@ export function browserSvgGeometry(): SvgGeometry {
     ]);
   }
 
-  function samplePathOf(el: Element, root: Element): GeometryPoint[][] | null {
-    const path = el as SVGPathElement;
+  function legacySamplePath(path: SVGPathElement, matrix: DOMMatrix | null): GeometryPoint[][] | null {
     if (typeof path.getTotalLength !== 'function') return null;
     const length = path.getTotalLength();
     if (!Number.isFinite(length) || length <= 0) return null;
@@ -133,7 +143,6 @@ export function browserSvgGeometry(): SvgGeometry {
     // long road path's tight arcs survive; cap 4000 for safety. Straight runs
     // are collapsed later by Ramer–Douglas–Peucker in toSkeleton.
     const n = clampInt(Math.ceil(length / 4), 8, 4000);
-    const matrix = matrixIntoRoot(root, el);
     const samples: GeometryPoint[] = [];
     for (let i = 0; i <= n; i += 1) {
       const point = path.getPointAtLength((i / n) * length);
@@ -155,6 +164,20 @@ export function browserSvgGeometry(): SvgGeometry {
     }
     if (current.length) subpaths.push(current);
     return subpaths;
+  }
+
+  function samplePathOf(el: Element, root: Element): GeometryPoint[][] | null {
+    const path = el as SVGPathElement;
+    const matrix = matrixIntoRoot(root, el);
+    const d = path.getAttribute?.('d');
+    if (d) {
+      const parsed = samplePathD(d, { spacing: 4 });
+      if (parsed) {
+        return parsed.map((subpath) => subpath.map((point) => transform(matrix, point.x, point.y)));
+      }
+      pathFallback += 1;
+    }
+    return legacySamplePath(path, matrix);
   }
 
   function textBoxOf(el: Element, root: Element): GeometryRect | null {
@@ -299,6 +322,9 @@ export function browserSvgGeometry(): SvgGeometry {
       return scoped && scoped.tagName.toLowerCase() === 'symbol'
         ? (scoped as unknown as SVGSymbolElement)
         : null;
+    },
+    pathFallbackCount() {
+      return pathFallback;
     },
   };
 }

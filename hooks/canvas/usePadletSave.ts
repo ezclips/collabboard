@@ -1597,14 +1597,80 @@ export function usePadletSave(params: UsePadletSaveParams) {
   ]);
 
   // ============================================================================
-  // handleSaveDrawing - verbatim from CanvasClient.tsx lines 4098-4195
+  // createDrawingPost - the ONE "new drawing post" path. saveDrawing's
+  // `id === 'new'` branch and "Edit as drawing" both use it; it never reads
+  // `padletToEdit`, because the converted post is new while an AI post is open.
+  // ============================================================================
+  const createDrawingPost = useCallback(async (
+    data: SaveDrawingData,
+    opts: { placement?: { x: number; y: number }; size?: { width: number; height: number }; openEditor?: boolean } = {},
+  ) => {
+    // Board content: refused before metadata, ids, placement, editor state.
+    if (!canEditBoardContentNow()) return null;
+    if (!canvasId) return null;
+    const size = opts.size ?? { width: 400, height: 300 };
+    const title = data.title || 'Drawing';
+    const metadata = {
+      ...data.metadata,
+      drawingData: data.drawingData,
+      drawingAppState: data.drawingAppState,
+      drawingFiles: data.drawingFiles,
+      previewUrl: data.previewUrl,
+    };
+    // The converted post is always NEW. On grid/columns/wall/timeline/drawing
+    // the placement flow owns creation: no insert here, and the editor is NOT
+    // opened -- the user opens the placed post from the board.
+    if (checkPlacementRequired(
+      { kind: 'drawing', content: '', file_url: data.previewUrl, title, metadata },
+      () => { setIsDrawingEditorOpen(false); setPadletToEdit(null); },
+      { isNewPost: true, hasParentId: false, hasSectionId: false },
+    )) return null;
+    const { position_x, position_y } = opts.placement
+      ? roundPostGeometry({ position_x: opts.placement.x, position_y: opts.placement.y })
+      : newPostPosition(size.width, size.height);
+    const { data: created, error } = await supabase
+      .from('padlets')
+      .insert({
+        board_id: canvasId,
+        title,
+        content: '',
+        type: 'drawing',
+        position_x,
+        position_y,
+        width: size.width,
+        height: size.height,
+        metadata,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    if (opts.openEditor) { setPadletToEdit(created); setIsDrawingEditorOpen(true); }
+    else { setIsDrawingEditorOpen(false); setPadletToEdit(null); }
+    if (created) setPadlets(prev => [...prev, created]);
+    else fetchData();
+    return created;
+  }, [
+    canvasId, supabase, setPadletToEdit, fetchData, setIsDrawingEditorOpen, setPadlets,
+    isDrawingLayout, isWallLayout, isColumnsLayout, isGridLayout, isTimelineLayout, isSchedulerLayout,
+    onDrawingPlacementStart, onTimelinePlacementStart, onSchedulerPlacementStart,
+  ]);
+
+  // ============================================================================
+  // handleSaveDrawing - the new branch delegates to createDrawingPost; the
+  // update branch is unchanged.
   // ============================================================================
   const saveDrawing = useCallback(async (data: SaveDrawingData) => {
-    // Board content: refused before metadata, ids, placement, editor state
-    // or any request -- and asked live, so a retained handle refuses too.
     if (!canEditBoardContentNow()) return;
     if (!canvasId || !padletToEdit) return;
-
+    if (padletToEdit.id === 'new') {
+      try {
+        await createDrawingPost({ ...data, metadata: { ...padletToEdit.metadata, ...data.metadata } });
+      } catch (e: unknown) {
+        const err = e as { message?: string; details?: string };
+        console.error('Failed to save drawing:', err?.message || err?.details || 'Unknown error');
+      }
+      return;
+    }
     const metadata = {
       ...padletToEdit.metadata,
       ...data.metadata,
@@ -1614,82 +1680,20 @@ export function usePadletSave(params: UsePadletSaveParams) {
       previewUrl: data.previewUrl,
     };
     const nextTitle = data.title !== undefined ? data.title : padletToEdit.title;
-
-    // Check if placement prompt is needed (grid/columns/wall layouts)
-    if (checkPlacementRequired(
-      { kind: 'drawing', content: '', file_url: data.previewUrl, title: nextTitle || 'Drawing', metadata },
-      () => { setIsDrawingEditorOpen(false); setPadletToEdit(null); }
-    )) {
-      return;
-    }
-
     try {
-      let createdPadlet: any = null;
-      if (padletToEdit.id === 'new') {
-        const { position_x, position_y } = newPostPosition(400, 300);
-        const { data: newDrawing, error } = await supabase
-          .from('padlets')
-          .insert({
-            board_id: canvasId,
-            title: data.title || 'Drawing',
-            content: '',
-            type: 'drawing',
-            position_x,
-            position_y,
-            width: 400,
-            height: 300,
-            metadata,
-          })
-          .select()
-          .single();
-        if (error) throw error;
-        createdPadlet = newDrawing;
-      } else {
-        const { error } = await supabase
-          .from('padlets')
-          .update({
-            title: nextTitle,
-            metadata,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', padletToEdit.id);
-        if (error) throw error;
-      }
-
+      const { error } = await supabase
+        .from('padlets')
+        .update({ title: nextTitle, metadata, updated_at: new Date().toISOString() })
+        .eq('id', padletToEdit.id);
+      if (error) throw error;
       setIsDrawingEditorOpen(false);
       setPadletToEdit(null);
-      if (padletToEdit.id === 'new') {
-        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
-        else fetchData();
-      } else {
-        setPadlets(prev => prev.map(p =>
-          p.id === padletToEdit!.id
-            ? { ...p, title: nextTitle, metadata }
-            : p
-        ));
-      }
+      setPadlets(prev => prev.map(p => p.id === padletToEdit!.id ? { ...p, title: nextTitle, metadata } : p));
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save drawing:', err?.message || err?.details || 'Unknown error');
     }
-  }, [
-    canvasId,
-    padletToEdit,
-    isWallLayout,
-    isColumnsLayout,
-    isGridLayout,
-    isTimelineLayout,
-    supabase,
-    setPadletToEdit,
-    fetchData,
-    setIsDrawingEditorOpen,
-    setPendingPostDraft,
-    setIsPlacementPromptOpen,
-    setWallPendingPostDraft,
-    setWallPlacementPromptOpen,
-    onTimelinePlacementStart,
-    setPadlets,
-  ]);
+  }, [canvasId, padletToEdit, supabase, setPadletToEdit, setIsDrawingEditorOpen, setPadlets, createDrawingPost]);
 
   const saveAIComponent = useCallback(async (
     data: SaveAIComponentData,
@@ -1867,6 +1871,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     saveCard,
     saveImage,
     saveDrawing,
+    createDrawingPost,
     saveAIComponent,
     /**
      * PDF-C1 R1-A-2. The layout placement DECISION, for a caller that owns its

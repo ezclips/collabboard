@@ -61,6 +61,7 @@ function scene(elements: SceneElement[], extra: Partial<PictureScene> = {}): Pic
       iconsAsImage: 0,
       mixedTextStyle: 0,
       shadowIgnored: 0,
+      pathFallback: 0,
     },
     ...extra,
   };

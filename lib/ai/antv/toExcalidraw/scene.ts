@@ -204,6 +204,11 @@ export interface PictureSceneLosses {
   mixedTextStyle: number;
   /** Addendum 4. Elements that carried a `filter` (drop shadow) we did not convert. */
   shadowIgnored: number;
+  /**
+   * PATCH-278 A.1. Paths the analytic sampler could not parse, so their points
+   * came from `getPointAtLength`. Zero for real AntV pictures.
+   */
+  pathFallback: number;
 }
 
 export interface PictureScene {

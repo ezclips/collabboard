@@ -37,6 +37,7 @@ function scene(elements: SceneElement[], overrides: Partial<PictureScene> = {}):
       iconsAsImage: 0,
       mixedTextStyle: 0,
       shadowIgnored: 0,
+      pathFallback: 0,
     },
     ...overrides,
   };

@@ -3351,6 +3351,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     saveCard,
     saveImage,
     saveDrawing,
+    createDrawingPost,
     saveAIComponent,
     requestPlacementIfRequired
   } = usePadletSave({
@@ -9310,6 +9311,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           saveImage={saveImageIfBoardEditable}
           saveDrawing={saveDrawingIfBoardEditable}
           saveAIComponent={handleSaveAIComponent}
+          createDrawingPost={createDrawingPost}
           initialVisualize={!!visualizeRequest}
           visualizePrompt={visualizeRequest?.prompt}
           saveCard={saveCardIfBoardEditable}

@@ -308,6 +308,7 @@ function Harness() {
         saveDrawing={() => {}}
         saveAIComponent={() => {}}
         saveCard={saveCard}
+        createDrawingPost={async () => null}
         closeAllToolbars={() => {}}
         openPadletInTypeEditor={() => {}}
         handleDetachChildFromFreeformContainer={() => {}}

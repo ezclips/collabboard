@@ -3,7 +3,7 @@
  * Every browser geometry call goes through the injectable `SvgGeometry`, so
  * this runs in jsdom with a stub. Reads the LIVE DOM, so it converts exactly
  * what the user sees, overrides included. Paint/gradient helpers live in
- * `readPaint.ts`; this module walks the tree and emits scene elements.
+ * `readPaint.ts`; text in `readText.ts`; icons in `readIcon.ts`.
  */
 
 import { browserSvgGeometry, type SvgGeometry } from './geometry';
@@ -17,10 +17,16 @@ import {
   num,
   opacityOf,
   paintFor,
-  resolveProperty,
-  symbolColor,
-  type PaintState,
 } from './readPaint';
+import { emitIcon } from './readIcon';
+import {
+  emitText,
+  groupIdsFor,
+  nextId,
+  recordSkip,
+  sourceOf,
+  type ReaderState,
+} from './readText';
 import {
   PICTURE_GROUP_ID,
   PICTURE_SCENE_VERSION,
@@ -31,8 +37,6 @@ import {
   type SceneRect,
   type SceneSkip,
   type SceneSkipReason,
-  type SceneSource,
-  type SceneTextAlign,
 } from './scene';
 
 export interface ReadSvgSceneOptions {
@@ -46,26 +50,6 @@ const DEFINITION_TAGS = new Set(['defs', 'clippath', 'mask', 'marker', 'symbol']
 const SHAPE_TAGS = new Set(['rect', 'circle', 'ellipse', 'path', 'polygon', 'polyline', 'line']);
 const VISUAL_TAGS = new Set([...SHAPE_TAGS, 'use', 'image', 'text', 'foreignobject']);
 
-function parseIndexes(raw: string | null): number[] | undefined {
-  if (!raw) return undefined;
-  const parts = raw.split(',').map((part) => Number(part.trim()));
-  if (parts.length === 0 || parts.some((value) => !Number.isInteger(value) || value < 0)) {
-    return undefined;
-  }
-  return parts;
-}
-
-function nearestIndexes(el: Element, root: Element): number[] | undefined {
-  let node: Element | null = el;
-  while (node && node !== root.parentElement) {
-    const parsed = parseIndexes(node.getAttribute('data-indexes'));
-    if (parsed) return parsed;
-    if (node === root) break;
-    node = node.parentElement;
-  }
-  return undefined;
-}
-
 function parsePoints(raw: string | null): Array<{ x: number; y: number }> {
   if (!raw) return [];
   const parts = raw.trim().split(/[\s,]+/).map(Number);
@@ -76,44 +60,6 @@ function parsePoints(raw: string | null): Array<{ x: number; y: number }> {
     }
   }
   return points;
-}
-
-function encodeSvgDataUrl(svg: string): string {
-  const bytes = new TextEncoder().encode(svg);
-  let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return `data:image/svg+xml;base64,${btoa(binary)}`;
-}
-
-interface ReaderState extends PaintState {
-  pictureGroup: string;
-  elements: SceneElement[];
-  skips: SceneSkip[];
-  visibleShapes: number;
-  resolvableIcons: number;
-  counter: number;
-}
-
-function nextId(state: ReaderState): string {
-  const id = `e${state.counter}`;
-  state.counter += 1;
-  return id;
-}
-
-function recordSkip(state: ReaderState, el: Element, reason: SceneSkipReason): void {
-  state.skips.push({ id: nextId(state), tag: lower(el), reason, indexes: nearestIndexes(el, state.root) });
-}
-
-function groupIdsFor(state: ReaderState, el: Element): string[] {
-  const indexes = nearestIndexes(el, state.root);
-  return indexes ? [`item:${indexes.join(',')}`, state.pictureGroup] : [state.pictureGroup];
-}
-
-function sourceOf(state: ReaderState, el: Element): SceneSource {
-  const indexes = nearestIndexes(el, state.root);
-  return indexes ? { tag: lower(el), indexes } : { tag: lower(el) };
 }
 
 function captionPoints(
@@ -225,64 +171,6 @@ function emitShape(
   }
 }
 
-const SYMBOL_PRESENTATION = [
-  'fill',
-  'stroke',
-  'stroke-width',
-  'stroke-linecap',
-  'stroke-linejoin',
-  'stroke-dasharray',
-];
-
-function iconDataUrl(state: ReaderState, use: Element, style: CSSStyleDeclaration, alpha: number): string {
-  const href = attr(use, 'href');
-  const symbol = href ? state.geometry.symbol(href, state.root) : null;
-  if (!symbol) return '';
-  const color = symbolColor(state, use, style, alpha);
-  const viewBox = symbol.getAttribute('viewBox') ?? '0 0 24 24';
-  const width = attr(use, 'width') ?? viewBox.split(/\s+/)[2] ?? '24';
-  const height = attr(use, 'height') ?? viewBox.split(/\s+/)[3] ?? '24';
-  const attrs = SYMBOL_PRESENTATION.map((name) => {
-    const value = symbol.getAttribute(name);
-    return value ? ` ${name}="${value.replace(/"/g, '&quot;')}"` : '';
-  }).join('');
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="${width}" height="${height}"` +
-    `${attrs}>${symbol.innerHTML}</svg>`;
-  return encodeSvgDataUrl(svg.replace(/currentColor/gi, color));
-}
-
-function emitIcon(state: ReaderState, el: Element, style: CSSStyleDeclaration, alphaBase: number): void {
-  const href = attr(el, 'href');
-  const symbol = href ? state.geometry.symbol(href, state.root) : null;
-  if (!symbol) {
-    recordSkip(state, el, 'icon-unresolved');
-    return;
-  }
-  const box = state.geometry.box(el, state.root);
-  if (!box || box.width <= 0 || box.height <= 0) {
-    recordSkip(state, el, 'hidden');
-    return;
-  }
-  const dataURL = iconDataUrl(state, el, style, alphaBase);
-  if (!dataURL) {
-    recordSkip(state, el, 'icon-unresolved');
-    return;
-  }
-  state.elements.push({
-    id: nextId(state),
-    kind: 'image',
-    box,
-    dataURL,
-    mimeType: 'image/svg+xml',
-    fromIcon: true,
-    groupIds: groupIdsFor(state, el),
-    source: sourceOf(state, el),
-  });
-  state.resolvableIcons += 1;
-  state.losses.iconsAsImage += 1;
-}
-
 function emitImage(state: ReaderState, el: Element, box: SceneRect | null): void {
   const href = attr(el, 'href') ?? '';
   if (!href.startsWith('data:')) {
@@ -302,125 +190,6 @@ function emitImage(state: ReaderState, el: Element, box: SceneRect | null): void
     dataURL: href,
     mimeType,
     fromIcon: false,
-    groupIds: groupIdsFor(state, el),
-    source: sourceOf(state, el),
-  });
-}
-
-function textString(el: Element): string {
-  if (lower(el) === 'foreignobject') {
-    const node = el as HTMLElement;
-    const inner = typeof node.innerText === 'string' ? node.innerText : (node.textContent ?? '');
-    return inner
-      .split('\n')
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .filter(Boolean)
-      .join('\n');
-  }
-  const tspans = Array.from(el.querySelectorAll('tspan'));
-  if (tspans.length === 0) return (el.textContent ?? '').trim();
-  const lines: string[] = [];
-  let lastY: string | null = null;
-  let current = '';
-  for (const tspan of tspans) {
-    const y = tspan.getAttribute('y') ?? tspan.getAttribute('dy');
-    if (lastY !== null && y !== null && y !== lastY) {
-      lines.push(current.trim());
-      current = '';
-    }
-    current += tspan.textContent ?? '';
-    if (y !== null) lastY = y;
-  }
-  lines.push(current.trim());
-  return lines.map((line) => line.replace(/\s+/g, ' ')).filter(Boolean).join('\n');
-}
-
-function alignOf(el: Element, style: CSSStyleDeclaration): SceneTextAlign {
-  const raw = lower(el) === 'text' ? attr(el, 'text-anchor') ?? style.textAnchor : style.textAlign;
-  const value = (raw ?? '').toLowerCase();
-  if (value === 'middle' || value === 'center') return 'center';
-  if (value === 'end' || value === 'right') return 'right';
-  return 'left';
-}
-
-/**
- * Addendum 2. The style the FIRST inner text node actually carries. AntV
- * foreignObjects put font-size/colour/weight on an HTML element INSIDE the
- * foreignObject, so reading the foreignObject's own computed style only sees
- * inherited defaults (16px, black). For SVG `<text>` the same applies across
- * `<tspan>`s, so the first tspan's computed style is preferred when present.
- */
-function firstTextStyle(
-  state: ReaderState,
-  el: Element,
-): { style: CSSStyleDeclaration; mixed: boolean } {
-  const host = state.geometry.firstTextHost(el);
-  const base = state.geometry.style(el);
-  const style = host && host !== el ? state.geometry.style(host) : base;
-  return { style, mixed: stylesDisagree(state, el, host) };
-}
-
-const INNER_TEXT_SELECTOR = 'span, div, p, b, strong, i, em, a, tspan';
-
-/** True when the inner text hosts disagree on font-size or colour. */
-function stylesDisagree(state: ReaderState, el: Element, firstHost: Element | null): boolean {
-  if (!firstHost || firstHost === el) return false;
-  const hosts = Array.from(el.querySelectorAll(INNER_TEXT_SELECTOR)).filter(
-    (node) => (node.textContent ?? '').trim().length > 0,
-  );
-  if (hosts.length <= 1) return false;
-  const first = state.geometry.style(firstHost);
-  const signature = (s: CSSStyleDeclaration) => `${s.fontSize}|${s.color}|${s.fontWeight}`;
-  const base = signature(first);
-  return hosts.some((host) => signature(state.geometry.style(host)) !== base);
-}
-
-function emitText(state: ReaderState, el: Element, style: CSSStyleDeclaration, alphaBase: number): void {
-  const text = textString(el);
-  if (!text) return;
-  const box = state.geometry.textBox(el, state.root);
-  if (!box || box.width <= 0 || box.height <= 0) {
-    recordSkip(state, el, 'hidden');
-    return;
-  }
-  const svgText = lower(el) === 'text';
-  // Addendum 2: for a `foreignObject` the size/colour live on the INNER HTML
-  // element, so read that (first text host). For SVG `<text>` keep the current
-  // behaviour (the `<text>` computed style, attributes included). `mixed`
-  // records inner nodes that disagree.
-  const { style: inner, mixed } = firstTextStyle(state, el);
-  const effective = !svgText && inner !== style ? inner : style;
-  const scale = state.geometry.scale(el, state.root);
-  const fontSize = Math.max(1, Math.round(num(effective.fontSize, 16) * scale * 2) / 2);
-  const colorRaw = svgText
-    ? attr(el, 'fill') ?? effective.fill ?? effective.color
-    : effective.color;
-  const color = resolveProperty(state, colorRaw, alphaBase).color;
-  if (color === 'none') {
-    recordSkip(state, el, 'invisible');
-    return;
-  }
-  const family = (effective.fontFamily ?? '').toLowerCase();
-  const monospace = /mono|consol|courier|cascadia|menlo/.test(family);
-  const lostWeight = num(effective.fontWeight, 400) >= 600;
-  const lostStyle = /italic|oblique/.test((effective.fontStyle ?? '').toLowerCase());
-  if (lostWeight) state.losses.lostFontWeight += 1;
-  if (lostStyle) state.losses.lostFontStyle += 1;
-  if (mixed) state.losses.mixedTextStyle += 1;
-  state.elements.push({
-    id: nextId(state),
-    kind: 'text',
-    text,
-    box,
-    fontSize,
-    color,
-    align: alignOf(el, effective),
-    monospace,
-    mayDownload: monospace,
-    lost: { fontWeight: lostWeight, fontStyle: lostStyle },
-    svgText,
-    mixedTextStyle: mixed,
-    lineCount: state.geometry.textLineCount(el, state.root),
     groupIds: groupIdsFor(state, el),
     source: sourceOf(state, el),
   });
@@ -508,6 +277,7 @@ export function readSvgScene(root: Element, options: ReadSvgSceneOptions): Pictu
       iconsAsImage: 0,
       mixedTextStyle: 0,
       shadowIgnored: 0,
+      pathFallback: 0,
     },
     visibleShapes: 0,
     resolvableIcons: 0,
@@ -516,6 +286,7 @@ export function readSvgScene(root: Element, options: ReadSvgSceneOptions): Pictu
   for (const child of Array.from(root.children)) {
     visit(state, child, 1);
   }
+  state.losses.pathFallback = geometry.pathFallbackCount?.() ?? 0;
   return {
     version: PICTURE_SCENE_VERSION,
     width: view.width,

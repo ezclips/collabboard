@@ -46,6 +46,8 @@ import { remapOverridesForItems } from '@/lib/ai/antv/remapOverrides';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from '@/components/collabboard/editors/OutlineTextEditor';
 import { PictureSidePanelContext } from '@/components/ai/renderers/PictureSidePanel';
+import EditAsDrawingButton from '@/components/ai/renderers/EditAsDrawingButton';
+import type { DrawingPostData } from '@/lib/ai/antv/toExcalidraw/drawingPost';
 import FlowStepsEditor from './FlowStepsEditor';
 import MindmapTreeEditor from './MindmapTreeEditor';
 
@@ -57,6 +59,8 @@ export interface AIContentEditModalProps {
   /** PATCH-240. A data-ai-edit-ref from a board double-click, opened for editing. */
   initialEditRef?: string | null;
   onSave: (data: { aiPrompt: string; aiComponentJson: LoadedAIContent }) => void;
+  /** PATCH-278. Turns the AntV picture into a drawing post. */
+  onEditAsDrawing?: (data: DrawingPostData) => void | Promise<void>;
 }
 
 // ── Shared input helpers ───────────────────────────────────────────────────────
@@ -646,6 +650,7 @@ export default function AIContentEditModal({
   initialPrompt = '',
   initialEditRef = null,
   onSave,
+  onEditAsDrawing,
 }: AIContentEditModalProps) {
   // PATCH-272. Load and save the validated, transformed data, not the raw
   // stored object: an unknown template, an out-of-range element edit or an
@@ -1159,6 +1164,20 @@ export default function AIContentEditModal({
           >
             Cancel
           </button>
+          {Boolean(onEditAsDrawing) && isInfographic && isAntvTemplate(draftData.template) && (
+            <EditAsDrawingButton
+              getSvg={() =>
+                document.querySelector<SVGSVGElement>('[data-antv-container] svg')
+              }
+              getBackground={() => {
+                const ground = document.querySelector<HTMLElement>('[data-ai-theme-background]');
+                return ground ? window.getComputedStyle(ground).backgroundColor : '#ffffff';
+              }}
+              title={draftData.title}
+              disabledReason={diagramHasSyntaxError ? 'Fix the diagram first' : undefined}
+              onDrawing={onEditAsDrawing!}
+            />
+          )}
           <button
             onClick={handleSave}
             disabled={diagramHasSyntaxError}
