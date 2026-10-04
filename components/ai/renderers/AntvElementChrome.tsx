@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Palette, Redo2, RotateCcw, Shapes, Trash2, Undo2 } from 'lucide-react';
+import { Palette, Redo2, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 
 import {
   elementAtPoint,
@@ -245,16 +245,12 @@ export interface AntvElementChromeProps {
    * therefore drops BELOW the box; other selections keep it above.
    */
   barBelow?: boolean;
-  /** PATCH-262. The selection is an item icon: offer "Change icon". */
-  showIconButton?: boolean;
-  iconOpen?: boolean;
   onResize: (event: React.PointerEvent, handle: ElementHandle) => void;
   onUndo: () => void;
   onRedo: () => void;
   onReset: () => void;
   onDelete: () => void;
   onToggleColour: () => void;
-  onToggleIcon?: () => void;
   children?: React.ReactNode;
 }
 
@@ -268,15 +264,12 @@ export function AntvElementChrome({
   counterScale,
   colourOpen,
   barBelow = false,
-  showIconButton = false,
-  iconOpen = false,
   onResize,
   onUndo,
   onRedo,
   onReset,
   onDelete,
   onToggleColour,
-  onToggleIcon,
   children,
 }: AntvElementChromeProps) {
   const barRef = React.useRef<HTMLDivElement>(null);
@@ -376,23 +369,11 @@ export function AntvElementChrome({
         <button type="button" data-ai-element-reset="true" title="Reset element" onClick={onReset} className="rounded p-1 text-gray-600 hover:bg-gray-100">
           <RotateCcw size={14} />
         </button>
-        {showIconButton && (
-          <button
-            type="button"
-            data-ai-element-icon-toggle="true"
-            title="Change icon"
-            aria-label="Change icon"
-            aria-expanded={iconOpen}
-            onClick={onToggleIcon}
-            className={`rounded p-1 hover:bg-gray-100 ${iconOpen ? 'text-blue-600' : 'text-gray-600'}`}
-          >
-            <Shapes size={14} />
-          </button>
-        )}
         <button
           type="button"
           data-ai-element-colour-toggle="true"
-          title="Colour"
+          title="Edit"
+          aria-label="Edit"
           aria-expanded={colourOpen}
           onClick={onToggleColour}
           className={`rounded p-1 hover:bg-gray-100 ${colourOpen ? 'text-blue-600' : 'text-gray-600'}`}

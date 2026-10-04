@@ -14,33 +14,64 @@ import { diffOverrides, type EditEntry } from '@/lib/ai/antv/editHistory';
 import type { ElementOverride, ElementOverrides } from '@/lib/ai/antv/elementOverrides';
 import type { VisualOutline } from '@/lib/ai/outline';
 
-import { isTextElement, selectedKeys, sameOverrides, type Selection } from './AntvElementChrome';
-import type { ColourRow } from './AntvElementColourMenu';
+import { selectedKeys, sameOverrides, type Selection } from './AntvElementChrome';
 
 /**
- * PATCH-270. The colour menu's state and commits, split out of
- * `AntvElementEditor` to keep that file under the 700-line ceiling. Behaviour is
- * unchanged: one history entry per row per colour session, then live updates.
+ * PATCH-270/275. The element panel's colour commits. Behaviour for history is
+ * unchanged: one entry per row per session, then live updates. PATCH-275 makes
+ * the recent list stable: picks are collected during a session (this panel on
+ * this selection) and merged into the visible list only when the session ends.
  */
 
+export type ColourRow = 'fill' | 'border' | 'icon' | 'text';
+
+export const COLOUR_ROW_LABELS: Record<ColourRow, string> = {
+  fill: 'Fill',
+  border: 'Border',
+  icon: 'Icon colour',
+  text: 'Text colour',
+};
+
 /** The row a value of this element type should land on. */
-function rowApplies(row: ColourRow, el: Element): boolean {
+export function rowApplies(row: ColourRow, el: Element): boolean {
   const kind = additionKindOf(el);
   if (kind) {
     if (row === 'text') return kind === 'text';
     if (row === 'icon') return kind === 'icon';
     return kind !== 'text' && kind !== 'icon';
   }
-  if (row === 'text') return isTextElement(el);
+  if (row === 'text') return isIconElement(el) ? false : isTextElementLike(el);
   if (row === 'icon') return isIconElement(el);
-  return !isTextElement(el) && !isIconElement(el);
+  return !isTextElementLike(el) && !isIconElement(el);
+}
+
+function isTextElementLike(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'text' || tag === 'foreignobject') return true;
+  const type = el.getAttribute('data-element-type');
+  return type === 'title' || type === 'item-label' || type === 'item-value' || type === 'item-desc' || type === 'label' || type === 'desc';
+}
+
+/** The colour rows a selection has, in panel order. */
+export function colourRowsForSelection(keys: string[], findElement: (key: string) => Element | null): ColourRow[] {
+  const rows = new Set<ColourRow>();
+  for (const key of keys) {
+    const el = findElement(key);
+    if (!el) continue;
+    const kind = additionKindOf(el);
+    if (kind === 'text' || (!kind && isTextElementLike(el))) rows.add('text');
+    else if (kind === 'icon' || (!kind && isIconElement(el))) rows.add('icon');
+    else {
+      rows.add('fill');
+      rows.add('border');
+    }
+  }
+  return [...rows];
 }
 
 export interface UseAntvElementColourOptions {
   template: string;
-  selection: Selection | null;
   selectionRef: React.MutableRefObject<Selection | null>;
-  overrides: ElementOverrides | undefined;
   overridesRef: React.MutableRefObject<ElementOverrides | undefined>;
   findElement: (key: string) => Element | null;
   cloneOverrides: () => ElementOverrides;
@@ -49,28 +80,31 @@ export interface UseAntvElementColourOptions {
   setOverrides: (next: ElementOverrides | undefined) => void;
   getContent: () => VisualOutline;
   emit: (nextOverrides: ElementOverrides | undefined, content: VisualOutline) => void;
+  palette: readonly string[];
 }
 
 export interface AntvElementColour {
-  colourOpen: boolean;
   recent: string[];
-  colourKeys: string[];
-  colourCurrent: ElementOverride;
-  colourRows: ColourRow[];
-  setColourOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  openColour: () => void;
-  resetSession: () => void;
-  toggleColour: () => void;
-  applyColour: (row: ColourRow, hex: string) => void;
+  applyColour: (row: ColourRow, hex: string, options?: { collect?: boolean }) => void;
   resetColour: () => void;
+  resetRow: (row: ColourRow) => void;
+  resetSession: () => void;
+  endSession: () => void;
+}
+
+const RECENT_MAX = 6;
+
+/** The override field a row writes. */
+function rowField(row: ColourRow): 'fill' | 'stroke' | 'text' {
+  if (row === 'border') return 'stroke';
+  if (row === 'text') return 'text';
+  return 'fill';
 }
 
 export function useAntvElementColour(options: UseAntvElementColourOptions): AntvElementColour {
   const {
     template,
-    selection,
     selectionRef,
-    overrides,
     overridesRef,
     findElement,
     cloneOverrides,
@@ -79,59 +113,49 @@ export function useAntvElementColour(options: UseAntvElementColourOptions): Antv
     setOverrides,
     getContent,
     emit,
+    palette,
   } = options;
 
-  const [colourOpen, setColourOpen] = React.useState(false);
   const [recent, setRecent] = React.useState<string[]>([]);
   /** Rows already given a history entry in the open colour session. */
   const colourSessionRef = React.useRef<Set<ColourRow>>(new Set());
+  /** Picks made in this session, oldest first; never reorders the visible list. */
+  const sessionPicksRef = React.useRef<string[]>([]);
 
-  const colourKeys = selectedKeys(selection);
-  const colourCurrent: ElementOverride = (() => {
-    const key = colourKeys[0];
-    if (!key) return {};
-    if (isAdditionKey(key)) {
-      const addition = findAdditionByKey(overrides, key);
-      return addition ? { fill: addition.fill, stroke: addition.stroke, text: addition.text } : {};
-    }
-    return overrides?.items[key] ?? {};
-  })();
-
-  const colourRows = React.useMemo<ColourRow[]>(() => {
-    if (!colourOpen) return [];
-    const rows = new Set<ColourRow>();
-    for (const key of selectedKeys(selection)) {
-      const el = findElement(key);
-      if (!el) continue;
-      const kind = additionKindOf(el);
-      if (kind === 'text' || (!kind && isTextElement(el))) rows.add('text');
-      else if (kind === 'icon' || (!kind && isIconElement(el))) rows.add('icon');
-      else {
-        rows.add('fill');
-        rows.add('border');
-      }
-    }
-    return [...rows];
-  }, [colourOpen, selection, findElement, overrides]);
+  // PATCH-275 Addendum 2. The palette prop is a NEW array on every renderer
+  // render (`theme.palette.map(...)`), so it must not feed the session
+  // callbacks' identities: read it through a ref and keep `endSession` stable,
+  // or the editor's session effect would end the session after every pick.
+  const paletteRef = React.useRef(palette);
+  paletteRef.current = palette;
 
   const resetSession = React.useCallback(() => {
     colourSessionRef.current = new Set();
+    sessionPicksRef.current = [];
   }, []);
 
-  const openColour = React.useCallback(() => {
+  const endSession = React.useCallback(() => {
+    const picks = sessionPicksRef.current;
     colourSessionRef.current = new Set();
-    setColourOpen(true);
-  }, []);
-
-  const toggleColour = React.useCallback(() => {
-    setColourOpen((open) => {
-      colourSessionRef.current = new Set();
-      return !open;
+    sessionPicksRef.current = [];
+    if (picks.length === 0) return;
+    const paletteSet = new Set(paletteRef.current.map((hex) => hex.toLowerCase()));
+    setRecent((previous) => {
+      const merged = [...picks].reverse().concat(previous);
+      const seen = new Set<string>();
+      const next: string[] = [];
+      for (const hex of merged) {
+        if (paletteSet.has(hex) || seen.has(hex)) continue;
+        seen.add(hex);
+        next.push(hex);
+        if (next.length >= RECENT_MAX) break;
+      }
+      return next;
     });
   }, []);
 
   const applyColour = React.useCallback(
-    (row: ColourRow, hex: string) => {
+    (row: ColourRow, hex: string, options2: { collect?: boolean } = {}) => {
       const keys = selectedKeys(selectionRef.current);
       if (keys.length === 0) return;
       let next = cloneOverrides();
@@ -154,7 +178,7 @@ export function useAntvElementColour(options: UseAntvElementColourOptions): Antv
       overridesRef.current = next;
       setOverrides(next);
       emit(next, getContent());
-      setRecent((prev) => [hex, ...prev.filter((value) => value !== hex)].slice(0, 6));
+      if (options2.collect !== false) sessionPicksRef.current.push(hex.toLowerCase());
     },
     [cloneOverrides, emit, findElement, getContent, overridesRef, recordEdit, selectionRef, setOverrides, template],
   );
@@ -185,17 +209,65 @@ export function useAntvElementColour(options: UseAntvElementColourOptions): Antv
     commit(next);
   }, [cloneOverrides, commit, selectionRef]);
 
-  return {
-    colourOpen,
-    recent,
-    colourKeys,
-    colourCurrent,
-    colourRows,
-    setColourOpen,
-    openColour,
-    resetSession,
-    toggleColour,
-    applyColour,
-    resetColour,
-  };
+  /** PATCH-275. The Original swatch: remove ONE field's override in this session. */
+  const resetRow = React.useCallback(
+    (row: ColourRow) => {
+      const keys = selectedKeys(selectionRef.current);
+      if (keys.length === 0) return;
+      const field = rowField(row);
+      let next = cloneOverrides();
+      let changed = false;
+      for (const key of keys) {
+        const el = findElement(key);
+        if (!el || !rowApplies(row, el)) continue;
+        if (isAdditionKey(key)) {
+          const addition = findAdditionByKey(next, key);
+          if (!addition || addition[field] === undefined) continue;
+          const patched = { ...addition };
+          delete patched[field];
+          next = updateAddition(next, key, patched);
+          changed = true;
+          continue;
+        }
+        const item = next.items[key];
+        if (!item || item[field] === undefined) continue;
+        const patched: ElementOverride = { ...item };
+        delete patched[field];
+        if (Object.keys(patched).length) next.items[key] = patched;
+        else delete next.items[key];
+        changed = true;
+      }
+      if (!changed) return;
+      const entry = diffOverrides(template, overridesRef.current, next);
+      if (entry) recordEdit(entry);
+      overridesRef.current = next;
+      setOverrides(next);
+      emit(next, getContent());
+    },
+    [cloneOverrides, emit, findElement, getContent, overridesRef, recordEdit, setOverrides, selectionRef, template],
+  );
+
+  return { recent, applyColour, resetColour, resetRow, resetSession, endSession };
+}
+
+/** PATCH-275. The current override literal for a row across the selection. */
+export function rowOverride(
+  row: ColourRow,
+  keys: string[],
+  overrides: ElementOverrides | undefined,
+): string | undefined {
+  for (const key of keys) {
+    if (isAdditionKey(key)) {
+      const addition = findAdditionByKey(overrides, key);
+      if (!addition) continue;
+      const value = row === 'border' ? addition.stroke : row === 'text' ? addition.text : addition.fill;
+      if (value) return value;
+      continue;
+    }
+    const item = overrides?.items[key];
+    if (!item) continue;
+    const value = row === 'border' ? item.stroke : row === 'text' ? item.text : item.fill;
+    if (value) return value;
+  }
+  return undefined;
 }

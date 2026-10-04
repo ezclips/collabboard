@@ -9,6 +9,7 @@ import AntvAddPanel from '@/components/ai/renderers/AntvAddPanel';
 import InfographicRenderer from '@/components/ai/renderers/InfographicRenderer';
 import MindmapTreeRenderer from '@/components/ai/renderers/MindmapTreeRenderer';
 import type { PictureStageMode } from '@/components/ai/renderers/PictureStage';
+import { DockedPanelShell, PictureSidePanelContext } from '@/components/ai/renderers/PictureSidePanel';
 import { isAntvTemplate, type InfographicDiagramData, type MindmapDiagramData } from '@/lib/ai/contracts';
 import { antvTemplateLabel, similarTemplates } from '@/lib/ai/antv/catalog';
 import { createAddition } from '@/lib/ai/antv/additions';
@@ -292,6 +293,11 @@ export default function OutlineSuggestionsPanel({
   // unmounts the panel while loading, so a new Generate reopens it; a theme
   // change or local re-rank leaves a user-closed panel closed).
   const [panel, setPanel] = React.useState<SidePanelId | null>(() => (options.length > 0 || loading ? 'designs' : null));
+  // PATCH-275. The element's own panel shares this column. While it is open the
+  // design panel is hidden but its state is kept, so it returns when it closes.
+  const [elementPanelOpen, setElementPanelOpen] = React.useState(false);
+  const [inlineHost, setInlineHost] = React.useState<HTMLDivElement | null>(null);
+  const sidePanelElementHost = sidePanelHost ?? inlineHost;
   const toolbarRef = React.useRef<HTMLDivElement | null>(null);
   const [detail, setDetail] = React.useState<'auto' | 'summary' | 'detailed'>('auto');
   const [keepWording, setKeepWording] = React.useState(false);
@@ -328,14 +334,19 @@ export default function OutlineSuggestionsPanel({
       onEditOutline: onEditOutline ?? (() => {}),
     });
 
-  const togglePanel = (id: SidePanelId) =>
-    setPanel((current) => (current === id ? null : id));
+  // PATCH-275. A toolbar button always yields the column to the design panel
+  // first; when the element panel owned it, the button opens its own panel.
+  const togglePanel = (id: SidePanelId) => {
+    const elementOwned = elementPanelOpen;
+    setElementPanelOpen(false);
+    setPanel((current) => (elementOwned ? id : current === id ? null : id));
+  };
   const closePanel = () => setPanel(null);
 
-  // PATCH-252. Report the open/closed state so the editor can size its modal.
+  // PATCH-252/275. Report the open/closed state so the editor can size its modal.
   React.useEffect(() => {
-    onSidePanelChange?.(panel !== null);
-  }, [panel, onSidePanelChange]);
+    onSidePanelChange?.(panel !== null || elementPanelOpen);
+  }, [panel, elementPanelOpen, onSidePanelChange]);
 
   // PATCH-255. On unmount report closed, so a stale open state cannot outlive
   // the panel (the editor unmounts it when switching away from Show options).
@@ -454,27 +465,15 @@ export default function OutlineSuggestionsPanel({
   // tall as the row); inline it is a normal flex child bounded by min-h-0. In
   // both cases the root is a flex column whose body is height-bounded so it can
   // scroll instead of growing the column with its content.
-  const sidePanel = panel ? (
-    <section
-      data-ai-side-panel={panel}
-      className={`flex w-full flex-col bg-white ${sidePanelHost ? 'absolute inset-0' : 'h-full min-h-0'}`}
+  const sidePanel = panel && !elementPanelOpen ? (
+    <DockedPanelShell
+      id={panel}
+      icon={SIDE_PANEL_ICONS[panel]}
+      title={SIDE_PANEL_TITLES[panel]}
+      headerExtra={panel === 'designs' ? familyChip : undefined}
+      onClose={closePanel}
+      className={sidePanelHost ? 'absolute inset-0' : 'h-full min-h-0'}
     >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 px-3">
-        <span className="text-gray-500">{SIDE_PANEL_ICONS[panel]}</span>
-        <span className="text-sm font-semibold text-gray-700">{SIDE_PANEL_TITLES[panel]}</span>
-        {panel === 'designs' && familyChip}
-        <button
-          type="button"
-          data-ai-side-panel-close="true"
-          aria-label="Close panel"
-          title="Close panel"
-          onClick={closePanel}
-          className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        >
-          <X size={16} aria-hidden="true" />
-        </button>
-      </div>
-
       {panel === 'designs' ? (
         <div
           ref={tilesRef}
@@ -636,11 +635,12 @@ export default function OutlineSuggestionsPanel({
           )}
         </div>
       )}
-    </section>
+    </DockedPanelShell>
   ) : null;
 
   return (
-    <div data-ai-outline-options="true" className="flex h-full w-full flex-row gap-3 overflow-hidden p-4">
+    <PictureSidePanelContext.Provider value={{ host: sidePanelElementHost, elementPanelOpen, setElementPanelOpen }}>
+      <div data-ai-outline-options="true" className="flex h-full w-full flex-row gap-3 overflow-hidden p-4">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* PATCH-268. An all-zero pie has no slices to draw; say so in the chart
             info area instead of showing an empty disk. */}
@@ -779,10 +779,11 @@ export default function OutlineSuggestionsPanel({
         )}
       </div>
 
-      {!sidePanelHost && sidePanel && (
-        <div className="flex h-full min-h-0 w-[340px] shrink-0 flex-col border-l border-gray-200 bg-white">{sidePanel}</div>
+      {!sidePanelHost && (sidePanel || elementPanelOpen) && (
+        <div ref={setInlineHost} className="flex h-full min-h-0 w-[340px] shrink-0 flex-col border-l border-gray-200 bg-white">{sidePanel}</div>
       )}
       {sidePanelHost && sidePanel && createPortal(sidePanel, sidePanelHost)}
-    </div>
+      </div>
+    </PictureSidePanelContext.Provider>
   );
 }

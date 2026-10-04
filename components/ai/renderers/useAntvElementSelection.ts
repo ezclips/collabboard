@@ -37,7 +37,7 @@ export interface UseAntvElementSelectionOptions {
   setRect: (rect: ChromeRect | null) => void;
   applyNarrow: (next: Selection) => void;
   beginMove: (event: PointerEvent, next: Selection, narrowTo: Selection | null) => void;
-  openColour: () => void;
+  openPanel: () => void;
   setEditingText: (value: { key: string; value: string } | null) => void;
 }
 
@@ -53,7 +53,7 @@ export function useAntvElementSelection(options: UseAntvElementSelectionOptions)
     setRect,
     applyNarrow,
     beginMove,
-    openColour,
+    openPanel,
     setEditingText,
   } = options;
 
@@ -126,7 +126,7 @@ export function useAntvElementSelection(options: UseAntvElementSelectionOptions)
           const addition = findAdditionByKey(overridesRef.current, key);
           setEditingText({ key, value: addition?.label ?? '' });
         } else {
-          openColour();
+          openPanel();
         }
         return;
       }
@@ -140,7 +140,7 @@ export function useAntvElementSelection(options: UseAntvElementSelectionOptions)
       selectionRef.current = next;
       setSelection(next);
       setRect(measureKeys([key]));
-      openColour();
+      openPanel();
     };
 
     root.addEventListener('pointerdown', onPointerDown, true);
@@ -155,7 +155,7 @@ export function useAntvElementSelection(options: UseAntvElementSelectionOptions)
     applyNarrow,
     beginMove,
     measureKeys,
-    openColour,
+    openPanel,
     overridesRef,
     pendingNarrowRef,
     rootElement,

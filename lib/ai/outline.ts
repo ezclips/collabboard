@@ -118,20 +118,35 @@ export interface VisualOutline {
 export const OUTLINE_FONT_SIZE_MIN = 8;
 export const OUTLINE_FONT_SIZE_MAX = 72;
 
+export interface TextStyleFontFamily {
+  /** The exact stored value AntV reads. */
+  value: string;
+  /** A short, readable name for a picker. */
+  label: string;
+}
+
 /**
- * PATCH-244. The font families AntV's toolbar can set: its five registered
+ * PATCH-244/275. The font families AntV's toolbar can set: its five registered
  * faces plus our two system-only stacks (see `antv/setup.ts`). A family outside
- * this list is dropped.
+ * this list is dropped. Exported so the element panel can offer them by name.
  */
-const TEXT_STYLE_FONT_FAMILIES = new Set<string>([
-  'Alibaba PuHuiTi',
-  'Source Han Sans',
-  'Source Han Serif',
-  'LXGW WenKai',
-  '851tegakizatsu',
-  'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
-  "'Segoe Print', 'Comic Sans MS', 'Bradley Hand', cursive",
-]);
+export const TEXT_STYLE_FONT_FAMILIES: readonly TextStyleFontFamily[] = [
+  { value: 'Alibaba PuHuiTi', label: 'Alibaba PuHuiTi' },
+  { value: 'Source Han Sans', label: 'Source Han Sans' },
+  { value: 'Source Han Serif', label: 'Source Han Serif' },
+  { value: 'LXGW WenKai', label: 'LXGW WenKai' },
+  { value: '851tegakizatsu', label: '851tegakizatsu' },
+  {
+    value: 'system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+    label: 'System',
+  },
+  {
+    value: "'Segoe Print', 'Comic Sans MS', 'Bradley Hand', cursive",
+    label: 'Handwriting',
+  },
+] as const;
+
+const TEXT_STYLE_FONT_FAMILY_VALUES = new Set(TEXT_STYLE_FONT_FAMILIES.map((family) => family.value));
 
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const RGB_COLOR =
@@ -170,7 +185,7 @@ export function sanitizeTextStyle(raw: unknown): TextStyle | undefined {
   ) {
     style.fontSize = input.fontSize;
   }
-  if (typeof input.fontFamily === 'string' && TEXT_STYLE_FONT_FAMILIES.has(input.fontFamily)) {
+  if (typeof input.fontFamily === 'string' && TEXT_STYLE_FONT_FAMILY_VALUES.has(input.fontFamily)) {
     style.fontFamily = input.fontFamily;
   }
   if (input.align === 'left' || input.align === 'center' || input.align === 'right') {

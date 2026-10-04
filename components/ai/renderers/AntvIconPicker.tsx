@@ -4,15 +4,12 @@ import React from 'react';
 
 import { VISUAL_ICON_NAMES, type VisualIconName } from '@/lib/ai/visualIcons';
 
-import { useClampedLeft, type ChromeRect } from './AntvElementChrome';
 import { VISUAL_ICON_MAP } from './visualIconMap';
 
 /**
- * PATCH-262. The searchable icon grid, shared by the selection bar's "Change
- * icon" popover and the Add panel. Every control carries `data-picture-control`
- * and stops pointerdown so PictureStage's pan never captures the press
- * (PATCH-261 Addendum 1). The popover clamps inside the preview (PATCH-263
- * Addendum 3) and counter-scales from the layer's real scale (Addendum 2).
+ * PATCH-262/275. The searchable icon grid, shared by the element panel and the
+ * Add panel. Every control carries `data-picture-control` and stops pointerdown
+ * so PictureStage's pan never captures the press (PATCH-261 Addendum 1).
  */
 
 export interface AntvIconSearchProps {
@@ -79,44 +76,3 @@ export function AntvIconSearch({ current, onPick, optionAttribute, onEscape }: A
   );
 }
 
-export interface AntvIconPickerProps {
-  rect: ChromeRect;
-  counterScale: number;
-  current?: string | null;
-  below?: boolean;
-  onPick: (name: VisualIconName) => void;
-  onClose: () => void;
-}
-
-export default function AntvIconPicker({
-  rect,
-  counterScale,
-  current,
-  below = false,
-  onPick,
-  onClose,
-}: AntvIconPickerProps) {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const left = useClampedLeft(ref, rect.left, counterScale);
-
-  return (
-    <div
-      ref={ref}
-      data-ai-icon-picker="true"
-      data-picture-control="true"
-      onPointerDown={(event) => event.stopPropagation()}
-      className="absolute z-30 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-xl"
-      style={{
-        pointerEvents: 'auto',
-        left: `${left}%`,
-        top: below
-          ? `calc(${rect.top + rect.height}% + 36px)`
-          : `calc(${Math.max(rect.top, 0)}% + 34px)`,
-        transform: `scale(${counterScale})`,
-        transformOrigin: 'left top',
-      }}
-    >
-      <AntvIconSearch current={current} onPick={onPick} onEscape={onClose} />
-    </div>
-  );
-}

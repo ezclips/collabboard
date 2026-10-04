@@ -191,6 +191,11 @@ describe('PATCH-260 AIComponentEditor keeps elementOverrides across the round tr
     // carry the current outline (with the override), not the suggestion's own
     // stale `outline` copy built before the move.
     await dragTitle(c, 20, 15, 1);
+    // PATCH-275. Selecting an element hides the Designs panel behind the
+    // element's own panel; reopen Designs before picking another design.
+    if (!c.querySelector('[data-ai-outline-option]')) {
+      click(c.querySelector('[data-ai-designs-toggle]') as Element);
+    }
     const other = Array.from(
       c.querySelectorAll('[data-ai-outline-option]'),
     ).find((el) => (el.getAttribute('data-ai-outline-option') ?? '').startsWith('antv:') && el.getAttribute('aria-pressed') !== 'true') as HTMLElement;

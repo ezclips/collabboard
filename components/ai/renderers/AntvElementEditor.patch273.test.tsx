@@ -11,8 +11,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { overridesForTemplate } from '@/lib/ai/antv/templateOverrides';
 import type { VisualOutline } from '@/lib/ai/outline';
 import AntvElementEditor from './AntvElementEditor';
+import { PictureSidePanelContext } from './PictureSidePanel';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** PATCH-275. A provider + host so the element panel renders in these tests. */
+function PanelHostProvider({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  const [host, setHost] = React.useState<HTMLDivElement | null>(null);
+  return (
+    <div>
+      <div data-test-panel-host="true" ref={setHost} />
+      <PictureSidePanelContext.Provider value={{ host, elementPanelOpen: open, setElementPanelOpen: setOpen }}>
+        {children}
+      </PictureSidePanelContext.Provider>
+    </div>
+  );
+}
 
 if (typeof (window as any).PointerEvent === 'undefined') {
   class PointerEventPolyfill extends MouseEvent {
@@ -82,12 +97,14 @@ function ControlledHost({
     setTemplate: (next) => act(() => setTemplate(next)),
   };
   return (
-    <AntvElementEditor
-      containerRef={editorRef!}
-      template={template}
-      outline={outline}
-      onChange={handleChange}
-    />
+    <PanelHostProvider>
+      <AntvElementEditor
+        containerRef={editorRef!}
+        template={template}
+        outline={outline}
+        onChange={handleChange}
+      />
+    </PanelHostProvider>
   );
 }
 
@@ -153,7 +170,6 @@ function selectLabel() {
 
 /** Pick the first available colour row's first swatch; return the hex picked. */
 function colourSelected() {
-  click(reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element);
   const swatch = reactHost!.querySelector('[data-ai-element-swatch]') as Element;
   expect(swatch).not.toBeNull();
   const value = swatch.getAttribute('data-ai-element-swatch-value')!;

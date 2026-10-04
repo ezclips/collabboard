@@ -45,6 +45,7 @@ import { withItemIds } from '@/lib/ai/outline';
 import { remapOverridesForItems } from '@/lib/ai/antv/remapOverrides';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from '@/components/collabboard/editors/OutlineTextEditor';
+import { PictureSidePanelContext } from '@/components/ai/renderers/PictureSidePanel';
 import FlowStepsEditor from './FlowStepsEditor';
 import MindmapTreeEditor from './MindmapTreeEditor';
 
@@ -663,6 +664,10 @@ export default function AIContentEditModal({
   // PATCH-241. Infographic pictures open picture-first; the form sits behind a
   // "List view" toggle (closed by default).
   const [listView, setListView] = useState(false);
+  // PATCH-275. The element panel shares the docked column; its host is the last
+  // child of the modal body while an element is selected.
+  const [elementPanelOpen, setElementPanelOpen] = useState(false);
+  const [sidePanelHost, setSidePanelHost] = useState<HTMLDivElement | null>(null);
 
   // PATCH-264. The diagram type label ("MINDMAP", ...) edits on the picture.
   const diagramKicker = useDiagramKicker(readDiagramKicker(parsedEnvelope));
@@ -680,6 +685,7 @@ export default function AIContentEditModal({
     setDiagramRenderPhase({ phase: 'idle' });
     setAdvancedOpen(false);
     setListView(false);
+    setElementPanelOpen(false);
 
     trackAIEditOpened({
       mode: parsedEnvelope.mode,
@@ -1086,6 +1092,9 @@ export default function AIContentEditModal({
           className="flex flex-1 overflow-hidden"
           style={{ minHeight: '60vh' }}
         >
+          <PictureSidePanelContext.Provider
+            value={{ host: sidePanelHost, elementPanelOpen, setElementPanelOpen }}
+          >
           {isInfographic && !listView ? (
             /* PATCH-241: picture-first -- the picture fills the window and is
                edited directly; the form is behind "List view". */
@@ -1132,6 +1141,14 @@ export default function AIContentEditModal({
               </div>
             </>
           )}
+          {elementPanelOpen && (
+            <div
+              ref={setSidePanelHost}
+              data-ai-side-panel-host="true"
+              className="relative w-[320px] shrink-0 border-l border-gray-200 bg-white"
+            />
+          )}
+          </PictureSidePanelContext.Provider>
         </div>
 
         {/* Footer */}

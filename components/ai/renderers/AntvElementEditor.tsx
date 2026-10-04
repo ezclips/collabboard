@@ -45,8 +45,8 @@ import {
   type Selection,
 } from './AntvElementChrome';
 import AntvAddedTextInput from './AntvAddedTextInput';
-import AntvElementColourMenu from './AntvElementColourMenu';
-import AntvIconPicker from './AntvIconPicker';
+import { renderAntvElementPanel } from './useAntvElementPanel';
+import { usePictureSidePanel } from './PictureSidePanel';
 import { useAntvElementColour } from './useAntvElementColour';
 import { useAntvElementDrag } from './useAntvElementDrag';
 import { useAntvElementSelection } from './useAntvElementSelection';
@@ -54,23 +54,11 @@ import { useAntvIconSwap } from './useAntvIconSwap';
 import { useLayerCounterScale } from './PictureEditOverlay';
 
 /**
- * PATCH-260. The HTML editing layer over an AntV picture. Defects fixed live:
- *   - 1: resize works in SCREEN deltas, so the new on-screen box is exactly the
- *     old box plus the pointer delta at any zoom;
- *   - 2: every box comes from SVG geometry (getBBox -> getScreenCTM), so 0x0
- *     client-rect elements (icons) select; only handles/bar take pointer events;
- *   - 3: the first click on an item's part selects the WHOLE item and moves all
- *     its members in one history entry; a second click drills into one element.
- *
- * PATCH-261 adds a colour menu (Fill/Border/Icon colour/Text) opened from the bar
- * or by double-clicking a shape/icon. It only edits `elementOverrides`, so every
- * commit is a plain outline change -- no AI call, no credit -- and it is NOT part
- * of the saved picture. Presentational chrome and the drag machine are split into
- * AntvElementChrome / useAntvElementDrag.
- *
- * PATCH-270. History is scoped and shared (editHistory.ts + the colour hook): an
- * entry records only what changed, so Undo reverses that one change on the
- * CURRENT outline instead of restoring an older copy of the whole picture.
+ * PATCH-260. The HTML editing layer over an AntV picture: selection in SVG
+ * geometry (screen deltas, 0x0 icons), whole-item-first clicking, move/resize
+ * and scoped undo (PATCH-270). PATCH-275 moves the colour and icon editing out
+ * of floating popovers into the element's own docked side panel; only the box,
+ * handles, bar and panel remain.
  */
 
 export interface AntvElementEditorProps {
@@ -115,13 +103,16 @@ export default function AntvElementEditor({
   );
   const [selection, setSelection] = React.useState<Selection | null>(null);
   const [rect, setRect] = React.useState<Rect | null>(null);
-  const [iconOpen, setIconOpen] = React.useState(false);
   const [editingText, setEditingText] = React.useState<{ key: string; value: string } | null>(null);
 
-  // Refs keep the native (window/container) listeners reading fresh values. The
-  // state is NOT mirrored here during render: an interrupted/concurrent render
-  // could otherwise clobber the ref with an older state between two pointermove
-  // events, so a resize would start from a stale override set (defect 1).
+  // PATCH-275. The element's own panel lives in the docked column the provider
+  // owns. Without a provider nothing is rendered (unit tests, plain usage).
+  const pictureSidePanel = usePictureSidePanel();
+  const elementPanelOpen = pictureSidePanel?.elementPanelOpen ?? false;
+  const setElementPanelOpen = pictureSidePanel?.setElementPanelOpen;
+
+  // Refs keep the native listeners reading fresh values; state is not mirrored
+  // during render (a concurrent render could clobber a resize's stale base).
   const overridesRef = React.useRef(overrides);
   const selectionRef = React.useRef(selection);
   const outlineRef = React.useRef(outline);
@@ -136,10 +127,7 @@ export default function AntvElementEditor({
   const suppressClickRef = React.useRef(false);
   /** PATCH-270. One scoped history for the picture (past/future, max 50). */
   const historyRef = React.useRef(createEditHistory());
-  /**
-   * PATCH-270 Addendum 1. The full overrides at drag start, so a drag commit
-   * records the dragged keys' `before` and nothing else.
-   */
+  /** PATCH-270. The full overrides at drag start, so a drag records only its keys. */
   const dragBaseRef = React.useRef<ElementOverrides | undefined>(undefined);
 
   const recordEdit = React.useCallback((entry: EditEntry) => {
@@ -377,25 +365,18 @@ export default function AntvElementEditor({
     [cloneOverrides, commit],
   );
 
-  // ── Colour (PATCH-261) ─────────────────────────────────────────────────────
+  // ── Colour (PATCH-261/275) ─────────────────────────────────────────────────
 
   const {
-    colourOpen,
     recent,
-    colourKeys,
-    colourCurrent,
-    colourRows,
-    setColourOpen,
-    openColour,
-    resetSession,
-    toggleColour,
     applyColour,
     resetColour,
+    resetRow,
+    resetSession,
+    endSession,
   } = useAntvElementColour({
     template,
-    selection,
     selectionRef,
-    overrides,
     overridesRef,
     findElement,
     cloneOverrides,
@@ -404,8 +385,10 @@ export default function AntvElementEditor({
     setOverrides,
     getContent: () => outlineRef.current,
     emit,
+    palette,
   });
 
+  const colourKeys = selection ? selectedKeys(selection) : [];
   // PATCH-261 fix. AntV's own text toolbar sits directly above a selected text
   // element (z-index 9999), exactly where our bar would be, so a text-only
   // selection drops the bar below the box. If below would leave the stage, fall
@@ -413,7 +396,16 @@ export default function AntvElementEditor({
   const textOnlySelection = colourKeys.length > 0 && colourKeys.every((key) => isTextElement(findElement(key)));
   const barBelow = rect !== null && textOnlySelection && rect.top + rect.height < 80;
 
-  // ── Change icon (PATCH-262) ────────────────────────────────────────────────
+  const openPanel = React.useCallback(() => {
+    setElementPanelOpen?.(true);
+  }, [setElementPanelOpen]);
+
+  const togglePanel = React.useCallback(() => {
+    setElementPanelOpen?.(!elementPanelOpen);
+  }, [setElementPanelOpen, elementPanelOpen]);
+
+  // ── Change icon (PATCH-262/275) ─────────────────────────────────────────────
+
   const { iconItemIndex, iconCurrent, applyIcon } = useAntvIconSwap({
     selection,
     findElement,
@@ -421,13 +413,8 @@ export default function AntvElementEditor({
     outline,
     getContent: () => outlineRef.current,
     commitContent,
-    onPicked: () => setIconOpen(false),
+    onPicked: () => {},
   });
-
-  const toggleIcon = React.useCallback(() => {
-    setIconOpen((open) => !open);
-    setColourOpen(false);
-  }, [setColourOpen]);
 
   // Added text: double-click opens a small inline input (Enter/blur commit,
   // Escape cancels). The input is an <input>, so the editor's key handler yields.
@@ -438,6 +425,30 @@ export default function AntvElementEditor({
       setEditingText(null);
     },
     [cloneOverrides, commit],
+  );
+
+  /** PATCH-275. The panel's added-text label / size, undoable via the override map. */
+  const commitAdditionLabel = React.useCallback(
+    (key: string, value: string) => {
+      commit(updateAddition(cloneOverrides(), key, { label: value.slice(0, 200) }));
+    },
+    [cloneOverrides, commit],
+  );
+
+  const commitAdditionFontSize = React.useCallback(
+    (key: string, size: number) => {
+      commit(updateAddition(cloneOverrides(), key, { fontSize: size }));
+    },
+    [cloneOverrides, commit],
+  );
+
+  /** PATCH-275. Applies a text edit to the outline and records its history entry. */
+  const commitOutline = React.useCallback(
+    (next: VisualOutline, entry: EditEntry | null) => {
+      if (entry) recordEdit(entry);
+      emit(overridesRef.current, next);
+    },
+    [emit, recordEdit],
   );
 
   // ── Selection ──────────────────────────────────────────────────────────────
@@ -496,8 +507,22 @@ export default function AntvElementEditor({
     onSelectionChange?.(selection ? selection.scope : null);
   }, [selection, onSelectionChange]);
 
+  // PATCH-275. Selecting an element opens its panel; deselecting closes it.
+  React.useEffect(() => {
+    setElementPanelOpen?.(selection !== null);
+  }, [selection, setElementPanelOpen]);
+
+  // PATCH-275. A colour session is "this panel on this selection": its picks
+  // merge into the recent list when the selection or panel changes, and the
+  // per-row history resets.
+  const selectionKey = selection ? selectedKeys(selection).join('|') : '';
+  React.useEffect(() => {
+    resetSession();
+    return () => endSession();
+  }, [selectionKey, elementPanelOpen, resetSession, endSession]);
+
   // Container listeners: select + start a move, narrow on a click, and open the
-  // colour menu on a double-click of a shape/icon (PATCH-270: extracted hook).
+  // element panel on a double-click of a shape/icon (PATCH-270: extracted hook).
   useAntvElementSelection({
     rootElement,
     selectionRef,
@@ -509,7 +534,7 @@ export default function AntvElementEditor({
     setRect,
     applyNarrow,
     beginMove: beginMoveTracked,
-    openColour,
+    openPanel,
     setEditingText,
   });
 
@@ -557,12 +582,10 @@ export default function AntvElementEditor({
     selectionRef.current = null;
     setOverrides(next);
     setSelection(null);
-    setColourOpen(false);
-    setIconOpen(false);
     setEditingText(null);
     resetSession();
     historyRef.current.clear();
-  }, [template, resetSession, setColourOpen]);
+  }, [template, resetSession]);
 
   // Keyboard: Escape deselects; Delete hides; Ctrl/⌘+Z / Shift+Z / Y. PATCH-270:
   // attached with OR without a selection, so Ctrl+Z reaches our history whenever
@@ -576,21 +599,14 @@ export default function AntvElementEditor({
       const key = event.key.toLowerCase();
       if (event.key === 'Escape') {
         if (!current) return;
-        // PATCH-265. The editor owns Escape while it has a selection: the open
-        // popover closes first, then a second Escape deselects. PATCH-262 adds
-        // the icon picker to that order (and the added-text input consumes its
-        // own Escape before this handler runs). Prevent the key in the capture
+        // PATCH-265/275. Escape inside a panel field is handled by the field
+        // (focus is in an input, so we returned above). Otherwise Escape
+        // deselects, which closes the panel. Prevent the key in the capture
         // phase so a document listener -- the docked panel's close-on-Escape --
         // yields to it.
         event.preventDefault();
-        if (iconOpen) {
-          setIconOpen(false);
-        } else if (colourOpen) {
-          setColourOpen(false);
-        } else {
-          selectionRef.current = null;
-          setSelection(null);
-        }
+        selectionRef.current = null;
+        setSelection(null);
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         if (keys.length === 0) return;
         event.preventDefault();
@@ -605,7 +621,7 @@ export default function AntvElementEditor({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [colourOpen, iconOpen, commitHidden, redo, rootElement, setColourOpen, undo]);
+  }, [commitHidden, redo, rootElement, undo]);
 
   const handleDelete = () => commitHidden(selectedKeys(selectionRef.current));
   const handleReset = () => commitReset(selectedKeys(selectionRef.current));
@@ -628,6 +644,29 @@ export default function AntvElementEditor({
   const screenWidth = hostRect?.width ?? 0;
   const screenHeight = hostRect?.height ?? 0;
 
+  const panel = renderAntvElementPanel(elementPanelOpen, pictureSidePanel?.host ?? null, {
+    selection,
+    outline,
+    template,
+    palette,
+    recent,
+    overrides,
+    findElement,
+    iconItemIndex,
+    iconCurrent,
+    getContent: () => outlineRef.current,
+    commitOutline,
+    onApplyColour: applyColour,
+    onResetColour: resetColour,
+    onResetRow: resetRow,
+    onApplyIcon: applyIcon,
+    onAdditionText: commitAdditionLabel,
+    onAdditionFontSize: commitAdditionFontSize,
+    onReset: handleReset,
+    onDelete: handleDelete,
+    onClose: () => setElementPanelOpen?.(false),
+  });
+
   return (
     <AntvElementChrome
       selectionLabel={selectionLabel}
@@ -636,41 +675,15 @@ export default function AntvElementEditor({
       screenWidth={screenWidth}
       screenHeight={screenHeight}
       counterScale={counterScale}
-      colourOpen={colourOpen}
+      colourOpen={elementPanelOpen}
       barBelow={barBelow}
-      showIconButton={iconItemIndex != null}
-      iconOpen={iconOpen}
       onResize={beginResizeTracked}
       onUndo={undo}
       onRedo={redo}
       onReset={handleReset}
       onDelete={handleDelete}
-      onToggleColour={toggleColour}
-      onToggleIcon={toggleIcon}
+      onToggleColour={togglePanel}
     >
-      {colourOpen && (
-        <AntvElementColourMenu
-          rows={colourRows}
-          palette={palette}
-          recent={recent}
-          current={colourCurrent}
-          rect={rect}
-          counterScale={counterScale}
-          below={barBelow}
-          onPick={applyColour}
-          onReset={resetColour}
-        />
-      )}
-      {iconOpen && (
-        <AntvIconPicker
-          rect={rect}
-          counterScale={counterScale}
-          current={iconCurrent}
-          below={barBelow}
-          onPick={applyIcon}
-          onClose={() => setIconOpen(false)}
-        />
-      )}
       {editingText && (
         <AntvAddedTextInput
           value={editingText.value}
@@ -681,6 +694,7 @@ export default function AntvElementEditor({
           onCancel={() => setEditingText(null)}
         />
       )}
+      {panel}
     </AntvElementChrome>
   );
 }

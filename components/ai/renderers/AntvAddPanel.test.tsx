@@ -12,8 +12,23 @@ import { createAddition, type Addition } from '@/lib/ai/antv/additions';
 import type { VisualOutline } from '@/lib/ai/outline';
 import AntvAddPanel from './AntvAddPanel';
 import AntvElementEditor from './AntvElementEditor';
+import { PictureSidePanelContext } from './PictureSidePanel';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** PATCH-275. A provider + host so the element panel renders in these tests. */
+function PanelHostProvider({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  const [host, setHost] = React.useState<HTMLDivElement | null>(null);
+  return (
+    <div>
+      <div data-test-panel-host="true" ref={setHost} />
+      <PictureSidePanelContext.Provider value={{ host, elementPanelOpen: open, setElementPanelOpen: setOpen }}>
+        {children}
+      </PictureSidePanelContext.Provider>
+    </div>
+  );
+}
 
 if (typeof (window as any).PointerEvent === 'undefined') {
   class PointerEventPolyfill extends MouseEvent {
@@ -76,7 +91,9 @@ function mount(el: HTMLDivElement, onChange: (next: VisualOutline) => void, outl
   editorRef = { current: el };
   act(() => {
     root!.render(
-      <AntvElementEditor containerRef={editorRef!} template={template} outline={outline} onChange={onChange} />,
+      <PanelHostProvider>
+        <AntvElementEditor containerRef={editorRef!} template={template} outline={outline} onChange={onChange} />
+      </PanelHostProvider>,
     );
   });
 }
@@ -189,20 +206,17 @@ describe('PATCH-262 AntvAddPanel', () => {
   });
 });
 
-describe('PATCH-262 change icon', () => {
-  it('replaces a flat item icon from the searchable picker', () => {
+describe('PATCH-262 change icon (now the element panel icon grid)', () => {
+  it('replaces a flat item icon from the searchable panel grid', () => {
     const onChange = vi.fn();
     mount(container!, onChange);
     selectIcon();
     expect(selectedAttr()).toBe('item-icon@0');
 
-    click(reactHost!.querySelector('[data-ai-element-icon-toggle]')!);
-    expect(iconPicker()).not.toBeNull();
-
     const rocket = reactHost!.querySelector('[data-ai-icon-option][data-ai-icon-name="rocket"]') as Element;
     click(rocket);
     expect(lastOutline(onChange).items[0].icon).toBe('rocket');
-    expect(iconPicker()).toBeNull();
+    expect(reactHost!.querySelector('[data-ai-icon-picker]')).toBeNull();
   });
 
   it('respects the hierarchy root offset: icon indexes 0,1 change outline item 1', () => {
@@ -219,17 +233,15 @@ describe('PATCH-262 change icon', () => {
     selectIcon();
     expect(selectedAttr()).toBe('item-icon@0,1');
 
-    click(reactHost!.querySelector('[data-ai-element-icon-toggle]')!);
     click(reactHost!.querySelector('[data-ai-icon-option][data-ai-icon-name="star"]')!);
     expect(lastOutline(onChange).items[1].icon).toBe('star');
     expect(lastOutline(onChange).items[0].icon).toBeUndefined();
   });
 
-  it('filters the picker grid and highlights the current icon', () => {
+  it('filters the grid and highlights the current icon', () => {
     const outline: VisualOutline = { ...BASE, items: [{ label: 'A', icon: 'star' }, { label: 'B' }] };
     mount(container!, vi.fn(), outline);
     selectIcon();
-    click(reactHost!.querySelector('[data-ai-element-icon-toggle]')!);
 
     const current = reactHost!.querySelector('[data-ai-icon-option][data-ai-icon-name="star"]') as HTMLElement;
     expect(current.getAttribute('aria-pressed')).toBe('true');
@@ -244,16 +256,15 @@ describe('PATCH-262 change icon', () => {
     expect(names).toEqual(['target']);
   });
 
-  it('Escape closes the picker first and keeps the selection', () => {
+  it('Escape typed in the icon search keeps the panel and the selection', () => {
     mount(container!, vi.fn());
     selectIcon();
-    click(reactHost!.querySelector('[data-ai-element-icon-toggle]')!);
-    expect(iconPicker()).not.toBeNull();
+    const search = reactHost!.querySelector('[data-ai-icon-search]') as HTMLInputElement;
+    act(() => { search.focus(); });
 
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    act(() => { document.body.dispatchEvent(event); });
-    expect(event.defaultPrevented).toBe(true);
-    expect(iconPicker()).toBeNull();
+    act(() => { search.dispatchEvent(event); });
+    expect(reactHost!.querySelector('[data-ai-element-panel]')).not.toBeNull();
     expect(selectedAttr()).toBe('item-icon@0');
   });
 });
@@ -263,7 +274,7 @@ const PAN_BLOCK_SELECTOR =
   '[data-ai-edit-ref],[data-ai-edit-add],[data-ai-edit-remove],[data-ai-edit-shape],input,[data-element-type],[data-picture-control]';
 
 describe('PATCH-262 controls vs PictureStage pan capture', () => {
-  it('a pointerdown on the icon picker search is not captured and does not deselect', () => {
+  it('a pointerdown on the panel icon search is not captured and does not deselect', () => {
     let captures = 0;
     reactHost = document.createElement('div');
     document.body.appendChild(reactHost);
@@ -279,12 +290,13 @@ describe('PATCH-262 controls vs PictureStage pan capture', () => {
             captures += 1;
           }}
         >
-          <AntvElementEditor containerRef={editorRef!} template="list-grid-badge-card" outline={BASE} onChange={vi.fn()} />
+          <PanelHostProvider>
+            <AntvElementEditor containerRef={editorRef!} template="list-grid-badge-card" outline={BASE} onChange={vi.fn()} />
+          </PanelHostProvider>
         </div>,
       );
     });
     selectIcon();
-    click(reactHost.querySelector('[data-ai-element-icon-toggle]')!);
     const search = reactHost.querySelector('[data-ai-icon-search]') as Element;
     pointer(search, 'pointerdown', 0, 0, 1);
     pointer(window, 'pointerup', 0, 0, 1);
@@ -318,12 +330,14 @@ describe('PATCH-262 additions are editable like everything else', () => {
 
     act(() => {
       root!.render(
-        <AntvElementEditor
-          containerRef={editorRef!}
-          template="list-grid-badge-card"
-          outline={withAdditions([addition({ id: 'circle1', kind: 'circle' })])}
-          onChange={onChange}
-        />,
+        <PanelHostProvider>
+          <AntvElementEditor
+            containerRef={editorRef!}
+            template="list-grid-badge-card"
+            outline={withAdditions([addition({ id: 'circle1', kind: 'circle' })])}
+            onChange={onChange}
+          />
+        </PanelHostProvider>,
       );
     });
     expect(container!.querySelector('[data-ai-additions]')).not.toBeNull();
@@ -363,11 +377,10 @@ describe('PATCH-262 additions are editable like everything else', () => {
     expect(next.h).toBeGreaterThan(80);
   });
 
-  it('recolours an addition through the colour menu', () => {
+  it('recolours an addition through the element panel', () => {
     const onChange = vi.fn();
     mount(container!, onChange, withAdditions([addition({ id: 'circle1', kind: 'circle' })]));
     selectAddition();
-    click(reactHost!.querySelector('[data-ai-element-colour-toggle]')!);
     const swatch = reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element;
     const value = swatch.getAttribute('data-ai-element-swatch-value');
     click(swatch);

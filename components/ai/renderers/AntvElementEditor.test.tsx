@@ -10,9 +10,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyElementOverrides } from '@/lib/ai/antv/elementOverrides';
 import type { VisualOutline } from '@/lib/ai/outline';
 import AntvElementEditor from './AntvElementEditor';
+import { PictureSidePanelContext } from './PictureSidePanel';
 import { PictureZoomContext } from './PictureStage';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** PATCH-275. A provider + host so the element panel renders in these tests. */
+function PanelHostProvider({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  const [host, setHost] = React.useState<HTMLDivElement | null>(null);
+  return (
+    <div>
+      <div data-test-panel-host="true" ref={setHost} />
+      <PictureSidePanelContext.Provider value={{ host, elementPanelOpen: open, setElementPanelOpen: setOpen }}>
+        {children}
+      </PictureSidePanelContext.Provider>
+    </div>
+  );
+}
 
 if (typeof (window as any).PointerEvent === 'undefined') {
   class PointerEventPolyfill extends MouseEvent {
@@ -864,204 +879,7 @@ function colourPopover(): Element | null {
   return reactHost!.querySelector('[data-ai-element-colour]');
 }
 
-describe('PATCH-261 AntvElementEditor colour menu', () => {
-  it('a shape shows a Colour button; picking a Fill swatch commits {fill}', () => {
-    const onChange = vi.fn();
-    mountEditor(onChange);
-    selectShape();
-    openColour();
-    expect(colourPopover()).not.toBeNull();
 
-    const swatch = reactHost!.querySelector('[data-ai-element-swatch="fill"]') as HTMLElement;
-    const value = swatch.getAttribute('data-ai-element-swatch-value')!;
-    click(swatch);
-
-    const override = onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'];
-    expect(override.fill).toBe(value);
-  });
-
-  it('a hex field #ABC commits the normalised #aabbcc', () => {
-    const onChange = vi.fn();
-    mountEditor(onChange);
-    selectShape();
-    openColour();
-
-    const hex = reactHost!.querySelector('[data-ai-element-hex="fill"]') as HTMLInputElement;
-    setInputValue(hex, '#ABC');
-
-    expect(onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'].fill).toBe('#aabbcc');
-  });
-
-  it('an invalid hex shows a red outline and commits nothing', () => {
-    const onChange = vi.fn();
-    mountEditor(onChange);
-    selectShape();
-    openColour();
-    onChange.mockClear();
-
-    const hex = reactHost!.querySelector('[data-ai-element-hex="fill"]') as HTMLInputElement;
-    setInputValue(hex, 'red');
-
-    expect(onChange).not.toHaveBeenCalled();
-    expect(hex.getAttribute('data-ai-element-hex-invalid')).toBe('true');
-  });
-
-  it('a text element shows only the Text row', () => {
-    mountEditor(vi.fn());
-    selectLabel();
-    openColour();
-    expect(reactHost!.querySelector('[data-ai-element-hex="text"]')).not.toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-hex="fill"]')).toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-hex="border"]')).toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-hex="icon"]')).toBeNull();
-  });
-
-  it('an icon shows only the Icon colour row', () => {
-    mountEditor(vi.fn());
-    selectIcon();
-    openColour();
-    expect(reactHost!.querySelector('[data-ai-element-hex="icon"]')).not.toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-hex="fill"]')).toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-hex="border"]')).toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-hex="text"]')).toBeNull();
-  });
-
-  it('double-click on a shape opens the popover', () => {
-    mountEditor(vi.fn());
-    shrinkOtherShapes();
-    // Select the shape first so the geometry is measured live.
-    pointer(shapeEl(), 'pointerdown', 100, 150, 1);
-    pointer(window, 'pointerup', 100, 150, 1);
-    act(() => {
-      shapeEl().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: 100, clientY: 150 }));
-    });
-    expect(colourPopover()).not.toBeNull();
-  });
-
-  it('double-click on text does not open the popover and still reaches the svg', () => {
-    mountEditor(vi.fn());
-    const svg = svgOf();
-    const dbl = vi.fn();
-    svg.addEventListener('dblclick', dbl);
-
-    const event = new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: ITEM_X, clientY: ITEM_Y });
-    act(() => { labelDiv(0).dispatchEvent(event); });
-
-    expect(dbl).toHaveBeenCalledTimes(1);
-    expect(event.defaultPrevented).toBe(false);
-    expect(colourPopover()).toBeNull();
-  });
-
-  it('Reset colour removes fill/stroke/text from the element override', () => {
-    const onChange = vi.fn();
-    mountEditor(onChange);
-    selectShape();
-    openColour();
-    click(reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element);
-    click(reactHost!.querySelector('[data-ai-element-colour-reset]') as Element);
-
-    const override = onChange.mock.calls.at(-1)![0].elementOverrides?.items['shape@0#0'];
-    expect(override?.fill).toBeUndefined();
-    expect(override?.stroke).toBeUndefined();
-    expect(override?.text).toBeUndefined();
-  });
-
-  it('undo restores the previous colour', () => {
-    const onChange = vi.fn();
-    const committed = { template: 'list-grid-badge-card', items: { 'shape@0#0': { fill: '#111111' } } };
-    mountEditor(onChange, { ...BASE_OUTLINE, elementOverrides: committed });
-
-    selectShape();
-    openColour();
-    click(reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element);
-    const picked = onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'].fill;
-    expect(picked).not.toBe('#111111');
-
-    click(reactHost!.querySelector('[data-ai-element-undo]') as Element);
-    expect(onChange.mock.calls.at(-1)![0].elementOverrides.items['shape@0#0'].fill).toBe('#111111');
-  });
-
-  it('sets user-select none on the body for the duration of a drag, then restores it', () => {
-    mountEditor(vi.fn());
-    selectTitle();
-
-    pointer(titleEl(), 'pointerdown', 40, 30, 1);
-    pointer(window, 'pointermove', 60, 45, 1);
-    expect(document.body.style.userSelect).toBe('none');
-
-    pointer(window, 'pointerup', 60, 45, 1);
-    expect(document.body.style.userSelect).toBe('');
-  });
-
-  it('ignores AntV\'s transient-container overlay: a click on the card selects the item, the next narrows to the shape', () => {
-    // AntV's editor appends its selection/hover overlay group LAST; its highlight
-    // rect covers item 0's card. It is not part of the picture.
-    const transient = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    transient.setAttribute('data-element-type', 'transient-container');
-    const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    transient.appendChild(highlight);
-    svgOf().appendChild(transient);
-    (transient as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 100, width: 120, height: 60 });
-    (transient as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(0, 100, 120, 60);
-
-    shrinkOtherShapes();
-    mountEditor(vi.fn());
-
-    // (10,145) is inside item 0's card and under the transient highlight.
-    pointer(svgOf(), 'pointerdown', 10, 145, 1);
-    pointer(window, 'pointerup', 10, 145, 1);
-    expect(selectedAttr()).toBe('item@0');
-
-    pointer(svgOf(), 'pointerdown', 10, 145, 1);
-    pointer(window, 'pointerup', 10, 145, 1);
-    expect(selectedAttr()).toBe('shape@0#0');
-  });
-});
-
-// ── PATCH-261 fix: a press on the bar or popover is a picture control ─────────
-
-describe('PATCH-261 colour controls vs PictureStage pan capture', () => {
-  it('a real pointerdown on the Colour button is not captured, opens the popover and keeps the selection', () => {
-    const onChange = vi.fn();
-    mountEditorInStage(onChange);
-    selectShape();
-    expect(selectedAttr()).toBe('shape@0#0');
-
-    const toggle = reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element;
-    pointer(toggle, 'pointerdown', 0, 0, 1);
-    pointer(window, 'pointerup', 0, 0, 1);
-    click(toggle);
-
-    expect(stageCaptures).toBe(0);
-    expect(colourPopover()).not.toBeNull();
-    expect(selectedAttr()).toBe('shape@0#0');
-  });
-
-  it('a pointerdown on the bar Undo and on a popover swatch is not captured by the stage', () => {
-    mountEditorInStage(vi.fn());
-    selectShape();
-
-    pointer(reactHost!.querySelector('[data-ai-element-undo]') as Element, 'pointerdown', 0, 0, 1);
-    pointer(window, 'pointerup', 0, 0, 1);
-    expect(stageCaptures).toBe(0);
-
-    click(reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element);
-    pointer(reactHost!.querySelector('[data-ai-element-swatch="fill"]') as Element, 'pointerdown', 0, 0, 1);
-    pointer(window, 'pointerup', 0, 0, 1);
-    expect(stageCaptures).toBe(0);
-  });
-
-  it('a pointerdown inside the colour popover does not deselect', () => {
-    mountEditorInStage(vi.fn());
-    selectShape();
-    click(reactHost!.querySelector('[data-ai-element-colour-toggle]') as Element);
-    expect(colourPopover()).not.toBeNull();
-
-    pointer(colourPopover() as Element, 'pointerdown', 0, 0, 1);
-    pointer(window, 'pointerup', 0, 0, 1);
-    expect(selectedAttr()).toBe('shape@0#0');
-  });
-});
 
 // ── PATCH-261 fix: a text selection clears AntV's toolbar above it ───────────
 
@@ -1096,17 +914,6 @@ describe('PATCH-261 text selection bar placement', () => {
     expect(barTopPercent()).toBeLessThan(boxBottomPercent());
   });
 
-  it('opens the colour popover below the bar for a text selection', () => {
-    mountEditor(vi.fn());
-    selectLabel();
-    openColour();
-
-    const popover = colourPopover() as HTMLElement;
-    expect(popover).not.toBeNull();
-    const match = /([\d.]+)%/.exec(popover.style.top);
-    // jsdom rounds a calc() percentage to ~4 decimals, so allow a small epsilon.
-    expect(match ? Number(match[1]) : Number.NaN).toBeGreaterThanOrEqual(boxBottomPercent() - 0.01);
-  });
 });
 
 // ── PATCH-263: the resize handles sit outside a small selection ──────────────
@@ -1251,30 +1058,6 @@ describe('PATCH-263 Addendum 2 editor chrome scale', () => {
   });
 });
 
-// ── PATCH-263 Addendum 3: the popover stays inside the preview ───────────────
-
-describe('PATCH-263 Addendum 3 popover clamp', () => {
-  it('clamps the colour popover left so its right edge stays inside the preview', () => {
-    (titleEl() as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 360, y: 0, width: 40, height: 40 });
-    mountEditor(vi.fn());
-    selectTitleAt(380, 20);
-    expect(selectedAttr()).toBe('title#0');
-    openColour();
-
-    const popover = colourPopover() as HTMLElement;
-    expect(popover).not.toBeNull();
-    const overlay = reactHost!.querySelector('[data-ai-element-overlay]') as HTMLElement;
-    (overlay as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () =>
-      rect(0, 0, 400, 300);
-    Object.defineProperty(popover, 'offsetWidth', { value: 300, configurable: true });
-    act(() => { window.dispatchEvent(new Event('resize')); });
-
-    const left = parseFloat(popover.style.left);
-    const renderedWidthPercent = (300 / 400) * 100;
-    expect(left + renderedWidthPercent).toBeLessThanOrEqual(100.0001);
-    expect(left).toBeCloseTo(25, 3);
-  });
-});
 
 // ── PATCH-265: Escape priority (deselect) ─────────────────────────────────────
 
@@ -1301,23 +1084,6 @@ describe('PATCH-265 AntvElementEditor Escape priority', () => {
     expect(selectedAttr()).toBe('');
   });
 
-  it('Escape with the popover open closes the popover, keeps the selection and is prevented', () => {
-    mountEditor(vi.fn());
-    selectShape();
-    openColour();
-    expect(colourPopover()).not.toBeNull();
-    expect(selectedAttr()).toBe('shape@0#0');
-
-    const first = keydownOn(document.body, 'Escape');
-    expect(first.defaultPrevented).toBe(true);
-    expect(colourPopover()).toBeNull();
-    expect(selectedAttr()).toBe('shape@0#0');
-
-    // A second Escape now deselects.
-    const second = keydownOn(document.body, 'Escape');
-    expect(second.defaultPrevented).toBe(true);
-    expect(selectedAttr()).toBe('');
-  });
 
   it('Escape with nothing selected is not prevented', () => {
     mountEditor(vi.fn());
@@ -1389,13 +1155,15 @@ function ControlledHost({
     },
   };
   return (
-    <AntvElementEditor
-      containerRef={editorRef!}
-      template="list-grid-badge-card"
-      outline={outline}
-      onChange={handleChange}
-      contentEditRef={contentEditRef}
-    />
+    <PanelHostProvider>
+      <AntvElementEditor
+        containerRef={editorRef!}
+        template="list-grid-badge-card"
+        outline={outline}
+        onChange={handleChange}
+        contentEditRef={contentEditRef}
+      />
+    </PanelHostProvider>
   );
 }
 
@@ -1495,20 +1263,6 @@ describe('PATCH-270 AntvElementEditor scoped undo', () => {
     expect(afterRedo.elementOverrides?.items['title#0']).toEqual({ dx: 20, dy: 15 });
   });
 
-  it('Ctrl+Z with nothing selected undoes the last entry', () => {
-    const harness = mountControlledEditor(BASE_OUTLINE);
-    selectTitle();
-    pointer(titleEl(), 'pointerdown', 40, 30, 1);
-    pointer(window, 'pointermove', 60, 45, 1);
-    pointer(window, 'pointerup', 60, 45, 1);
-    keydown('Escape');
-    expect(selectedAttr()).toBe('');
-
-    ctrlKeydown('z');
-    const undone = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
-    expect(undone.elementOverrides).toBeUndefined();
-  });
-
   it('an icon swap undo restores only that icon while a later side-panel label edit stays', () => {
     const withIcons: VisualOutline = {
       ...BASE_OUTLINE,
@@ -1521,8 +1275,7 @@ describe('PATCH-270 AntvElementEditor scoped undo', () => {
 
     selectIcon();
     expect(selectedAttr()).toBe('item-icon@0');
-    click(reactHost!.querySelector('[data-ai-element-icon-toggle]') as Element);
-    click(reactHost!.querySelector('[data-ai-icon-picker] [data-ai-icon-name="flower-2"]') as Element);
+    click(reactHost!.querySelector('[data-ai-icon-option][data-ai-icon-name="flower-2"]') as Element);
     expect((harness.onChange.mock.calls.at(-1)![0] as VisualOutline).items[0].icon).toBe('flower-2');
 
     // A later side-panel edit on a DIFFERENT item (not recorded in our history).
@@ -1537,6 +1290,21 @@ describe('PATCH-270 AntvElementEditor scoped undo', () => {
     expect(undone.items[0].icon).toBe('sun');
     expect(undone.items[1].label).toBe('B2');
   });
+
+  it('Ctrl+Z with nothing selected undoes the last entry', () => {
+    const harness = mountControlledEditor(BASE_OUTLINE);
+    selectTitle();
+    pointer(titleEl(), 'pointerdown', 40, 30, 1);
+    pointer(window, 'pointermove', 60, 45, 1);
+    pointer(window, 'pointerup', 60, 45, 1);
+    keydown('Escape');
+    expect(selectedAttr()).toBe('');
+
+    ctrlKeydown('z');
+    const undone = harness.onChange.mock.calls.at(-1)![0] as VisualOutline;
+    expect(undone.elementOverrides).toBeUndefined();
+  });
+
 
   it('add circle -> Undo -> Redo -> content edit -> move -> Undo keeps the redone circle (Addendum 1)', () => {
     const harness = mountControlledEditor(BASE_OUTLINE);
@@ -1571,5 +1339,42 @@ describe('PATCH-270 AntvElementEditor scoped undo', () => {
     const afterRedo = harness.getOutline();
     expect(afterRedo.elementOverrides?.items['title#0']).toEqual({ dx: 20, dy: 15 });
     expect(afterRedo.elementOverrides?.additions).toEqual([CIRCLE]);
+  });
+});
+
+// ── PATCH-261. Kept from the old colour popover describe (not about colours) ──
+
+describe('PATCH-261 editor body interactions', () => {
+  it('sets user-select none on the body for the duration of a drag, then restores it', () => {
+    mountEditor(vi.fn());
+    selectTitle();
+
+    pointer(titleEl(), 'pointerdown', 40, 30, 1);
+    pointer(window, 'pointermove', 60, 45, 1);
+    expect(document.body.style.userSelect).toBe('none');
+
+    pointer(window, 'pointerup', 60, 45, 1);
+    expect(document.body.style.userSelect).toBe('');
+  });
+
+  it("ignores AntV's transient-container overlay: a click on the card selects the item, the next narrows to the shape", () => {
+    const transient = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    transient.setAttribute('data-element-type', 'transient-container');
+    const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    transient.appendChild(highlight);
+    svgOf().appendChild(transient);
+    (transient as unknown as { getBBox: () => unknown }).getBBox = () => ({ x: 0, y: 100, width: 120, height: 60 });
+    (transient as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(0, 100, 120, 60);
+
+    shrinkOtherShapes();
+    mountEditor(vi.fn());
+
+    pointer(svgOf(), 'pointerdown', 10, 145, 1);
+    pointer(window, 'pointerup', 10, 145, 1);
+    expect(selectedAttr()).toBe('item@0');
+
+    pointer(svgOf(), 'pointerdown', 10, 145, 1);
+    pointer(window, 'pointerup', 10, 145, 1);
+    expect(selectedAttr()).toBe('shape@0#0');
   });
 });
