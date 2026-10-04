@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import * as antv from '@antv/infographic';
+import { parseSVG } from '@antv/infographic';
 import { describe, expect, it } from 'vitest';
 
 import { VISUAL_ICON_NAMES } from '@/lib/ai/visualIcons';
 import { sanitizeTextStyle } from '@/lib/ai/outline';
 import { ANTV_FONT_STACK, ANTV_HAND_DRAWN_FONT_STACK, configureAntv, makeAntvResourceLoader } from './setup';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 describe('PATCH-241 configureAntv', () => {
   it('uses system-only font stacks (no remote Inter or Roboto)', () => {
@@ -49,5 +52,25 @@ describe('PATCH-241 configureAntv', () => {
 
     const empty = await loader({});
     expect(empty).toBeTruthy();
+  });
+});
+
+describe('PATCH-276 the loader returns namespace-correct symbols', () => {
+  it('each loaded symbol is an SVGSymbolElement in the SVG namespace (real parseSVG)', async () => {
+    const loader = makeAntvResourceLoader(antv);
+    for (const name of VISUAL_ICON_NAMES) {
+      const element = await loader({ data: `lucide/${name}` });
+      expect(element.namespaceURI, `${name} must be in the SVG namespace`).toBe(SVG_NS);
+      expect(element.constructor.name, `${name} must be an SVGSymbolElement`).toBe('SVGSymbolElement');
+    }
+  });
+
+  it('goes through a stub module whose parseSVG is AntV', async () => {
+    // @antv/infographic exports its real `parseSVG` (the two-line DOMParser
+    // call), so the loader test exercises the exact production path.
+    const stub = { parseSVG } as unknown as Parameters<typeof makeAntvResourceLoader>[0];
+    const element = await makeAntvResourceLoader(stub)({ data: 'lucide/sun' });
+    expect(element.namespaceURI).toBe(SVG_NS);
+    expect(element.constructor.name).toBe('SVGSymbolElement');
   });
 });

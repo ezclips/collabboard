@@ -88,4 +88,12 @@ describe('PATCH-275 effectiveColour', () => {
   it('returns an empty row for no parts', () => {
     expect(effectiveColour([], 'fill')).toEqual({ current: null, base: null, baseCss: null, mixed: false });
   });
+
+  it('PATCH-276 reads an icon <use>\u2019s own fill', () => {
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('fill', '#4F9D8F');
+    const row = effectiveColour([use], 'fill');
+    expect(row.current).toEqual({ hex: '#4f9d8f', alpha: 1 });
+    expect(row.base?.hex).toBe('#4f9d8f');
+  });
 });

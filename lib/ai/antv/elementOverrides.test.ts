@@ -10,6 +10,7 @@ import {
   ELEMENT_OVERRIDE_MAX_KEYS,
   elementAtPoint,
   elementBaseBox,
+  effectiveElementKey,
   elementItemScope,
   elementKey,
   elementScreenBox,
@@ -759,5 +760,59 @@ describe('PATCH-261 fix: AntV transient-container overlay', () => {
 
     // The transient group is LAST, so before the fix its (equal) box won the tie.
     expect(elementAtPoint(svg, 10, 10)).toBe(real);
+  });
+});
+
+describe('PATCH-276 badge key (`item-icon-group@<path>#badge`)', () => {
+  const BADGE_FIXTURE = `
+    <svg viewBox="0 0 100 100">
+      <g data-element-type="items-group">
+        <g data-element-type="item-icon-group">
+          <ellipse data-element-type="shape" fill="#ffffff"/>
+          <use data-element-type="item-icon" data-indexes="0" href="#i" fill="#4f9d8f"/>
+        </g>
+        <g data-element-type="item-label" data-indexes="0"><text/></g>
+      </g>
+    </svg>`;
+
+  function badgeFixture(): { svg: SVGSVGElement; group: Element; badge: Element; icon: Element } {
+    const host = document.createElement('div');
+    host.innerHTML = BADGE_FIXTURE;
+    const svg = host.querySelector('svg') as SVGSVGElement;
+    const group = svg.querySelector('[data-element-type="item-icon-group"]') as Element;
+    return {
+      svg,
+      group,
+      badge: group.querySelector('[data-element-type="shape"]') as Element,
+      icon: group.querySelector('[data-element-type="item-icon"]') as Element,
+    };
+  }
+
+  it('sanitize keeps a badge key with its fill', () => {
+    const out = sanitizeElementOverrides({
+      template: 't',
+      items: { 'item-icon-group@0#0#badge': { fill: '#AABBCC' } },
+    });
+    expect(out?.items['item-icon-group@0#0#badge']).toEqual({ fill: '#aabbcc' });
+  });
+
+  it('effectiveElementKey names the badge child, distinct from the group and icon', () => {
+    const { svg, group, badge, icon } = badgeFixture();
+    expect(elementKey(group, svg)).toBe('item-icon-group@0#0');
+    expect(elementKey(icon, svg)).toBe('item-icon@0');
+    expect(effectiveElementKey(badge, svg)).toBe('item-icon-group@0#0#badge');
+    // The badge element itself is not a keyed shape any more.
+    expect(elementKey(badge, svg)).toBe('shape@0#0');
+  });
+
+  it('applies the badge fill and restores AntV base on reset', () => {
+    const { svg, badge } = badgeFixture();
+    applyElementOverrides(svg, { template: 't', items: { 'item-icon-group@0#0#badge': { fill: '#ff0000' } } }, 't');
+    expect(badge.getAttribute('fill')).toBe('#ff0000');
+    expect(badge.getAttribute('data-ai-base-fill')).toBe('#ffffff');
+
+    applyElementOverrides(svg, { template: 't', items: {} }, 't');
+    expect(badge.getAttribute('fill')).toBe('#ffffff');
+    expect(badge.getAttribute('data-ai-base-fill')).toBeNull();
   });
 });

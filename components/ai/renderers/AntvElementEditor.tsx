@@ -4,7 +4,6 @@ import React from 'react';
 
 import {
   applyElementOverrides,
-  elementKey,
   elementScreenBox,
   unionScreenBoxes,
   type ElementHandle,
@@ -49,7 +48,7 @@ import { renderAntvElementPanel } from './useAntvElementPanel';
 import { usePictureSidePanel } from './PictureSidePanel';
 import { useAntvElementColour } from './useAntvElementColour';
 import { useAntvElementDrag } from './useAntvElementDrag';
-import { useAntvElementSelection } from './useAntvElementSelection';
+import { useAntvElementSelection, useAntvObjectScope } from './useAntvElementSelection';
 import { useAntvIconSwap } from './useAntvIconSwap';
 import { useLayerCounterScale } from './PictureEditOverlay';
 
@@ -136,17 +135,8 @@ export default function AntvElementEditor({
 
   const rootElement = React.useCallback((): HTMLElement | null => containerRef.current, [containerRef]);
 
-  const findElement = React.useCallback(
-    (key: string): Element | null => {
-      const root = rootElement();
-      if (!root) return null;
-      for (const el of Array.from(root.querySelectorAll('[data-element-type]'))) {
-        if (elementKey(el, root) === key) return el;
-      }
-      return null;
-    },
-    [rootElement],
-  );
+  // PATCH-276. The panel's object members, key resolver and DOM lookup.
+  const { objectKeys, objectKeysRef, keyOf, findElement } = useAntvObjectScope(selection, rootElement, overrides);
 
   const toPercent = React.useCallback(
     (box: ScreenBox): Rect => {
@@ -376,9 +366,10 @@ export default function AntvElementEditor({
     endSession,
   } = useAntvElementColour({
     template,
-    selectionRef,
+    objectKeysRef,
     overridesRef,
     findElement,
+    keyOf,
     cloneOverrides,
     commit,
     recordEdit,
@@ -625,6 +616,9 @@ export default function AntvElementEditor({
 
   const handleDelete = () => commitHidden(selectedKeys(selectionRef.current));
   const handleReset = () => commitReset(selectedKeys(selectionRef.current));
+  /** PATCH-276. The panel's footer acts on the OBJECT; the bar acts on the selection. */
+  const handleObjectDelete = () => commitHidden(objectKeys);
+  const handleObjectReset = () => commitReset(objectKeys);
 
   if (!selection || !rect) {
     return (
@@ -652,6 +646,8 @@ export default function AntvElementEditor({
     recent,
     overrides,
     findElement,
+    objectKeys,
+    elementKeyOf: keyOf,
     iconItemIndex,
     iconCurrent,
     getContent: () => outlineRef.current,
@@ -662,8 +658,8 @@ export default function AntvElementEditor({
     onApplyIcon: applyIcon,
     onAdditionText: commitAdditionLabel,
     onAdditionFontSize: commitAdditionFontSize,
-    onReset: handleReset,
-    onDelete: handleDelete,
+    onReset: handleObjectReset,
+    onDelete: handleObjectDelete,
     onClose: () => setElementPanelOpen?.(false),
   });
 

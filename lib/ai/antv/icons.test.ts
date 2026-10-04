@@ -1,9 +1,20 @@
+// @vitest-environment jsdom
+//
+// PATCH-276. AntV's `parseSVG` uses `DOMParser(image/svg+xml)`, so the symbol we
+// hand it MUST carry the SVG namespace: without `xmlns` its children are created
+// in the null namespace and the browser never draws the `<use>`. These tests use
+// a REAL DOMParser, exactly as the live resource loader does.
 import { describe, expect, it } from 'vitest';
 
 import { VISUAL_ICON_NAMES } from '@/lib/ai/visualIcons';
 import { iconNodeChildren, iconSymbolSvg } from './icons';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
 const UNKNOWN = iconSymbolSvg('definitely-not-an-icon');
+
+function parseSymbol(svg: string): Element {
+  return new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
+}
 
 describe('PATCH-241 icon symbols', () => {
   it('builds a stroke symbol with the icon geometry', () => {
@@ -32,5 +43,32 @@ describe('PATCH-241 icon symbols', () => {
   it('PATCH-262 exposes the raw node list, with the neutral dot as fallback', () => {
     expect(iconNodeChildren('sun').some(([tag]) => tag === 'circle')).toBe(true);
     expect(iconNodeChildren(null)).toEqual([['circle', { cx: 12, cy: 12, r: 3 }]]);
+  });
+});
+
+describe('PATCH-276 icon symbols live in the SVG namespace', () => {
+  it('the parsed root is an SVGSymbolElement in the SVG namespace', () => {
+    const root = parseSymbol(iconSymbolSvg('sun'));
+    expect(root.tagName.toLowerCase()).toBe('symbol');
+    expect(root.namespaceURI).toBe(SVG_NS);
+    expect(root.constructor.name).toBe('SVGSymbolElement');
+  });
+
+  it('every child is created in the SVG namespace', () => {
+    const root = parseSymbol(iconSymbolSvg('sun'));
+    const children = Array.from(root.children);
+    expect(children.length).toBeGreaterThan(0);
+    for (const child of children) {
+      expect(child.namespaceURI).toBe(SVG_NS);
+    }
+  });
+
+  it('the fallback dot for an unknown name is in the SVG namespace too', () => {
+    const root = parseSymbol(UNKNOWN);
+    expect(root.namespaceURI).toBe(SVG_NS);
+    expect(root.constructor.name).toBe('SVGSymbolElement');
+    for (const child of Array.from(root.children)) {
+      expect(child.namespaceURI).toBe(SVG_NS);
+    }
   });
 });

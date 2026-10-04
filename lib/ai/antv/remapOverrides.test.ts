@@ -112,6 +112,18 @@ describe('PATCH-274 remapOverridesForItems (Codex F4)', () => {
     expect(items['item-label@0']).toEqual({ dx: 4 });
   });
 
+  it('remaps a badge key like any other item key (PATCH-276)', () => {
+    const prev = outlineWithOverrides(outline([A, B, C]), {
+      template: TEMPLATE,
+      items: { 'item-icon-group@1#0#badge': RED },
+    });
+    const next = restructure(prev, [B, C]);
+    const remapped = remapOverridesForItems(prev, next);
+    const items = remapped.elementOverrides!.items;
+    expect(items['item-icon-group@0#0#badge']).toEqual(RED);
+    expect(items['item-icon-group@1#0#badge']).toBeUndefined();
+  });
+
   it('rewrites every template entry in the map and the mirrored flat slot', () => {
     const t2 = 'chart-pie-compact-card';
     const prev = outline([A, B, C], {

@@ -187,8 +187,12 @@ export function iconNodeChildren(name: string | undefined | null): IconNode {
  */
 export function iconSymbolSvg(name: string | undefined | null): string {
   const body = iconNodeChildren(name).map(renderChild).join('');
+  // PATCH-276. AntV's `parseSVG` does `DOMParser(image/svg+xml)`; without an
+  // explicit `xmlns`, the symbol and its paths are created in the NULL namespace
+  // and every `<use>` pointing at it draws nothing. The namespace here is what
+  // makes the icon render.
   return (
-    '<symbol viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    '<symbol xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     `stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`
   );
 }

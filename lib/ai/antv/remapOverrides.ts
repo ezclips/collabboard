@@ -18,7 +18,7 @@ import {
 import { isHierarchyTemplate, outlineItemIndexForElementPath } from './mapOutline';
 
 /** A key with an `@indexes` part (the part that can be positional). */
-const KEY_WITH_INDEXES = /^([a-z-]{1,40})@([0-9]+(?:,[0-9]+)*)(#[0-9]{1,4})?$/;
+const KEY_WITH_INDEXES = /^([a-z-]{1,40})@([0-9]+(?:,[0-9]+)*)(#[0-9]{1,4})?(#badge)?$/;
 
 function idSequence(outline: VisualOutline): string {
   return outline.items.map((item) => item.id ?? '').join('|');
@@ -41,7 +41,7 @@ export function remapElementKey(
   const match = KEY_WITH_INDEXES.exec(key);
   if (!match) return key;
   const type = match[1];
-  const ordinal = match[3] ?? '';
+  const suffix = `${match[3] ?? ''}${match[4] ?? ''}`;
   const indexes = match[2].split(',').map(Number);
 
   const itemIndex = outlineItemIndexForElementPath(indexes, template);
@@ -55,7 +55,7 @@ export function remapElementKey(
   const position = isHierarchyTemplate(template) ? 1 : 0;
   const rewritten = indexes.slice();
   rewritten[position] = newIndex;
-  return `${type}@${rewritten.join(',')}${ordinal}`;
+  return `${type}@${rewritten.join(',')}${suffix}`;
 }
 
 /** PATCH-274. Rewrites every key of one design's map, orphaning removed ones. */

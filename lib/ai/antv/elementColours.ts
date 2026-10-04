@@ -5,7 +5,7 @@
  * reset or a removed override restores them exactly (idempotent).
  */
 
-import type { ElementOverride } from './elementOverrides';
+import { elementKey, type ElementOverride } from './elementOverrides';
 
 const BASE_FILL = 'data-ai-base-fill';
 const BASE_STROKE = 'data-ai-base-stroke';
@@ -152,4 +152,45 @@ export function restoreElementColours(el: Element): void {
   restoreColourAttr(el, 'stroke');
   restoreElementColor(el);
   restoreTextColour(el);
+}
+
+// ── PATCH-276. The badge key ─────────────────────────────────────────────────
+
+/** PATCH-276. The key suffix for the badge shape inside an `item-icon-group`. */
+export const BADGE_KEY_SUFFIX = '#badge';
+
+/**
+ * PATCH-276. True for the badge shape of an `item-icon-group` (the first child
+ * that is not the icon `<use>`/`item-icon`), the circle/ellipse/rect the icon
+ * sits on. The badge gets its own override key so the group's icon colour and
+ * the badge's background colour never write to each other.
+ */
+export function isBadgeElement(el: Element): boolean {
+  const parent = el.parentElement;
+  if (!parent || parent.getAttribute('data-element-type') !== 'item-icon-group') return false;
+  if (el.getAttribute('data-element-type') === 'item-icon') return false;
+  if (el.tagName.toLowerCase() === 'use') return false;
+  for (const child of Array.from(parent.children)) {
+    if (child === el) return true;
+    if (child.getAttribute('data-element-type') === 'item-icon') continue;
+    if (child.tagName.toLowerCase() === 'use') continue;
+    return false;
+  }
+  return false;
+}
+
+/**
+ * PATCH-276. The key an override for `el` is stored under: the badge child of an
+ * `item-icon-group` is `item-icon-group@<path>#badge`, everything else keeps its
+ * `elementKey`.
+ */
+export function effectiveElementKey(
+  el: Element,
+  root: Element = (el as SVGElement).ownerSVGElement ?? el,
+): string | null {
+  if (isBadgeElement(el)) {
+    const groupKey = elementKey(el.parentElement as Element, root);
+    return groupKey ? `${groupKey}${BADGE_KEY_SUFFIX}` : null;
+  }
+  return elementKey(el, root);
 }

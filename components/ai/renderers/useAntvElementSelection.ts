@@ -2,12 +2,14 @@
 
 import React from 'react';
 
-import { additionKindOf, findAdditionByKey } from '@/lib/ai/antv/additions';
+import { additionKindOf, findAdditionByKey, isAdditionKey } from '@/lib/ai/antv/additions';
 import {
+  effectiveElementKey,
   elementAtPoint,
   elementItemScope,
   elementKey,
   isTransientElement,
+  itemMemberKeys,
   type ElementOverrides,
 } from '@/lib/ai/antv/elementOverrides';
 
@@ -26,6 +28,61 @@ import {
  * unchanged: a pointerdown selects and starts a move, a click narrows, and a
  * double-click on a shape/icon opens the colour menu while text is left to AntV.
  */
+export interface AntvObjectScope {
+  objectKeys: string[];
+  objectKeysRef: React.MutableRefObject<string[]>;
+  keyOf: (el: Element) => string | null;
+  findElement: (key: string) => Element | null;
+}
+
+/**
+ * PATCH-276. The panel's subject: the whole object's member keys. The item
+ * selection already carries them; a drilled part resolves to its item scope's
+ * members; an addition/title is its own object. `recompute` (the overrides map)
+ * re-derives the members when the picture changes.
+ */
+export function useAntvObjectScope(
+  selection: Selection | null,
+  rootElement: () => HTMLElement | null,
+  recompute?: unknown,
+): AntvObjectScope {
+  const objectKeys = React.useMemo(() => {
+    if (!selection) return [];
+    if (selection.kind === 'item') return selection.keys;
+    if (isAdditionKey(selection.key)) return [selection.key];
+    const root = rootElement();
+    if (selection.scope && root) return itemMemberKeys(selection.scope, root);
+    return [selection.key];
+  }, [selection, rootElement, recompute]);
+
+  const objectKeysRef = React.useRef<string[]>(objectKeys);
+  React.useEffect(() => {
+    objectKeysRef.current = objectKeys;
+  }, [objectKeys]);
+
+  const keyOf = React.useCallback(
+    (el: Element): string | null => {
+      const root = rootElement();
+      return root ? effectiveElementKey(el, root) : null;
+    },
+    [rootElement],
+  );
+
+  const findElement = React.useCallback(
+    (key: string): Element | null => {
+      const root = rootElement();
+      if (!root) return null;
+      for (const el of Array.from(root.querySelectorAll('[data-element-type]'))) {
+        if (effectiveElementKey(el, root) === key) return el;
+      }
+      return null;
+    },
+    [rootElement],
+  );
+
+  return { objectKeys, objectKeysRef, keyOf, findElement };
+}
+
 export interface UseAntvElementSelectionOptions {
   rootElement: () => HTMLElement | null;
   selectionRef: React.MutableRefObject<Selection | null>;

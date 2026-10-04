@@ -506,12 +506,14 @@ describe('PATCH-275 double-click gestures open the panel', () => {
     expect(panel()).toBeNull();
   });
 
-  it('a text selection shows only the Text section; an icon shows the Icon section', () => {
+  it('PATCH-276: a drill-down into a text or icon part keeps the whole object panel', () => {
     mountEditor(vi.fn());
     selectIcon(0);
     expect(panel()).not.toBeNull();
     expect(reactHost!.querySelector('[data-ai-element-panel-section="icon"]')).not.toBeNull();
-    expect(reactHost!.querySelector('[data-ai-element-panel-section="shape"]')).toBeNull();
+    // The same object panel as the whole-item selection: Text and Shape stay.
+    expect(reactHost!.querySelector('[data-ai-element-panel-section="shape"]')).not.toBeNull();
+    expect(reactHost!.querySelector('[data-ai-element-panel-section="text"]')).not.toBeNull();
   });
 });
 

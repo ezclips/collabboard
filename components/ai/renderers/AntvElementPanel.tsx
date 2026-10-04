@@ -22,9 +22,11 @@ import { DockedPanelShell } from './PictureSidePanel';
 import { selectedKeys, type Selection } from './AntvElementChrome';
 import {
   COLOUR_ROW_LABELS,
-  colourRowsForSelection,
+  colourPartsForObject,
+  colourRowsForObject,
   rowApplies,
   rowOverride,
+  type ColourPart,
   type ColourRow,
 } from './useAntvElementColour';
 import { useAntvElementText } from './useAntvElementText';
@@ -34,6 +36,10 @@ import { useAntvElementText } from './useAntvElementText';
  * shape colours, its icon and its reset/delete. Rendered in the shared docked
  * shell and portalled into the provider's host. It never deselects and never
  * covers the picture.
+ *
+ * PATCH-276. The panel's subject is the OBJECT: whether the user selected the
+ * whole item or drilled into one part, the title and sections are the item's,
+ * and the drilled part only marks its section active.
  */
 
 export interface AntvElementPanelProps {
@@ -44,6 +50,10 @@ export interface AntvElementPanelProps {
   recent: readonly string[];
   overrides: ElementOverrides | undefined;
   findElement: (key: string) => Element | null;
+  /** PATCH-276. The whole object's member keys (the item's parts). */
+  objectKeys: string[];
+  /** PATCH-276. The override key of a DOM element (badge keys included). */
+  elementKeyOf: (el: Element) => string | null;
   iconItemIndex: number | null;
   iconCurrent: string | null;
   getContent: () => VisualOutline;
@@ -90,7 +100,25 @@ function parseKey(key: string): ParsedKey {
   return { type, indexes };
 }
 
-/** PATCH-275. What the panel header says: the item/part's label, never a key. */
+/** PATCH-276. The label an element path refers to (an item's or a child's). */
+function labelForElementPath(parsed: ParsedKey, outline: VisualOutline, template: string): string {
+  const hierarchy = isHierarchyTemplate(template);
+  const indexes = parsed.indexes;
+  const childIndex = hierarchy
+    ? indexes.length === 3 && indexes[0] === 0
+      ? indexes[2]
+      : null
+    : indexes.length === 2
+      ? indexes[1]
+      : null;
+  const itemIndex = outlineItemIndexForElementPath(indexes, template);
+  if (childIndex !== null && itemIndex !== null) {
+    return outline.items[itemIndex]?.children?.[childIndex]?.label ?? '';
+  }
+  return itemIndex !== null ? outline.items[itemIndex]?.label ?? '' : '';
+}
+
+/** PATCH-276. What the panel header says: the OBJECT's label, never a key. */
 export function panelTitle(
   selection: Selection,
   outline: VisualOutline,
@@ -109,29 +137,33 @@ export function panelTitle(
     return (kind && ADDITION_LABELS[kind]) || 'Element';
   }
 
+  if (isHierarchyTemplate(template)) {
+    // The hierarchy root is drawn as an unindexed item-label at [0]: it is the title.
+    if (parsed.indexes.length === 1 && parsed.indexes[0] === 0) return outline.title || 'Title';
+    const label = labelForElementPath(parsed, outline, template);
+    return label ? `Node · ${label}` : 'Node';
+  }
+
+  const label = labelForElementPath(parsed, outline, template);
   const index = outlineItemIndexForElementPath(parsed.indexes, template);
-  const item = index !== null ? outline.items[index] : undefined;
-  const itemLabel = item?.label ?? '';
+  return index !== null ? `Card ${index + 1} · ${label}` : label || 'Element';
+}
 
-  if (selection.kind === 'item') {
-    return index !== null ? `Card ${index + 1} · ${itemLabel}` : itemLabel || 'Element';
-  }
+/** PATCH-276. The footer noun for the object: a card, a node, or an element. */
+export function panelObjectNoun(selection: Selection, template: string): 'card' | 'node' | 'element' {
+  const keys = selectedKeys(selection);
+  const parsed = keys.length ? parseKey(keys[0]) : null;
+  if (!parsed || parsed.type === 'title' || parsed.type === 'ai-addition') return 'element';
+  return isHierarchyTemplate(template) ? 'node' : 'card';
+}
 
-  switch (parsed.type) {
-    case 'item-label':
-      return `Label · ${itemLabel}`;
-    case 'item-desc':
-      return `Description · ${itemLabel}`;
-    case 'item-value':
-      return `Value · ${itemLabel}`;
-    case 'item-icon':
-    case 'item-icon-group':
-      return `Icon · ${itemLabel}`;
-    case 'shape':
-      return `Shape · ${itemLabel}`;
-    default:
-      return itemLabel || ADDITION_LABELS[parsed.type] || 'Element';
-  }
+/** PATCH-276. The panel section a drilled part marks active. */
+function sectionForElement(el: Element | null): 'text' | 'shape' | 'icon' | null {
+  if (!el) return null;
+  if (rowApplies('text', el)) return 'text';
+  if (rowApplies('icon', el)) return 'icon';
+  if (rowApplies('fill', el)) return 'shape';
+  return null;
 }
 
 function styleForTarget(
@@ -249,11 +281,13 @@ function TextContentField({
 
 interface StyleControlsProps {
   target: { scope: 'title' } | { scope: 'item'; index: number; part: 'label' | 'detail' };
+  /** PATCH-276 Addendum 1. Which field this block styles, e.g. "Label style". */
+  label: string;
   style: TextStyle | undefined;
   commitStyle: (target: StyleControlsProps['target'], patch: TextStyle) => void;
 }
 
-function StyleControls({ target, style, commitStyle }: StyleControlsProps) {
+function StyleControls({ target, label, style, commitStyle }: StyleControlsProps) {
   const size = style?.fontSize;
   const family = style?.fontFamily ?? '';
   const align = style?.align ?? 'left';
@@ -265,6 +299,7 @@ function StyleControls({ target, style, commitStyle }: StyleControlsProps) {
 
   return (
     <div className="space-y-2 rounded border border-gray-100 bg-gray-50/60 p-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</div>
       <div className="flex items-center gap-1.5">
         <span className="w-16 shrink-0 text-[11px] text-gray-500">Size</span>
         <button
@@ -354,6 +389,8 @@ export function AntvElementPanel({
   recent,
   overrides,
   findElement,
+  objectKeys,
+  elementKeyOf,
   iconItemIndex,
   iconCurrent,
   getContent,
@@ -368,21 +405,38 @@ export function AntvElementPanel({
   onDelete,
   onClose,
 }: AntvElementPanelProps) {
-  const keys = selectedKeys(selection);
-  const text = useAntvElementText({ template, selection, getContent, commitOutline });
+  const text = useAntvElementText({ template, keys: objectKeys, getContent, commitOutline });
 
-  const rows = React.useMemo(() => colourRowsForSelection(keys, findElement), [keys, findElement]);
-  const partsFor = (row: ColourRow) =>
-    keys.map((key) => findElement(key)).filter((el): el is Element => el !== null && rowApplies(row, el));
+  const rows = React.useMemo(() => colourRowsForObject(objectKeys, findElement), [objectKeys, findElement]);
+  const partsFor = React.useCallback(
+    (row: ColourRow): ColourPart[] => colourPartsForObject(row, objectKeys, findElement, elementKeyOf),
+    [objectKeys, findElement, elementKeyOf],
+  );
+  const textParts = partsFor('text');
+  const fillParts = partsFor('fill');
+  const borderParts = partsFor('border');
+  const iconParts = partsFor('icon');
+  const badgeParts = partsFor('badge');
 
   const additionField = text.fields.find((field) => field.field === 'addition');
   const styles = text.fields.filter((field) => field.styleTarget);
 
   const title = panelTitle(selection, outline, template, findElement);
-  const textParts = partsFor('text');
+  const noun = panelObjectNoun(selection, template);
+  const activeSection =
+    selection.kind === 'element' && selection.scope !== null ? sectionForElement(findElement(selection.key)) : null;
+  const activeRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (activeSection) activeRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeSection]);
+  const sectionActive = (name: 'text' | 'shape' | 'icon') => activeSection === name;
+  const sectionClass = (name: 'text' | 'shape' | 'icon', spacing: string) =>
+    `${spacing}${sectionActive(name) ? ' border-l-2 border-blue-400 pl-2' : ''}`;
+  const sectionRef = (name: 'text' | 'shape' | 'icon') => (sectionActive(name) ? activeRef : undefined);
+
   const hasText = text.fields.length > 0 || rows.includes('text');
   const hasShape = rows.includes('fill') || rows.includes('border');
-  const hasIcon = rows.includes('icon') || iconItemIndex != null;
+  const hasIcon = rows.includes('icon') || rows.includes('badge') || iconItemIndex != null;
 
   return (
     <DockedPanelShell
@@ -399,7 +453,12 @@ export function AntvElementPanel({
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
       >
         {hasText && (
-          <div data-ai-element-panel-section="text" className="space-y-3">
+          <div
+            ref={sectionRef('text')}
+            data-ai-element-panel-section="text"
+            data-ai-element-panel-section-active={sectionActive('text') ? 'true' : undefined}
+            className={sectionClass('text', 'space-y-3')}
+          >
             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Text</div>
             {text.fields
               .filter((field) => field.field !== 'addition')
@@ -452,21 +511,26 @@ export function AntvElementPanel({
                 </label>
               </label>
             )}
-            {styles.map((field) => (
-              <StyleControls
-                key={`style:${field.styleTarget!.scope}:${field.path.join(',')}`}
-                target={field.styleTarget!}
-                style={styleForTarget(outline, field.styleTarget!)}
-                commitStyle={text.commitStyle}
-              />
-            ))}
+            {styles.map((field) => {
+              const target = field.styleTarget!;
+              const part = target.scope === 'item' ? target.part : '';
+              return (
+                <StyleControls
+                  key={`style:${target.scope}:${part}:${field.path.join(',')}`}
+                  label={`${field.label} style`}
+                  target={target}
+                  style={styleForTarget(outline, target)}
+                  commitStyle={text.commitStyle}
+                />
+              );
+            })}
             {textParts.length > 0 && (
               <AntvColourField
                 row="text"
                 label={COLOUR_ROW_LABELS.text}
                 kind="text"
-                parts={textParts}
-                override={rowOverride('text', keys, overrides)}
+                parts={textParts.map((part) => part.el)}
+                override={rowOverride('text', textParts, overrides)}
                 palette={palette}
                 recent={recent}
                 onPick={(hex) => onApplyColour('text', hex)}
@@ -478,15 +542,20 @@ export function AntvElementPanel({
         )}
 
         {hasShape && (
-          <div data-ai-element-panel-section="shape" className="space-y-2">
+          <div
+            ref={sectionRef('shape')}
+            data-ai-element-panel-section="shape"
+            data-ai-element-panel-section-active={sectionActive('shape') ? 'true' : undefined}
+            className={sectionClass('shape', 'space-y-2')}
+          >
             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Shape</div>
             {rows.includes('fill') && (
               <AntvColourField
                 row="fill"
                 label={COLOUR_ROW_LABELS.fill}
                 kind="fill"
-                parts={partsFor('fill')}
-                override={rowOverride('fill', keys, overrides)}
+                parts={fillParts.map((part) => part.el)}
+                override={rowOverride('fill', fillParts, overrides)}
                 palette={palette}
                 recent={recent}
                 onPick={(hex) => onApplyColour('fill', hex)}
@@ -499,8 +568,8 @@ export function AntvElementPanel({
                 row="border"
                 label={COLOUR_ROW_LABELS.border}
                 kind="stroke"
-                parts={partsFor('border')}
-                override={rowOverride('border', keys, overrides)}
+                parts={borderParts.map((part) => part.el)}
+                override={rowOverride('border', borderParts, overrides)}
                 palette={palette}
                 recent={recent}
                 onPick={(hex) => onApplyColour('border', hex)}
@@ -512,20 +581,39 @@ export function AntvElementPanel({
         )}
 
         {hasIcon && (
-          <div data-ai-element-panel-section="icon" className="space-y-2">
+          <div
+            ref={sectionRef('icon')}
+            data-ai-element-panel-section="icon"
+            data-ai-element-panel-section-active={sectionActive('icon') ? 'true' : undefined}
+            className={sectionClass('icon', 'space-y-2')}
+          >
             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Icon</div>
             {rows.includes('icon') && (
               <AntvColourField
                 row="icon"
                 label={COLOUR_ROW_LABELS.icon}
                 kind="fill"
-                parts={partsFor('icon')}
-                override={rowOverride('icon', keys, overrides)}
+                parts={iconParts.map((part) => part.el)}
+                override={rowOverride('icon', iconParts, overrides)}
                 palette={palette}
                 recent={recent}
                 onPick={(hex) => onApplyColour('icon', hex)}
                 onInput={(hex) => onApplyColour('icon', hex, { collect: false })}
                 onReset={() => onResetRow('icon')}
+              />
+            )}
+            {rows.includes('badge') && (
+              <AntvColourField
+                row="badge"
+                label={COLOUR_ROW_LABELS.badge}
+                kind="fill"
+                parts={badgeParts.map((part) => part.el)}
+                override={rowOverride('badge', badgeParts, overrides)}
+                palette={palette}
+                recent={recent}
+                onPick={(hex) => onApplyColour('badge', hex)}
+                onInput={(hex) => onApplyColour('badge', hex, { collect: false })}
+                onReset={() => onResetRow('badge')}
               />
             )}
             <AntvIconSearch current={iconCurrent} onPick={onApplyIcon} />
@@ -549,7 +637,7 @@ export function AntvElementPanel({
             onClick={onReset}
             className="flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-100"
           >
-            <RotateCcw size={12} /> Reset element
+            <RotateCcw size={12} /> Reset {noun}
           </button>
           <button
             type="button"
@@ -558,7 +646,7 @@ export function AntvElementPanel({
             onClick={onDelete}
             className="flex items-center gap-1 rounded border border-red-100 px-2 py-1 text-[11px] text-red-600 hover:bg-red-50"
           >
-            <Trash2 size={12} /> Delete
+            <Trash2 size={12} /> Delete {noun}
           </button>
         </div>
       </section>

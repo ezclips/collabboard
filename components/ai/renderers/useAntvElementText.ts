@@ -12,18 +12,19 @@ import {
 } from '@/lib/ai/antv/elementText';
 import type { TextStyle, VisualOutline } from '@/lib/ai/outline';
 
-import type { Selection } from './AntvElementChrome';
-import { selectedKeys } from './AntvElementChrome';
-
 /**
  * PATCH-275. The element panel's text state: which fields the selection has and
  * how a field edit becomes an undoable content change. One history entry per
  * field per focus; later commits in the same focus apply live.
+ *
+ * PATCH-276. The fields are always the OBJECT's: the caller passes the whole
+ * item's member keys, so a drill-down does not change the fields.
  */
 
 export interface UseAntvElementTextOptions {
   template: string;
-  selection: Selection;
+  /** PATCH-276. The whole object's member keys. */
+  keys: string[];
   /** The latest outline (a live-edit must start from the current value). */
   getContent: () => VisualOutline;
   /** Applies a content change and records `entry` when non-null. */
@@ -71,14 +72,14 @@ function buildEntry(field: TextFieldDescriptor, before: string, after: string): 
 }
 
 export function useAntvElementText(options: UseAntvElementTextOptions): AntvElementText {
-  const { template, selection, getContent, commitOutline } = options;
+  const { template, keys, getContent, commitOutline } = options;
   const sessionRef = React.useRef<FieldSession | null>(null);
 
   const fields = React.useMemo(
-    () => textFieldsForSelection(getContent(), template, selectedKeys(selection)),
-    // The selection identity is enough: the fields are recomputed whenever the
+    () => textFieldsForSelection(getContent(), template, keys),
+    // The keys identity is enough: the fields are recomputed whenever the
     // outline changes as well, so a committed edit is reflected.
-    [getContent, template, selection],
+    [getContent, template, keys],
   );
 
   const beginField = React.useCallback(

@@ -20,7 +20,9 @@ import {
   sanitizeAdditions,
   type Addition,
 } from './additions';
-import { applyElementColours, restoreElementColours } from './elementColours';
+import { applyElementColours, effectiveElementKey, restoreElementColours } from './elementColours';
+
+export { effectiveElementKey };
 
 export interface ElementOverride {
   /** Translation in viewBox units, |v| <= 5000. */
@@ -63,9 +65,12 @@ const TEMPLATE_MAX = 120;
 
 /**
  * PATCH-260. The stable shape of an element key: `type`, an optional `@indexes`
- * and an optional `#ordinal`. Lenient by design -- sanitize never throws.
+ * and an optional `#ordinal` / `#badge` suffix. Lenient by design -- sanitize
+ * never throws. PATCH-276 adds the `#badge` suffix for the badge shape inside an
+ * `item-icon-group`.
  */
-export const ELEMENT_OVERRIDE_KEY_PATTERN = /^[a-z-]{1,40}(@[0-9]{1,3}(,[0-9]{1,3}){0,3})?(#[0-9]{1,4})?$/;
+export const ELEMENT_OVERRIDE_KEY_PATTERN =
+  /^[a-z-]{1,40}(@[0-9]{1,3}(,[0-9]{1,3}){0,3})?(#[0-9]{1,4})?(#badge)?$/;
 
 const INDEXES_PATTERN = /^[0-9]+(,[0-9]+)*$/;
 
@@ -459,7 +464,7 @@ export function applyElementOverrides(
     // PATCH-262. Additions have their own renderer below; never treat them as
     // AntV elements (that would clobber the shape we just drew).
     if (isAdditionSubtree(el)) continue;
-    const key = elementKey(el, root);
+    const key = effectiveElementKey(el, root);
     if (key) el.setAttribute('data-ai-element-key', key);
 
     if (!active || !key) {
