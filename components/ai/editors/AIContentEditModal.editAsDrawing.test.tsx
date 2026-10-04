@@ -15,9 +15,10 @@ vi.mock('@/components/ai/AIContentRenderer', () => ({
 }));
 
 vi.mock('@/components/ai/renderers/EditAsDrawingButton', () => ({
-  default: ({ disabledReason, onDrawing }: any) =>
+  default: ({ disabledReason, title, onDrawing }: any) =>
     React.createElement('button', {
       'data-ai-edit-as-drawing': 'true',
+      'data-title': title ?? '',
       'data-disabled': disabledReason ?? '',
       onClick: () => onDrawing({ drawingData: 'D' }),
     }),
@@ -49,7 +50,7 @@ function drawButton(c: ParentNode): HTMLButtonElement | null {
   return c.querySelector('[data-ai-edit-as-drawing="true"]') as HTMLButtonElement | null;
 }
 
-function envelope(template: unknown) {
+function envelope(template: unknown, title = 'T') {
   return {
     mode: 'diagram',
     version: 1,
@@ -57,9 +58,9 @@ function envelope(template: unknown) {
       type: 'diagram',
       subtype: 'infographic',
       renderer: 'infographic',
-      title: 'T',
+      title,
       template,
-      outline: { title: 'T', ordered: false, items: [{ label: 'A' }, { label: 'B' }] },
+      outline: { title, ordered: false, items: [{ label: 'A' }, { label: 'B' }] },
     },
     meta: { renderer: 'infographic', subtype: 'infographic', prompt: '' },
   } as never;
@@ -116,5 +117,31 @@ describe('PATCH-278 Edit window Edit as drawing', () => {
     click(drawButton(c)!);
     expect(onEditAsDrawing).toHaveBeenCalledTimes(1);
     expect(onEditAsDrawing.mock.calls[0][0]).toEqual({ drawingData: 'D' });
+  });
+
+  it('PATCH-279: passes the picture title to the drawing', () => {
+    const c = mount(
+      <AIContentEditModal
+        isOpen
+        onClose={() => {}}
+        envelope={envelope('antv:list-grid-badge-card')}
+        onSave={() => {}}
+        onEditAsDrawing={() => {}}
+      />,
+    );
+    expect(drawButton(c)!.getAttribute('data-title')).toBe('T');
+  });
+
+  it('PATCH-279: with no title, the button passes no title', () => {
+    const c = mount(
+      <AIContentEditModal
+        isOpen
+        onClose={() => {}}
+        envelope={envelope('antv:list-grid-badge-card', '')}
+        onSave={() => {}}
+        onEditAsDrawing={() => {}}
+      />,
+    );
+    expect(drawButton(c)!.getAttribute('data-title')).toBe('');
   });
 });

@@ -207,14 +207,19 @@ export default function CanvasModals({
   // converted picture and open it. The AI post is never modified. `placement`
   // is passed only from the Edit window (next to the AI post); the generator
   // uses the default new-post position.
-  const handleEditAsDrawing = (
+  const handleEditAsDrawing = async (
     data: DrawingPostData,
     placement?: { x: number; y: number },
     close: () => void = () => {},
   ) => {
     close();
     setPadletToEdit(null);
-    void createDrawingPost(data, { size: data.size, openEditor: true, placement });
+    try {
+      await createDrawingPost(data, { size: data.size, openEditor: true, placement });
+    } catch (e) {
+      console.error('Failed to create drawing post:', e instanceof Error ? e.message : e);
+      toast.error('The drawing could not be saved. Please try again.');
+    }
   };
 
   return (

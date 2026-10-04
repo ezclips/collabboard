@@ -3,6 +3,7 @@
 import type { LoadedAIContent } from '@/lib/ai/contracts';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { nextZIndex } from '@/components/collabboard/canvas/engine/zIndex';
 import { useGridPadletSave } from './useGridPadletSave';
 
 export type SaveAIComponentData = {
@@ -1612,6 +1613,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     const title = data.title || 'Drawing';
     const metadata = {
       ...data.metadata,
+      zIndex: nextZIndex(padlets),
       drawingData: data.drawingData,
       drawingAppState: data.drawingAppState,
       drawingFiles: data.drawingFiles,
@@ -1650,7 +1652,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     else fetchData();
     return created;
   }, [
-    canvasId, supabase, setPadletToEdit, fetchData, setIsDrawingEditorOpen, setPadlets,
+    canvasId, padlets, supabase, setPadletToEdit, fetchData, setIsDrawingEditorOpen, setPadlets,
     isDrawingLayout, isWallLayout, isColumnsLayout, isGridLayout, isTimelineLayout, isSchedulerLayout,
     onDrawingPlacementStart, onTimelinePlacementStart, onSchedulerPlacementStart,
   ]);

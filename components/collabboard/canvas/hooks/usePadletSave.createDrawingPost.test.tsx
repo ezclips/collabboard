@@ -21,6 +21,7 @@ let inserts: any[] = [];
 let newPostPosition = { x: 7, y: 8 };
 let api: ReturnType<typeof usePadletSave> | null = null;
 let setDraft: ((padlet: Padlet | null) => void) | null = null;
+let seedBoard: ((padlets: Padlet[]) => void) | null = null;
 let editedDraft: Padlet | null = null;
 let editorOpen = false;
 let pendingDrafts: any[] = [];
@@ -57,6 +58,7 @@ function Harness() {
   const [padlets, setPadlets] = React.useState<Padlet[]>([]);
   const [padletToEdit, setPadletToEdit] = React.useState<Padlet | null>(null);
   setDraft = setPadletToEdit;
+  seedBoard = (next) => setPadlets(next);
 
   api = usePadletSave({
     canEditBoardContentNow: () => true,
@@ -116,6 +118,7 @@ afterEach(() => {
   newPostPosition = { x: 7, y: 8 };
   api = null;
   setDraft = null;
+  seedBoard = null;
   editedDraft = null;
   editorOpen = false;
   pendingDrafts = [];
@@ -154,12 +157,34 @@ describe('PATCH-278 createDrawingPost', () => {
       drawingAppState: 'APP',
       drawingFiles: 'FILES',
       previewUrl: 'PREVIEW',
+      zIndex: 101,
     });
     expect(row.position_x).toBe(11);
     expect(row.position_y).toBe(22);
     expect(row.width).toBe(500);
     expect(row.height).toBe(300);
     expect(row.title).toBe('Pic');
+  });
+
+  it('PATCH-279: lands on top of the board: metadata.zIndex is nextZIndex(padlets)', async () => {
+    installSupabase();
+    mount();
+    act(() => {
+      seedBoard!([
+        { id: 'top', type: 'ai-component', metadata: { zIndex: 250 } } as unknown as Padlet,
+        { id: 'mid', type: 'text', metadata: { zIndex: 100 } } as unknown as Padlet,
+      ]);
+    });
+    await act(async () => {
+      await api!.createDrawingPost(DRAWING as never, { openEditor: true });
+    });
+    const row = inserts.find((r) => r.type === 'drawing');
+    expect(row.metadata.zIndex).toBe(251);
+  });
+
+  it('PATCH-279: an empty board still gives a drawing a zIndex (101)', async () => {
+    const row = await run(DRAWING, { openEditor: true });
+    expect(row.metadata.zIndex).toBe(101);
   });
 
   it('openEditor points padletToEdit at the created post and opens the drawing editor', async () => {
@@ -214,5 +239,6 @@ describe('PATCH-278 createDrawingPost', () => {
     expect(row.height).toBe(300);
     expect(row.position_x).toBe(7);
     expect(editorOpen).toBe(false);
+    expect(row.metadata.zIndex).toBe(101);
   });
 });

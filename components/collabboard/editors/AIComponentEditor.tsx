@@ -711,6 +711,12 @@ export default function AIComponentEditor({
       ? selectedOption.envelopeData.template
       : undefined;
   const showEditAsDrawing = Boolean(onEditAsDrawing) && typeof selectedTemplate === 'string' && isAntvTemplate(selectedTemplate);
+  // PATCH-279. Post name wins; else the picture's own outline title; else none
+  // (createDrawingPost then titles the new drawing "Drawing").
+  const editAsDrawingTitle =
+    title.trim() ||
+    (needsExampleEnvelopes && derivedOutline ? derivedOutline : activeOutline)?.title ||
+    undefined;
 
   const normalizedContent = normalizeAIContent(content);
   const photoCardData: PhotoCardData | null =
@@ -1759,7 +1765,7 @@ export default function AIComponentEditor({
                 <EditAsDrawingButton
                   getSvg={editAsDrawingSvg}
                   getBackground={editAsDrawingBackground}
-                  title={title.trim() || undefined}
+                  title={editAsDrawingTitle}
                   disabledReason={canSave ? undefined : saveDisabledReason}
                   onDrawing={onEditAsDrawing!}
                 />

@@ -1173,7 +1173,7 @@ export default function AIContentEditModal({
                 const ground = document.querySelector<HTMLElement>('[data-ai-theme-background]');
                 return ground ? window.getComputedStyle(ground).backgroundColor : '#ffffff';
               }}
-              title={draftData.title}
+              title={draftData.title?.trim() || undefined}
               disabledReason={diagramHasSyntaxError ? 'Fix the diagram first' : undefined}
               onDrawing={onEditAsDrawing!}
             />

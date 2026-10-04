@@ -39,16 +39,19 @@ const h = vi.hoisted(() => {
   }
   return {
     lastGetSvg: null as null | (() => SVGSVGElement | null),
+    lastTitle: undefined as string | undefined,
     mocks: { Infographic: FakeInfographic },
   };
 });
 vi.mock('@/lib/ai/antv/load', () => ({ loadAntv: async () => h.mocks }));
 
 vi.mock('@/components/ai/renderers/EditAsDrawingButton', () => ({
-  default: ({ getSvg, disabledReason, onDrawing }: any) => {
+  default: ({ getSvg, title, disabledReason, onDrawing }: any) => {
     h.lastGetSvg = getSvg;
+    h.lastTitle = title;
     return React.createElement('button', {
       'data-ai-edit-as-drawing': 'true',
+      'data-title': title ?? '',
       'data-disabled': disabledReason ?? '',
       onClick: () => onDrawing({ drawingData: 'D' }),
     });
@@ -85,6 +88,13 @@ function setTextareaValue(input: HTMLTextAreaElement, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+function setInputValue(input: HTMLInputElement, value: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 function buttonContaining(root: ParentNode, text: string): HTMLButtonElement {
   const found = Array.from(root.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes(text));
   expect(found, `no button containing "${text}"`).toBeTruthy();
@@ -106,10 +116,10 @@ const OUTLINE = {
   items: [{ label: 'Evaporation' }, { label: 'Condensation' }, { label: 'Precipitation' }],
 };
 
-function stubFetch() {
+function stubFetch(outline: unknown = OUTLINE) {
   const fetchMock = vi.fn(async () =>
     new Response(
-      JSON.stringify({ outline: OUTLINE, generatedBy: { source: 'collabboard-default', model: 'm' } }),
+      JSON.stringify({ outline, generatedBy: { source: 'collabboard-default', model: 'm' } }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     ),
   );
@@ -221,5 +231,31 @@ describe('PATCH-278 generator Edit as drawing', () => {
     click(drawButton(c)!);
     expect(onEditAsDrawing).toHaveBeenCalledTimes(1);
     expect(onEditAsDrawing.mock.calls[0][0]).toEqual({ drawingData: 'D' });
+  });
+
+  it('PATCH-279: with an empty Post name, the drawing takes the picture title', async () => {
+    stubFetch();
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} onEditAsDrawing={() => {}} />);
+    await openGallery(c);
+    await selectAntvTile(c);
+    expect(drawButton(c)!.getAttribute('data-title')).toBe('Water cycle');
+  });
+
+  it('PATCH-279: a typed Post name wins over the picture title', async () => {
+    stubFetch();
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} onEditAsDrawing={() => {}} />);
+    await openGallery(c);
+    await selectAntvTile(c);
+    setInputValue(c.querySelector('input[placeholder="Post name"]') as HTMLInputElement, 'My post');
+    await flush(50);
+    expect(drawButton(c)!.getAttribute('data-title')).toBe('My post');
+  });
+
+  it('PATCH-279: with no title anywhere, the button passes no title (createDrawingPost defaults to Drawing)', async () => {
+    stubFetch({ ...OUTLINE, title: '' });
+    const c = mount(<AIComponentEditor isOpen onClose={() => {}} onSave={() => {}} onEditAsDrawing={() => {}} />);
+    await openGallery(c);
+    await selectAntvTile(c);
+    expect(drawButton(c)!.getAttribute('data-title')).toBe('');
   });
 });
