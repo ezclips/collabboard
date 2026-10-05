@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const root = path.resolve(__dirname, '..');
 const SCRIPT = path.join(root, 'scripts', 'build-excalidraw-fork.mjs');
+const SYNC_SCRIPT = path.join(root, 'scripts', 'sync-excalidraw-assets.mjs');
 const MARKER = 'customContextMenuRenderer';
 
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -155,6 +156,15 @@ describe('generator source contract', () => {
     expect(block.slice(0, 400)).toContain('writeFileSync(file, "")');
   });
 
+  it('runs the asset copy after a successful build, through the one script', () => {
+    const source = script();
+    // Reuses scripts/sync-excalidraw-assets.mjs rather than a second copy path,
+    // and invokes it after the per-package loop.
+    expect(source).toContain('sync-excalidraw-assets.mjs');
+    const loopEnd = source.indexOf('syncAssets();');
+    expect(loopEnd).toBeGreaterThan(source.indexOf('for (const pkg of PACKAGES)'));
+  });
+
   it('resolves its paths from its own location, not the caller cwd', () => {
     const source = script();
     expect(source).toContain('fileURLToPath(import.meta.url)');
@@ -214,6 +224,10 @@ describe('generator verification behavior', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fork-contract-'));
     fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
     fs.copyFileSync(SCRIPT, path.join(dir, 'scripts', 'build-excalidraw-fork.mjs'));
+    // The generator runs the asset copy after a successful build; the fixture
+    // must contain that script or the real invocation would fail on a missing
+    // file rather than on the artifact contract under test.
+    fs.copyFileSync(SYNC_SCRIPT, path.join(dir, 'scripts', 'sync-excalidraw-assets.mjs'));
 
     const packages = path.join(dir, 'components/collabboard/canvas/excalidraw_fork/packages');
     const future = new Date(Date.now() + 60_000);
@@ -235,6 +249,11 @@ describe('generator verification behavior', () => {
         fs.utimesSync(full, future, future);
       }
     }
+
+    // A real font for the copy step the generator now runs after verification.
+    const fonts = path.join(packages, 'excalidraw', 'dist/prod/fonts/Excalifont');
+    fs.mkdirSync(fonts, { recursive: true });
+    fs.writeFileSync(path.join(fonts, 'Excalifont-Regular-test.woff2'), 'woff2');
     return dir;
   }
 

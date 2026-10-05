@@ -44,6 +44,7 @@ next-env.d.ts
 supabase/.temp/
 tmp-line-debug/
 devserver.out.log
+public/excalidraw-assets/
 
 # .agent/ holds local notes, with a deliberate set of exceptions (the count in
 # this comment said "three" long after there were more than three). The verification

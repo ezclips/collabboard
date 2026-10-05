@@ -81,7 +81,7 @@ export default function ExcalidrawWrapper({
 
     React.useEffect(() => {
         if (typeof window !== 'undefined' && !(window as any).EXCALIDRAW_ASSET_PATH) {
-            (window as any).EXCALIDRAW_ASSET_PATH = "https://unpkg.com/@excalidraw/excalidraw/dist/";
+            (window as any).EXCALIDRAW_ASSET_PATH = `${window.location.origin}/excalidraw-assets/`;
         }
     }, []);
 

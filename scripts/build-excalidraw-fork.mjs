@@ -36,6 +36,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const fork = path.join(root, "components/collabboard/canvas/excalidraw_fork");
 const packagesDir = path.join(fork, "packages");
+const syncAssetsScript = path.join(here, "sync-excalidraw-assets.mjs");
 
 /** The 6A public API. Its absence means the app would silently lose the hook. */
 const MARKER = "customContextMenuRenderer";
@@ -272,6 +273,29 @@ for (const pkg of PACKAGES) {
   log(`${pkg.name}: OK`);
   built += 1;
 }
+
+/**
+ * The built fonts must also reach the app's own `public/` tree, or the editor
+ * falls back to an outside CDN whose release may not match this fork. Runs the
+ * same script as `npm run sync:excalidraw-assets`, so there is one copy
+ * implementation. Fast (a file copy) and idempotent. Defined after the loop so
+ * the non-zero-exit branch above stays the generator's own.
+ */
+const syncAssets = () => {
+  log("copying the fork's fonts into the app...");
+  const result = spawnSync(process.execPath, [syncAssetsScript], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (result.error) {
+    fail(`could not run the asset copy: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    fail("the fork's fonts were built but could not be copied into the app.");
+  }
+};
+
+syncAssets();
 
 log(
   built === 0
