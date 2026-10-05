@@ -183,8 +183,6 @@ import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import ImportsDialog from '@/components/collabboard/imports/ImportsDialog';
 import { LibraryItemContent, addToLibrary } from '@/lib/collabboard/library';
 import { extractAIContentFromPadletMetadata, normalizeAIContent } from '@/lib/ai/normalize-ai-content';
-import { visualizeSourceText } from '@/lib/ai/visualizeSource';
-import { findVisualizeSpot } from '@/lib/ai/visualizePlacement';
 import { clipboardManager } from '@/lib/collabboard/ClipboardManager';
 import { toast } from 'sonner';
 import PlacementPrompt from '@/components/collabboard/PlacementPrompt';
@@ -849,10 +847,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const setIsCardEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isCardEditorOpen: v } });
   const isAIComponentEditorOpen = canvasState.editors.isAIComponentEditorOpen;
   const setIsAIComponentEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isAIComponentEditorOpen: v } });
-  // PATCH-235. A "Visualize…" request: where the new picture should land, and a
-  // pending ref used to draw its link line once the insert lands.
-  const [visualizeRequest, setVisualizeRequest] = useState<{ sourceId: string; x: number; y: number; prompt: string } | null>(null);
-  const visualizeLinkRef = useRef<{ sourceId: string; beforeIds: Set<string> } | null>(null);
   const isAIContentEditModalOpen = canvasState.editors.isAIContentEditModalOpen;
   // PATCH-240. A board double-click on an AI picture carries the clicked word's
   // data-ai-edit-ref through to the Edit window. It lives here, not in
@@ -3460,102 +3454,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const saveLinkIfBoardEditable = useMemo(() => guardBoardContentSave(saveLink), [guardBoardContentSave, saveLink]);
   const saveImageIfBoardEditable = useMemo(() => guardBoardContentSave(saveImage), [guardBoardContentSave, saveImage]);
   const saveDrawingIfBoardEditable = useMemo(() => guardBoardContentSave(saveDrawing), [guardBoardContentSave, saveDrawing]);
-
-  // PATCH-235. Save through the shared AI save, remembering a Visualize request
-  // so the new picture can be linked to its source once the insert lands.
-  const handleSaveAIComponent = useCallback(
-    async (data: Parameters<typeof saveAIComponent>[0]) => {
-      const request = visualizeRequest;
-      const beforeIds = new Set(padlets.map((p) => p.id));
-      await saveAIComponent(data, request ? { x: request.x, y: request.y } : undefined);
-      if (request) visualizeLinkRef.current = { sourceId: request.sourceId, beforeIds };
-    },
-    [saveAIComponent, visualizeRequest, padlets],
-  );
-
-  // Opens the AI generator pre-filled from a Note/Document's text, placed to the
-  // right of the source.
-  const handleVisualizePost = useCallback((padlet: Padlet) => {
-    if (!canvasId) return;
-    // The stored width can be wider than the visible card; the wrapper's own
-    // offsetWidth is unscaled (world units), so prefer it.
-    const wrapper = typeof document !== 'undefined'
-      ? document.querySelector(`[data-padlet-id="${padlet.id}"]`) as HTMLElement | null
-      : null;
-    const sourceWidth = wrapper?.offsetWidth || Number(padlet.width) || 320;
-    const sourceHeight = wrapper?.offsetHeight || Number(padlet.height) || 200;
-    const sourceX = Number(padlet.position_x) || 0;
-    const sourceY = Number(padlet.position_y) || 0;
-    const spot = findVisualizeSpot({
-      source: { x: sourceX, y: sourceY, width: sourceWidth, height: sourceHeight },
-      size: { width: 500, height: 400 },
-      others: padlets
-        .filter((p) => p.id !== padlet.id)
-        .map((p) => ({
-          x: Number(p.position_x) || 0,
-          y: Number(p.position_y) || 0,
-          width: Number(p.width) || 320,
-          height: Number(p.height) || 200,
-        })),
-    });
-    setVisualizeRequest({
-      sourceId: padlet.id,
-      x: spot.x,
-      y: spot.y,
-      // The source text travels in the request, not on the draft metadata (the
-      // knowledgeSourceAiWiring census bans an ai* literal in this file).
-      prompt: visualizeSourceText(padlet),
-    });
-    setPadletToEdit({
-      id: 'new',
-      board_id: canvasId,
-      title: 'AI Component',
-      content: '',
-      type: 'ai-component',
-      position_x: 0,
-      position_y: 0,
-      width: 500,
-      height: 400,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      metadata: {},
-    });
-    setIsAIComponentEditorOpen(true);
-  }, [canvasId, setPadletToEdit, setIsAIComponentEditorOpen]);
-
-  // The request is cleared on save, cancel and close.
-  useEffect(() => {
-    if (!isAIComponentEditorOpen) setVisualizeRequest(null);
-  }, [isAIComponentEditorOpen]);
-
-  // After the insert lands, join source -> new picture on graph boards only.
-  useEffect(() => {
-    const pending = visualizeLinkRef.current;
-    if (!pending || !canvasId) return;
-    const created = padlets.find((p) => p.type === 'ai-component' && !pending.beforeIds.has(p.id));
-    if (!created) return;
-    visualizeLinkRef.current = null;
-    if (!isFreeformGraphMode) return;
-    void (async () => {
-      try {
-        const repo = createFreeformGraphRepo(String(canvasId));
-        await repo.upsertEdge({
-          id: crypto.randomUUID(),
-          board_id: String(canvasId),
-          source_post_id: pending.sourceId,
-          target_post_id: String(created.id),
-          relation_type: 'solid',
-          direction: 'forward',
-          label: null,
-          style: { color: '#9ca3af' },
-        });
-        setGraphRefreshToken((token) => token + 1);
-      } catch (error) {
-        console.error('Visualize link failed:', error);
-        toast.error('The picture was added, but the link line could not be drawn.');
-      }
-    })();
-  }, [padlets, canvasId, isFreeformGraphMode, setGraphRefreshToken]);
 
   // Scroll to bottom when toggling Gantt or Scheduler so they are instantly visible
   useEffect(() => {
@@ -9310,10 +9208,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           saveComment={saveComment}
           saveImage={saveImageIfBoardEditable}
           saveDrawing={saveDrawingIfBoardEditable}
-          saveAIComponent={handleSaveAIComponent}
+          saveAIComponent={saveAIComponent}
           createDrawingPost={createDrawingPost}
-          initialVisualize={!!visualizeRequest}
-          visualizePrompt={visualizeRequest?.prompt}
           saveCard={saveCardIfBoardEditable}
           closeAllToolbars={closeAllToolbars}
           openPadletInTypeEditor={openPadletInTypeEditor}
@@ -10704,7 +10600,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setGraphConnectSelection={setGraphConnectSelection}
                     graphRefreshToken={graphRefreshToken}
                     onGraphEdgesChanged={() => setGraphRefreshToken((token) => token + 1)}
-                    onVisualizePost={handleVisualizePost}
                     onAIContentEdit={openAIContentEdit}
                     closeAllToolbars={closeAllToolbars}
                     handlePadletMouseDown={handlePadletMouseDown}

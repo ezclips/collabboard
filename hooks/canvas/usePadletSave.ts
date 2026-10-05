@@ -1699,9 +1699,6 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
   const saveAIComponent = useCallback(async (
     data: SaveAIComponentData,
-    // PATCH-235. When supplied (a "Visualize…" request), the new post is placed
-    // here instead of at newPostPosition -- still rounded. No stored field.
-    placement?: { x: number; y: number },
   ) => {
     // Board content: refused before metadata, ids, placement, editor state
     // or any request -- and asked live, so a retained handle refuses too.
@@ -1790,9 +1787,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { position_x, position_y } = placement
-          ? roundPostGeometry({ position_x: placement.x, position_y: placement.y })
-          : newPostPosition(500, 400);
+        const { position_x, position_y } = newPostPosition(500, 400);
         const { data: newAIComp, error } = await supabase
           .from('padlets')
           .insert({

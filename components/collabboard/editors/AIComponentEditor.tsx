@@ -105,9 +105,6 @@ interface AIComponentEditorProps {
   currentUserName?: string;
   /** PATCH-188. The board this card is built on; the owner's plan pays. */
   boardId?: string;
-  // PATCH-235. Opened by "Visualize…": starts in Diagram + Show options with the
-  // post's text and generates once, automatically.
-  initialVisualize?: boolean;
   /** PATCH-278. Turns the selected AntV picture into a drawing post. */
   onEditAsDrawing?: (data: DrawingPostData) => void | Promise<void>;
 }
@@ -308,7 +305,6 @@ export default function AIComponentEditor({
   currentUserId = 'anon',
   currentUserName = 'You',
   boardId,
-  initialVisualize = false,
   onEditAsDrawing,
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
@@ -434,8 +430,6 @@ export default function AIComponentEditor({
   const [modelError, setModelError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
-  // PATCH-235: the Visualize auto-run fires exactly once per open.
-  const visualizeAutoRanRef = useRef(false);
   // PATCH-256. The options the last outline attempt used, so the preview's
   // Try again replays exactly that request (a bare Generate, or a Customize /
   // estimated-values one) rather than always sending no options.
@@ -474,16 +468,6 @@ export default function AIComponentEditor({
     setError(null);
     diagramKicker.reset(readDiagramKicker(initialContent));
     setErrorIsPlanLimit(false);
-    // PATCH-235: a Visualize request opens straight into Diagram + Show options.
-    visualizeAutoRanRef.current = false;
-    if (initialVisualize) {
-      setUiMode('diagram');
-      setMode('diagram');
-      setSubtype(undefined);
-      setShowOptions(true);
-      setOutlineOptions([]);
-      setSelectedOptionKey(null);
-    }
 
     // PATCH-236: opening a stored infographic shows its designs, its template
     // preselected, with NO AI call (the shape is already stored).
@@ -511,7 +495,6 @@ export default function AIComponentEditor({
       );
       setOutlineGeneratedBy(readAIGenerationAttribution(initialContent) ?? null);
       setOutlineCreatedAt(new Date().toISOString());
-      visualizeAutoRanRef.current = true; // no auto-run for a stored shape
     }
 
     setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
@@ -531,7 +514,7 @@ export default function AIComponentEditor({
     setActiveStyleTarget('title');
     setDetachedPopupPos(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialTitle, initialPrompt, initialContent, initialMetadata, initialVisualize]);
+  }, [isOpen, initialTitle, initialPrompt, initialContent, initialMetadata]);
 
   const isLoading = stage === 'classifying' || stage === 'generating' || stage === 'rendering';
 
@@ -1060,16 +1043,6 @@ export default function AIComponentEditor({
       abortRef.current = null;
     }
   };
-
-  // PATCH-235: a Visualize request runs the outline exactly once per open.
-  useEffect(() => {
-    if (!isOpen || !initialVisualize || !showOptions) return;
-    if (visualizeAutoRanRef.current) return;
-    if (!prompt.trim()) return;
-    visualizeAutoRanRef.current = true;
-    void generate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialVisualize, showOptions]);
 
   const cancel = () => {
     abortRef.current?.abort();
