@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import { X, Save, CircleHelp, Move, ZoomIn, Palette, Type, Smile, MessageSquare, TextCursor } from 'lucide-react';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
+import { loadAntvLibraryItems } from '@/lib/collabboard/antvLibrary';
 import { CardColorPanel } from './CardColorPanel';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
@@ -83,6 +84,9 @@ export default function DrawingEditor({
     const filesRef = useRef<any>({});
     const helpRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
+    // PATCH-282: the live Excalidraw API, so the built-in AntV library can be
+    // pushed into an already-open editor once its static file arrives.
+    const excalidrawAPIRef = useRef<any>(null);
 
     // Track if initial data has been loaded
     const [initialElements, setInitialElements] = useState<any[]>([]);
@@ -231,22 +235,35 @@ export default function DrawingEditor({
 
     // Parse initial data only when opening
     useEffect(() => {
+        let libraryCancelled = false;
         if (isOpen) {
             let elements: any[] = [];
             let appState: any = null;
             let files: any = {};
 
-            // Load Excalidraw Community Library items
-            const communityItems = getExcalidrawLibrary();
-            // Flatten the nested elements structure for Excalidraw
-            const flattenedLibrary = communityItems.flatMap(item =>
-                item.elements.map(el => ({
-                    ...el,
-                    // Optional: add some metadata to help identify source
-                    metadata: { ...el.metadata, source: item.name }
-                }))
-            );
-            setLibraryItems(flattenedLibrary);
+            // Load Excalidraw Community Library items.
+            // PATCH-282: Excalidraw's library panel expects `LibraryItem`
+            // objects ({ id, status, elements, created, name }), not a flat
+            // element list -- flattening them is why the panel showed nothing.
+            const communityLibraryItems = getExcalidrawLibrary().map((item) => ({
+                id: item.id,
+                status: 'unpublished',
+                created: item.created,
+                name: item.name,
+                elements: item.elements,
+            }));
+            setLibraryItems(communityLibraryItems);
+
+            // The built-in AntV diagrams are a static, same-origin file fetched
+            // asynchronously. The editor opens immediately; once they arrive we
+            // prepend them and push the merged list into the already-mounted
+            // editor (initialData is not re-read after mount).
+            loadAntvLibraryItems().then((antvItems) => {
+                if (libraryCancelled) return;
+                const mergedLibraryItems = [...antvItems, ...communityLibraryItems];
+                setLibraryItems(mergedLibraryItems);
+                excalidrawAPIRef.current?.updateLibrary?.({ libraryItems: mergedLibraryItems, merge: false });
+            });
 
             if (initialData?.drawingData) {
                 try {
@@ -297,7 +314,16 @@ export default function DrawingEditor({
             setActiveStyleTarget('title');
             setDetachedPopupPos(null);
         }
+        return () => {
+            libraryCancelled = true;
+        };
     }, [isOpen, initialData?.drawingData, initialData?.drawingAppState, initialData?.drawingFiles, initialTitle, initialMetadata]);
+
+    // Stable API capture for the wrapper (PATCH-282 uses it to update the
+    // library after the async AntV file arrives).
+    const handleExcalidrawApi = useCallback((api: any) => {
+        excalidrawAPIRef.current = api;
+    }, []);
 
     // Memoized onChange handler that only updates refs
     const handleChange = useCallback((elements: readonly any[], appState: any, files: any) => {
@@ -727,6 +753,7 @@ export default function DrawingEditor({
                                 readOnly={readOnly}
                                 onShowHelp={() => setShowHelp(true)}
                                 useCollabBoardContextMenu
+                                excalidrawAPI={handleExcalidrawApi}
                             />
                         </div>
                     </div>

@@ -11,16 +11,24 @@ import AntvExcalidrawHarnessClient from '@/components/ai/dev/AntvExcalidrawHarne
  * `ssr: false` is not allowed in a Server Component. The Excalidraw package is
  * never evaluated during server rendering.
  *
- * `?t=<template>&theme=<id>&pill=polygon` shows one design on its own.
+ * `?t=<template>&theme=<id>&pill=polygon&icons=strokes` shows one design on its
+ * own. `icons=strokes` emits the icons as editable geometry (PATCH-281).
  */
 export default async function AntvExcalidrawFixturePage({
   searchParams,
 }: {
-  searchParams: Promise<{ t?: string; theme?: string; pill?: string }>;
+  searchParams: Promise<{ t?: string; theme?: string; pill?: string; icons?: string; export?: string }>;
 }) {
   if (process.env.NODE_ENV === 'production') notFound();
   const params = await searchParams;
-  return (
-    <AntvExcalidrawHarnessClient template={params.t} theme={params.theme} pill={params.pill} />
-  );
+  // Spread so the client wrapper (a thin pass-through) forwards `icons` and
+  // `export` too.
+  const harnessProps = {
+    template: params.t,
+    theme: params.theme,
+    pill: params.pill,
+    icons: params.icons,
+    export: params.export,
+  };
+  return <AntvExcalidrawHarnessClient {...harnessProps} />;
 }

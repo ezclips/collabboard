@@ -16,6 +16,7 @@ type DrawingPostDraft = Partial<Padlet> & {
 };
 import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
+import { loadAntvLibraryItems } from '@/lib/collabboard/antvLibrary';
 import {
   buildDrawingSceneUpdate,
   collectDrawingLinkedContainerDeletionPlan,
@@ -1613,6 +1614,8 @@ export default function DrawingLayout({
   const [initialAppState, setInitialAppState] = useState<any>(null);
   const [initialFiles, setInitialFiles] = useState<any>(null);
   const [libraryItems, setLibraryItems] = useState<any[]>([]);
+  // PATCH-282: the built-in AntV designs, loaded once from the static file.
+  const [antvLibraryItems, setAntvLibraryItems] = useState<any[]>([]);
   const [pendingImportedScene, setPendingImportedScene] = useState<ImportedDrawingScene | null>(null);
   const [isImportingScene, setIsImportingScene] = useState(false);
 
@@ -2067,9 +2070,15 @@ export default function DrawingLayout({
       }
 
       const communityItems = getExcalidrawLibrary();
-      setLibraryItems(communityItems.flatMap(item =>
-        item.elements.map(el => ({ ...el, metadata: { ...el.metadata, source: item.name } }))
-      ));
+      // PATCH-282: Excalidraw expects `LibraryItem` objects, not a flat list
+      // of elements (flattening is why the library panel showed nothing).
+      setLibraryItems(communityItems.map((item) => ({
+        id: item.id,
+        status: 'unpublished',
+        created: item.created,
+        name: item.name,
+        elements: item.elements,
+      })));
 
       setKey(1);
       setIsInitializing(false);
@@ -2106,6 +2115,36 @@ export default function DrawingLayout({
       setIsInitializing(false);
     }
   }, [padlets, padletsLoaded, canvasId, readOnly, onAddPadlet]);
+
+  // PATCH-282: fetch the built-in AntV diagrams once (module-cached).
+  useEffect(() => {
+    let cancelled = false;
+    loadAntvLibraryItems().then((items) => {
+      if (!cancelled) setAntvLibraryItems(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // PATCH-282: the library is AntV items first, then each community item as its
+  // own `LibraryItem`. Re-runs when the AntV file or the Excalidraw API arrives,
+  // so an already-mounted editor gets the merged list via `updateLibrary`.
+  useEffect(() => {
+    const communityItems = getExcalidrawLibrary().map((item) => ({
+      id: item.id,
+      status: 'unpublished',
+      created: item.created,
+      name: item.name,
+      elements: item.elements,
+    }));
+    const mergedLibraryItems = [...antvLibraryItems, ...communityItems];
+    setLibraryItems(mergedLibraryItems);
+    const api = excalidrawAPIRef.current ?? excalidrawAPI;
+    if (api?.updateLibrary) {
+      api.updateLibrary({ libraryItems: mergedLibraryItems, merge: false });
+    }
+  }, [antvLibraryItems, excalidrawAPI]);
 
   // Keep a ref so performSave always sees the latest masterPadlet without recreating on every
   // padlets state update (which would cascade and recreate handleChange at 60fps during drag).

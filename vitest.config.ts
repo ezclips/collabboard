@@ -15,6 +15,9 @@ export default defineConfig({
       // RUN, which is worse than a failing one -- it reports nothing and looks
       // green. lib/ai held no test files at all until this was added.
       'lib/ai/*.test.ts',
+      // PATCH-283: the AI-drawn picture spike lives one level down; without this
+      // line its tests are silently NOT RUN (the trap above).
+      'lib/ai/drawn/**/*.test.ts',
       // PATCH-236: the infographic design library lives one level down; without
       // this line its tests are silently NOT RUN (the trap the note above warns of).
       'lib/ai/infographic/**/*.test.ts',
@@ -22,6 +25,9 @@ export default defineConfig({
       // tests are silently NOT RUN (the trap the note above warns of).
       'lib/ai/antv/**/*.test.ts',
       'lib/domain/**/*.test.ts',
+      // PATCH-282: the AntV drawing-library loader lives under lib/collabboard;
+      // without this line its test is silently NOT RUN (the trap above).
+      'lib/collabboard/**/*.test.ts',
       // PATCH-183: the permissions layer's plan tests.
       'lib/auth/**/*.test.ts',
       // PATCH-183: the Stripe plan-mapping tests.

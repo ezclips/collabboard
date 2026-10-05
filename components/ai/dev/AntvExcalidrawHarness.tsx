@@ -23,6 +23,12 @@ import { themeById } from '@/lib/ai/visualThemes';
 import { convertAntvSvg } from '@/lib/ai/antv/toExcalidraw';
 import type { SpikeReport } from '@/lib/ai/antv/toExcalidraw';
 import {
+  ANTV_LIBRARY_TEMPLATES,
+  serializeAntvLibrary,
+  type AntvLibraryItemInput,
+} from '@/lib/ai/antv/toExcalidraw/libraryTemplates';
+import { stableHash } from '@/lib/ai/antv/toExcalidraw/toSkeleton';
+import {
   HARNESS_OUTLINE,
   selectedRows,
   type HarnessRow,
@@ -42,6 +48,7 @@ declare global {
 }
 
 type PillMode = 'rectangle' | 'polygon';
+type IconMode = 'image' | 'strokes';
 
 interface AntvInstance {
   on?: (event: string, callback: () => void) => void;
@@ -70,7 +77,8 @@ function ReportTable({ report }: { report: SpikeReport }): ReactElement {
       `blended ${report.losses.blended}, gradient ${report.losses.gradientFlattened}, ` +
         `pill-approx ${report.losses.pillApproximated}, clip ${report.losses.clipIgnored}, ` +
         `bold ${report.losses.lostFontWeight}, italic ${report.losses.lostFontStyle}, ` +
-        `icons ${report.losses.iconsAsImage}, mixed ${report.losses.mixedTextStyle}`,
+        `icons ${report.losses.iconsAsImage}, stroke-icons ${report.losses.iconsAsStrokes}, ` +
+        `pattern ${report.losses.patternIgnored}, mixed ${report.losses.mixedTextStyle}`,
     ],
     ['pass', report.passed ? 'YES' : 'NO'],
   ];
@@ -88,7 +96,7 @@ function ReportTable({ report }: { report: SpikeReport }): ReactElement {
   );
 }
 
-function HarnessRowView({ row, pill }: { row: HarnessRow; pill: PillMode }): ReactElement {
+function HarnessRowView({ row, pill, icons }: { row: HarnessRow; pill: PillMode; icons: IconMode }): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [converted, setConverted] = useState<Converted | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +138,7 @@ function HarnessRowView({ row, pill }: { row: HarnessRow; pill: PillMode }): Rea
             template: row.template,
             theme: row.theme,
             pill,
+            icons,
           })
             .then((result) => {
               if (cancelled) return;
@@ -162,7 +171,7 @@ function HarnessRowView({ row, pill }: { row: HarnessRow; pill: PillMode }): Rea
       }
       if (host) host.innerHTML = '';
     };
-  }, [row.template, row.theme, pill, background]);
+  }, [row.template, row.theme, pill, icons, background]);
 
   return (
     <section style={{ borderTop: '1px solid #e5e7eb', padding: '16px 0' }}>
@@ -194,19 +203,166 @@ function HarnessRowView({ row, pill }: { row: HarnessRow; pill: PillMode }): Rea
   );
 }
 
+/**
+ * PATCH-282. The library export view. It renders the curated templates ONE AT A
+ * TIME through a single AntV container (not 74 instances at once), converts each
+ * with icons as strokes, normalises it to the origin, and finally prints the
+ * complete same-origin `.excalidrawlib` file in one `<pre data-antv-library>`.
+ * The CTO copies that text into `public/libraries/antv-diagrams.excalidrawlib`.
+ */
+
+function withStableIds(template: string, elements: readonly ExcalidrawElement[]): ExcalidrawElement[] {
+  return elements.map((element, index) => ({
+    ...element,
+    id: `antv-${stableHash(`${template}:${index}`)}`,
+  })) as ExcalidrawElement[];
+}
+
+function normaliseToOrigin(elements: readonly ExcalidrawElement[]): ExcalidrawElement[] {
+  if (elements.length === 0) return [];
+  const minX = Math.min(...elements.map((element) => element.x));
+  const minY = Math.min(...elements.map((element) => element.y));
+  return elements.map((element) => ({
+    ...element,
+    x: element.x - minX,
+    y: element.y - minY,
+  })) as ExcalidrawElement[];
+}
+
+function renderLibraryTemplate(
+  Ctor: new (options: Record<string, unknown>) => AntvInstance,
+  container: HTMLElement,
+  template: string,
+): Promise<readonly ExcalidrawElement[]> {
+  return new Promise((resolve, reject) => {
+    const ig = new Ctor({
+      ...toAntvOptions(HARNESS_OUTLINE, template, 'classic'),
+      container,
+      width: '100%',
+      height: 'auto',
+      editable: false,
+    });
+    ig.on?.('error', () => reject(new Error(`AntV render failed: ${template}`)));
+    ig.on?.('loaded', () => {
+      const svg = container.querySelector('svg');
+      if (!svg) {
+        reject(new Error(`AntV produced no <svg>: ${template}`));
+        return;
+      }
+      convertAntvSvg(svg, {
+        background: themeById('classic').background,
+        template,
+        theme: 'classic',
+        pill: 'polygon',
+        icons: 'strokes',
+      })
+        .then((result) => {
+          ig.destroy?.();
+          resolve(result.elements);
+        })
+        .catch((cause: unknown) => {
+          ig.destroy?.();
+          reject(cause);
+        });
+    });
+    ig.render?.();
+  });
+}
+
+function AntvLibraryExportView(): ReactElement {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [status, setStatus] = useState('Starting…');
+  const [libraryJson, setLibraryJson] = useState('');
+  const [byteSize, setByteSize] = useState(0);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const mod = await loadAntv();
+      const Ctor = mod.Infographic as unknown as new (options: Record<string, unknown>) => AntvInstance;
+      const libraryItems: AntvLibraryItemInput[] = [];
+      for (const entry of ANTV_LIBRARY_TEMPLATES) {
+        if (cancelled || !hostRef.current) return;
+        setStatus(`Rendering ${libraryItems.length + 1}/${ANTV_LIBRARY_TEMPLATES.length}: ${entry.template}…`);
+        const container = hostRef.current;
+        container.innerHTML = '';
+        const elements = await renderLibraryTemplate(Ctor, container, entry.template);
+        if (cancelled) return;
+        libraryItems.push({
+          id: `antv:${entry.template}`,
+          status: 'published',
+          created: 0,
+          name: `${entry.section} · ${entry.name}`,
+          elements: normaliseToOrigin(
+            withStableIds(entry.template, elements),
+          ) as unknown as Array<Record<string, unknown>>,
+        });
+      }
+      // Addendum 1: compact JSON, rounded floats, no customData -- the budget is
+      // 2.5 MB and pretty-printing alone nearly doubled it.
+      const json = serializeAntvLibrary(libraryItems);
+      if (cancelled) return;
+      setLibraryJson(json);
+      setByteSize(new TextEncoder().encode(json).length);
+      setStatus(`Done: ${libraryItems.length} templates`);
+    };
+    run().catch((cause: unknown) => {
+      if (!cancelled) {
+        setFailed(true);
+        setStatus(`Failed: ${String(cause)}`);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <main style={{ padding: 16, fontFamily: 'system-ui, sans-serif' }}>
+      <h1 style={{ fontSize: 18, fontWeight: 700 }}>AntV → Excalidraw library export (dev only)</h1>
+      <p style={{ fontSize: 12, color: failed ? '#b91c1c' : '#6b7280' }}>{status}</p>
+      <div ref={hostRef} style={{ border: '1px solid #e5e7eb', width: 720 }} />
+      {libraryJson ? (
+        <>
+          <p data-antv-library-bytes style={{ fontSize: 12 }}>
+            {byteSize} bytes
+          </p>
+          <pre
+            data-antv-library
+            style={{ fontSize: 11, maxHeight: 480, overflow: 'auto', background: '#f9fafb', padding: 8 }}
+          >
+            {libraryJson}
+          </pre>
+        </>
+      ) : null}
+    </main>
+  );
+}
+
 export default function AntvExcalidrawHarness({
   template,
   theme,
   pill,
+  icons,
+  export: exportMode,
 }: {
   template?: string;
   theme?: string;
   pill?: string;
+  icons?: string;
+  export?: string;
 }): ReactElement {
   const rows = useMemo(() => selectedRows(template ?? null, theme ?? null), [template, theme]);
   // Addendum 4: exact capsule outline is the default; `?pill=rectangle` restores
   // the legacy ADAPTIVE_RADIUS rounded box.
   const pillMode: PillMode = pill === 'rectangle' ? 'rectangle' : 'polygon';
+  // PATCH-281: `?icons=strokes` emits editabe icon geometry for the library path.
+  const iconMode: IconMode = icons === 'strokes' ? 'strokes' : 'image';
+  // PATCH-282: `?export=library` switches to the whole-library export view.
+  if (exportMode === 'library') {
+    return <AntvLibraryExportView />;
+  }
   return (
     <main style={{ padding: 16, fontFamily: 'system-ui, sans-serif' }}>
       <h1 style={{ fontSize: 18, fontWeight: 700 }}>AntV → Excalidraw spike (dev only)</h1>
@@ -215,7 +371,7 @@ export default function AntvExcalidrawHarness({
         Reports are also on <code>window.__antvExcalidrawSpike</code>.
       </p>
       {rows.map((row) => (
-        <HarnessRowView key={`${row.template}:${row.theme}`} row={row} pill={pillMode} />
+        <HarnessRowView key={`${row.template}:${row.theme}`} row={row} pill={pillMode} icons={iconMode} />
       ))}
     </main>
   );
