@@ -9,6 +9,7 @@ import {
     type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
 import ExcalidrawCollabBoardContextMenu from '@/components/collabboard/menus/ExcalidrawCollabBoardContextMenu';
+import AntvChartValuesControl from '@/components/collabboard/editors/AntvChartValuesControl';
 
 import type { ExcalidrawContextMenuRendererProps } from "@excalidraw/excalidraw/types";
 
@@ -73,6 +74,9 @@ export default function ExcalidrawWrapper({
     // API kept in a ref to avoid triggering renders when Excalidraw fires the callback
     const apiRef = React.useRef<any>(null);
     const importInputRef = React.useRef<HTMLInputElement | null>(null);
+    // PATCH-287. Bumped when the Excalidraw API arrives, so the values panel can
+    // subscribe once it exists.
+    const [apiVersion, setApiVersion] = React.useState(0);
     const [excalidrawLib, setExcalidrawLib] = React.useState<{
         Excalidraw: React.ComponentType<any>;
         MainMenu: any;
@@ -130,8 +134,11 @@ export default function ExcalidrawWrapper({
     const handleSetApi = React.useCallback((newApi: any) => {
         if (apiRef.current === newApi) return;
         apiRef.current = newApi;
+        setApiVersion((version) => version + 1);
         excalidrawAPI?.(newApi);
     }, [excalidrawAPI]);
+
+    const getApi = React.useCallback(() => apiRef.current, []);
 
     const uiOptions = React.useMemo(() => ({
         canvasActions: {
@@ -273,7 +280,7 @@ export default function ExcalidrawWrapper({
     const { Excalidraw, MainMenu, WelcomeScreen } = excalidrawLib;
 
     return (
-        <>
+        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
             <input
                 ref={importInputRef}
                 type="file"
@@ -301,6 +308,9 @@ export default function ExcalidrawWrapper({
                     <React.Fragment />
                 </WelcomeScreen>
             </Excalidraw>
-        </>
+            {!readOnly ? (
+                <AntvChartValuesControl getApi={getApi} apiVersion={apiVersion} />
+            ) : null}
+        </div>
     );
 }

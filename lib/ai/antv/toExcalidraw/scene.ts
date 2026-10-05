@@ -94,6 +94,11 @@ export interface SceneSource {
   tag: string;
   /** The nearest `data-indexes` ancestor, parsed, when there was one. */
   indexes?: number[];
+  /**
+   * PATCH-287. The nearest `data-element-type` of the node or an ancestor, when
+   * there was one. Combined with `indexes` it names the chart part.
+   */
+  elementType?: string;
 }
 
 interface SceneElementBase {

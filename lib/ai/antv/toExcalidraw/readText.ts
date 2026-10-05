@@ -45,6 +45,21 @@ export function nearestIndexes(el: Element, root: Element): number[] | undefined
   return undefined;
 }
 
+/**
+ * PATCH-287. The nearest `data-element-type` of the node or an ancestor, the
+ * same walk that finds `data-indexes`.
+ */
+export function nearestElementType(el: Element, root: Element): string | undefined {
+  let node: Element | null = el;
+  while (node && node !== root.parentElement) {
+    const type = node.getAttribute('data-element-type');
+    if (type) return type;
+    if (node === root) break;
+    node = node.parentElement;
+  }
+  return undefined;
+}
+
 export function recordSkip(state: ReaderState, el: Element, reason: SceneSkipReason): void {
   state.skips.push({ id: nextId(state), tag: lower(el), reason, indexes: nearestIndexes(el, state.root) });
 }
@@ -56,7 +71,11 @@ export function groupIdsFor(state: ReaderState, el: Element): string[] {
 
 export function sourceOf(state: ReaderState, el: Element): SceneElement['source'] {
   const indexes = nearestIndexes(el, state.root);
-  return indexes ? { tag: lower(el), indexes } : { tag: lower(el) };
+  const elementType = nearestElementType(el, state.root);
+  const source: SceneElement['source'] = { tag: lower(el) };
+  if (indexes) source.indexes = indexes;
+  if (elementType) source.elementType = elementType;
+  return source;
 }
 
 function textString(el: Element): string {

@@ -50,6 +50,12 @@ export interface SkeletonOptions {
    * ADAPTIVE_RADIUS rounded box.
    */
   pill?: 'rectangle' | 'polygon';
+  /**
+   * PATCH-287. When given, every skeleton element gets its role in
+   * `customData.antvRole`. The library/harness path passes it; nothing else
+   * changes.
+   */
+  roles?: ReadonlyMap<string, string>;
 }
 
 export interface SkeletonResult {
@@ -71,14 +77,19 @@ export function stableHash(input: string): string {
 interface Common {
   id: string;
   groupIds: string[];
-  customData: { antvId: string; antvKind: SceneElement['kind'] };
+  customData: { antvId: string; antvKind: SceneElement['kind'] | 'background'; antvRole?: string };
 }
 
-function common(el: { id: string; groupIds: string[]; kind: SceneElement['kind'] }): Common {
+function common(
+  el: { id: string; groupIds: string[]; kind: SceneElement['kind'] },
+  role?: string,
+): Common {
   return {
     id: el.id,
     groupIds: el.groupIds,
-    customData: { antvId: el.id, antvKind: el.kind },
+    customData: role
+      ? { antvId: el.id, antvKind: el.kind, antvRole: role }
+      : { antvId: el.id, antvKind: el.kind },
   };
 }
 
@@ -182,11 +193,12 @@ function polylineSkeleton(
 
 function textSkeleton(
   el: Extract<SceneElement, { kind: 'text' }>,
+  role?: string,
 ): ExcalidrawElementSkeleton {
   const wrapped = wrapToLineCount(el.text, el.fontSize, el.box.width, el.monospace, el.lineCount);
   return {
     type: 'text',
-    ...common(el),
+    ...common(el, role),
     x: el.box.x,
     y: el.box.y,
     text: wrapped,
@@ -205,6 +217,7 @@ function textSkeleton(
 function imageSkeleton(
   el: Extract<SceneElement, { kind: 'image' }>,
   files: Record<string, BinaryFileData>,
+  role?: string,
 ): ExcalidrawElementSkeleton {
   const fileId = stableHash(el.dataURL);
   if (!files[fileId]) {
@@ -217,7 +230,7 @@ function imageSkeleton(
   }
   return {
     type: 'image',
-    ...common(el),
+    ...common(el, role),
     x: el.box.x,
     y: el.box.y,
     width: el.box.width,
@@ -231,6 +244,8 @@ function imageSkeleton(
 /** Converts a scene into Excalidraw skeletons and the deduped files map. */
 export function toSkeleton(scene: PictureScene, options: SkeletonOptions = {}): SkeletonResult {
   const files: Record<string, BinaryFileData> = {};
+  const roles = options.roles;
+  const backgroundRole = roles?.get('background');
   const elements: ExcalidrawElementSkeleton[] = [
     {
       type: 'rectangle',
@@ -247,12 +262,14 @@ export function toSkeleton(scene: PictureScene, options: SkeletonOptions = {}): 
       roundness: null,
       opacity: 100,
       groupIds: [PICTURE_GROUP_ID],
-      customData: { antvId: 'background', antvKind: 'background' },
+      customData: backgroundRole
+        ? { antvId: 'background', antvKind: 'background', antvRole: backgroundRole }
+        : { antvId: 'background', antvKind: 'background' },
     } as unknown as ExcalidrawElementSkeleton,
   ];
 
   for (const el of scene.elements) {
-    const base = common(el);
+    const base = common(el, roles?.get(el.id));
     if (el.kind === 'rect') {
       if (el.pill && options.pill !== 'rectangle') {
         const points = stadiumPoints(el.box);
@@ -303,11 +320,11 @@ export function toSkeleton(scene: PictureScene, options: SkeletonOptions = {}): 
       continue;
     }
     if (el.kind === 'text') {
-      elements.push(textSkeleton(el));
+      elements.push(textSkeleton(el, roles?.get(el.id)));
       continue;
     }
     if (el.kind === 'image') {
-      elements.push(imageSkeleton(el, files));
+      elements.push(imageSkeleton(el, files, roles?.get(el.id)));
     }
   }
 

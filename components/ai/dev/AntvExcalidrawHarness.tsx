@@ -33,6 +33,8 @@ import {
   selectedRows,
   type HarnessRow,
 } from '@/lib/ai/antv/toExcalidraw/harnessFixtures';
+import { isAntvChartTemplate, type AntvChartData } from '@/lib/ai/antv/chartValues/data';
+import { renderAntvToElements } from '@/lib/ai/antv/chartValues/render';
 
 const Excalidraw = dynamic(
   () => import('@excalidraw/excalidraw').then((mod) => mod.Excalidraw),
@@ -229,44 +231,33 @@ function normaliseToOrigin(elements: readonly ExcalidrawElement[]): ExcalidrawEl
   })) as ExcalidrawElement[];
 }
 
-function renderLibraryTemplate(
-  Ctor: new (options: Record<string, unknown>) => AntvInstance,
-  container: HTMLElement,
-  template: string,
-): Promise<readonly ExcalidrawElement[]> {
-  return new Promise((resolve, reject) => {
-    const ig = new Ctor({
-      ...toAntvOptions(HARNESS_OUTLINE, template, 'classic'),
-      container,
-      width: '100%',
-      height: 'auto',
-      editable: false,
-    });
-    ig.on?.('error', () => reject(new Error(`AntV render failed: ${template}`)));
-    ig.on?.('loaded', () => {
-      const svg = container.querySelector('svg');
-      if (!svg) {
-        reject(new Error(`AntV produced no <svg>: ${template}`));
-        return;
-      }
-      convertAntvSvg(svg, {
-        background: themeById('classic').background,
-        template,
-        theme: 'classic',
-        pill: 'polygon',
-        icons: 'strokes',
-      })
-        .then((result) => {
-          ig.destroy?.();
-          resolve(result.elements);
-        })
-        .catch((cause: unknown) => {
-          ig.destroy?.();
-          reject(cause);
-        });
-    });
-    ig.render?.();
-  });
+/**
+ * PATCH-287. The chart data the library export attaches to every element of a
+ * chart item, so the editor can offer "Edit values" after insert.
+ */
+function chartDataFor(template: string): AntvChartData {
+  return {
+    v: 1,
+    template: template as AntvChartData['template'],
+    theme: 'classic',
+    title: HARNESS_OUTLINE.title,
+    items: HARNESS_OUTLINE.items.map((item) => ({
+      label: item.label,
+      value: item.value ?? 0,
+      ...(item.detail ? { detail: item.detail } : {}),
+      ...(item.icon ? { icon: item.icon } : {}),
+    })),
+  };
+}
+
+function attachChartData(
+  elements: readonly ExcalidrawElement[],
+  data: AntvChartData,
+): ExcalidrawElement[] {
+  return elements.map((element) => ({
+    ...element,
+    customData: { ...(element.customData ?? {}), antvChart: data },
+  })) as ExcalidrawElement[];
 }
 
 function AntvLibraryExportView(): ReactElement {
@@ -279,16 +270,22 @@ function AntvLibraryExportView(): ReactElement {
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const mod = await loadAntv();
-      const Ctor = mod.Infographic as unknown as new (options: Record<string, unknown>) => AntvInstance;
       const libraryItems: AntvLibraryItemInput[] = [];
       for (const entry of ANTV_LIBRARY_TEMPLATES) {
         if (cancelled || !hostRef.current) return;
         setStatus(`Rendering ${libraryItems.length + 1}/${ANTV_LIBRARY_TEMPLATES.length}: ${entry.template}…`);
         const container = hostRef.current;
         container.innerHTML = '';
-        const elements = await renderLibraryTemplate(Ctor, container, entry.template);
+        const rendered = await renderAntvToElements({
+          template: entry.template,
+          theme: 'classic',
+          outline: HARNESS_OUTLINE,
+          container,
+        });
         if (cancelled) return;
+        const elements = isAntvChartTemplate(entry.template)
+          ? attachChartData(rendered.elements, chartDataFor(entry.template))
+          : rendered.elements;
         libraryItems.push({
           id: `antv:${entry.template}`,
           status: 'published',

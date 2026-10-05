@@ -8,6 +8,8 @@
  * `public/libraries/antv-diagrams.excalidrawlib`.
  */
 
+import { parseAntvChartData } from '../chartValues/data';
+
 export type AntvLibrarySection =
   | 'Charts'
   | 'Lists'
@@ -175,13 +177,31 @@ function roundDeep(value: unknown): unknown {
 }
 
 /**
- * One element as it is written into the library file: `customData` (converter
- * bookkeeping) is dropped and every float is rounded to one decimal, recursively.
+ * PATCH-287. The only `customData` a chart element keeps: its role and its
+ * parseable chart data. Everything else is converter bookkeeping and is
+ * dropped, as before.
+ */
+function keptChartCustomData(value: unknown): { antvRole: unknown; antvChart: unknown } | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as { antvRole?: unknown; antvChart?: unknown };
+  const chart = parseAntvChartData(raw.antvChart);
+  if (!chart) return null;
+  return { antvRole: raw.antvRole, antvChart: chart };
+}
+
+/**
+ * One element as it is written into the library file: every float is rounded to
+ * one decimal, recursively. A chart element keeps ONLY its role and chart data;
+ * every other `customData` is dropped.
  */
 export function exportLibraryElement(element: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(element)) {
-    if (key === 'customData') continue;
+    if (key === 'customData') {
+      const kept = keptChartCustomData(value);
+      if (kept) out.customData = kept;
+      continue;
+    }
     out[key] = VERBATIM_INTEGER_KEYS.has(key) ? value : roundDeep(value);
   }
   return out;

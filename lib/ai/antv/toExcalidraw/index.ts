@@ -18,6 +18,7 @@ import { readSvgScene } from './readSvgScene';
 import { buildReport, type ReportElement, type SpikeReport } from './report';
 import type { PictureScene } from './scene';
 import { alignTextElements, toSkeleton, type AlignableElement } from './toSkeleton';
+import { assignRoles } from '../chartValues/roles';
 
 export type { SvgGeometry } from './geometry';
 export {
@@ -44,6 +45,11 @@ export interface ConvertAntvSvgOptions {
   /** Report labels only. */
   template?: string;
   theme?: string;
+  /**
+   * PATCH-287. When true, every converted element gets its chart role in
+   * `customData.antvRole`. Used by the drawing-library / redraw render path.
+   */
+  roles?: boolean;
   /** Test seam for the browser geometry. */
   geometry?: SvgGeometry;
   /** Test seam for the clock. */
@@ -82,7 +88,10 @@ export async function convertAntvSvg(
     icons: options.icons,
     geometry: options.geometry,
   });
-  const { elements: skeleton, files } = toSkeleton(scene, { pill: options.pill });
+  const { elements: skeleton, files } = toSkeleton(scene, {
+    pill: options.pill,
+    roles: options.roles ? assignRoles(scene) : undefined,
+  });
   const elements = convertToExcalidrawElements(skeleton, { regenerateIds: false });
   alignTextElements(elements as unknown as AlignableElement[], scene);
   const conversionMs = now() - start;
