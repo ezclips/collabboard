@@ -422,6 +422,23 @@ display artifact is the next review's real byte.
 **Fix:** 404 is now the only status that returns `null`; 409 still throws `retry`; every other non-ok status throws and reaches the drawer's failure message. Pinned by a source test, because the handler sits inside an 11k-line client component with no harness. **The test was run against the OLD code first and fails 2 of 6 there** -- a pin that passes either way is not a pin.
 **Reusable rule:** this is the THIRD time this shape has appeared in this stream -- a swallowed `error` that would have rendered every wiki source as DELETED, an adversarial harness that scored PASS on a fault, and now a 503 rendered as a fact about the user's board. The common structure is a failure path and an answer path that converge on one value (`null`, `[]`, "any error"), after which nothing downstream can tell them apart. So: wherever a UI states something about the user's own data ("nothing here", "no results", "deleted", "none"), find the code that produces that state and check what ELSE produces it. If a thrown error, a 5xx, or an empty fallback lands on the same branch, that sentence is a lie waiting for an outage -- and it will be indistinguishable from the truth at the moment it matters most. Route failures to a DIFFERENT branch with a DIFFERENT sentence, and pin it with a test verified to fail against the old code.
 
+### A test script that never exits keeps changing the owner's browser (2026-10-05, board tab stuck at 1460x850)
+**Symptom:** the owner's board tab showed the board in only part of the window, with a white band to the right and
+below. The page measured 1460x850 inside a 1920-wide window. That is exactly the page size the CTO's live-check
+scripts set. No board data had changed.
+**Wrong path(s):** clearing the size lock from a NEW debugging connection (`Emulation.clearDeviceMetricsOverride`, then a
+0x0 override) had no effect. A size lock belongs to the connection that set it, so only that connection, or ending it,
+removes it.
+**Root cause:** fifteen scratchpad scripts from 2026-09-18..20 had no `process.exit`. They were still connected to the
+browser on port 9333 two weeks later and attached to every tab, including the owner's. The scripts set a page size on
+the tabs they drove, and an open connection keeps such a setting alive. Nothing checked, after a run, that the
+owner's tabs were back to normal or that the script had actually ended.
+**Fix:** the owner can close the affected tab or stop the stale processes. Stopping them needs the owner's OK. The
+rules for live checks in the owner's browser are now in TESTING.md §4.
+**Reusable rule:** a live check in a browser someone else is using is finished only when its connection is gone.
+End every script with `process.exit(0)` in `finally`. Set nothing on a tab you did not open. After each run, verify
+the owner's tabs (`innerWidth == outerWidth`) and that no connection of yours is still open on the debug port.
+
 ## Architecture strategy (the standing plan)
 
 ### Domain-layer migration: net → freeze → seam → extract

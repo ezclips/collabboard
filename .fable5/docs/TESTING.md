@@ -51,3 +51,20 @@ Test data: one seeding module (`test/seed.ts`) creating deterministic workspaces
 - Flaky test = quarantined same day, fixed or deleted within a week; a red-but-ignored suite is worse than no suite.
 - Tests use the public surface (ops, commands, rendered UI) — never reach into store internals; refactors shouldn't break tests unless behavior changed.
 - Delete the root `test-*.js` / `check_*.js` / `audit_frames.js` scripts as their subjects gain real tests (CODING_STANDARDS.md §3).
+
+### Live checks in the owner's browser (CDP 9333)
+
+The live-check browser on port 9333 is the OWNER's browser: they work in it while our scripts run. A script that
+misbehaves there damages their session, not a sandbox.
+
+- **Every script exits.** End with `process.exit(0)` inside `finally`, so a failure exits too. Never `browser.close()`.
+  A script that never exits keeps its debugging connection, and with it everything that connection set, attached to
+  every tab of the browser for as long as it runs (2026-10-05: fifteen scripts from 18 to 20 September were still
+  attached).
+- **Only touch your own tab.** Open it with `newPage()`, close it in `finally`. Never set a size, zoom, emulation,
+  route or script on a tab you did not open.
+- **Prefer no page-size override.** If a check needs a fixed size, set it on your own tab only and reset it before
+  closing.
+- **After every live run, check the owner's tabs:** each page tab's `innerWidth` must equal its window width
+  (`outerWidth`), and no node process of ours may still hold a 9333 connection (`netstat -ano | grep :9333`).
+  A stale one is reported to the owner. Stopping it needs the owner's OK.
