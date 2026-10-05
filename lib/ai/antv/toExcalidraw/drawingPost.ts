@@ -1,13 +1,16 @@
 /**
- * PATCH-278 B. Turns a rendered AntV picture into exactly the payload
- * `DrawingEditor.onSave` produces, so the picture can be saved as an ordinary
- * drawing post and opened for hand editing. The field names are the ones
- * `DrawingEditor.tsx` writes: `drawingData`, `drawingAppState`, `drawingFiles`,
- * `previewUrl`, `title` (plus the `size` the caller places the post with).
+ * PATCH-278 B / PATCH-284. Turns a rendered AntV picture -- or a `PictureScene`
+ * the app built without a DOM -- into exactly the payload `DrawingEditor.onSave`
+ * produces, so the picture can be saved as an ordinary drawing post and opened
+ * for hand editing. The field names are the ones `DrawingEditor.tsx` writes:
+ * `drawingData`, `drawingAppState`, `drawingFiles`, `previewUrl`, `title` (plus
+ * the `size` the caller places the post with).
  */
 
 import { convertAntvSvg } from './index';
 import { loadExcalidraw } from './loadExcalidraw';
+import type { PictureScene } from './scene';
+import { alignTextElements, toSkeleton, type AlignableElement } from './toSkeleton';
 
 export interface DrawingPostData {
   drawingData: string;
@@ -23,6 +26,8 @@ export interface BuildDrawingPostOptions {
   /** The picture's real ground; becomes the drawing's `viewBackgroundColor`. */
   background: string;
   title?: string;
+  /** Pill handling for the scene path; forwarded to `toSkeleton`. */
+  pill?: 'rectangle' | 'polygon';
 }
 
 /** Thrown when a picture cannot become a drawing at all. */
@@ -42,20 +47,25 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Converts `svg` into drawing-post data. Throws `DrawingConversionError` when
- * the svg is missing or the conversion yields no elements.
+ * PATCH-284. The scene-based core: builds the Excalidraw elements from a
+ * `PictureScene`, exports the preview and assembles `DrawingPostData`. A drawn
+ * picture reaches this without ever round-tripping through the DOM.
  */
-export async function buildDrawingPostData(
-  svg: SVGSVGElement | null,
+export async function buildDrawingPostDataFromScene(
+  scene: PictureScene,
   opts: BuildDrawingPostOptions,
 ): Promise<DrawingPostData> {
-  if (!svg) {
-    throw new DrawingConversionError('No picture to convert');
-  }
-  const { elements, files, scene } = await convertAntvSvg(svg, { background: opts.background });
-  if (!elements.length || scene.elements.length === 0) {
+  if (scene.elements.length === 0) {
     throw new DrawingConversionError('The picture has nothing to convert');
   }
+  const { elements: skeleton, files } = toSkeleton(scene, { pill: opts.pill });
+  if (!skeleton.length) {
+    throw new DrawingConversionError('The picture has nothing to convert');
+  }
+
+  const { convertToExcalidrawElements, exportToSvg } = await loadExcalidraw();
+  const elements = convertToExcalidrawElements(skeleton, { regenerateIds: false });
+  alignTextElements(elements as unknown as AlignableElement[], scene);
 
   const width = scene.width > 0 ? scene.width : PREVIEW_WIDTH;
   const height = scene.height > 0 ? scene.height : PREVIEW_WIDTH;
@@ -64,7 +74,6 @@ export async function buildDrawingPostData(
     height: clamp(Math.round((PREVIEW_WIDTH * height) / width), MIN_HEIGHT, MAX_HEIGHT),
   };
 
-  const { exportToSvg } = await loadExcalidraw();
   const previewSvg = await exportToSvg({
     elements,
     appState: {
@@ -87,4 +96,19 @@ export async function buildDrawingPostData(
     title: opts.title,
     size,
   };
+}
+
+/**
+ * Reads `svg` into a scene and converts it. Throws `DrawingConversionError`
+ * when the svg is missing or the conversion yields no elements.
+ */
+export async function buildDrawingPostData(
+  svg: SVGSVGElement | null,
+  opts: BuildDrawingPostOptions,
+): Promise<DrawingPostData> {
+  if (!svg) {
+    throw new DrawingConversionError('No picture to convert');
+  }
+  const { scene } = await convertAntvSvg(svg, { background: opts.background });
+  return buildDrawingPostDataFromScene(scene, opts);
 }

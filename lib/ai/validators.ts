@@ -5,6 +5,7 @@ import type {
   DiagramSubtype,
   BarChartDiagramData,
   ComparisonDiagramData,
+  DrawnDiagramData,
   FlowDiagramData,
   InfographicDiagramData,
   InfographicTemplate,
@@ -17,6 +18,7 @@ import type {
   WorkshopBoardData,
 } from './contracts';
 import { isKnownAntvTemplate } from './antv/catalog';
+import { parseDrawnPicture } from './drawn/format';
 import { parseOutline } from './outline';
 import { VISUAL_THEMES, type VisualThemeId } from './visualThemes';
 import { sanitizeVisualStyle } from './visualStyle';
@@ -253,6 +255,42 @@ function buildInfographicDiagramSchema(source: 'model' | 'stored'): z.ZodType<In
   });
 }
 
+/**
+ * PATCH-284. An AI-drawn picture. Its `picture` is run through the SAME
+ * `parseDrawnPicture` the route uses (stored rows are user-writable, so never
+ * trusted); an invalid picture makes the whole content invalid. Its `outline`
+ * is parsed with the same `source` as an infographic's.
+ */
+const DrawnKindSchema = z.enum(['flowchart', 'mindmap', 'pie', 'bar', 'timeline', 'comparison']);
+
+function drawnPictureValue(value: unknown, ctx: z.RefinementCtx) {
+  try {
+    return parseDrawnPicture(value).picture;
+  } catch (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : 'Invalid picture.',
+    });
+    return z.NEVER;
+  }
+}
+
+function buildDrawnDiagramSchema(source: 'model' | 'stored'): z.ZodType<DrawnDiagramData> {
+  return z.object({
+    type: z.literal('diagram'),
+    subtype: z.literal('drawn'),
+    title: z.string().min(1),
+    renderer: z.literal('drawn'),
+    outline: z.unknown().transform((value, ctx) => infographicOutlineValue(value, ctx, source)),
+    kind: DrawnKindSchema,
+    seed: z.number(),
+    picture: z.unknown().transform(drawnPictureValue),
+    kicker: KickerSchema,
+  });
+}
+
+export const DrawnDiagramSchema: z.ZodType<DrawnDiagramData> = buildDrawnDiagramSchema('model');
+
 export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = buildInfographicDiagramSchema('model');
 
 /**
@@ -261,6 +299,13 @@ export const InfographicDiagramSchema: z.ZodType<InfographicDiagramData> = build
  * of having `parseOutline` drop them as untrusted model fields.
  */
 export const StoredInfographicDiagramSchema: z.ZodType<InfographicDiagramData> = buildInfographicDiagramSchema('stored');
+
+/**
+ * PATCH-284. The same drawn shape, validated as data the app itself wrote: the
+ * stored outline keeps `valuesEstimated` and its sanitized overrides so a
+ * reopened drawn post round-trips without loss.
+ */
+export const StoredDrawnDiagramSchema: z.ZodType<DrawnDiagramData> = buildDrawnDiagramSchema('stored');
 
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({
   type: z.literal('photo'),
@@ -285,6 +330,7 @@ export const DIAGRAM_SUBTYPE_SCHEMAS = {
   timeline: TimelineDiagramSchema,
   comparison: ComparisonDiagramSchema,
   infographic: InfographicDiagramSchema,
+  drawn: DrawnDiagramSchema,
 } as const;
 
 export const MODE_SCHEMAS = {
@@ -373,7 +419,9 @@ export function safeValidateStoredDiagramData<S extends DiagramSubtype>(
 ): ValidationResult<ParsedDiagramData<S>> {
   const schema = (subtype === 'infographic'
     ? StoredInfographicDiagramSchema
-    : DIAGRAM_SUBTYPE_SCHEMAS[subtype]) as z.ZodType<ParsedDiagramData<S>>;
+    : subtype === 'drawn'
+      ? StoredDrawnDiagramSchema
+      : DIAGRAM_SUBTYPE_SCHEMAS[subtype]) as z.ZodType<ParsedDiagramData<S>>;
   return schema.safeParse(input);
 }
 
@@ -399,6 +447,7 @@ export function safeValidateAIContentWithSubtypeCheck(input: {
       | TimelineDiagramData
       | ComparisonDiagramData
       | InfographicDiagramData
+      | DrawnDiagramData
     >
   | ValidationMissingSubtypeError {
   if (input.mode === 'diagram') {

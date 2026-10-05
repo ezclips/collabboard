@@ -3,16 +3,26 @@
 import React, { useState } from 'react';
 import { PenTool } from 'lucide-react';
 
-import { buildDrawingPostData, type DrawingPostData } from '@/lib/ai/antv/toExcalidraw/drawingPost';
+import type { PictureScene } from '@/lib/ai/antv/toExcalidraw/scene';
+import {
+  buildDrawingPostData,
+  buildDrawingPostDataFromScene,
+  type DrawingPostData,
+} from '@/lib/ai/antv/toExcalidraw/drawingPost';
 
 /**
- * PATCH-278 D. The "Edit as drawing" action shown next to Save in the generator
- * and in the Edit window. It converts the picture the caller hands it into
- * drawing-post data and reports it upward; the caller creates the post.
+ * PATCH-278 D / PATCH-284. The "Edit as drawing" action shown next to Save in
+ * the generator and in the Edit window. It converts the picture the caller hands
+ * it into drawing-post data and reports it upward; the caller creates the post.
+ *
+ * PATCH-284. An AntV picture hands it `getSvg`; a drawn picture hands it
+ * `getScene`, so the drawn path never round-trips through the DOM.
  */
 export interface EditAsDrawingButtonProps {
-  /** The picture to convert; the caller picks the SELECTED layer, never hover. */
-  getSvg: () => SVGSVGElement | null;
+  /** The AntV picture to convert; the caller picks the SELECTED layer, never hover. */
+  getSvg?: () => SVGSVGElement | null;
+  /** The drawn picture's scene, built from the stored data. */
+  getScene?: () => PictureScene;
   /** The picture's ground (already computed from `[data-ai-theme-background]`). */
   getBackground: () => string;
   title?: string;
@@ -38,6 +48,7 @@ export function normalizeBackgroundColor(value: string, fallback = '#ffffff'): s
 
 export default function EditAsDrawingButton({
   getSvg,
+  getScene,
   getBackground,
   title,
   disabledReason,
@@ -52,10 +63,10 @@ export default function EditAsDrawingButton({
     setFailed(false);
     setConverting(true);
     try {
-      const data = await buildDrawingPostData(getSvg(), {
-        background: normalizeBackgroundColor(getBackground()),
-        title,
-      });
+      const background = normalizeBackgroundColor(getBackground());
+      const data = getScene
+        ? await buildDrawingPostDataFromScene(getScene(), { background, title })
+        : await buildDrawingPostData(getSvg?.() ?? null, { background, title });
       await onDrawing(data);
     } catch {
       // The picture and the modal stay exactly as they are.

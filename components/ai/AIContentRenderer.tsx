@@ -20,6 +20,7 @@ const CodeDiagramRenderer = dynamic(() => import('./renderers/CodeDiagramRendere
   ),
 });
 import ComparisonDiagramRenderer from './renderers/ComparisonDiagramRenderer';
+import DrawnPictureRenderer from './renderers/DrawnPictureRenderer';
 import InfographicRenderer from './renderers/InfographicRenderer';
 import MindmapTreeRenderer from './renderers/MindmapTreeRenderer';
 import PhotoCardRenderer from './renderers/PhotoCardRenderer';
@@ -94,6 +95,8 @@ function renderDiagram(data: DiagramData): React.ReactNode {
       return <ComparisonDiagramRenderer data={data} />;
     case 'infographic':
       return <InfographicRenderer data={data} />;
+    case 'drawn':
+      return <DrawnPictureRenderer data={data} />;
     default:
       trackAIRenderFallback({ renderer: 'diagram', subtype, reason: 'unsupported_subtype' });
       return <UnsupportedAIContent message="This diagram subtype is not supported yet." />;

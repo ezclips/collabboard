@@ -6,7 +6,10 @@
 // metrics provider is the only jsdom seam, because jsdom has no canvas).
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { buildDrawingPostData, DrawingConversionError } from './drawingPost';
+import { drawnToScene } from '@/lib/ai/drawn/compile';
+import type { DrawnPicture } from '@/lib/ai/drawn/format';
+
+import { buildDrawingPostData, buildDrawingPostDataFromScene, DrawingConversionError } from './drawingPost';
 import { loadExcalidraw } from './loadExcalidraw';
 
 beforeAll(async () => {
@@ -101,5 +104,54 @@ describe('PATCH-278 buildDrawingPostData', () => {
     await expect(buildDrawingPostData(null, { background: '#ffffff' })).rejects.toBeInstanceOf(
       DrawingConversionError,
     );
+  });
+});
+
+describe('PATCH-284 buildDrawingPostDataFromScene', () => {
+  const PIE: DrawnPicture = {
+    version: 1,
+    width: 800,
+    height: 600,
+    background: '#f8fafc',
+    elements: Array.from({ length: 5 }, (_, index) => ({
+      id: `wedge-${index}`,
+      type: 'wedge' as const,
+      item: index,
+      cx: 300,
+      cy: 300,
+      r: 160,
+      inner: 80,
+      fill: ['#aabbcc', '#bbccdd', '#ccddee', '#ddeeff', '#eef0ff'][index],
+      startAngle: (index * 2 * Math.PI) / 5,
+      endAngle: ((index + 1) * 2 * Math.PI) / 5,
+    })),
+  };
+
+  it('turns a drawn pie into closed filled wedges and keeps the icon images', async () => {
+    const scene = drawnToScene({
+      ...PIE,
+      elements: [...PIE.elements, { id: 'icon', type: 'icon', name: 'sun', x: 600, y: 60, size: 32, color: '#123456' }],
+    });
+    const data = await buildDrawingPostDataFromScene(scene, { background: '#f8fafc' });
+    const { restoreElements } = await loadExcalidraw();
+    const restored = restoreElements(JSON.parse(data.drawingData), null);
+
+    const wedges = restored.filter((element) => element.type === 'line' && (element as { polygon?: boolean }).polygon);
+    expect(wedges).toHaveLength(5);
+    for (const wedge of wedges) {
+      expect((wedge as { backgroundColor?: string }).backgroundColor).not.toBe('transparent');
+    }
+
+    const files = JSON.parse(data.drawingFiles) as Record<string, { dataURL?: string; mimeType?: string }>;
+    expect(Object.values(files).some((file) => file.mimeType === 'image/svg+xml')).toBe(true);
+  });
+
+  it('throws DrawingConversionError for a scene with no elements', async () => {
+    await expect(
+      buildDrawingPostDataFromScene(
+        { ...drawnToScene(PIE), elements: [] },
+        { background: '#ffffff' },
+      ),
+    ).rejects.toBeInstanceOf(DrawingConversionError);
   });
 });

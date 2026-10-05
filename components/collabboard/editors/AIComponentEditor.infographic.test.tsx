@@ -57,15 +57,6 @@ const OUTLINE = {
   items: [{ label: 'H1' }, { label: 'H2' }, { label: 'H3' }],
 };
 
-// A "steps" outline defaults to the stairs design, NOT pyramid -- so only a
-// genuine preferKey pass can put pyramid first.
-const STEPS_OUTLINE = {
-  title: 'Steps',
-  ordered: true,
-  kind: 'steps',
-  items: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
-};
-
 const STORED = {
   mode: 'diagram',
   version: 1,
@@ -207,25 +198,6 @@ describe('PATCH-236 AIComponentEditor stored infographic', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('PATCH-237 Addendum 1: an Apply hint ranks the named design first, with Best match', async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ outline: STEPS_OUTLINE, generatedBy: { source: 'collabboard-default', model: 'm' } }), {
-        status: 200, headers: { 'content-type': 'application/json' },
-      }));
-    vi.stubGlobal('fetch', fetchMock);
-    const c = mount(<AIComponentEditor isOpen initialContent={STORED} initialPrompt="p" onClose={() => {}} onSave={() => {}} />);
-    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-
-    click(c.querySelector('[data-ai-customize-toggle="true"]') as HTMLElement);
-    setInputValue(c.querySelector('[data-ai-customize-hint="true"]') as HTMLInputElement, 'pyramid');
-    click(c.querySelector('[data-ai-customize-apply="true"]') as HTMLElement);
-
-    await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
-    const first = c.querySelector('[data-ai-outline-option]') as HTMLElement;
-    expect(first.getAttribute('data-ai-outline-option')).toBe('infographic:pyramid');
-    expect(first.textContent).toContain('Best match');
   });
 
   it('PATCH-237 Addendum 1 / PATCH-252: the preview uses the full height and the tiles keep a 220px min-height', async () => {

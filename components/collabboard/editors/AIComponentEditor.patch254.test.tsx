@@ -64,10 +64,23 @@ function jsonResponse(body: unknown) {
   });
 }
 
-/** A fetch whose promises we resolve by hand, so a request can be held open. */
+const PICTURE = {
+  version: 1,
+  width: 800,
+  height: 600,
+  background: '#ffffff',
+  elements: [{ id: 'r', type: 'rect', x: 0, y: 0, w: 160, h: 90, fill: '#aabbcc', stroke: '#000000' }],
+};
+
+/** A fetch whose outline promise we resolve by hand; drawing resolves at once. */
 function holdFetch() {
   const pending: Array<{ url: string; resolve: (r: Response) => void }> = [];
-  const fetchMock = vi.fn((url: string) => new Promise<Response>((resolve) => { pending.push({ url, resolve }); }));
+  const fetchMock = vi.fn((url: string) => {
+    if (url === '/api/ai/draw-picture') {
+      return Promise.resolve(jsonResponse({ picture: PICTURE, kind: 'flowchart', seed: 1 }));
+    }
+    return new Promise<Response>((resolve) => { pending.push({ url, resolve }); });
+  });
   vi.stubGlobal('fetch', fetchMock);
   return { fetchMock, pending };
 }

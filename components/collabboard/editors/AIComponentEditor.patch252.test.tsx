@@ -63,6 +63,14 @@ const CHART = {
   meta: { renderer: 'chart', subtype: 'pie_chart', prompt: 'p' },
 };
 
+const DRAWN_PICTURE = {
+  version: 1,
+  width: 800,
+  height: 600,
+  background: '#ffffff',
+  elements: [{ id: 'r', type: 'rect', x: 0, y: 0, w: 160, h: 90, fill: '#aabbcc', stroke: '#000000' }],
+};
+
 function stubFetch() {
   const fetchMock = vi.fn(async (url: string) => {
     if (url === '/api/ai/generate-outline') {
@@ -70,6 +78,12 @@ function stubFetch() {
         JSON.stringify({ outline: OUTLINE, generatedBy: { source: 'collabboard-default', model: 'm' } }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
+    }
+    if (url === '/api/ai/draw-picture') {
+      return new Response(JSON.stringify({ picture: DRAWN_PICTURE, kind: 'flowchart', seed: 1 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     return new Response(JSON.stringify(CHART), { status: 200, headers: { 'content-type': 'application/json' } });
   });

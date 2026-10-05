@@ -66,6 +66,12 @@ interface OutlineSuggestionsPanelProps {
   onMakeChart?: (subtype: 'pie_chart' | 'bar_chart') => void;
   /** PATCH-248. Which chart subtype button was clicked (labels the make-chart button). */
   makeChartSubtype?: 'pie_chart' | 'bar_chart';
+  /** PATCH-284. Draws three more of the current kind (AI-drawn options). */
+  onShuffle?: () => void;
+  /** PATCH-284. A drawn batch is in flight: show three "Drawing…" placeholders. */
+  drawing?: boolean;
+  /** PATCH-284. The options are AI-drawn: hide AntV/our-design-only controls. */
+  drawn?: boolean;
   /** PATCH-257. The preview shows a chart drawn from example numbers: mark it and
    *  word the no-numbers note for the clicked chart. */
   exampleValues?: boolean;
@@ -172,6 +178,9 @@ export default function OutlineSuggestionsPanel({
   onShowAll,
   onMakeChart,
   makeChartSubtype = 'pie_chart',
+  onShuffle,
+  drawing = false,
+  drawn = false,
   exampleValues = false,
   zeroValues = false,
   loading = false,
@@ -481,7 +490,30 @@ export default function OutlineSuggestionsPanel({
           className={`min-h-0 flex-1 overflow-y-auto p-4 pb-4 ${loading && options.length > 0 ? 'pointer-events-none opacity-50' : ''}`}
           style={{ minHeight: 220 }}
         >
-          {loading && options.length === 0 ? (
+          {onShuffle && (
+            <button
+              type="button"
+              data-ai-drawn-shuffle="true"
+              onClick={onShuffle}
+              disabled={drawing}
+              className="mb-3 rounded-lg border border-purple-200 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Shuffle
+            </button>
+          )}
+          {drawing && options.length === 0 ? (
+            <div data-ai-drawn-placeholders="true" aria-hidden="true" className="grid grid-cols-2 gap-2">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="flex h-[104px] flex-col items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white"
+                >
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-200 border-t-purple-600 motion-reduce:animate-none" />
+                  <span className="text-xs text-gray-500">Drawing…</span>
+                </div>
+              ))}
+            </div>
+          ) : loading && options.length === 0 ? (
             <div data-ai-designs-skeleton="true" aria-hidden="true" className="grid grid-cols-2 gap-2">
               {Array.from({ length: 8 }).map((_, index) => (
                 <div key={index} className="h-[104px] rounded-xl bg-gray-100 animate-pulse motion-reduce:animate-none" />
@@ -726,7 +758,7 @@ export default function OutlineSuggestionsPanel({
               >
                 <LayoutGrid size={16} aria-hidden="true" />
               </PreviewToolButton>
-              {outline && onEditOutline && (
+              {!drawn && outline && onEditOutline && (
                 <PreviewToolButton
                   label="Edit text"
                   dataAi="data-ai-edit-text-toggle"
@@ -736,7 +768,7 @@ export default function OutlineSuggestionsPanel({
                   <Pencil size={16} aria-hidden="true" />
                 </PreviewToolButton>
               )}
-              {similarPresent.length > 0 && (
+              {!drawn && similarPresent.length > 0 && (
                 <PreviewToolButton
                   label="Similar visuals"
                   dataAi="data-ai-similar-toggle"
@@ -746,7 +778,7 @@ export default function OutlineSuggestionsPanel({
                   <Shapes size={16} aria-hidden="true" />
                 </PreviewToolButton>
               )}
-              {onThemeChange && (
+              {!drawn && onThemeChange && (
                 <PreviewToolButton
                   label="Colours & Fonts"
                   dataAi="data-ai-colours-toggle"
@@ -756,15 +788,17 @@ export default function OutlineSuggestionsPanel({
                   <Palette size={16} aria-hidden="true" />
                 </PreviewToolButton>
               )}
-              <PreviewToolButton
-                label="Customize"
-                dataAi="data-ai-customize-toggle"
-                active={panel === 'customize'}
-                onClick={() => togglePanel('customize')}
-              >
-                <SlidersHorizontal size={16} aria-hidden="true" />
-              </PreviewToolButton>
-              {canAdd && (
+              {!drawn && (
+                <PreviewToolButton
+                  label="Customize"
+                  dataAi="data-ai-customize-toggle"
+                  active={panel === 'customize'}
+                  onClick={() => togglePanel('customize')}
+                >
+                  <SlidersHorizontal size={16} aria-hidden="true" />
+                </PreviewToolButton>
+              )}
+              {!drawn && canAdd && (
                 <PreviewToolButton
                   label="Add"
                   dataAi="data-ai-add-toggle"

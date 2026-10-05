@@ -15,7 +15,8 @@ export type DiagramSubtype =
   | 'bar_chart'
   | 'timeline'
   | 'comparison'
-  | 'infographic';
+  | 'infographic'
+  | 'drawn';
 
 export type AIRendererKey =
   | 'lesson_board'
@@ -24,6 +25,7 @@ export type AIRendererKey =
   | 'timeline'
   | 'comparison'
   | 'infographic'
+  | 'drawn'
   | 'photo'
   | 'workshop_board'
   | 'legacy_html';
@@ -199,6 +201,21 @@ export function isAntvTemplate(template: string): template is AntvInfographicTem
   return template.startsWith('antv:');
 }
 
+/**
+ * PATCH-284. A picture drawn entirely by the AI in the DrawnPicture format and
+ * repaired by the route. Like `'infographic'`, `'drawn'` is never shown as a
+ * type button: it is only ever produced by the generator's drawn options.
+ */
+export interface DrawnDiagramData extends DiagramDataBase {
+  subtype: 'drawn';
+  renderer: 'drawn';
+  outline: import('./outline').VisualOutline;
+  kind: import('./drawn/prompt').DrawnKind;
+  seed: number;
+  /** The REPAIRED picture exactly as `/api/ai/draw-picture` returned it. */
+  picture: import('./drawn/format').DrawnPicture;
+}
+
 // Mirrors CaptionStyle (lib/domain/canvas/captionStyle.ts) -- the same
 // heading-preset system every other post type's title/caption uses -- so
 // the Photo Card's text goes through the one real "Text style" panel
@@ -251,7 +268,8 @@ export type DiagramData =
   | BarChartDiagramData
   | TimelineDiagramData
   | ComparisonDiagramData
-  | InfographicDiagramData;
+  | InfographicDiagramData
+  | DrawnDiagramData;
 
 export type AIContentData =
   | LessonBoardData

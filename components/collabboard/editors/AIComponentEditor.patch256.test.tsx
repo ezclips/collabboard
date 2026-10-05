@@ -67,6 +67,14 @@ const OUTLINE = {
 
 const FAILED_MESSAGE = 'The AI outline needs at least two usable points.';
 
+const PICTURE = {
+  version: 1,
+  width: 800,
+  height: 600,
+  background: '#ffffff',
+  elements: [{ id: 'r', type: 'rect', x: 0, y: 0, w: 160, h: 90, fill: '#aabbcc', stroke: '#000000' }],
+};
+
 function stubFetch() {
   let outlineCalls = 0;
   const fetchMock = vi.fn(async (url: string) => {
@@ -82,6 +90,12 @@ function stubFetch() {
         JSON.stringify({ outline: OUTLINE, generatedBy: { source: 'collabboard-default', model: 'm' } }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
+    }
+    if (url === '/api/ai/draw-picture') {
+      return new Response(JSON.stringify({ picture: PICTURE, kind: 'flowchart', seed: 1 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
   });

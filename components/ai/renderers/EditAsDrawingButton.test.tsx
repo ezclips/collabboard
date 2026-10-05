@@ -9,11 +9,16 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildDrawingPostData, type DrawingPostData } from '@/lib/ai/antv/toExcalidraw/drawingPost';
+import {
+  buildDrawingPostData,
+  buildDrawingPostDataFromScene,
+  type DrawingPostData,
+} from '@/lib/ai/antv/toExcalidraw/drawingPost';
 import EditAsDrawingButton from './EditAsDrawingButton';
 
 vi.mock('@/lib/ai/antv/toExcalidraw/drawingPost', () => ({
   buildDrawingPostData: vi.fn(),
+  buildDrawingPostDataFromScene: vi.fn(),
   DrawingConversionError: class DrawingConversionError extends Error {},
 }));
 
@@ -44,6 +49,7 @@ afterEach(() => {
   }
   mounted = [];
   vi.mocked(buildDrawingPostData).mockReset();
+  vi.mocked(buildDrawingPostDataFromScene).mockReset();
 });
 
 const button = (c: ParentNode) => c.querySelector('[data-ai-edit-as-drawing="true"]') as HTMLButtonElement;
@@ -106,6 +112,28 @@ describe('PATCH-278 EditAsDrawingButton', () => {
     click(button(c));
     expect(buildDrawingPostData).not.toHaveBeenCalled();
     expect(onDrawing).not.toHaveBeenCalled();
+  });
+
+  it('uses the scene path and never the DOM when getScene is given', async () => {
+    vi.mocked(buildDrawingPostDataFromScene).mockResolvedValue(DATA);
+    const onDrawing = vi.fn();
+    const scene = { version: 1, width: 1, height: 1, background: '#fff', elements: [] };
+    const c = mount(
+      <EditAsDrawingButton
+        getScene={() => scene as never}
+        getBackground={() => '#f8fafc'}
+        title="Drawn"
+        onDrawing={onDrawing}
+      />,
+    );
+    click(button(c));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(vi.mocked(buildDrawingPostDataFromScene)).toHaveBeenCalledWith(scene, {
+      background: '#f8fafc',
+      title: 'Drawn',
+    });
+    expect(buildDrawingPostData).not.toHaveBeenCalled();
+    expect(onDrawing).toHaveBeenCalledWith(DATA);
   });
 
   it('normalises a named/hex background to #rrggbb', async () => {

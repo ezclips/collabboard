@@ -64,6 +64,22 @@ const BASE_BY_SUBTYPE: Record<DiagramSubtype, Record<string, unknown>> = {
     template: 'stack',
     outline: OUTLINE,
   },
+  drawn: {
+    type: 'diagram',
+    subtype: 'drawn',
+    title: 'Seasons',
+    renderer: 'drawn',
+    kind: 'flowchart',
+    seed: 1,
+    outline: OUTLINE,
+    picture: {
+      version: 1,
+      width: 800,
+      height: 600,
+      background: '#ffffff',
+      elements: [{ id: 'r', type: 'rect', x: 0, y: 0, w: 100, h: 50, fill: '#aabbcc', stroke: '#000000' }],
+    },
+  },
 };
 
 describe('PATCH-264 diagram kicker validation', () => {

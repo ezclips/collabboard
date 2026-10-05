@@ -247,6 +247,18 @@ Do not add prose outside the JSON structure.
         systemPrompt: '',
         defaultRenderer: 'infographic',
       },
+
+      // PATCH-284. A drawn picture is only produced by the generator's drawn
+      // options, never generated directly; this entry only satisfies the
+      // exhaustive Record<DiagramSubtype> and is not shown as a subtype chip.
+      drawn: {
+        id: 'drawn',
+        label: 'Drawing',
+        description: 'A picture drawn by the AI.',
+        placeholder: 'Describe the picture to draw.',
+        systemPrompt: '',
+        defaultRenderer: 'drawn',
+      },
     },
   },
 

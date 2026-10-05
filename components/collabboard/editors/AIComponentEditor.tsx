@@ -12,12 +12,14 @@ import type {
   AIMode,
   AIGenerationAttribution,
   DiagramSubtype,
+  DrawnDiagramData,
   GenerateAIContentRequest,
   InfographicDiagramData,
   LoadedAIContent,
   PhotoCardData,
   PhotoCardTextStyle,
 } from '@/lib/ai/contracts';
+import { kindForOutline, type DrawnKind } from '@/lib/ai/drawn/prompt';
 import {
   MODE_REGISTRY,
   getDiagramSubtypeConfig,
@@ -37,6 +39,8 @@ import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
 import OutlineTextEditor from './OutlineTextEditor';
 import OutlineSuggestionsPanel from './OutlineSuggestionsPanel';
+import { drawnKindForSubtype, drawnSceneFromData } from './drawnOptionHelpers';
+import { useDrawnOptions } from './useDrawnOptions';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import {
   trackAIAutoModeCorrectedByUser,
@@ -434,6 +438,10 @@ export default function AIComponentEditor({
   // Try again replays exactly that request (a bare Generate, or a Customize /
   // estimated-values one) rather than always sending no options.
   const lastOutlineRequestBodyRef = useRef<OutlineRequestBody | undefined>(undefined);
+  const drawn = useDrawnOptions({ boardId });
+  const [drawnActive, setDrawnActive] = useState(false);
+  const drawnKindRef = useRef<DrawnKind | null>(null);
+  const pendingEstimateRef = useRef(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -453,6 +461,7 @@ export default function AIComponentEditor({
     setAutoResolved(null);
     setShowOptions(false);
     setOutlineOptions([]);
+    setDrawnActive(false); drawnKindRef.current = null; pendingEstimateRef.current = false;
     setActiveVisualHint(undefined);
     setActiveFamily(null);
     setActiveFamilyLabel(null);
@@ -523,11 +532,13 @@ export default function AIComponentEditor({
   // Every other mode keeps the spinner below.
   const isOutlineLoading = isLoading && mode === 'diagram' && showOptions;
   const outlineProgressText = stage === 'rendering' ? 'Drawing designs…' : 'Reading your text…';
+  const drawnDrawing = drawnActive && drawn.status === 'drawing';
+  const drawnError = drawnActive ? drawn.error : null;
 
   // PATCH-256. An outline request that failed with no designs on screen: the
   // preview area (where the user is looking) shows the message and Try again,
   // instead of silently falling back to the empty placeholder.
-  const showPreviewError = showOptions && !!error && outlineOptions.length === 0 && !isLoading;
+  const showPreviewError = showOptions && !!error && outlineOptions.length === 0 && !isLoading && !drawnActive;
 
   // PATCH-252. The docked side panel's host element (callback ref) and whether
   // it is open, so the modal can widen while the panel is docked on the right.
@@ -537,7 +548,7 @@ export default function AIComponentEditor({
   // rendered (the exact condition below, including the PATCH-254 loading case)
   // and reports itself open. Switching mode unmounts the panel but not its open
   // state, which used to strand an empty wide column on the right.
-  const suggestionsMounted = showOptions && (outlineOptions.length > 0 || isOutlineLoading);
+  const suggestionsMounted = showOptions && ((drawnActive ? drawn.options.length : outlineOptions.length) > 0 || isOutlineLoading || drawnDrawing);
   const sidePanelVisible = sidePanelOpen && suggestionsMounted;
 
   // Read off the content in hand -- a fresh response, or a saved card that
@@ -594,10 +605,11 @@ export default function AIComponentEditor({
       if (option.key !== 'flow' || option.envelopeData.subtype !== 'flowchart' || !activeOutline) return option;
       return { ...option, envelopeData: { ...option.envelopeData, code: flowCode(activeOutline, flowDirection) } };
     });
+  const activeOptions = drawnActive ? drawn.options : outlineOptions;
   // PATCH-238: stamp the chosen theme onto every themed option (local, no AI).
   // PATCH-257. A chart drawn from example numbers uses the example designs
   // (derived from the example outline), so its tiles/preview carry real values.
-  const themedOptions = (needsExampleEnvelopes ? derivedOptions : outlineOptions).map((option) => ({
+  const themedOptions = (needsExampleEnvelopes ? derivedOptions : activeOptions).map((option) => ({
     ...option,
     envelopeData: applyStyleToData(applyThemeToData(option.envelopeData, visualTheme), visualStyle),
   }));
@@ -693,7 +705,13 @@ export default function AIComponentEditor({
     selectedOption && 'template' in selectedOption.envelopeData
       ? selectedOption.envelopeData.template
       : undefined;
-  const showEditAsDrawing = Boolean(onEditAsDrawing) && typeof selectedTemplate === 'string' && isAntvTemplate(selectedTemplate);
+  const selectedDrawn: DrawnDiagramData | null =
+    selectedOption?.envelopeData.subtype === 'drawn' ? (selectedOption.envelopeData as DrawnDiagramData) : null;
+  const editAsDrawingInputs = selectedDrawn
+    ? { getScene: () => drawnSceneFromData(selectedDrawn), getBackground: () => selectedDrawn.picture.background }
+    : { getSvg: editAsDrawingSvg, getBackground: editAsDrawingBackground };
+  const showEditAsDrawing = Boolean(onEditAsDrawing)
+    && (selectedDrawn !== null || (typeof selectedTemplate === 'string' && isAntvTemplate(selectedTemplate)));
   // PATCH-279. Post name wins; else the picture's own outline title; else none
   // (createDrawingPost then titles the new drawing "Drawing").
   const editAsDrawingTitle =
@@ -814,36 +832,43 @@ export default function AIComponentEditor({
     }
   };
 
-  // PATCH-248. "Show options": show every design again, keeping the current
-  // selection when it is still visible (nothing is fetched or cleared then).
+  const drawFromOutline = (outline: VisualOutline, kind: DrawnKind) => {
+    drawnKindRef.current = kind;
+    setDrawnActive(true);
+    setOutlineOptions([]);
+    setSelectedOptionKey(null);
+    drawn.draw(outline, kind);
+  };
+
   const showAllDesigns = () => {
     setActiveFamily(null);
     setActiveFamilyLabel(null);
     setActiveFamilyDescription(null);
     setChartMakeSubtype(null);
     setShowOptions(true);
-    if (outlineOptions.length === 0) setSelectedOptionKey(null);
+    if (drawnActive && activeOutline) drawFromOutline(activeOutline, kindForOutline(activeOutline));
+    else { drawnKindRef.current = null; if (outlineOptions.length === 0) setSelectedOptionKey(null); }
     setError(null);
     setErrorIsPlanLimit(false);
   };
 
-  // PATCH-248. A subtype button opens the gallery filtered to its family. With
-  // designs already on screen this is local (no fetch); before that it just
-  // remembers the family so Generate draws the outline once, like Show options.
   const openFamily = (subtypeId: DiagramSubtype) => {
-    const family = familyForSubtype(subtypeId);
-    if (!family) return;
     setError(null);
     setErrorIsPlanLimit(false);
-    setActiveFamily(family);
     setActiveFamilyLabel(getDiagramSubtypeConfig(subtypeId).label);
     setActiveFamilyDescription(getDiagramSubtypeConfig(subtypeId).description);
     setChartMakeSubtype(subtypeId === 'pie_chart' || subtypeId === 'bar_chart' ? subtypeId : null);
     setShowOptions(true);
-    // PATCH-257. A subtype button selects the FIRST design of its own ordering,
-    // even when the previous selection is still visible (pie -> bar must show a
-    // bar, not the kept pie). The panel then picks the first of its sorted list.
     setSelectedOptionKey(null);
+    const kind = drawnKindForSubtype(subtypeId);
+    if (!kind) { const family = familyForSubtype(subtypeId); if (family) setActiveFamily(family); return; }
+    setActiveFamily(null);
+    if (activeOutline) drawFromOutline(activeOutline, kind);
+    else {
+      drawnKindRef.current = kind;
+      pendingEstimateRef.current = subtypeId === 'pie_chart' || subtypeId === 'bar_chart';
+      setOutlineOptions([]);
+    }
   };
 
   // PATCH-250. "Make pie/bar chart" on text without numbers asks the outline
@@ -918,8 +943,9 @@ export default function AIComponentEditor({
     // locally, so the AI draws nothing. One call, several options.
     // PATCH-248: a forced chart subtype always takes the component path below.
     if (!forcedSubtype && effectiveMode === 'diagram' && showOptions) {
+      const effectiveBody = outlineOptionsBody ?? (pendingEstimateRef.current ? { estimateValues: true } : undefined);
       // PATCH-256. Remembered so the preview's Try again replays this request.
-      lastOutlineRequestBodyRef.current = outlineOptionsBody;
+      lastOutlineRequestBodyRef.current = effectiveBody;
       setStage('generating');
       try {
         const res = await fetch('/api/ai/generate-outline', {
@@ -928,7 +954,7 @@ export default function AIComponentEditor({
           body: JSON.stringify({
             prompt: prompt.trim(),
             ...(boardId ? { boardId } : {}),
-            ...(outlineOptionsBody ? { options: outlineOptionsBody } : {}),
+            ...(effectiveBody ? { options: effectiveBody } : {}),
           }),
           signal: controller.signal,
         });
@@ -954,19 +980,19 @@ export default function AIComponentEditor({
 
         // PATCH-237 Addendum 1: the Apply hint must reach the ranking, and stay
         // for the session so local re-ranks keep the named design first.
-        const preferKey = outlineOptionsBody?.visualHint;
+        const preferKey = effectiveBody?.visualHint;
         setActiveVisualHint(preferKey);
+        pendingEstimateRef.current = false;
         // PATCH-274. A freshly generated (or regenerated) outline enters editing
         // with stable item ids.
         const outline = withItemIds(data.outline);
-        const options = suggestDesigns(outline, preferKey ? { preferKey } : undefined);
-        setOutlineOptions(options);
         setActiveOutline(outline);
-        setSelectedOptionKey(options[0]?.key ?? null);
         setOutlineGeneratedBy((data.generatedBy as AIGenerationAttribution) ?? null);
         setOutlineCreatedAt(new Date().toISOString());
         setContent(null);
         setStage('done');
+        // PATCH-284. The AI now draws the pictures from this outline.
+        drawFromOutline(outline, drawnKindRef.current ?? kindForOutline(outline));
       } catch (err: unknown) {
         const e = err as Error;
         if (e.name === 'AbortError') {
@@ -1441,8 +1467,8 @@ export default function AIComponentEditor({
                                 <div className="mt-1 text-[11px] text-gray-500">Draw the same content several ways and pick one.</div>
                               </button>
                               {(Object.keys(diagramConfig.subtypes) as DiagramSubtype[])
-                                // PATCH-236: an infographic is only produced by Show options.
-                                .filter((subtypeId) => subtypeId !== 'infographic')
+                                // PATCH-236/284: infographic and drawn are never chips.
+                                .filter((subtypeId) => subtypeId !== 'infographic' && subtypeId !== 'drawn')
                                 .map((subtypeId) => {
                                 const config = diagramConfig.subtypes[subtypeId];
                                 // PATCH-248: a clicked family button stays selected
@@ -1556,6 +1582,12 @@ export default function AIComponentEditor({
                     : <p className="text-xs text-red-600">{error}</p>}
                 </div>
               )}
+              {/* PATCH-284. Every drawing request failed: the route's own words. */}
+              {drawnError && (
+                <div data-ai-drawn-error="true" className="rounded-lg border border-red-100 bg-red-50 p-3">
+                  <p className="text-xs text-red-600">{drawnError}</p>
+                </div>
+              )}
 
               {/* WAS a hardcoded "Generated by DeepSeek". It named a provider
                   nobody had read, and once the chooser above exists it would
@@ -1596,7 +1628,7 @@ export default function AIComponentEditor({
                 </div>
               )}
 
-              {!content && !isLoading && !(showOptions && outlineOptions.length > 0) && !showPreviewError && (
+              {!content && !isLoading && !suggestionsMounted && !showPreviewError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
                   <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
                     <Sparkles className="h-8 w-8 text-gray-300" />
@@ -1651,7 +1683,7 @@ export default function AIComponentEditor({
 
               {/* PATCH-236: the Suggestions panel -- one large preview of the
                   selected design, then "Suggested" and per-category headings. */}
-              {showOptions && (outlineOptions.length > 0 || isOutlineLoading) && (
+              {suggestionsMounted && (
                 <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
                 <OutlineSuggestionsPanel
                   options={displayOptions}
@@ -1672,6 +1704,9 @@ export default function AIComponentEditor({
                   onShowAll={showAllDesigns}
                   onMakeChart={makeChart}
                   makeChartSubtype={chartMakeSubtype ?? undefined}
+                  onShuffle={drawnActive ? drawn.shuffle : undefined}
+                  drawing={drawnDrawing}
+                  drawn={drawnActive}
                   exampleValues={showExampleValues}
                   zeroValues={chartPieZeroTotal}
                   loading={isOutlineLoading}
@@ -1736,8 +1771,7 @@ export default function AIComponentEditor({
               </button>
               {showEditAsDrawing && (
                 <EditAsDrawingButton
-                  getSvg={editAsDrawingSvg}
-                  getBackground={editAsDrawingBackground}
+                  {...editAsDrawingInputs}
                   title={editAsDrawingTitle}
                   disabledReason={canSave ? undefined : saveDisabledReason}
                   onDrawing={onEditAsDrawing!}

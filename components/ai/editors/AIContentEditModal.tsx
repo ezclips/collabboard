@@ -15,6 +15,7 @@ import type {
   BarChartDiagramData,
   ChartDataPoint,
   ComparisonColumn,
+  DrawnDiagramData,
   LessonBoardData,
   StoredInfographicTemplate,
   LessonBoardSection,
@@ -36,6 +37,7 @@ import {
 } from '@/lib/ai/telemetry';
 import { safeValidateAIContentWithSubtypeCheck } from '@/lib/ai/validators';
 import { renderDiagramCode } from '@/lib/ai/diagram-engine';
+import { sceneFromStored } from '@/lib/ai/drawn/stored';
 import { suggestDesigns } from '@/lib/ai/infographic/suggest';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import { parseMindmapCode } from '@/lib/ai/mermaidMindmapParse';
@@ -793,6 +795,9 @@ export default function AIContentEditModal({
     draftData.type === 'diagram' ? diagramKicker.applyKicker(draftData) : draftData,
   );
   const isInfographic = draftData.type === 'diagram' && draftData.subtype === 'infographic';
+  // PATCH-284. A drawn post opens picture-first and can convert losslessly.
+  const isDrawn = draftData.type === 'diagram' && draftData.subtype === 'drawn';
+  const pictureFirst = isInfographic || isDrawn;
   const subtypeLabel = getSubtypeForData(draftData);
   const modeLabel = parsedEnvelope.mode.replace('_', ' ');
   const contentTypeLabel = subtypeLabel
@@ -1100,8 +1105,8 @@ export default function AIContentEditModal({
           <PictureSidePanelContext.Provider
             value={{ host: sidePanelHost, elementPanelOpen, setElementPanelOpen }}
           >
-          {isInfographic && !listView ? (
-            /* PATCH-241: picture-first -- the picture fills the window and is
+          {pictureFirst && !listView ? (
+            /* PATCH-241/284: picture-first -- the picture fills the window and is
                edited directly; the form is behind "List view". */
             <div data-ai-picture-first="true" className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white p-6">
               <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
@@ -1173,6 +1178,15 @@ export default function AIContentEditModal({
                 const ground = document.querySelector<HTMLElement>('[data-ai-theme-background]');
                 return ground ? window.getComputedStyle(ground).backgroundColor : '#ffffff';
               }}
+              title={draftData.title?.trim() || undefined}
+              disabledReason={diagramHasSyntaxError ? 'Fix the diagram first' : undefined}
+              onDrawing={onEditAsDrawing!}
+            />
+          )}
+          {Boolean(onEditAsDrawing) && isDrawn && (
+            <EditAsDrawingButton
+              getScene={() => sceneFromStored(draftData as DrawnDiagramData)}
+              getBackground={() => (draftData as DrawnDiagramData).picture.background}
               title={draftData.title?.trim() || undefined}
               disabledReason={diagramHasSyntaxError ? 'Fix the diagram first' : undefined}
               onDrawing={onEditAsDrawing!}
