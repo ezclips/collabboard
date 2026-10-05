@@ -139,6 +139,12 @@ export interface SceneImageElement extends SceneElementBase {
   mimeType: string;
   /** True when an AntV `<use>` icon became a picture (not editable strokes). */
   fromIcon: boolean;
+  /**
+   * PATCH-283. The icon name recovered from the `<use>`/`<symbol>` id, when it
+   * names one of `VISUAL_ICON_NAMES`. Excalidraw does not read it; the AI-drawn
+   * example converter uses it to turn an icon picture back into a `DrawnIcon`.
+   */
+  iconName?: string;
 }
 
 export interface SceneTextElement extends SceneElementBase {

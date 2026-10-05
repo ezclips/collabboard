@@ -8,10 +8,54 @@
  * elements. Paths go through the analytic `samplePathD`.
  */
 
+import { VISUAL_ICON_NAMES, isVisualIconName } from '@/lib/ai/visualIcons';
+
 import { samplePathD } from './pathSampler';
 import { attr, isNone, lower, num, resolveProperty, symbolColor } from './readPaint';
 import { groupIdsFor, nextId, recordSkip, sourceOf, type ReaderState } from './readText';
 import type { ScenePaint, ScenePoint, SceneRect } from './scene';
+
+/**
+ * PATCH-283. AntV's resource loader names a symbol `rsc-<hash>` where the hash is
+ * Java's `String.hashCode` of the serialized resource data. To recover our icon
+ * NAME for the AI-drawn example converter we precompute that hash for every
+ * known icon name and each plausible serialization the resource data may take.
+ * A direct symbol/href name also matches, so hand-built fixtures work.
+ */
+function javaHash(value: string): string {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+  }
+  return String(hash);
+}
+
+function buildRscNameMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const name of VISUAL_ICON_NAMES) {
+    const candidates = [
+      `lucide/${name}`,
+      JSON.stringify(`lucide/${name}`),
+      JSON.stringify({ source: 'custom', data: `lucide/${name}` }),
+      JSON.stringify({ data: `lucide/${name}`, source: 'custom' }),
+      name,
+    ];
+    for (const candidate of candidates) map.set(`rsc-${javaHash(candidate)}`, name);
+  }
+  return map;
+}
+
+const RSC_ICON_NAMES = buildRscNameMap();
+
+function iconNameFor(use: Element, symbol: Element): string | undefined {
+  const href = attr(use, 'href');
+  const fragment = href && href.startsWith('#') ? href.slice(1) : href ?? '';
+  if (isVisualIconName(fragment)) return fragment;
+  const symbolId = symbol.getAttribute('id');
+  if (isVisualIconName(symbolId)) return symbolId;
+  return RSC_ICON_NAMES.get(fragment) ?? (symbolId ? RSC_ICON_NAMES.get(symbolId) : undefined);
+}
+
 
 function encodeSvgDataUrl(svg: string): string {
   const bytes = new TextEncoder().encode(svg);
@@ -233,6 +277,7 @@ export function emitIcon(state: ReaderState, el: Element, style: CSSStyleDeclara
     recordSkip(state, el, 'icon-unresolved');
     return;
   }
+  const iconName = iconNameFor(el, symbol);
   state.elements.push({
     id: nextId(state),
     kind: 'image',
@@ -240,6 +285,7 @@ export function emitIcon(state: ReaderState, el: Element, style: CSSStyleDeclara
     dataURL,
     mimeType: 'image/svg+xml',
     fromIcon: true,
+    ...(iconName ? { iconName } : {}),
     groupIds: groupIdsFor(state, el),
     source: sourceOf(state, el),
   });

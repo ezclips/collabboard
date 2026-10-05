@@ -40,7 +40,8 @@ describe('PDF Source AI Phase 1 wiring', () => {
     // table-plan: PATCH-175, an AI plan for table edits; likewise unreachable from the PDF Source AI panel.
     // transcript-punctuate: PATCH-178, batch punctuation for readability; likewise unreachable from the PDF Source AI panel.
     // generate-outline: PATCH-233, the "Show options" outline; likewise unreachable from the PDF Source AI panel.
-    expect(routes).toEqual(['classify-intent', 'convert-component', 'generate-component', 'generate-outline', 'save-generated-component', 'table-fill', 'table-plan', 'text-action', 'transcript-punctuate']);
+    // draw-picture: PATCH-283, an AI-drawn picture; likewise unreachable from the PDF Source AI panel.
+    expect(routes).toEqual(['classify-intent', 'convert-component', 'draw-picture', 'generate-component', 'generate-outline', 'save-generated-component', 'table-fill', 'table-plan', 'text-action', 'transcript-punctuate']);
   });
 
   it('the request body carries ONLY action/selectedText/instruction -- no page, board or PDF context', () => {
