@@ -53,6 +53,18 @@ const drawing = (): Padlet =>
 
 const wrapper = (c: HTMLElement) => c.querySelector('[class*="drawing-preview"]') as HTMLElement;
 
+const sizedDrawing = (metadata: Record<string, unknown>): Padlet =>
+  ({
+    id: 'd-sized',
+    board_id: 'b',
+    title: 'Drawing',
+    content: '',
+    type: 'drawing',
+    width: 360,
+    height: 240,
+    metadata,
+  } as unknown as Padlet);
+
 describe('PATCH-223 the drawing wrapper zooms only when a viewer is passed', () => {
   it('without onView: no zoom cursor, no title, and the click is not swallowed', () => {
     const parent = vi.fn();
@@ -82,5 +94,28 @@ describe('PATCH-223 the drawing wrapper zooms only when a viewer is passed', () 
     });
     expect(onView).toHaveBeenCalledTimes(1);
     expect(parent).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH-288 the drawing preview cap is dropped only once the post is manually sized', () => {
+  it('a manually-sized drawing renders the preview with no max-h-[300px] cap', () => {
+    const c = mountWithParent(
+      () => {},
+      <PostCardContent padlet={sizedDrawing({ previewUrl: 'data:image/svg+xml;utf8,<svg/>', manualSize: true })} />,
+    );
+    const img = c.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.className).not.toContain('max-h-[300px]');
+    expect(img!.className).toContain('w-full h-auto object-contain');
+  });
+
+  it('a legacy (never resized) drawing keeps the 300px cap exactly as before', () => {
+    const c = mountWithParent(
+      () => {},
+      <PostCardContent padlet={sizedDrawing({ previewUrl: 'data:image/svg+xml;utf8,<svg/>' })} />,
+    );
+    const img = c.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.className).toContain('max-h-[300px]');
   });
 });

@@ -16,6 +16,7 @@ import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
 import { isDocumentPost, resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
+import { isManuallySizedPost } from "@/lib/domain/canvas/postResizePolicy";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import { stripDrawingPreviewBackground } from "@/lib/domain/canvas/drawingPreview";
 import DocumentCardContent from "./DocumentCardContent";
@@ -940,7 +941,7 @@ export default function PostCardContent({
                     // to move. Only reachable by clicking the drawing's own
                     // preview area; the surrounding card margin was never
                     // affected since it isn't an <img>.
-                    <img src={drawingPreviewSrc} alt="Drawing preview" className="w-full h-auto object-contain max-h-[300px]" draggable={false} data-graph-anchor={drawingFullView ? "visual" : undefined} />
+                    <img src={drawingPreviewSrc} alt="Drawing preview" className={`w-full h-auto object-contain ${isManuallySizedPost(padlet) ? "" : "max-h-[300px]"}`} draggable={false} data-graph-anchor={drawingFullView ? "visual" : undefined} />
                 ) : (
                     <>
                         <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mt-4">

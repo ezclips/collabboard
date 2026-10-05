@@ -21,11 +21,14 @@ export type PostResizeMode = 'none' | 'horizontal-only' | 'box';
  *
  * horizontal-only:
  * - link, table (B2) -- width is manual, height stays content-derived.
+ * - drawing (PATCH-288) -- width is manual, height follows the SVG preview,
+ *   which stays sharp at any width because it is rendered from `exportToSvg`.
+ *   POST-RESIZE-B2 had kept drawing at 'none'; the owner reversed that so a
+ *   chart drawn in the 180px card becomes readable at 100% zoom.
  * - section_heading -> horizontal-only SPECIAL: owned by the existing
  *   left/right handle implementation, never the shared bottom-right grip.
  *
- * none: container (B3), file, comment, drawing-in-freeform (B4), and every
- * other type.
+ * none: container (B3), comment, and every other type.
  */
 export function getPostResizeCapability(post: Pick<Padlet, 'type'>): PostResizeMode {
   switch (post.type) {
@@ -43,6 +46,7 @@ export function getPostResizeCapability(post: Pick<Padlet, 'type'>): PostResizeM
       return 'box';
     case 'link':
     case 'table':
+    case 'drawing':
       return 'horizontal-only';
     case 'section_heading':
       return 'horizontal-only';
@@ -72,6 +76,9 @@ export interface PostResizeConstraints {
  * - table: minWidth 180, height content-derived (horizontal-only). The
  *   historical Freeform table shell is 180px wide, so a first resize must not
  *   jump above the usable legacy width merely because it becomes manual.
+ * - drawing: minWidth 180, height content-derived (horizontal-only). 180 is
+ *   today's fixed Freeform card width, so a first resize never jumps; the SVG
+ *   preview then scales with the card's width (PATCH-288).
  * - file: 180x160 -- a Knowledge PDF placement; narrower than this and the
  *   header controls wrap, shorter and the page viewport shows almost nothing.
  * - card: Document vs Clipart differ because their content natures differ --
@@ -87,6 +94,7 @@ export const POST_RESIZE_CONSTRAINTS: Record<string, PostResizeConstraints> = {
   todo: { minWidth: 160, minHeight: 100 },
   link: { minWidth: 240, minHeight: 0 },
   table: { minWidth: 180, minHeight: 0 },
+  drawing: { minWidth: 180, minHeight: 0 },
   document: { minWidth: 180, minHeight: 220 },
   // The PDF card's own header is ~26px; below roughly this the page viewport
   // stops showing a usable amount of a page.

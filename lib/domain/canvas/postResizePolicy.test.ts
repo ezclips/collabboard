@@ -65,10 +65,17 @@ describe('PATCH POST-RESIZE-B1/B2 capability matrix', () => {
     expect(getPostResizeCapability(post('table'))).toBe('horizontal-only');
   });
 
-  it('B2 exposes nothing else: container/comment/drawing -> none', () => {
-    for (const type of ['container', 'comment', 'drawing']) {
+  it('B2 exposes nothing else: container/comment -> none', () => {
+    for (const type of ['container', 'comment']) {
       expect(getPostResizeCapability(post(type)), type).toBe('none');
     }
+  });
+
+  it('PATCH-288: drawing moved from none to horizontal-only', () => {
+    // Owner reversed POST-RESIZE-B2's "drawing -> none": a chart drawn in a
+    // 180px card is unreadable at 100% zoom, so the drawing resizes by width
+    // and its SVG preview scales with it.
+    expect(getPostResizeCapability(post('drawing'))).toBe('horizontal-only');
   });
 
   it('PDF-C1: a file post is the Knowledge PDF placement and resizes as a box', () => {
@@ -100,6 +107,11 @@ describe('PATCH POST-RESIZE-B1 constraints', () => {
     expect(getPostResizeConstraints(post('todo'))).toEqual({ minWidth: 160, minHeight: 100 });
     expect(getPostResizeConstraints(post('link'))).toEqual({ minWidth: 240, minHeight: 0 });
     expect(getPostResizeConstraints(post('table'))).toEqual({ minWidth: 180, minHeight: 0 });
+  });
+
+  it('PATCH-288: drawing minimum is 180 wide (today\'s card), height content-derived', () => {
+    expect(getPostResizeConstraints(post('drawing'))).toEqual({ minWidth: 180, minHeight: 0 });
+    expect(POST_RESIZE_CONSTRAINTS.drawing).toEqual({ minWidth: 180, minHeight: 0 });
   });
 
   it('B2: Document vs Clipart minima differ by the canonical svgUrl distinction', () => {

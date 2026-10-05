@@ -19,7 +19,14 @@ import {
 } from '@/lib/ai/antv/chartValues/redraw';
 import { redrawChart, type ExcalidrawApiLike } from '@/lib/ai/antv/chartValues/redrawChart';
 
-import { editButtonStyle, inputStyle, panelStyle, rowStyle } from './AntvChartValuesControl.styles';
+import {
+  editButtonStyle,
+  inputStyle,
+  panelStyle,
+  primaryButtonStyle,
+  rowStyle,
+  secondaryButtonStyle,
+} from './AntvChartValuesControl.styles';
 
 export interface AntvChartValuesControlProps {
   getApi: () => ExcalidrawApiLike | null;
@@ -206,9 +213,6 @@ export default function AntvChartValuesControl({
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <strong>Chart values</strong>
-            <button type="button" data-antv-chart-cancel onClick={close} style={{ cursor: 'pointer' }}>
-              Cancel
-            </button>
           </div>
           {rows.map((row) => {
             const value = Number(row.value);
@@ -269,8 +273,17 @@ export default function AntvChartValuesControl({
               {error}
             </p>
           ) : null}
-          <div style={{ marginTop: 8, textAlign: 'right' }}>
-            <button type="button" data-antv-chart-apply disabled={busy} onClick={apply} style={{ cursor: 'pointer' }}>
+          <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" data-antv-chart-cancel onClick={close} style={secondaryButtonStyle}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-antv-chart-apply
+              disabled={busy}
+              onClick={apply}
+              style={busy ? { ...primaryButtonStyle, opacity: 0.6, cursor: 'default' } : primaryButtonStyle}
+            >
               {busy ? 'Redrawing…' : 'Apply'}
             </button>
           </div>

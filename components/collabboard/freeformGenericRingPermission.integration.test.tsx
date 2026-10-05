@@ -114,18 +114,20 @@ const canvasEditorValue: CanvasEditorState = {
   commentPopupPosition: null, commentPopupHighlightColor: undefined,
 };
 
-function buildPadlets(targetType: Padlet['type'], metadata: Padlet['metadata'] = {}): Padlet[] {
+function buildPadlets(targetType: Padlet['type'], metadata: Padlet['metadata'] = {}, width = 200, height = 150): Padlet[] {
   return [
-    padlet('target-1', targetType, 200, 150, metadata),
+    padlet('target-1', targetType, width, height, metadata),
   ];
 }
 
-function Harness({ targetType, canUseFreeformEditButton, metadata }: {
+function Harness({ targetType, canUseFreeformEditButton, metadata, width = 200, height = 150 }: {
   targetType: Padlet['type'];
   canUseFreeformEditButton: boolean;
   metadata?: Padlet['metadata'];
+  width?: number;
+  height?: number;
 }) {
-  const [padlets, setPadlets] = React.useState<Padlet[]>(() => buildPadlets(targetType, metadata));
+  const [padlets, setPadlets] = React.useState<Padlet[]>(() => buildPadlets(targetType, metadata, width, height));
   const containerRef = React.useRef<HTMLDivElement>(null);
   const stableActions = useStableCanvasActions({
     duplicatePadlet: () => {}, addPadletToLibrary: () => {}, requestDeletePadlet: () => {},
@@ -174,13 +176,27 @@ function Harness({ targetType, canUseFreeformEditButton, metadata }: {
   );
 }
 
-async function mount(targetType: Padlet['type'], canUseFreeformEditButton: boolean, metadata?: Padlet['metadata']) {
+async function mount(
+  targetType: Padlet['type'],
+  canUseFreeformEditButton: boolean,
+  metadata?: Padlet['metadata'],
+  width = 200,
+  height = 150,
+) {
   const host = document.createElement('div');
   document.body.appendChild(host);
   let root: Root;
   await act(async () => {
     root = createRoot(host);
-    root.render(<Harness targetType={targetType} canUseFreeformEditButton={canUseFreeformEditButton} metadata={metadata} />);
+    root.render(
+      <Harness
+        targetType={targetType}
+        canUseFreeformEditButton={canUseFreeformEditButton}
+        metadata={metadata}
+        width={width}
+        height={height}
+      />,
+    );
   });
   return { host, root: root! };
 }
@@ -269,5 +285,41 @@ describe('PATCH FREEFORM-COMMENT-PRIVILEGE collapsed standalone Comment marker r
       expect(() => marker!.click()).not.toThrow();
       await unmount(host, root);
     }
+  });
+});
+
+describe('PATCH-288 a drawing post resizes by width on the Freeform board', () => {
+  const drawingCard = (host: HTMLElement) => host.querySelector<HTMLElement>('.group\\/image-container');
+
+  it('selected, editable, unlocked: the shared resize handle renders', async () => {
+    const { host, root } = await mount('drawing', true);
+    expect(host.querySelectorAll('[data-post-resize-handle="true"]').length).toBe(1);
+    await unmount(host, root);
+  });
+
+  it('a locked drawing renders no resize handle', async () => {
+    const { host, root } = await mount('drawing', true, { isLocked: true } as Padlet['metadata']);
+    expect(host.querySelectorAll('[data-post-resize-handle="true"]').length).toBe(0);
+    await unmount(host, root);
+  });
+
+  it('a read-only drawing renders no resize handle', async () => {
+    const { host, root } = await mount('drawing', false);
+    expect(host.querySelectorAll('[data-post-resize-handle="true"]').length).toBe(0);
+    await unmount(host, root);
+  });
+
+  it('a manually sized drawing renders at its stored width; a legacy one stays 180px', async () => {
+    const manual = await mount('drawing', true, { manualSize: true } as Padlet['metadata'], 320, 200);
+    const manualCard = drawingCard(manual.host);
+    expect(manualCard, 'manual drawing card').not.toBeNull();
+    expect(manualCard!.style.width).toBe('320px');
+    await unmount(manual.host, manual.root);
+
+    const legacy = await mount('drawing', true, {}, 320, 200);
+    const legacyCard = drawingCard(legacy.host);
+    expect(legacyCard, 'legacy drawing card').not.toBeNull();
+    expect(legacyCard!.style.width).toBe('180px');
+    await unmount(legacy.host, legacy.root);
   });
 });

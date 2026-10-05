@@ -20,6 +20,27 @@ export const editButtonStyle: CSSProperties = {
   cursor: 'pointer',
 };
 
+// PATCH-288. Apply and Cancel now read as real buttons: a filled primary and an
+// outlined secondary, sitting together in the panel footer.
+export const primaryButtonStyle: CSSProperties = {
+  background: '#2563eb',
+  color: '#ffffff',
+  border: '1px solid #2563eb',
+  borderRadius: 6,
+  padding: '6px 14px',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+export const secondaryButtonStyle: CSSProperties = {
+  background: '#ffffff',
+  border: '1px solid #d1d5db',
+  borderRadius: 6,
+  padding: '6px 14px',
+  color: '#374151',
+  cursor: 'pointer',
+};
+
 export const panelStyle: CSSProperties = {
   position: 'absolute',
   top: 64,

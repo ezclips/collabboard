@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { getFallbackMinimapItem } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
-import { getPostResizeCapability } from '@/lib/domain/canvas/postResizePolicy';
+import { getManualResizeDimensions, getPostResizeCapability, getPostResizeConstraints } from '@/lib/domain/canvas/postResizePolicy';
 import type { Padlet } from '@/types/collabboard';
 
 function read(relativePath: string): string {
@@ -259,6 +259,28 @@ describe('PATCH POST-RESIZE-B2 minimap parity', () => {
 });
 
 describe('PATCH POST-RESIZE-B2 freezes', () => {
+  it('PATCH-288: drawing moves to horizontal-only with a 180 width minimum', () => {
+    expect(getPostResizeCapability({ type: 'drawing' })).toBe('horizontal-only');
+    expect(getPostResizeConstraints({ type: 'drawing' })).toEqual({ minWidth: 180, minHeight: 0 });
+  });
+
+  it('PATCH-288: the shared generic handle branch already covers drawing (selected, editable, unlocked)', () => {
+    // The policy change alone routes a drawing through this pre-existing
+    // branch -- no FreeformPadletCards wiring was added in PATCH-288.
+    expect(code(cardsSrc)).toContain(
+      "(resizeMode === 'box' || resizeMode === 'horizontal-only') && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked",
+    );
+  });
+
+  it('PATCH-288: a legacy drawing stays 180px; a manually sized drawing uses its stored width', () => {
+    const legacy = padlet('drawing', 300, 200);
+    expect(getManualResizeDimensions(legacy)).toBeNull();
+    expect(getManualResizeDimensions(padlet('drawing', 420, 300, { manualSize: true })))
+      .toEqual({ width: 420, height: 300 });
+    // The generic renderer still falls back to the historical 180px card.
+    expect(code(cardsSrc)).toContain(": (manualGeometry ? `${manualGeometry.width}px` : '180px')");
+  });
+
   it('66/67. Image and AI capabilities unchanged by B2', () => {
     expect(getPostResizeCapability({ type: 'image' })).toBe('box');
     expect(getPostResizeCapability({ type: 'ai-component' })).toBe('box');

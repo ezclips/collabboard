@@ -306,6 +306,37 @@ describe('PATCH-287: AntvChartValuesControl', () => {
     expect(slice?.backgroundColor).toBe('#ff0000');
   });
 
+  it('PATCH-288: Apply is a filled primary button and Cancel an outlined secondary one', () => {
+    selectChart();
+    const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
+    click(c.querySelector('[data-antv-chart-edit]')!);
+    const apply = c.querySelector('[data-antv-chart-apply]') as HTMLButtonElement;
+    const cancel = c.querySelector('[data-antv-chart-cancel]') as HTMLButtonElement;
+    expect(apply.style.background).toBe('rgb(37, 99, 235)');
+    expect(apply.style.color).toBe('rgb(255, 255, 255)');
+    expect(apply.style.border).toContain('rgb(37, 99, 235)');
+    expect(apply.style.fontWeight).toBe('600');
+    expect(cancel.style.background).toBe('rgb(255, 255, 255)');
+    expect(cancel.style.border).toContain('rgb(209, 213, 219)');
+    expect(cancel.style.color).toBe('rgb(55, 65, 81)');
+  });
+
+  it('PATCH-288: disabled Apply (busy) dims and shows the default cursor', async () => {
+    let release: ((value: { ok: boolean }) => void) | undefined;
+    redraw.fn.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    selectChart();
+    const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
+    click(c.querySelector('[data-antv-chart-edit]')!);
+    await act(async () => {
+      c.querySelector('[data-antv-chart-apply]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const apply = c.querySelector('[data-antv-chart-apply]') as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+    expect(apply.style.opacity).toBe('0.6');
+    expect(apply.style.cursor).toBe('default');
+    await act(async () => { release?.({ ok: true }); });
+  });
+
   it('says "Select the chart again" instead of redrawing when it is no longer that chart (Addendum 1 item 3)', async () => {
     selectChart();
     const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
