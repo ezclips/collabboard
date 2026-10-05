@@ -42,6 +42,12 @@ import {
 export interface ReadSvgSceneOptions {
   /** The theme ground, for alpha blending. */
   background: string;
+  /**
+   * PATCH-281. How to emit `<use>` icons: as a data-URL picture (default) or as
+   * their own editable geometry. Default `'image'`, so nothing changes unless
+   * asked (Excalidraw libraries cannot hold images).
+   */
+  icons?: 'image' | 'strokes';
   /** Test seam; defaults to the real browser geometry. */
   geometry?: SvgGeometry;
 }
@@ -49,6 +55,12 @@ export interface ReadSvgSceneOptions {
 const DEFINITION_TAGS = new Set(['defs', 'clippath', 'mask', 'marker', 'symbol']);
 const SHAPE_TAGS = new Set(['rect', 'circle', 'ellipse', 'path', 'polygon', 'polyline', 'line']);
 const VISUAL_TAGS = new Set([...SHAPE_TAGS, 'use', 'image', 'text', 'foreignobject']);
+/**
+ * PATCH-281. Shapes that can render with a zero-width or zero-height box: a
+ * perfectly straight line. They survive the zero-box rule when stroked; a
+ * zero-box `rect`/`ellipse` is genuinely invisible and still skipped.
+ */
+const FLAT_SHAPE_TAGS = new Set(['path', 'polygon', 'polyline', 'line']);
 
 function parsePoints(raw: string | null): Array<{ x: number; y: number }> {
   if (!raw) return [];
@@ -75,6 +87,27 @@ function captionPoints(
 
 /** Distance below which the shape is considered closed (path ends meet). */
 const CLOSE_EPSILON = 0.5;
+
+/** Addendum 1. Points within this of each other are a zero-length dot. */
+const DOT_DIAMETER = 0.5;
+
+function isDot(points: readonly ScenePoint[]): boolean {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of points) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  return Math.hypot(maxX - minX, maxY - minY) <= DOT_DIAMETER;
+}
+
+function lineCapOf(el: Element, style: CSSStyleDeclaration): string {
+  return (attr(el, 'stroke-linecap') ?? style.strokeLinecap ?? 'butt').trim().toLowerCase();
+}
 
 function emitShape(
   state: ReaderState,
@@ -148,6 +181,35 @@ function emitShape(
   subpaths = subpaths.filter((points) => points.length >= 2);
   if (subpaths.length === 0) {
     recordSkip(state, el, 'hidden');
+    return;
+  }
+  // Addendum 1. A zero-length stroked path is a dot, drawn with the stroke cap:
+  // round -> circle, square -> square, butt -> nothing. `toSkeleton` would
+  // collapse the polyline below 2 points and drop it, so emit the primitive.
+  if (paint.stroke !== 'none' && subpaths.every(isDot)) {
+    const cap = lineCapOf(el, style);
+    if (cap === 'butt') {
+      recordSkip(state, el, 'hidden');
+      return;
+    }
+    const radius = paint.strokeWidth / 2;
+    const dotPaint: ScenePaint = { ...paint, fill: paint.stroke, stroke: 'none' };
+    for (const [index, points] of subpaths.entries()) {
+      const [cx, cy] = points[0];
+      const id = index === 0 ? base.id : `${base.id}:${index}`;
+      const dotBox: SceneRect = {
+        x: cx - radius,
+        y: cy - radius,
+        width: paint.strokeWidth,
+        height: paint.strokeWidth,
+      };
+      if (cap === 'round') {
+        state.elements.push({ ...base, id, kind: 'ellipse', box: dotBox, paint: dotPaint });
+      } else {
+        state.elements.push({ ...base, id, kind: 'rect', box: dotBox, radius: 0, pill: false, paint: dotPaint });
+      }
+      state.visibleShapes += 1;
+    }
     return;
   }
   const arrowStart = isMarkerSet(el, style, 'marker-start');
@@ -232,16 +294,21 @@ function visit(state: ReaderState, el: Element, chainOpacity: number): void {
   }
   if (SHAPE_TAGS.has(tag)) {
     const box = state.geometry.box(el, state.root);
-    const { paint, fillEmpty, strokeEmpty } = paintFor(state, el, style, alphaBase);
+    const { paint, fillEmpty, strokeEmpty, patternFill } = paintFor(state, el, style, alphaBase);
+    if (patternFill) state.losses.patternIgnored += 1;
     if (fillEmpty && strokeEmpty) {
-      recordSkip(state, el, 'invisible');
+      recordSkip(state, el, patternFill ? 'pattern' : 'invisible');
       return;
     }
     if (!box || box.width <= 0 || box.height <= 0) {
-      recordSkip(state, el, 'hidden');
-      return;
+      // PATCH-281: a straight stroked line has a zero-height (or -width) box; it
+      // is still painted, so only skip when there is no stroke to draw.
+      if (strokeEmpty || !FLAT_SHAPE_TAGS.has(tag)) {
+        recordSkip(state, el, 'hidden');
+        return;
+      }
     }
-    emitShape(state, el, style, box, paint);
+    emitShape(state, el, style, box as SceneRect, paint);
     return;
   }
   if (tag === 'use') {
@@ -265,6 +332,7 @@ export function readSvgScene(root: Element, options: ReadSvgSceneOptions): Pictu
     root,
     geometry,
     background: options.background,
+    icons: options.icons ?? 'image',
     pictureGroup: PICTURE_GROUP_ID,
     elements: [],
     skips: [],
@@ -275,9 +343,11 @@ export function readSvgScene(root: Element, options: ReadSvgSceneOptions): Pictu
       lostFontWeight: 0,
       lostFontStyle: 0,
       iconsAsImage: 0,
+      iconsAsStrokes: 0,
       mixedTextStyle: 0,
       shadowIgnored: 0,
       pathFallback: 0,
+      patternIgnored: 0,
     },
     visibleShapes: 0,
     resolvableIcons: 0,

@@ -16,6 +16,7 @@ export interface ReportElement {
   height: number;
   backgroundColor?: string;
   strokeColor?: string;
+  groupIds?: string[];
   customData?: Record<string, unknown> | null;
 }
 
@@ -161,12 +162,23 @@ export function buildReport(input: ReportInput): SpikeReport {
     skipped: scene.skips,
   };
 
-  // Icon coverage: resolvable `<use>` icons must be image elements.
-  const iconElements = scene.elements.filter(isImage).filter((el) => el.fromIcon);
-  const convertedIcons = iconElements.filter((el) => output.get(el.id)?.type === 'image').length;
+  // Icon coverage: a resolvable `<use>` icon converted in EITHER mode counts.
+  // Image mode: its picture element is present. Strokes mode: at least one
+  // output element carries the icon's shared `icon:<n>` group (PATCH-281).
+  const imageIcons = scene.elements.filter(isImage).filter((el) => el.fromIcon);
+  const strokeIconGroups = new Set<string>();
+  for (const el of scene.elements) {
+    const group = el.groupIds.find((value) => value.startsWith('icon:'));
+    if (group) strokeIconGroups.add(group);
+  }
+  let convertedIcons = imageIcons.filter((el) => output.get(el.id)?.type === 'image').length;
+  for (const group of strokeIconGroups) {
+    if (elements.some((element) => element.groupIds?.includes(group))) convertedIcons += 1;
+  }
+  const iconTotal = imageIcons.length + strokeIconGroups.size;
   const iconCoverage = {
-    ...ratio(convertedIcons, iconElements.length),
-    total: iconElements.length,
+    ...ratio(convertedIcons, iconTotal),
+    total: iconTotal,
     converted: convertedIcons,
   };
 

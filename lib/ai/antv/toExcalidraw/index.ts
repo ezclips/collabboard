@@ -35,6 +35,12 @@ export interface ConvertAntvSvgOptions {
   background: string;
   /** Pill handling. Default `'polygon'` (exact capsule); `'rectangle'` is legacy. */
   pill?: 'rectangle' | 'polygon';
+  /**
+   * PATCH-281. How to emit `<use>` icons: a data-URL image (default) or editable
+   * strokes. Excalidraw libraries cannot hold images, so `'strokes'` is used by
+   * the drawing-library path.
+   */
+  icons?: 'image' | 'strokes';
   /** Report labels only. */
   template?: string;
   theme?: string;
@@ -71,7 +77,11 @@ export async function convertAntvSvg(
   const moduleLoadMs = now() - loadStart;
 
   const start = now();
-  const scene = readSvgScene(svg, { background: options.background, geometry: options.geometry });
+  const scene = readSvgScene(svg, {
+    background: options.background,
+    icons: options.icons,
+    geometry: options.geometry,
+  });
   const { elements: skeleton, files } = toSkeleton(scene, { pill: options.pill });
   const elements = convertToExcalidrawElements(skeleton, { regenerateIds: false });
   alignTextElements(elements as unknown as AlignableElement[], scene);

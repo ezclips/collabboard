@@ -9,6 +9,8 @@ import { attr, lower, num, resolveProperty, type PaintState } from './readPaint'
 import type { SceneElement, ScenePoint, SceneSkip, SceneSkipReason, SceneTextAlign } from './scene';
 
 export interface ReaderState extends PaintState {
+  /** PATCH-281. How `<use>` icons are emitted (see `ReadSvgSceneOptions`). */
+  icons: 'image' | 'strokes';
   pictureGroup: string;
   elements: SceneElement[];
   skips: SceneSkip[];

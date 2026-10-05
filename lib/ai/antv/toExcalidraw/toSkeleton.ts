@@ -119,12 +119,27 @@ function rectangleSkeleton(
   } as unknown as ExcalidrawElementSkeleton;
 }
 
+/**
+ * Addendum 2. Excalidraw's `restoreElements` re-validates polygons with
+ * `isValidPolygon` (`points.length > 3 && points[0] === points[last]`), and
+ * turns an open one into `polygon: false`, dropping its fill. AntV's sampled
+ * wedge points do not repeat the first point, so close the ring ourselves.
+ */
+function closeRing(points: readonly ScenePoint[]): ScenePoint[] {
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) return [...points];
+  return [...points, [first[0], first[1]]];
+}
+
 function polylineSkeleton(
   common: Common,
   el: Extract<SceneElement, { kind: 'polyline' }>,
 ): ExcalidrawElementSkeleton | null {
-  const points = simplifyPolyline(el.points, el.closed);
-  if (points.length < 2) return null;
+  const reduced = simplifyPolyline(el.points, el.closed);
+  if (reduced.length < 2) return null;
+  const isPolygon = el.closed && el.filled;
+  const points = isPolygon ? closeRing(reduced) : reduced;
   const minX = Math.min(...points.map((p) => p[0]));
   const minY = Math.min(...points.map((p) => p[1]));
   const local = points.map(([px, py]) => [px - minX, py - minY] as [number, number]);
@@ -157,7 +172,7 @@ function polylineSkeleton(
     width,
     height,
     points: local,
-    polygon: el.closed && el.filled,
+    polygon: isPolygon,
     ...stops,
     fillStyle: 'solid',
     roughness: 0,

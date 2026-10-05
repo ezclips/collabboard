@@ -59,9 +59,11 @@ function scene(elements: SceneElement[], extra: Partial<PictureScene> = {}): Pic
       lostFontWeight: 0,
       lostFontStyle: 0,
       iconsAsImage: 0,
+      iconsAsStrokes: 0,
       mixedTextStyle: 0,
       shadowIgnored: 0,
       pathFallback: 0,
+      patternIgnored: 0,
     },
     ...extra,
   };

@@ -65,11 +65,39 @@ export function strokeStyleOf(el: Element, style: CSSStyleDeclaration): SceneStr
   return everyDashTiny ? 'dotted' : 'dashed';
 }
 
-function gradientStops(root: Element, ref: string): GradientStop[] | null {
-  const id = ref.slice(ref.indexOf('#') + 1, ref.lastIndexOf(')'));
+/**
+ * PATCH-281. The id inside a paint reference. Handles the presentation-attribute
+ * form `url(#g)`, the COMPUTED-style form `url("#g")`/`url('#g')` (quotes), and
+ * a fully-qualified URL (`url("http://.../doc#g")`). A bare `#g` (a gradient
+ * `href`) is accepted too. This quote/URL handling is the root fix for gradient
+ * STROKES: their colour often arrives via the computed style, so the naive
+ * `slice(indexOf('#') + 1, lastIndexOf(')'))` returned `g"` and dropped the line.
+ */
+function paintServerId(raw: string): string | null {
+  const match = /^url\(\s*(['"]?)(.*?)\1\s*\)$/i.exec(raw.trim());
+  const inner = (match ? match[2] : raw).trim();
+  const hash = inner.indexOf('#');
+  const id = (hash >= 0 ? inner.slice(hash + 1) : inner).trim();
+  return id || null;
+}
+
+function paintServerNode(root: Element, raw: string): Element | null {
+  const id = paintServerId(raw);
   if (!id) return null;
+  const byId = root.ownerDocument?.getElementById?.(id);
+  if (byId) return byId;
+  return root.querySelector(`[id="${id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+}
+
+/** PATCH-281. True when `raw` references an SVG `<pattern>` paint server. */
+export function isPatternPaint(state: PaintState, raw: string): boolean {
+  const node = paintServerNode(state.root, raw);
+  return !!node && lower(node) === 'pattern';
+}
+
+function gradientStops(root: Element, ref: string): GradientStop[] | null {
   const seen = new Set<string>();
-  let node: Element | null = root.ownerDocument.getElementById(id) ?? root.querySelector(`[id="${id}"]`);
+  let node: Element | null = paintServerNode(root, ref);
   while (node) {
     const tag = lower(node);
     if (tag !== 'lineargradient' && tag !== 'radialgradient') return null;
@@ -91,7 +119,7 @@ function gradientStops(root: Element, ref: string): GradientStop[] | null {
     const href = attr(node, 'href');
     if (!href || seen.has(href)) break;
     seen.add(href);
-    node = root.ownerDocument.getElementById(href.replace(/^#/, ''));
+    node = paintServerNode(root, href);
   }
   return null;
 }
@@ -120,9 +148,10 @@ export function paintFor(
   el: Element,
   style: CSSStyleDeclaration,
   alphaBase: number,
-): { paint: ScenePaint; fillEmpty: boolean; strokeEmpty: boolean } {
+): { paint: ScenePaint; fillEmpty: boolean; strokeEmpty: boolean; patternFill: boolean } {
   const fillRaw = attr(el, 'fill') ?? style.fill ?? 'none';
   const strokeRaw = attr(el, 'stroke') ?? style.stroke ?? 'none';
+  const patternFill = isPatternPaint(state, fillRaw);
   const fillAlpha = alphaBase * opacityOf(attr(el, 'fill-opacity') ?? style.fillOpacity);
   const strokeAlpha = alphaBase * opacityOf(attr(el, 'stroke-opacity') ?? style.strokeOpacity);
   const fill = resolveProperty(state, fillRaw, fillAlpha);
@@ -137,7 +166,7 @@ export function paintFor(
     opacity: 100,
     blended: fill.blended || stroke.blended,
   };
-  return { paint, fillEmpty: fill.color === 'none', strokeEmpty: stroke.color === 'none' };
+  return { paint, fillEmpty: fill.color === 'none', strokeEmpty: stroke.color === 'none', patternFill };
 }
 
 export function clipOrMask(el: Element, style: CSSStyleDeclaration): boolean {

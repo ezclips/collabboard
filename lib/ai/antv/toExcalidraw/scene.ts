@@ -182,6 +182,7 @@ export type SceneSkipReason =
   | 'definition'
   | 'hidden'
   | 'invisible'
+  | 'pattern'
   | 'external-image'
   | 'icon-unresolved'
   | 'unknown';
@@ -200,6 +201,11 @@ export interface PictureSceneLosses {
   lostFontWeight: number;
   lostFontStyle: number;
   iconsAsImage: number;
+  /**
+   * PATCH-281. Icons emitted as editable strokes instead of a picture
+   * (`icons: 'strokes'`). Mutually exclusive with `iconsAsImage` per mode.
+   */
+  iconsAsStrokes: number;
   /** Addendum 2. Text blocks whose inner nodes disagreed on size/colour. */
   mixedTextStyle: number;
   /** Addendum 4. Elements that carried a `filter` (drop shadow) we did not convert. */
@@ -209,6 +215,11 @@ export interface PictureSceneLosses {
    * came from `getPointAtLength`. Zero for real AntV pictures.
    */
   pathFallback: number;
+  /**
+   * PATCH-281. Faint `fill="url(#...-pattern)"` decorations we deliberately do
+   * not convert; counted separately from `invisible`.
+   */
+  patternIgnored: number;
 }
 
 export interface PictureScene {
