@@ -451,6 +451,88 @@ describe('PATCH-287 Addendum 1: background and lineHeight', () => {
     expect(result.find((element) => element.customData?.antvRole === 'background#0')?.backgroundColor).toBe('#654321');
   });
 
+  it('PATCH-289: flag true makes every background role transparent', () => {
+    const second = realElement('bg2', 'background#0', 'rectangle', { width: 800, height: 400 });
+    const oldRender = pieRender(5).concat(second);
+    const current = oldRender;
+    const nextRender = pieRender(5).concat(realElement('bg2', 'background#0', 'rectangle', { width: 800, height: 400 }));
+    const result = carryOver({
+      oldRender,
+      current,
+      nextRender,
+      indexMap: [0, 1, 2, 3, 4],
+      oldCount: 5,
+      nextCount: 5,
+      nextData: { ...data(5), transparentBackground: true },
+    });
+    expect(result.find((element) => element.customData?.antvRole === 'background')?.backgroundColor).toBe('transparent');
+    expect(result.find((element) => element.customData?.antvRole === 'background#0')?.backgroundColor).toBe('transparent');
+  });
+
+  it('PATCH-289: false after true takes the new render colour, never the old transparent', () => {
+    const oldRender = pieRender(5);
+    const current = replace(oldRender, 'bg', { backgroundColor: 'transparent' });
+    const nextRender = pieRender(5);
+    const result = carryOver({
+      oldRender,
+      current,
+      nextRender,
+      indexMap: [0, 1, 2, 3, 4],
+      oldCount: 5,
+      nextCount: 5,
+      oldData: { ...data(5), transparentBackground: true },
+      nextData: { ...data(5), transparentBackground: false },
+    });
+    expect(result.find((element) => element.customData?.antvRole === 'background')?.backgroundColor).toBe('#ffffff');
+  });
+
+  it('PATCH-289: absent flag still carries a user-changed background colour', () => {
+    const oldRender = pieRender(5);
+    const current = replace(oldRender, 'bg', { backgroundColor: '#123456' });
+    const nextRender = pieRender(5);
+    const result = carryOver({
+      oldRender,
+      current,
+      nextRender,
+      indexMap: [0, 1, 2, 3, 4],
+      oldCount: 5,
+      nextCount: 5,
+      oldData: data(5),
+      nextData: data(5),
+    });
+    expect(result.find((element) => element.customData?.antvRole === 'background')?.backgroundColor).toBe('#123456');
+  });
+
+  it('PATCH-289: the flag changes only background roles', () => {
+    const oldRender = pieRender(5);
+    const current = replace(oldRender, 'slice-1', { backgroundColor: '#ff0000' });
+    const nextRender = pieRender(5);
+    const result = carryOver({
+      oldRender,
+      current,
+      nextRender,
+      indexMap: [0, 1, 2, 3, 4],
+      oldCount: 5,
+      nextCount: 5,
+      nextData: { ...data(5), transparentBackground: true },
+    });
+    expect(result.find((element) => element.customData?.antvRole === 'shape#1')?.backgroundColor).toBe('#ff0000');
+    expect(result.find((element) => element.customData?.antvRole === 'background')?.backgroundColor).toBe('transparent');
+  });
+
+  it('PATCH-289: buildNextData stores the flag', () => {
+    const data5 = data(5);
+    const rows = planRows(data5, { labels: new Map(), details: new Map() });
+    const on = buildNextData(data5, { labels: new Map(), details: new Map() }, rows, {
+      transparentBackground: true,
+    });
+    const off = buildNextData(data5, { labels: new Map(), details: new Map() }, rows, {
+      transparentBackground: false,
+    });
+    expect(on.transparentBackground).toBe(true);
+    expect(off.transparentBackground).toBe(false);
+  });
+
   it('scales fontSize but leaves the unitless lineHeight alone', () => {
     const oldRender: TestElement[] = [
       background(),

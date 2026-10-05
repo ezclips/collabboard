@@ -10,6 +10,7 @@ import {
 } from '@/lib/infra/drawing/importScene';
 import ExcalidrawCollabBoardContextMenu from '@/components/collabboard/menus/ExcalidrawCollabBoardContextMenu';
 import AntvChartValuesControl from '@/components/collabboard/editors/AntvChartValuesControl';
+import LibraryHoverPreview from '@/components/collabboard/editors/LibraryHoverPreview';
 
 import type { ExcalidrawContextMenuRendererProps } from "@excalidraw/excalidraw/types";
 
@@ -73,6 +74,8 @@ export default function ExcalidrawWrapper({
 }: ExcalidrawWrapperProps) {
     // API kept in a ref to avoid triggering renders when Excalidraw fires the callback
     const apiRef = React.useRef<any>(null);
+    // PATCH-289. Root element the hover preview delegates its pointer events on.
+    const rootRef = React.useRef<HTMLDivElement | null>(null);
     const importInputRef = React.useRef<HTMLInputElement | null>(null);
     // PATCH-287. Bumped when the Excalidraw API arrives, so the values panel can
     // subscribe once it exists.
@@ -280,7 +283,7 @@ export default function ExcalidrawWrapper({
     const { Excalidraw, MainMenu, WelcomeScreen } = excalidrawLib;
 
     return (
-        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div ref={rootRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
             <input
                 ref={importInputRef}
                 type="file"
@@ -311,6 +314,7 @@ export default function ExcalidrawWrapper({
             {!readOnly ? (
                 <AntvChartValuesControl getApi={getApi} apiVersion={apiVersion} />
             ) : null}
+            <LibraryHoverPreview rootRef={rootRef} />
         </div>
     );
 }

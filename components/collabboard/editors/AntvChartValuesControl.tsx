@@ -11,6 +11,7 @@ import React from 'react';
 
 import { isAntvPieTemplate } from '@/lib/ai/antv/chartValues/data';
 import {
+  chartBackgroundsTransparent,
   findSelectedChart,
   planRows,
   readCanvasTexts,
@@ -20,6 +21,7 @@ import {
 import { redrawChart, type ExcalidrawApiLike } from '@/lib/ai/antv/chartValues/redrawChart';
 
 import {
+  checkboxRowStyle,
   editButtonStyle,
   inputStyle,
   panelStyle,
@@ -60,6 +62,7 @@ export default function AntvChartValuesControl({
   const [rows, setRows] = React.useState<DraftRow[]>([]);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [error, setError] = React.useState<string | null>(null);
+  const [transparent, setTransparent] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const signature = React.useRef('');
   const nextKey = React.useRef(0);
@@ -116,6 +119,7 @@ export default function AntvChartValuesControl({
     }
     setChart(fresh);
     const texts = readCanvasTexts(fresh.elements);
+    setTransparent(fresh.data.transparentBackground ?? chartBackgroundsTransparent(fresh.elements));
     setRows(
       planRows(fresh.data, texts).map((row) => ({
         key: row.key,
@@ -183,7 +187,7 @@ export default function AntvChartValuesControl({
       label: row.label.trim(),
       value: Number(row.value),
     }));
-    const result = await redrawChart(api, fresh, chartRows);
+    const result = await redrawChart(api, fresh, chartRows, { transparentBackground: transparent });
     if (result.ok) close();
     else setError(result.error);
     setBusy(false);
@@ -273,6 +277,15 @@ export default function AntvChartValuesControl({
               {error}
             </p>
           ) : null}
+          <label style={checkboxRowStyle}>
+            <input
+              type="checkbox"
+              data-antv-chart-transparent
+              checked={transparent}
+              onChange={(event) => setTransparent(event.target.checked)}
+            />{' '}
+            Transparent background
+          </label>
           <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button type="button" data-antv-chart-cancel onClick={close} style={secondaryButtonStyle}>
               Cancel

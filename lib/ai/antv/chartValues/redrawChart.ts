@@ -31,16 +31,22 @@ export interface ExcalidrawApiLike {
 
 export type RedrawResult = { ok: true } | { ok: false; error: string };
 
+/** PATCH-289. Panel options carried into the redraw's next data. */
+export interface RedrawChartOptions {
+  transparentBackground?: boolean;
+}
+
 /** Redraw `chart` with `rows` into the live Excalidraw scene. */
 export async function redrawChart(
   api: ExcalidrawApiLike,
   chart: SelectedChart,
   rows: readonly ChartRow[],
+  options: RedrawChartOptions = {},
 ): Promise<RedrawResult> {
   try {
     const oldData = chart.data;
     const canvasTexts = readCanvasTexts(chart.elements);
-    const nextData = buildNextData(oldData, canvasTexts, rows);
+    const nextData = buildNextData(oldData, canvasTexts, rows, options);
     if (!antvChartDataSchema.safeParse(nextData).success) {
       return { ok: false, error: 'The chart values are not valid.' };
     }
@@ -71,6 +77,7 @@ export async function redrawChart(
       oldCount: oldData.items.length,
       nextCount: nextData.items.length,
       nextData,
+      oldData,
     });
 
     const elements = replaceChartInScene(api.getSceneElements(), chart.groupId, newElements);

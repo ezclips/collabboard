@@ -135,12 +135,22 @@ export function planRows(data: AntvChartData, texts: CanvasTexts): ChartRow[] {
   }));
 }
 
+export interface BuildNextDataOptions {
+  /** PATCH-289. The panel's checkbox state; omitted keeps the old data's flag. */
+  transparentBackground?: boolean;
+}
+
 /**
  * The next chart data: title and details from the canvas texts, labels and
  * values from the rows. A row's detail/icon follow its `from` item; a brand new
  * row (`from: null`) has neither. The input is never mutated.
  */
-export function buildNextData(data: AntvChartData, texts: CanvasTexts, rows: readonly ChartRow[]): AntvChartData {
+export function buildNextData(
+  data: AntvChartData,
+  texts: CanvasTexts,
+  rows: readonly ChartRow[],
+  options: BuildNextDataOptions = {},
+): AntvChartData {
   const items = rows.map((row) => {
     const source = row.from !== null ? data.items[row.from] : undefined;
     const detail =
@@ -153,13 +163,32 @@ export function buildNextData(data: AntvChartData, texts: CanvasTexts, rows: rea
       ...(icon ? { icon } : {}),
     };
   });
+  const transparentBackground = options.transparentBackground ?? data.transparentBackground;
   return {
     v: 1,
     template: data.template,
     theme: data.theme,
     title: texts.title ?? data.title,
     items,
+    ...(transparentBackground !== undefined ? { transparentBackground } : {}),
   };
+}
+
+/**
+ * PATCH-289. The panel's fallback initial state when the data carries no flag:
+ * true only when the chart has background-role elements and all of them are
+ * currently `transparent`.
+ */
+export function chartBackgroundsTransparent(elements: readonly ChartSceneElement[]): boolean {
+  let count = 0;
+  for (const element of elements) {
+    const role = roleOf(element);
+    const parsed = role ? parseRole(role) : null;
+    if (parsed?.type !== BACKGROUND_ROLE) continue;
+    count += 1;
+    if (element.backgroundColor !== 'transparent') return false;
+  }
+  return count > 0;
 }
 
 const COPIED_PROPS = [
@@ -239,6 +268,8 @@ export interface CarryOverInput<E extends ChartSceneElement> {
   oldCount: number;
   nextCount: number;
   nextData?: AntvChartData;
+  /** PATCH-289. The previous data, to detect a true -> false flag change. */
+  oldData?: AntvChartData;
 }
 
 /**
@@ -247,7 +278,7 @@ export interface CarryOverInput<E extends ChartSceneElement> {
  * group. Pure: the inputs are never mutated and every output element is new.
  */
 export function carryOver<E extends ChartSceneElement>(input: CarryOverInput<E>): E[] {
-  const { oldRender, current, nextRender, indexMap, oldCount, nextCount, nextData } = input;
+  const { oldRender, current, nextRender, indexMap, oldCount, nextCount, nextData, oldData } = input;
 
   const oldByRole = new Map<string, E>();
   for (const element of oldRender) {
@@ -357,10 +388,23 @@ export function carryOver<E extends ChartSceneElement>(input: CarryOverInput<E>)
     // lineHeight does not.
 
     if (oldElement && currentElement) {
+      // PATCH-289. Background roles follow the transparent flag, not the
+      // changed-only rule: transparent on, or after turning it off take the
+      // fresh render's colour rather than carrying the old `transparent`.
+      const parsedRole = role ? parseRole(role) : null;
+      const isBackground = parsedRole?.type === BACKGROUND_ROLE;
+      const takeRenderColor =
+        isBackground &&
+        nextData?.transparentBackground === false &&
+        oldData?.transparentBackground === true;
       for (const prop of COPIED_PROPS) {
+        if (takeRenderColor && prop === 'backgroundColor') continue;
         if (currentElement[prop] !== oldElement[prop]) {
           (next as Record<string, unknown>)[prop] = currentElement[prop];
         }
+      }
+      if (isBackground && nextData?.transparentBackground === true) {
+        (next as ChartSceneElement).backgroundColor = 'transparent';
       }
     }
 

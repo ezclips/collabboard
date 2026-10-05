@@ -70,3 +70,12 @@ export const inputStyle: CSSProperties = {
   border: '1px solid #d1d5db',
   borderRadius: 4,
 };
+
+// PATCH-289. The "Transparent background" checkbox row, above the footer.
+export const checkboxRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  marginTop: 8,
+  cursor: 'pointer',
+};

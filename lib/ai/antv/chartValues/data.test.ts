@@ -94,6 +94,21 @@ describe('PATCH-287: antvChartDataSchema', () => {
   });
 });
 
+describe('PATCH-289: transparentBackground', () => {
+  it('parses old data without the flag and accepts a boolean flag', () => {
+    const old = parseAntvChartData(sample());
+    expect(old).not.toBeNull();
+    expect(old?.transparentBackground).toBeUndefined();
+
+    const parsed = parseAntvChartData(sample({ transparentBackground: true }));
+    expect(parsed?.transparentBackground).toBe(true);
+  });
+
+  it('rejects a non-boolean flag', () => {
+    expect(antvChartDataSchema.safeParse(sample({ transparentBackground: 'yes' as never })).success).toBe(false);
+  });
+});
+
 describe('PATCH-287: parseAntvChartData', () => {
   it('returns the data for a valid payload', () => {
     const parsed = parseAntvChartData(sample());

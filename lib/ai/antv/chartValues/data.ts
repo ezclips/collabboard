@@ -48,6 +48,8 @@ export const antvChartDataSchema = z.object({
   theme: z.string().min(1).max(40),
   title: z.string().trim().max(80),
   items: z.array(itemSchema).min(1).max(10),
+  // PATCH-289. Optional so every chart drawn before this patch still parses.
+  transparentBackground: z.boolean().optional(),
 });
 
 export type AntvChartData = z.infer<typeof antvChartDataSchema>;

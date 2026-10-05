@@ -46,7 +46,7 @@ function makeChart(count: number): TestElement[] {
     ...partial,
   });
   const elements: TestElement[] = [
-    el({ id: 'bg', type: 'rectangle', width: 720, height: 400 }),
+    el({ id: 'bg', type: 'rectangle', width: 720, height: 400, customData: { antvRole: 'background', antvChart: chart } }),
   ];
   for (let i = 0; i < count; i += 1) {
     elements.push(
@@ -335,6 +335,70 @@ describe('PATCH-287: AntvChartValuesControl', () => {
     expect(apply.style.opacity).toBe('0.6');
     expect(apply.style.cursor).toBe('default');
     await act(async () => { release?.({ ok: true }); });
+  });
+
+  it('PATCH-289: checkbox initial state comes from data.transparentBackground', () => {
+    elements = elements.map((element) => ({
+      ...element,
+      customData: {
+        ...element.customData,
+        antvChart: { ...(element.customData.antvChart as Record<string, unknown>), transparentBackground: true },
+      },
+    }));
+    selectChart();
+    const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
+    click(c.querySelector('[data-antv-chart-edit]')!);
+    const box = c.querySelector('[data-antv-chart-transparent]') as HTMLInputElement;
+    expect(box).not.toBeNull();
+    expect(box.checked).toBe(true);
+  });
+
+  it('PATCH-289: checkbox initial state falls back to the canvas when data has no flag', () => {
+    elements = elements.map((element) =>
+      element.id === 'bg' ? { ...element, backgroundColor: 'transparent' } : element,
+    );
+    selectChart();
+    const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
+    click(c.querySelector('[data-antv-chart-edit]')!);
+    expect((c.querySelector('[data-antv-chart-transparent]') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('PATCH-289: toggling the checkbox passes the flag to the redraw', async () => {
+    selectChart();
+    const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
+    click(c.querySelector('[data-antv-chart-edit]')!);
+    const box = c.querySelector('[data-antv-chart-transparent]') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    act(() => {
+      box.click();
+    });
+    await act(async () => {
+      c.querySelector('[data-antv-chart-apply]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(redraw.fn).toHaveBeenCalledTimes(1);
+    expect(redraw.fn.mock.calls[0][3]).toEqual({ transparentBackground: true });
+  });
+
+  it('PATCH-289: unticking a transparent chart passes false to the redraw', async () => {
+    elements = elements.map((element) => ({
+      ...element,
+      customData: {
+        ...element.customData,
+        antvChart: { ...(element.customData.antvChart as Record<string, unknown>), transparentBackground: true },
+      },
+    }));
+    selectChart();
+    const c = mount(<AntvChartValuesControl getApi={api} apiVersion={0} />);
+    click(c.querySelector('[data-antv-chart-edit]')!);
+    const box = c.querySelector('[data-antv-chart-transparent]') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    act(() => {
+      box.click();
+    });
+    await act(async () => {
+      c.querySelector('[data-antv-chart-apply]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(redraw.fn.mock.calls[0][3]).toEqual({ transparentBackground: false });
   });
 
   it('says "Select the chart again" instead of redrawing when it is no longer that chart (Addendum 1 item 3)', async () => {
