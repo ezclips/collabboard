@@ -429,14 +429,20 @@ scripts set. No board data had changed.
 **Wrong path(s):** clearing the size lock from a NEW debugging connection (`Emulation.clearDeviceMetricsOverride`, then a
 0x0 override) had no effect. A size lock belongs to the connection that set it, so only that connection, or ending it,
 removes it.
-**Root cause:** fourteen scratchpad scripts from 2026-09-18..20 had no `process.exit`. They were still connected to the
-browser on port 9333 two weeks later and attached to every tab, including the owner's. The scripts set a page size on
-the tabs they drove, and an open connection keeps such a setting alive. Nothing checked, after a run, that the
-owner's tabs were back to normal or that the script had actually ended.
-**Fix:** the owner stopped the fourteen processes with a script, because the safety check blocks the CTO from
-killing processes. Every tab measured full width again and no connection remained on port 9333. The
+**Root cause (corrected the same day):** the first diagnosis blamed fourteen stale scratchpad scripts (no
+`process.exit`, still attached since 2026-09-18..20). The owner stopped them and the tab measured full width — but
+an hour later the same tab was 1460x850 again with NO connection open. An experiment on a blank tab of the CTO's own
+settled it: a size lock set with `Emulation.setDeviceMetricsOverride` outlives the connection that set it, survives
+a plain reload, and `clearDeviceMetricsOverride` from another connection does nothing. The live scripts set
+1460x850 on the tabs they drove; a tab that kept that lock reached the owner. The stale scripts were real litter but
+not the cause, and the brief "fixed" reading was never explained — a measurement that agrees with the hypothesis is
+not proof of it.
+**Fix:** the owner stopped the stale processes. The lock itself is removed by a new connection sending
+`setDeviceMetricsOverride` then `clearDeviceMetricsOverride`, followed by a reload (verified twice on a blank tab;
+the reload alone does not do it). Live scripts no longer set a page size at all. The
 rules for live checks in the owner's browser are now in TESTING.md §4.
-**Reusable rule:** a live check in a browser someone else is using is finished only when its connection is gone.
+**Reusable rule:** in a browser someone else uses, never change state that outlives your connection (page size,
+emulation) — test it on a throwaway tab first if unsure. A live check is finished only when its connection is gone.
 End every script with `process.exit(0)` in `finally`. Set nothing on a tab you did not open. After each run, verify
 the owner's tabs (`innerWidth == outerWidth`) and that no connection of yours is still open on the debug port.
 

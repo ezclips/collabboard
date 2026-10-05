@@ -63,8 +63,13 @@ misbehaves there damages their session, not a sandbox.
   attached).
 - **Only touch your own tab.** Open it with `newPage()`, close it in `finally`. Never set a size, zoom, emulation,
   route or script on a tab you did not open.
-- **Prefer no page-size override.** If a check needs a fixed size, set it on your own tab only and reset it before
-  closing.
+- **Never set a page size.** No `page.setViewportSize`, no `Emulation.setDeviceMetricsOverride`, on any tab. A size
+  lock set over CDP OUTLIVES the connection that set it, survives a reload, and cannot be removed by
+  `clearDeviceMetricsOverride` from another connection (CTO experiment, 2026-10-05). If a tab you open is later
+  used by the owner, the lock goes with it. The window size is fine for every live check.
+- **To unlock a stuck tab** (`innerWidth` ≠ `outerWidth`): from a new connection send `setDeviceMetricsOverride`
+  (any size) then `clearDeviceMetricsOverride`, then reload the tab. Reloading the owner's tab is the owner's call
+  (it can hold unsaved work) — ask them to press F5.
 - **After every live run, check the owner's tabs:** each page tab's `innerWidth` must equal its window width
   (`outerWidth`), and no node process of ours may still hold a 9333 connection (`netstat -ano | grep :9333`).
   A stale one is reported to the owner. Stopping it needs the owner's OK.
