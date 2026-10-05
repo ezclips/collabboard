@@ -446,10 +446,10 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
-- **2026-10-05** — **Owner's board tab stuck at 1460x850 (white band right and bottom).** Caused by fifteen CTO test
+- **2026-10-05** — **Owner's board tab stuck at 1460x850 (white band right and bottom).** Caused by fourteen CTO test
   scripts from 18 to 20 September that never exited and stayed attached to the owner's browser on port 9333. Board data
-  was unaffected. New rules for live checks in TESTING.md §4, lesson in LESSONS_LEARNED.md. Stopping the stale
-  processes waits for the owner's OK.
+  was unaffected. New rules for live checks in TESTING.md §4, lesson in LESSONS_LEARNED.md. Owner stopped the stale
+  processes; every tab is full size again.
 
 - **2026-09-21** — **PATCH-153 DONE (`f577c32a`), CTO re-verified.** First
   unit through the Fable 5 patch workflow on this stream: drafted, reviewed

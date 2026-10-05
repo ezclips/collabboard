@@ -59,7 +59,7 @@ misbehaves there damages their session, not a sandbox.
 
 - **Every script exits.** End with `process.exit(0)` inside `finally`, so a failure exits too. Never `browser.close()`.
   A script that never exits keeps its debugging connection, and with it everything that connection set, attached to
-  every tab of the browser for as long as it runs (2026-10-05: fifteen scripts from 18 to 20 September were still
+  every tab of the browser for as long as it runs (2026-10-05: fourteen scripts from 18 to 20 September were still
   attached).
 - **Only touch your own tab.** Open it with `newPage()`, close it in `finally`. Never set a size, zoom, emulation,
   route or script on a tab you did not open.
