@@ -76,6 +76,29 @@ describe('PATCH-283 sceneToSvg', () => {
     expect(svg).toContain('&quot;');
   });
 
+  it('stamps every element with its escaped data-drawn-id', () => {
+    const svg = sceneToSvg(
+      scene({
+        elements: [
+          {
+            id: 'e3"/><script>alert(1)</script>',
+            kind: 'rect',
+            box: { x: 0, y: 0, width: 10, height: 10 },
+            radius: 0,
+            pill: false,
+            paint: { fill: '#ffffff', stroke: '#000000', strokeWidth: 1, strokeStyle: 'solid', opacity: 100, blended: false },
+            clipIgnored: false,
+            groupIds: ['picture'],
+            source: { tag: 'rect' },
+          },
+        ],
+      }),
+    );
+    expect(svg).toMatch(/data-drawn-id="[A-Za-z0-9_.:-]+"/);
+    expect(svg).not.toContain('<script>');
+    expect(svg).not.toContain('><script');
+  });
+
   it('declares the SVG namespace and no external href', () => {
     const svg = sceneToSvg(
       scene({

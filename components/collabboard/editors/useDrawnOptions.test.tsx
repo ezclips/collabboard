@@ -158,6 +158,42 @@ describe('PATCH-284 useDrawnOptions', () => {
     expect(new Set(seeds).size).toBe(6);
   });
 
+  it('PATCH-285 keeps an edit per option key and exposes the original for reset', async () => {
+    const fetchMock = vi.fn(async () => okResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    mount(<Harness />);
+
+    act(() => { latest!.draw(outline, 'pie'); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.resolve(); });
+
+    const key = latest!.options[0].key;
+    const original = latest!.basePicture(key)!;
+    const edited = { ...original, background: '#123456' };
+    act(() => { latest!.commitEdit(key, edited); });
+
+    const shown = latest!.options.find((option) => option.key === key)!.envelopeData as { picture: { background: string } };
+    expect(shown.picture.background).toBe('#123456');
+    expect(latest!.basePicture(key)!.background).toBe('#ffffff');
+  });
+
+  it('PATCH-285 drops an edit of an option a Shuffle replaces', async () => {
+    const fetchMock = vi.fn(async () => okResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    mount(<Harness />);
+
+    act(() => { latest!.draw(outline, 'pie'); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.resolve(); });
+    const key = latest!.options[0].key;
+    act(() => { latest!.commitEdit(key, { ...latest!.basePicture(key)!, background: '#123456' }); });
+
+    act(() => { latest!.shuffle(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.resolve(); });
+
+    // Fresh seeds: every old key is gone, so the edit went with it.
+    expect(latest!.options.every((option) => option.key !== key)).toBe(true);
+    expect(latest!.basePicture(key)).toBeNull();
+  });
+
   it('aborts in-flight requests on unmount', async () => {
     const signals: Array<AbortSignal | undefined> = [];
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {

@@ -24,29 +24,42 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
+/**
+ * PATCH-285. Only id characters that survive an HTML attribute are emitted, so
+ * a hostile stored id can never smuggle markup into the injected SVG. Normal
+ * parser ids (`e3`, `item-2`) pass through unchanged.
+ */
+function safeId(id: string): string {
+  return id.replace(/[^A-Za-z0-9_.:-]/g, '_');
+}
+
 function paintAttrs(element: { paint: ScenePaint }): string {
   const dash = element.paint.strokeStyle !== 'solid' ? ` stroke-dasharray="${element.paint.strokeStyle === 'dotted' ? '2 3' : '6 4'}"` : '';
   return `fill="${element.paint.fill}" stroke="${element.paint.stroke}" stroke-width="${fmt(element.paint.strokeWidth)}"${dash}`;
 }
 
 function renderElement(element: SceneElement): string {
+  // PATCH-285. The element's own id travels into the DOM so a click can name the
+  // object it hit. The id is escaped like any other attribute: a hostile stored
+  // id must stay inert.
+  const drawnId = ` data-drawn-id="${escapeXml(safeId(element.id))}"`;
   if (element.kind === 'rect') {
     const radius = element.radius > 0 ? ` rx="${fmt(Math.min(element.radius, Math.min(element.box.width, element.box.height) / 2))}"` : '';
-    return `<rect x="${fmt(element.box.x)}" y="${fmt(element.box.y)}" width="${fmt(element.box.width)}" height="${fmt(element.box.height)}"${radius} ${paintAttrs(element)} />`;
+    return `<rect${drawnId} x="${fmt(element.box.x)}" y="${fmt(element.box.y)}" width="${fmt(element.box.width)}" height="${fmt(element.box.height)}"${radius} ${paintAttrs(element)} />`;
   }
   if (element.kind === 'ellipse') {
     const rx = element.box.width / 2;
     const ry = element.box.height / 2;
-    return `<ellipse cx="${fmt(element.box.x + rx)}" cy="${fmt(element.box.y + ry)}" rx="${fmt(rx)}" ry="${fmt(ry)}" ${paintAttrs(element)} />`;
+    return `<ellipse${drawnId} cx="${fmt(element.box.x + rx)}" cy="${fmt(element.box.y + ry)}" rx="${fmt(rx)}" ry="${fmt(ry)}" ${paintAttrs(element)} />`;
   }
   if (element.kind === 'polyline') {
     const tag = element.closed && element.filled ? 'polygon' : 'polyline';
     const points = element.points.map(([x, y]) => `${fmt(x)},${fmt(y)}`).join(' ');
-    return `<${tag} points="${points}" ${paintAttrs(element)} />`;
+    return `<${tag}${drawnId} points="${points}" ${paintAttrs(element)} />`;
   }
   if (element.kind === 'image') {
     if (!element.dataURL.startsWith('data:image/svg+xml')) return '';
-    return `<image x="${fmt(element.box.x)}" y="${fmt(element.box.y)}" width="${fmt(element.box.width)}" height="${fmt(element.box.height)}" href="${element.dataURL}" />`;
+    return `<image${drawnId} x="${fmt(element.box.x)}" y="${fmt(element.box.y)}" width="${fmt(element.box.width)}" height="${fmt(element.box.height)}" href="${element.dataURL}" />`;
   }
   const lines = wrapText(element.text, element.fontSize, element.box.width, false);
   const anchor = element.align === 'center' ? 'middle' : element.align === 'right' ? 'end' : 'start';
@@ -59,7 +72,7 @@ function renderElement(element: SceneElement): string {
   const tspans = lines
     .map((line, index) => `<tspan x="${fmt(x)}" dy="${index === 0 ? 0 : fmt(lineHeight(element.fontSize))}">${escapeXml(line)}</tspan>`)
     .join('');
-  return `<text x="${fmt(x)}" y="${fmt(element.box.y + element.fontSize)}" font-family="${FONT_FAMILY}" font-size="${fmt(element.fontSize)}" fill="${element.color}" text-anchor="${anchor}">${tspans}</text>`;
+  return `<text${drawnId} x="${fmt(x)}" y="${fmt(element.box.y + element.fontSize)}" font-family="${FONT_FAMILY}" font-size="${fmt(element.fontSize)}" fill="${element.color}" text-anchor="${anchor}">${tspans}</text>`;
 }
 
 /** Renders a PictureScene to a pure SVG string. */

@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { DrawnKind } from '@/lib/ai/drawn/prompt';
+import type { DrawnPicture } from '@/lib/ai/drawn/format';
 import type { DesignSuggestion } from '@/lib/ai/infographic/suggest';
 import type { VisualOutline } from '@/lib/ai/outline';
 
@@ -29,10 +30,20 @@ export interface UseDrawnOptionsResult {
   error: string | null;
   draw: (outline: VisualOutline, kind: DrawnKind) => void;
   shuffle: () => void;
+  /** PATCH-285. Replaces one option's picture with an edit (kept per option key). */
+  commitEdit: (key: string, picture: DrawnPicture) => void;
+  /** PATCH-285. The picture as the AI drew it, for Reset; null when unknown. */
+  basePicture: (key: string) => DrawnPicture | null;
+}
+
+function editedOption(option: DesignSuggestion, edit: DrawnPicture | undefined): DesignSuggestion {
+  if (!edit) return option;
+  return { ...option, envelopeData: { ...option.envelopeData, picture: edit } as DesignSuggestion['envelopeData'] };
 }
 
 export function useDrawnOptions({ boardId }: { boardId?: string } = {}): UseDrawnOptionsResult {
-  const [options, setOptions] = useState<DesignSuggestion[]>([]);
+  const [originals, setOriginals] = useState<DesignSuggestion[]>([]);
+  const [edits, setEdits] = useState<Record<string, DrawnPicture>>({});
   const [status, setStatus] = useState<DrawnOptionsStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +63,8 @@ export function useDrawnOptions({ boardId }: { boardId?: string } = {}): UseDraw
       const seeds = seedsForBase(pickBaseSeed(Math.random, usedSeedsRef.current));
       seeds.forEach((seed) => usedSeedsRef.current.add(seed));
 
-      setOptions([]);
+      setOriginals([]);
+      setEdits({});
       setError(null);
       setStatus('drawing');
 
@@ -66,7 +78,14 @@ export function useDrawnOptions({ boardId }: { boardId?: string } = {}): UseDraw
         const good = results
           .filter((entry): entry is DesignSuggestion => entry !== null)
           .sort((a, b) => a.fit - b.fit);
-        setOptions(good);
+        setOriginals(good);
+        // PATCH-285. Shuffle/redraw replaces the options; an edit of an option
+        // that is gone is dropped, an edit of a key that survives is kept.
+        setEdits((previous) => {
+          const kept: Record<string, DrawnPicture> = {};
+          for (const option of good) if (previous[option.key]) kept[option.key] = previous[option.key];
+          return kept;
+        });
         if (arrived + failures === DRAWN_BATCH) {
           if (arrived === 0) {
             setStatus('error');
@@ -139,7 +158,25 @@ export function useDrawnOptions({ boardId }: { boardId?: string } = {}): UseDraw
     if (lastRef.current) run(lastRef.current.outline, lastRef.current.kind);
   }, [run]);
 
+  const commitEdit = useCallback((key: string, picture: DrawnPicture) => {
+    setEdits((previous) => ({ ...previous, [key]: picture }));
+  }, []);
+
+  const basePicture = useCallback(
+    (key: string): DrawnPicture | null => {
+      const option = originals.find((candidate) => candidate.key === key);
+      const data = option?.envelopeData as { picture?: DrawnPicture } | undefined;
+      return data?.picture ?? null;
+    },
+    [originals],
+  );
+
+  const options = useMemo(
+    () => originals.map((option) => editedOption(option, edits[option.key])),
+    [originals, edits],
+  );
+
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  return { options, status, error, draw, shuffle };
+  return { options, status, error, draw, shuffle, commitEdit, basePicture };
 }

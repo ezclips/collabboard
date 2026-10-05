@@ -20,6 +20,8 @@ import type {
   PhotoCardTextStyle,
 } from '@/lib/ai/contracts';
 import { kindForOutline, type DrawnKind } from '@/lib/ai/drawn/prompt';
+import type { DrawnPicture } from '@/lib/ai/drawn/format';
+import { DrawnEditContext } from '@/components/ai/renderers/DrawnElementPanel';
 import {
   MODE_REGISTRY,
   getDiagramSubtypeConfig,
@@ -39,7 +41,7 @@ import { themeById, type VisualThemeId } from '@/lib/ai/visualThemes';
 import type { VisualStyle } from '@/lib/ai/visualStyle';
 import OutlineTextEditor from './OutlineTextEditor';
 import OutlineSuggestionsPanel from './OutlineSuggestionsPanel';
-import { drawnKindForSubtype, drawnSceneFromData } from './drawnOptionHelpers';
+import { drawnKindForSubtype, drawnOptionKey, drawnSceneFromData } from './drawnOptionHelpers';
 import { useDrawnOptions } from './useDrawnOptions';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import {
@@ -440,6 +442,9 @@ export default function AIComponentEditor({
   const lastOutlineRequestBodyRef = useRef<OutlineRequestBody | undefined>(undefined);
   const drawn = useDrawnOptions({ boardId });
   const [drawnActive, setDrawnActive] = useState(false);
+  // PATCH-285. Which type button's kind is showing, so the button reads selected
+  // (not "Show options") while its drawn pictures are on screen.
+  const [activeDrawnKind, setActiveDrawnKind] = useState<DrawnKind | null>(null);
   const drawnKindRef = useRef<DrawnKind | null>(null);
   const pendingEstimateRef = useRef(false);
 
@@ -462,6 +467,7 @@ export default function AIComponentEditor({
     setShowOptions(false);
     setOutlineOptions([]);
     setDrawnActive(false); drawnKindRef.current = null; pendingEstimateRef.current = false;
+    setActiveDrawnKind(null);
     setActiveVisualHint(undefined);
     setActiveFamily(null);
     setActiveFamilyLabel(null);
@@ -719,6 +725,19 @@ export default function AIComponentEditor({
     (needsExampleEnvelopes && derivedOutline ? derivedOutline : activeOutline)?.title ||
     undefined;
 
+  // PATCH-285. The bridge to the drawn preview, which is rendered deep inside
+  // the options panel: it edits by option key and resets to the stored picture.
+  const drawnEdit = useMemo(
+    () => ({
+      enabled: drawnActive,
+      scopeToSelectedLayer: true,
+      baseFor: (data: DrawnDiagramData) => drawn.basePicture(drawnOptionKey(data.kind, data.seed)),
+      onChange: (data: DrawnDiagramData, next: DrawnPicture) =>
+        drawn.commitEdit(drawnOptionKey(data.kind, data.seed), next),
+    }),
+    [drawnActive, drawn.basePicture, drawn.commitEdit],
+  );
+
   const normalizedContent = normalizeAIContent(content);
   const photoCardData: PhotoCardData | null =
     normalizedContent.kind === 'structured' && normalizedContent.data.type === 'photo'
@@ -818,6 +837,7 @@ export default function AIComponentEditor({
     setActiveFamilyLabel(null);
     setActiveFamilyDescription(null);
     setChartMakeSubtype(null);
+    setActiveDrawnKind(null);
 
     if (nextUiMode === 'auto') {
       // Don't change mode/subtype yet -- resolved at generate time
@@ -846,6 +866,7 @@ export default function AIComponentEditor({
     setActiveFamilyDescription(null);
     setChartMakeSubtype(null);
     setShowOptions(true);
+    setActiveDrawnKind(null);
     if (drawnActive && activeOutline) drawFromOutline(activeOutline, kindForOutline(activeOutline));
     else { drawnKindRef.current = null; if (outlineOptions.length === 0) setSelectedOptionKey(null); }
     setError(null);
@@ -861,8 +882,9 @@ export default function AIComponentEditor({
     setShowOptions(true);
     setSelectedOptionKey(null);
     const kind = drawnKindForSubtype(subtypeId);
-    if (!kind) { const family = familyForSubtype(subtypeId); if (family) setActiveFamily(family); return; }
+    if (!kind) { setActiveDrawnKind(null); const family = familyForSubtype(subtypeId); if (family) setActiveFamily(family); return; }
     setActiveFamily(null);
+    setActiveDrawnKind(kind);
     if (activeOutline) drawFromOutline(activeOutline, kind);
     else {
       drawnKindRef.current = kind;
@@ -1451,11 +1473,11 @@ export default function AIComponentEditor({
                                 key="options"
                                 type="button"
                                 data-ai-subtype-chip="options"
-                                aria-pressed={showOptions && !activeFamily}
+                                aria-pressed={showOptions && !activeFamily && (!drawnActive || activeDrawnKind === null)}
                                 onClick={showAllDesigns}
                                 disabled={isLoading}
                                 className={`rounded-xl border px-3 py-3 text-left transition-all ${
-                                  showOptions && !activeFamily
+                                  showOptions && !activeFamily && (!drawnActive || activeDrawnKind === null)
                                     ? 'border-purple-500 bg-purple-50 shadow-sm'
                                     : 'border-gray-200 bg-white hover:border-gray-300'
                                 }`}
@@ -1478,7 +1500,9 @@ export default function AIComponentEditor({
                                   ? (subtypeId === 'pie_chart' || subtypeId === 'bar_chart'
                                     ? subtypeId === chartMakeSubtype
                                     : familyForSubtype(subtypeId) === activeFamily)
-                                  : (!showOptions && activeSubtype === subtypeId);
+                                  : drawnActive
+                                    ? drawnKindForSubtype(subtypeId) === activeDrawnKind
+                                    : (!showOptions && activeSubtype === subtypeId);
 
                                 return (
                                   <button
@@ -1684,6 +1708,7 @@ export default function AIComponentEditor({
               {/* PATCH-236: the Suggestions panel -- one large preview of the
                   selected design, then "Suggested" and per-category headings. */}
               {suggestionsMounted && (
+                <DrawnEditContext.Provider value={drawnEdit}>
                 <DiagramKickerEditContext.Provider value={diagramKicker.contextValue}>
                 <OutlineSuggestionsPanel
                   options={displayOptions}
@@ -1714,6 +1739,7 @@ export default function AIComponentEditor({
                   onSidePanelChange={setSidePanelOpen}
                 />
                 </DiagramKickerEditContext.Provider>
+                </DrawnEditContext.Provider>
               )}
 
               {!showOptions && !!content && (

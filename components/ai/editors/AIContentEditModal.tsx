@@ -38,6 +38,7 @@ import {
 import { safeValidateAIContentWithSubtypeCheck } from '@/lib/ai/validators';
 import { renderDiagramCode } from '@/lib/ai/diagram-engine';
 import { sceneFromStored } from '@/lib/ai/drawn/stored';
+import type { DrawnPicture } from '@/lib/ai/drawn/format';
 import { suggestDesigns } from '@/lib/ai/infographic/suggest';
 import type { MindmapTree } from '@/lib/ai/mindmapLayout';
 import { parseMindmapCode } from '@/lib/ai/mermaidMindmapParse';
@@ -48,6 +49,7 @@ import { remapOverridesForItems } from '@/lib/ai/antv/remapOverrides';
 import { VISUAL_THEMES, type VisualThemeId } from '@/lib/ai/visualThemes';
 import OutlineTextEditor from '@/components/collabboard/editors/OutlineTextEditor';
 import { PictureSidePanelContext } from '@/components/ai/renderers/PictureSidePanel';
+import { DrawnEditContext } from '@/components/ai/renderers/DrawnElementPanel';
 import EditAsDrawingButton from '@/components/ai/renderers/EditAsDrawingButton';
 import type { DrawingPostData } from '@/lib/ai/antv/toExcalidraw/drawingPost';
 import FlowStepsEditor from './FlowStepsEditor';
@@ -797,6 +799,21 @@ export default function AIContentEditModal({
   const isInfographic = draftData.type === 'diagram' && draftData.subtype === 'infographic';
   // PATCH-284. A drawn post opens picture-first and can convert losslessly.
   const isDrawn = draftData.type === 'diagram' && draftData.subtype === 'drawn';
+  // PATCH-285. The Edit window shows one drawn picture, so it edits directly;
+  // Reset restores the picture as it was when the window opened.
+  const drawnBasePicture =
+    parsedEnvelope.data.type === 'diagram' && parsedEnvelope.data.subtype === 'drawn'
+      ? parsedEnvelope.data.picture
+      : null;
+  const drawnEditContextValue = {
+    enabled: isDrawn,
+    scopeToSelectedLayer: false,
+    baseFor: () => drawnBasePicture,
+    onChange: (_data: DrawnDiagramData, next: DrawnPicture) =>
+      setDraftData((prev) =>
+        prev.type === 'diagram' && prev.subtype === 'drawn' ? { ...prev, picture: next } : prev,
+      ),
+  };
   const pictureFirst = isInfographic || isDrawn;
   const subtypeLabel = getSubtypeForData(draftData);
   const modeLabel = parsedEnvelope.mode.replace('_', ' ');
@@ -1105,6 +1122,7 @@ export default function AIContentEditModal({
           <PictureSidePanelContext.Provider
             value={{ host: sidePanelHost, elementPanelOpen, setElementPanelOpen }}
           >
+          <DrawnEditContext.Provider value={drawnEditContextValue}>
           {pictureFirst && !listView ? (
             /* PATCH-241/284: picture-first -- the picture fills the window and is
                edited directly; the form is behind "List view". */
@@ -1158,6 +1176,7 @@ export default function AIContentEditModal({
               className="relative w-[320px] shrink-0 border-l border-gray-200 bg-white"
             />
           )}
+          </DrawnEditContext.Provider>
           </PictureSidePanelContext.Provider>
         </div>
 
