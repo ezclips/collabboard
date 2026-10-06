@@ -191,7 +191,7 @@ const EMPTY_CANVAS_POINTS = [[420, 320], [640, 420], [840, 320], [520, 520], [32
 /** Navigates to a board and waits for it to hydrate. */
 export async function openBoard(ctx, boardId) {
   const { page } = ctx;
-  await page.goto(`${ORIGIN}/dashboard/canvas/${boardId}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${ORIGIN}/dashboard/canvas/${boardId}`, { waitUntil: 'domcontentloaded', timeout: 240000 });
   await page.waitForSelector('[data-board-wiki-open="true"]', { timeout: 200000, state: 'attached' });
   await page.locator('[data-padlet-id]').first().waitFor({ state: 'attached', timeout: 120000 });
 }
@@ -219,10 +219,17 @@ export async function openNewDraw(ctx) {
   await page.locator('.excalidraw').first().waitFor({ state: 'visible', timeout: 60000 });
 }
 
+/** Our own library button when present, else Excalidraw's stock trigger. */
+async function resolveLibraryTrigger(page) {
+  const own = page.locator('[data-drawing-library-button]').first();
+  if (await own.isVisible().catch(() => false)) return own;
+  return page.locator('.excalidraw .sidebar-trigger').first();
+}
+
 /** Opens the Excalidraw library sidebar and waits for a unit. */
 export async function openLibrary(ctx) {
   const { page } = ctx;
-  const trigger = page.locator('.excalidraw .sidebar-trigger').first();
+  const trigger = await resolveLibraryTrigger(page);
   await trigger.waitFor({ state: 'visible', timeout: 30000 });
   if (!(await page.locator('.library-unit').first().isVisible().catch(() => false))) {
     await trigger.click();
@@ -235,7 +242,7 @@ export async function closeLibrary(ctx) {
   const { page } = ctx;
   const unit = page.locator('.library-unit').first();
   if (await unit.isVisible().catch(() => false)) {
-    const trigger = page.locator('.excalidraw .sidebar-trigger').first();
+    const trigger = await resolveLibraryTrigger(page);
     if (await trigger.isVisible().catch(() => false)) await trigger.click();
   }
   await unit.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});

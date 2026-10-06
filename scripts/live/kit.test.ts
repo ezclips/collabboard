@@ -7,6 +7,8 @@ import {
   isExtensionNoise,
   isReadMethod,
   lockedTabs,
+  openBoard,
+  openLibrary,
   openNewDraw,
   padletIdFromBody,
 } from './kit.mjs';
@@ -131,6 +133,60 @@ describe('closeLibrary', () => {
   });
 });
 
+describe('library trigger preference', () => {
+  function fakePage(behaviors: Record<string, { visible?: boolean }>) {
+    const clicks: string[] = [];
+    const page = {
+      locator(selector: string) {
+        const behavior = behaviors[selector] ?? {};
+        const locator: {
+          first: () => unknown;
+          isVisible: () => Promise<boolean>;
+          click: () => Promise<void>;
+          waitFor: () => Promise<void>;
+        } = {
+          first: () => locator,
+          isVisible: async () => behavior.visible ?? false,
+          click: async () => { clicks.push(selector); },
+          waitFor: async () => {},
+        };
+        return locator;
+      },
+    };
+    return { page, clicks };
+  }
+
+  it('openLibrary prefers our own toolbar button when it is present', async () => {
+    const { page, clicks } = fakePage({
+      '[data-drawing-library-button]': { visible: true },
+      '.library-unit': { visible: false },
+      '.excalidraw .sidebar-trigger': { visible: true },
+    });
+    await openLibrary({ page });
+    expect(clicks).toEqual(['[data-drawing-library-button]']);
+  });
+
+  it('openLibrary falls back to the stock sidebar trigger', async () => {
+    const { page, clicks } = fakePage({
+      '[data-drawing-library-button]': { visible: false },
+      '.library-unit': { visible: false },
+      '.excalidraw .sidebar-trigger': { visible: true },
+    });
+    await openLibrary({ page });
+    expect(clicks).toEqual(['.excalidraw .sidebar-trigger']);
+  });
+
+  it('closeLibrary prefers our own toolbar button when it is present', async () => {
+    const { page, clicks } = fakePage({
+      '.library-unit': { visible: true },
+      '[data-drawing-library-button]': { visible: true },
+      '.excalidraw .sidebar-trigger': { visible: true },
+    });
+    await closeLibrary({ page });
+    expect(clicks).toEqual(['[data-drawing-library-button]']);
+  });
+});
+
 describe('openNewDraw', () => {
   it('accepts the item by exact text and gives each point 800 ms', async () => {
     const waits: number[] = [];
@@ -153,6 +209,21 @@ describe('openNewDraw', () => {
     expect(waits[0]).toBe(800);
     expect(mouseClicks).toHaveLength(1);
     expect(menuClicks).toEqual(['new-draw']);
+  });
+});
+
+describe('openBoard', () => {
+  it('gives the goto a long first-load timeout, not Playwright\'s 30 s default', async () => {
+    const gotos: Array<{ url: string; options: unknown }> = [];
+    const page = {
+      goto: async (url: string, options: unknown) => { gotos.push({ url, options }); },
+      waitForSelector: async () => {},
+      locator: () => ({ first() { return this; }, waitFor: async () => {} }),
+    };
+    await openBoard({ page }, 'board-123');
+    expect(gotos).toHaveLength(1);
+    expect(gotos[0].url).toContain('/dashboard/canvas/board-123');
+    expect(gotos[0].options).toEqual({ waitUntil: 'domcontentloaded', timeout: 240000 });
   });
 });
 

@@ -752,7 +752,7 @@ export default function DrawingEditor({
                                 onChange={handleChange}
                                 readOnly={readOnly}
                                 onShowHelp={() => setShowHelp(true)}
-                                useCollabBoardContextMenu
+                                useCollabBoardContextMenu libraryButton="toolbar"
                                 excalidrawAPI={handleExcalidrawApi}
                             />
                         </div>

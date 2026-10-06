@@ -4400,7 +4400,7 @@ export default function DrawingLayout({
       <div className="bg-white rounded-lg shadow-lg border border-gray-200 flex items-center p-1 gap-1 pointer-events-auto">
         <button
           onClick={() => setActiveTool(activeTool === 'comment' ? 'select' : 'comment')}
-          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'comment' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'comment' ? 'bg-[#dbeafe] text-[#1d4ed8]' : 'hover:bg-[#f1f0ff] text-[#374151]'
             }`}
           title="Add Comment"
         >
@@ -4411,7 +4411,7 @@ export default function DrawingLayout({
 
         <button
           onClick={() => setActiveTool(activeTool === 'library' ? 'select' : 'library')}
-          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'library' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'library' ? 'bg-[#dbeafe] text-[#1d4ed8]' : 'hover:bg-[#f1f0ff] text-[#374151]'
             }`}
           title="Open Library"
         >
@@ -4420,7 +4420,7 @@ export default function DrawingLayout({
 
         <button
           onClick={() => setActiveTool(activeTool === 'present' ? 'select' : 'present')}
-          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'present' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'present' ? 'bg-[#dbeafe] text-[#1d4ed8]' : 'hover:bg-[#f1f0ff] text-[#374151]'
             }`}
           title="Present Frames"
         >
@@ -4431,7 +4431,7 @@ export default function DrawingLayout({
 
         <button
           onClick={() => setMermaidModalOpen(true)}
-          className="p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium hover:bg-gray-100 text-gray-700"
+          className="p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium hover:bg-[#f1f0ff] text-[#374151]"
           title="Insert Mermaid Diagram"
         >
           <Workflow size={18} />

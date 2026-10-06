@@ -11,6 +11,7 @@ import {
 import ExcalidrawCollabBoardContextMenu from '@/components/collabboard/menus/ExcalidrawCollabBoardContextMenu';
 import AntvChartValuesControl from '@/components/collabboard/editors/AntvChartValuesControl';
 import LibraryHoverPreview from '@/components/collabboard/editors/LibraryHoverPreview';
+import LibraryToolbarButton from '@/components/collabboard/editors/LibraryToolbarButton';
 
 import type { ExcalidrawContextMenuRendererProps } from "@excalidraw/excalidraw/types";
 
@@ -55,6 +56,8 @@ interface ExcalidrawWrapperProps {
      * presentation switch: Excalidraw still owns every menu action.
      */
     useCollabBoardContextMenu?: boolean;
+    /** PATCH-291: 'toolbar' puts OUR library button beside the stock toolbar. */
+    libraryButton?: 'toolbar' | 'default';
 }
 
 export default function ExcalidrawWrapper({
@@ -71,6 +74,7 @@ export default function ExcalidrawWrapper({
     onImportScene,
     canImportScene,
     useCollabBoardContextMenu = false,
+    libraryButton = 'default',
 }: ExcalidrawWrapperProps) {
     // API kept in a ref to avoid triggering renders when Excalidraw fires the callback
     const apiRef = React.useRef<any>(null);
@@ -283,7 +287,14 @@ export default function ExcalidrawWrapper({
     const { Excalidraw, MainMenu, WelcomeScreen } = excalidrawLib;
 
     return (
-        <div ref={rootRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div ref={rootRef} data-library-button={libraryButton} style={{ position: 'relative', width: '100%', height: '100%' }}>
+            {/* PATCH-291: scoped to the wrapper root -- the dead Browse-libraries
+                link is hidden everywhere; Excalidraw's own trigger only where
+                our toolbar button replaces it. */}
+            <style>{`
+                [data-library-button] .library-menu-browse-button { display: none; }
+                ${libraryButton === 'toolbar' ? '[data-library-button="toolbar"] .default-sidebar-trigger { display: none; }' : ''}
+            `}</style>
             <input
                 ref={importInputRef}
                 type="file"
@@ -313,6 +324,14 @@ export default function ExcalidrawWrapper({
             </Excalidraw>
             {!readOnly ? (
                 <AntvChartValuesControl getApi={getApi} apiVersion={apiVersion} />
+            ) : null}
+            {!readOnly && libraryButton === 'toolbar' ? (
+                <LibraryToolbarButton
+                    getApi={getApi}
+                    rootRef={rootRef}
+                    apiVersion={apiVersion}
+                    readOnly={readOnly}
+                />
             ) : null}
             <LibraryHoverPreview rootRef={rootRef} />
         </div>
