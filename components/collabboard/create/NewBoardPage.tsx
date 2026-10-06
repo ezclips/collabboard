@@ -129,25 +129,26 @@ export default function NewBoardPage() {
   const formatName = formatById(format)?.name;
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      <div
-        data-new-board-bar
-        className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"
-      >
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+    <div className="min-h-screen bg-slate-50 px-4 py-4 font-sans text-slate-900">
+      <div className="mx-auto w-full max-w-[1320px] overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-sm">
+        <div
+          data-new-board-bar
+          className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"
         >
-          <ArrowLeft className="h-[18px] w-[18px]" />
-          Dashboard
-        </Link>
-        <h1 className="border-l border-slate-200 pl-3 text-[15px] font-semibold text-slate-900">
-          New board
-        </h1>
-      </div>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          >
+            <ArrowLeft className="h-[18px] w-[18px]" />
+            Dashboard
+          </Link>
+          <h1 className="border-l border-slate-200 pl-3 text-[15px] font-semibold text-slate-900">
+            New board
+          </h1>
+        </div>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_352px] max-[980px]:grid-cols-1">
-        <main className="flex min-w-0 flex-col gap-7 px-7 pb-8 pt-6">
+        <div className="grid grid-cols-[minmax(0,1fr)_352px] max-[980px]:grid-cols-1">
+          <main className="flex min-w-0 flex-col gap-7 px-7 pb-8 pt-6">
           <section>
             <div className="flex flex-wrap items-baseline gap-3">
               <h2 className="text-xl font-semibold tracking-[-.01em] text-slate-900">
@@ -255,6 +256,7 @@ export default function NewBoardPage() {
             ) : null}
           </div>
         </aside>
+        </div>
       </div>
 
       <TemplateGalleryModal
