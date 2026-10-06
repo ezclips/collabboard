@@ -51,6 +51,16 @@ function updateLocalCache(items: ExcalidrawLibraryItem[]): void {
 }
 
 /**
+ * Merge items into the local cache, newest first, deduped by id.
+ */
+function mergeItemsIntoLocalCache(items: ExcalidrawLibraryItem[]): void {
+    const current = getExcalidrawLibrary();
+    const existingIds = new Set(current.map(i => i.id));
+    const fresh = items.filter(i => !existingIds.has(i.id));
+    updateLocalCache([...fresh, ...current]);
+}
+
+/**
  * Fetches all items from the Excalidraw Library (synchronous - returns cached data)
  * For fresh data from database, use fetchExcalidrawLibrary() instead
  */
@@ -144,6 +154,54 @@ export async function addToExcalidrawLibrary(item: ExcalidrawLibraryItem): Promi
         if (error) throw error;
     } catch (err) {
         console.error('Failed to save Excalidraw library item to database:', err);
+    }
+}
+
+/**
+ * Adds many items to the Excalidraw Library in ONE upsert.
+ *
+ * PATCH-299 Addendum 1: when signed in the local cache is updated only AFTER
+ * the upsert succeeds, so a failed save does not masquerade as saved (a retry
+ * would then wrongly say "already in your library"). Not signed in -> local
+ * cache only. The database error is RETURNED (message only), never swallowed.
+ */
+export async function addItemsToExcalidrawLibrary(
+    items: ExcalidrawLibraryItem[]
+): Promise<{ saved: number; error: string | null }> {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            // Not signed in: local cache only.
+            mergeItemsIntoLocalCache(items);
+            return { saved: items.length, error: null };
+        }
+
+        const rows = items.map(item => ({
+            id: item.id,
+            user_id: user.id,
+            name: item.name,
+            description: item.description,
+            author: item.author,
+            source: item.source,
+            preview: item.preview,
+            elements: item.elements,
+            created: item.created
+        }));
+
+        const { error } = await supabase
+            .from('excalidraw_library')
+            .upsert(rows);
+
+        if (error) {
+            return { saved: 0, error: error.message };
+        }
+        mergeItemsIntoLocalCache(items);
+        return { saved: items.length, error: null };
+    } catch (err) {
+        return {
+            saved: 0,
+            error: err instanceof Error ? err.message : String(err)
+        };
     }
 }
 

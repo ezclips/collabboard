@@ -87,12 +87,18 @@ export default function DrawingEditor({
     // PATCH-282: the live Excalidraw API, so the built-in AntV library can be
     // pushed into an already-open editor once its static file arrives.
     const excalidrawAPIRef = useRef<any>(null);
+    // PATCH-299 Addendum 2: the library reaches Excalidraw ONLY through
+    // updateLibrary, never initialData (whose async merge duplicates items).
+    const libraryItemsRef = useRef<any[]>([]);
+    const pushLibraryItems = useCallback((items: any[]) => {
+        libraryItemsRef.current = items;
+        excalidrawAPIRef.current?.updateLibrary?.({ libraryItems: items, merge: false });
+    }, []);
 
     // Track if initial data has been loaded
     const [initialElements, setInitialElements] = useState<any[]>([]);
     const [initialAppState, setInitialAppState] = useState<any>(null);
     const [initialFiles, setInitialFiles] = useState<any>(null);
-    const [libraryItems, setLibraryItems] = useState<any[]>([]); // New state
     const [key, setKey] = useState(0);
     const [showHelp, setShowHelp] = useState(false);
 
@@ -252,7 +258,7 @@ export default function DrawingEditor({
                 name: item.name,
                 elements: item.elements,
             }));
-            setLibraryItems(communityLibraryItems);
+            pushLibraryItems(communityLibraryItems);
 
             // The built-in AntV diagrams are a static, same-origin file fetched
             // asynchronously. The editor opens immediately; once they arrive we
@@ -260,9 +266,7 @@ export default function DrawingEditor({
             // editor (initialData is not re-read after mount).
             loadAntvLibraryItems().then((antvItems) => {
                 if (libraryCancelled) return;
-                const mergedLibraryItems = [...antvItems, ...communityLibraryItems];
-                setLibraryItems(mergedLibraryItems);
-                excalidrawAPIRef.current?.updateLibrary?.({ libraryItems: mergedLibraryItems, merge: false });
+                pushLibraryItems([...antvItems, ...communityLibraryItems]);
             });
 
             if (initialData?.drawingData) {
@@ -317,13 +321,15 @@ export default function DrawingEditor({
         return () => {
             libraryCancelled = true;
         };
-    }, [isOpen, initialData?.drawingData, initialData?.drawingAppState, initialData?.drawingFiles, initialTitle, initialMetadata]);
+    }, [isOpen, initialData?.drawingData, initialData?.drawingAppState, initialData?.drawingFiles, initialTitle, initialMetadata, pushLibraryItems]);
 
     // Stable API capture for the wrapper (PATCH-282 uses it to update the
     // library after the async AntV file arrives).
     const handleExcalidrawApi = useCallback((api: any) => {
         excalidrawAPIRef.current = api;
-    }, []);
+        // PATCH-299 Addendum 2: a list ready before the API is pushed now.
+        pushLibraryItems(libraryItemsRef.current);
+    }, [pushLibraryItems]);
 
     // Memoized onChange handler that only updates refs
     const handleChange = useCallback((elements: readonly any[], appState: any, files: any) => {
@@ -747,7 +753,6 @@ export default function DrawingEditor({
                                     },
                                     files: initialFiles,
                                     scrollToContent: true,
-                                    libraryItems: libraryItems,
                                 }}
                                 onChange={handleChange}
                                 readOnly={readOnly}

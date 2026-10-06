@@ -2,8 +2,8 @@
 //
 // PATCH-291. ExcalidrawWrapper gains a `libraryButton` switch. With
 // `libraryButton="toolbar"` it renders OUR library button and hides
-// Excalidraw's own top-right trigger; with the default it renders neither. The
-// dead Browse-libraries link is hidden on every surface via one scoped rule.
+// Excalidraw's own top-right trigger; with the default it renders neither.
+// PATCH-299 keeps the Browse-libraries link visible now that it works.
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -88,10 +88,10 @@ describe('PATCH-291: ExcalidrawWrapper libraryButton', () => {
     expect(container.querySelector('[data-library-button]')!.getAttribute('data-library-button')).toBe('toolbar');
   });
 
-  it('hides the dead Browse-libraries link in both modes', async () => {
+  it('does not hide the Browse-libraries link in either mode', async () => {
     const withDefault = await mount();
-    expect(styles(withDefault)).toContain('[data-library-button] .library-menu-browse-button');
+    expect(styles(withDefault)).not.toContain('.library-menu-browse-button');
     const withToolbar = await mount({ libraryButton: 'toolbar' });
-    expect(styles(withToolbar)).toContain('[data-library-button] .library-menu-browse-button');
+    expect(styles(withToolbar)).not.toContain('.library-menu-browse-button');
   });
 });

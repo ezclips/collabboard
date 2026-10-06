@@ -11,12 +11,13 @@ import DrawingEditor from './DrawingEditor';
 
 const hoisted = vi.hoisted(() => ({
   initialData: null as any,
-  libraryItems: [] as any[],
+  excalidrawAPI: null as ((api: any) => void) | null,
 }));
 
 vi.mock('./ExcalidrawWrapper', () => ({
   default: (props: any) => {
     if (props.initialData) hoisted.initialData = props.initialData;
+    if (props.excalidrawAPI) hoisted.excalidrawAPI = props.excalidrawAPI;
     return React.createElement('div', { 'data-testid': 'excalidraw-stub' });
   },
 }));
@@ -70,21 +71,31 @@ afterEach(() => {
   }
   mounted = [];
   hoisted.initialData = null;
+  hoisted.excalidrawAPI = null;
 });
 
 describe('PATCH-282: DrawingEditor library wiring', () => {
-  it('passes AntV items first, then whole community items with id/status/elements', async () => {
+  it('pushes AntV items first, then whole community items with id/status/elements', async () => {
     mount(<DrawingEditor isOpen onClose={() => {}} onSave={() => {}} initialMetadata={{}} />);
 
     await act(async () => {
-      for (let i = 0; i < 30; i += 1) {
-        const items = hoisted.initialData?.libraryItems ?? [];
-        if (items.some((item: any) => String(item.id).startsWith('antv:'))) break;
+      for (let i = 0; i < 30 && !hoisted.excalidrawAPI; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
+      // Let the async AntV file land before the API exists -- this is the
+      // "list ready before the API" case PATCH-299 Addendum 2 must not lose.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    const items = hoisted.initialData?.libraryItems ?? [];
+    expect(hoisted.initialData).not.toHaveProperty('libraryItems');
+
+    const updateLibrary = vi.fn();
+    act(() => {
+      hoisted.excalidrawAPI!({ updateLibrary });
+    });
+
+    const items = updateLibrary.mock.calls[0][0].libraryItems;
+    expect(updateLibrary).toHaveBeenCalledWith({ libraryItems: items, merge: false });
     expect(items.length).toBe(2);
     expect(items[0].id).toBe('antv:chart-pie-donut-pill-badge');
     expect(items[0].status).toBe('published');

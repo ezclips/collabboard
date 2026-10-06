@@ -288,11 +288,10 @@ export default function ExcalidrawWrapper({
 
     return (
         <div ref={rootRef} data-library-button={libraryButton} style={{ position: 'relative', width: '100%', height: '100%' }}>
-            {/* PATCH-291: scoped to the wrapper root -- the dead Browse-libraries
-                link is hidden everywhere; Excalidraw's own trigger only where
-                our toolbar button replaces it. */}
+            {/* PATCH-299: the Browse-libraries link is kept visible now that it
+                opens the real library site; Excalidraw's own trigger is hidden
+                only where our toolbar button replaces it. */}
             <style>{`
-                [data-library-button] .library-menu-browse-button { display: none; }
                 ${libraryButton === 'toolbar' ? '[data-library-button="toolbar"] .default-sidebar-trigger { display: none; }' : ''}
             `}</style>
             <input

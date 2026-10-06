@@ -13,6 +13,7 @@ import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import SimpleLineRenderer from '@/components/collabboard/SimpleLineRenderer';
+import { useExcalidrawLibraryReturn } from '@/components/collabboard/useExcalidrawLibraryReturn';
 import {
   mapGeoCanvasLinePersistencePayload,
   type DrawingViewport,
@@ -319,6 +320,7 @@ function getFreeformSpacingGuidesStorageKey(boardId?: string) {
 // === END TYPES + CONSTANTS REGION ===
 
 export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
+  useExcalidrawLibraryReturn();
   // Canvas store (PR4) — declared first so useCanvasData can receive dispatch
   const [canvasState, dispatch] = useReducer(canvasReducer, initialCanvasState);
   const supabase = useMemo(() => supabaseBrowser(), []);

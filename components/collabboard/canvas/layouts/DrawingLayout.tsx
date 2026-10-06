@@ -1613,7 +1613,6 @@ export default function DrawingLayout({
   const [initialElements, setInitialElements] = useState<any[]>([]);
   const [initialAppState, setInitialAppState] = useState<any>(null);
   const [initialFiles, setInitialFiles] = useState<any>(null);
-  const [libraryItems, setLibraryItems] = useState<any[]>([]);
   // PATCH-282: the built-in AntV designs, loaded once from the static file.
   const [antvLibraryItems, setAntvLibraryItems] = useState<any[]>([]);
   const [pendingImportedScene, setPendingImportedScene] = useState<ImportedDrawingScene | null>(null);
@@ -2069,17 +2068,6 @@ export default function DrawingLayout({
         console.error("Failed to parse drawing data", e);
       }
 
-      const communityItems = getExcalidrawLibrary();
-      // PATCH-282: Excalidraw expects `LibraryItem` objects, not a flat list
-      // of elements (flattening is why the library panel showed nothing).
-      setLibraryItems(communityItems.map((item) => ({
-        id: item.id,
-        status: 'unpublished',
-        created: item.created,
-        name: item.name,
-        elements: item.elements,
-      })));
-
       setKey(1);
       setIsInitializing(false);
     } else if (padlets.length > 0) {
@@ -2139,7 +2127,6 @@ export default function DrawingLayout({
       elements: item.elements,
     }));
     const mergedLibraryItems = [...antvLibraryItems, ...communityItems];
-    setLibraryItems(mergedLibraryItems);
     const api = excalidrawAPIRef.current ?? excalidrawAPI;
     if (api?.updateLibrary) {
       api.updateLibrary({ libraryItems: mergedLibraryItems, merge: false });
@@ -3739,8 +3726,7 @@ export default function DrawingLayout({
     },
     files: initialFiles,
     scrollToContent: !hasSavedViewportOnInit,
-    libraryItems: libraryItems,
-  }), [hasSavedViewportOnInit, initialElements, initialAppState, initialFiles, libraryItems]);
+  }), [hasSavedViewportOnInit, initialElements, initialAppState, initialFiles]);
 
   const handleInsertMermaid = useCallback((newElements: any[], newFiles?: any) => {
     if (!excalidrawAPI) return;
