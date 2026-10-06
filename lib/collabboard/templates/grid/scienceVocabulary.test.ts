@@ -8,6 +8,7 @@ describe('Science Vocabulary', () => {
     expect(SCIENCE_VOCABULARY.id).toBe('science-vocabulary');
     expect(SCIENCE_VOCABULARY.name).toBe('Science Vocabulary');
     expect(SCIENCE_VOCABULARY.layout).toBe('grid');
+    expect(SCIENCE_VOCABULARY.previewUrl).toBe('/templates/grid/science-vocabulary/preview.jpg');
   });
 
   it('lists the two rows', () => {

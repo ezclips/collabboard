@@ -54,5 +54,10 @@
     "author": "Microsoft (Fluent Emoji)",
     "page": "https://icon-sets.iconify.design/fluent-emoji-flat/fire/",
     "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
   }
 ]

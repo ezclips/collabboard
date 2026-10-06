@@ -9,10 +9,15 @@ import { TRIP_PLANNER } from './freeform/tripPlanner';
 import { EVENT_PLAN } from './freeform/eventPlan';
 import { PRODUCT_LAUNCH } from './freeform/productLaunch';
 import { BRAINSTORMING } from './columns/brainstorming';
+import { FROGS_AND_TOADS } from './columns/frogsAndToads';
 import { SCIENCE_VOCABULARY } from './grid/scienceVocabulary';
+import { BOOK_REVIEWS } from './grid/bookReviews';
 import { BIRTHDAY_WALL } from './wall/birthdayWall';
+import { STUDENT_ART_GALLERY } from './wall/artGallery';
 import { WORLD_VOLCANOES } from './map/worldVolcanoes';
+import { TRADITIONS_AROUND_THE_WORLD } from './map/traditionsAroundTheWorld';
 import { HISTORY_OF_FLIGHT } from './timeline/historyOfFlight';
+import { MARIE_CURIE } from './timeline/marieCurie';
 
 /**
  * PATCH-293/294. The board-template registry. One group per layout; later
@@ -43,27 +48,27 @@ export const BOARD_TEMPLATE_GROUPS: readonly BoardTemplateGroup[] = [
   {
     layout: 'columns',
     label: 'Columns canvas',
-    templates: [BRAINSTORMING],
+    templates: [BRAINSTORMING, FROGS_AND_TOADS],
   },
   {
     layout: 'grid',
     label: 'Grid canvas',
-    templates: [SCIENCE_VOCABULARY],
+    templates: [SCIENCE_VOCABULARY, BOOK_REVIEWS],
   },
   {
     layout: 'wall',
     label: 'Wall canvas',
-    templates: [BIRTHDAY_WALL],
+    templates: [BIRTHDAY_WALL, STUDENT_ART_GALLERY],
   },
   {
     layout: 'map',
     label: 'Map canvas',
-    templates: [WORLD_VOLCANOES],
+    templates: [WORLD_VOLCANOES, TRADITIONS_AROUND_THE_WORLD],
   },
   {
     layout: 'timeline',
     label: 'Timeline canvas',
-    templates: [HISTORY_OF_FLIGHT],
+    templates: [HISTORY_OF_FLIGHT, MARIE_CURIE],
   },
 ];
 

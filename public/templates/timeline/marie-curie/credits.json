@@ -1,0 +1,95 @@
+[
+  {
+    "file": "warsaw.jpg",
+    "source": "Pexels",
+    "id": 39633034,
+    "photographer": "Raymond Petrik",
+    "page": "https://www.pexels.com/photo/beautiful-warsaw-old-town-square-on-a-sunny-day-39633034/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "paris.jpg",
+    "source": "Pexels",
+    "id": 14212588,
+    "photographer": "Mehmet Turgut  Kirkgoz",
+    "page": "https://www.pexels.com/photo/victorian-concrete-building-in-front-of-a-river-14212588/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "glassware.jpg",
+    "source": "Pexels",
+    "id": 9629701,
+    "photographer": "Ivan S",
+    "page": "https://www.pexels.com/photo/test-tubes-on-test-tube-rack-9629701/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "microscope.jpg",
+    "source": "Pexels",
+    "id": 707332,
+    "photographer": "Francesco Paggiaro",
+    "page": "https://www.pexels.com/photo/gray-microscope-on-table-707332/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "medal.jpg",
+    "source": "Pexels",
+    "id": 7267540,
+    "photographer": "DS stories",
+    "page": "https://www.pexels.com/photo/a-medal-with-red-lanyard-on-white-paper-7267540/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "test-tube.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:test-tube",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/test-tube/",
+    "license": "MIT"
+  },
+  {
+    "file": "microscope.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:microscope",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/microscope/",
+    "license": "MIT"
+  },
+  {
+    "file": "1st-place-medal.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:1st-place-medal",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/1st-place-medal/",
+    "license": "MIT"
+  },
+  {
+    "file": "books.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:books",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/books/",
+    "license": "MIT"
+  },
+  {
+    "file": "ambulance.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:ambulance",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/ambulance/",
+    "license": "MIT"
+  },
+  {
+    "file": "radioactive.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:radioactive",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/radioactive/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

@@ -62,5 +62,10 @@
     "author": "Microsoft (Fluent Emoji)",
     "page": "https://icon-sets.iconify.design/fluent-emoji-flat/red-question-mark/",
     "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
   }
 ]

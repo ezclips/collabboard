@@ -9,6 +9,7 @@ export const BRAINSTORMING: BoardTemplate = {
   id: 'brainstorming',
   name: 'Brainstorming Board',
   layout: 'columns',
+  previewUrl: '/templates/columns/brainstorming/preview.jpg',
   posts: [
     { kind: 'section', key: 'question', title: 'The question' },
     {

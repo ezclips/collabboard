@@ -8,6 +8,7 @@ describe('History of Flight', () => {
     expect(HISTORY_OF_FLIGHT.id).toBe('history-of-flight');
     expect(HISTORY_OF_FLIGHT.name).toBe('History of Flight');
     expect(HISTORY_OF_FLIGHT.layout).toBe('timeline');
+    expect(HISTORY_OF_FLIGHT.previewUrl).toBe('/templates/timeline/history-of-flight/preview.jpg');
   });
 
   it('lists the seven entries in order', () => {

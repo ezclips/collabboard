@@ -8,6 +8,7 @@ describe('World Volcanoes', () => {
     expect(WORLD_VOLCANOES.id).toBe('world-volcanoes');
     expect(WORLD_VOLCANOES.name).toBe('World Volcanoes');
     expect(WORLD_VOLCANOES.layout).toBe('map');
+    expect(WORLD_VOLCANOES.previewUrl).toBe('/templates/map/world-volcanoes/preview.jpg');
   });
 
   it('places the five pins at their exact coordinates', () => {

@@ -60,12 +60,27 @@ describe('layout groups', () => {
     ]);
   });
 
-  it('offers the expected template in each new group', () => {
-    expect(templatesForLayout('columns')?.templates.map((template) => template.id)).toEqual(['brainstorming']);
-    expect(templatesForLayout('grid')?.templates.map((template) => template.id)).toEqual(['science-vocabulary']);
-    expect(templatesForLayout('wall')?.templates.map((template) => template.id)).toEqual(['birthday-wall']);
-    expect(templatesForLayout('map')?.templates.map((template) => template.id)).toEqual(['world-volcanoes']);
-    expect(templatesForLayout('timeline')?.templates.map((template) => template.id)).toEqual(['history-of-flight']);
+  it('lists the two templates in each new group, in order', () => {
+    expect(templatesForLayout('columns')?.templates.map((template) => template.id)).toEqual([
+      'brainstorming',
+      'frogs-and-toads',
+    ]);
+    expect(templatesForLayout('grid')?.templates.map((template) => template.id)).toEqual([
+      'science-vocabulary',
+      'book-reviews',
+    ]);
+    expect(templatesForLayout('wall')?.templates.map((template) => template.id)).toEqual([
+      'birthday-wall',
+      'art-gallery',
+    ]);
+    expect(templatesForLayout('map')?.templates.map((template) => template.id)).toEqual([
+      'world-volcanoes',
+      'traditions-around-the-world',
+    ]);
+    expect(templatesForLayout('timeline')?.templates.map((template) => template.id)).toEqual([
+      'history-of-flight',
+      'marie-curie',
+    ]);
   });
 });
 
@@ -93,11 +108,10 @@ describe('template assets', () => {
 
 describe('template previews', () => {
   for (const group of BOARD_TEMPLATE_GROUPS) {
-    if (group.layout !== 'freeform') continue;
     for (const template of group.templates) {
       it(`${template.id} has a previewUrl whose file exists and is credited`, () => {
         const preview = template.previewUrl;
-        expect(preview).toBe(`/templates/freeform/${template.id}/preview.jpg`);
+        expect(preview).toBe(`/templates/${group.layout}/${template.id}/preview.jpg`);
         if (!preview) throw new Error('expected a previewUrl');
         const filePath = path.join(ROOT, 'public', preview);
         expect(fs.existsSync(filePath), `${preview} should exist under public/`).toBe(true);

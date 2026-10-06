@@ -8,6 +8,7 @@ describe('Brainstorming Board', () => {
     expect(BRAINSTORMING.id).toBe('brainstorming');
     expect(BRAINSTORMING.name).toBe('Brainstorming Board');
     expect(BRAINSTORMING.layout).toBe('columns');
+    expect(BRAINSTORMING.previewUrl).toBe('/templates/columns/brainstorming/preview.jpg');
   });
 
   it('lists the five sections in order', () => {

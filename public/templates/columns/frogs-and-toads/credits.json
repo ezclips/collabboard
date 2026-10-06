@@ -1,0 +1,87 @@
+[
+  {
+    "file": "frog.jpg",
+    "source": "Pexels",
+    "id": 17506297,
+    "photographer": "Chris F",
+    "page": "https://www.pexels.com/photo/frog-on-branch-in-pond-17506297/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "frog-pond.jpg",
+    "source": "Pexels",
+    "id": 30835534,
+    "photographer": "Fotis Michalainas",
+    "page": "https://www.pexels.com/photo/vibrant-green-frog-resting-on-rocky-terrain-30835534/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "toad.jpg",
+    "source": "Pexels",
+    "id": 31826536,
+    "photographer": "Chris F",
+    "page": "https://www.pexels.com/photo/close-up-of-an-american-toad-in-natural-habitat-31826536/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "toad-ground.jpg",
+    "source": "Pexels",
+    "id": 36469990,
+    "photographer": "David Selbert",
+    "page": "https://www.pexels.com/photo/close-up-of-a-common-toad-s-distinctive-eye-36469990/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "pond.jpg",
+    "source": "Pexels",
+    "id": 33311247,
+    "photographer": "G Cicconeto",
+    "page": "https://www.pexels.com/photo/vibrant-water-lilies-in-singapore-pond-33311247/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "frog.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:frog",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/frog/",
+    "license": "MIT"
+  },
+  {
+    "file": "droplet.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:droplet",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/droplet/",
+    "license": "MIT"
+  },
+  {
+    "file": "magnifying-glass-tilted-left.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:magnifying-glass-tilted-left",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/magnifying-glass-tilted-left/",
+    "license": "MIT"
+  },
+  {
+    "file": "red-question-mark.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:red-question-mark",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/red-question-mark/",
+    "license": "MIT"
+  },
+  {
+    "file": "leaf-fluttering-in-wind.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:leaf-fluttering-in-wind",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/leaf-fluttering-in-wind/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

@@ -1,0 +1,87 @@
+[
+  {
+    "file": "diwali.jpg",
+    "source": "Pexels",
+    "id": 34641279,
+    "photographer": "Soummyo Sarker",
+    "page": "https://www.pexels.com/photo/glowing-oil-lamps-for-diwali-celebration-34641279/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "day-of-the-dead.jpg",
+    "source": "Pexels",
+    "id": 18950636,
+    "photographer": "Chris Luengas",
+    "page": "https://www.pexels.com/photo/dia-de-muertos-altar-18950636/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "hanami.jpg",
+    "source": "Pexels",
+    "id": 31791448,
+    "photographer": "Frank Lee",
+    "page": "https://www.pexels.com/photo/cherry-blossoms-along-kamo-river-in-kyoto-31791448/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "lanterns.jpg",
+    "source": "Pexels",
+    "id": 29715852,
+    "photographer": "Escape Plan",
+    "page": "https://www.pexels.com/photo/red-lanterns-in-blue-sky-celebrating-festival-29715852/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "midsummer.jpg",
+    "source": "Pexels",
+    "id": 6486895,
+    "photographer": "Eugene Lisyuk",
+    "page": "https://www.pexels.com/photo/a-girl-holding-purple-cornflowers-6486895/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "carnival.jpg",
+    "source": "Pexels",
+    "id": 30994508,
+    "photographer": "Heriberto Jahir Medina",
+    "page": "https://www.pexels.com/photo/vibrant-carnival-performer-in-festive-costume-30994508/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "diya-lamp.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:diya-lamp",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/diya-lamp/",
+    "license": "MIT"
+  },
+  {
+    "file": "cherry-blossom.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:cherry-blossom",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/cherry-blossom/",
+    "license": "MIT"
+  },
+  {
+    "file": "red-paper-lantern.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:red-paper-lantern",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/red-paper-lantern/",
+    "license": "MIT"
+  },
+  {
+    "file": "party-popper.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:party-popper",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/party-popper/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

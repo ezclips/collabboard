@@ -9,6 +9,7 @@ export const SCIENCE_VOCABULARY: BoardTemplate = {
   id: 'science-vocabulary',
   name: 'Science Vocabulary',
   layout: 'grid',
+  previewUrl: '/templates/grid/science-vocabulary/preview.jpg',
   posts: [
     { kind: 'section', key: 'living', title: 'Living things' },
 

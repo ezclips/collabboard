@@ -9,6 +9,7 @@ export const HISTORY_OF_FLIGHT: BoardTemplate = {
   id: 'history-of-flight',
   name: 'History of Flight',
   layout: 'timeline',
+  previewUrl: '/templates/timeline/history-of-flight/preview.jpg',
   posts: [
     { kind: 'column', key: 'balloon', title: 'The first hot-air balloon flight', timelineLabel: '1783' },
     { kind: 'image', title: 'Hot air rises', src: '/templates/timeline/history-of-flight/balloon.jpg', parent: 'balloon' },

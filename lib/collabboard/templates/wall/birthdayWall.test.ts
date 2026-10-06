@@ -8,6 +8,7 @@ describe('Birthday Wall', () => {
     expect(BIRTHDAY_WALL.id).toBe('birthday-wall');
     expect(BIRTHDAY_WALL.name).toBe('Birthday Wall');
     expect(BIRTHDAY_WALL.layout).toBe('wall');
+    expect(BIRTHDAY_WALL.previewUrl).toBe('/templates/wall/birthday-wall/preview.jpg');
   });
 
   it('has six groups with the expected titles', () => {

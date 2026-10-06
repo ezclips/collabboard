@@ -1,0 +1,95 @@
+[
+  {
+    "file": "open-book.jpg",
+    "source": "Pexels",
+    "id": 159866,
+    "photographer": "Pixabay",
+    "page": "https://www.pexels.com/photo/pile-of-books-159866/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "book-heart.jpg",
+    "source": "Pexels",
+    "id": 34260873,
+    "photographer": "Veronika Andrews",
+    "page": "https://www.pexels.com/photo/open-book-with-heart-shaped-pages-in-focus-34260873/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "book-stack.jpg",
+    "source": "Pexels",
+    "id": 5984614,
+    "photographer": "Olha Ruskykh",
+    "page": "https://www.pexels.com/photo/close-up-photo-of-stack-of-hardbound-books-5984614/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "books-plants.jpg",
+    "source": "Pexels",
+    "id": 7034759,
+    "photographer": "George Milton",
+    "page": "https://www.pexels.com/photo/a-glass-vase-with-green-leaves-on-top-of-the-books-stacked-on-the-wooden-floor-7034759/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "reading-glasses.jpg",
+    "source": "Pexels",
+    "id": 336407,
+    "photographer": "ugurlu photographer",
+    "page": "https://www.pexels.com/photo/close-up-of-eyeglasses-on-book-336407/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "rabbit-face.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:rabbit-face",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/rabbit-face/",
+    "license": "MIT"
+  },
+  {
+    "file": "tulip.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:tulip",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/tulip/",
+    "license": "MIT"
+  },
+  {
+    "file": "skull-and-crossbones.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:skull-and-crossbones",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/skull-and-crossbones/",
+    "license": "MIT"
+  },
+  {
+    "file": "horse-face.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:horse-face",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/horse-face/",
+    "license": "MIT"
+  },
+  {
+    "file": "canoe.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:canoe",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/canoe/",
+    "license": "MIT"
+  },
+  {
+    "file": "star.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:star",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/star/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

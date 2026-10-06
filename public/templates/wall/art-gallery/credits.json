@@ -1,0 +1,79 @@
+[
+  {
+    "file": "watercolor.jpg",
+    "source": "Pexels",
+    "id": 37607306,
+    "photographer": "Tanha Tamanna  Syed",
+    "page": "https://www.pexels.com/photo/colorful-watercolor-painting-of-joyful-scooter-ride-37607306/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "paint-box.jpg",
+    "source": "Pexels",
+    "id": 30064948,
+    "photographer": "Lisa Fotios",
+    "page": "https://www.pexels.com/photo/creative-watercolor-painting-activity-for-kids-30064948/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "clay-figures.jpg",
+    "source": "Pexels",
+    "id": 5377304,
+    "photographer": "Anubhaw Anand",
+    "page": "https://www.pexels.com/photo/buddha-clay-statue-5377304/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "collage.jpg",
+    "source": "Pexels",
+    "id": 19780748,
+    "photographer": "Heather Green",
+    "page": "https://www.pexels.com/photo/colorful-cutouts-from-magazines-19780748/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "bird-sketches.jpg",
+    "source": "Pexels",
+    "id": 6593529,
+    "photographer": "Pavel Danilyuk",
+    "page": "https://www.pexels.com/photo/sketches-of-tattoo-design-on-paper-beside-drawing-materials-6593529/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "artist-palette.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:artist-palette",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/artist-palette/",
+    "license": "MIT"
+  },
+  {
+    "file": "framed-picture.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:framed-picture",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/framed-picture/",
+    "license": "MIT"
+  },
+  {
+    "file": "red-heart.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:red-heart",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/red-heart/",
+    "license": "MIT"
+  },
+  {
+    "file": "clapping-hands.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:clapping-hands",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/clapping-hands/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]
