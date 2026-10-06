@@ -368,7 +368,7 @@ async function runPlacement(over: {
 
   const build = new Function(
     'canvasId', 'canPlaceDirectPdf', 'padlets', 'toast', 'requestPlacementIfRequiredRef',
-    'getNewPostPosition', 'nextZIndex', 'setPadlets', 'insertPostPreservingFailureChannels',
+    'getFreePostPosition', 'nextZIndex', 'setPadlets', 'insertPostPreservingFailureChannels',
     'fetchData', 'KNOWLEDGE_PDF_PLACEMENT_WIDTH', 'KNOWLEDGE_PDF_PLACEMENT_HEIGHT', 'crypto',
     'canEditBoardContentRef',
     `return ${HANDLER_JS};`,

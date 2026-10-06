@@ -116,6 +116,8 @@ import {
 } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { attemptTimelineAutoInitOnce, TIMELINE_AUTO_INIT_FAILURE_TOAST } from '@/lib/domain/canvas/timelineAutoInit';
+import { findFreeSpot } from '@/lib/domain/canvas/freeformFreeSpot';
+import { readFreeformOccupiedRects, readFreeformVisibleArea } from '@/lib/collabboard/freeformOccupancy';
 import { hasBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
 import { storeEditedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
@@ -1780,6 +1782,27 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     });
   }, [getCanvasPointFromClient]);
 
+  // PATCH-304 addendum. A new post prefers the centre of the visible board, but
+  // must not land on top of what is already there (e.g. the Research drop zone)
+  // or under an open Board AI panel or side-panel PDF reader. Used by a PDF card
+  // and by the two Save as Note paths; every other new post keeps the plain
+  // centre placement above.
+  const getFreePostPosition = useCallback((cardWidth: number, cardHeight: number) => {
+    const container = containerRef.current;
+    if (!freeformWorldOriginRef.current || !container) {
+      return getNewPostPosition(cardWidth, cardHeight);
+    }
+    const area = readFreeformVisibleArea(container, getCanvasPointFromClient);
+    const preferred = {
+      x: Math.round(area.x + (area.width - cardWidth) / 2),
+      y: Math.round(area.y + (area.height - cardHeight) / 2),
+      width: cardWidth,
+      height: cardHeight,
+    };
+    const spot = findFreeSpot(preferred, readFreeformOccupiedRects(container, getCanvasPointFromClient), area);
+    return clampRectPositionToFreeformBounds({ x: spot.x, y: spot.y, width: cardWidth, height: cardHeight });
+  }, [getCanvasPointFromClient, getNewPostPosition]);
+
   const openFreeformBoardMenuAt = useCallback((clientX: number, clientY: number) => {
     const point = getCanvasPointFromClient(clientX, clientY);
     setFreeformBoardMenu({
@@ -2874,7 +2897,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const nowIso = new Date().toISOString();
     const width = KNOWLEDGE_PDF_PLACEMENT_WIDTH;
     const height = KNOWLEDGE_PDF_PLACEMENT_HEIGHT;
-    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+    const { x: positionX, y: positionY } = getFreePostPosition(width, height);
 
     const placement: Padlet = {
       id: placementId,
@@ -2902,7 +2925,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       return false;
     }
     return true;
-  }, [canvasId, canPlaceDirectPdf, padlets, getNewPostPosition, insertPostPreservingFailureChannels, fetchData]);
+  }, [canvasId, canPlaceDirectPdf, padlets, getFreePostPosition, insertPostPreservingFailureChannels, fetchData]);
 
   /*
     PDF reentry. A Knowledge document is durable and board-independent; its
@@ -3147,7 +3170,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const nowIso = new Date().toISOString();
     const width = 280;
     const height = 280;
-    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+    const { x: positionX, y: positionY } = getFreePostPosition(width, height);
     const note: Padlet = {
       id: noteId,
       board_id: canvasId,
@@ -3207,7 +3230,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasId,
     canEditBoardContent,
     deletePostOrThrow,
-    getNewPostPosition,
+    getFreePostPosition,
     insertPostAndSelectOrThrow,
     padlets,
     setPadlets,
@@ -3245,7 +3268,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const nowIso = new Date().toISOString();
     const width = 280;
     const height = 280;
-    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+    const { x: positionX, y: positionY } = getFreePostPosition(width, height);
     const note: Padlet = {
       id: crypto.randomUUID(),
       board_id: canvasId,
@@ -3294,7 +3317,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasId,
     canSavePdfSelectionAsNote,
     deletePostOrThrow,
-    getNewPostPosition,
+    getFreePostPosition,
     insertPostAndSelectOrThrow,
     padlets,
     persistKnowledgeSourceReference,

@@ -84,7 +84,7 @@ describe('a PDF selection becomes one source-linked Note', () => {
     expect(command).toContain('title: draft.title');
     expect(command).toContain('content: draft.content');
     // Standard creation and placement -- no PDF-relative geometry.
-    expect(command).toContain('getNewPostPosition(width, height)');
+    expect(command).toContain('getFreePostPosition(width, height)');
     expect(command).toContain('await insertPostAndSelectOrThrow(note as any)');
     // Not promoted anywhere, and no second Note species is introduced.
     for (const forbidden of ['library', 'Library', 'promote', 'research', 'quote:', 'kind:']) {

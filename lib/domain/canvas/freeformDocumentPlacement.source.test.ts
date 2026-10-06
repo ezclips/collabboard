@@ -107,3 +107,23 @@ describe('Other layouts still require container/section placement for a new card
     expect(checkBlock).toContain('if (isSchedulerLayout && !hasParentId) {');
   });
 });
+
+describe('new-post placement uses getFreePostPosition (PATCH-304 addendum)', () => {
+  const canvasClientSrc = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+  const callbackBody = (name: string) => {
+    const start = canvasClientSrc.indexOf(`const ${name} = useCallback`);
+    return canvasClientSrc.slice(start, canvasClientSrc.indexOf('\n  }, [', start));
+  };
+
+  it('the PDF handler and both Save as Note callbacks use getFreePostPosition, not getNewPostPosition', () => {
+    for (const name of [
+      'handleKnowledgePdfUploaded',
+      'savePdfAssistantAnswerAsNote',
+      'saveKnowledgeSelectionAsNote',
+    ]) {
+      const body = callbackBody(name);
+      expect(body, name).toContain('getFreePostPosition(');
+      expect(body, name).not.toContain('getNewPostPosition(');
+    }
+  });
+});
