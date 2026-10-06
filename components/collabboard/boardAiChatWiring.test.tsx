@@ -403,7 +403,7 @@ describe('10-15. one right-side dock, two directions', () => {
     // clause must not be droppable without this failing -- so a legitimately
     // added clause updates it here.
     expect(CLIENT).toContain(
-      '{enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (');
+      '{showBoardAssistantButtons && enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (');
     // The reader reports its own open state; the board cannot derive it.
     expect(CLIENT).toContain('onOpenChange={setIsKnowledgeReaderOpen}');
     expect(READER).toContain('onOpenChange?.(isOpen);');

@@ -1529,6 +1529,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
+  const showBoardAssistantButtons = !!canvas && isFreeformLayout;
   // PDF-C1 release scope. Deliberately NOT isFreeformLayout: that flag is the
   // catch-all for Table/Stream and any unrecognised layout, none of which ship
   // direct PDF objects. One allowlist, shared by the toolbar gate below and by
@@ -9091,7 +9092,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       */
       onCreateNoteFromPage={canEditBoardContent ? handleCreateNoteFromKnowledgePage : null}
     >
-    <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
+    <div data-canvas-layout={canvas?.layout ?? ''} className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
         {showCanvasTitleHeader && (
@@ -11546,7 +11547,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         />
 
         {/* The wiki's ONE entry point for every reader (viewers included); hidden while an editor owns the screen or the wiki is already open. */}
-        {!isBlockingEditorModalOpen && !isBoardWikiOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (
+        {showBoardAssistantButtons && !isBlockingEditorModalOpen && !isBoardWikiOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (
           <button
             type="button"
             data-board-wiki-open="true"
@@ -11572,7 +11573,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             wiki's close control returned THIS button. The close button
             rendered, passed its test, and could not be clicked -- item 15's
             defect, one surface later. */}
-        {enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (
+        {showBoardAssistantButtons && enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (
           <button
             type="button"
             data-board-ai-chat-open="true"

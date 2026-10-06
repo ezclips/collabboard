@@ -225,6 +225,18 @@ describe('openBoard', () => {
     expect(gotos[0].url).toContain('/dashboard/canvas/board-123');
     expect(gotos[0].options).toEqual({ waitUntil: 'domcontentloaded', timeout: 240000 });
   });
+
+  it('waits for the board-layout marker, not the freeform-only wiki button', async () => {
+    const selectors: string[] = [];
+    const page = {
+      goto: async () => {},
+      waitForSelector: async (selector: string) => { selectors.push(selector); },
+      locator: () => ({ first() { return this; }, waitFor: async () => {} }),
+    };
+    await openBoard({ page }, 'board-123');
+    expect(selectors).toContain('[data-canvas-layout]:not([data-canvas-layout=""])');
+    expect(selectors).not.toContain('[data-board-wiki-open="true"]');
+  });
 });
 
 describe('lockedTabs', () => {

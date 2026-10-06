@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 //
-// PATCH-297 defect 3: the "Layout: Vertical" button sat at `right-2`, under the
-// Board AI column (fixed right-4 top-4, 36px) and its wiki button. It must move
-// to `right-16`, left of that column. Nothing else moves.
+// PATCH-300: the Board AI and wiki buttons now render on freeform boards only,
+// so the column they forced the "Layout: Vertical" button away from no longer
+// exists on a Timeline board. It moves back to the corner at `right-2`. Nothing
+// else moves.
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -41,13 +42,13 @@ afterEach(() => {
   mounted = [];
 });
 
-describe('TimelineHeaderBar layout button position (PATCH-297 defect 3)', () => {
-  it('sits at right-16, left of the Board AI column, not right-2', () => {
+describe('TimelineHeaderBar layout button position (PATCH-300)', () => {
+  it('sits back in the corner at right-2, not right-16', () => {
     const container = mount(
       <TimelineHeaderBar currentMode="vertical" onModeChange={() => {}} />,
     );
     const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain('right-16');
-    expect(root.className).not.toContain('right-2');
+    expect(root.className).toContain('right-2');
+    expect(root.className).not.toContain('right-16');
   });
 });

@@ -192,7 +192,7 @@ const EMPTY_CANVAS_POINTS = [[420, 320], [640, 420], [840, 320], [520, 520], [32
 export async function openBoard(ctx, boardId) {
   const { page } = ctx;
   await page.goto(`${ORIGIN}/dashboard/canvas/${boardId}`, { waitUntil: 'domcontentloaded', timeout: 240000 });
-  await page.waitForSelector('[data-board-wiki-open="true"]', { timeout: 200000, state: 'attached' });
+  await page.waitForSelector('[data-canvas-layout]:not([data-canvas-layout=""])', { timeout: 200000, state: 'attached' });
   await page.locator('[data-padlet-id]').first().waitFor({ state: 'attached', timeout: 120000 });
 }
 
