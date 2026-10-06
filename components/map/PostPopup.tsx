@@ -58,7 +58,7 @@ export default function PostPopup({
 }: PostPopupProps) {
 
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState((post.metadata as any)?.startExpanded === true);
   const [canExpand, setCanExpand] = useState(false);
 
   useEffect(() => {

@@ -72,3 +72,13 @@ describe('Product Launch', () => {
     }
   });
 });
+
+describe('Product Launch note titles', () => {
+  it('prepends the note title to the body so the name is visible', () => {
+    for (const title of ['Targets']) {
+      const note = PRODUCT_LAUNCH.posts.find((post) => post.kind === 'note' && post.title === title);
+      const html = note && note.kind === 'note' ? note.html : '';
+      expect(html.startsWith(`<p><strong>${title}</strong></p>`), title).toBe(true);
+    }
+  });
+});

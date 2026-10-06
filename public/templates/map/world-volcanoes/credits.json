@@ -1,0 +1,58 @@
+[
+  {
+    "file": "fuji.jpg",
+    "source": "Pexels",
+    "id": 20133012,
+    "photographer": "Johnson Hie",
+    "page": "https://www.pexels.com/photo/fuji-mountain-in-japan-20133012/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "vesuvius.jpg",
+    "source": "Pexels",
+    "id": 17311125,
+    "photographer": "K",
+    "page": "https://www.pexels.com/photo/harbor-in-naples-17311125/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "kilauea.jpg",
+    "source": "Pexels",
+    "id": 33295503,
+    "photographer": "James Lee",
+    "page": "https://www.pexels.com/photo/dramatic-lava-eruption-at-kilauea-volcano-33295503/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "reykjanes.jpg",
+    "source": "Pexels",
+    "id": 9388882,
+    "photographer": "Koen Swiers",
+    "page": "https://www.pexels.com/photo/volcanic-eruption-in-close-up-photography-9388882/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "etna.jpg",
+    "source": "Pexels",
+    "id": 37934799,
+    "photographer": "Aleyna Yetkin",
+    "page": "https://www.pexels.com/photo/scenic-view-of-mount-etna-from-sicilian-town-37934799/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "volcano.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:volcano",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/volcano/",
+    "license": "MIT"
+  },
+  {
+    "file": "fire.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:fire",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/fire/",
+    "license": "MIT"
+  }
+]

@@ -8,6 +8,8 @@ import type mapboxgl from 'mapbox-gl';
 import type { Feature, FeatureCollection, LineString } from 'geojson';
 import type { BoardSection, CanvasLine, Padlet } from '@/types/collabboard';
 import { getPadletMapLocation } from '@/lib/map/geojson';
+import { computeMapPinBounds } from '@/lib/domain/canvas/mapPinBounds';
+import { getBrowserCoords, getIpCoords } from '@/components/map/mapViewerLocation';
 import MapSearchControl from '@/components/map/MapSearchControl';
 import MarkersLayer, {
   CLUSTER_LAYER_ID,
@@ -178,6 +180,7 @@ function MapCanvas({
   const lastLineClickRef = useRef<{ lineId: string; at: number } | null>(null);
   const DBLCLICK_MS = 350;
   const didAutoLocateRef = useRef(false);
+  const didFitPinsRef = useRef(false);
   const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
   const [createMode, setCreateMode] = useState<CreateMode>('idle');
@@ -314,39 +317,22 @@ function MapCanvas({
   }, [selectedPostId, mapLoaded]);
 
   useEffect(() => {
-    if (!mapLoaded || !mapToken || didAutoLocateRef.current) return;
-    didAutoLocateRef.current = true;
+    if (!mapLoaded || !mapToken) return;
 
-    const getBrowserCoords = async (): Promise<{ lng: number; lat: number } | null> => {
-      if (typeof window === 'undefined' || !navigator.geolocation) return null;
-      return await new Promise((resolve) => {
-        const timeout = window.setTimeout(() => resolve(null), 3500);
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            window.clearTimeout(timeout);
-            resolve({ lng: position.coords.longitude, lat: position.coords.latitude });
-          },
-          () => {
-            window.clearTimeout(timeout);
-            resolve(null);
-          },
-          { enableHighAccuracy: false, timeout: 3000, maximumAge: 300000 }
-        );
-      });
-    };
-
-    const getIpCoords = async (): Promise<{ lng: number; lat: number } | null> => {
-      try {
-        const ipResponse = await fetch('https://ipapi.co/json/');
-        const ipJson = (await ipResponse.json()) as { longitude?: number; latitude?: number };
-        if (typeof ipJson.longitude === 'number' && typeof ipJson.latitude === 'number') {
-          return { lng: ipJson.longitude, lat: ipJson.latitude };
-        }
-      } catch {
-        // ignore
+    const pinBounds = computeMapPinBounds(posts);
+    if (pinBounds.kind !== 'none') {
+      if (didFitPinsRef.current) return;
+      didFitPinsRef.current = true;
+      if (pinBounds.kind === 'single') {
+        mapRef.current?.flyTo({ center: pinBounds.center, zoom: 5, duration: 900 });
+      } else {
+        mapRef.current?.fitBounds(pinBounds.bounds, { padding: 64, maxZoom: 6, duration: 900 });
       }
-      return null;
-    };
+      return;
+    }
+
+    if (didAutoLocateRef.current) return;
+    didAutoLocateRef.current = true;
 
     const fitCountryFromCoords = async (coords: { lng: number; lat: number }) => {
       const endpoint =
@@ -382,7 +368,7 @@ function MapCanvas({
       if (!coords) return;
       await fitCountryFromCoords(coords);
     })();
-  }, [mapLoaded, mapToken]);
+  }, [mapLoaded, mapToken, posts]);
 
   if (!mapToken) {
     return (

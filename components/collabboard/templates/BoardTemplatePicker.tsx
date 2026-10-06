@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import type { LayoutType } from '@/types/collabboard';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { LayoutType, Padlet } from '@/types/collabboard';
 import {
   createApplyBoardTemplateCommand,
   type BoardTemplate,
 } from '@/lib/domain/canvas/boardTemplates';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
+import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import { templatesForLayout } from '@/lib/collabboard/templates/registry';
 
 const EMPTY_SELECTION = 'empty';
@@ -14,9 +15,11 @@ const EMPTY_SELECTION = 'empty';
 export interface BoardTemplatePickerProps {
   boardId: string;
   layout: LayoutType | null | undefined;
-  postCount: number;
+  posts: Padlet[];
   postsLoaded: boolean;
   canEdit: boolean;
+  /** The board's sections, reused by columns/grid templates. */
+  sections?: { id: number; title: string; position: number }[];
   onApplied?: () => void;
 }
 
@@ -33,12 +36,27 @@ function readDismissed(boardId: string): boolean {
   }
 }
 
+/**
+ * A root container with no title, no children and no content is a placeholder
+ * (the blank container a Timeline board auto-creates on first open), not a real
+ * post.
+ */
+function isPlaceholderPost(post: Padlet): boolean {
+  const metadata = (post.metadata ?? {}) as Record<string, unknown>;
+  const isContainer =
+    post.type === 'container' || metadata.kind === 'container' || metadata.isContainer === true;
+  if (!isContainer || metadata.parentId) return false;
+  const children = Array.isArray(metadata.childPadletIds) ? metadata.childPadletIds : [];
+  return (post.title ?? '').trim() === '' && (post.content ?? '').trim() === '' && children.length === 0;
+}
+
 export default function BoardTemplatePicker({
   boardId,
   layout,
-  postCount,
+  posts,
   postsLoaded,
   canEdit,
+  sections,
   onApplied,
 }: BoardTemplatePickerProps) {
   const group = templatesForLayout(layout);
@@ -46,12 +64,15 @@ export default function BoardTemplatePicker({
   const [selected, setSelected] = useState<string>(EMPTY_SELECTION);
   const [applying, setApplying] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setDismissed(readDismissed(boardId));
     setSelected(EMPTY_SELECTION);
     setApplying(false);
     setFailed(false);
+    setCollapsed(false);
   }, [boardId]);
 
   const dismiss = useCallback(() => {
@@ -70,8 +91,12 @@ export default function BoardTemplatePicker({
     if (!selectedTemplate) return;
     setApplying(true);
     setFailed(false);
-    const command = createApplyBoardTemplateCommand(createPostsRepository());
-    const result = await command({ boardId, template: selectedTemplate }, { userId: null });
+    const replacePostIds = posts.filter(isPlaceholderPost).map((post) => post.id);
+    const command = createApplyBoardTemplateCommand(createPostsRepository(), createSectionsRepository());
+    const result = await command(
+      { boardId, template: selectedTemplate, existingSections: sections ?? [], replacePostIds },
+      { userId: null },
+    );
     if (result.ok) {
       dismiss();
       onApplied?.();
@@ -79,15 +104,52 @@ export default function BoardTemplatePicker({
       setFailed(true);
       setApplying(false);
     }
-  }, [boardId, selectedTemplate, dismiss, onApplied]);
+  }, [boardId, selectedTemplate, sections, posts, dismiss, onApplied]);
 
   // While an apply is in flight (or after one failed) the first template posts
-  // arrive through realtime and raise postCount. The panel must stay mounted so
-  // "Adding…" and the failure message can still be seen; it closes on success
-  // (dismiss) and only hides once the board is genuinely empty again.
+  // arrive through realtime and raise the post count. The panel must stay
+  // mounted so "Adding…" and the failure message can still be seen; it closes
+  // on success (dismiss) and only hides once the board is genuinely empty.
+  const hasRealPosts = posts.some((post) => !isPlaceholderPost(post));
   const visible =
-    Boolean(group) && canEdit && postsLoaded && !dismissed && (postCount === 0 || applying || failed);
+    Boolean(group) && canEdit && postsLoaded && !dismissed && (!hasRealPosts || applying || failed);
+
+  // Defect 4: a press outside the panel collapses it to the pill (never a
+  // dismissal); Escape collapses too. Clicking the pill reopens the panel.
+  useEffect(() => {
+    if (!visible || !group) return;
+    const onPointerDown = (event: Event) => {
+      const target = event.target as Node | null;
+      if (panelRef.current && target && panelRef.current.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-board-template-pill]')) return;
+      setCollapsed(true);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCollapsed(true);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [visible, group]);
+
   if (!visible || !group) return null;
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        data-board-template-pill="true"
+        onClick={() => setCollapsed(false)}
+        className="fixed z-[1250] rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-lg transition-colors hover:bg-gray-50"
+        style={{ bottom: 120, right: 16 }}
+      >
+        Templates
+      </button>
+    );
+  }
 
   const rowClass =
     'block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 aria-pressed:bg-blue-50 aria-pressed:text-blue-700';
@@ -95,7 +157,7 @@ export default function BoardTemplatePicker({
     selected === EMPTY_SELECTION ? 'Start empty' : applying ? 'Adding…' : 'Use this template';
 
   return (
-    <div className="fixed right-4 top-28 z-[1250] flex items-start gap-3" data-board-template-picker="true">
+    <div ref={panelRef} className="fixed right-4 top-28 z-[1250] flex items-start gap-3" data-board-template-picker="true">
       {selectedTemplate?.previewUrl && (
         <img
           src={selectedTemplate.previewUrl}

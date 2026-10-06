@@ -364,7 +364,7 @@ const ColumnsPreview: React.FC = () => {
       {/* Column 1 */}
       <div className="w-80 flex-shrink-0 bg-slate-200/50 rounded-lg flex flex-col h-full max-h-full">
         <div className="p-3 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-700 text-sm">Attachment</h3>
+          <h3 className="font-semibold text-slate-700 text-sm">Column 1</h3>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">1</span>
             <MoreVertical className="w-4 h-4 text-slate-500" />
@@ -373,9 +373,9 @@ const ColumnsPreview: React.FC = () => {
         <div className="px-2 pb-2 flex-1 overflow-y-auto space-y-2">
           {/* Padlet Card */}
           <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
-            <h4 className="font-medium text-sm text-slate-800 mb-2">Map of Berlin</h4>
+            <h4 className="font-medium text-sm text-slate-800 mb-2">First idea</h4>
             <div className="h-16 border rounded bg-slate-50 flex items-center justify-center border-l-4 border-l-orange-500 text-xs text-slate-500">
-              Image of a map
+              A note in this column.
             </div>
           </div>
         </div>
@@ -388,7 +388,7 @@ const ColumnsPreview: React.FC = () => {
       {/* Column 2 */}
       <div className="w-80 flex-shrink-0 bg-slate-200/50 rounded-lg flex flex-col h-full max-h-full">
         <div className="p-3 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-700 text-sm">Body</h3>
+          <h3 className="font-semibold text-slate-700 text-sm">Column 2</h3>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">1</span>
             <MoreVertical className="w-4 h-4 text-slate-500" />
@@ -397,9 +397,9 @@ const ColumnsPreview: React.FC = () => {
         <div className="px-2 pb-2 flex-1 overflow-y-auto space-y-2">
           {/* Padlet Card */}
           <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
-            <h4 className="font-medium text-sm text-slate-800 mb-2">xcfasdcacasca</h4>
+            <h4 className="font-medium text-sm text-slate-800 mb-2">Second idea</h4>
             <div className="h-16 border rounded bg-slate-50 flex items-center justify-center border-l-4 border-l-orange-500 text-xs text-slate-500">
-              Some details here.
+              A note in this column.
             </div>
           </div>
         </div>
@@ -411,7 +411,7 @@ const ColumnsPreview: React.FC = () => {
       {/* Column 3 */}
       <div className="w-80 flex-shrink-0 bg-slate-200/50 rounded-lg flex flex-col h-full max-h-full">
         <div className="p-3 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-700 text-sm">Testing</h3>
+          <h3 className="font-semibold text-slate-700 text-sm">Column 3</h3>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">1</span>
             <MoreVertical className="w-4 h-4 text-slate-500" />
@@ -420,9 +420,9 @@ const ColumnsPreview: React.FC = () => {
         <div className="px-2 pb-2 flex-1 overflow-y-auto space-y-2">
           {/* Padlet Card */}
           <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
-            <h4 className="font-medium text-sm text-slate-800 mb-2">sdsdsdsd</h4>
+            <h4 className="font-medium text-sm text-slate-800 mb-2">Third idea</h4>
             <div className="h-16 border rounded bg-slate-50 flex items-center justify-center border-l-4 border-l-orange-500 text-xs text-slate-500">
-              More details.
+              A note in this column.
             </div>
           </div>
         </div>
@@ -949,23 +949,23 @@ const CanvasSetupPage: React.FC<CanvasSetupPageProps> = ({ onSave, isCreating, l
   const [columns, setColumns] = useState<ColumnData[]>([
     {
       id: 'column-1',
-      title: 'Attachment',
+      title: 'Column 1',
       items: [
-        { id: 'item-1', title: 'Map of Berlin', content: 'Image of a map.' },
+        { id: 'item-1', title: 'First idea', content: 'A note in this column.' },
       ]
     },
     {
       id: 'column-2',
-      title: 'Body',
+      title: 'Column 2',
       items: [
-        { id: 'item-3', title: 'xcfasdcacasca', content: 'Some details here.' }
+        { id: 'item-3', title: 'Second idea', content: 'A note in this column.' }
       ]
     },
     {
       id: 'column-3',
-      title: 'Testing',
+      title: 'Column 3',
       items: [
-        { id: 'item-4', title: 'sdsdsdsd', content: 'More details.' }
+        { id: 'item-4', title: 'Third idea', content: 'A note in this column.' }
       ]
     }
   ]);

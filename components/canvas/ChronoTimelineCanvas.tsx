@@ -525,8 +525,8 @@ export default function ChronoTimelineCanvas({
             cardColor={cardColor}
             topStripColor={(container.metadata as any)?.topStrip && (container.metadata as any).topStrip !== 'transparent' ? (container.metadata as any).topStrip : null}
             onEdit={isEditable ? () => onOpenContainer(container) : undefined}
-            onExpandToggle={expandableContainers[container.id] ? () => setExpandedContainers(prev => ({ ...prev, [container.id]: !prev[container.id] })) : undefined}
-            isExpanded={expandedContainers[container.id] ?? false}
+            onExpandToggle={expandableContainers[container.id] ? () => setExpandedContainers(prev => ({ ...prev, [container.id]: !(prev[container.id] ?? ((container.metadata as any)?.startExpanded === true)) })) : undefined}
+            isExpanded={expandedContainers[container.id] ?? ((container.metadata as any)?.startExpanded === true)}
           >
             <RowColumnContainerCard
               padlet={container}
@@ -538,7 +538,7 @@ export default function ChronoTimelineCanvas({
               currentUserAvatar={currentUserAvatar}
               onUpdateChildComments={onUpdateChildComments}
               accessMode={commentAccessMode}
-              isExpanded={expandedContainers[container.id] ?? false}
+              isExpanded={expandedContainers[container.id] ?? ((container.metadata as any)?.startExpanded === true)}
               onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[container.id] === available ? prev : { ...prev, [container.id]: available })}
               canvasContext="timeline"
               isContentOnly

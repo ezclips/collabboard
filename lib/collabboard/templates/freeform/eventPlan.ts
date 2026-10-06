@@ -16,7 +16,7 @@ export const EVENT_PLAN: BoardTemplate = {
     {
       kind: 'note',
       title: 'Summer garden party',
-      html: '<p><strong>When:</strong> a Saturday in late June, from 5 pm</p><p><strong>Where:</strong> the back garden</p><p><strong>Guests:</strong> about 30</p><p><strong>Dress code:</strong> summer whites</p>',
+      html: '<p><strong>Summer garden party</strong></p><p><strong>When:</strong> a Saturday in late June, from 5 pm</p><p><strong>Where:</strong> the back garden</p><p><strong>Guests:</strong> about 30</p><p><strong>Dress code:</strong> summer whites</p>',
       parent: 'party',
     },
     { kind: 'clipart', title: "Let's celebrate", svg: '/templates/freeform/event-plan/party-popper.svg', iconBgColor: '#fbcfe8', parent: 'party' },
@@ -27,7 +27,7 @@ export const EVENT_PLAN: BoardTemplate = {
     {
       kind: 'note',
       title: 'Menu',
-      html: '<ul><li>Grilled vegetables and halloumi</li><li>Three salads</li><li>Lemonade and a spritz bar</li><li>Strawberry cake</li></ul>',
+      html: '<p><strong>Menu</strong></p><ul><li>Grilled vegetables and halloumi</li><li>Three salads</li><li>Lemonade and a spritz bar</li><li>Strawberry cake</li></ul>',
       parent: 'food',
     },
     { kind: 'clipart', title: 'Cake', svg: '/templates/freeform/event-plan/birthday-cake.svg', iconBgColor: '#fde68a', parent: 'food' },

@@ -78,3 +78,13 @@ describe('Creative Brief', () => {
     }
   });
 });
+
+describe('Creative Brief note titles', () => {
+  it('prepends the note title to the body so the name is visible', () => {
+    for (const title of ['Lumen Bikes · Spring campaign', 'Tone', 'Mandatories']) {
+      const note = CREATIVE_BRIEF.posts.find((post) => post.kind === 'note' && post.title === title);
+      const html = note && note.kind === 'note' ? note.html : '';
+      expect(html.startsWith(`<p><strong>${title}</strong></p>`), title).toBe(true);
+    }
+  });
+});

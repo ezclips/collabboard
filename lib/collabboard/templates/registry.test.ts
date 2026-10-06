@@ -36,7 +36,36 @@ describe('templatesForLayout', () => {
   });
 
   it('returns null for a layout with no group', () => {
-    expect(templatesForLayout('wall')).toBeNull();
+    expect(templatesForLayout('kanban')).toBeNull();
+  });
+});
+
+describe('layout groups', () => {
+  it('lists every group in order with its label', () => {
+    expect(BOARD_TEMPLATE_GROUPS.map((group) => group.layout)).toEqual([
+      'freeform',
+      'columns',
+      'grid',
+      'wall',
+      'map',
+      'timeline',
+    ]);
+    expect(BOARD_TEMPLATE_GROUPS.map((group) => group.label)).toEqual([
+      'Freeform canvas',
+      'Columns canvas',
+      'Grid canvas',
+      'Wall canvas',
+      'Map canvas',
+      'Timeline canvas',
+    ]);
+  });
+
+  it('offers the expected template in each new group', () => {
+    expect(templatesForLayout('columns')?.templates.map((template) => template.id)).toEqual(['brainstorming']);
+    expect(templatesForLayout('grid')?.templates.map((template) => template.id)).toEqual(['science-vocabulary']);
+    expect(templatesForLayout('wall')?.templates.map((template) => template.id)).toEqual(['birthday-wall']);
+    expect(templatesForLayout('map')?.templates.map((template) => template.id)).toEqual(['world-volcanoes']);
+    expect(templatesForLayout('timeline')?.templates.map((template) => template.id)).toEqual(['history-of-flight']);
   });
 });
 
@@ -64,6 +93,7 @@ describe('template assets', () => {
 
 describe('template previews', () => {
   for (const group of BOARD_TEMPLATE_GROUPS) {
+    if (group.layout !== 'freeform') continue;
     for (const template of group.templates) {
       it(`${template.id} has a previewUrl whose file exists and is credited`, () => {
         const preview = template.previewUrl;

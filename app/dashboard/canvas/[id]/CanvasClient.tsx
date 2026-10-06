@@ -114,6 +114,7 @@ import {
   resolveCropResetSource,
 } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
+import { attemptTimelineAutoInitOnce, TIMELINE_AUTO_INIT_FAILURE_TOAST } from '@/lib/domain/canvas/timelineAutoInit';
 import { storeEditedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
@@ -6740,7 +6741,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [canvasId, canvas, supabase]);
 
   // Auto-create empty container on timeline
-  const handleCreateEmptyTimelineContainer = useCallback(async (): Promise<boolean> => {
+  const handleCreateEmptyTimelineContainer = useCallback(async (options?: { silent?: boolean }): Promise<boolean> => {
     if (!canvasId) return false;
     const containerCount = padlets.filter(
       (p) => p.type === 'container' && !(p.metadata as any)?.parentId
@@ -6773,34 +6774,29 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const result = await createPost({ row: newContainer }, { userId: null });
     if (!result.ok) {
       setPadlets((prev) => prev.filter((p) => p.id !== containerId));
-      toast.error('Failed to create container');
+      if (!options?.silent) toast.error('Failed to create container');
       return false;
     }
     return true;
   }, [canvasId, padlets, supabase]);
 
   useEffect(() => {
-    if (!isTimelineLayout || !canvasId || loading || !canUseFreeformEditButton) return;
-    if (timelineAutoInitAttemptedRef.current.has(canvasId)) return;
-
     const rootTimelineContainerCount = padlets.filter((p) => {
       const meta = p.metadata as any;
       const isContainer = p.type === 'container' || meta?.kind === 'container' || meta?.isContainer === true;
       return isContainer && !meta?.parentId;
     }).length;
 
-    if (rootTimelineContainerCount > 0) {
-      timelineAutoInitAttemptedRef.current.add(canvasId);
-      return;
-    }
-
-    timelineAutoInitAttemptedRef.current.add(canvasId);
-    (async () => {
-      const created = await handleCreateEmptyTimelineContainer();
-      if (!created) {
-        timelineAutoInitAttemptedRef.current.delete(canvasId);
-      }
-    })();
+    void attemptTimelineAutoInitOnce({
+      isTimelineLayout,
+      canvasId,
+      loading,
+      canEdit: canUseFreeformEditButton,
+      rootContainerCount: rootTimelineContainerCount,
+      attempted: timelineAutoInitAttemptedRef.current,
+      createEmptyContainer: () => handleCreateEmptyTimelineContainer({ silent: true }),
+      onFailure: () => toast.error(TIMELINE_AUTO_INIT_FAILURE_TOAST),
+    });
   }, [isTimelineLayout, canvasId, loading, canUseFreeformEditButton, padlets, handleCreateEmptyTimelineContainer]);
 
   const getTimelineContainers = useCallback(() => {
@@ -11542,7 +11538,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         <BoardTemplatePicker
           boardId={canvasId ?? ''}
           layout={canvas?.layout}
-          postCount={padlets.length} postsLoaded={!loading}
+          posts={padlets} postsLoaded={!loading} sections={sections}
           canEdit={canEditBoardContent}
           onApplied={() => { void fetchData(); }}
         />

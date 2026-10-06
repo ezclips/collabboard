@@ -1,0 +1,66 @@
+[
+  {
+    "file": "sticky-notes.jpg",
+    "source": "Pexels",
+    "id": 3854816,
+    "photographer": "Bruno Bueno",
+    "page": "https://www.pexels.com/photo/person-writing-on-pink-sticky-notes-3854816/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "idea-wall.jpg",
+    "source": "Pexels",
+    "id": 15543114,
+    "photographer": "Walls.io",
+    "page": "https://www.pexels.com/photo/white-board-with-colorful-sticky-notes-15543114/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "library.jpg",
+    "source": "Pexels",
+    "id": 37888976,
+    "photographer": "beyzz",
+    "page": "https://www.pexels.com/photo/cozy-library-interior-with-wooden-bookshelves-37888976/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "light-bulb.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:light-bulb",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/light-bulb/",
+    "license": "MIT"
+  },
+  {
+    "file": "thinking-face.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:thinking-face",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/thinking-face/",
+    "license": "MIT"
+  },
+  {
+    "file": "books.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:books",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/books/",
+    "license": "MIT"
+  },
+  {
+    "file": "check-mark-button.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:check-mark-button",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/check-mark-button/",
+    "license": "MIT"
+  },
+  {
+    "file": "red-question-mark.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:red-question-mark",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/red-question-mark/",
+    "license": "MIT"
+  }
+]

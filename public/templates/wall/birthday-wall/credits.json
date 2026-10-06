@@ -1,0 +1,74 @@
+[
+  {
+    "file": "candles.jpg",
+    "source": "Pexels",
+    "id": 15211704,
+    "photographer": "Shuvalova Natalia",
+    "page": "https://www.pexels.com/photo/burning-candles-on-birthday-cake-15211704/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "birthday-letters.jpg",
+    "source": "Pexels",
+    "id": 16000541,
+    "photographer": "Alina Komarevska",
+    "page": "https://www.pexels.com/photo/close-up-of-birthday-candles-16000541/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "balloons.jpg",
+    "source": "Pexels",
+    "id": 30206729,
+    "photographer": "Vladimir Srajber",
+    "page": "https://www.pexels.com/photo/colorful-balloons-floating-against-blue-sky-30206729/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "confetti.jpg",
+    "source": "Pexels",
+    "id": 8516696,
+    "photographer": "Hanna Pad",
+    "page": "https://www.pexels.com/photo/confetti-in-close-up-8516696/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "birthday-cake.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:birthday-cake",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/birthday-cake/",
+    "license": "MIT"
+  },
+  {
+    "file": "wrapped-gift.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:wrapped-gift",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/wrapped-gift/",
+    "license": "MIT"
+  },
+  {
+    "file": "party-popper.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:party-popper",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/party-popper/",
+    "license": "MIT"
+  },
+  {
+    "file": "balloon.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:balloon",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/balloon/",
+    "license": "MIT"
+  },
+  {
+    "file": "star-struck.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:star-struck",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/star-struck/",
+    "license": "MIT"
+  }
+]

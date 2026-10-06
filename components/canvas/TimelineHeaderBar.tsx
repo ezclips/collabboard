@@ -37,7 +37,7 @@ export default function TimelineHeaderBar({
   onModeChange,
 }: TimelineHeaderBarProps) {
   return (
-    <div className="absolute top-2 right-2 z-30 flex items-center gap-2">
+    <div className="absolute top-2 right-16 z-30 flex items-center gap-2">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

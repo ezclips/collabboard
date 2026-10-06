@@ -15,7 +15,7 @@ export const CREATIVE_BRIEF: BoardTemplate = {
     {
       kind: 'note',
       title: 'Lumen Bikes · Spring campaign',
-      html: '<p><strong>Product:</strong> Lumen City, an e-bike for daily commuting.</p><p><strong>Goal:</strong> 2,000 test rides booked in April and May.</p><p><strong>Audience:</strong> city commuters aged 25–45 who drive or take the bus today.</p>',
+      html: '<p><strong>Lumen Bikes · Spring campaign</strong></p><p><strong>Product:</strong> Lumen City, an e-bike for daily commuting.</p><p><strong>Goal:</strong> 2,000 test rides booked in April and May.</p><p><strong>Audience:</strong> city commuters aged 25–45 who drive or take the bus today.</p>',
       parent: 'brief',
     },
     {
@@ -44,7 +44,7 @@ export const CREATIVE_BRIEF: BoardTemplate = {
     {
       kind: 'note',
       title: 'Tone',
-      html: '<ul><li>Bright, optimistic, everyday</li><li>Morning and evening light</li><li>No lycra, no racing</li></ul>',
+      html: '<p><strong>Tone</strong></p><ul><li>Bright, optimistic, everyday</li><li>Morning and evening light</li><li>No lycra, no racing</li></ul>',
       parent: 'visual',
     },
     { kind: 'clipart', title: 'Idea', svg: '/templates/freeform/creative-brief/light-bulb.svg', iconBgColor: '#fef08a', parent: 'visual' },
@@ -55,7 +55,7 @@ export const CREATIVE_BRIEF: BoardTemplate = {
     {
       kind: 'note',
       title: 'Mandatories',
-      html: '<ul><li>Logo bottom right</li><li>“Book a free test ride” on every asset</li><li>From €2,490</li></ul>',
+      html: '<p><strong>Mandatories</strong></p><ul><li>Logo bottom right</li><li>“Book a free test ride” on every asset</li><li>From €2,490</li></ul>',
       parent: 'moments',
     },
     { kind: 'clipart', title: 'Timeline', svg: '/templates/freeform/creative-brief/spiral-calendar.svg', iconBgColor: '#e9d5ff', parent: 'moments' },

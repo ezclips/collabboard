@@ -145,7 +145,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
     (padlet.metadata as any)?.kind === 'container' ||
     (padlet.metadata as any)?.isContainer;
 
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState((padlet.metadata as any)?.startExpanded === true);
   const [canExpand, setCanExpand] = useState(false);
 
   return (

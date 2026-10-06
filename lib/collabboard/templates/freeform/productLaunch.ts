@@ -43,7 +43,7 @@ export const PRODUCT_LAUNCH: BoardTemplate = {
     {
       kind: 'note',
       title: 'Targets',
-      html: '<ul><li>1,500 bottles in the first month</li><li>5,000 people on the waiting list</li><li>Press in three lifestyle magazines</li></ul>',
+      html: '<p><strong>Targets</strong></p><ul><li>1,500 bottles in the first month</li><li>5,000 people on the waiting list</li><li>Press in three lifestyle magazines</li></ul>',
       parent: 'goals',
     },
     { kind: 'clipart', title: 'Sales', svg: '/templates/freeform/product-launch/chart-increasing.svg', iconBgColor: '#bbf7d0', parent: 'goals' },

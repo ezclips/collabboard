@@ -8,6 +8,11 @@ import { WEEKLY_PLAN } from './freeform/weeklyPlan';
 import { TRIP_PLANNER } from './freeform/tripPlanner';
 import { EVENT_PLAN } from './freeform/eventPlan';
 import { PRODUCT_LAUNCH } from './freeform/productLaunch';
+import { BRAINSTORMING } from './columns/brainstorming';
+import { SCIENCE_VOCABULARY } from './grid/scienceVocabulary';
+import { BIRTHDAY_WALL } from './wall/birthdayWall';
+import { WORLD_VOLCANOES } from './map/worldVolcanoes';
+import { HISTORY_OF_FLIGHT } from './timeline/historyOfFlight';
 
 /**
  * PATCH-293/294. The board-template registry. One group per layout; later
@@ -34,6 +39,31 @@ export const BOARD_TEMPLATE_GROUPS: readonly BoardTemplateGroup[] = [
       EVENT_PLAN,
       PRODUCT_LAUNCH,
     ],
+  },
+  {
+    layout: 'columns',
+    label: 'Columns canvas',
+    templates: [BRAINSTORMING],
+  },
+  {
+    layout: 'grid',
+    label: 'Grid canvas',
+    templates: [SCIENCE_VOCABULARY],
+  },
+  {
+    layout: 'wall',
+    label: 'Wall canvas',
+    templates: [BIRTHDAY_WALL],
+  },
+  {
+    layout: 'map',
+    label: 'Map canvas',
+    templates: [WORLD_VOLCANOES],
+  },
+  {
+    layout: 'timeline',
+    label: 'Timeline canvas',
+    templates: [HISTORY_OF_FLIGHT],
   },
 ];
 

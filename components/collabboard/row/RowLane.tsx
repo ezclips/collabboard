@@ -456,8 +456,8 @@ export default function RowLane({
                                                     cardColor={(post.metadata as any)?.cardColor || '#ffffff'}
                                                     topStripColor={post.metadata?.topStrip && post.metadata.topStrip !== 'transparent' ? post.metadata.topStrip : null}
                                                     onEdit={isEditable ? () => onEditPost(post) : undefined}
-                                                    onExpandToggle={expandableContainers[post.id] ? () => setExpandedContainers(prev => ({ ...prev, [post.id]: !prev[post.id] })) : undefined}
-                                                    isExpanded={expandedContainers[post.id] ?? false}
+                                                    onExpandToggle={expandableContainers[post.id] ? () => setExpandedContainers(prev => ({ ...prev, [post.id]: !(prev[post.id] ?? ((post.metadata as any)?.startExpanded === true)) })) : undefined}
+                                                    isExpanded={expandedContainers[post.id] ?? ((post.metadata as any)?.startExpanded === true)}
                                                     className="cursor-grab active:cursor-grabbing w-full"
                                                 >
                                                     <RowColumnContainerCard
@@ -469,7 +469,7 @@ export default function RowLane({
                                                         onUpdateChildComments={onUpdateChildComments}
                                                         accessMode={commentAccessMode}
                                                         onDropDraftIntoContainer={isEditable ? onDropDraftIntoContainer : undefined}
-                                                        isExpanded={expandedContainers[post.id] ?? false}
+                                                        isExpanded={expandedContainers[post.id] ?? ((post.metadata as any)?.startExpanded === true)}
                                                         onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[post.id] === available ? prev : { ...prev, [post.id]: available })}
                                                         isContentOnly
                                                         onOpenDocument={onOpenDocument}

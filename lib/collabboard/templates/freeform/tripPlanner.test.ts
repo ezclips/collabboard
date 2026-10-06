@@ -73,3 +73,13 @@ describe('Trip Planner', () => {
     }
   });
 });
+
+describe('Trip Planner note titles', () => {
+  it('prepends the note title to the body so the name is visible', () => {
+    for (const title of ['Five days in Lisbon', 'Must-sees', 'Try']) {
+      const note = TRIP_PLANNER.posts.find((post) => post.kind === 'note' && post.title === title);
+      const html = note && note.kind === 'note' ? note.html : '';
+      expect(html.startsWith(`<p><strong>${title}</strong></p>`), title).toBe(true);
+    }
+  });
+});

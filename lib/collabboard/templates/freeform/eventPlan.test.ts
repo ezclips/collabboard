@@ -72,3 +72,13 @@ describe('Event Plan', () => {
     }
   });
 });
+
+describe('Event Plan note titles', () => {
+  it('prepends the note title to the body so the name is visible', () => {
+    for (const title of ['Summer garden party', 'Menu']) {
+      const note = EVENT_PLAN.posts.find((post) => post.kind === 'note' && post.title === title);
+      const html = note && note.kind === 'note' ? note.html : '';
+      expect(html.startsWith(`<p><strong>${title}</strong></p>`), title).toBe(true);
+    }
+  });
+});

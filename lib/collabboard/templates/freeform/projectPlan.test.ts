@@ -56,4 +56,9 @@ describe('Project Plan', () => {
     const table = PROJECT_PLAN.posts.find((post) => post.kind === 'table');
     expect(table && table.kind === 'table' ? table.height : null).toBe(240);
   });
+
+  it('prepends the note title to the body so the name is visible', () => {
+    const note = PROJECT_PLAN.posts.find((post) => post.kind === 'note' && post.title === 'Fern & Fig Café — new website');
+    expect(note && note.kind === 'note' ? note.html : '').toMatch(/^<p><strong>Fern & Fig Café — new website<\/strong><\/p>/);
+  });
 });

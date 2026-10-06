@@ -15,7 +15,7 @@ export const PROJECT_PLAN: BoardTemplate = {
     {
       kind: 'note',
       title: 'Fern & Fig Café — new website',
-      html: '<p><strong>Goal:</strong> a warm, simple website with online ordering.</p><ul><li>Show the seasonal menu and the garden terrace</li><li>Order ahead for pick-up</li><li>Launch before the summer season</li></ul><p>⭐ It must feel great on a phone.</p>',
+      html: '<p><strong>Fern & Fig Café — new website</strong></p><p><strong>Goal:</strong> a warm, simple website with online ordering.</p><ul><li>Show the seasonal menu and the garden terrace</li><li>Order ahead for pick-up</li><li>Launch before the summer season</li></ul><p>⭐ It must feel great on a phone.</p>',
       parent: 'brief',
     },
     { kind: 'clipart', title: 'Goals', svg: '/templates/freeform/project-plan/bullseye.svg', iconBgColor: '#fde68a', parent: 'brief' },

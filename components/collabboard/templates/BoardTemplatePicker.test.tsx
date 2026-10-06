@@ -15,6 +15,10 @@ vi.mock('@/lib/infra/canvas/postsRepository', () => ({
   createPostsRepository: () => ({}),
 }));
 
+vi.mock('@/lib/infra/canvas/sectionsRepository', () => ({
+  createSectionsRepository: () => ({}),
+}));
+
 vi.mock('@/lib/domain/canvas/boardTemplates', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/domain/canvas/boardTemplates')>();
   return {
@@ -45,7 +49,7 @@ async function mount(props: Partial<React.ComponentProps<typeof BoardTemplatePic
       <BoardTemplatePicker
         boardId={BOARD}
         layout="freeform"
-        postCount={0}
+        posts={[]}
         postsLoaded
         canEdit
         {...props}
@@ -71,7 +75,7 @@ async function rerender(props: Partial<React.ComponentProps<typeof BoardTemplate
       <BoardTemplatePicker
         boardId={BOARD}
         layout="freeform"
-        postCount={0}
+        posts={[]}
         postsLoaded
         canEdit
         {...props}
@@ -86,6 +90,30 @@ function deferred<T>() {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+function realPost(overrides: Record<string, unknown> = {}) {
+  return { id: 'p-1', type: 'text', title: 'Real', content: '<p>x</p>', metadata: {}, ...overrides } as any;
+}
+
+function placeholderPost(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'placeholder-1',
+    type: 'container',
+    title: '',
+    content: '',
+    metadata: { isContainer: true, childPadletIds: [] },
+    ...overrides,
+  } as any;
+}
+
+async function outsidePress() {
+  await act(async () => {
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 beforeEach(() => {
@@ -111,7 +139,7 @@ describe('BoardTemplatePicker visibility', () => {
   });
 
   it('renders nothing for a non-empty board', async () => {
-    await mount({ postCount: 3 });
+    await mount({ posts: [realPost()] });
     expect(q('[data-board-template-picker]')).toBeNull();
   });
 
@@ -120,8 +148,8 @@ describe('BoardTemplatePicker visibility', () => {
     expect(q('[data-board-template-picker]')).toBeNull();
   });
 
-  it('renders nothing for a non-freeform layout', async () => {
-    await mount({ layout: 'wall' });
+  it('renders nothing for a layout with no group', async () => {
+    await mount({ layout: 'kanban' });
     expect(q('[data-board-template-picker]')).toBeNull();
   });
 
@@ -187,6 +215,8 @@ describe('BoardTemplatePicker behaviour', () => {
     expect(hoisted.apply.mock.calls[0][0]).toEqual({
       boardId: BOARD,
       template: expect.objectContaining({ id: 'project-plan' }),
+      existingSections: [],
+      replacePostIds: [],
     });
     expect(hoisted.apply.mock.calls[0][1]).toEqual({ userId: null });
     expect((q('[data-board-template-apply]') as HTMLButtonElement).textContent).toContain('Adding…');
@@ -199,6 +229,14 @@ describe('BoardTemplatePicker behaviour', () => {
     expect(window.localStorage.getItem(DISMISS_KEY)).not.toBeNull();
   });
 
+  it('passes the board sections through as existingSections', async () => {
+    const sections = [{ id: 12, title: 'One', position: 2 }];
+    await mount({ sections });
+    await click(q('[data-board-template-row="project-plan"]'));
+    await click(q('[data-board-template-apply]'));
+    expect(hoisted.apply.mock.calls[0][0]).toMatchObject({ existingSections: sections });
+  });
+
   it('stays with "Adding…" when template posts arrive while the command is still in flight, then closes on success', async () => {
     const pending = deferred<{ ok: true; value: number }>();
     hoisted.apply.mockReturnValue(pending.promise);
@@ -206,7 +244,7 @@ describe('BoardTemplatePicker behaviour', () => {
     await click(q('[data-board-template-row="project-plan"]'));
     await click(q('[data-board-template-apply]'));
 
-    await rerender({ postCount: 3 });
+    await rerender({ posts: [realPost()] });
     expect(q('[data-board-template-picker]')).not.toBeNull();
     expect((q('[data-board-template-apply]') as HTMLButtonElement).textContent).toContain('Adding…');
 
@@ -224,7 +262,7 @@ describe('BoardTemplatePicker behaviour', () => {
     await click(q('[data-board-template-row="project-plan"]'));
     await click(q('[data-board-template-apply]'));
 
-    await rerender({ postCount: 3 });
+    await rerender({ posts: [realPost()] });
     expect(q('[data-board-template-picker]')).not.toBeNull();
 
     await act(async () => {
@@ -303,6 +341,72 @@ describe('BoardTemplatePicker behaviour', () => {
   });
 });
 
+describe('BoardTemplatePicker placeholders (Timeline)', () => {
+  it('shows the picker for a board with only a placeholder container', async () => {
+    await mount({ layout: 'timeline', posts: [placeholderPost()] });
+    expect(q('[data-board-template-picker]')).not.toBeNull();
+  });
+
+  it('hides the picker for a titled container', async () => {
+    await mount({ layout: 'timeline', posts: [placeholderPost({ title: 'Entry' })] });
+    expect(q('[data-board-template-picker]')).toBeNull();
+  });
+
+  it('hides the picker for a container with a child', async () => {
+    await mount({
+      layout: 'timeline',
+      posts: [placeholderPost({ metadata: { isContainer: true, childPadletIds: ['child-1'] } })],
+    });
+    expect(q('[data-board-template-picker]')).toBeNull();
+  });
+
+  it('passes the placeholder ids as replacePostIds', async () => {
+    await mount({ layout: 'timeline', posts: [placeholderPost()] });
+    await click(q('[data-board-template-row="history-of-flight"]'));
+    await click(q('[data-board-template-apply]'));
+    expect(hoisted.apply.mock.calls[0][0]).toMatchObject({ replacePostIds: ['placeholder-1'] });
+  });
+});
+
+describe('BoardTemplatePicker collapse to pill', () => {
+  it('collapses to the pill on an outside press without dismissing', async () => {
+    await mount();
+    expect(q('[data-board-template-picker]')).not.toBeNull();
+
+    await outsidePress();
+    expect(q('[data-board-template-picker]')).toBeNull();
+    expect(q('[data-board-template-pill]')).not.toBeNull();
+    expect(q('[data-board-template-pill]')?.textContent).toContain('Templates');
+    expect(window.localStorage.getItem(DISMISS_KEY)).toBeNull();
+  });
+
+  it('reopens the panel from the pill', async () => {
+    await mount();
+    await outsidePress();
+    await click(q('[data-board-template-pill]'));
+    expect(q('[data-board-template-picker]')).not.toBeNull();
+    expect(q('[data-board-template-pill]')).toBeNull();
+  });
+
+  it('stays open on an inside press', async () => {
+    await mount();
+    const panel = q('[data-board-template-picker]')!;
+    await act(async () => {
+      panel.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    });
+    expect(q('[data-board-template-picker]')).not.toBeNull();
+  });
+
+  it('collapses on Escape', async () => {
+    await mount();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(q('[data-board-template-pill]')).not.toBeNull();
+    expect(q('[data-board-template-picker]')).toBeNull();
+  });
+});
+
 describe('source invariants', () => {
   it('mounts BoardTemplatePicker exactly once in CanvasClient', () => {
     const source = fs.readFileSync(path.join(ROOT, 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
@@ -315,6 +419,28 @@ describe('source invariants', () => {
     const block = source.slice(start, source.indexOf('/>', start));
     expect(block).toContain('onApplied');
     expect(block).toContain('fetchData');
+  });
+
+  it('passes the board sections into the picker mount', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+    const start = source.indexOf('<BoardTemplatePicker');
+    const block = source.slice(start, source.indexOf('/>', start));
+    expect(block).toContain('sections={sections}');
+  });
+
+  it('passes the posts into the picker mount instead of a count', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+    const start = source.indexOf('<BoardTemplatePicker');
+    const block = source.slice(start, source.indexOf('/>', start));
+    expect(block).toContain('posts={padlets}');
+    expect(block).not.toContain('postCount');
+  });
+
+  it('keeps the picker mount at seven lines (CanvasClient net growth 0)', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+    const start = source.indexOf('<BoardTemplatePicker');
+    const block = source.slice(start, source.indexOf('/>', start));
+    expect(block.split('\n').length).toBe(7);
   });
 
   it('removes the Template 1 button from the dashboard', () => {

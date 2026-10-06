@@ -16,7 +16,7 @@ export const TRIP_PLANNER: BoardTemplate = {
     {
       kind: 'note',
       title: 'Five days in Lisbon',
-      html: '<p><strong>When:</strong> five days in early May</p><p><strong>Stay:</strong> a guesthouse in Alfama</p><p><strong>Getting around:</strong> metro, tram 28 and a lot of walking</p>',
+      html: '<p><strong>Five days in Lisbon</strong></p><p><strong>When:</strong> five days in early May</p><p><strong>Stay:</strong> a guesthouse in Alfama</p><p><strong>Getting around:</strong> metro, tram 28 and a lot of walking</p>',
       parent: 'plan',
     },
     { kind: 'clipart', title: 'Flights', svg: '/templates/freeform/trip-planner/airplane.svg', iconBgColor: '#fed7aa', parent: 'plan' },
@@ -38,7 +38,7 @@ export const TRIP_PLANNER: BoardTemplate = {
     {
       kind: 'note',
       title: 'Must-sees',
-      html: '<ul><li>Belém Tower and the monastery</li><li>A day trip to Sintra</li><li>LX Factory on Sunday</li><li>Sunset at a miradouro</li></ul>',
+      html: '<p><strong>Must-sees</strong></p><ul><li>Belém Tower and the monastery</li><li>A day trip to Sintra</li><li>LX Factory on Sunday</li><li>Sunset at a miradouro</li></ul>',
       parent: 'see',
     },
     { kind: 'clipart', title: 'Photo spots', svg: '/templates/freeform/trip-planner/camera.svg', iconBgColor: '#bae6fd', parent: 'see' },
@@ -49,7 +49,7 @@ export const TRIP_PLANNER: BoardTemplate = {
     {
       kind: 'note',
       title: 'Try',
-      html: '<ul><li>A bifana at the counter</li><li>Grilled sardines</li><li>Ginjinha in a chocolate cup</li></ul>',
+      html: '<p><strong>Try</strong></p><ul><li>A bifana at the counter</li><li>Grilled sardines</li><li>Ginjinha in a chocolate cup</li></ul>',
       parent: 'eat',
     },
 

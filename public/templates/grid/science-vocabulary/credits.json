@@ -1,0 +1,82 @@
+[
+  {
+    "file": "habitat.jpg",
+    "source": "Pexels",
+    "id": 14022250,
+    "photographer": "Quang Nguyen Vinh",
+    "page": "https://www.pexels.com/photo/tall-trees-in-the-forest-14022250/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "erosion.jpg",
+    "source": "Pexels",
+    "id": 7748292,
+    "photographer": "Robert Schrader",
+    "page": "https://www.pexels.com/photo/aerial-view-of-bryce-canyon-national-park-7748292/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "migration.jpg",
+    "source": "Pexels",
+    "id": 14780499,
+    "photographer": "Brian Forsyth",
+    "page": "https://www.pexels.com/photo/a-flock-of-birds-flying-in-the-blue-sky-14780499/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "pollination.jpg",
+    "source": "Pexels",
+    "id": 34178902,
+    "photographer": "Masood Aslami",
+    "page": "https://www.pexels.com/photo/close-up-of-honeybee-pollinating-a-daisy-flower-34178902/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "photosynthesis.jpg",
+    "source": "Pexels",
+    "id": 6038156,
+    "photographer": "Gergő",
+    "page": "https://www.pexels.com/photo/close-up-on-leaves-on-black-background-6038156/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "evaporation.jpg",
+    "source": "Pexels",
+    "id": 37443453,
+    "photographer": "Serhii Barkanov",
+    "page": "https://www.pexels.com/photo/serene-misty-sunrise-over-a-tranquil-lake-37443453/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "globe-showing-europe-africa.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:globe-showing-europe-africa",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/globe-showing-europe-africa/",
+    "license": "MIT"
+  },
+  {
+    "file": "herb.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:herb",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/herb/",
+    "license": "MIT"
+  },
+  {
+    "file": "droplet.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:droplet",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/droplet/",
+    "license": "MIT"
+  },
+  {
+    "file": "sun.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:sun",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/sun/",
+    "license": "MIT"
+  }
+]
