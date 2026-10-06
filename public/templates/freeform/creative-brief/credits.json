@@ -1,0 +1,71 @@
+[
+  {
+    "file": "ebike-commuter.jpg",
+    "source": "Pexels",
+    "id": 11387314,
+    "photographer": "Đặng Thanh Tú",
+    "page": "https://www.pexels.com/photo/man-riding-a-bike-turning-on-the-street-11387314/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "city-ride.jpg",
+    "source": "Pexels",
+    "id": 26927188,
+    "photographer": "Juliet Montesinos",
+    "page": "https://www.pexels.com/photo/cyclist-on-street-in-city-26927188/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "evening-ride.jpg",
+    "source": "Pexels",
+    "id": 13720218,
+    "photographer": "Ammy Singh",
+    "page": "https://www.pexels.com/photo/a-man-riding-a-bicycle-on-the-street-side-13720218/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "light-trails.jpg",
+    "source": "Pexels",
+    "id": 843166,
+    "photographer": "Hannes L.",
+    "page": "https://www.pexels.com/photo/black-bicycle-beside-pathway-843166/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "bicycle.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:bicycle",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/bicycle/",
+    "license": "MIT"
+  },
+  {
+    "file": "megaphone.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:megaphone",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/megaphone/",
+    "license": "MIT"
+  },
+  {
+    "file": "light-bulb.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:light-bulb",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/light-bulb/",
+    "license": "MIT"
+  },
+  {
+    "file": "spiral-calendar.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:spiral-calendar",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/spiral-calendar/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

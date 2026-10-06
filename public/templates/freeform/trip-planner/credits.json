@@ -1,0 +1,63 @@
+[
+  {
+    "file": "tram.jpg",
+    "source": "Pexels",
+    "id": 18908575,
+    "photographer": "Michiel Meurs",
+    "page": "https://www.pexels.com/photo/vintage-tram-on-street-in-lisbon-18908575/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "viewpoint.jpg",
+    "source": "Pexels",
+    "id": 35771198,
+    "photographer": "Alyona Nagel",
+    "page": "https://www.pexels.com/photo/scenic-view-of-lisbon-s-alfama-district-rooftops-35771198/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "pastel-de-nata.jpg",
+    "source": "Pexels",
+    "id": 34315407,
+    "photographer": "Travel with  Lenses",
+    "page": "https://www.pexels.com/photo/coffee-and-pastel-de-nata-on-wooden-board-34315407/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "airplane.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:airplane",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/airplane/",
+    "license": "MIT"
+  },
+  {
+    "file": "luggage.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:luggage",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/luggage/",
+    "license": "MIT"
+  },
+  {
+    "file": "camera.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:camera",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/camera/",
+    "license": "MIT"
+  },
+  {
+    "file": "tram-car.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:tram-car",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/tram-car/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

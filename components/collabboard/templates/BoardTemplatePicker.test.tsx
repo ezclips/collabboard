@@ -141,6 +141,38 @@ describe('BoardTemplatePicker behaviour', () => {
     expect(q('[data-board-template-row="empty"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('renders eight template rows under "Freeform canvas"', async () => {
+    await mount();
+    expect(q('[data-board-template-picker]')?.textContent).toContain('Freeform canvas');
+    const rows = Array.from(host.querySelectorAll('[data-board-template-row]'));
+    const templateRows = rows.filter((row) => row.getAttribute('data-board-template-row') !== 'empty');
+    expect(templateRows).toHaveLength(8);
+    expect(templateRows.map((row) => row.getAttribute('data-board-template-row'))).toEqual([
+      'project-plan',
+      'moodboard',
+      'creative-brief',
+      'character-profile',
+      'weekly-plan',
+      'trip-planner',
+      'event-plan',
+      'product-launch',
+    ]);
+  });
+
+  it('shows the selected template\u2019s preview image and none for Empty board', async () => {
+    await mount();
+    expect(q('[data-board-template-preview]')).toBeNull();
+
+    await click(q('[data-board-template-row="moodboard"]'));
+    const preview = q('[data-board-template-preview]');
+    expect(preview).not.toBeNull();
+    expect(preview?.getAttribute('src')).toBe('/templates/freeform/moodboard/preview.jpg');
+    expect(preview?.getAttribute('alt')).toBe('Moodboard preview');
+
+    await click(q('[data-board-template-row="empty"]'));
+    expect(q('[data-board-template-preview]')).toBeNull();
+  });
+
   it('runs the command once, shows Adding…, closes and stores dismissal on success', async () => {
     const pending = deferred<{ ok: true; value: number }>();
     hoisted.apply.mockReturnValue(pending.promise);

@@ -9,6 +9,7 @@ export const PROJECT_PLAN: BoardTemplate = {
   id: 'project-plan',
   name: 'Project Plan',
   layout: 'freeform',
+  previewUrl: '/templates/freeform/project-plan/preview.jpg',
   posts: [
     { kind: 'column', key: 'brief', title: 'Brief', x: 60, y: 60, width: 360, height: 800, topStrip: '#6366f1' },
     {

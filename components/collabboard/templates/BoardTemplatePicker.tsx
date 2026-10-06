@@ -99,7 +99,8 @@ export default function BoardTemplatePicker({
       {selectedTemplate?.previewUrl && (
         <img
           src={selectedTemplate.previewUrl}
-          alt=""
+          alt={`${selectedTemplate.name} preview`}
+          data-board-template-preview="true"
           className="max-w-[40vw] rounded-xl border border-gray-200 bg-white shadow-lg"
         />
       )}

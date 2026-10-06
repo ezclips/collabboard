@@ -1,0 +1,95 @@
+[
+  {
+    "file": "living-room.jpg",
+    "source": "Pexels",
+    "id": 26546549,
+    "photographer": "Sami  Abdullah",
+    "page": "https://www.pexels.com/photo/floor-lamp-glowing-by-a-sofa-26546549/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "sofa-sheepskin.jpg",
+    "source": "Pexels",
+    "id": 27638192,
+    "photographer": "Alexander Mass",
+    "page": "https://www.pexels.com/photo/a-brown-leather-couch-in-a-room-with-a-window-27638192/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "pink-vase.jpg",
+    "source": "Pexels",
+    "id": 7572727,
+    "photographer": "Sid Maia",
+    "page": "https://www.pexels.com/photo/a-vase-with-dried-leaves-7572727/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "terracotta-vases.jpg",
+    "source": "Pexels",
+    "id": 8063850,
+    "photographer": "ROMAN ODINTSOV",
+    "page": "https://www.pexels.com/photo/close-up-of-little-clay-vases-and-delicate-flowers-in-one-of-them-8063850/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "pampas.jpg",
+    "source": "Pexels",
+    "id": 6963598,
+    "photographer": "cottonbro studio",
+    "page": "https://www.pexels.com/photo/dried-flowers-in-a-vase-near-a-white-wall-6963598/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "linen.jpg",
+    "source": "Pexels",
+    "id": 7533979,
+    "photographer": "amanda cavalcante",
+    "page": "https://www.pexels.com/photo/white-canvas-fabric-7533979/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "jute.jpg",
+    "source": "Pexels",
+    "id": 36346049,
+    "photographer": "Jonathan Borba",
+    "page": "https://www.pexels.com/photo/close-up-of-natural-fabric-texture-36346049/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "sparkles.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:sparkles",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/sparkles/",
+    "license": "MIT"
+  },
+  {
+    "file": "potted-plant.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:potted-plant",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/potted-plant/",
+    "license": "MIT"
+  },
+  {
+    "file": "candle.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:candle",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/candle/",
+    "license": "MIT"
+  },
+  {
+    "file": "framed-picture.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:framed-picture",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/framed-picture/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

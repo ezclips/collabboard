@@ -1,0 +1,63 @@
+[
+  {
+    "file": "planner.jpg",
+    "source": "Pexels",
+    "id": 7319184,
+    "photographer": "Angela Roma",
+    "page": "https://www.pexels.com/photo/stationery-near-plant-and-cup-7319184/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "breakfast.jpg",
+    "source": "Pexels",
+    "id": 6823331,
+    "photographer": "Antoni Shkraba",
+    "page": "https://www.pexels.com/photo/sliced-kiwi-and-cashew-nuts-in-ceramic-bowl-6823331/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "morning-run.jpg",
+    "source": "Pexels",
+    "id": 347134,
+    "photographer": "Tirachard Kumtanom",
+    "page": "https://www.pexels.com/photo/woman-about-to-run-during-golden-hour-347134/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "spiral-calendar.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:spiral-calendar",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/spiral-calendar/",
+    "license": "MIT"
+  },
+  {
+    "file": "running-shoe.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:running-shoe",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/running-shoe/",
+    "license": "MIT"
+  },
+  {
+    "file": "green-salad.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:green-salad",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/green-salad/",
+    "license": "MIT"
+  },
+  {
+    "file": "books.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:books",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/books/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

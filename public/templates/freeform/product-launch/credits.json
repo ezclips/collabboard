@@ -1,0 +1,63 @@
+[
+  {
+    "file": "bottles.jpg",
+    "source": "Pexels",
+    "id": 10035322,
+    "photographer": "Natalia García Prieto",
+    "page": "https://www.pexels.com/photo/red-and-blue-bottle-on-snow-10035322/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "steel-bottle.jpg",
+    "source": "Pexels",
+    "id": 7879984,
+    "photographer": "Tima Miroshnichenko",
+    "page": "https://www.pexels.com/photo/person-holding-stainless-steel-vacuum-flask-7879984/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "whiteboard.jpg",
+    "source": "Pexels",
+    "id": 17724746,
+    "photographer": "Walls.io",
+    "page": "https://www.pexels.com/photo/man-and-woman-standing-by-whiteboard-17724746/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "rocket.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:rocket",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/rocket/",
+    "license": "MIT"
+  },
+  {
+    "file": "chart-increasing.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:chart-increasing",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/chart-increasing/",
+    "license": "MIT"
+  },
+  {
+    "file": "megaphone.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:megaphone",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/megaphone/",
+    "license": "MIT"
+  },
+  {
+    "file": "droplet.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:droplet",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/droplet/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

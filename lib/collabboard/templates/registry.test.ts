@@ -13,6 +13,28 @@ describe('templatesForLayout', () => {
     expect(group?.templates.map((template) => template.id)).toContain('project-plan');
   });
 
+  it('lists the eight finished templates in order', () => {
+    const group = templatesForLayout('freeform');
+    expect(group?.templates.map((template) => template.id)).toEqual([
+      'project-plan',
+      'moodboard',
+      'creative-brief',
+      'character-profile',
+      'weekly-plan',
+      'trip-planner',
+      'event-plan',
+      'product-launch',
+    ]);
+  });
+
+  it('has unique template ids and names', () => {
+    const group = templatesForLayout('freeform');
+    const ids = group?.templates.map((template) => template.id) ?? [];
+    const names = group?.templates.map((template) => template.name) ?? [];
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
   it('returns null for a layout with no group', () => {
     expect(templatesForLayout('wall')).toBeNull();
   });
@@ -36,6 +58,24 @@ describe('template assets', () => {
           expect(credits.map((entry) => entry.file)).toContain(path.basename(asset));
         });
       }
+    }
+  }
+});
+
+describe('template previews', () => {
+  for (const group of BOARD_TEMPLATE_GROUPS) {
+    for (const template of group.templates) {
+      it(`${template.id} has a previewUrl whose file exists and is credited`, () => {
+        const preview = template.previewUrl;
+        expect(preview).toBe(`/templates/freeform/${template.id}/preview.jpg`);
+        if (!preview) throw new Error('expected a previewUrl');
+        const filePath = path.join(ROOT, 'public', preview);
+        expect(fs.existsSync(filePath), `${preview} should exist under public/`).toBe(true);
+        const credits = JSON.parse(
+          fs.readFileSync(path.join(path.dirname(filePath), 'credits.json'), 'utf8'),
+        ) as Array<{ file: string }>;
+        expect(credits.map((entry) => entry.file)).toContain('preview.jpg');
+      });
     }
   }
 });

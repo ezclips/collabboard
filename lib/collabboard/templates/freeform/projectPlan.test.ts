@@ -12,6 +12,7 @@ describe('Project Plan', () => {
     expect(PROJECT_PLAN.id).toBe('project-plan');
     expect(PROJECT_PLAN.name).toBe('Project Plan');
     expect(PROJECT_PLAN.layout).toBe('freeform');
+    expect(PROJECT_PLAN.previewUrl).toBe('/templates/freeform/project-plan/preview.jpg');
   });
 
   it('has three columns, each with four children in order', () => {

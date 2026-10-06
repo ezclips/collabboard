@@ -1,0 +1,79 @@
+[
+  {
+    "file": "portrait.jpg",
+    "source": "Pexels",
+    "id": 20638090,
+    "photographer": "Willy Villada",
+    "page": "https://www.pexels.com/photo/portrait-of-a-woman-in-a-pilot-hat-20638090/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "portrait-pose.jpg",
+    "source": "Pexels",
+    "id": 21297740,
+    "photographer": "Noemí Jiménez",
+    "page": "https://www.pexels.com/photo/woman-in-aviator-hat-smiling-21297740/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "map-compass.jpg",
+    "source": "Pexels",
+    "id": 14436275,
+    "photographer": "Ylanite Koppens",
+    "page": "https://www.pexels.com/photo/gold-compass-and-a-rope-on-a-map-14436275/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "balloon-peach.jpg",
+    "source": "Pexels",
+    "id": 26497924,
+    "photographer": "Chloé Bams",
+    "page": "https://www.pexels.com/photo/hot-air-ballons-26497924/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "balloon-sunset.jpg",
+    "source": "Pexels",
+    "id": 10244848,
+    "photographer": "Rahime Gül",
+    "page": "https://www.pexels.com/photo/hot-air-balloons-in-the-sky-during-beautiful-sunset-10244848/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "compass.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:compass",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/compass/",
+    "license": "MIT"
+  },
+  {
+    "file": "scroll.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:scroll",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/scroll/",
+    "license": "MIT"
+  },
+  {
+    "file": "world-map.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:world-map",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/world-map/",
+    "license": "MIT"
+  },
+  {
+    "file": "crossed-swords.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:crossed-swords",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/crossed-swords/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

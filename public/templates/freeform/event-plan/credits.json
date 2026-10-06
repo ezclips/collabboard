@@ -1,0 +1,63 @@
+[
+  {
+    "file": "string-lights.jpg",
+    "source": "Pexels",
+    "id": 9562280,
+    "photographer": "Алексей Вечерин",
+    "page": "https://www.pexels.com/photo/string-lights-under-the-blue-sky-9562280/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "dinner-table.jpg",
+    "source": "Pexels",
+    "id": 5961880,
+    "photographer": "cottonbro studio",
+    "page": "https://www.pexels.com/photo/food-on-the-table-5961880/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "food-spread.jpg",
+    "source": "Pexels",
+    "id": 8841416,
+    "photographer": "Julia M Cameron",
+    "page": "https://www.pexels.com/photo/grilled-vegetables-on-table-in-yard-8841416/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "party-popper.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:party-popper",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/party-popper/",
+    "license": "MIT"
+  },
+  {
+    "file": "birthday-cake.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:birthday-cake",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/birthday-cake/",
+    "license": "MIT"
+  },
+  {
+    "file": "balloon.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:balloon",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/balloon/",
+    "license": "MIT"
+  },
+  {
+    "file": "musical-notes.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:musical-notes",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/musical-notes/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]
