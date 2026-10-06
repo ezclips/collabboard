@@ -2,6 +2,7 @@ import React from 'react';
 import DOMPurify from 'dompurify';
 import { Padlet } from '@/types/collabboard';
 import { resolveCaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { contrastIconColor } from '@/lib/domain/canvas/contrastColor';
 import { decodeHtmlEntities } from '@/lib/html-utils';
 import { Edit2 } from 'lucide-react';
 import ReactionDisplay from './editors/ReactionDisplay';
@@ -57,7 +58,11 @@ export default function CardPreview({
     const cardBgColor = metadata?.backgroundColor || '#ffffff'; // Outer card background (Tab 2: "Icon BG")
     const svgUrl = metadata?.svgUrl;
     const topStripColor = metadata?.topStripColor || '#4f46e5'; // Top strip (Tab 3: "Icon Strip")
-    const titleStyle = resolveCaptionStyle(metadata?.titleStyle, metadata?.textColor);
+    const showTopStrip = !!topStripColor && topStripColor !== 'transparent';
+    const titleStyle = resolveCaptionStyle(
+        metadata?.titleStyle,
+        metadata?.textColor || (showTopStrip ? contrastIconColor(topStripColor) : undefined),
+    );
     // The Clipart branch's caption (the text below reactions, metadata.caption)
     // has always been a field distinct from the title -- but until this fix it
     // was rendered with the SAME titleStyle object, so changing the title's
@@ -65,7 +70,6 @@ export default function CardPreview({
     // caption's too. metadata.captionStyle is now the caption's own style,
     // independent of metadata.titleStyle (see ClipartCardDraftModal.tsx).
     const captionStyle = resolveCaptionStyle(metadata?.captionStyle, metadata?.textColor);
-    const showTopStrip = !!topStripColor && topStripColor !== 'transparent';
     const isClipartCard = !!svgUrl;
     const stripBg = showTopStrip ? topStripColor : 'rgba(0,0,0,0.04)';
     const stripIconColor = showTopStrip ? '#f3f4f6' : '#9ca3af';

@@ -137,7 +137,7 @@ describe('CardPreview captionStyle reader legacy compatibility', () => {
 
   it('keeps metadata.textColor and default color precedence for legacy cards', () => {
     expect(style(renderCard(padlet({ metadata: { textColor: '#0f172a' } })))).toBe('color:#0f172a');
-    expect(style(renderCard(padlet({ metadata: { textColor: undefined } })))).toBe('color:#1F2937');
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined } })))).toBe('color:#f8fafc');
   });
 
   it('does not change legacy card dimensions, wrappers, spacing, or title source', () => {
@@ -169,7 +169,7 @@ describe('CardPreview titleStyle reader rendering', () => {
 
   it('falls back from invalid titleStyle.color to metadata.textColor, then default color', () => {
     expect(style(renderCard(padlet({ metadata: { textColor: '#334155', titleStyle: { color: 'red' } } })))).toBe('color:#334155');
-    expect(style(renderCard(padlet({ metadata: { textColor: undefined, titleStyle: { color: 'red' } } })))).toBe('color:#1F2937');
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined, titleStyle: { color: 'red' } } })))).toBe('color:#f8fafc');
   });
 
   it('renders only valid supplied titleStyle fields, without writing metadata, and renders the real caption text below reactions', () => {
@@ -495,5 +495,31 @@ describe('CardPreview edit-content affordance (PATCH-138)', () => {
     expect(rendered).toContain('Clipart caption');
     expect(rendered).toContain('aria-label="Open card"');
     expect((rendered.match(/<button/g) || []).length).toBe(2);
+  });
+});
+
+describe('CardPreview title contrast on the top strip (PATCH-295)', () => {
+  it('uses light text on the default indigo strip when no colour is chosen', () => {
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined, topStripColor: undefined } })))).toBe('color:#f8fafc');
+  });
+
+  it('uses dark text on a light strip', () => {
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined, topStripColor: '#fde68a' } })))).toBe('color:#1e293b');
+  });
+
+  it('lets a chosen metadata.textColor win over the strip contrast', () => {
+    expect(style(renderCard(padlet({ metadata: { textColor: '#ff0000', topStripColor: '#4f46e5' } })))).toBe('color:#ff0000');
+  });
+
+  it('lets a chosen titleStyle.color win over the strip contrast', () => {
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined, topStripColor: '#4f46e5', titleStyle: { color: '#00ff00' } } })))).toBe('color:#00ff00');
+  });
+
+  it('keeps the legacy dark default when the strip is transparent', () => {
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined, topStripColor: 'transparent' } })))).toBe('color:#1F2937');
+  });
+
+  it('applies the same strip contrast to a document card with the default strip', () => {
+    expect(style(renderCard(padlet({ metadata: { svgUrl: undefined, textColor: undefined, topStripColor: undefined } })))).toBe('color:#f8fafc');
   });
 });

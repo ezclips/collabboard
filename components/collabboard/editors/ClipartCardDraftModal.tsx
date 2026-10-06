@@ -11,6 +11,7 @@ import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import { contrastIconColor } from '@/lib/domain/canvas/contrastColor';
 import { nextTextAlign, type TextAlignValue } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
@@ -195,7 +196,12 @@ export default function ClipartCardDraftModal({
   // across every Text style panel) toggle on top of whichever heading preset
   // is active, same layering as a TipTap mark over a paragraph.
   const titleStyle = (previewPadlet.metadata?.titleStyle as Record<string, unknown>) || {};
-  const titleInputStyle = resolveCaptionStyle(titleStyle, previewPadlet.metadata?.textColor);
+  const titleStripColor = previewPadlet.metadata?.topStripColor || '#4f46e5';
+  const showTitleStrip = !!titleStripColor && titleStripColor !== 'transparent';
+  const titleInputStyle = resolveCaptionStyle(
+    titleStyle,
+    previewPadlet.metadata?.textColor || (showTitleStrip ? contrastIconColor(titleStripColor) : undefined),
+  );
   const applyTitlePreset = applyPreset(writeTitleStyle, titleStyle);
   const isTitleBold = titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold';
   const isTitleItalic = titleStyle.fontStyle === 'italic';
