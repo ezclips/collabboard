@@ -1,13 +1,16 @@
 /**
- * PATCH-282. The curated list of AntV designs shipped as the drawing editor's
- * built-in library. The order is the CTO's pick from the 276-design audit
- * (PATCH-282): at most 6 designs per AntV family, no "animated" variants.
+ * PATCH-292. The list of AntV designs shipped as the drawing editor's built-in
+ * library. The 74 designs curated in PATCH-282 (`ANTV_LIBRARY_PICKS`) stay at the
+ * top of their section; every other still catalogue template follows, in
+ * catalogue order. The 20 `-animated-` variants are left out: a drawing cannot
+ * move.
  *
  * The list is pure data: the export view (`AntvExcalidrawHarness` with
  * `?export=library`) renders exactly these, in this order, into
  * `public/libraries/antv-diagrams.excalidrawlib`.
  */
 
+import { ANTV_TEMPLATES } from '../catalog';
 import { parseAntvChartData } from '../chartValues/data';
 
 export type AntvLibrarySection =
@@ -38,7 +41,8 @@ export function libraryTemplateName(template: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-const BY_SECTION: ReadonlyArray<readonly [AntvLibrarySection, readonly string[]]> = [
+/** PATCH-282's curated picks: at most 6 designs per family. */
+export const ANTV_LIBRARY_PICKS: ReadonlyArray<readonly [AntvLibrarySection, readonly string[]]> = [
   [
     'Charts',
     [
@@ -145,9 +149,53 @@ const BY_SECTION: ReadonlyArray<readonly [AntvLibrarySection, readonly string[]]
   ],
 ];
 
-export const ANTV_LIBRARY_TEMPLATES: readonly AntvLibraryTemplate[] = BY_SECTION.flatMap(
-  ([section, templates]) =>
-    templates.map((template) => ({
+/** The section order PATCH-282 shipped and PATCH-292 keeps. */
+const SECTION_ORDER: readonly AntvLibrarySection[] = [
+  'Charts',
+  'Lists',
+  'Steps & timelines',
+  'Hierarchies & mind maps',
+  'Comparisons',
+  'Relations',
+];
+
+/** Which section a catalogue category belongs to. */
+const SECTION_BY_CATEGORY: Readonly<Record<string, AntvLibrarySection>> = {
+  chart: 'Charts',
+  list: 'Lists',
+  sequence: 'Steps & timelines',
+  hierarchy: 'Hierarchies & mind maps',
+  compare: 'Comparisons',
+  quadrant: 'Comparisons',
+  relation: 'Relations',
+};
+
+/** The section a catalogue category maps to; throws if the catalogue grows one. */
+function sectionForCategory(category: string): AntvLibrarySection {
+  const section = SECTION_BY_CATEGORY[category];
+  if (!section) throw new Error(`Unknown AntV catalogue category: ${category}`);
+  return section;
+}
+
+function isAnimatedTemplate(name: string): boolean {
+  return name.includes('-animated-');
+}
+
+/** The section's picks first, in curated order, then the rest in catalogue order. */
+function sectionTemplates(section: AntvLibrarySection): string[] {
+  const picks = ANTV_LIBRARY_PICKS.find(([name]) => name === section)?.[1] ?? [];
+  const picked = new Set(picks);
+  const rest = ANTV_TEMPLATES.filter(
+    (info) => sectionForCategory(info.category) === section && !isAnimatedTemplate(info.name),
+  )
+    .map((info) => info.name)
+    .filter((name) => !picked.has(name));
+  return [...picks, ...rest];
+}
+
+export const ANTV_LIBRARY_TEMPLATES: readonly AntvLibraryTemplate[] = SECTION_ORDER.flatMap(
+  (section) =>
+    sectionTemplates(section).map((template) => ({
       template,
       name: libraryTemplateName(template),
       section,

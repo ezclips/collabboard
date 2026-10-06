@@ -6,6 +6,9 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { isAntvChartTemplate, parseAntvChartData } from '../ai/antv/chartValues/data';
+import { ANTV_LIBRARY_TEMPLATES } from '../ai/antv/toExcalidraw/libraryTemplates';
+
 const VALID_FILE = {
   type: 'excalidrawlib',
   version: 2,
@@ -118,8 +121,17 @@ describe('PATCH-282: loadAntvLibraryItems', () => {
 // are skipped rather than faked.
 const GENERATED_FILE = path.resolve('public/libraries/antv-diagrams.excalidrawlib');
 const GENERATED_EXISTS = fs.existsSync(GENERATED_FILE);
+const MAX_BYTES = 10 * 1024 * 1024;
 
-describe.skipIf(!GENERATED_EXISTS)('PATCH-282: generated antv-diagrams.excalidrawlib', () => {
+describe.skipIf(!GENERATED_EXISTS)('PATCH-292: generated antv-diagrams.excalidrawlib', () => {
+  interface GeneratedFile {
+    libraryItems: Array<{ id: string; elements: Array<{ customData?: { antvChart?: unknown } }> }>;
+  }
+
+  function readGeneratedFile(): GeneratedFile {
+    return JSON.parse(fs.readFileSync(GENERATED_FILE, 'utf8')) as GeneratedFile;
+  }
+
   it('parses and holds image-free items with unique element ids', () => {
     const file = JSON.parse(fs.readFileSync(GENERATED_FILE, 'utf8')) as {
       libraryItems: Array<{ id: string; elements: Array<{ id: string; type: string }> }>;
@@ -131,5 +143,32 @@ describe.skipIf(!GENERATED_EXISTS)('PATCH-282: generated antv-diagrams.excalidra
       const ids = item.elements.map((element) => element.id);
       expect(new Set(ids).size).toBe(ids.length);
     }
+  });
+
+  it('holds exactly one item per ANTV_LIBRARY_TEMPLATES entry, in order', () => {
+    const file = readGeneratedFile();
+    expect(file.libraryItems.map((item) => item.id)).toEqual(
+      ANTV_LIBRARY_TEMPLATES.map((entry) => `antv:${entry.template}`),
+    );
+  });
+
+  it('attaches parseable chart data to supported chart items only', () => {
+    const file = readGeneratedFile();
+    ANTV_LIBRARY_TEMPLATES.forEach((entry, index) => {
+      const item = file.libraryItems[index];
+      const isChart = isAntvChartTemplate(entry.template);
+      for (const element of item.elements) {
+        const chart = element.customData?.antvChart;
+        if (isChart) {
+          expect(parseAntvChartData(chart), `${entry.template} element chart data`).not.toBeNull();
+        } else {
+          expect(chart, `${entry.template} element chart data`).toBeUndefined();
+        }
+      }
+    });
+  });
+
+  it('fits the 10 MB budget', () => {
+    expect(fs.statSync(GENERATED_FILE).size).toBeLessThanOrEqual(MAX_BYTES);
   });
 });

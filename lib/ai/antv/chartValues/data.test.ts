@@ -9,6 +9,7 @@ import {
   antvChartDataSchema,
   chartDataToOutline,
   isAntvChartTemplate,
+  isAntvPieTemplate,
   parseAntvChartData,
   type AntvChartData,
 } from './data';
@@ -31,14 +32,27 @@ function sample(overrides: Partial<AntvChartData> = {}): unknown {
 }
 
 describe('PATCH-287: isAntvChartTemplate', () => {
-  it('knows the 7 chart templates and rejects others', () => {
-    expect(ANTV_CHART_TEMPLATES).toHaveLength(7);
+  it('knows the 9 chart templates and rejects others', () => {
+    expect(ANTV_CHART_TEMPLATES).toHaveLength(9);
     expect(isAntvChartTemplate('chart-pie-donut-pill-badge')).toBe(true);
     expect(isAntvChartTemplate('chart-column-simple')).toBe(true);
+    expect(isAntvChartTemplate('chart-pie-donut-compact-card')).toBe(true);
+    expect(isAntvChartTemplate('chart-pie-plain-text')).toBe(true);
     expect(isAntvChartTemplate('chart-wordcloud')).toBe(false);
+    expect(isAntvChartTemplate('chart-wordcloud-rotate')).toBe(false);
     expect(isAntvChartTemplate('list-grid-badge-card')).toBe(false);
     expect(isAntvChartTemplate(undefined)).toBe(false);
     expect(isAntvChartTemplate(7)).toBe(false);
+  });
+
+  it('accepts the two new pies in the schema and flags them as pies', () => {
+    const template = 'chart-pie-donut-compact-card' as AntvChartData['template'];
+    const plain = 'chart-pie-plain-text' as AntvChartData['template'];
+    expect(antvChartDataSchema.safeParse(sample({ template })).success).toBe(true);
+    expect(antvChartDataSchema.safeParse(sample({ template: plain })).success).toBe(true);
+    expect(isAntvPieTemplate('chart-pie-donut-compact-card')).toBe(true);
+    expect(isAntvPieTemplate('chart-pie-plain-text')).toBe(true);
+    expect(isAntvPieTemplate('chart-wordcloud-rotate')).toBe(false);
   });
 });
 

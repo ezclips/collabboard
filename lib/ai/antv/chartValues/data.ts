@@ -10,12 +10,14 @@ import { z } from 'zod';
 
 import type { VisualOutline } from '@/lib/ai/outline';
 
-/** The 7 chart templates the values panel supports. */
+/** The 9 chart templates the values panel supports. */
 export const ANTV_CHART_TEMPLATES = [
   'chart-pie-donut-pill-badge',
   'chart-pie-compact-card',
   'chart-pie-donut-plain-text',
   'chart-pie-pill-badge',
+  'chart-pie-donut-compact-card',
+  'chart-pie-plain-text',
   'chart-column-simple',
   'chart-bar-plain-text',
   'chart-line-plain-text',
@@ -23,7 +25,7 @@ export const ANTV_CHART_TEMPLATES = [
 
 export type AntvChartTemplate = (typeof ANTV_CHART_TEMPLATES)[number];
 
-/** True only for one of the 7 supported chart template ids. */
+/** True only for one of the 9 supported chart template ids. */
 export function isAntvChartTemplate(id: unknown): id is AntvChartTemplate {
   return typeof id === 'string' && (ANTV_CHART_TEMPLATES as readonly string[]).includes(id);
 }
