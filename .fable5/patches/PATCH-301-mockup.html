@@ -1,0 +1,538 @@
+<title>New Board Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#f6f7f9; --surface:#ffffff; --sunken:#eef1f5; --line:#e2e6ec; --line-strong:#cfd5de;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#7b8597;
+  --accent:#2563eb; --accent-ink:#ffffff; --accent-soft:#e8efff;
+  --mini-a:#cbd8f6; --mini-b:#f3d9a8; --mini-c:#c9e8d4; --mini-d:#f2c6c6; --mini-ink:#94a3b8;
+  --shadow:0 1px 2px rgba(15,23,42,.06),0 4px 16px rgba(15,23,42,.06);
+  --shadow-pop:0 16px 48px rgba(15,23,42,.22);
+  --scrim:rgba(15,23,42,.5);
+  --font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --ground:#0d1117; --surface:#151b24; --sunken:#1c2430; --line:#263041; --line-strong:#34405a;
+  --ink:#e8edf5; --ink-2:#a9b4c6; --ink-3:#7d8899;
+  --accent:#5b8cff; --accent-ink:#0b1020; --accent-soft:#1a2747;
+  --mini-a:#2c3f6b; --mini-b:#5c4a28; --mini-c:#244a36; --mini-d:#5a2f33; --mini-ink:#5f6b80;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+  --shadow-pop:0 16px 48px rgba(0,0,0,.6); --scrim:rgba(0,0,0,.65);
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0d1117; --surface:#151b24; --sunken:#1c2430; --line:#263041; --line-strong:#34405a;
+  --ink:#e8edf5; --ink-2:#a9b4c6; --ink-3:#7d8899;
+  --accent:#5b8cff; --accent-ink:#0b1020; --accent-soft:#1a2747;
+  --mini-a:#2c3f6b; --mini-b:#5c4a28; --mini-c:#244a36; --mini-d:#5a2f33; --mini-ink:#5f6b80;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+  --shadow-pop:0 16px 48px rgba(0,0,0,.6); --scrim:rgba(0,0,0,.65);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+.mock-note{max-width:1320px;margin:0 auto;padding-block:10px;padding-inline:16px;color:var(--ink-3);font-size:12px}
+.app{max-width:1320px;margin:0 auto 32px;padding-inline:16px}
+.frame{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+
+.bar{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--surface);border-radius:14px 14px 0 0}
+.back{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2);font-weight:500;padding:6px 8px;border-radius:8px;border:0;background:none;cursor:pointer}
+.back:hover{background:var(--sunken);color:var(--ink)}
+.bar h1{font-size:15px;font-weight:600;margin:0;padding-left:12px;border-left:1px solid var(--line)}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:38px;padding:0 16px;border-radius:9px;font-weight:600;cursor:pointer;border:1px solid transparent;white-space:nowrap}
+.btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{filter:brightness(1.07)}
+.btn-ghost{background:var(--surface);border-color:var(--line-strong);color:var(--ink)}
+.btn-ghost:hover{background:var(--sunken)}
+.btn-sm{height:32px;padding:0 12px;font-size:13px}
+
+.body{display:grid;grid-template-columns:minmax(0,1fr) 352px}
+.main{padding:24px 28px 32px;display:flex;flex-direction:column;gap:28px;min-width:0}
+.rail{border-left:1px solid var(--line);background:var(--ground);padding:22px;border-radius:0 0 14px 0}
+.rail-inner{position:sticky;top:16px;display:flex;flex-direction:column;gap:18px}
+@media (max-width:980px){.body{grid-template-columns:1fr}.rail{border-left:0;border-top:1px solid var(--line);border-radius:0 0 14px 14px}}
+
+.sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.sec-head h2{font-size:20px;font-weight:650;letter-spacing:-.01em;margin:0;text-wrap:balance}
+.sec-head p{margin:0;color:var(--ink-2)}
+.group-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin:18px 0 10px}
+
+/* format tiles */
+.formats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+@media (max-width:1180px){.formats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:520px){.formats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.fmt{position:relative;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:border-color .15s,box-shadow .15s,transform .15s}
+.fmt:hover{border-color:var(--line-strong);transform:translateY(-1px)}
+.fmt[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.fmt .mini{aspect-ratio:5/3;max-width:100%;border-radius:8px;background:var(--sunken);display:block;width:100%}
+.fmt .name{font-weight:600;font-size:14px;margin-top:2px}
+.fmt .desc{color:var(--ink-2);font-size:12px;line-height:1.35}
+.fmt .count{position:absolute;top:14px;right:14px;font-family:var(--mono);font-size:10.5px;background:var(--surface);color:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:0 7px}
+.fmt .tick{position:absolute;top:15px;left:15px;width:20px;height:20px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:none;align-items:center;justify-content:center}
+.fmt .tick svg{width:12px;height:12px;stroke-width:3}
+.fmt[aria-pressed="true"] .tick{display:flex}
+.tag{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 7px}
+.tag svg{width:11px;height:11px}
+
+/* start with */
+.start{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:14px}
+@media (max-width:720px){.start{grid-template-columns:1fr}}
+.choice{position:relative;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s,box-shadow .15s}
+.choice:hover{border-color:var(--line-strong);box-shadow:var(--shadow)}
+.choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.choice .art{height:170px;max-width:100%;background:var(--sunken);position:relative;overflow:hidden}
+.choice .blank-art{display:flex;align-items:center;justify-content:center;color:var(--ink-3);background:repeating-linear-gradient(0deg,transparent 0 19px,var(--line) 19px 20px),repeating-linear-gradient(90deg,transparent 0 19px,var(--line) 19px 20px),var(--surface)}
+.choice .blank-art svg{width:30px;height:30px}
+.choice .meta{padding:12px 14px 14px;display:flex;align-items:center;gap:12px}
+.choice .meta .tx{flex:1;min-width:0}
+.choice .t{font-weight:600}
+.choice .d{color:var(--ink-2);font-size:12.5px}
+.fan{position:absolute;inset:0}
+.fan img{position:absolute;width:46%;aspect-ratio:16/10;object-fit:cover;object-position:top;border-radius:8px;border:1px solid var(--line);box-shadow:var(--shadow);background:var(--surface);max-width:100%}
+.fan img:nth-child(1){left:6%;top:22%;transform:rotate(-5deg)}
+.fan img:nth-child(2){left:27%;top:12%;transform:rotate(1deg);z-index:2}
+.fan img:nth-child(3){left:48%;top:24%;transform:rotate(5deg)}
+.chosen-art{position:absolute;inset:0;background:var(--surface) top/cover no-repeat}
+
+/* rail */
+.stage-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.stage{position:relative;aspect-ratio:5/3;max-width:100%;border-radius:10px;background:var(--sunken);overflow:hidden}
+.stage .card{position:absolute;border-radius:5px;box-shadow:0 1px 2px rgba(15,23,42,.12);transition:left .75s cubic-bezier(.2,.8,.2,1),top .75s cubic-bezier(.2,.8,.2,1),width .75s cubic-bezier(.2,.8,.2,1),height .75s cubic-bezier(.2,.8,.2,1),transform .75s cubic-bezier(.2,.8,.2,1),border-radius .5s,opacity .4s}
+.stage .card::after{content:"";position:absolute;left:12%;right:30%;bottom:14%;height:2px;border-radius:2px;background:rgba(15,23,42,.18)}
+.stage .deco{position:absolute;opacity:0;transition:opacity .5s}
+.stage[data-layout="timeline"] .d-line,.stage[data-layout="map"] .d-map,.stage[data-layout="kanban"] .d-lanes,.stage[data-layout="gantt"] .d-rows,.stage[data-layout="scheduler"] .d-cal,.stage[data-layout="drawing"] .d-ink,.stage[data-layout="columns"] .d-heads{opacity:1}
+.d-line{left:calc(50% - 1px);top:4%;width:2px;height:92%;background:var(--mini-ink)}
+.d-map{inset:8% 4%;border-radius:40% 55% 45% 50%/50% 40% 60% 45%;background:var(--mini-c)}
+.d-lanes{inset:6% 4%;background:linear-gradient(90deg,var(--line) 0 30%,transparent 30% 35%,var(--line) 35% 65%,transparent 65% 70%,var(--line) 70% 100%);border-radius:6px}
+.d-rows{inset:0;background:repeating-linear-gradient(0deg,transparent 0 13px,var(--line-strong) 13px 14px)}
+.d-cal{inset:0;background:repeating-linear-gradient(0deg,transparent 0 23px,var(--line-strong) 23px 24px),repeating-linear-gradient(90deg,transparent 0 41px,var(--line-strong) 41px 42px)}
+.d-heads{left:6%;right:6%;top:6%;height:6%;background:linear-gradient(90deg,var(--mini-ink) 0 28%,transparent 28% 36%,var(--mini-ink) 36% 64%,transparent 64% 72%,var(--mini-ink) 72% 100%);border-radius:3px;opacity:0}
+.d-ink{inset:0}
+.d-ink svg{width:100%;height:100%}
+.stage-meta{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.stage-meta .s1{font-weight:600}
+.stage-meta .s2{color:var(--ink-2);font-size:12.5px}
+.dots{display:flex;gap:4px}
+.dots i{width:5px;height:5px;border-radius:50%;background:var(--line-strong)}
+.dots i.on{background:var(--accent)}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>label,.field>.lbl{font-size:12.5px;font-weight:600}
+.input{height:38px;border:1px solid var(--line-strong);border-radius:9px;padding:0 12px;background:var(--surface);width:100%}
+textarea.input{height:60px;padding:8px 12px;resize:vertical}
+.pick-row{display:flex;flex-wrap:wrap;gap:6px}
+.ic{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--ink-2)}
+.ic:hover{border-color:var(--line-strong);color:var(--ink)}
+.ic[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.ic.more{border-style:dashed;color:var(--ink-3)}
+.sw{width:36px;height:36px;border-radius:50%;border:3px solid var(--surface);box-shadow:0 0 0 1px var(--line-strong);cursor:pointer;background-size:cover;background-position:center}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--accent)}
+.sw.more{display:flex;align-items:center;justify-content:center;background:var(--surface);color:var(--ink-3);border:1px dashed var(--line-strong);box-shadow:none}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.toggle-row .tl{font-weight:600;font-size:13px}
+.toggle-row .ts{color:var(--ink-3);font-size:12px}
+.switch{width:38px;height:22px;border-radius:999px;background:var(--line-strong);border:0;position:relative;cursor:pointer;flex:none;transition:background .15s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(16px)}
+.divider{height:1px;background:var(--line)}
+.wide{width:100%;height:42px}
+
+/* modals */
+.scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20;animation:fade .15s ease-out}
+@keyframes fade{from{opacity:0}}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-pop);width:min(640px,100%);max-height:calc(100% - 32px);display:flex;flex-direction:column;overflow:hidden;animation:rise .2s ease-out}
+@keyframes rise{from{transform:translateY(8px);opacity:0}}
+.modal.xl{width:min(1240px,100%);height:calc(100% - 32px)}
+.m-head{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.m-head h3{margin:0;font-size:17px;font-weight:650;flex:1}
+.x{width:34px;height:34px;border-radius:9px;border:0;background:none;cursor:pointer;color:var(--ink-2);display:flex;align-items:center;justify-content:center}
+.x:hover{background:var(--sunken)}
+.m-body{padding:18px 20px;overflow:auto}
+.tabs{display:flex;gap:4px;background:var(--sunken);padding:4px;border-radius:10px;margin-bottom:16px;flex-wrap:wrap}
+.tabs button{border:0;background:none;padding:6px 12px;border-radius:7px;cursor:pointer;font-weight:500;color:var(--ink-2)}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.src-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.bg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:10px}
+.bg-grid.photos{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+.bg-opt{aspect-ratio:1;border-radius:10px;border:1px solid var(--line);cursor:pointer;background-size:cover;background-position:center;max-width:100%}
+.bg-grid.photos .bg-opt{aspect-ratio:3/2}
+.bg-opt[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:2px}
+.icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:8px}
+.icon-grid .ic{width:auto;height:52px}
+.icon-grid .ic svg{width:22px;height:22px}
+.emoji-grid .ic{font-size:22px}
+.drop{border:1.5px dashed var(--line-strong);border-radius:12px;padding:32px;text-align:center;color:var(--ink-2)}
+.hint{color:var(--ink-3);font-size:12px;margin-top:10px}
+
+/* template gallery */
+.gal{display:grid;grid-template-columns:220px minmax(0,1fr);flex:1;min-height:0}
+@media (max-width:760px){.gal{grid-template-columns:1fr}.gal-nav{display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}}
+.gal-nav{border-right:1px solid var(--line);padding:14px 10px;overflow:auto;background:var(--ground)}
+.gal-nav button{display:flex;width:100%;justify-content:space-between;align-items:center;gap:10px;border:0;background:none;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--ink-2);font-weight:500;text-align:left;white-space:nowrap}
+.gal-nav button:hover{background:var(--sunken)}
+.gal-nav button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.gal-nav .n{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.gal-main{overflow:auto;padding:20px}
+.gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px}
+.gcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;text-align:left;padding:0;display:flex;flex-direction:column;transition:border-color .15s,box-shadow .15s,transform .15s}
+.gcard:hover{border-color:var(--line-strong);box-shadow:var(--shadow);transform:translateY(-2px)}
+.gcard .shot{aspect-ratio:16/10;max-width:100%;width:100%;background:var(--sunken) top/cover no-repeat;border-bottom:1px solid var(--line)}
+.gcard .meta{padding:12px 14px 14px;display:flex;flex-direction:column;gap:3px}
+.gcard .t{font-weight:600;font-size:15px}
+.gcard .d{color:var(--ink-2);font-size:13px}
+.gcard .chips{display:flex;gap:6px;margin-top:6px}
+.chip{font-size:11px;font-weight:600;color:var(--ink-2);background:var(--sunken);border-radius:999px;padding:2px 8px}
+.detail{display:grid;grid-template-columns:minmax(0,1fr) 320px;flex:1;min-height:0}
+@media (max-width:860px){.detail{grid-template-columns:1fr;overflow:auto}}
+.detail .big{background:var(--sunken);overflow:auto;padding:20px;display:flex;align-items:flex-start;justify-content:center}
+.detail .big img{max-width:100%;border-radius:10px;border:1px solid var(--line);box-shadow:var(--shadow);background:var(--surface)}
+.detail .side{padding:22px;display:flex;flex-direction:column;gap:12px;border-left:1px solid var(--line);overflow:auto}
+.detail h4{margin:0;font-size:22px;font-weight:650;letter-spacing:-.01em;text-wrap:balance}
+.detail ul{margin:0;padding-left:18px;color:var(--ink-2)}
+.detail .actions{margin-top:auto;display:flex;flex-direction:column;gap:8px}
+.toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:10px;font-weight:500;box-shadow:var(--shadow-pop);z-index:40;max-width:calc(100% - 32px)}
+@media (prefers-reduced-motion:reduce){*,*::after{transition:none!important;animation:none!important}}
+@media (max-width:520px){.main{padding:20px 16px}.bar h1{display:none}}
+.mini .a{fill:var(--mini-a)}.mini .b{fill:var(--mini-b)}.mini .c{fill:var(--mini-c)}.mini .d{fill:var(--mini-d)}
+.mini .k{fill:var(--mini-ink)}.mini .s{fill:var(--line)}
+.mini .l{stroke:var(--mini-ink);stroke-width:2;fill:none}.mini .g{stroke:var(--line-strong);stroke-width:1;fill:none}
+.mini .pin{fill:var(--accent)}.mini .ink{stroke:var(--accent);stroke-width:3;fill:none;stroke-linecap:round}
+.mini .o{fill:none;stroke:var(--mini-ink);stroke-width:2}
+</style>
+
+<div class="mock-note">Mockup v3 of the new "New board" page. Click formats, the template card, icons, the + buttons and the switches. Nothing is saved.</div>
+<div class="app">
+  <div class="frame">
+    <div class="bar">
+      <button class="back" type="button" id="back-btn"><svg class="i" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Dashboard</button>
+      <h1>New board</h1>
+      <div class="spacer"></div>
+    </div>
+    <div class="body">
+      <main class="main">
+        <section>
+          <div class="sec-head"><h2>What kind of board?</h2><p>You can switch format later — your posts move with you.</p></div>
+          <div id="format-groups"></div>
+        </section>
+        <section>
+          <div class="sec-head"><h2>Start with</h2><p id="start-sub"></p></div>
+          <div class="start" id="start" style="margin-top:14px"></div>
+        </section>
+      </main>
+      <aside class="rail"><div class="rail-inner">
+        <div class="stage-card">
+          <div class="stage" id="stage" data-layout="freeform" aria-hidden="true">
+            <div class="deco d-map"></div><div class="deco d-lanes"></div><div class="deco d-rows"></div><div class="deco d-cal"></div><div class="deco d-line"></div><div class="deco d-heads"></div>
+            <div class="deco d-ink"><svg viewBox="0 0 100 60" preserveAspectRatio="none"><path d="M8 44 C20 10 34 52 48 26 S76 8 92 34" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg></div>
+          </div>
+          <div class="stage-meta"><div><div class="s1" id="stage-name">Freeform</div><div class="s2" id="stage-sub"></div></div><div class="dots" id="dots"></div></div>
+        </div>
+        <div class="field"><label for="f-name">Name</label><input class="input" id="f-name" value="Untitled board"></div>
+        <div class="field"><label for="f-desc">Description <span style="color:var(--ink-3);font-weight:400">(optional)</span></label><textarea class="input" id="f-desc" placeholder="What is this board for?"></textarea></div>
+        <div class="field"><span class="lbl">Icon</span><div class="pick-row" id="icons"></div></div>
+        <div class="field"><span class="lbl">Background</span><div class="pick-row" id="swatches"></div></div>
+        <div class="divider"></div>
+        <div class="toggle-row"><div><div class="tl">Comments</div><div class="ts">People can comment on posts</div></div><button class="switch" role="switch" aria-checked="true" id="sw-comments" aria-label="Comments"></button></div>
+        <div class="toggle-row"><div><div class="tl">New posts first</div><div class="ts">Newest posts appear at the top</div></div><button class="switch" role="switch" aria-checked="true" id="sw-newfirst" aria-label="New posts first"></button></div>
+        <div class="divider"></div>
+        <button class="btn btn-primary wide" type="button" id="create-rail">Create board</button>
+      </div></aside>
+    </div>
+  </div>
+</div>
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script>
+const PREVIEWS = /*PREVIEWS*/{};
+const BG_PHOTOS = /*BGPHOTOS*/[];
+const ICON = {
+  check:'<path d="M20 6 9 17l-5-5"/>', plus:'<path d="M12 5v14M5 12h14"/>', x:'<path d="M18 6 6 18M6 6l12 12"/>', back:'<path d="M19 12H5M12 19l-7-7 7-7"/>',
+  sparkles:'<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  layout:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+  star:'<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+  heart:'<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z"/>',
+  bulb:'<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6M10 22h4"/>',
+  book:'<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  pin:'<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
+  calendar:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  camera:'<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
+  music:'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  flask:'<path d="M10 2v7.31M14 9.3V2M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/>',
+  cap:'<path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5M22 10v6"/>',
+  rocket:'<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>',
+  users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  target:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  pen:'<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+};
+const svg = (name, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+
+const MINI = {
+  freeform:`<rect x="10" y="10" width="34" height="22" rx="3" class="a"/><rect x="58" y="16" width="26" height="30" rx="3" class="b"/><rect x="92" y="8" width="20" height="16" rx="3" class="c"/><rect x="20" y="42" width="30" height="20" rx="3" class="d"/><path d="M48 24 L58 30" class="l"/><rect x="88" y="40" width="24" height="22" rx="3" class="a"/>`,
+  wall:`<rect x="10" y="8" width="30" height="26" rx="3" class="a"/><rect x="45" y="8" width="30" height="18" rx="3" class="b"/><rect x="80" y="8" width="30" height="30" rx="3" class="c"/><rect x="10" y="38" width="30" height="26" rx="3" class="d"/><rect x="45" y="30" width="30" height="34" rx="3" class="a"/><rect x="80" y="42" width="30" height="22" rx="3" class="b"/>`,
+  columns:`<rect x="10" y="8" width="30" height="6" rx="2" class="k"/><rect x="45" y="8" width="30" height="6" rx="2" class="k"/><rect x="80" y="8" width="30" height="6" rx="2" class="k"/><rect x="10" y="18" width="30" height="16" rx="3" class="a"/><rect x="10" y="38" width="30" height="14" rx="3" class="b"/><rect x="45" y="18" width="30" height="22" rx="3" class="c"/><rect x="80" y="18" width="30" height="12" rx="3" class="d"/><rect x="80" y="34" width="30" height="18" rx="3" class="a"/>`,
+  grid:`<rect x="10" y="8" width="30" height="24" rx="3" class="a"/><rect x="45" y="8" width="30" height="24" rx="3" class="b"/><rect x="80" y="8" width="30" height="24" rx="3" class="c"/><rect x="10" y="38" width="30" height="24" rx="3" class="d"/><rect x="45" y="38" width="30" height="24" rx="3" class="a"/><rect x="80" y="38" width="30" height="24" rx="3" class="b"/>`,
+  timeline:`<path d="M60 6 V66" class="l"/><circle cx="60" cy="16" r="3" class="k"/><circle cx="60" cy="36" r="3" class="k"/><circle cx="60" cy="56" r="3" class="k"/><rect x="14" y="9" width="38" height="14" rx="3" class="a"/><rect x="68" y="29" width="38" height="14" rx="3" class="b"/><rect x="14" y="49" width="38" height="14" rx="3" class="c"/>`,
+  map:`<path d="M10 20 Q30 8 50 18 T90 16 Q110 14 112 30 L112 60 Q90 52 70 60 T30 58 Q14 60 10 50 Z" class="c"/><circle cx="36" cy="30" r="4" class="pin"/><circle cx="74" cy="40" r="4" class="pin"/><circle cx="96" cy="26" r="4" class="pin"/>`,
+  kanban:`<rect x="10" y="8" width="30" height="56" rx="4" class="s"/><rect x="45" y="8" width="30" height="56" rx="4" class="s"/><rect x="80" y="8" width="30" height="56" rx="4" class="s"/><rect x="14" y="14" width="22" height="10" rx="2" class="a"/><rect x="14" y="28" width="22" height="10" rx="2" class="b"/><rect x="49" y="14" width="22" height="10" rx="2" class="c"/><rect x="84" y="14" width="22" height="10" rx="2" class="d"/>`,
+  gantt:`<path d="M10 14 H112 M10 30 H112 M10 46 H112 M10 62 H112" class="g"/><rect x="14" y="17" width="40" height="9" rx="2" class="a"/><rect x="44" y="33" width="34" height="9" rx="2" class="b"/><rect x="70" y="49" width="38" height="9" rx="2" class="c"/><path d="M54 22 H60 V37" class="l"/>`,
+  scheduler:`<rect x="10" y="8" width="102" height="10" rx="2" class="k"/><path d="M10 22 H112 M10 36 H112 M10 50 H112 M10 64 H112 M30 22 V64 M50 22 V64 M70 22 V64 M90 22 V64" class="g"/><rect x="32" y="25" width="16" height="9" rx="2" class="a"/><rect x="72" y="39" width="16" height="9" rx="2" class="d"/><rect x="52" y="53" width="16" height="9" rx="2" class="c"/>`,
+  drawing:`<path d="M16 50 C30 14 50 60 64 30 S96 10 106 40" class="ink"/><circle cx="34" cy="22" r="9" class="o"/><rect x="74" y="44" width="26" height="16" rx="3" class="o"/>`
+};
+const FORMATS = [
+  {group:'Collect and arrange', items:[
+    {id:'freeform', name:'Freeform', desc:'Your research board: notes, PDFs and pictures anywhere.', tag:'Board AI + wiki'},
+    {id:'wall', name:'Wall', desc:'Cards in a tidy, flowing wall.'},
+    {id:'columns', name:'Columns', desc:'Sort posts into named columns.'},
+    {id:'grid', name:'Grid', desc:'Even rows of equal cards.'},
+    {id:'timeline', name:'Timeline', desc:'Posts in date order along a line.'},
+    {id:'map', name:'Map', desc:'Pin posts to places on a world map.'},
+  ]},
+  {group:'Plan, track and draw', items:[
+    {id:'kanban', name:'Kanban', desc:'Move tasks through stages.'},
+    {id:'gantt', name:'Gantt', desc:'Schedule tasks and their dependencies.'},
+    {id:'scheduler', name:'Scheduler', desc:'Events on a calendar.'},
+    {id:'drawing', name:'Drawing', desc:'One big whiteboard to draw on.'},
+  ]},
+];
+const ALL_FORMATS = FORMATS.flatMap((g) => g.items);
+const TEMPLATES = {
+  freeform:[
+    ['research','Research','Upload a PDF and explore it with Board AI.',['Drop zone for your PDFs in the middle','Research question and key findings','Sources table and open questions','Board AI opens with the board']],
+    ['project-plan','Project Plan','Goals, milestones and a to-do list.',['Goal and scope notes','Milestones with dates','A to-do list','Reference photos']],
+    ['moodboard','Moodboard','Photos, colours and notes for a look.',['Photo collage','Colour swatches','Style notes']],
+    ['creative-brief','Creative Brief','Audience, message and references.',['Audience and message','Do and don’t list','Reference images']],
+    ['character-profile','Character Profile','Looks, traits and backstory of a character.',['Portrait','Traits and quirks','Backstory notes']],
+    ['weekly-plan','Weekly Plan','Seven days with to-dos and notes.',['A card for every day','To-do lists','Weekly goals']],
+    ['trip-planner','Trip Planner','Places, packing list and itinerary.',['Destination photos','Day-by-day plan','Packing list']],
+    ['event-plan','Event Plan','Venue, guests, schedule and checklist.',['Venue and date','Run of show','Checklist']],
+    ['product-launch','Product Launch','Launch timeline, channels and tasks.',['Launch timeline','Channels','Owner to-dos']],
+  ],
+  wall:[
+    ['birthday-wall','Birthday Wall','Messages and photos for someone’s birthday.',['Greeting cards','Photos','Clipart decorations']],
+    ['art-gallery','Student Art Gallery','Student artworks with artist notes.',['Artwork photos','Artist statements']],
+  ],
+  columns:[
+    ['brainstorming','Brainstorming Board','Ideas sorted into columns.',['Three idea columns','Starter sticky notes']],
+    ['frogs-and-toads','Compare and Contrast','Frogs, toads, and what they share.',['Frogs / Both / Toads columns','Photos and facts']],
+  ],
+  grid:[
+    ['science-vocabulary','Science Vocabulary','Science words with pictures and meanings.',['Word cards with photos','Definitions']],
+    ['book-reviews','Book Reviews','Book covers with short reviews.',['Book cards','Star ratings and reviews']],
+  ],
+  timeline:[
+    ['history-of-flight','History of Flight','From the Wright brothers to the Moon.',['Dated milestones 1903–1969','Photos']],
+    ['marie-curie','Marie Curie: A Life in Science','Key moments of her life and work.',['Dated life events','Photos and quotes']],
+  ],
+  map:[
+    ['world-volcanoes','World Volcanoes','Famous volcanoes pinned on the map.',['Pins with photos','Height and last eruption']],
+    ['traditions-around-the-world','Traditions Around the World','Festivals and customs by country.',['A pin per country','Photos and short stories']],
+  ],
+};
+const TOTAL_T = Object.values(TEMPLATES).reduce((n, l) => n + l.length, 0);
+const QUICK_ICONS = ['layout','star','bulb','book','pin','globe'];
+const MORE_ICONS = ['layout','star','heart','bulb','book','pin','calendar','globe','camera','music','flask','cap','rocket','users','target','pen','sparkles'];
+const EMOJI = ['🎨','📚','🧪','🗺️','📅','✈️','💡','🚀','🌋','🎂','🎵','🌱','⭐','🧩','📝','🏛️'];
+const COLORS = ['#ffffff','#f3f4f6','#d1d5db','#374151','#1f2937','#000000','#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#f59e0b','#84cc16','#06b6d4','#6366f1','#a855f7'];
+const GRADIENTS = ['linear-gradient(135deg,#667eea 0%,#764ba2 100%)','linear-gradient(135deg,#f093fb 0%,#f5576c 100%)','linear-gradient(135deg,#4facfe 0%,#00f2fe 100%)','linear-gradient(135deg,#43e97b 0%,#38f9d7 100%)','linear-gradient(135deg,#fa709a 0%,#fee140 100%)','linear-gradient(135deg,#a8edea 0%,#fed6e3 100%)','linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%)','linear-gradient(135deg,#ff9a9e 0%,#fecfef 100%)','linear-gradient(135deg,#a18cd1 0%,#fbc2eb 100%)'];
+const TEXTURES = ['radial-gradient(#cbd5e1 1px,transparent 1.5px) 0 0/14px 14px,#f8fafc','repeating-linear-gradient(45deg,#e2e8f0 0 2px,#f8fafc 2px 12px)','linear-gradient(#e2e8f0 1px,transparent 1px) 0 0/16px 16px,linear-gradient(90deg,#e2e8f0 1px,#f8fafc 1px) 0 0/16px 16px','repeating-radial-gradient(circle at 0 0,#fef3c7 0 6px,#fde68a 6px 7px)'];
+const QUICK_BG = ['#ffffff','#f3f4f6','#fef3c7','#dcfce7','#dbeafe'];
+
+const state = {format:'freeform', template:'', icon:{kind:'line', v:'layout'}, bg:'#ffffff', userPickedFormat:false};
+const $ = (id) => document.getElementById(id);
+const fmt = (id) => ALL_FORMATS.find((f) => f.id === id);
+const findTpl = (id) => { for (const [f, list] of Object.entries(TEMPLATES)) { const t = list.find((x) => x[0] === id); if (t) return {format:f, id:t[0], name:t[1], desc:t[2], items:t[3]}; } return null; };
+const img = (format, id) => PREVIEWS[format + '/' + id] || '';
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- format tiles ---------- */
+function renderFormats(){
+  $('format-groups').innerHTML = FORMATS.map((g) => `
+    <div class="group-label">${g.group}</div>
+    <div class="formats">${g.items.map((f) => { const n = (TEMPLATES[f.id] || []).length; return `
+      <button type="button" class="fmt" id="fmt-${f.id}" data-fmt="${f.id}" aria-pressed="${state.format === f.id}">
+        <svg class="mini" viewBox="0 0 122 72" aria-hidden="true">${MINI[f.id]}</svg>
+        <span class="tick">${svg('check')}</span>
+        ${n ? `<span class="count">${n}</span>` : ''}
+        <span class="name">${f.name}</span>
+        ${f.tag ? `<span class="tag">${svg('sparkles')}${f.tag}</span>` : ''}
+        <span class="desc">${f.desc}</span>
+      </button>`; }).join('')}</div>`).join('');
+}
+
+/* ---------- start with ---------- */
+function renderStart(){
+  const f = fmt(state.format); const t = findTpl(state.template); const list = TEMPLATES[state.format] || [];
+  $('start-sub').textContent = `A blank ${f.name} board, or one already filled in.`;
+  const fanSrc = (list.length ? list.map((x) => [state.format, x[0]]) : Object.entries(TEMPLATES).flatMap(([k, l]) => l.map((x) => [k, x[0]]))).slice(0, 3);
+  while (fanSrc.length < 3) fanSrc.push(['freeform', TEMPLATES.freeform[fanSrc.length][0]]);
+  const tplArt = t ? `<div class="chosen-art" style="background-image:url(${img(t.format, t.id)})"></div>` : `<div class="fan">${fanSrc.map(([k, id]) => `<img alt="" src="${img(k, id)}">`).join('')}</div>`;
+  const tplMeta = t
+    ? `<div class="tx"><div class="t">${t.name}</div><div class="d">${t.desc}</div></div><span class="btn btn-ghost btn-sm" data-open-gallery>Change</span>`
+    : `<div class="tx"><div class="t">From a template</div><div class="d">${list.length ? `${list.length} ${f.name} templates · ${TOTAL_T} in total` : `No ${f.name} templates yet · ${TOTAL_T} for other formats`}</div></div><span class="btn btn-primary btn-sm" data-open-gallery>Browse templates</span>`;
+  $('start').innerHTML = `
+    <button type="button" class="choice" id="choice-blank" data-blank aria-pressed="${!t}">
+      <div class="art blank-art">${svg('plus')}</div>
+      <div class="meta"><div class="tx"><div class="t">Blank board</div><div class="d">Start empty and add your own posts.</div></div></div>
+    </button>
+    <button type="button" class="choice" id="choice-template" data-open-gallery aria-pressed="${!!t}">
+      <div class="art">${tplArt}</div>
+      <div class="meta">${tplMeta}</div>
+    </button>`;
+}
+
+/* ---------- shuffle stage ---------- */
+const COLORS_CARD = ['var(--mini-a)','var(--mini-b)','var(--mini-c)','var(--mini-d)','var(--mini-a)','var(--mini-b)'];
+const POS = { // left, top, width, height (%), rotate (deg), radius
+  freeform:[[7,10,27,30,-5],[40,6,22,28,3],[70,14,23,34,-2],[12,54,30,32,2],[47,48,21,36,-3],[74,60,20,28,4]],
+  wall:[[6,7,27,38],[37,7,27,26],[68,7,27,46],[6,49,27,44],[37,37,27,56],[68,57,27,36]],
+  columns:[[6,16,27,28],[6,48,27,30],[37,16,27,40],[37,60,27,24],[68,16,27,22],[68,42,27,32]],
+  grid:[[6,8,27,40],[37,8,27,40],[68,8,27,40],[6,52,27,40],[37,52,27,40],[68,52,27,40]],
+  timeline:[[8,4,36,13],[56,19,36,13],[8,34,36,13],[56,49,36,13],[8,64,36,13],[56,79,36,13]],
+  map:[[20,28,12,16],[44,46,12,16],[70,22,12,16],[30,60,12,16],[62,62,12,16],[82,44,12,16]],
+  kanban:[[8,12,24,18],[8,34,24,18],[38,12,24,18],[38,34,24,18],[38,56,24,18],[68,12,24,18]],
+  gantt:[[6,6,30,9],[22,26,34,9],[40,46,28,9],[52,66,36,9],[30,86,30,9],[64,16,30,9]],
+  scheduler:[[8,6,14,12],[30,26,14,12],[52,46,14,12],[74,26,14,12],[30,66,14,12],[74,66,14,12]],
+  drawing:[[46,40,8,12,0,1],[46,40,8,12,0,1],[46,40,8,12,0,1],[46,40,8,12,0,1],[46,40,8,12,0,1],[46,40,8,12,0,1]],
+};
+const ORDER = ['freeform','wall','columns','grid','timeline','map','kanban','gantt','scheduler','drawing'];
+let cycleIdx = 0, cycleTimer = null;
+function buildStage(){
+  const st = $('stage');
+  for (let i = 0; i < 6; i++) { const c = document.createElement('div'); c.className = 'card'; c.style.background = COLORS_CARD[i]; st.appendChild(c); }
+  $('dots').innerHTML = ORDER.map((id) => `<i data-dot="${id}"></i>`).join('');
+}
+function showStage(layout){
+  const st = $('stage'); st.dataset.layout = layout;
+  st.querySelectorAll('.card').forEach((c, i) => {
+    const p = POS[layout][i];
+    c.style.left = p[0] + '%'; c.style.top = p[1] + '%'; c.style.width = p[2] + '%'; c.style.height = p[3] + '%';
+    c.style.transform = `rotate(${p[4] || 0}deg)`; c.style.opacity = p[5] ? 0 : 1;
+    c.style.borderRadius = layout === 'map' ? '50% 50% 50% 4px' : '5px';
+  });
+  $('stage-name').textContent = fmt(layout).name;
+  const t = findTpl(state.template);
+  $('stage-sub').textContent = state.userPickedFormat || layout === state.format ? (t && t.format === layout ? 'From template: ' + t.name : 'Blank board') : 'Same posts, every format';
+  document.querySelectorAll('[data-dot]').forEach((d) => d.classList.toggle('on', d.dataset.dot === layout));
+}
+function startCycle(){
+  if (reduced) { showStage(state.format); return; }
+  stopCycle();
+  cycleTimer = setInterval(() => { cycleIdx = (cycleIdx + 1) % ORDER.length; showStage(ORDER[cycleIdx]); }, 2200);
+}
+function stopCycle(){ clearInterval(cycleTimer); cycleTimer = null; }
+
+/* ---------- rail pickers ---------- */
+function iconFace(icon){ return icon.kind === 'line' ? svg(icon.v) : icon.kind === 'emoji' ? `<span style="font-size:18px">${icon.v}</span>` : `<span style="width:100%;height:100%;border-radius:9px;background:url(${icon.v}) center/cover"></span>`; }
+function renderRail(){
+  const quick = QUICK_ICONS.map((k) => ({kind:'line', v:k}));
+  const cur = state.icon; const inQuick = cur.kind === 'line' && QUICK_ICONS.includes(cur.v);
+  const list = inQuick ? quick : [cur, ...quick.slice(0, 5)];
+  $('icons').innerHTML = list.map((ic, n) => `<button type="button" class="ic" id="icon-${n}" data-icon='${JSON.stringify(ic)}' aria-pressed="${ic.kind === cur.kind && ic.v === cur.v}" aria-label="Icon">${iconFace(ic)}</button>`).join('')
+    + `<button type="button" class="ic more" id="icon-more" data-more-icons aria-label="More icons">${svg('plus')}</button>`;
+  const qb = QUICK_BG.includes(state.bg) ? QUICK_BG : [state.bg, ...QUICK_BG.slice(0, 4)];
+  $('swatches').innerHTML = qb.map((c, n) => `<button type="button" class="sw" id="sw-${n}" data-bg="${encodeURIComponent(c)}" aria-pressed="${state.bg === c}" aria-label="Background" style="background:${bgCss(c)}"></button>`).join('')
+    + `<button type="button" class="sw more" id="sw-more" data-more-bg aria-label="More backgrounds">${svg('plus')}</button>`;
+}
+function bgCss(v){ return v.startsWith('data:') ? `url(${v}) center/cover` : v; }
+
+/* ---------- modals ---------- */
+function modal(html, cls = ''){ $('modal-root').innerHTML = `<div class="scrim" id="scrim"><div class="modal ${cls}" role="dialog" aria-modal="true">${html}</div></div>`; $('scrim').addEventListener('click', (e) => { if (e.target.id === 'scrim') closeModal(); }); }
+function closeModal(){ $('modal-root').innerHTML = ''; }
+const head = (title) => `<div class="m-head"><h3>${title}</h3><button type="button" class="x" data-close aria-label="Close">${svg('x')}</button></div>`;
+
+function openBackgrounds(tab = 'colors'){
+  const tabs = [['colors','Colors'],['gradients','Gradients'],['photos','Photos'],['textures','Textures']];
+  const body = tab === 'colors' ? `<div class="bg-grid">${COLORS.map((c) => opt(c)).join('')}</div>`
+    : tab === 'gradients' ? `<div class="bg-grid">${GRADIENTS.map((c) => opt(c)).join('')}</div>`
+    : tab === 'photos' ? `<div class="bg-grid photos">${BG_PHOTOS.map((c) => opt(c)).join('')}</div><div class="hint">Search Pexels for more photos — mockup shows examples.</div>`
+    : `<div class="bg-grid">${TEXTURES.map((c) => opt(c)).join('')}</div>`;
+  modal(head('Background') + `<div class="m-body">
+    <div class="src-row"><button type="button" class="btn btn-ghost btn-sm" data-mock="Upload">${svg('upload')}Upload</button><button type="button" class="btn btn-ghost btn-sm" data-mock="Google Drive">Google Drive</button><button type="button" class="btn btn-ghost btn-sm" data-mock="OneDrive">OneDrive</button></div>
+    <div class="tabs" role="tablist">${tabs.map(([id, l]) => `<button type="button" role="tab" data-bg-tab="${id}" aria-selected="${tab === id}">${l}</button>`).join('')}</div>${body}</div>`);
+  function opt(c){ return `<button type="button" class="bg-opt" data-bg-pick="${encodeURIComponent(c)}" aria-pressed="${state.bg === c}" aria-label="Background" style="background:${bgCss(c)}"></button>`; }
+}
+function openIcons(tab = 'icons'){
+  const tabs = [['icons','Icons'],['emoji','Emoji'],['photo','Photo'],['upload','Upload']];
+  const body = tab === 'icons' ? `<div class="icon-grid">${MORE_ICONS.map((k) => `<button type="button" class="ic" data-icon-pick='${JSON.stringify({kind:'line', v:k})}' aria-pressed="${state.icon.kind === 'line' && state.icon.v === k}" aria-label="${k}">${svg(k)}</button>`).join('')}</div>`
+    : tab === 'emoji' ? `<div class="icon-grid emoji-grid">${EMOJI.map((e) => `<button type="button" class="ic" data-icon-pick='${JSON.stringify({kind:'emoji', v:e})}' aria-pressed="${state.icon.v === e}">${e}</button>`).join('')}</div>`
+    : tab === 'photo' ? `<div style="display:flex;gap:8px;margin-bottom:12px"><input class="input" id="photo-q" placeholder="Search photos (Pexels)" value="volcano"><button type="button" class="btn btn-ghost" data-mock="Search">${svg('search')}</button></div><div class="bg-grid">${BG_PHOTOS.map((p) => `<button type="button" class="bg-opt" data-icon-pick='${JSON.stringify({kind:'photo', v:p})}' style="background:url(${p}) center/cover" aria-label="Photo"></button>`).join('')}</div>`
+    : `<div class="drop">${svg('upload')}<div style="margin-top:8px;font-weight:600">Drop an image here</div><div class="hint">PNG, JPG or GIF</div></div>`;
+  modal(head('Board icon') + `<div class="m-body"><div class="tabs" role="tablist">${tabs.map(([id, l]) => `<button type="button" role="tab" data-icon-tab="${id}" aria-selected="${tab === id}">${l}</button>`).join('')}</div>${body}</div>`);
+}
+let galFilter = 'all';
+function openGallery(detailId){
+  if (detailId) {
+    const t = findTpl(detailId);
+    modal(`<div class="m-head"><button type="button" class="x" data-gallery aria-label="Back to templates">${svg('back')}</button><h3>${t.name}</h3><button type="button" class="x" data-close aria-label="Close">${svg('x')}</button></div>
+      <div class="detail"><div class="big"><img alt="Preview of ${t.name}" src="${img(t.format, t.id)}"></div>
+      <div class="side"><span class="tag">${fmt(t.format).name} board</span><h4>${t.name}</h4><div style="color:var(--ink-2)">${t.desc}</div>
+      <div style="font-weight:600;font-size:13px;margin-top:6px">What's on the board</div><ul>${t.items.map((x) => `<li>${x}</li>`).join('')}</ul>
+      <div class="hint">Photos from Pexels, clipart from Iconify. Everything stays editable.</div>
+      <div class="actions"><button type="button" class="btn btn-primary" data-use="${t.id}">Use this template</button><button type="button" class="btn btn-ghost" data-gallery>Back to templates</button></div></div></div>`, 'xl');
+    return;
+  }
+  const nav = [['all','All templates',TOTAL_T], ...ALL_FORMATS.filter((f) => TEMPLATES[f.id]).map((f) => [f.id, f.name, TEMPLATES[f.id].length])];
+  const shown = Object.entries(TEMPLATES).filter(([k]) => galFilter === 'all' || k === galFilter).flatMap(([k, l]) => l.map((x) => ({format:k, id:x[0], name:x[1], desc:x[2]})));
+  modal(head('Templates') + `<div class="gal">
+    <nav class="gal-nav" aria-label="Formats">${nav.map(([id, l, n]) => `<button type="button" data-gal-filter="${id}" aria-selected="${galFilter === id}"><span>${l}</span><span class="n">${n}</span></button>`).join('')}</nav>
+    <div class="gal-main"><div class="gal-grid">${shown.map((t) => `<button type="button" class="gcard" data-detail="${t.id}">
+      <div class="shot" style="background-image:url(${img(t.format, t.id)})"></div>
+      <div class="meta"><span class="t">${t.name}</span><span class="d">${t.desc}</span><div class="chips"><span class="chip">${fmt(t.format).name}</span></div></div></button>`).join('')}</div></div></div>`, 'xl');
+}
+
+/* ---------- actions ---------- */
+function setFormat(id){
+  state.format = id; state.userPickedFormat = true; stopCycle();
+  const t = findTpl(state.template); if (t && t.format !== id) { if ($('f-name').value === t.name) $('f-name').value = 'Untitled board'; state.template = ''; }
+  renderFormats(); renderStart(); showStage(id);
+}
+function useTemplate(id){
+  const t = findTpl(id); const prev = findTpl(state.template);
+  if ($('f-name').value === 'Untitled board' || (prev && $('f-name').value === prev.name)) $('f-name').value = t.name;
+  state.template = id; state.format = t.format; state.userPickedFormat = true; stopCycle();
+  closeModal(); renderFormats(); renderStart(); showStage(t.format);
+}
+function toast(msg){ $('toast-root').innerHTML = `<div class="toast" role="status">${msg}</div>`; clearTimeout(toast.t); toast.t = setTimeout(() => { $('toast-root').innerHTML = ''; }, 2800); }
+
+document.addEventListener('click', (e) => {
+  const q = (s) => e.target.closest(s);
+  let el;
+  if (q('[data-close]')) return closeModal();
+  if ((el = q('[data-use]'))) return useTemplate(el.dataset.use);
+  if ((el = q('[data-detail]'))) return openGallery(el.dataset.detail);
+  if ((el = q('[data-gal-filter]'))) { galFilter = el.dataset.galFilter; return openGallery(); }
+  if (q('[data-gallery]') || q('[data-open-gallery]')) { galFilter = TEMPLATES[state.format] ? state.format : 'all'; return openGallery(); }
+  if (q('[data-blank]')) { const t = findTpl(state.template); if (t && $('f-name').value === t.name) $('f-name').value = 'Untitled board'; state.template = ''; renderStart(); showStage(state.format); return; }
+  if ((el = q('[data-fmt]'))) return setFormat(el.dataset.fmt);
+  if ((el = q('[data-bg-tab]'))) return openBackgrounds(el.dataset.bgTab);
+  if ((el = q('[data-bg-pick]'))) { state.bg = decodeURIComponent(el.dataset.bgPick); closeModal(); return renderRail(); }
+  if ((el = q('[data-bg]'))) { state.bg = decodeURIComponent(el.dataset.bg); return renderRail(); }
+  if (q('[data-more-bg]')) return openBackgrounds();
+  if ((el = q('[data-icon-tab]'))) return openIcons(el.dataset.iconTab);
+  if ((el = q('[data-icon-pick]'))) { state.icon = JSON.parse(el.dataset.iconPick); closeModal(); return renderRail(); }
+  if ((el = q('[data-icon]'))) { state.icon = JSON.parse(el.dataset.icon); return renderRail(); }
+  if (q('[data-more-icons]')) return openIcons();
+  if ((el = q('[data-mock]'))) return toast(`Mockup: ${el.dataset.mock} opens the existing picker.`);
+  if ((el = q('[role="switch"]'))) return el.setAttribute('aria-checked', el.getAttribute('aria-checked') !== 'true');
+  if (q('#create-top, #create-rail')) { const t = findTpl(state.template); return toast(t ? `Mockup: creates “${$('f-name').value}” and opens it filled with ${t.name}.` : `Mockup: creates a blank ${fmt(state.format).name} board and opens it.`); }
+  if (q('#back-btn')) return toast('Mockup: back to the dashboard.');
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('mouseover', (e) => { const f = e.target.closest('[data-fmt]'); if (f && !cycleTimer) showStage(f.dataset.fmt); });
+document.addEventListener('mouseout', (e) => { const f = e.target.closest('[data-fmt]'); if (f && !cycleTimer && !f.contains(e.relatedTarget)) showStage(state.format); });
+
+buildStage(); renderFormats(); renderStart(); renderRail(); showStage('freeform'); startCycle();
+</script>

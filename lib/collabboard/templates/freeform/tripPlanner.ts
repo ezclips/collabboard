@@ -10,6 +10,8 @@ export const TRIP_PLANNER: BoardTemplate = {
   name: 'Trip Planner',
   layout: 'freeform',
   previewUrl: '/templates/freeform/trip-planner/preview.jpg',
+  summary: 'Places, packing list and itinerary.',
+  contents: ['Destination photos', 'Day-by-day plan', 'Packing list'],
   posts: [
     { kind: 'column', key: 'plan', title: 'The trip', x: 60, y: 60, width: 360, height: 800, topStrip: '#ea580c' },
     { kind: 'image', title: 'Tram 28', src: '/templates/freeform/trip-planner/tram.jpg', parent: 'plan' },

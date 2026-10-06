@@ -31,6 +31,7 @@ vi.mock('@/lib/domain/canvas/boardTemplates', async (importOriginal) => {
 });
 
 import BoardTemplatePicker from './BoardTemplatePicker';
+import { readBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
 
 const BOARD = 'board-1';
 const DISMISS_KEY = `fable.templatePicker.dismissed.${BOARD}`;
@@ -118,6 +119,8 @@ async function outsidePress() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
+  window.history.replaceState({}, '', '/');
   hoisted.apply.mockReset();
   hoisted.factory.mockReset();
   hoisted.apply.mockResolvedValue({ ok: true, value: 1 });
@@ -450,5 +453,206 @@ describe('source invariants', () => {
 
   it('deletes the old template1 module', () => {
     expect(fs.existsSync(path.join(ROOT, 'lib/collabboard/templates/template1.ts'))).toBe(false);
+  });
+});
+
+async function settle() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+describe('BoardTemplatePicker ?template= auto-apply (PATCH-301)', () => {
+  const withParam = (value: string) => {
+    window.history.replaceState({}, '', `/dashboard/canvas/${BOARD}?template=${value}&other=keep`);
+  };
+
+  it('applies once on an empty editable board and strips the param, keeping the others', async () => {
+    withParam('project-plan');
+    await mount();
+    await settle();
+
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(hoisted.apply.mock.calls[0][0]).toMatchObject({
+      boardId: BOARD,
+      template: expect.objectContaining({ id: 'project-plan' }),
+    });
+    expect(window.location.search).not.toContain('template');
+    expect(window.location.search).toContain('other=keep');
+    expect(q('[data-board-template-picker]')).toBeNull();
+    expect(window.localStorage.getItem(DISMISS_KEY)).not.toBeNull();
+  });
+
+  it('never applies the same param twice', async () => {
+    withParam('project-plan');
+    await mount();
+    await settle();
+    await rerender({ posts: [realPost()] });
+    await settle();
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores the param on a non-empty board but still strips it', async () => {
+    withParam('project-plan');
+    await mount({ posts: [realPost()] });
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+    expect(window.location.search).not.toContain('template');
+  });
+
+  it('ignores the param for a viewer', async () => {
+    withParam('project-plan');
+    await mount({ canEdit: false });
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+  });
+
+  it('ignores an unknown id', async () => {
+    withParam('nope');
+    await mount();
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+  });
+
+  it('ignores an id that belongs to another layout', async () => {
+    withParam('birthday-wall');
+    await mount({ layout: 'freeform' });
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+  });
+
+  it('applies a template that belongs to the board layout', async () => {
+    withParam('birthday-wall');
+    await mount({ layout: 'wall' });
+    await settle();
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(hoisted.apply.mock.calls[0][0]).toMatchObject({
+      template: expect.objectContaining({ id: 'birthday-wall' }),
+    });
+  });
+});
+
+const PENDING_KEY = `board-template-request:${BOARD}`;
+
+async function mountStrict(props: Partial<React.ComponentProps<typeof BoardTemplatePicker>> = {}) {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => {
+    root!.render(
+      <React.StrictMode>
+        <BoardTemplatePicker
+          boardId={BOARD}
+          layout="freeform"
+          posts={[]}
+          postsLoaded
+          canEdit
+          {...props}
+        />
+      </React.StrictMode>,
+    );
+  });
+  return host;
+}
+
+describe('BoardTemplatePicker ?template= under Strict Mode (PATCH-301 Addendum 1)', () => {
+  const withParam = (value: string) => {
+    window.history.replaceState({}, '', `/dashboard/canvas/${BOARD}?template=${value}&other=keep`);
+  };
+
+  it('applies exactly once inside React.StrictMode', async () => {
+    withParam('project-plan');
+    await mountStrict();
+    await settle();
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(hoisted.apply.mock.calls[0][0]).toMatchObject({
+      boardId: BOARD,
+      template: expect.objectContaining({ id: 'project-plan' }),
+    });
+    expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+  });
+
+  it('carries the request across an unmount/remount and applies exactly once', async () => {
+    withParam('project-plan');
+    await mount({ postsLoaded: false });
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+    expect(readBoardTemplateRequest(BOARD)).toEqual({ id: 'project-plan', state: 'pending' });
+
+    act(() => root!.unmount());
+    root = null;
+    host.remove();
+
+    await mount({ postsLoaded: true });
+    await settle();
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+  });
+
+  it('removes the pending key when a non-empty board ignores the request', async () => {
+    withParam('project-plan');
+    await mount({ posts: [realPost()] });
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+  });
+
+  it('removes the pending key for a viewer', async () => {
+    withParam('project-plan');
+    await mount({ canEdit: false });
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+  });
+
+  it('removes the pending key for an unknown id', async () => {
+    withParam('nope');
+    await mount();
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(PENDING_KEY)).toBeNull();
+  });
+});
+
+describe('BoardTemplatePicker template request state machine (PATCH-301 Addendum 3)', () => {
+  const withParam = (value: string) => {
+    window.history.replaceState({}, '', `/dashboard/canvas/${BOARD}?template=${value}`);
+  };
+
+  it('moves pending → applying → removed across the apply', async () => {
+    withParam('project-plan');
+    const pending = deferred<{ ok: true; value: number }>();
+    hoisted.apply.mockReturnValue(pending.promise);
+    await mount();
+    await settle();
+
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(readBoardTemplateRequest(BOARD)).toEqual({ id: 'project-plan', state: 'applying' });
+
+    await act(async () => {
+      pending.resolve({ ok: true, value: 1 });
+      await pending.promise;
+    });
+    expect(readBoardTemplateRequest(BOARD)).toBeNull();
+  });
+
+  it('removes the key when the apply fails', async () => {
+    withParam('project-plan');
+    hoisted.apply.mockResolvedValue({ ok: false, error: { code: 'unavailable', message: 'boom' } });
+    await mount();
+    await settle();
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(readBoardTemplateRequest(BOARD)).toBeNull();
+  });
+
+  it('never applies a key that is already applying', async () => {
+    window.sessionStorage.setItem(
+      `board-template-request:${BOARD}`,
+      JSON.stringify({ id: 'project-plan', state: 'applying' }),
+    );
+    await mount();
+    await settle();
+    expect(hoisted.apply).not.toHaveBeenCalled();
   });
 });

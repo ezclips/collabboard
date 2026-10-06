@@ -10,6 +10,8 @@ export const SCIENCE_VOCABULARY: BoardTemplate = {
   name: 'Science Vocabulary',
   layout: 'grid',
   previewUrl: '/templates/grid/science-vocabulary/preview.jpg',
+  summary: 'Science words with pictures and meanings.',
+  contents: ['Word cards with photos', 'Definitions'],
   posts: [
     { kind: 'section', key: 'living', title: 'Living things' },
 

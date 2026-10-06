@@ -9,6 +9,11 @@ import {
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import { templatesForLayout } from '@/lib/collabboard/templates/registry';
+import {
+  clearBoardTemplateRequest,
+  readBoardTemplateRequest,
+  writeBoardTemplateRequest,
+} from '@/lib/collabboard/templates/templateRequest';
 
 const EMPTY_SELECTION = 'empty';
 
@@ -65,7 +70,35 @@ export default function BoardTemplatePicker({
   const [applying, setApplying] = useState(false);
   const [failed, setFailed] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [autoTemplate, setAutoTemplate] = useState<string | null>(null);
+  const [autoApplying, setAutoApplying] = useState(false);
+  const autoAppliedRef = useRef(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // PATCH-301 + Addendum 1/3. A board created from a template opens with
+  // `?template=<id>`. Read it once and strip it immediately (keeping other
+  // params), so a reload or a share never re-applies it. The id is parked in
+  // sessionStorage as a `pending` request so a Strict Mode double-run (or any
+  // remount) cannot lose it. This effect is declared BEFORE the
+  // reset-on-board-change effect on purpose: the request must be parked before
+  // anything that could drop it runs.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('template');
+    if (!requested) return;
+    // Never clobber a request that is already applying.
+    if (readBoardTemplateRequest(boardId) === null) {
+      writeBoardTemplateRequest(boardId, requested, 'pending');
+    }
+    params.delete('template');
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+    );
+  }, [boardId]);
 
   useEffect(() => {
     setDismissed(readDismissed(boardId));
@@ -73,6 +106,9 @@ export default function BoardTemplatePicker({
     setApplying(false);
     setFailed(false);
     setCollapsed(false);
+    setAutoTemplate(null);
+    setAutoApplying(false);
+    autoAppliedRef.current = false;
   }, [boardId]);
 
   const dismiss = useCallback(() => {
@@ -87,24 +123,34 @@ export default function BoardTemplatePicker({
   const selectedTemplate: BoardTemplate | undefined =
     selected === EMPTY_SELECTION ? undefined : group?.templates.find((template) => template.id === selected);
 
+  const applyTemplate = useCallback(
+    async (template: BoardTemplate) => {
+      setApplying(true);
+      setFailed(false);
+      const replacePostIds = posts.filter(isPlaceholderPost).map((post) => post.id);
+      const command = createApplyBoardTemplateCommand(
+        createPostsRepository(),
+        createSectionsRepository(),
+      );
+      const result = await command(
+        { boardId, template, existingSections: sections ?? [], replacePostIds },
+        { userId: null },
+      );
+      if (result.ok) {
+        dismiss();
+        onApplied?.();
+      } else {
+        setFailed(true);
+        setApplying(false);
+      }
+    },
+    [boardId, sections, posts, dismiss, onApplied],
+  );
+
   const apply = useCallback(async () => {
     if (!selectedTemplate) return;
-    setApplying(true);
-    setFailed(false);
-    const replacePostIds = posts.filter(isPlaceholderPost).map((post) => post.id);
-    const command = createApplyBoardTemplateCommand(createPostsRepository(), createSectionsRepository());
-    const result = await command(
-      { boardId, template: selectedTemplate, existingSections: sections ?? [], replacePostIds },
-      { userId: null },
-    );
-    if (result.ok) {
-      dismiss();
-      onApplied?.();
-    } else {
-      setFailed(true);
-      setApplying(false);
-    }
-  }, [boardId, selectedTemplate, sections, posts, dismiss, onApplied]);
+    await applyTemplate(selectedTemplate);
+  }, [selectedTemplate, applyTemplate]);
 
   // While an apply is in flight (or after one failed) the first template posts
   // arrive through realtime and raise the post count. The panel must stay
@@ -113,6 +159,38 @@ export default function BoardTemplatePicker({
   const hasRealPosts = posts.some((post) => !isPlaceholderPost(post));
   const visible =
     Boolean(group) && canEdit && postsLoaded && !dismissed && (!hasRealPosts || applying || failed);
+
+  // PATCH-301 + Addendum 1/3. Apply the requested template once, when the board
+  // is empty and editable and the id belongs to this board's layout. It uses
+  // the SAME path as the Apply button; success and failure behave the same.
+  // Only a `pending` request is applied; it is moved to `applying` before the
+  // command starts and removed when the command finishes (either way) or when
+  // the request is ignored. An `applying` key is never applied again.
+  useEffect(() => {
+    if (!postsLoaded || !group) return;
+    const request = readBoardTemplateRequest(boardId);
+    if (!request || request.state !== 'pending' || autoAppliedRef.current) return;
+
+    if (!canEdit || hasRealPosts) {
+      clearBoardTemplateRequest(boardId);
+      setAutoTemplate(null);
+      return;
+    }
+    const template = group.templates.find((item) => item.id === request.id);
+    if (!template) {
+      clearBoardTemplateRequest(boardId);
+      setAutoTemplate(null);
+      return;
+    }
+    autoAppliedRef.current = true;
+    writeBoardTemplateRequest(boardId, request.id, 'applying');
+    setAutoTemplate(request.id);
+    setAutoApplying(true);
+    void applyTemplate(template).finally(() => {
+      clearBoardTemplateRequest(boardId);
+      setAutoApplying(false);
+    });
+  }, [boardId, group, canEdit, postsLoaded, hasRealPosts, applyTemplate, autoTemplate]);
 
   // Defect 4: a press outside the panel collapses it to the pill (never a
   // dismissal); Escape collapses too. Clicking the pill reopens the panel.
@@ -134,6 +212,20 @@ export default function BoardTemplatePicker({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [visible, group]);
+
+  if (autoApplying) {
+    const autoName =
+      group?.templates.find((item) => item.id === autoTemplate)?.name ?? 'template';
+    return (
+      <div
+        data-board-template-auto
+        className="fixed z-[1250] rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-lg"
+        style={{ bottom: 120, right: 16 }}
+      >
+        Adding {autoName}…
+      </div>
+    );
+  }
 
   if (!visible || !group) return null;
 

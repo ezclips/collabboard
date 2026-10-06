@@ -10,6 +10,8 @@ export const BOOK_REVIEWS: BoardTemplate = {
   name: 'Book Reviews',
   layout: 'grid',
   previewUrl: '/templates/grid/book-reviews/preview.jpg',
+  summary: 'Book covers with short reviews.',
+  contents: ['Book cards', 'Star ratings and reviews'],
   posts: [
     { kind: 'section', key: 'adventure', title: 'Adventure' },
 

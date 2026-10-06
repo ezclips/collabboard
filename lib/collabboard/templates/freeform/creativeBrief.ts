@@ -10,6 +10,8 @@ export const CREATIVE_BRIEF: BoardTemplate = {
   name: 'Creative Brief',
   layout: 'freeform',
   previewUrl: '/templates/freeform/creative-brief/preview.jpg',
+  summary: 'Audience, message and references.',
+  contents: ['Audience and message', "Do and don't list", 'Reference images'],
   posts: [
     { kind: 'column', key: 'brief', title: 'The brief', x: 60, y: 60, width: 360, height: 800, topStrip: '#2563eb' },
     {

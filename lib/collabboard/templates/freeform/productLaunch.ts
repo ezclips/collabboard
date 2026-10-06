@@ -10,6 +10,8 @@ export const PRODUCT_LAUNCH: BoardTemplate = {
   name: 'Product Launch',
   layout: 'freeform',
   previewUrl: '/templates/freeform/product-launch/preview.jpg',
+  summary: 'Launch timeline, channels and tasks.',
+  contents: ['Launch timeline', 'Channels', 'Owner to-dos'],
   posts: [
     { kind: 'column', key: 'product', title: 'The product', x: 60, y: 60, width: 360, height: 800, topStrip: '#0891b2' },
     { kind: 'image', title: 'Hydra, in four colours', src: '/templates/freeform/product-launch/bottles.jpg', parent: 'product' },

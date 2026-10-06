@@ -10,6 +10,8 @@ export const EVENT_PLAN: BoardTemplate = {
   name: 'Event Plan',
   layout: 'freeform',
   previewUrl: '/templates/freeform/event-plan/preview.jpg',
+  summary: 'Venue, guests, schedule and checklist.',
+  contents: ['Venue and date', 'Run of show', 'Checklist'],
   posts: [
     { kind: 'column', key: 'party', title: 'The party', x: 60, y: 60, width: 360, height: 800, topStrip: '#db2777' },
     { kind: 'image', title: 'Lights on at eight', src: '/templates/freeform/event-plan/string-lights.jpg', parent: 'party' },

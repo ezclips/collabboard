@@ -10,6 +10,8 @@ export const CHARACTER_PROFILE: BoardTemplate = {
   name: 'Character Profile',
   layout: 'freeform',
   previewUrl: '/templates/freeform/character-profile/preview.jpg',
+  summary: 'Looks, traits and backstory of a character.',
+  contents: ['Portrait', 'Traits and quirks', 'Backstory notes'],
   posts: [
     { kind: 'column', key: 'who', title: 'Who she is', x: 60, y: 60, width: 360, height: 800, topStrip: '#0f766e' },
     { kind: 'image', title: 'Mara Quill, 34', src: '/templates/freeform/character-profile/portrait.jpg', parent: 'who' },

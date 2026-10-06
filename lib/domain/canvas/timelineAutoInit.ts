@@ -14,6 +14,13 @@ export interface TimelineAutoInitInput {
   attempted: Set<string>;
   createEmptyContainer: () => Promise<boolean>;
   onFailure: () => void;
+  /**
+   * PATCH-301 Addendum 3. True while a `?template=` request is still being
+   * applied. The auto-init must not create the blank first entry during that
+   * window, and must NOT mark the board attempted, so the normal rule applies
+   * once the request is gone.
+   */
+  templateRequestActive?: boolean;
 }
 
 export type TimelineAutoInitOutcome = 'skipped' | 'created' | 'failed';
@@ -26,6 +33,9 @@ export async function attemptTimelineAutoInitOnce(
 ): Promise<TimelineAutoInitOutcome> {
   const { isTimelineLayout, canvasId, loading, canEdit, rootContainerCount, attempted } = input;
   if (!isTimelineLayout || !canvasId || loading || !canEdit) return 'skipped';
+  // A template request in flight owns the board's first posts; skip without
+  // marking so the normal rule still runs after the request clears.
+  if (input.templateRequestActive) return 'skipped';
   if (attempted.has(canvasId)) return 'skipped';
 
   // Mark before the async create so a re-render mid-flight cannot double-create.

@@ -311,6 +311,10 @@ export const boardTemplateSchema = z
     name: z.string(),
     layout: boardTemplateLayoutSchema,
     previewUrl: z.string().optional(),
+    /** PATCH-301. A one-line summary shown in the template gallery. */
+    summary: z.string().optional(),
+    /** PATCH-301. The "What's on the board" list shown in the detail view. */
+    contents: z.array(z.string()).optional(),
     posts: z.array(templatePostSchema),
   })
   .superRefine((template, ctx) => {

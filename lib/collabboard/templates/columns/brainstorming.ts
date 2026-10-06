@@ -10,6 +10,8 @@ export const BRAINSTORMING: BoardTemplate = {
   name: 'Brainstorming Board',
   layout: 'columns',
   previewUrl: '/templates/columns/brainstorming/preview.jpg',
+  summary: 'Ideas sorted into columns.',
+  contents: ['Three idea columns', 'Starter sticky notes'],
   posts: [
     { kind: 'section', key: 'question', title: 'The question' },
     {

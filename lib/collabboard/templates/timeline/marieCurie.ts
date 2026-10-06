@@ -10,6 +10,8 @@ export const MARIE_CURIE: BoardTemplate = {
   name: 'Marie Curie: A Life in Science',
   layout: 'timeline',
   previewUrl: '/templates/timeline/marie-curie/preview.jpg',
+  summary: 'Key moments of her life and work.',
+  contents: ['Dated life events', 'Photos and quotes'],
   posts: [
     { kind: 'column', key: 'born', title: 'Born in Warsaw', timelineLabel: '1867' },
     { kind: 'image', title: "Warsaw's Old Town", src: '/templates/timeline/marie-curie/warsaw.jpg', parent: 'born' },

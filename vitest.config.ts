@@ -61,6 +61,12 @@ export default defineConfig({
       // PATCH-293: the board-template picker lives one level down; without this
       // line its test is silently NOT RUN (the trap the notes above warn of).
       'components/collabboard/templates/*.test.tsx',
+      // PATCH-301: the new-board page's components live one level down; without
+      // this line their tests are silently NOT RUN (the trap above).
+      'components/collabboard/create/**/*.test.tsx',
+      // PATCH-301: the create-board helper's test lives one level down; without
+      // this line its test is silently NOT RUN (the trap above).
+      'lib/collabboard/create/**/*.test.ts',
       'components/dashboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',
       'components/collabboard/comments/*.test.tsx',

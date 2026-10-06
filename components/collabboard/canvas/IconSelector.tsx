@@ -9,6 +9,7 @@ import ImportsDialog from "@/components/collabboard/imports/ImportsDialog";
 import { toast } from "sonner";
 import type { ImportProvider, ResolvedImportItem } from "@/lib/imports/types";
 import EmojiPicker, { EmojiStyle } from "emoji-picker-react";
+import { BOARD_LINE_ICON_NAMES, lineIconFor } from "@/components/collabboard/boardIcons";
 
 interface IconSelectorProps {
   isOpen: boolean;
@@ -154,6 +155,33 @@ const IconSelector: React.FC<IconSelectorProps> = ({
           </DialogHeader>
 
           <div className="space-y-5">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Icons</h3>
+              <div className="grid grid-cols-6 gap-2" data-line-icon-grid>
+                {BOARD_LINE_ICON_NAMES.map((name) => {
+                  const Icon = lineIconFor(name);
+                  const value = `lucide:${name}`;
+                  const isSelected = selectedIcon === value;
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      aria-label={name}
+                      aria-pressed={isSelected}
+                      onClick={() => handleIconSelect(value)}
+                      className={`flex h-11 items-center justify-center rounded-lg border-2 transition-colors ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-50 text-blue-600"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Emojis</h3>
               <div className="w-full">

@@ -10,6 +10,8 @@ export const FROGS_AND_TOADS: BoardTemplate = {
   name: 'Compare and Contrast',
   layout: 'columns',
   previewUrl: '/templates/columns/frogs-and-toads/preview.jpg',
+  summary: 'Frogs, toads, and what they share.',
+  contents: ['Frogs / Both / Toads columns', 'Photos and facts'],
   posts: [
     { kind: 'section', key: 'frogs', title: 'Frogs' },
     { kind: 'image', title: 'Smooth, wet skin', src: '/templates/columns/frogs-and-toads/frog.jpg', section: 'frogs' },

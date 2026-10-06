@@ -10,6 +10,8 @@ export const BIRTHDAY_WALL: BoardTemplate = {
   name: 'Birthday Wall',
   layout: 'wall',
   previewUrl: '/templates/wall/birthday-wall/preview.jpg',
+  summary: "Messages and photos for someone's birthday.",
+  contents: ['Greeting cards', 'Photos', 'Clipart decorations'],
   posts: [
     { kind: 'column', key: 'maya', title: 'Happy birthday, Maya! 🎉' },
     { kind: 'image', title: 'Happy birthday!', src: '/templates/wall/birthday-wall/birthday-letters.jpg', parent: 'maya' },

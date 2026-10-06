@@ -1,6 +1,7 @@
 "use client";
 
 import React from 'react';
+import BoardIconGlyph from '@/components/collabboard/BoardIconGlyph';
 
 export const CANVAS_TITLE_HEADER_HEIGHT = 56;
 
@@ -32,12 +33,11 @@ export default function CanvasTitleHeader({
     >
       {showIcon && icon ? (
         <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-50 text-2xl leading-none">
-          {icon.startsWith('http') ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={icon} alt="" className="h-full w-full object-cover" />
-          ) : (
-            icon
-          )}
+          <BoardIconGlyph
+            icon={icon}
+            className="text-2xl leading-none"
+            imageClassName="h-full w-full object-cover"
+          />
         </div>
       ) : null}
       <div className="min-w-0 flex-1 leading-tight">

@@ -1,7 +1,7 @@
 "use client";
 
-import CanvasSetupPage from '@/components/collabboard/canvas/CanvasSetupPage';
+import NewBoardPage from '@/components/collabboard/create/NewBoardPage';
 
 export default function CreateCanvasPage() {
-  return <CanvasSetupPage />;
+  return <NewBoardPage />;
 }

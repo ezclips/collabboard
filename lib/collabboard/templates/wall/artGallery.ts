@@ -10,6 +10,8 @@ export const STUDENT_ART_GALLERY: BoardTemplate = {
   name: 'Student Art Gallery',
   layout: 'wall',
   previewUrl: '/templates/wall/art-gallery/preview.jpg',
+  summary: 'Student artworks with artist notes.',
+  contents: ['Artwork photos', 'Artist statements'],
   posts: [
     { kind: 'column', key: 'welcome', title: 'Our art gallery 🎨' },
     {

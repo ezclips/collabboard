@@ -10,6 +10,8 @@ export const WEEKLY_PLAN: BoardTemplate = {
   name: 'Weekly Plan',
   layout: 'freeform',
   previewUrl: '/templates/freeform/weekly-plan/preview.jpg',
+  summary: 'Seven days with to-dos and notes.',
+  contents: ['A card for every day', 'To-do lists', 'Weekly goals'],
   posts: [
     { kind: 'column', key: 'week', title: 'This week', x: 60, y: 60, width: 360, height: 800, topStrip: '#4f46e5' },
     { kind: 'image', title: 'Plan on Sunday evening', src: '/templates/freeform/weekly-plan/planner.jpg', parent: 'week' },

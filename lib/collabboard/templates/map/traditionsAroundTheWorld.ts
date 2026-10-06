@@ -10,6 +10,8 @@ export const TRADITIONS_AROUND_THE_WORLD: BoardTemplate = {
   name: 'Traditions Around the World',
   layout: 'map',
   previewUrl: '/templates/map/traditions-around-the-world/preview.jpg',
+  summary: 'Festivals and customs by country.',
+  contents: ['A pin per country', 'Photos and short stories'],
   posts: [
     { kind: 'column', key: 'diwali', title: 'Diwali — India', location: { lat: 28.6139, lng: 77.209, label: 'New Delhi, India' } },
     { kind: 'image', title: 'Clay lamps called diyas', src: '/templates/map/traditions-around-the-world/diwali.jpg', parent: 'diwali' },

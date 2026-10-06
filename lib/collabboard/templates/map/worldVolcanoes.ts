@@ -10,6 +10,8 @@ export const WORLD_VOLCANOES: BoardTemplate = {
   name: 'World Volcanoes',
   layout: 'map',
   previewUrl: '/templates/map/world-volcanoes/preview.jpg',
+  summary: 'Famous volcanoes pinned on the map.',
+  contents: ['Pins with photos', 'Height and last eruption'],
   posts: [
     { kind: 'column', key: 'fuji', title: 'Mount Fuji, Japan', location: { lat: 35.3606, lng: 138.7274, label: 'Mount Fuji, Japan' } },
     { kind: 'image', title: 'Mount Fuji', src: '/templates/map/world-volcanoes/fuji.jpg', parent: 'fuji' },

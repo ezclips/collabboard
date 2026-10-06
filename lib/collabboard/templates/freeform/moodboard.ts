@@ -10,6 +10,8 @@ export const MOODBOARD: BoardTemplate = {
   name: 'Moodboard',
   layout: 'freeform',
   previewUrl: '/templates/freeform/moodboard/preview.jpg',
+  summary: 'Photos, colours and notes for a look.',
+  contents: ['Photo collage', 'Colour swatches', 'Style notes'],
   posts: [
     { kind: 'column', key: 'mood', title: 'Mood', x: 60, y: 60, width: 360, height: 800, topStrip: '#d97706' },
     { kind: 'image', title: 'Evening light', src: '/templates/freeform/moodboard/living-room.jpg', parent: 'mood' },

@@ -116,6 +116,7 @@ import {
 } from '@/lib/infra/collabboard/imageDurableContent';
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { attemptTimelineAutoInitOnce, TIMELINE_AUTO_INIT_FAILURE_TOAST } from '@/lib/domain/canvas/timelineAutoInit';
+import { hasBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
 import { storeEditedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
 import {
@@ -6797,6 +6798,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       canEdit: canUseFreeformEditButton,
       rootContainerCount: rootTimelineContainerCount,
       attempted: timelineAutoInitAttemptedRef.current,
+      templateRequestActive: hasBoardTemplateRequest(canvasId ?? ''),
       createEmptyContainer: () => handleCreateEmptyTimelineContainer({ silent: true }),
       onFailure: () => toast.error(TIMELINE_AUTO_INIT_FAILURE_TOAST),
     });
