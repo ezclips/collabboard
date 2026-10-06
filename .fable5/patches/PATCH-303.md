@@ -39,3 +39,19 @@ instead of stretching across wide screens.
 
 ## Final result (CTO, 2026-10-06, live)
 On a 1920 px window the page sits in a centred 1320 px frame with the bar inside it, as in the mockup; a format tile is 143 px wide (was ~240); one "Create board" button. `NewBoardPage.test.tsx` passes.
+
+## Addendum 1 (owner, 2026-10-06: "give me the same top bar as in dashboard without 'Workspace Settings' and icons")
+The dashboard's bar (`app/dashboard/page.tsx` L357–385) is a full-width `<header className="bg-white border-b
+border-gray-200 px-6 py-3 flex-shrink-0">` at the very top of the page: left a back control (`ArrowLeft w-4 h-4` +
+`<span className="text-sm">Back to Dashboard</span>`, `flex items-center gap-2 text-gray-600 hover:text-gray-900
+transition-colors`), a divider `h-4 w-px bg-gray-300`, then the title `font-medium text-gray-900`; right
+"Workspace Settings".
+**Change in `NewBoardPage.tsx`:** move the bar OUT of the frame to the top of the page, full width, with exactly those
+classes: `<Link href="/dashboard">` with the arrow and "Back to Dashboard", the divider, the title "New board"
+(`font-medium text-gray-900`, NO icon in front of it), nothing on the right. Keep `data-new-board-bar` on the header.
+The frame below keeps `max-w-[1320px]` and now starts with the main/rail grid (top margin `mt-4` from the bar; outer
+padding as now).
+Test: the header is outside the `max-w-[1320px]` frame, contains "Back to Dashboard" linking to `/dashboard` and
+"New board", no "Workspace Settings", and still no button. Same rules; run only `NewBoardPage.test.tsx` and tsc.
+
+Addendum 1 result (CTO, live): full-width white header at the top, "Back to Dashboard" | "New board", no icon before the title, nothing on the right; the frame below starts with the content. Test passes.

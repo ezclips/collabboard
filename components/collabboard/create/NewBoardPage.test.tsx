@@ -98,12 +98,23 @@ describe('NewBoardPage', () => {
     expect(q('[data-new-board-bar] a')?.getAttribute('href')).toBe('/dashboard');
   });
 
-  it('frames the bar and the grid inside a max-w-[1320px] container', async () => {
+  it('frames the grid inside a max-w-[1320px] container, with the bar outside it', async () => {
     await mount();
     const frame = document.querySelector('[class*="max-w-[1320px]"]') as HTMLElement | null;
     expect(frame).not.toBeNull();
-    expect(frame!.contains(q('[data-new-board-bar]'))).toBe(true);
     expect(frame!.contains(q('main'))).toBe(true);
+    expect(frame!.contains(q('[data-new-board-bar]'))).toBe(false);
+  });
+
+  it('renders the dashboard-style header without "Workspace Settings"', async () => {
+    await mount();
+    const bar = q('[data-new-board-bar]');
+    expect(bar).not.toBeNull();
+    expect(bar!.textContent).toContain('Back to Dashboard');
+    expect(bar!.textContent).toContain('New board');
+    expect(bar!.textContent).not.toContain('Workspace Settings');
+    expect(bar!.querySelector('a')?.getAttribute('href')).toBe('/dashboard');
+    expect(bar!.querySelector('button')).toBeNull();
   });
 
   it('starts with the default name, icon and background', async () => {

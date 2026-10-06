@@ -129,25 +129,27 @@ export default function NewBoardPage() {
   const formatName = formatById(format)?.name;
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-4 font-sans text-slate-900">
-      <div className="mx-auto w-full max-w-[1320px] overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-sm">
-        <div
-          data-new-board-bar
-          className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"
-        >
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      <header
+        data-new-board-bar
+        className="bg-white border-b border-gray-200 px-6 py-3 flex-shrink-0"
+      >
+        <div className="flex items-center gap-4">
           <Link
             href="/dashboard"
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
-            <ArrowLeft className="h-[18px] w-[18px]" />
-            Dashboard
+            <ArrowLeft className="w-4 h-4" />
+            <span className="text-sm">Back to Dashboard</span>
           </Link>
-          <h1 className="border-l border-slate-200 pl-3 text-[15px] font-semibold text-slate-900">
-            New board
-          </h1>
+          <div className="h-4 w-px bg-gray-300" />
+          <h1 className="font-medium text-gray-900">New board</h1>
         </div>
+      </header>
 
-        <div className="grid grid-cols-[minmax(0,1fr)_352px] max-[980px]:grid-cols-1">
+      <div className="px-4 py-4">
+        <div className="mx-auto w-full max-w-[1320px] overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-sm">
+          <div className="grid grid-cols-[minmax(0,1fr)_352px] max-[980px]:grid-cols-1">
           <main className="flex min-w-0 flex-col gap-7 px-7 pb-8 pt-6">
           <section>
             <div className="flex flex-wrap items-baseline gap-3">
@@ -256,6 +258,7 @@ export default function NewBoardPage() {
             ) : null}
           </div>
         </aside>
+          </div>
         </div>
       </div>
 
