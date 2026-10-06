@@ -3810,7 +3810,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               const showTableExpand = isTablePost && tableCardHasMore(padlet.content);
               const showAIExpand = isAIPost;
               const showExpandButton = showContainerExpand || showAIExpand || showTableExpand;
-              const isContainerExpanded = expandedContainers[padlet.id] ?? false;
+              const isContainerExpanded = expandedContainers[padlet.id] ?? ((padlet.metadata as { startExpanded?: boolean } | undefined)?.startExpanded === true);
               const isAIPostExpanded = expandedAIPosts[padlet.id] ?? false;
               const isExpanded = isContainer ? isContainerExpanded : isTablePost ? (expandedTables[padlet.id] ?? false) : isAIPostExpanded;
               return (
@@ -3931,7 +3931,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           onClick={(e) => {
                             e.stopPropagation();
                             if (isContainer) {
-                              setExpandedContainers(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
+                              setExpandedContainers(prev => ({ ...prev, [padlet.id]: !(prev[padlet.id] ?? ((padlet.metadata as { startExpanded?: boolean } | undefined)?.startExpanded === true)) }));
                             } else if (isTablePost) {
                               setExpandedTables(prev => ({ ...prev, [padlet.id]: !prev[padlet.id] }));
                             }
@@ -4460,7 +4460,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       : { ...prev, [padlet.id]: requiredOuterWidth });
                   }}
                   showHeader={false}
-                  isExpanded={expandedContainers[padlet.id] ?? false}
+                  isExpanded={expandedContainers[padlet.id] ?? ((padlet.metadata as { startExpanded?: boolean } | undefined)?.startExpanded === true)}
                   onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[padlet.id] === available ? prev : { ...prev, [padlet.id]: available })}
                   onDropExistingPadlet={canUseFreeformEditButton ? async (containerId, droppedId) => {
                     const containerPadlet = padlets.find(p => p.id === containerId);

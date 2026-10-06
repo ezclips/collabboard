@@ -153,6 +153,7 @@ import type { KnowledgeDocumentOpenRequest, KnowledgeSourceOpenRequest } from '@
 import KnowledgeSourceReaderDrawer from '@/components/collabboard/KnowledgeSourceReaderDrawer';
 import BoardWikiDrawer from '@/components/collabboard/BoardWikiDrawer';
 import { BoardWikiPlanLimitError } from '@/components/collabboard/BoardWikiDrawer';
+import BoardTemplatePicker from '@/components/collabboard/templates/BoardTemplatePicker';
 import type { BoardWikiProposal } from '@/lib/domain/wiki/boardWikiEditing';
 import { seekBoardVideo } from '@/components/collabboard/boardVideoPlayerRegistry';
 import {
@@ -11495,10 +11496,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onOpenWikiWithProposal={canEditBoardContent ? openBoardWikiWithProposal : undefined}
         />
 
-        {/* Board AI Chat. A shell-level sibling for the same reason the reader
-            is one: mounted under CanvasSidebar's z-[3000] wrapper it would be
-            pinned above every editor modal. Here it sits in the docked band and
-            yields to a blocking editor on the board's own flag. */}
+        {/* Board AI Chat. A shell-level sibling so CanvasSidebar's z-[3000] wrapper cannot pin it above every editor modal. */}
         {enableBoardAiChat && (
           <BoardAiChatDrawer
             boardId={canvasId}
@@ -11519,10 +11517,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           />
         )}
 
-        {/* WIKI-U2. The board wiki, a shell-level sibling for the same stacking
-            reason Chat is: mounted under CanvasSidebar's z-[3000] wrapper it
-            would be pinned above every editor modal. It yields to a blocking
-            editor on the board's own flag. */}
+        {/* WIKI-U2. The board wiki, a shell-level sibling for the same stacking reason Chat is; it yields to a blocking editor on the board's own flag. */}
         <BoardWikiDrawer
           boardId={canvasId}
           isOpen={isBoardWikiOpen}
@@ -11543,11 +11538,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
              and gets no Refresh control at all. */
           onRequestRecompile={canEditBoardContent ? requestWikiRecompile : undefined}
         />
+        {/* PATCH-293. Finished-template picker for an empty freeform board. */}
+        <BoardTemplatePicker
+          boardId={canvasId ?? ''}
+          layout={canvas?.layout}
+          postCount={padlets.length} postsLoaded={!loading}
+          canEdit={canEditBoardContent}
+          onApplied={() => { void fetchData(); }}
+        />
 
-        {/* The wiki's ONE entry point. Available to every reader of the board,
-            viewers included -- reading a page and its sources chain is a read.
-            Hidden while an editor owns the screen and while the wiki is already
-            open, like every other floating board control. */}
+        {/* The wiki's ONE entry point for every reader (viewers included); hidden while an editor owns the screen or the wiki is already open. */}
         {!isBlockingEditorModalOpen && !isBoardWikiOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && (
           <button
             type="button"

@@ -58,6 +58,9 @@ export default defineConfig({
       'workers/knowledge-embedding/**/*.test.ts',
       'workers/knowledge-query/**/*.test.ts',
       'components/collabboard/*.test.tsx',
+      // PATCH-293: the board-template picker lives one level down; without this
+      // line its test is silently NOT RUN (the trap the notes above warn of).
+      'components/collabboard/templates/*.test.tsx',
       'components/dashboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',
       'components/collabboard/comments/*.test.tsx',

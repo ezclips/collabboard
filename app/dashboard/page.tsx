@@ -9,7 +9,6 @@ import DashboardSidebar, { Folder } from '@/components/dashboard/DashboardSideba
 import CanvasCard from '@/components/dashboard/CanvasCard';
 import { Plus, Loader2, ArrowLeft, LayoutDashboard, Clock, Star, Trash2, Folder as FolderIcon, Settings, Palette, X } from 'lucide-react';
 import Link from 'next/link';
-import { createTemplate1Canvas } from '@/lib/collabboard/templates/template1';
 import { type WorkspaceContext } from '@/lib/workspace/context';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -75,7 +74,6 @@ export default function DashboardPage() {
     const [activeFilter, setActiveFilter] = useState<FilterType>('all');
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [isCreatingTemplate, setIsCreatingTemplate] = useState(false);
     const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [newFolderIcon, setNewFolderIcon] = useState('📁');
@@ -300,24 +298,6 @@ export default function DashboardPage() {
         }
     };
 
-    const handleCreateTemplate1 = async () => {
-        if (!user) return;
-        if (!canCreateMoreBoards) {
-            router.push('/dashboard/settings/billing');
-            return;
-        }
-        try {
-            setIsCreatingTemplate(true);
-            const newBoardId = await createTemplate1Canvas(user.id, workspaceContext?.workspaceId ?? null);
-            router.push(`/dashboard/canvas/${newBoardId}`);
-        } catch (err) {
-            console.error('Error creating template:', err);
-            alert('Failed to create template');
-        } finally {
-            setIsCreatingTemplate(false);
-        }
-    };
-
     const handleLogout = async () => {
         await supabase.auth.signOut();
         router.push('/login');
@@ -447,14 +427,6 @@ export default function DashboardPage() {
                                 >
                                     <Plus className="w-5 h-5" />
                                     {canCreateMoreBoards ? 'Create Canvas' : 'Upgrade for More'}
-                                </button>
-                                <button
-                                    onClick={handleCreateTemplate1}
-                                    disabled={isCreatingTemplate || !canCreateMoreBoards}
-                                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50"
-                                >
-                                    {isCreatingTemplate ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                                    Template 1
                                 </button>
                             </div>
                         )}

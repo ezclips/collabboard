@@ -1,0 +1,74 @@
+[
+  {
+    "file": "cafe-plants.jpg",
+    "source": "Pexels",
+    "id": 18721993,
+    "photographer": "Arda Kaykısız",
+    "page": "https://www.pexels.com/photo/plants-in-a-restaurant-18721993/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "latte-art.jpg",
+    "source": "Pexels",
+    "id": 459489,
+    "photographer": "Pixabay",
+    "page": "https://www.pexels.com/photo/cup-of-coffee-on-saucer-459489/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "terrace.jpg",
+    "source": "Pexels",
+    "id": 39600535,
+    "photographer": "Liubava Fedoryshyn",
+    "page": "https://www.pexels.com/photo/charming-outdoor-cafe-tables-in-ukraine-39600535/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "website-laptop.jpg",
+    "source": "Pexels",
+    "id": 7191162,
+    "photographer": "Pavel Danilyuk",
+    "page": "https://www.pexels.com/photo/close-up-shot-of-laptop-screen-7191162/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "barista.jpg",
+    "source": "Pexels",
+    "id": 2101154,
+    "photographer": "Elle Hughes",
+    "page": "https://www.pexels.com/photo/man-carrying-glass-of-coffee-2101154/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "bullseye.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:bullseye",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/bullseye/",
+    "license": "MIT"
+  },
+  {
+    "file": "hot-beverage.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:hot-beverage",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/hot-beverage/",
+    "license": "MIT"
+  },
+  {
+    "file": "artist-palette.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:artist-palette",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/artist-palette/",
+    "license": "MIT"
+  },
+  {
+    "file": "rocket.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:rocket",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/rocket/",
+    "license": "MIT"
+  }
+]

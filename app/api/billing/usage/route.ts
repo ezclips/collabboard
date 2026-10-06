@@ -44,8 +44,8 @@ export const GET = createUsageHandler({
       .from("boards")
       .select("id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
-      // Active boards only, exactly as the board limit counts them (template1.ts,
-      // CanvasSetupPage): a meter must never disagree with the refusal.
+      // Active boards only, exactly as the board limit counts them (CanvasSetupPage):
+      // a meter must never disagree with the refusal.
       .is("deleted_at", null);
     if (error) throw error;
     return count ?? 0;

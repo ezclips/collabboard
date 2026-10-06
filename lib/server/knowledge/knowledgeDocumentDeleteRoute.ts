@@ -56,6 +56,7 @@ const ERROR_RESPONSES: Record<DomainErrorCode, { status: number; error: string }
   rate_limited: { status: 429, error: 'Too many requests' },
   quota_exceeded: { status: 403, error: 'Forbidden' },
   unavailable: { status: 503, error: UNAVAILABLE },
+  template_apply_failed: { status: 500, error: 'Could not apply the template' },
   unknown: { status: 500, error: 'Could not complete the delete request' },
 };
 

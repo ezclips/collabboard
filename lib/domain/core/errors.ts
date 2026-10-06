@@ -11,6 +11,7 @@ export type DomainErrorCode =
   | 'rate_limited' // app- or provider-level throttle
   | 'quota_exceeded' // plan entitlement limit reached
   | 'unavailable' // infrastructure failure (network, DB down)
+  | 'template_apply_failed' // a board-template apply failed and was rolled back (PATCH-293)
   | 'unknown'; // unexpected exception; always report to telemetry
 
 export interface DomainError {
