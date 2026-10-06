@@ -11,15 +11,17 @@ export const RESEARCH: BoardTemplate = {
   layout: 'freeform',
   previewUrl: '/templates/freeform/research/preview.jpg',
   openBoardAiAfterApply: true,
-  summary: 'Upload a PDF and explore it with Board AI.',
+  summary:
+    'Read PDFs beside your board, turn passages into linked Notes, and pull it together with Board AI and the Board Wiki.',
   contents: [
     'A drop zone for your PDFs in the middle',
-    'Research question and key findings',
-    'Sources table and open questions',
-    'Board AI opens with the board',
+    'The PDF opens beside the board: a selected passage or area becomes a Note linked to its page',
+    'Research question, findings and a sources table',
+    'Board AI opens on the right and answers with page numbers',
+    'Save answers to the Board Wiki, as pages that list their sources',
   ],
   posts: [
-    { kind: 'column', key: 'question', title: 'Your question', x: 60, y: 60, width: 360, height: 820, topStrip: '#6366f1' },
+    { kind: 'column', key: 'question', title: 'Your question', x: 60, y: 60, width: 360, height: 1100, topStrip: '#6366f1' },
     { kind: 'clipart', title: 'Question', svg: '/templates/freeform/research/magnifier.svg', iconBgColor: '#c7d2fe', parent: 'question' },
     {
       kind: 'note',
@@ -49,15 +51,25 @@ export const RESEARCH: BoardTemplate = {
 
     {
       kind: 'note',
-      title: 'Ask Board AI',
-      html: '<p><strong>Ask Board AI</strong> — it opens on the right.</p><ul><li>“Summarise this PDF in five points.”</li><li>“What evidence answers my question?”</li><li>“Which sources does it cite?”</li><li>“Find quotes about …, with page numbers.”</li></ul>',
+      title: 'Read it beside your board',
+      html: '<p><strong>Read it beside your board</strong></p><ol><li>On the PDF card, press <strong>Add to side panel</strong>. Its pages open next to the board.</li><li>Select a sentence and press <strong>Save as Note</strong>. The Note links back to its page.</li><li>Press <strong>Select area</strong>, frame a chart or a picture, then press <strong>Create Note from area</strong>.</li><li>Drag your Notes into Findings. The reader’s <strong>Library</strong> keeps every Note, image and highlight of that PDF.</li></ol>',
       x: 470,
       y: 670,
       width: 560,
-      height: 210,
+      height: 240,
     },
 
-    { kind: 'column', key: 'findings', title: 'Findings', x: 1080, y: 60, width: 360, height: 820, topStrip: '#10b981' },
+    {
+      kind: 'note',
+      title: 'Ask Board AI, keep it in the wiki',
+      html: '<p><strong>Ask Board AI</strong> — it is open on the right.</p><ul><li>“Summarise this PDF in five points.”</li><li>“What evidence answers my question?”</li><li>“Find quotes about …, with page numbers.”</li></ul><p>Answers name their pages. <strong>Save as Note</strong> puts an answer on the board; <strong>Save to wiki</strong> keeps it in the <strong>Board Wiki</strong>, as a page that lists its sources.</p>',
+      x: 470,
+      y: 930,
+      width: 560,
+      height: 230,
+    },
+
+    { kind: 'column', key: 'findings', title: 'Findings', x: 1080, y: 60, width: 360, height: 1100, topStrip: '#10b981' },
     { kind: 'clipart', title: 'Findings', svg: '/templates/freeform/research/light-bulb.svg', iconBgColor: '#bbf7d0', parent: 'findings' },
     {
       kind: 'todo',
@@ -85,23 +97,16 @@ export const RESEARCH: BoardTemplate = {
       ],
       parent: 'findings',
     },
-
     {
       kind: 'table',
       title: 'Sources',
-      x: 1490,
-      y: 60,
-      width: 440,
-      height: 220,
       rows: [
         ['Title', 'Author', 'Year'],
         ['Your first PDF', '', ''],
         ['', '', ''],
         ['', '', ''],
       ],
+      parent: 'findings',
     },
-    { kind: 'image', title: 'Taking notes', src: '/templates/freeform/research/taking-notes.jpg', x: 1490, y: 310, width: 440, height: 294 },
-    { kind: 'clipart', title: 'Reading list', svg: '/templates/freeform/research/books.svg', iconBgColor: '#fecaca', x: 1490, y: 640 },
-    { kind: 'clipart', title: 'Ask Board AI', svg: '/templates/freeform/research/speech-balloon.svg', iconBgColor: '#bfdbfe', x: 1700, y: 640 },
   ],
 };

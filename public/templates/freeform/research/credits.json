@@ -16,14 +16,6 @@
     "license": "Pexels License"
   },
   {
-    "file": "taking-notes.jpg",
-    "source": "Pexels",
-    "id": 6549598,
-    "photographer": "Tima Miroshnichenko",
-    "page": "https://www.pexels.com/photo/a-man-taking-notes-while-reading-a-book-6549598/",
-    "license": "Pexels License"
-  },
-  {
     "file": "magnifier.svg",
     "source": "Iconify",
     "id": "fluent-emoji-flat:magnifying-glass-tilted-left",
@@ -40,27 +32,11 @@
     "license": "MIT"
   },
   {
-    "file": "books.svg",
-    "source": "Iconify",
-    "id": "fluent-emoji-flat:books",
-    "author": "Microsoft (Fluent Emoji)",
-    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/books/",
-    "license": "MIT"
-  },
-  {
     "file": "bookmark-tabs.svg",
     "source": "Iconify",
     "id": "fluent-emoji-flat:bookmark-tabs",
     "author": "Microsoft (Fluent Emoji)",
     "page": "https://icon-sets.iconify.design/fluent-emoji-flat/bookmark-tabs/",
-    "license": "MIT"
-  },
-  {
-    "file": "speech-balloon.svg",
-    "source": "Iconify",
-    "id": "fluent-emoji-flat:speech-balloon",
-    "author": "Microsoft (Fluent Emoji)",
-    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/speech-balloon/",
     "license": "MIT"
   },
   {
