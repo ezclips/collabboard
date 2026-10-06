@@ -3,7 +3,15 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOARD_TEMPLATE_GROUPS } from '@/lib/collabboard/templates/registry';
 import TemplateGalleryModal from './TemplateGalleryModal';
+
+const TOTAL_TEMPLATES = BOARD_TEMPLATE_GROUPS.reduce(
+  (total, group) => total + group.templates.length,
+  0,
+);
+const countFor = (layout: string) =>
+  BOARD_TEMPLATE_GROUPS.find((group) => group.layout === layout)?.templates.length ?? 0;
 
 let root: Root | null = null;
 let host: HTMLElement;
@@ -55,10 +63,10 @@ afterEach(() => {
 describe('TemplateGalleryModal', () => {
   it('shows the filter counts', async () => {
     await mount();
-    expect(q('[data-gallery-filter="all"]')?.textContent).toContain('18');
-    expect(q('[data-gallery-filter="freeform"]')?.textContent).toContain('8');
-    expect(q('[data-gallery-filter="wall"]')?.textContent).toContain('2');
-    expect(q('[data-gallery-filter="map"]')?.textContent).toContain('2');
+    expect(q('[data-gallery-filter="all"]')?.textContent).toContain(String(TOTAL_TEMPLATES));
+    expect(q('[data-gallery-filter="freeform"]')?.textContent).toContain(String(countFor('freeform')));
+    expect(q('[data-gallery-filter="wall"]')?.textContent).toContain(String(countFor('wall')));
+    expect(q('[data-gallery-filter="map"]')?.textContent).toContain(String(countFor('map')));
   });
 
   it('opens filtered on the current format when it has templates', async () => {

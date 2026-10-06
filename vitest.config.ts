@@ -75,6 +75,9 @@ export default defineConfig({
       'components/collabboard/canvas/engine/*.test.ts',
       'components/collabboard/canvas/hooks/*.test.ts',
       'components/collabboard/canvas/hooks/*.test.tsx',
+      // PATCH-302: the Research drop zone and its FreeformPadletCards branch
+      // live one level down; without this line their tests are silently NOT RUN.
+      'components/collabboard/canvas/ui/*.test.tsx',
       'components/settings/ai/*.test.ts',
       'components/settings/ai/*.test.tsx',
       // Shared AI components used by several surfaces (the role model chooser).

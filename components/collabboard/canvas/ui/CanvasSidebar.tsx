@@ -22,6 +22,7 @@ import {
   TOOLBAR_MENU_COLLISION_PADDING_PX,
   TOOLBAR_MENU_GAP_PX,
 } from './toolbarMenuPlacement';
+import { registerBoardPdfUploader } from '@/lib/collabboard/boardUploadBridge';
 
 export interface SidebarToolItem {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
@@ -156,6 +157,11 @@ export default function CanvasSidebar({
   const [overflowState, setOverflowState] = useState<OverflowState | null>(null);
   const [menuSideOffset, setMenuSideOffset] = useState(TOOLBAR_MENU_GAP_PX);
 
+  const attachKnowledgeUploader = useCallback((next: KnowledgePdfUploaderHandle | null) => { // PATCH-302: publish the uploader to the board's PDF drop zone.
+    registerBoardPdfUploader(next);
+    if (typeof knowledgeUploaderRef === 'function') knowledgeUploaderRef(next); else if (knowledgeUploaderRef) knowledgeUploaderRef.current = next;
+    return () => registerBoardPdfUploader(null);
+  }, [knowledgeUploaderRef]);
   // P6J-F7-B1: a Note asking for its source no longer touches this component.
   // The request goes straight to the shell-level reader, so opening a citation
   // never pops the library open on the way -- and a collapsed toolbar, which
@@ -445,7 +451,7 @@ export default function CanvasSidebar({
           different surface and is deliberately untouched here. */}
       {canAddBoardContentPdf ? (
         <KnowledgePdfUploader
-          ref={knowledgeUploaderRef}
+          ref={attachKnowledgeUploader}
           initiationPolicy="board-content"
           canInitiateUploadNow={canAddBoardContentPdfNow}
           inputId={KNOWLEDGE_PDF_TOOLBAR_INPUT_ID}

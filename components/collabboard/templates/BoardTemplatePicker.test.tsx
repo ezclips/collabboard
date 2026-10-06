@@ -30,8 +30,13 @@ vi.mock('@/lib/domain/canvas/boardTemplates', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/collabboard/templates/revealAppliedTemplate', () => ({
+  revealAppliedTemplate: vi.fn(),
+}));
+
 import BoardTemplatePicker from './BoardTemplatePicker';
 import { readBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
+import { revealAppliedTemplate } from '@/lib/collabboard/templates/revealAppliedTemplate';
 
 const BOARD = 'board-1';
 const DISMISS_KEY = `fable.templatePicker.dismissed.${BOARD}`;
@@ -124,6 +129,7 @@ beforeEach(() => {
   hoisted.apply.mockReset();
   hoisted.factory.mockReset();
   hoisted.apply.mockResolvedValue({ ok: true, value: 1 });
+  vi.mocked(revealAppliedTemplate).mockClear();
 });
 
 afterEach(() => {
@@ -172,13 +178,14 @@ describe('BoardTemplatePicker behaviour', () => {
     expect(q('[data-board-template-row="empty"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('renders eight template rows under "Freeform canvas"', async () => {
+  it('renders nine template rows under "Freeform canvas"', async () => {
     await mount();
     expect(q('[data-board-template-picker]')?.textContent).toContain('Freeform canvas');
     const rows = Array.from(host.querySelectorAll('[data-board-template-row]'));
     const templateRows = rows.filter((row) => row.getAttribute('data-board-template-row') !== 'empty');
-    expect(templateRows).toHaveLength(8);
+    expect(templateRows).toHaveLength(9);
     expect(templateRows.map((row) => row.getAttribute('data-board-template-row'))).toEqual([
+      'research',
       'project-plan',
       'moodboard',
       'creative-brief',
@@ -333,6 +340,39 @@ describe('BoardTemplatePicker behaviour', () => {
     expect(onApplied).toHaveBeenCalledTimes(1);
   });
 
+  it('passes the applied template to onApplied', async () => {
+    const onApplied = vi.fn();
+    await mount({ onApplied });
+    await click(q('[data-board-template-row="research"]'));
+    await click(q('[data-board-template-apply]'));
+
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(onApplied.mock.calls[0][0]).toMatchObject({ id: 'research', openBoardAiAfterApply: true });
+  });
+
+  it('reveals the board after a successful freeform apply', async () => {
+    await mount();
+    await click(q('[data-board-template-row="research"]'));
+    await click(q('[data-board-template-apply]'));
+    expect(revealAppliedTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reveal after a non-freeform apply', async () => {
+    await mount({ layout: 'wall' });
+    await click(q('[data-board-template-row="birthday-wall"]'));
+    await click(q('[data-board-template-apply]'));
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    expect(revealAppliedTemplate).not.toHaveBeenCalled();
+  });
+
+  it('does not reveal when the command fails', async () => {
+    hoisted.apply.mockResolvedValue({ ok: false, error: { code: 'unavailable', message: 'boom' } });
+    await mount();
+    await click(q('[data-board-template-row="research"]'));
+    await click(q('[data-board-template-apply]'));
+    expect(revealAppliedTemplate).not.toHaveBeenCalled();
+  });
+
   it('does not call onApplied when the command fails', async () => {
     const onApplied = vi.fn();
     hoisted.apply.mockResolvedValue({ ok: false, error: { code: 'unavailable', message: 'boom' } });
@@ -446,6 +486,15 @@ describe('source invariants', () => {
     expect(block.split('\n').length).toBe(7);
   });
 
+  it('opens Board AI from the picker mount when the template asks for it', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
+    const start = source.indexOf('<BoardTemplatePicker');
+    const block = source.slice(start, source.indexOf('/>', start));
+    expect(block).toContain('openBoardAiAfterApply');
+    expect(block).toContain('toggleBoardAiChat');
+    expect(block).toContain('isBoardAiChatOpen');
+  });
+
   it('removes the Template 1 button from the dashboard', () => {
     const source = fs.readFileSync(path.join(ROOT, 'app/dashboard/page.tsx'), 'utf8');
     expect(source).not.toMatch(/Template 1/);
@@ -490,6 +539,22 @@ describe('BoardTemplatePicker ?template= auto-apply (PATCH-301)', () => {
     await rerender({ posts: [realPost()] });
     await settle();
     expect(hoisted.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives onApplied the auto-applied template', async () => {
+    withParam('research');
+    const onApplied = vi.fn();
+    await mount({ onApplied });
+    await settle();
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(onApplied.mock.calls[0][0]).toMatchObject({ id: 'research', openBoardAiAfterApply: true });
+  });
+
+  it('reveals after an auto-applied freeform template', async () => {
+    withParam('research');
+    await mount();
+    await settle();
+    expect(revealAppliedTemplate).toHaveBeenCalledTimes(1);
   });
 
   it('ignores the param on a non-empty board but still strips it', async () => {

@@ -1,0 +1,79 @@
+[
+  {
+    "file": "library-reading-room.jpg",
+    "source": "Pexels",
+    "id": 9572477,
+    "photographer": "Tima Miroshnichenko",
+    "page": "https://www.pexels.com/photo/people-sitting-at-the-table-9572477/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "highlighting.jpg",
+    "source": "Pexels",
+    "id": 6958526,
+    "photographer": "https://kaboompics.com/",
+    "page": "https://www.pexels.com/photo/person-using-a-blue-highlighter-pen-6958526/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "taking-notes.jpg",
+    "source": "Pexels",
+    "id": 6549598,
+    "photographer": "Tima Miroshnichenko",
+    "page": "https://www.pexels.com/photo/a-man-taking-notes-while-reading-a-book-6549598/",
+    "license": "Pexels License"
+  },
+  {
+    "file": "magnifier.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:magnifying-glass-tilted-left",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/magnifying-glass-tilted-left/",
+    "license": "MIT"
+  },
+  {
+    "file": "light-bulb.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:light-bulb",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/light-bulb/",
+    "license": "MIT"
+  },
+  {
+    "file": "books.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:books",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/books/",
+    "license": "MIT"
+  },
+  {
+    "file": "bookmark-tabs.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:bookmark-tabs",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/bookmark-tabs/",
+    "license": "MIT"
+  },
+  {
+    "file": "speech-balloon.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:speech-balloon",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/speech-balloon/",
+    "license": "MIT"
+  },
+  {
+    "file": "inbox-tray.svg",
+    "source": "Iconify",
+    "id": "fluent-emoji-flat:inbox-tray",
+    "author": "Microsoft (Fluent Emoji)",
+    "page": "https://icon-sets.iconify.design/fluent-emoji-flat/inbox-tray/",
+    "license": "MIT"
+  },
+  {
+    "file": "preview.jpg",
+    "source": "Screenshot of this template, made from the files above",
+    "license": "Same as the files above"
+  }
+]

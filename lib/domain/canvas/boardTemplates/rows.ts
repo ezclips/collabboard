@@ -234,6 +234,14 @@ export function buildTemplateRows(
           },
         });
         break;
+      case 'upload':
+        rows.push({
+          ...shared,
+          type: 'text',
+          content: post.html,
+          metadata: { ...placement, uploadDropZone: true, startExpanded: true },
+        });
+        break;
     }
   }
   return rows;

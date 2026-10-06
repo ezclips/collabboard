@@ -14,6 +14,7 @@ import {
   readBoardTemplateRequest,
   writeBoardTemplateRequest,
 } from '@/lib/collabboard/templates/templateRequest';
+import { revealAppliedTemplate } from '@/lib/collabboard/templates/revealAppliedTemplate';
 
 const EMPTY_SELECTION = 'empty';
 
@@ -25,7 +26,7 @@ export interface BoardTemplatePickerProps {
   canEdit: boolean;
   /** The board's sections, reused by columns/grid templates. */
   sections?: { id: number; title: string; position: number }[];
-  onApplied?: () => void;
+  onApplied?: (template: BoardTemplate) => void;
 }
 
 function dismissedKey(boardId: string): string {
@@ -138,7 +139,8 @@ export default function BoardTemplatePicker({
       );
       if (result.ok) {
         dismiss();
-        onApplied?.();
+        onApplied?.(template);
+        if (template.layout === 'freeform') void revealAppliedTemplate();
       } else {
         setFailed(true);
         setApplying(false);

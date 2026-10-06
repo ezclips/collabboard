@@ -100,6 +100,22 @@ const clipartPostSchema = z.object({
   ...placementShape,
 });
 
+/**
+ * PATCH-302. The Research template's PDF drop zone. Its `html` is the
+ * instructions, so any renderer without the drop-zone branch still shows
+ * readable text. Only freeform and only once per template, at root.
+ */
+const uploadPostSchema = z.object({
+  kind: z.literal('upload'),
+  title: z.string(),
+  html: z.string(),
+  ...placementShape,
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
 export const templatePostSchema = z.discriminatedUnion('kind', [
   sectionPostSchema,
   columnPostSchema,
@@ -108,6 +124,7 @@ export const templatePostSchema = z.discriminatedUnion('kind', [
   tablePostSchema,
   imagePostSchema,
   clipartPostSchema,
+  uploadPostSchema,
 ]);
 
 export type TemplatePost = z.infer<typeof templatePostSchema>;
@@ -136,6 +153,25 @@ function checkParentNamesColumn(posts: Post[], columnKeys: Set<string>, ctx: Ref
     if (!contentPost(post) || post.parent === undefined) return;
     if (!columnKeys.has(post.parent)) {
       addIssue(ctx, `parent "${post.parent}" names no column`, ['posts', index, 'parent']);
+    }
+  });
+}
+
+/**
+ * PATCH-302. An `upload` post is freeform-only and at most one per template.
+ * Its root placement is enforced by `validateFreeform` like any content post.
+ */
+function checkUploadPosts(posts: Post[], layout: string, ctx: RefineContext): void {
+  let seenIndex = -1;
+  posts.forEach((post, index) => {
+    if (post.kind !== 'upload') return;
+    if (layout !== 'freeform') {
+      addIssue(ctx, 'An upload post is only allowed in a freeform template', ['posts', index, 'kind']);
+    }
+    if (seenIndex !== -1) {
+      addIssue(ctx, 'A template has at most one upload post', ['posts', index, 'kind']);
+    } else {
+      seenIndex = index;
     }
   });
 }
@@ -315,6 +351,8 @@ export const boardTemplateSchema = z
     summary: z.string().optional(),
     /** PATCH-301. The "What's on the board" list shown in the detail view. */
     contents: z.array(z.string()).optional(),
+    /** PATCH-302. Open Board AI once the template has been applied. */
+    openBoardAiAfterApply: z.boolean().optional(),
     posts: z.array(templatePostSchema),
   })
   .superRefine((template, ctx) => {
@@ -328,6 +366,7 @@ export const boardTemplateSchema = z
     checkDuplicateKeys(template.posts, 'column', ctx);
     checkDuplicateKeys(template.posts, 'section', ctx);
     checkParentNamesColumn(template.posts, columnKeys, ctx);
+    checkUploadPosts(template.posts, template.layout, ctx);
 
     switch (template.layout) {
       case 'freeform':

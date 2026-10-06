@@ -13,9 +13,10 @@ describe('templatesForLayout', () => {
     expect(group?.templates.map((template) => template.id)).toContain('project-plan');
   });
 
-  it('lists the eight finished templates in order', () => {
+  it('lists the nine finished templates in order', () => {
     const group = templatesForLayout('freeform');
     expect(group?.templates.map((template) => template.id)).toEqual([
+      'research',
       'project-plan',
       'moodboard',
       'creative-brief',

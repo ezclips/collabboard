@@ -11545,7 +11545,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           layout={canvas?.layout}
           posts={padlets} postsLoaded={!loading} sections={sections}
           canEdit={canEditBoardContent}
-          onApplied={() => { void fetchData(); }}
+          onApplied={(t) => { void fetchData(); if (t?.openBoardAiAfterApply && !isBoardAiChatOpen) toggleBoardAiChat(); }}
         />
 
         {/* The wiki's ONE entry point for every reader (viewers included); hidden while an editor owns the screen or the wiki is already open. */}

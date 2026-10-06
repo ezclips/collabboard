@@ -1,5 +1,6 @@
 import type { LayoutType } from '@/types/collabboard';
 import type { BoardTemplate } from '@/lib/domain/canvas/boardTemplates';
+import { RESEARCH } from './freeform/research';
 import { PROJECT_PLAN } from './freeform/projectPlan';
 import { MOODBOARD } from './freeform/moodboard';
 import { CREATIVE_BRIEF } from './freeform/creativeBrief';
@@ -35,6 +36,7 @@ export const BOARD_TEMPLATE_GROUPS: readonly BoardTemplateGroup[] = [
     layout: 'freeform',
     label: 'Freeform canvas',
     templates: [
+      RESEARCH,
       PROJECT_PLAN,
       MOODBOARD,
       CREATIVE_BRIEF,

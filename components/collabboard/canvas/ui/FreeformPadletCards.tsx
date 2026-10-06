@@ -46,6 +46,7 @@ import KnowledgePdfCanvasSurface, {
   type KnowledgePdfCardView,
 } from '@/components/collabboard/KnowledgePdfCanvasSurface';
 import { KNOWLEDGE_SOURCE_CLIP_MIME } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
+import ResearchDropZone from '@/components/collabboard/canvas/ui/ResearchDropZone';
 import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMenu';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
@@ -4611,8 +4612,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 );
               })()}
 
+              {/* PATCH-302. A Research template upload post draws the PDF drop zone in place of the note body. */}
+              {(padlet.metadata as Record<string, unknown>).uploadDropZone === true && <ResearchDropZone title={padlet.title} />}
               {/* Generic / Note Display (Default) */}
-              {(!['link', 'todo', 'table', 'container', 'drawing', 'ai-component'].includes(padlet.type) && !padlet.file_url?.includes('https://')) && (
+              {(!['link', 'todo', 'table', 'container', 'drawing', 'ai-component'].includes(padlet.type) && !padlet.file_url?.includes('https://') && (padlet.metadata as Record<string, unknown>).uploadDropZone !== true) && (
                 <>
                 <div
                   className="text-gray-800 text-xs prose prose-sm break-words tiptap"
