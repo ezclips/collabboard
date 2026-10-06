@@ -48,6 +48,11 @@ export default defineConfig({
       'scripts/harness/**/*.test.ts',
       'scripts/*.test.ts',
       'scripts/db/**/*.test.ts',
+      // PATCH-290: the guard hook's decide() and the live-check kit's pure
+      // helpers live under scripts/hooks and scripts/live; without these lines
+      // their tests are silently NOT RUN (the trap the note above warns of).
+      'scripts/hooks/**/*.test.*',
+      'scripts/live/**/*.test.*',
       'tools/pdf-extraction-prototype/**/*.test.ts',
       'workers/knowledge-pdf/**/*.test.ts',
       'workers/knowledge-embedding/**/*.test.ts',

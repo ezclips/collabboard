@@ -57,6 +57,13 @@ Test data: one seeding module (`test/seed.ts`) creating deterministic workspaces
 The live-check browser on port 9333 is the OWNER's browser: they work in it while our scripts run. A script that
 misbehaves there damages their session, not a sandbox.
 
+- **Use `scripts/live/kit.mjs` for every live check** (see its README for an example). It opens its own tab,
+  blocks writes except during a save, waits for conditions instead of sleeping, checks the owner's tabs and always
+  exits.
+- **The guard hook enforces these rules.** `scripts/hooks/guard-live-browser.mjs` is a Claude Code PreToolUse hook
+  that blocks a script that would set a page size or close the shared browser, and blocks a production build while
+  the dev server runs. Enable it locally in `.claude/settings.local.json` (the CTO does this; never in
+  `settings.json`).
 - **Every script exits.** End with `process.exit(0)` inside `finally`, so a failure exits too. Never `browser.close()`.
   A script that never exits keeps its debugging connection, and with it everything that connection set, attached to
   every tab of the browser for as long as it runs (2026-10-05: fourteen scripts from 18 to 20 September were still
