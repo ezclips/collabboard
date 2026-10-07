@@ -77,10 +77,7 @@ let root: Root | null = null;
 let container: HTMLElement;
 const onEditItem = vi.fn();
 
-async function mount(
-  padlets: Padlet[] = [PADLET],
-  onRenameContainer?: (containerId: string, title: string) => void,
-): Promise<HTMLElement> {
+async function mount(padlets: Padlet[] = [PADLET]): Promise<HTMLElement> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -92,7 +89,6 @@ async function mount(
         onUpdatePadletMetadata={vi.fn()}
         onCreatePadlet={vi.fn()}
         onEditItem={onEditItem}
-        onRenameContainer={onRenameContainer}
       />,
     );
   });
@@ -197,110 +193,21 @@ describe('PATCH-313/314: an event shows how many items it holds', () => {
   });
 });
 
-describe('PATCH-314: type a short text right in an event', () => {
-  const wrapper = () => container.querySelector<HTMLElement>('[data-scheduler-container-id="p1"]')!;
+describe('PATCH-316: an event menu has no text entry', () => {
   const menuItem = (text: string) =>
     Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((el) =>
       el.textContent?.includes(text),
     ) ?? null;
-  const input = () => container.querySelector<HTMLInputElement>('[data-scheduler-event-tab] input');
 
-  async function openMenu() {
+  it('shows "Add post" and neither "Add text" nor "Edit text"', async () => {
+    const wrapper = await mount();
     await act(async () => {
-      wrapper().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+      wrapper.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
     });
-  }
 
-  async function chooseEditText() {
-    await openMenu();
-    const item = menuItem('Edit text');
-    expect(item).not.toBeNull();
-    await act(async () => {
-      item!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
-      item!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-      item!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
-      item!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-      item!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-    });
-  }
-
-  async function type(value: string) {
-    const field = input()!;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-      setter.call(field, value);
-      field.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-  }
-
-  it('offers "Edit text" for a titled event', async () => {
-    await mount([PADLET], vi.fn());
-    await openMenu();
-    expect(menuItem('Edit text')).not.toBeNull();
-    expect(menuItem('Add text')).toBeNull();
-  });
-
-  it('offers "Add text" for an untitled event', async () => {
-    await mount([{ ...PADLET, title: '' } as unknown as Padlet], vi.fn());
-    await openMenu();
-    expect(menuItem('Add text')).not.toBeNull();
-    expect(menuItem('Edit text')).toBeNull();
-  });
-
-  it('offers neither item without onRenameContainer', async () => {
-    await mount([PADLET]);
-    await openMenu();
+    expect(menuItem('Add post')).not.toBeNull();
     expect(menuItem('Add text')).toBeNull();
     expect(menuItem('Edit text')).toBeNull();
-  });
-
-  it('opens an input and saves the trimmed value on Enter', async () => {
-    const rename = vi.fn();
-    await mount([PADLET], rename);
-    await chooseEditText();
-    expect(input()).not.toBeNull();
-
-    await type('  Standup  ');
-    await act(async () => {
-      input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    });
-    expect(rename).toHaveBeenCalledWith('p1', 'Standup');
-  });
-
-  it('saves on blur', async () => {
-    const rename = vi.fn();
-    await mount([PADLET], rename);
-    await chooseEditText();
-    await type('Standup');
-    await act(async () => {
-      input()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
-    });
-    expect(rename).toHaveBeenCalledWith('p1', 'Standup');
-  });
-
-  it('does not save on Escape', async () => {
-    const rename = vi.fn();
-    await mount([PADLET], rename);
-    await chooseEditText();
-    await type('Standup');
-    await act(async () => {
-      input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    });
-    expect(rename).not.toHaveBeenCalled();
-  });
-
-  it('does not let the input mousedown reach the event wrapper', async () => {
-    const rename = vi.fn();
-    await mount([PADLET], rename);
-    await chooseEditText();
-    onEditItem.mockReset();
-
-    await act(async () => {
-      input()!.dispatchEvent(mouse('mousedown', 100, 100));
-      window.dispatchEvent(mouse('mouseup', 100, 100));
-    });
-    expect(onEditItem).not.toHaveBeenCalled();
   });
 });
 

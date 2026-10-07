@@ -2,13 +2,11 @@
 
 import React from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
-import { Clock3, RotateCcw, Scissors, SplitSquareHorizontal, Trash2, Plus, CalendarRange, Type } from 'lucide-react';
+import { Clock3, RotateCcw, Scissors, SplitSquareHorizontal, Trash2, Plus, CalendarRange } from 'lucide-react';
 
 type SchedulerEventContextMenuProps = {
   children: React.ReactNode;
   onAddPost: () => void;
-  onEditText?: () => void;
-  hasText?: boolean;
   onSetDuration: (minutes: number) => void;
   onSplitInHalf: () => void;
   onSplitIntoQuarterHours: () => void;
@@ -154,8 +152,6 @@ function DaySpanSubmenu({ currentSpan, onSetDaySpan }: { currentSpan: number; on
 export default function SchedulerEventContextMenu({
   children,
   onAddPost,
-  onEditText,
-  hasText,
   onSetDuration,
   onSplitInHalf,
   onSplitIntoQuarterHours,
@@ -177,13 +173,6 @@ export default function SchedulerEventContextMenu({
           style={{ zIndex: 9999 }}
         >
           <MenuItem label="Add post" icon={<Plus size={16} />} onClick={onAddPost} />
-          {onEditText && (
-            <MenuItem
-              label={hasText ? 'Edit text' : 'Add text'}
-              icon={<Type size={16} />}
-              onClick={onEditText}
-            />
-          )}
           <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
           <DurationSubmenu onSetDuration={onSetDuration} />
           <SplitSubmenu onSplitInHalf={onSplitInHalf} onSplitIntoQuarterHours={onSplitIntoQuarterHours} />

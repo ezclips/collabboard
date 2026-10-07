@@ -43,7 +43,6 @@ type StandaloneSchedulerCanvasProps = {
   selectedTimeSlot?: { start: Date; end: Date } | null;
   onSelectTimeSlot?: (slot: { start: Date; end: Date } | null) => void;
   onDeletePadlet?: (padletId: string) => void;
-  onRenameContainer?: (containerId: string, title: string) => void;
   onExternalDropItem?: (input: {
     payload: Record<string, unknown>;
     slot: { start: Date; end: Date };
@@ -103,12 +102,10 @@ export default function StandaloneSchedulerCanvas({
   selectedTimeSlot = null,
   onSelectTimeSlot,
   onDeletePadlet,
-  onRenameContainer,
   onExternalDropItem,
 }: StandaloneSchedulerCanvasProps) {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>('week');
-  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const suppressNextSelectRef = useRef(false);
   const eventMutationInFlightRef = useRef<Set<string>>(new Set());
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -712,8 +709,6 @@ export default function StandaloneSchedulerCanvas({
         onAddPost={() => {
           onTargetItem?.(event.resource);
         }}
-        onEditText={onRenameContainer && !readOnly ? () => setEditingEventId(event.resource.id) : undefined}
-        hasText={!!(event.resource.title ?? '').trim()}
         onSetDuration={(minutes) => {
           setEventDuration(event, minutes);
         }}
@@ -753,7 +748,6 @@ export default function StandaloneSchedulerCanvas({
     getLiveEventRange,
     onDeletePadlet,
     openEventOnce,
-    onRenameContainer,
     onTargetItem,
     setDaySpan,
     onUpdatePadletMetadata,
@@ -773,7 +767,6 @@ export default function StandaloneSchedulerCanvas({
     // PATCH-313/314. The count was only a hover tooltip; show it as a badge in
     // the container's design, on the first day of a multi-day event.
     const showPostBadge = childCount >= 1 && (!event.segment || event.segment.isFirst);
-    const isEditing = editingEventId === event.resource.id;
 
     const metadata = event.resource.metadata as Record<string, unknown> | undefined;
     const cardColor = typeof metadata?.cardColor === 'string' ? metadata.cardColor : null;
@@ -781,9 +774,7 @@ export default function StandaloneSchedulerCanvas({
     const { textColor: badgeTextColor, badgeBg } = containerBadgeColors(eventBackground);
 
     const tabRef = useRef<HTMLDivElement | null>(null);
-    const inputRef = useRef<HTMLInputElement | null>(null);
     const [isShort, setIsShort] = useState(true);
-    const [draft, setDraft] = useState(title);
 
     useLayoutEffect(() => {
       const element = tabRef.current;
@@ -796,26 +787,6 @@ export default function StandaloneSchedulerCanvas({
       return () => observer.disconnect();
     }, []);
 
-    useEffect(() => {
-      if (!isEditing) return;
-      setDraft(title);
-      const timer = window.setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }, [isEditing, title]);
-
-    const commit = () => {
-      const value = draft.trim();
-      if (onRenameContainer && value !== (title ?? '').trim()) {
-        onRenameContainer(event.resource.id, value);
-      }
-      setEditingEventId(null);
-    };
-
-    const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-
     const badgeStyle = { backgroundColor: badgeBg, color: badgeTextColor };
 
     return (
@@ -826,33 +797,7 @@ export default function StandaloneSchedulerCanvas({
         aria-label={event.segment ? `${itemLabel} · drag the edge to extend across days` : itemLabel}
         className="relative block w-full h-full min-h-[20px] px-1 overflow-hidden font-medium text-sm text-left"
       >
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            maxLength={80}
-            placeholder="Short text"
-            className="w-full rounded bg-white/90 px-1 text-sm font-medium text-slate-900 outline-none"
-            onChange={(e) => setDraft(e.target.value)}
-            onMouseDown={stop}
-            onMouseUp={stop}
-            onPointerDown={stop}
-            onPointerUp={stop}
-            onClick={stop}
-            onDoubleClick={stop}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                commit();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                setEditingEventId(null);
-              }
-            }}
-            onBlur={commit}
-          />
-        ) : isShort ? (
+        {isShort ? (
           <span className="flex items-center gap-1 min-w-0">
             {showPostBadge && (
               <span
@@ -905,7 +850,7 @@ export default function StandaloneSchedulerCanvas({
         )}
       </div>
     );
-  }, [padlets, readOnly, startDaySpanDrag, editingEventId, onRenameContainer]);
+  }, [padlets, readOnly, startDaySpanDrag]);
 
   const TimeSlotWrapper = useCallback(({ value, children }: { value: Date; children: React.ReactElement }) => {
     return React.cloneElement(children, {
