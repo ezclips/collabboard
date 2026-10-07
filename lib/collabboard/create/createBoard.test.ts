@@ -166,6 +166,23 @@ describe('createBoard', () => {
     expect(entry(log, 'kanban_columns', 'insert')).toBeUndefined();
   });
 
+  it('seeds the same three stages for a Kanban board', async () => {
+    const { client, log } = fakeSupabase();
+    await createBoard(client, { ...INPUT, layout: 'kanban' });
+
+    const stages = entry(log, 'kanban_columns', 'insert')?.payload as Array<Record<string, unknown>>;
+    expect(stages).toHaveLength(3);
+    expect(stages.map((stage) => stage.name)).toEqual(['To Do', 'In Progress', 'Done']);
+    expect(stages.map((stage) => stage.order_index)).toEqual([0, 1, 2]);
+    expect(stages.every((stage) => stage.canvas_id === 'board-1')).toBe(true);
+  });
+
+  it('does not seed stages for a Freeform board', async () => {
+    const { client, log } = fakeSupabase();
+    await createBoard(client, { ...INPUT, layout: 'freeform' });
+    expect(entry(log, 'kanban_columns', 'insert')).toBeUndefined();
+  });
+
   it('creates the three default sections for a Columns board', async () => {
     const { client, log } = fakeSupabase();
     await createBoard(client, { ...INPUT, layout: 'columns' });

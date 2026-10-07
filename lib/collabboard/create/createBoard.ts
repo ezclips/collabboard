@@ -111,7 +111,7 @@ export async function createBoard(
       { onConflict: 'canvas_id,user_id' },
     );
 
-    if (input.layout === 'gantt') {
+    if (input.layout === 'gantt' || input.layout === 'kanban') {
       const defaultStages = [
         { id: crypto.randomUUID(), name: 'To Do', order_index: 0 },
         { id: crypto.randomUUID(), name: 'In Progress', order_index: 1 },
