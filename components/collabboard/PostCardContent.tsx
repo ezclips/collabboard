@@ -992,7 +992,7 @@ export default function PostCardContent({
         return (
             <div className="space-y-3 pointer-events-none select-none">
                 <div className="flex items-center gap-2 mb-1">
-                    <h4 className="text-xs font-bold text-gray-800">{padlet.title || "Container"}</h4>
+                    <h4 className="text-xs font-bold text-gray-800" style={resolvePadletTitleStyle(padlet, '#1f2937')}>{padlet.title || "Container"}</h4>
                 </div>
 
                 {rawContent && <p className="text-[10px] text-gray-500 line-clamp-2">{rawContent}</p>}

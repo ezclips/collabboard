@@ -9,6 +9,7 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
+import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 
 type PostPopupProps = {
   post: Padlet;
@@ -124,7 +125,7 @@ export default function PostPopup({
       className="group/popup relative w-[360px] rounded-xl border border-slate-200 bg-white/95 p-2 shadow-xl backdrop-blur"
     >
       <div className="mb-2 flex items-center gap-2 min-w-0">
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-none text-slate-800">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-none text-slate-800" style={post.type === 'container' ? resolvePadletTitleStyle(post, '#1e293b') : undefined}>
           {post.title || 'Untitled post'}
         </h3>
         <div className="flex shrink-0 items-center justify-end gap-1">

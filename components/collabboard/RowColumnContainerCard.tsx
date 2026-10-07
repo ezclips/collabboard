@@ -15,6 +15,7 @@ import { useScrollbarLane } from "./useScrollbarLane";
 import { resolveContainerChildren, type ContainerOrientation } from "@/lib/domain/canvas/containerModel";
 import { resolveReusedLibraryItemId } from "@/lib/infra/collabboard/libraryReuseLink";
 import { containerBadgeColors } from "@/lib/domain/canvas/containerBadgeColors";
+import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -293,7 +294,7 @@ export default function RowColumnContainerCard({
       <div>
         {showHeader && !isContentOnly && (
           <div className="flex items-center justify-center relative mb-2">
-            <h3 className="text-sm font-bold text-center" style={{ color: isContentOnly ? undefined : textColor }}>{padlet.title || "Container"}</h3>
+            <h3 className="text-sm font-bold text-center" style={resolvePadletTitleStyle(padlet, textColor)}>{padlet.title || "Container"}</h3>
             {showExpandToggle && !isControlled && (
               <button
                 type="button"

@@ -24,7 +24,8 @@ import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import PostCardContent from "../PostCardContent";
 import RowColumnContainerCard from "../RowColumnContainerCard";
 import { ColumnPostContextMenu } from "../menus/ColumnPostContextMenu";
-import CardShell from "@/components/collabboard/shells/CardShell";
+import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
+import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 
@@ -455,6 +456,12 @@ export default function RowLane({
                                                     padletId={post.id}
                                                     isContainer
                                                     title={post.title || undefined}
+                                                    titleStyle={resolvePadletTitleStyle(
+                                                        post,
+                                                        post.metadata?.topStrip && post.metadata.topStrip !== 'transparent'
+                                                            ? contrastIconColor(post.metadata.topStrip)
+                                                            : '#374151',
+                                                    )}
                                                     cardColor={(post.metadata as any)?.cardColor || '#ffffff'}
                                                     topStripColor={post.metadata?.topStrip && post.metadata.topStrip !== 'transparent' ? post.metadata.topStrip : null}
                                                     onEdit={isEditable ? () => onEditPost(post) : undefined}

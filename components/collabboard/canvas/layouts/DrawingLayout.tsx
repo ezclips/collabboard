@@ -53,6 +53,7 @@ import {
   type SectionHeadingRect,
 } from '@/components/collabboard/canvas/engine/sectionHeading';
 import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import type { SectionHeadingColorTarget } from '@/components/collabboard/canvas/ui/SectionHeadingAppearancePanel';
 import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
@@ -1330,7 +1331,7 @@ export function DrawingEmbeddableCard({
           {isContainer && padlet.title && (
             <span
               className="text-xs font-semibold text-center break-words leading-snug py-1"
-              style={{ color: titleColor }}
+              style={resolvePadletTitleStyle(padlet, titleColor)}
             >
               {padlet.title}
             </span>

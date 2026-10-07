@@ -24,7 +24,8 @@ import RowColumnContainerCard from "@/components/collabboard/RowColumnContainerC
 import { ColumnPostContextMenu } from "@/components/collabboard/menus/ColumnPostContextMenu";
 
 import { useDroppable, useDraggable } from "@dnd-kit/core";
-import CardShell from "@/components/collabboard/shells/CardShell";
+import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
+import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image", "card"]);
@@ -386,6 +387,12 @@ export default function ColumnsCanvasRow({
                   padletId={post.id}
                   isContainer
                   title={post.title || undefined}
+                  titleStyle={resolvePadletTitleStyle(
+                    post,
+                    (post.metadata as any)?.topStrip && (post.metadata as any).topStrip !== 'transparent'
+                      ? contrastIconColor((post.metadata as any).topStrip)
+                      : '#374151',
+                  )}
                   cardColor={(post.metadata as any)?.cardColor || '#ffffff'}
                   topStripColor={(post.metadata as any)?.topStrip && (post.metadata as any).topStrip !== 'transparent' ? (post.metadata as any).topStrip : null}
                   onEdit={isEditable ? () => onEditPost(post) : undefined}

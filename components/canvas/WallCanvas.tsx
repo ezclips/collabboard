@@ -31,7 +31,8 @@ import { toast } from 'sonner';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { WallContainerContextMenu } from '@/components/collabboard/context-menus/WallContainerContextMenu';
 import PostCardContent from '@/components/collabboard/PostCardContent';
-import CardShell from '@/components/collabboard/shells/CardShell';
+import CardShell, { contrastIconColor } from '@/components/collabboard/shells/CardShell';
+import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 
 import { Padlet } from "@/types/collabboard";
@@ -186,6 +187,12 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
               padletId={padlet.id}
               isContainer
               title={padlet.title || undefined}
+              titleStyle={resolvePadletTitleStyle(
+                padlet,
+                padlet.metadata?.topStrip && padlet.metadata.topStrip !== 'transparent'
+                  ? contrastIconColor(padlet.metadata.topStrip)
+                  : '#374151',
+              )}
               cardColor={padlet.metadata?.cardColor || '#ffffff'}
               topStripColor={padlet.metadata?.topStrip && padlet.metadata.topStrip !== 'transparent' ? padlet.metadata.topStrip : null}
               onEdit={isEditable ? () => onEdit(padlet) : undefined}

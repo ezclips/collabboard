@@ -252,3 +252,25 @@ describe('PATCH-314 Addendum 1: short events keep the badge and title on one lin
     expect(el.className).toContain('bottom-1');
   });
 });
+
+describe('PATCH-318: a Scheduler event title shows the container title style', () => {
+  it('applies italic and colour but never the block font-size or background', async () => {
+    const styled = {
+      ...PADLET,
+      metadata: {
+        start_date: '2026-01-01T09:00:00.000Z',
+        end_date: '2026-01-01T10:00:00.000Z',
+        titleStyle: { color: '#fa5252', fontStyle: 'italic', fontSize: '24px', backgroundColor: '#ffff00' },
+      },
+    } as unknown as Padlet;
+    await mount([styled]);
+
+    const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
+    const span = tab.querySelector<HTMLElement>('span.truncate')!;
+    expect(span).not.toBeNull();
+    expect(span.style.fontStyle).toBe('italic');
+    expect(span.style.color).toBe('rgb(250, 82, 82)');
+    expect(span.style.fontSize).toBe('');
+    expect(span.style.backgroundColor).toBe('');
+  });
+});

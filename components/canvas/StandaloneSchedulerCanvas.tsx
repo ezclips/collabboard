@@ -10,6 +10,7 @@ import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './scheduler-theme.css';
 import SchedulerEventContextMenu from '@/components/canvas/SchedulerEventContextMenu';
 import { containerBadgeColors } from '@/lib/domain/canvas/containerBadgeColors';
+import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 
 const DEFAULT_EVENT_BACKGROUND = '#2563eb';
 
@@ -773,6 +774,18 @@ export default function StandaloneSchedulerCanvas({
     const eventBackground = cardColor && cardColor !== '#ffffff' ? cardColor : DEFAULT_EVENT_BACKGROUND;
     const { textColor: badgeTextColor, badgeBg } = containerBadgeColors(eventBackground);
 
+    // PATCH-318. The event title is the container's title; show the style set in
+    // its Text style panel, except the block's own size/line-height/background.
+    // Only take the colour when the style actually sets one.
+    const rawTitleStyle = (metadata?.titleStyle ?? undefined) as { color?: unknown } | undefined;
+    const eventTitleStyle: React.CSSProperties = { ...resolvePadletTitleStyle(event.resource) };
+    delete eventTitleStyle.fontSize;
+    delete eventTitleStyle.lineHeight;
+    delete eventTitleStyle.backgroundColor;
+    if (typeof rawTitleStyle?.color !== 'string' || rawTitleStyle.color.trim() === '') {
+      delete eventTitleStyle.color;
+    }
+
     const tabRef = useRef<HTMLDivElement | null>(null);
     const [isShort, setIsShort] = useState(true);
 
@@ -808,11 +821,11 @@ export default function StandaloneSchedulerCanvas({
                 {itemLabel}
               </span>
             )}
-            <span className="min-w-0 truncate">{title}</span>
+            <span className="min-w-0 truncate" style={eventTitleStyle}>{title}</span>
           </span>
         ) : (
           <>
-            <span className="block whitespace-normal break-words">{title}</span>
+            <span className="block whitespace-normal break-words" style={eventTitleStyle}>{title}</span>
             {showPostBadge && (
               <span
                 data-scheduler-post-count

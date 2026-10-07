@@ -3,7 +3,8 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import { Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus } from 'lucide-react';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
-import CardShell from '@/components/collabboard/shells/CardShell';
+import CardShell, { contrastIconColor } from '@/components/collabboard/shells/CardShell';
+import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
@@ -524,6 +525,12 @@ export default function ChronoTimelineCanvas({
             padletId={container.id}
             isContainer
             title={container.title || undefined}
+            titleStyle={resolvePadletTitleStyle(
+              container,
+              (container.metadata as any)?.topStrip && (container.metadata as any).topStrip !== 'transparent'
+                ? contrastIconColor((container.metadata as any).topStrip)
+                : '#374151',
+            )}
             cardColor={cardColor}
             topStripColor={(container.metadata as any)?.topStrip && (container.metadata as any).topStrip !== 'transparent' ? (container.metadata as any).topStrip : null}
             onEdit={isEditable ? () => onOpenContainer(container) : undefined}
