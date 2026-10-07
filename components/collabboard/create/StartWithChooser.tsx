@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { LayoutType } from '@/types/collabboard';
 import type { BoardTemplate } from '@/lib/domain/canvas/boardTemplates';
 import { BOARD_TEMPLATE_GROUPS, templatesForLayout } from '@/lib/collabboard/templates/registry';
@@ -42,6 +42,14 @@ export default function StartWithChooser({
   const selectedClass = 'border-blue-600 ring-[3px] ring-blue-100';
   const idleClass = 'border-slate-200 hover:border-slate-300 hover:shadow';
 
+  const [thumbNaturalWidth, setThumbNaturalWidth] = useState<{ url: string; width: number } | null>(null);
+  const chosenPreviewUrl = template?.previewUrl ?? null;
+  const thumbHalfWidth =
+    chosenPreviewUrl && thumbNaturalWidth?.url === chosenPreviewUrl
+      ? Math.round(thumbNaturalWidth.width / 2)
+      : null;
+  const thumbWidth = thumbHalfWidth === null ? '100%' : `min(100%, ${thumbHalfWidth}px)`;
+
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3.5 max-[720px]:grid-cols-1">
       <button
@@ -76,10 +84,23 @@ export default function StartWithChooser({
         className={`${cardClass} ${template ? selectedClass : idleClass}`}
       >
         {template ? (
-          <div
-            className="h-[170px] bg-slate-100 bg-cover bg-top"
-            style={template.previewUrl ? { backgroundImage: `url(${template.previewUrl})` } : undefined}
-          />
+          <div data-template-thumb className="flex h-[170px] justify-center overflow-hidden bg-slate-100">
+            {chosenPreviewUrl ? (
+              <img
+                src={chosenPreviewUrl}
+                alt=""
+                data-thumb-max-width={thumbHalfWidth ?? undefined}
+                onLoad={(event) => {
+                  const naturalWidth = event.currentTarget.naturalWidth;
+                  if (naturalWidth > 0) {
+                    setThumbNaturalWidth({ url: chosenPreviewUrl, width: naturalWidth });
+                  }
+                }}
+                className="block h-auto self-start"
+                style={{ width: thumbWidth }}
+              />
+            ) : null}
+          </div>
         ) : (
           <div className="relative h-[170px] overflow-hidden">
             {fan.map((src, index) => (
