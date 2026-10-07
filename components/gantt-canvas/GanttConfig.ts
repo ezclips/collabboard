@@ -301,7 +301,6 @@ export function configureGantt(
   if (isInit) {
     gantt.plugins({
       tooltip: false,
-      undo: true,
       quick_info: false,
       keyboard_navigation: true,
       inline_editors: true,
