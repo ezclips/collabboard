@@ -19,6 +19,22 @@ type SchedulerEventContextMenuProps = {
   onSetDaySpan: (days: number) => void;
 };
 
+/**
+ * PATCH-308. The menu is portalled, but React still bubbles synthetic events
+ * through the React tree, so a press here reached the scheduler event wrapper
+ * beneath and was read as a click on the event -- redrawing the calendar and
+ * discarding the menu before the item's action fired. Stop propagation of
+ * every pointer/mouse/click event; never preventDefault, so Radix's own
+ * handling is unchanged.
+ */
+const stopMenuEventPropagation = {
+  onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+  onPointerUp: (event: React.PointerEvent) => event.stopPropagation(),
+  onMouseDown: (event: React.MouseEvent) => event.stopPropagation(),
+  onMouseUp: (event: React.MouseEvent) => event.stopPropagation(),
+  onClick: (event: React.MouseEvent) => event.stopPropagation(),
+};
+
 function MenuItem({ label, icon, onClick, className }: { label: string; icon?: React.ReactNode; onClick: () => void; className?: string }) {
   return (
     <ContextMenu.Item
@@ -40,6 +56,7 @@ function DurationSubmenu({ onSetDuration }: { onSetDuration: (minutes: number) =
       </ContextMenu.SubTrigger>
       <ContextMenu.Portal>
         <ContextMenu.SubContent
+          {...stopMenuEventPropagation}
           className="min-w-[180px] bg-white rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)]"
           style={{ zIndex: 10000 }}
         >
@@ -68,6 +85,7 @@ function SplitSubmenu({
       </ContextMenu.SubTrigger>
       <ContextMenu.Portal>
         <ContextMenu.SubContent
+          {...stopMenuEventPropagation}
           className="min-w-[220px] bg-white rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)]"
           style={{ zIndex: 10000 }}
         >
@@ -90,6 +108,7 @@ function DaySpanSubmenu({ currentSpan, onSetDaySpan }: { currentSpan: number; on
       </ContextMenu.SubTrigger>
       <ContextMenu.Portal>
         <ContextMenu.SubContent
+          {...stopMenuEventPropagation}
           className="min-w-[220px] bg-white rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)]"
           style={{ zIndex: 10000 }}
         >
@@ -149,6 +168,7 @@ export default function SchedulerEventContextMenu({
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
+          {...stopMenuEventPropagation}
           className="min-w-[260px] bg-white rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)]"
           style={{ zIndex: 9999 }}
         >

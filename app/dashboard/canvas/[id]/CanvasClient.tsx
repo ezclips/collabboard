@@ -9565,6 +9565,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 </>
               );
 
+            // ▸ P1 – Scheduler event selected
+            } else if (isSchedulerLayout && selectedSchedulerContainerId && !schedulerPopoverPadletId) {
+              hintContent = (
+                <>
+                  Event selected — pick a post type in the <kbd style={kbdStyle}>toolbar</kbd> to add it to this event
+                </>
+              );
+
             // ▸ P2 – Library panel open (click-to-place workflow)
             } else if (isLibraryOpen) {
               hintContent = isMapLayout ? (
@@ -9639,7 +9647,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             } else if (isSchedulerLayout && padlets.length === 0) {
               hintContent = (
                 <>
-                  <kbd style={kbdStyle}>Click</kbd> a time slot to schedule a post, or use the <kbd style={kbdStyle}>toolbar</kbd> to add one
+                  <kbd style={kbdStyle}>Double-click</kbd> a time slot or drag across slots to add an event, or use the <kbd style={kbdStyle}>toolbar</kbd>
                 </>
               );
             }

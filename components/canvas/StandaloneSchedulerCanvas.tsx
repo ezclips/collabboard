@@ -276,8 +276,8 @@ export default function StandaloneSchedulerCanvas({
         (event) => event.start < end && event.end > start
       );
       if (overlapsExistingEvent) {
-        // The click landed on/near an existing block; let onSelectEvent handle it instead.
-        onSelectTimeSlot?.(null);
+        // The click landed on/near an existing block; the event's own click
+        // owns it, so do not clear the selection here.
         return;
       }
       // A single click just clears any stale highlight — creation requires a
@@ -292,13 +292,25 @@ export default function StandaloneSchedulerCanvas({
     [events, onCreatePadlet, onSelectTimeSlot, readOnly]
   );
 
+  // PATCH-308 Addendum 1. The DnD addon takes the event on mousedown, so the
+  // release lands on the slot beneath and no click reaches the wrapper. A
+  // window mouseup is watched instead; this guard keeps one physical click from
+  // opening the event twice if a view also reports it through onSelectEvent.
+  const lastOpenedAtRef = useRef(0);
+  const openEventOnce = useCallback((resource: Padlet) => {
+    const now = Date.now();
+    if (now - lastOpenedAtRef.current < 250) return;
+    lastOpenedAtRef.current = now;
+    onEditItem?.(resource);
+  }, [onEditItem]);
+
   const handleSelectEvent = (event: SchedulerEvent) => {
     if (readOnly) return;
     if (suppressNextSelectRef.current) {
       suppressNextSelectRef.current = false;
       return;
     }
-    onEditItem?.(event.resource);
+    openEventOnce(event.resource);
   };
 
   const runEventMutation = useCallback(async (eventId: string, action: () => Promise<void>) => {
@@ -659,28 +671,26 @@ export default function StandaloneSchedulerCanvas({
         style={{ display: 'contents' }}
         onMouseDown={(e) => {
           if (readOnly) return;
-          if (e.button === 0) {
-            pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
-          }
-        }}
-        onMouseUp={(e) => {
-          if (readOnly) return;
           if (e.button !== 0) return;
-          const start = pointerDownPosRef.current;
-          pointerDownPosRef.current = null;
-          if (!start) return;
-          const dx = e.clientX - start.x;
-          const dy = e.clientY - start.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance > 5) return;
-
-          e.stopPropagation();
-          e.preventDefault();
-          if (suppressNextSelectRef.current) {
-            suppressNextSelectRef.current = false;
-            return;
-          }
-          onEditItem?.(event.resource);
+          pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+          // The DnD addon takes the event on mousedown, so the release lands on
+          // the slot beneath and this wrapper never sees a click. Watch the
+          // window's mouseup (capture, once): a short, near-stationary release
+          // is a click on the event.
+          window.addEventListener('mouseup', (upEvent) => {
+            if (upEvent.button !== 0) return;
+            const start = pointerDownPosRef.current;
+            pointerDownPosRef.current = null;
+            if (!start) return;
+            const dx = upEvent.clientX - start.x;
+            const dy = upEvent.clientY - start.y;
+            if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+            if (suppressNextSelectRef.current) {
+              suppressNextSelectRef.current = false;
+              return;
+            }
+            openEventOnce(event.resource);
+          }, { capture: true, once: true });
         }}
       >
         {children}
@@ -734,7 +744,7 @@ export default function StandaloneSchedulerCanvas({
     getDaySpanCount,
     getLiveEventRange,
     onDeletePadlet,
-    onEditItem,
+    openEventOnce,
     onTargetItem,
     setDaySpan,
     onUpdatePadletMetadata,
@@ -755,7 +765,7 @@ export default function StandaloneSchedulerCanvas({
       <div
         data-scheduler-event-tab="true"
         data-scheduler-container-id={event.resource.id}
-        title={event.segment ? `${postLabel} · drag the edge to extend across days` : postLabel}
+        aria-label={event.segment ? `${postLabel} · drag the edge to extend across days` : postLabel}
         className="relative block w-full h-full min-h-[20px] px-1 overflow-hidden font-medium text-sm text-left"
       >
         <span className="block truncate">{title}</span>
@@ -764,6 +774,7 @@ export default function StandaloneSchedulerCanvas({
             className="absolute left-0 top-0 h-full w-2 cursor-ew-resize"
             style={{ zIndex: 5 }}
             onMouseDown={(e) => {
+              if (e.button !== 0) return;
               e.stopPropagation();
               e.preventDefault();
               startDaySpanDrag(event, 'start');
@@ -775,6 +786,7 @@ export default function StandaloneSchedulerCanvas({
             className="absolute right-0 top-0 h-full w-2 cursor-ew-resize"
             style={{ zIndex: 5 }}
             onMouseDown={(e) => {
+              if (e.button !== 0) return;
               e.stopPropagation();
               e.preventDefault();
               startDaySpanDrag(event, 'end');
@@ -790,6 +802,14 @@ export default function StandaloneSchedulerCanvas({
       'data-scheduler-slot-start': value.toISOString(),
     } as React.HTMLAttributes<HTMLElement>);
   }, []);
+
+  // PATCH-308. react-big-calendar remounts an event wrapper whenever the
+  // `components` prop identity changes, so an open context menu was discarded
+  // on the very re-render its own click caused. Keep the object stable.
+  const calendarComponents = useMemo(
+    () => ({ event: CustomEvent, eventWrapper: CustomEventWrapper, timeSlotWrapper: TimeSlotWrapper }),
+    [CustomEvent, CustomEventWrapper, TimeSlotWrapper],
+  );
 
   const clearExternalDragState = useCallback(() => {
     externalDragItemRef.current = null;
@@ -879,11 +899,7 @@ export default function StandaloneSchedulerCanvas({
           slotPropGetter={slotPropGetter}
           eventPropGetter={eventPropGetter}
           dayPropGetter={dayPropGetter}
-          components={{
-            event: CustomEvent,
-            eventWrapper: CustomEventWrapper,
-            timeSlotWrapper: TimeSlotWrapper,
-          }}
+          components={calendarComponents}
         />
       )}
     </div>
