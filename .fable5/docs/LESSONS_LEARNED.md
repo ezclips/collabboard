@@ -474,7 +474,7 @@ The template engine inserted rows shaped like the editors' saves, every insert r
    `.github/workflows/ci.yml`; the build (and smoke) steps need repo secrets
    `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` or the first
    Actions runs will fail red. Owner action; then check the first run.
-2. dhtmlx-gantt/scheduler are GPL/commercial dual-licensed and shipped unlicensed — replace or buy before GA.
+2. ~~dhtmlx-gantt/scheduler are GPL/commercial dual-licensed and shipped unlicensed~~ — RESOLVED 2026-10-07: dhtmlx-gantt moved to the MIT Community edition 10.x (PATCH-310; it lacks undo/redo, markers, multiselect, calendars, auto-scheduling, critical path, resources — do not add them without a licence); dhtmlx-scheduler removed, Kanban's scheduler runs on react-big-calendar (MIT, PATCH-311).
 3. Supabase built-in email = **2/hour project-wide** — configure custom SMTP before any beta.
 4. Lint has 5,426 legacy errors and is advisory; the build ignores it (`eslint.ignoreDuringBuilds`) — burn down, then remove the bypass.
 5. Excalidraw fork has its own committed `node_modules` backing a `file:` dependency — repo bloat; also inflates every clone/push now that a remote exists (though the PATCH-003.5 purge cut the pack 166→38.8 MiB).

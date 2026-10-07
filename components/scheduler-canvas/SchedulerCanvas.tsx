@@ -1,41 +1,30 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import 'dhtmlx-scheduler/codebase/dhtmlxscheduler.css';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { Calendar, momentLocalizer, type View } from 'react-big-calendar';
+import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
+import moment from 'moment';
+import 'react-big-calendar/lib/css/react-big-calendar.css';
+import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
+import '@/components/canvas/scheduler-theme.css';
 import './scheduler.css';
 import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from '@/components/kanban-canvas/store';
 import type { Card, Column } from '@/types/kanban-canvas';
 import { SchedulerEventMenu } from './SchedulerEventMenu';
 
+const localizer = momentLocalizer(moment);
+const DndCalendar = withDragAndDrop(Calendar) as unknown as ComponentType<Record<string, unknown>>;
+
+// react-big-calendar only reads the time-of-day from min/max.
+const DAY_START = new Date(1970, 0, 1, 6, 0, 0);
+const DAY_END = new Date(1970, 0, 1, 22, 0, 0);
+
 type SchedulerEvent = {
   id: string;
-  text: string;
-  start_date: Date;
-  end_date: Date;
-};
-
-type SchedulerLike = {
-  config: {
-    readonly?: boolean;
-    drag_move?: boolean;
-    drag_resize?: boolean;
-    drag_create?: boolean;
-    edit_on_create?: boolean;
-    details_on_create?: boolean;
-    details_on_dblclick?: boolean;
-    first_hour?: number;
-    last_hour?: number;
-  };
-  templates?: { event_class?: (_start: Date, _end: Date, event: { color?: string }) => string };
-  init: (container: HTMLElement, date?: Date, mode?: 'week' | 'month' | 'day') => void;
-  clearAll: () => void;
-  parse: (data: SchedulerEvent[] | { data: SchedulerEvent[] }, type?: 'json') => void;
-  attachEvent: (name: string, cb: (...args: unknown[]) => unknown) => string;
-  detachEvent: (id: string) => void;
-  changeEventId: (id: string, newId: string) => void;
-  getEvent: (id: string | number) => Record<string, unknown> | null;
-  setCurrentView: (date?: Date, mode?: 'week' | 'month' | 'day') => void;
-  destructor?: () => void;
+  title: string;
+  start: Date;
+  end: Date;
+  resource: Card;
 };
 
 type EventMenuState = {
@@ -44,13 +33,22 @@ type EventMenuState = {
   y: number;
 };
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
+function getReadableTextColor(backgroundColor: string): '#000000' | '#ffffff' {
+  const hex = backgroundColor.trim().replace('#', '');
+  const normalized = hex.length === 3
+    ? hex.split('').map((char) => `${char}${char}`).join('')
+    : hex;
 
-function toUuid(id: string): string {
-  if (isUuid(id)) return id;
-  return crypto.randomUUID();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return '#000000';
+  }
+
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 160 ? '#000000' : '#ffffff';
 }
 
 function toDate(value?: string): Date | null {
@@ -81,17 +79,6 @@ function floorToQuarter(minutes: number): number {
   return Math.max(15, Math.floor(minutes / 15) * 15);
 }
 
-function mapCardToEvent(card: Card): SchedulerEvent {
-  const start = toDate(card.start_date) || toDate(card.end_date) || new Date();
-  const end = toDate(card.end_date) || new Date(start.getTime() + 60 * 60 * 1000);
-  return {
-    id: card.id,
-    text: card.label || 'Untitled',
-    start_date: start,
-    end_date: end,
-  };
-}
-
 function resolveDefaultColumnId(columns: Column[]): string | null {
   const first = [...columns]
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
@@ -104,15 +91,35 @@ export function SchedulerCanvas() {
   const actions = useKanbanPersistence();
   const readonly = useKanbanReadonly();
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const schedulerRef = useRef<SchedulerLike | null>(null);
-  const detachEventsRef = useRef<(() => void) | null>(null);
-  const isApplyingExternalUpdateRef = useRef(false);
   const dataRef = useRef(data);
   const originalRangesRef = useRef(new Map<string, { start: string; end: string }>());
   const [eventMenu, setEventMenu] = useState<EventMenuState | null>(null);
+  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  const [currentView, setCurrentView] = useState<View>('week');
 
-  const mapped = useMemo(() => data.cards.map(mapCardToEvent), [data.cards]);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+
+  // Only cards that carry a date are events; an undated card would otherwise
+  // land at "now" and clutter the week.
+  const events = useMemo<SchedulerEvent[]>(
+    () =>
+      data.cards
+        .filter((card) => !!card.start_date || !!card.end_date)
+        .map((card) => {
+          const start = toDate(card.start_date) || toDate(card.end_date) || new Date();
+          const end = toDate(card.end_date) || addMinutes(start, 60);
+          return {
+            id: card.id,
+            title: card.label || 'Untitled',
+            start,
+            end: end > start ? end : addMinutes(start, 60),
+            resource: card,
+          };
+        }),
+    [data.cards],
+  );
 
   const closeEventMenu = useCallback(() => {
     setEventMenu(null);
@@ -146,10 +153,6 @@ export function SchedulerCanvas() {
   }, [closeEventMenu, eventMenu, getCardById]);
 
   useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
-
-  useEffect(() => {
     if (!eventMenu) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -161,157 +164,90 @@ export function SchedulerCanvas() {
   }, [eventMenu]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const setup = async () => {
-      if (!containerRef.current || schedulerRef.current) return;
-      const schedulerModule = await import('dhtmlx-scheduler');
-      if (cancelled) return;
-
-      const scheduler = schedulerModule.scheduler as SchedulerLike;
-      schedulerRef.current = scheduler;
-      scheduler.config.readonly = readonly;
-      scheduler.config.drag_move = !readonly;
-      scheduler.config.drag_resize = !readonly;
-      scheduler.config.drag_create = !readonly;
-      scheduler.config.edit_on_create = false;
-      scheduler.config.details_on_create = false;
-      scheduler.config.details_on_dblclick = false;
-      scheduler.config.first_hour = 6;
-      scheduler.config.last_hour = 22;
-      scheduler.templates = scheduler.templates || {};
-      scheduler.templates.event_class = (_start, _end, event) => (event.color ? `sched-color-${event.color.replace('#', '')}` : '');
-
-      scheduler.init(containerRef.current, new Date(), 'week');
-      scheduler.parse(mapped, 'json');
-
-      const ids: string[] = [];
-      ids.push(
-        scheduler.attachEvent('onEventChanged', (id: unknown) => {
-          if (isApplyingExternalUpdateRef.current) return true;
-          const eventId = String(id);
-          if (!isUuid(eventId)) return true;
-
-          const ev = scheduler.getEvent(eventId);
-          if (!ev) return true;
-          const updates: Partial<Card> = {
-            label: typeof ev.text === 'string' ? ev.text : undefined,
-            start_date: toDateInput(ev.start_date as Date | undefined),
-            end_date: toDateInput(ev.end_date as Date | undefined),
-          };
-          void actions.updateCard(eventId, updates);
-          return true;
-        })
-      );
-
-      ids.push(
-        scheduler.attachEvent('onEventAdded', (id: unknown, ev: unknown) => {
-          if (isApplyingExternalUpdateRef.current) return true;
-          const eventLike = ev as Record<string, unknown>;
-          const columnId = resolveDefaultColumnId(dataRef.current.columns);
-          if (!columnId) return true;
-          const nextId = toUuid(String(id));
-          if (nextId !== String(id)) {
-            scheduler.changeEventId(String(id), nextId);
-          }
-          const nextCard: Card = {
-            id: nextId,
-            label: typeof eventLike.text === 'string' ? eventLike.text : 'Untitled',
-            description: undefined,
-            priority: 'medium',
-            columnId,
-            order: dataRef.current.cards.filter((c) => c.columnId === columnId).length + 1,
-            start_date: toDateInput(eventLike.start_date as Date | undefined),
-            end_date: toDateInput(eventLike.end_date as Date | undefined),
-            progress: 0,
-          };
-          void actions.addCard(nextCard);
-          return true;
-        })
-      );
-
-      ids.push(
-        scheduler.attachEvent('onContextMenu', (id: unknown, rawEvent: unknown) => {
-          if (readonly) return false;
-          const cardId = String(id);
-          if (!isUuid(cardId)) return false;
-          if (!getCardById(cardId)) return false;
-          const event = rawEvent as MouseEvent | undefined;
-          if (!event) return false;
-          event.preventDefault();
-          setEventMenu({
-            cardId,
-            x: event.clientX,
-            y: event.clientY,
-          });
-          return false;
-        })
-      );
-
-      ids.push(
-        scheduler.attachEvent('onEventDeleted', (id: unknown) => {
-          if (isApplyingExternalUpdateRef.current) return true;
-          const eventId = String(id);
-          if (!isUuid(eventId)) return true;
-          closeEventMenu();
-          void actions.deleteCard(eventId);
-          return true;
-        })
-      );
-
-      detachEventsRef.current = () => {
-        ids.forEach((eventId) => scheduler.detachEvent(eventId));
-      };
-    };
-
-    setup();
-    return () => {
-      cancelled = true;
-      detachEventsRef.current?.();
-      detachEventsRef.current = null;
-      if (schedulerRef.current) {
-        schedulerRef.current.clearAll();
-        schedulerRef.current.destructor?.();
-      }
-      schedulerRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const scheduler = schedulerRef.current;
-    if (!scheduler) return;
-    scheduler.config.readonly = readonly;
-    scheduler.config.drag_move = !readonly;
-    scheduler.config.drag_resize = !readonly;
-    scheduler.config.drag_create = !readonly;
-    scheduler.config.edit_on_create = false;
-    scheduler.setCurrentView();
-  }, [readonly]);
-
-  useEffect(() => {
     if (!readonly) return;
     setEventMenu(null);
   }, [readonly]);
 
-  useEffect(() => {
-    const scheduler = schedulerRef.current;
-    if (!scheduler) return;
-    isApplyingExternalUpdateRef.current = true;
-    try {
-      scheduler.clearAll();
-      scheduler.parse(mapped, 'json');
-    } finally {
-      isApplyingExternalUpdateRef.current = false;
-    }
-  }, [mapped]);
+  const handleEventChange = useCallback(({ event, start, end }: { event: SchedulerEvent; start: Date; end: Date }) => {
+    if (readonly) return;
+    void actions.updateCard(event.resource.id, {
+      start_date: toDateInput(start),
+      end_date: toDateInput(end),
+    });
+  }, [actions, readonly]);
+
+  const handleSelectSlot = useCallback(({ start, end, action }: { start: Date; end: Date; action: 'select' | 'click' | 'doubleClick' }) => {
+    if (readonly) return;
+    // A single click does nothing; only a drag-select or double-click creates.
+    if (action === 'click') return;
+    const columnId = resolveDefaultColumnId(dataRef.current.columns);
+    if (!columnId) return;
+    const nextCard: Card = {
+      id: crypto.randomUUID(),
+      label: 'Untitled',
+      description: undefined,
+      priority: 'medium',
+      columnId,
+      order: dataRef.current.cards.filter((c) => c.columnId === columnId).length + 1,
+      start_date: toDateInput(start),
+      end_date: toDateInput(end),
+      progress: 0,
+    };
+    void actions.addCard(nextCard);
+  }, [actions, readonly]);
+
+  const eventPropGetter = useCallback((event: SchedulerEvent) => {
+    const color = event.resource.color;
+    if (!color) return {};
+    return { style: { backgroundColor: color, color: getReadableTextColor(color) } };
+  }, []);
+
+  const EventWrapper = useCallback(({ event, children }: { event: SchedulerEvent; children: ReactNode }) => (
+    <div
+      data-scheduler-event-id={event.resource.id}
+      style={{ display: 'contents' }}
+      onContextMenu={(contextEvent) => {
+        if (readonly) return;
+        contextEvent.preventDefault();
+        setEventMenu({ cardId: event.resource.id, x: contextEvent.clientX, y: contextEvent.clientY });
+      }}
+    >
+      {children}
+    </div>
+  ), [readonly]);
+
+  const calendarComponents = useMemo(() => ({ eventWrapper: EventWrapper }), [EventWrapper]);
 
   return (
     <div className="scheduler-shell">
       <div className="scheduler-toolbar">
         <span className="scheduler-toolbar-title">Scheduler</span>
       </div>
-      <div ref={containerRef} className="scheduler-container" />
+      <div className="scheduler-container">
+        <DndCalendar
+          localizer={localizer}
+          events={events}
+          date={currentDate}
+          view={currentView}
+          onNavigate={(newDate: Date) => setCurrentDate(newDate)}
+          onView={(newView: View) => setCurrentView(newView)}
+          views={['week', 'day', 'month']}
+          min={DAY_START}
+          max={DAY_END}
+          step={30}
+          timeslots={2}
+          selectable={!readonly}
+          resizable={!readonly}
+          draggableAccessor={() => !readonly}
+          resizableAccessor={() => !readonly}
+          onEventDrop={readonly ? undefined : handleEventChange}
+          onEventResize={readonly ? undefined : handleEventChange}
+          onSelectSlot={readonly ? undefined : handleSelectSlot}
+          eventPropGetter={eventPropGetter}
+          components={calendarComponents}
+          style={{ height: '100%', width: '100%' }}
+        />
+      </div>
       {eventMenu ? (
         <SchedulerEventMenu
           x={eventMenu.x}
