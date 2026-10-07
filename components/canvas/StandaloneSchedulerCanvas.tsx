@@ -761,6 +761,9 @@ export default function StandaloneSchedulerCanvas({
     const postLabel = `${childCount} ${childCount === 1 ? 'post' : 'posts'}`;
     const showStartHandle = !readOnly && event.segment?.isFirst;
     const showEndHandle = !readOnly && event.segment?.isLast;
+    // PATCH-313. The count was only a hover tooltip; show it as a badge, and on
+    // a multi-day event only on its first day.
+    const showPostBadge = childCount >= 1 && (!event.segment || event.segment.isFirst);
     return (
       <div
         data-scheduler-event-tab="true"
@@ -768,7 +771,10 @@ export default function StandaloneSchedulerCanvas({
         aria-label={event.segment ? `${postLabel} · drag the edge to extend across days` : postLabel}
         className="relative block w-full h-full min-h-[20px] px-1 overflow-hidden font-medium text-sm text-left"
       >
-        <span className="block truncate">{title}</span>
+        <span className={`block truncate${showPostBadge ? ' pr-16' : ''}`}>{title}</span>
+        {showPostBadge && (
+          <span data-scheduler-post-count className="pointer-events-none absolute right-3 top-0.5 rounded-full bg-white/85 px-1.5 text-[11px] font-semibold leading-4 text-slate-700 shadow-sm">{postLabel}</span>
+        )}
         {showStartHandle && (
           <div
             className="absolute left-0 top-0 h-full w-2 cursor-ew-resize"

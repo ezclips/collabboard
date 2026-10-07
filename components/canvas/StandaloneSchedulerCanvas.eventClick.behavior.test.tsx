@@ -12,8 +12,9 @@ import type { Padlet } from '@/types/collabboard';
 vi.mock('react-big-calendar', async () => {
   const ReactModule = await import('react');
   return {
-    Calendar: (props: { events?: Array<{ id: string; resource: Padlet }>; components?: { eventWrapper?: (args: { event: unknown; children: React.ReactNode }) => React.ReactNode } }) => {
+    Calendar: (props: { events?: Array<{ id: string; title?: string; resource: Padlet }>; components?: { eventWrapper?: (args: { event: unknown; children: React.ReactNode }) => React.ReactNode; event?: (args: { title: string; event: unknown }) => React.ReactNode } }) => {
       const EventWrapper = props.components?.eventWrapper;
+      const EventComponent = props.components?.event;
       const events = props.events ?? [];
       return ReactModule.createElement(
         'div',
@@ -22,7 +23,14 @@ vi.mock('react-big-calendar', async () => {
           ReactModule.createElement(
             ReactModule.Fragment,
             { key: event.id },
-            EventWrapper ? EventWrapper({ event, children: ReactModule.createElement('div') }) : null,
+            EventWrapper
+              ? EventWrapper({
+                  event,
+                  children: EventComponent
+                    ? EventComponent({ title: event.title ?? '', event })
+                    : ReactModule.createElement('div'),
+                })
+              : null,
           ),
         ),
       );
@@ -69,14 +77,14 @@ let root: Root | null = null;
 let container: HTMLElement;
 const onEditItem = vi.fn();
 
-async function mount(): Promise<HTMLElement> {
+async function mount(padlets: Padlet[] = [PADLET]): Promise<HTMLElement> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
     root!.render(
       <StandaloneSchedulerCanvas
-        padlets={[PADLET]}
+        padlets={padlets}
         canvasId="b1"
         onUpdatePadletMetadata={vi.fn()}
         onCreatePadlet={vi.fn()}
@@ -88,6 +96,14 @@ async function mount(): Promise<HTMLElement> {
   expect(wrapper).not.toBeNull();
   return wrapper!;
 }
+
+const childPost = (id: string) =>
+  ({
+    ...PADLET,
+    id,
+    title: '',
+    metadata: { parentId: 'p1' },
+  }) as unknown as Padlet;
 
 const mouse = (type: string, x: number, y: number) =>
   new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
@@ -125,5 +141,44 @@ describe('PATCH-308 Addendum 1: an event opens from a click the DnD addon swallo
       window.dispatchEvent(mouse('mouseup', 120, 100));
     });
     expect(onEditItem).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH-313: an event shows how many posts it holds', () => {
+  const badge = () => container.querySelector<HTMLElement>('[data-scheduler-post-count]');
+
+  it('shows "2 posts" for an event with two child posts', async () => {
+    await mount([PADLET, childPost('c1'), childPost('c2')]);
+    expect(badge()?.textContent).toBe('2 posts');
+  });
+
+  it('shows "1 post" for one child post', async () => {
+    await mount([PADLET, childPost('c1')]);
+    expect(badge()?.textContent).toBe('1 post');
+  });
+
+  it('shows no badge for an event with no posts', async () => {
+    await mount([PADLET]);
+    expect(badge()).toBeNull();
+  });
+
+  it('keeps the badge out of the pointer path', async () => {
+    await mount([PADLET, childPost('c1')]);
+    expect(badge()?.className).toContain('pointer-events-none');
+  });
+
+  it('shows the badge on the first segment of a multi-day event only', async () => {
+    const multiDay = {
+      ...PADLET,
+      metadata: { start_date: '2026-01-01T09:00:00.000Z', end_date: '2026-01-03T10:00:00.000Z' },
+    } as unknown as Padlet;
+    await mount([multiDay, childPost('c1'), childPost('c2')]);
+
+    const tabs = Array.from(container.querySelectorAll<HTMLElement>('[data-scheduler-event-tab="true"]'));
+    expect(tabs.length).toBeGreaterThan(1);
+    expect(tabs[0].querySelector('[data-scheduler-post-count]')).not.toBeNull();
+    for (const later of tabs.slice(1)) {
+      expect(later.querySelector('[data-scheduler-post-count]')).toBeNull();
+    }
   });
 });
