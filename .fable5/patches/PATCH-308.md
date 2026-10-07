@@ -106,5 +106,5 @@ Every menu item works and saves: Add post (Note saved into the event, "1 post", 
 duration, Trim to half, Revert time setting, Split, Add container, Extend across days / Back to single day, colours,
 Delete event. A left-click opens the event's posts (the saved Note is listed). A right-click on an event's edge opens
 the menu. No native tooltip over the menu. Gate `.opencode-vitest-308.json`: 26 = 26; tsc clean. Test board deleted.
-Open follow-up (not fixed here): opening an event's posts issues PATCHes to its child posts without any edit (seen as
+Follow-up resolved in PATCH-309: the writes came from the board-load zIndex migration, not from opening the posts.
 blocked writes in the live kit) — needs its own look.

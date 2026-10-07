@@ -6583,6 +6583,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const zIndexMigrationDoneRef = useRef(false);
   useEffect(() => {
     if (!hasMounted || padlets.length === 0) return;
+    // PATCH-309: only Freeform and Drawing read zIndex, and only an editor may
+    // write it; a viewer's refused write must not run at all. Checked BEFORE the
+    // done-ref so the migration still runs once authority resolves after load.
+    if (!((isFreeformLayout || isDrawingLayout) && canEditBoardContent)) return;
     if (zIndexMigrationDoneRef.current) return;
     zIndexMigrationDoneRef.current = true; // Prevent re-running when new padlets are added optimistically
 
@@ -6597,7 +6601,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           zUpdates.push({ id: padlet.id, zIndex: newZ });
           markPadletLocallyModified(padlet.id);
           const result = await updatePostMetadataUnstampedBestEffort({ postId: padlet.id, metadata: { ...padlet.metadata, zIndex: newZ } }, { userId: null });
-          if (!result.ok) throw result.error.cause ?? result.error;
+          if (!result.ok) {
+            console.error('[canvas] zIndex migration failed', result.error.cause ?? result.error);
+            return;
+          }
         }
         // Update local state directly instead of fetchData() to avoid
         // wiping dev-mode sections that only exist in local state.
@@ -6609,7 +6616,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       };
       migrate();
     }
-  }, [hasMounted, padlets.length, supabase, markPadletLocallyModified, setPadlets]); // Only run when mount status or list length changes
+  }, [hasMounted, padlets.length, isFreeformLayout, isDrawingLayout, canEditBoardContent, supabase, markPadletLocallyModified, setPadlets]); // Only run when mount status or list length changes
 
   const getClickedSide = useCallback((event: React.MouseEvent<HTMLElement>): GraphSide => {
     const rect = event.currentTarget.getBoundingClientRect();
