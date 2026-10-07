@@ -9,7 +9,9 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './scheduler-theme.css';
 import SchedulerEventContextMenu from '@/components/canvas/SchedulerEventContextMenu';
+import TextStyleToolbar from '@/components/collabboard/TextStyleToolbar';
 import { containerBadgeColors } from '@/lib/domain/canvas/containerBadgeColors';
+import { parseTextStyle, textStyleToCss } from '@/lib/domain/canvas/textStyle';
 
 const DEFAULT_EVENT_BACKGROUND = '#2563eb';
 
@@ -109,6 +111,10 @@ export default function StandaloneSchedulerCanvas({
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>('week');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  // PATCH-315 Addendum 1. The draft lives here, not inside CustomEvent: saving
+  // a style updates `padlets`, which gives CustomEvent a new identity and makes
+  // react-big-calendar remount it. Held here, the typed text survives that.
+  const [editingDraft, setEditingDraft] = useState('');
   const suppressNextSelectRef = useRef(false);
   const eventMutationInFlightRef = useRef<Set<string>>(new Set());
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -712,7 +718,7 @@ export default function StandaloneSchedulerCanvas({
         onAddPost={() => {
           onTargetItem?.(event.resource);
         }}
-        onEditText={onRenameContainer && !readOnly ? () => setEditingEventId(event.resource.id) : undefined}
+        onEditText={onRenameContainer && !readOnly ? () => { setEditingDraft(event.resource.title ?? ''); setEditingEventId(event.resource.id); } : undefined}
         hasText={!!(event.resource.title ?? '').trim()}
         onSetDuration={(minutes) => {
           setEventDuration(event, minutes);
@@ -779,44 +785,61 @@ export default function StandaloneSchedulerCanvas({
     const cardColor = typeof metadata?.cardColor === 'string' ? metadata.cardColor : null;
     const eventBackground = cardColor && cardColor !== '#ffffff' ? cardColor : DEFAULT_EVENT_BACKGROUND;
     const { textColor: badgeTextColor, badgeBg } = containerBadgeColors(eventBackground);
+    const titleStyle = parseTextStyle(metadata?.titleStyle);
 
     const tabRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
+    const toolbarRef = useRef<HTMLDivElement | null>(null);
     const [isShort, setIsShort] = useState(true);
-    const [draft, setDraft] = useState(title);
+    const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
     useLayoutEffect(() => {
       const element = tabRef.current;
       if (!element) return;
-      const measure = () => setIsShort(element.getBoundingClientRect().height < 36);
+      const measure = () => {
+        const rect = element.getBoundingClientRect();
+        setIsShort(rect.height < 36);
+        setAnchorRect(rect);
+      };
       measure();
       if (typeof ResizeObserver === 'undefined') return;
       const observer = new ResizeObserver(measure);
       observer.observe(element);
       return () => observer.disconnect();
-    }, []);
+    }, [isEditing]);
 
+    // Re-focus after a remount while still editing (the style save remounts the
+    // event). The draft itself is owned by the canvas component.
     useEffect(() => {
       if (!isEditing) return;
-      setDraft(title);
       const timer = window.setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
+        const input = inputRef.current;
+        if (!input) return;
+        input.focus();
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
       }, 0);
       return () => window.clearTimeout(timer);
-    }, [isEditing, title]);
+    }, [isEditing]);
 
     const commit = () => {
-      const value = draft.trim();
+      const value = editingDraft.trim();
       if (onRenameContainer && value !== (title ?? '').trim()) {
         onRenameContainer(event.resource.id, value);
       }
       setEditingEventId(null);
     };
 
+    // PATCH-315. Style changes are saved immediately (they are not part of the
+    // text edit), so Escape cancels only the TEXT and leaves the style saved.
+    const applyStyle = (next: typeof titleStyle) => {
+      onUpdatePadletMetadata(event.resource.id, { titleStyle: next });
+    };
+
     const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
     const badgeStyle = { backgroundColor: badgeBg, color: badgeTextColor };
+    const textStyle = textStyleToCss(titleStyle);
 
     return (
       <div
@@ -829,11 +852,12 @@ export default function StandaloneSchedulerCanvas({
         {isEditing ? (
           <input
             ref={inputRef}
-            value={draft}
+            value={editingDraft}
             maxLength={80}
             placeholder="Short text"
             className="w-full rounded bg-white/90 px-1 text-sm font-medium text-slate-900 outline-none"
-            onChange={(e) => setDraft(e.target.value)}
+            style={textStyle}
+            onChange={(e) => setEditingDraft(e.target.value)}
             onMouseDown={stop}
             onMouseUp={stop}
             onPointerDown={stop}
@@ -846,11 +870,15 @@ export default function StandaloneSchedulerCanvas({
                 e.preventDefault();
                 commit();
               } else if (e.key === 'Escape') {
+                // PATCH-315: the style is already saved; Escape cancels only the text.
                 e.preventDefault();
                 setEditingEventId(null);
               }
             }}
-            onBlur={commit}
+            onBlur={(e) => {
+              if (toolbarRef.current?.contains(e.relatedTarget as Node)) return;
+              commit();
+            }}
           />
         ) : isShort ? (
           <span className="flex items-center gap-1 min-w-0">
@@ -863,11 +891,11 @@ export default function StandaloneSchedulerCanvas({
                 {itemLabel}
               </span>
             )}
-            <span className="min-w-0 truncate">{title}</span>
+            <span className="min-w-0 truncate" style={textStyle}>{title}</span>
           </span>
         ) : (
           <>
-            <span className="block whitespace-normal break-words">{title}</span>
+            <span className="block whitespace-normal break-words" style={textStyle}>{title}</span>
             {showPostBadge && (
               <span
                 data-scheduler-post-count
@@ -879,6 +907,17 @@ export default function StandaloneSchedulerCanvas({
             )}
           </>
         )}
+        {isEditing && !readOnly && anchorRect ? (
+          <div
+            ref={toolbarRef}
+            onBlur={(e) => {
+              if (toolbarRef.current?.contains(e.relatedTarget as Node)) return;
+              commit();
+            }}
+          >
+            <TextStyleToolbar value={titleStyle} onChange={applyStyle} anchorRect={anchorRect} />
+          </div>
+        ) : null}
         {showStartHandle && (
           <div
             className="absolute left-0 top-0 h-full w-2 cursor-ew-resize"
@@ -905,7 +944,7 @@ export default function StandaloneSchedulerCanvas({
         )}
       </div>
     );
-  }, [padlets, readOnly, startDaySpanDrag, editingEventId, onRenameContainer]);
+  }, [padlets, readOnly, startDaySpanDrag, editingEventId, editingDraft, onRenameContainer, onUpdatePadletMetadata]);
 
   const TimeSlotWrapper = useCallback(({ value, children }: { value: Date; children: React.ReactElement }) => {
     return React.cloneElement(children, {

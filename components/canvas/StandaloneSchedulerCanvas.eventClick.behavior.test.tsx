@@ -76,10 +76,12 @@ const PADLET = {
 let root: Root | null = null;
 let container: HTMLElement;
 const onEditItem = vi.fn();
+const onUpdatePadletMetadata = vi.fn();
 
 async function mount(
   padlets: Padlet[] = [PADLET],
   onRenameContainer?: (containerId: string, title: string) => void,
+  readOnly = false,
 ): Promise<HTMLElement> {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -89,7 +91,8 @@ async function mount(
       <StandaloneSchedulerCanvas
         padlets={padlets}
         canvasId="b1"
-        onUpdatePadletMetadata={vi.fn()}
+        readOnly={readOnly}
+        onUpdatePadletMetadata={onUpdatePadletMetadata}
         onCreatePadlet={vi.fn()}
         onEditItem={onEditItem}
         onRenameContainer={onRenameContainer}
@@ -115,6 +118,7 @@ const mouse = (type: string, x: number, y: number) =>
 beforeEach(() => {
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverMock;
   onEditItem.mockReset();
+  onUpdatePadletMetadata.mockReset();
 });
 
 afterEach(() => {
@@ -301,6 +305,110 @@ describe('PATCH-314: type a short text right in an event', () => {
       window.dispatchEvent(mouse('mouseup', 100, 100));
     });
     expect(onEditItem).not.toHaveBeenCalled();
+  });
+
+  it('shows the style bar while editing', async () => {
+    await mount([PADLET], vi.fn());
+    await chooseEditText();
+    expect(container.querySelector('[data-text-style-toolbar]')).not.toBeNull();
+  });
+
+  it('saves a font choice to metadata.titleStyle', async () => {
+    await mount([PADLET], vi.fn());
+    await chooseEditText();
+
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Font"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, 'serif');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(onUpdatePadletMetadata).toHaveBeenCalledWith('p1', {
+      titleStyle: expect.objectContaining({ fontFamily: 'serif' }),
+    });
+  });
+
+  it('does not save the text or leave edit mode when a bar control is used', async () => {
+    const rename = vi.fn();
+    await mount([PADLET], rename);
+    await chooseEditText();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Bold"]')!.click();
+      await Promise.resolve();
+    });
+
+    expect(rename).not.toHaveBeenCalled();
+    expect(input()).not.toBeNull();
+  });
+
+  it('renders an event text with its saved style', async () => {
+    const styled = {
+      ...PADLET,
+      metadata: {
+        ...PADLET.metadata,
+        titleStyle: { fontFamily: 'serif', fontSize: 18, bold: true, color: '#ef4444' },
+      },
+    } as unknown as Padlet;
+    await mount([styled]);
+
+    const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
+    const span = tab.querySelector<HTMLElement>('span.truncate')!;
+    expect(span).not.toBeNull();
+    expect(span.style.fontFamily).toContain('Georgia');
+    expect(span.style.fontSize).toBe('18px');
+    expect(span.style.fontWeight).toBe('700');
+    expect(span.style.color).toBe('rgb(239, 68, 68)');
+  });
+
+  it('shows no style bar for a read-only viewer', async () => {
+    await mount([PADLET], vi.fn(), true);
+    expect(container.querySelector('[data-text-style-toolbar]')).toBeNull();
+  });
+
+  it('keeps the typed text across a style change that updates the board', async () => {
+    const rename = vi.fn();
+    function Harness() {
+      const [padlets, setPadlets] = React.useState<Padlet[]>([{ ...PADLET } as Padlet]);
+      return (
+        <StandaloneSchedulerCanvas
+          padlets={padlets}
+          canvasId="b1"
+          onUpdatePadletMetadata={(id, patch) =>
+            setPadlets((prev) =>
+              prev.map((p) => (p.id === id ? { ...p, metadata: { ...p.metadata, ...patch } } : p)),
+            )
+          }
+          onCreatePadlet={vi.fn()}
+          onEditItem={onEditItem}
+          onRenameContainer={rename}
+        />
+      );
+    }
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<Harness />);
+    });
+
+    await chooseEditText();
+    await type('Standup');
+
+    // A style change updates padlets, giving CustomEvent a new identity and
+    // remounting it. The draft lives in the canvas component, so it survives.
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Bold"]')!.click();
+      await Promise.resolve();
+    });
+    expect(input()!.value).toBe('Standup');
+
+    await act(async () => {
+      input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect(rename).toHaveBeenCalledWith('p1', 'Standup');
   });
 });
 
