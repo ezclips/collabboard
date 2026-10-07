@@ -113,6 +113,7 @@ export default function TemplateGalleryModal({
               </div>
               <div className="mt-auto flex flex-col gap-2">
                 <Button
+                  variant="outline"
                   data-use-template={detail.id}
                   onClick={() => {
                     onUse(detail);

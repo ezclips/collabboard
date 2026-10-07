@@ -120,4 +120,17 @@ describe('TemplateGalleryModal', () => {
     await click(q('[data-back-to-templates]'));
     expect(q('[data-gallery-card="project-plan"]')).not.toBeNull();
   });
+
+  it('gives "Use this template" the same box as "Back to templates"', async () => {
+    await mount({ format: 'freeform' });
+    await click(q('[data-gallery-card="project-plan"]'));
+
+    const useButton = q('[data-use-template="project-plan"]')!;
+    const backButton = (Array.from(document.querySelectorAll('[data-back-to-templates]')) as HTMLElement[]).find(
+      (button) => button.textContent?.includes('Back to templates'),
+    )!;
+
+    expect(useButton.className).toBe(backButton.className);
+    expect(useButton.className).toContain('border');
+  });
 });
