@@ -10399,6 +10399,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setSchedulerPopoverPadletId(null);
                   }}
                   onDeletePadlet={deletePadletById}
+                  onRenameContainer={canUseFreeformEditButton ? (id, title) => updatePadletTitle(id, title) : undefined}
                   onExternalDropItem={handleSchedulerExternalDrop}
                 />
               </div>

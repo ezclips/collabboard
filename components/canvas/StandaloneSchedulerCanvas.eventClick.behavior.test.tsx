@@ -12,7 +12,7 @@ import type { Padlet } from '@/types/collabboard';
 vi.mock('react-big-calendar', async () => {
   const ReactModule = await import('react');
   return {
-    Calendar: (props: { events?: Array<{ id: string; title?: string; resource: Padlet }>; components?: { eventWrapper?: (args: { event: unknown; children: React.ReactNode }) => React.ReactNode; event?: (args: { title: string; event: unknown }) => React.ReactNode } }) => {
+    Calendar: (props: { events?: Array<{ id: string; title?: string; resource: Padlet }>; components?: { eventWrapper?: (args: { event: unknown; children: React.ReactNode }) => React.ReactNode; event?: React.ComponentType<{ title: string; event: unknown }> } }) => {
       const EventWrapper = props.components?.eventWrapper;
       const EventComponent = props.components?.event;
       const events = props.events ?? [];
@@ -27,7 +27,7 @@ vi.mock('react-big-calendar', async () => {
               ? EventWrapper({
                   event,
                   children: EventComponent
-                    ? EventComponent({ title: event.title ?? '', event })
+                    ? ReactModule.createElement(EventComponent, { title: event.title ?? '', event })
                     : ReactModule.createElement('div'),
                 })
               : null,
@@ -77,7 +77,10 @@ let root: Root | null = null;
 let container: HTMLElement;
 const onEditItem = vi.fn();
 
-async function mount(padlets: Padlet[] = [PADLET]): Promise<HTMLElement> {
+async function mount(
+  padlets: Padlet[] = [PADLET],
+  onRenameContainer?: (containerId: string, title: string) => void,
+): Promise<HTMLElement> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -89,6 +92,7 @@ async function mount(padlets: Padlet[] = [PADLET]): Promise<HTMLElement> {
         onUpdatePadletMetadata={vi.fn()}
         onCreatePadlet={vi.fn()}
         onEditItem={onEditItem}
+        onRenameContainer={onRenameContainer}
       />,
     );
   });
@@ -144,17 +148,17 @@ describe('PATCH-308 Addendum 1: an event opens from a click the DnD addon swallo
   });
 });
 
-describe('PATCH-313: an event shows how many posts it holds', () => {
+describe('PATCH-313/314: an event shows how many items it holds', () => {
   const badge = () => container.querySelector<HTMLElement>('[data-scheduler-post-count]');
 
-  it('shows "2 posts" for an event with two child posts', async () => {
+  it('shows "2 items" for an event with two child posts', async () => {
     await mount([PADLET, childPost('c1'), childPost('c2')]);
-    expect(badge()?.textContent).toBe('2 posts');
+    expect(badge()?.textContent).toBe('2 items');
   });
 
-  it('shows "1 post" for one child post', async () => {
+  it('shows "1 item" for one child post', async () => {
     await mount([PADLET, childPost('c1')]);
-    expect(badge()?.textContent).toBe('1 post');
+    expect(badge()?.textContent).toBe('1 item');
   });
 
   it('shows no badge for an event with no posts', async () => {
@@ -165,6 +169,16 @@ describe('PATCH-313: an event shows how many posts it holds', () => {
   it('keeps the badge out of the pointer path', async () => {
     await mount([PADLET, childPost('c1')]);
     expect(badge()?.className).toContain('pointer-events-none');
+  });
+
+  it('uses the container badge colours for the event background', async () => {
+    const light = {
+      ...PADLET,
+      metadata: { start_date: '2026-01-01T09:00:00.000Z', end_date: '2026-01-01T10:00:00.000Z', cardColor: '#f8fafc' },
+    } as unknown as Padlet;
+    await mount([light, childPost('c1')]);
+    expect(badge()?.style.color).toBe('rgb(15, 23, 42)');
+    expect(badge()?.style.backgroundColor).toBe('rgba(15, 23, 42, 0.08)');
   });
 
   it('shows the badge on the first segment of a multi-day event only', async () => {
@@ -180,5 +194,154 @@ describe('PATCH-313: an event shows how many posts it holds', () => {
     for (const later of tabs.slice(1)) {
       expect(later.querySelector('[data-scheduler-post-count]')).toBeNull();
     }
+  });
+});
+
+describe('PATCH-314: type a short text right in an event', () => {
+  const wrapper = () => container.querySelector<HTMLElement>('[data-scheduler-container-id="p1"]')!;
+  const menuItem = (text: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((el) =>
+      el.textContent?.includes(text),
+    ) ?? null;
+  const input = () => container.querySelector<HTMLInputElement>('[data-scheduler-event-tab] input');
+
+  async function openMenu() {
+    await act(async () => {
+      wrapper().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+  }
+
+  async function chooseEditText() {
+    await openMenu();
+    const item = menuItem('Edit text');
+    expect(item).not.toBeNull();
+    await act(async () => {
+      item!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+  }
+
+  async function type(value: string) {
+    const field = input()!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('offers "Edit text" for a titled event', async () => {
+    await mount([PADLET], vi.fn());
+    await openMenu();
+    expect(menuItem('Edit text')).not.toBeNull();
+    expect(menuItem('Add text')).toBeNull();
+  });
+
+  it('offers "Add text" for an untitled event', async () => {
+    await mount([{ ...PADLET, title: '' } as unknown as Padlet], vi.fn());
+    await openMenu();
+    expect(menuItem('Add text')).not.toBeNull();
+    expect(menuItem('Edit text')).toBeNull();
+  });
+
+  it('offers neither item without onRenameContainer', async () => {
+    await mount([PADLET]);
+    await openMenu();
+    expect(menuItem('Add text')).toBeNull();
+    expect(menuItem('Edit text')).toBeNull();
+  });
+
+  it('opens an input and saves the trimmed value on Enter', async () => {
+    const rename = vi.fn();
+    await mount([PADLET], rename);
+    await chooseEditText();
+    expect(input()).not.toBeNull();
+
+    await type('  Standup  ');
+    await act(async () => {
+      input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect(rename).toHaveBeenCalledWith('p1', 'Standup');
+  });
+
+  it('saves on blur', async () => {
+    const rename = vi.fn();
+    await mount([PADLET], rename);
+    await chooseEditText();
+    await type('Standup');
+    await act(async () => {
+      input()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(rename).toHaveBeenCalledWith('p1', 'Standup');
+  });
+
+  it('does not save on Escape', async () => {
+    const rename = vi.fn();
+    await mount([PADLET], rename);
+    await chooseEditText();
+    await type('Standup');
+    await act(async () => {
+      input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it('does not let the input mousedown reach the event wrapper', async () => {
+    const rename = vi.fn();
+    await mount([PADLET], rename);
+    await chooseEditText();
+    onEditItem.mockReset();
+
+    await act(async () => {
+      input()!.dispatchEvent(mouse('mousedown', 100, 100));
+      window.dispatchEvent(mouse('mouseup', 100, 100));
+    });
+    expect(onEditItem).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH-314 Addendum 1: short events keep the badge and title on one line', () => {
+  const badge = () => container.querySelector<HTMLElement>('[data-scheduler-post-count]');
+
+  it('lays the badge and title out as one flex row in a short event', async () => {
+    await mount([PADLET, childPost('c1')]);
+    const el = badge()!;
+    expect(el).not.toBeNull();
+
+    const row = el.parentElement!;
+    expect(row.className).toContain('flex');
+    expect(row.className).toContain('items-center');
+    expect(row.className).toContain('min-w-0');
+
+    const titleSpan = row.querySelector('span.truncate');
+    expect(titleSpan).not.toBeNull();
+    expect(titleSpan!.parentElement).toBe(row);
+    expect(el.className).toContain('flex-none');
+  });
+
+  it('positions the badge absolutely in a tall event', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const isTab = this.getAttribute?.('data-scheduler-event-tab') === 'true';
+      return {
+        width: 200,
+        height: isTab ? 100 : 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: isTab ? 100 : 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+
+    await mount([PADLET, childPost('c1')]);
+    const el = badge()!;
+    expect(el.className).toContain('absolute');
+    expect(el.className).toContain('bottom-1');
   });
 });

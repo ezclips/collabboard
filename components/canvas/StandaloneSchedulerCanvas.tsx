@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useCallback, type ComponentType } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type ComponentType } from 'react';
 import { Calendar, momentLocalizer, type View } from 'react-big-calendar';
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
 import moment from 'moment';
@@ -9,6 +9,9 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './scheduler-theme.css';
 import SchedulerEventContextMenu from '@/components/canvas/SchedulerEventContextMenu';
+import { containerBadgeColors } from '@/lib/domain/canvas/containerBadgeColors';
+
+const DEFAULT_EVENT_BACKGROUND = '#2563eb';
 
 const localizer = momentLocalizer(moment);
 
@@ -40,6 +43,7 @@ type StandaloneSchedulerCanvasProps = {
   selectedTimeSlot?: { start: Date; end: Date } | null;
   onSelectTimeSlot?: (slot: { start: Date; end: Date } | null) => void;
   onDeletePadlet?: (padletId: string) => void;
+  onRenameContainer?: (containerId: string, title: string) => void;
   onExternalDropItem?: (input: {
     payload: Record<string, unknown>;
     slot: { start: Date; end: Date };
@@ -99,10 +103,12 @@ export default function StandaloneSchedulerCanvas({
   selectedTimeSlot = null,
   onSelectTimeSlot,
   onDeletePadlet,
+  onRenameContainer,
   onExternalDropItem,
 }: StandaloneSchedulerCanvasProps) {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>('week');
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const suppressNextSelectRef = useRef(false);
   const eventMutationInFlightRef = useRef<Set<string>>(new Set());
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -706,6 +712,8 @@ export default function StandaloneSchedulerCanvas({
         onAddPost={() => {
           onTargetItem?.(event.resource);
         }}
+        onEditText={onRenameContainer && !readOnly ? () => setEditingEventId(event.resource.id) : undefined}
+        hasText={!!(event.resource.title ?? '').trim()}
         onSetDuration={(minutes) => {
           setEventDuration(event, minutes);
         }}
@@ -745,6 +753,7 @@ export default function StandaloneSchedulerCanvas({
     getLiveEventRange,
     onDeletePadlet,
     openEventOnce,
+    onRenameContainer,
     onTargetItem,
     setDaySpan,
     onUpdatePadletMetadata,
@@ -758,22 +767,117 @@ export default function StandaloneSchedulerCanvas({
 
   const CustomEvent = useCallback(({ title, event }: { title: string; event: SchedulerEvent }) => {
     const childCount = padlets.filter((p) => (p.metadata as any)?.parentId === event.resource.id).length;
-    const postLabel = `${childCount} ${childCount === 1 ? 'post' : 'posts'}`;
+    const itemLabel = `${childCount} ${childCount === 1 ? 'item' : 'items'}`;
     const showStartHandle = !readOnly && event.segment?.isFirst;
     const showEndHandle = !readOnly && event.segment?.isLast;
-    // PATCH-313. The count was only a hover tooltip; show it as a badge, and on
-    // a multi-day event only on its first day.
+    // PATCH-313/314. The count was only a hover tooltip; show it as a badge in
+    // the container's design, on the first day of a multi-day event.
     const showPostBadge = childCount >= 1 && (!event.segment || event.segment.isFirst);
+    const isEditing = editingEventId === event.resource.id;
+
+    const metadata = event.resource.metadata as Record<string, unknown> | undefined;
+    const cardColor = typeof metadata?.cardColor === 'string' ? metadata.cardColor : null;
+    const eventBackground = cardColor && cardColor !== '#ffffff' ? cardColor : DEFAULT_EVENT_BACKGROUND;
+    const { textColor: badgeTextColor, badgeBg } = containerBadgeColors(eventBackground);
+
+    const tabRef = useRef<HTMLDivElement | null>(null);
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const [isShort, setIsShort] = useState(true);
+    const [draft, setDraft] = useState(title);
+
+    useLayoutEffect(() => {
+      const element = tabRef.current;
+      if (!element) return;
+      const measure = () => setIsShort(element.getBoundingClientRect().height < 36);
+      measure();
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+      if (!isEditing) return;
+      setDraft(title);
+      const timer = window.setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }, [isEditing, title]);
+
+    const commit = () => {
+      const value = draft.trim();
+      if (onRenameContainer && value !== (title ?? '').trim()) {
+        onRenameContainer(event.resource.id, value);
+      }
+      setEditingEventId(null);
+    };
+
+    const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+    const badgeStyle = { backgroundColor: badgeBg, color: badgeTextColor };
+
     return (
       <div
+        ref={tabRef}
         data-scheduler-event-tab="true"
         data-scheduler-container-id={event.resource.id}
-        aria-label={event.segment ? `${postLabel} · drag the edge to extend across days` : postLabel}
+        aria-label={event.segment ? `${itemLabel} · drag the edge to extend across days` : itemLabel}
         className="relative block w-full h-full min-h-[20px] px-1 overflow-hidden font-medium text-sm text-left"
       >
-        <span className={`block truncate${showPostBadge ? ' pr-16' : ''}`}>{title}</span>
-        {showPostBadge && (
-          <span data-scheduler-post-count className="pointer-events-none absolute right-3 top-0.5 rounded-full bg-white/85 px-1.5 text-[11px] font-semibold leading-4 text-slate-700 shadow-sm">{postLabel}</span>
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            maxLength={80}
+            placeholder="Short text"
+            className="w-full rounded bg-white/90 px-1 text-sm font-medium text-slate-900 outline-none"
+            onChange={(e) => setDraft(e.target.value)}
+            onMouseDown={stop}
+            onMouseUp={stop}
+            onPointerDown={stop}
+            onPointerUp={stop}
+            onClick={stop}
+            onDoubleClick={stop}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setEditingEventId(null);
+              }
+            }}
+            onBlur={commit}
+          />
+        ) : isShort ? (
+          <span className="flex items-center gap-1 min-w-0">
+            {showPostBadge && (
+              <span
+                data-scheduler-post-count
+                className="pointer-events-none flex-none rounded px-1.5 py-0.5 text-[9px] font-medium"
+                style={badgeStyle}
+              >
+                {itemLabel}
+              </span>
+            )}
+            <span className="min-w-0 truncate">{title}</span>
+          </span>
+        ) : (
+          <>
+            <span className="block whitespace-normal break-words">{title}</span>
+            {showPostBadge && (
+              <span
+                data-scheduler-post-count
+                className="pointer-events-none absolute left-1 bottom-1 rounded px-1.5 py-0.5 text-[9px] font-medium"
+                style={badgeStyle}
+              >
+                {itemLabel}
+              </span>
+            )}
+          </>
         )}
         {showStartHandle && (
           <div
@@ -801,7 +905,7 @@ export default function StandaloneSchedulerCanvas({
         )}
       </div>
     );
-  }, [padlets, readOnly, startDaySpanDrag]);
+  }, [padlets, readOnly, startDaySpanDrag, editingEventId, onRenameContainer]);
 
   const TimeSlotWrapper = useCallback(({ value, children }: { value: Date; children: React.ReactElement }) => {
     return React.cloneElement(children, {
