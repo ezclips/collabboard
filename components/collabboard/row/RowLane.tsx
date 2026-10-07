@@ -91,6 +91,7 @@ interface RowLaneProps {
     onDeletePost?: (post: Padlet) => void;
     onOpenPost?: (post: Padlet) => void;
     onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
+    onViewDrawing?: (post: Padlet) => void;
     onOpenTarget?: (post: Padlet) => void; // For opening specific child posts from containers
     onOpenInNewTab?: (post: Padlet) => void;
     onCopyLink?: (post: Padlet) => void;
@@ -139,6 +140,7 @@ export default function RowLane({
     onDeletePost,
     onOpenPost,
     onOpenDocument,
+    onViewDrawing,
     onOpenTarget,
     onOpenInNewTab,
     onCopyLink,
@@ -473,6 +475,7 @@ export default function RowLane({
                                                         onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[post.id] === available ? prev : { ...prev, [post.id]: available })}
                                                         isContentOnly
                                                         onOpenDocument={onOpenDocument}
+                                                        onViewDrawing={onViewDrawing}
                                                     />
                                                 </CardShell>
                                             </ColumnPostContextMenu>

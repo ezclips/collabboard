@@ -20,6 +20,7 @@ type PostPopupProps = {
   onEditContainer?: (post: Padlet) => void;
   onEditPost?: (post: Padlet) => void;
   onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
+  onViewDrawing?: (post: Padlet) => void;
   onDeleteContainer?: (post: Padlet) => void;
   onChangeContainerColor?: (post: Padlet, color: string) => void;
   onEditLocation?: (post: Padlet) => void;
@@ -46,6 +47,7 @@ export default function PostPopup({
   onEditContainer,
   onEditPost,
   onOpenDocument,
+  onViewDrawing,
   onDeleteContainer,
   onChangeContainerColor,
   onEditLocation,
@@ -178,6 +180,7 @@ export default function PostPopup({
             onUpdateChildComments={onUpdateChildComments}
             onScanChild={onRefreshChildren}
             onOpenDocument={onOpenDocument}
+            onViewDrawing={onViewDrawing}
             accessMode={accessMode}
           />
           </div>

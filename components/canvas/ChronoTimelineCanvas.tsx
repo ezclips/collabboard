@@ -50,6 +50,7 @@ interface TimelineCanvasProps {
   allPadlets?: Padlet[];
   onOpenTarget?: (padlet: Padlet) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
+  onViewDrawing?: (padlet: Padlet) => void;
 }
 
 export default function ChronoTimelineCanvas({
@@ -78,6 +79,7 @@ export default function ChronoTimelineCanvas({
   allPadlets,
   onOpenTarget,
   onOpenDocument,
+  onViewDrawing,
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
@@ -543,6 +545,7 @@ export default function ChronoTimelineCanvas({
               canvasContext="timeline"
               isContentOnly
               onOpenDocument={onOpenDocument}
+              onViewDrawing={onViewDrawing}
             />
           </CardShell>
         </div>

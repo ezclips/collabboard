@@ -54,6 +54,7 @@ type ColumnsLayoutProps = {
   onDeletePost?: (post: Padlet) => void;
   onOpenPost?: (post: Padlet) => void;
   onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
+  onViewDrawing?: (post: Padlet) => void;
   onOpenInNewTab?: (post: Padlet) => void;
   onCopyLink?: (post: Padlet) => void;
   onStartSlideshow?: (post: Padlet) => void;
@@ -158,6 +159,7 @@ export default function ColumnsCanvasRow({
   onDeletePost,
   onOpenPost,
   onOpenDocument,
+  onViewDrawing,
   onOpenInNewTab,
   onCopyLink,
   onStartSlideshow,
@@ -405,6 +407,7 @@ export default function ColumnsCanvasRow({
                     onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[post.id] === available ? prev : { ...prev, [post.id]: available })}
                     isContentOnly
                     onOpenDocument={onOpenDocument}
+                    onViewDrawing={onViewDrawing}
                   />
                 </CardShell>
               </ColumnPostContextMenu>

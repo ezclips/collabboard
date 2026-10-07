@@ -9993,6 +9993,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setIsNoteEditorOpen(true);
                 }}
                 onOpenDocument={openDocumentFromPreview}
+                onViewDrawing={(p) => setViewDrawingPadlet(p)}
                 onDeletePost={(post: Padlet) => deletePadletById(post.id)}
                 onStartSlideshow={(post: Padlet) => startSlideshow(post)}
                 onDownloadAttachment={(post: Padlet) => downloadAttachment(post)}
@@ -10088,6 +10089,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       setIsNoteEditorOpen(true);
                     }}
                     onOpenDocument={openDocumentFromPreview}
+                    onViewDrawing={(p) => setViewDrawingPadlet(p)}
                     onOpenTarget={openPadletTargetFromContextMenu}
                     onOpenInNewTab={openPostInNewTab}
                     onCopyLink={copyPostLink}
@@ -10143,6 +10145,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 canvasSettings={wallCanvasSettings}
                 isEditable={canEditBoardContent}
                 onOpenDocument={openDocumentFromPreview}
+                onViewDrawing={(p) => setViewDrawingPadlet(p)}
                 onPadletUpdate={(updatedPadlet) => {
                   setPadlets(prev => prev.map(p => p.id === updatedPadlet.id ? updatedPadlet : p));
                 }}
@@ -10237,6 +10240,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onDeletePadlet={handleDrawingLayoutDeletePadlet}
                 onDeleteOverlayPadlets={handleDrawingLayoutDeleteOverlayPadlets}
                 onOpenDocument={openDocumentFromPreview}
+                onViewDrawing={(p) => setViewDrawingPadlet(p)}
                 ghostDraft={drawingGhostDraft}
                 onGhostDraftDropped={() => setDrawingGhostDraft(null)}
                 drawingAppStateRef={drawingAppStateRef}
@@ -10304,6 +10308,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onCreateEmptyContainer={canUseFreeformEditButton ? handleCreateEmptyTimelineContainer : undefined}
                   onOpenTarget={canUseFreeformEditButton ? openPadletTargetFromContextMenu : undefined}
                   onOpenDocument={openDocumentFromPreview}
+                  onViewDrawing={(p) => setViewDrawingPadlet(p)}
                   allPadlets={padlets}
                   onDropExistingPadlet={canUseFreeformEditButton ? (async (containerId, droppedId) => {
                     const containerPadlet = padlets.find(p => p.id === containerId);
@@ -10414,6 +10419,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onPinContainerOpen={handleMapPinContainerOpen}
                   onPinContainerClose={handleMapPinContainerClose}
                   onOpenDocument={openDocumentFromPreview}
+                  onViewDrawing={(p) => setViewDrawingPadlet(p)}
                   onEditPinContainer={canUseFreeformEditButton ? ((post) => {
                     if (post.type !== 'container') return;
                     closeAllToolbarLaunchedUi();
@@ -11422,6 +11428,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                                 setIsContainerEditorOpen(true);
                               }}
                               onOpenDocument={openDocumentFromPreview}
+                              onViewDrawing={(p) => {
+                                setSchedulerPopoverPadletId(null);
+                                setViewDrawingPadlet(p);
+                              }}
                               className="w-full bg-white p-4"
                             />
                           </div>

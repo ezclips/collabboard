@@ -92,8 +92,9 @@ type AutoHeightContainerProps = {
   isExpanded?: boolean;
   onExpandAvailabilityChange?: (available: boolean) => void;
   onOpenDocument?: (post: Padlet) => void;
+  onViewDrawing?: (post: Padlet) => void;
 };
-function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWidthChange, onIntrinsicRequiredWidthChange, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
+function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWidthChange, onIntrinsicRequiredWidthChange, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument, onViewDrawing }: AutoHeightContainerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onNaturalHeight);
   cbRef.current = onNaturalHeight;
@@ -129,6 +130,7 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWi
         onScanChild={onScanChild}
         onExpandAvailabilityChange={onExpandAvailabilityChange}
         onOpenDocument={onOpenDocument}
+        onViewDrawing={onViewDrawing}
       />
     </div>
   );
@@ -783,6 +785,7 @@ type DrawingEmbeddableCardProps = {
   onDragEnd?: (padletId: string, x: number, y: number) => void;
   onNaturalResize?: (padletId: string, size: { width?: number; height?: number }) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
+  onViewDrawing?: (padlet: Padlet) => void;
   // PATCH POST-RESIZE-B3.2: locks the reconciliation effect's width-snapback
   // during a live manual-resize preview, without onNaturalResize's own
   // persistence side-effect (see lockManualResizePreviewWidth's own comment).
@@ -816,6 +819,7 @@ export function DrawingEmbeddableCard({
   onDragEnd,
   onNaturalResize,
   onOpenDocument,
+  onViewDrawing,
   onManualResizePreviewLock,
   onKnowledgeSourceClipDropOnNote,
 }: DrawingEmbeddableCardProps) {
@@ -1372,6 +1376,7 @@ export function DrawingEmbeddableCard({
             onScanChild={fetchData}
             onExpandAvailabilityChange={setCanExpand}
             onOpenDocument={onOpenDocument}
+            onViewDrawing={onViewDrawing}
             onNaturalHeight={(h) => {
               const newHeight = Math.max(Math.ceil(measureContainerHeightChrome() + h), 80);
               const excAPI = excalidrawAPIRef.current;
@@ -1555,6 +1560,7 @@ interface DrawingLayoutProps {
   onPadletEdit?: (padlet: Padlet) => void;
   onEditPadletAsPost?: (padlet: Padlet) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
+  onViewDrawing?: (padlet: Padlet) => void;
   readOnly?: boolean;
   fetchData?: () => void;
   ghostDraft?: Partial<Padlet> | null;
@@ -1590,6 +1596,7 @@ export default function DrawingLayout({
   onPadletEdit,
   onEditPadletAsPost,
   onOpenDocument,
+  onViewDrawing,
   readOnly = false,
   fetchData,
   ghostDraft,
@@ -3485,11 +3492,12 @@ export default function DrawingLayout({
           }
         }}
         onOpenDocument={onOpenDocument}
+        onViewDrawing={onViewDrawing}
         onManualResizePreviewLock={lockManualResizePreviewWidth}
         onKnowledgeSourceClipDropOnNote={onKnowledgeSourceClipDropOnNote}
       />
     );
-  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument, lockManualResizePreviewWidth, onKnowledgeSourceClipDropOnNote]);
+  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument, onViewDrawing, lockManualResizePreviewWidth, onKnowledgeSourceClipDropOnNote]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.

@@ -598,7 +598,7 @@ export default function RowColumnContainerCard({
                           <PostCardContent
                             padlet={child}
                             allPadlets={allPadlets}
-                            onView={() => onViewDrawing?.(child)}
+                            onView={onViewDrawing ? () => onViewDrawing(child) : undefined}
                             onScan={onScanChild}
                             canvasContext={canvasContext}
                             currentUserId={currentUserId}

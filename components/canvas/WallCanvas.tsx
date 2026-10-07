@@ -56,6 +56,7 @@ interface WallCanvasProps {
   onPadletDelete?: (padletId: string) => void;
   onPadletEdit?: (padlet: Padlet) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149C §40: forwarded through SortablePadletCard into RowColumnContainerCard for nested Document children
+  onViewDrawing?: (padlet: Padlet) => void;
   onOpenTarget?: (padlet: Padlet) => void; // For opening specific child posts from containers
   onPadletCreate?: () => void;
   onReorder?: (padlets: Padlet[]) => void;
@@ -92,6 +93,7 @@ interface SortablePadletProps {
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   commentAccessMode?: CommentAccessMode;
   onOpenDocument?: (padlet: Padlet) => void;
+  onViewDrawing?: (padlet: Padlet) => void;
 }
 
 
@@ -118,6 +120,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
   onUpdateChildComments,
   commentAccessMode,
   onOpenDocument,
+  onViewDrawing,
 }) => {
   // Label for the open-target submenu -- prefers the child's own title (set
   // via getContainerEditTargetLabel) so a container holding many same-typed
@@ -203,6 +206,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                 onUpdateChildComments={onUpdateChildComments}
                 accessMode={commentAccessMode}
                 onOpenDocument={onOpenDocument}
+                onViewDrawing={onViewDrawing}
               />
             </CardShell>
           </div>
@@ -240,6 +244,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
   onUpdateChildComments,
   commentAccessMode,
   onOpenDocument,
+  onViewDrawing,
 }) => {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
@@ -724,6 +729,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
                                 onUpdateChildComments={onUpdateChildComments}
                                 commentAccessMode={commentAccessMode}
                                 onOpenDocument={onOpenDocument}
+                                onViewDrawing={onViewDrawing}
                               />
                             )}
                           </div>
