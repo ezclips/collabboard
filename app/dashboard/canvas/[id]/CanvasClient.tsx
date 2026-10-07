@@ -526,7 +526,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Data layer — canvas/padlets/lines/sections state + CRUD (PR5)
   const {
     canvas, padlets, setPadlets, lines, setLines, sections, setSections,
-    loading, error, fetchData,
+    loading, error, fetchData, mergeCanvasSettings,
     markPadletLocallyModified,
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
@@ -3496,17 +3496,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   }, [isGanttVisible, isSchedulerVisible]);
 
-  // Initialize chrono mode from canvas settings
+  // Initialize chrono mode from canvas settings. PATCH-307: the layout lives on
+  // the board, which only its owner may change, so only the owner is ever asked
+  // or offered the choice; everyone else gets the saved mode, or horizontal.
   useEffect(() => {
     if (canvas && canvas.layout === 'timeline') {
       const saved = (canvas as any)?.settings?.chronoMode as ChronoMode | undefined;
       if (saved) {
         setChronoMode(saved);
-      } else {
+        setShowChronoModeModal(false);
+      } else if (canManageBoardSettings) {
         setShowChronoModeModal(true);
+      } else {
+        setChronoMode('horizontal');
+        setShowChronoModeModal(false);
       }
     }
-  }, [canvas?.id, canvas?.layout]);
+  }, [canvas?.id, canvas?.layout, canManageBoardSettings]);
 
   // Check B — Confirm runtime is grid
   useEffect(() => {
@@ -6748,6 +6754,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   // Handle chrono mode change (persist to DB)
   const handleChronoModeChange = useCallback(async (mode: ChronoMode) => {
+    // PATCH-307: only the board's owner may change its saved layout.
+    if (!canManageBoardSettings) return;
     setChronoMode(mode);
     setShowChronoModeModal(false);
     if (canvasId) {
@@ -6760,12 +6768,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         );
 
         if (!result.ok) throw result.error.cause ?? result.error;
+        mergeCanvasSettings({ chronoMode: mode });
       } catch (err) {
         console.error('Failed to save chrono mode:', err);
         toast.error('Failed to save timeline mode');
       }
     }
-  }, [canvasId, canvas, supabase]);
+  }, [canvasId, canvas, canManageBoardSettings, mergeCanvasSettings, supabase]);
 
   // Auto-create empty container on timeline
   const handleCreateEmptyTimelineContainer = useCallback(async (options?: { silent?: boolean }): Promise<boolean> => {
@@ -10258,10 +10267,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             {/* Timeline Layout */}
             {isTimelineLayout && chronoMode && (
               <div className="absolute inset-0" style={canvasBackgroundStyle}>
-                <TimelineHeaderBar
-                  currentMode={chronoMode}
-                  onModeChange={handleChronoModeChange}
-                />
+                {canManageBoardSettings && (
+                  <TimelineHeaderBar
+                    currentMode={chronoMode}
+                    onModeChange={handleChronoModeChange}
+                  />
+                )}
                 <ChronoTimelineCanvas
                   padlets={padlets}
                   canvasId={canvasId || ''}
@@ -10347,7 +10358,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             )}
 
             {/* Chrono Mode Selection Modal (first-visit) */}
-            {isTimelineLayout && showChronoModeModal && (
+            {isTimelineLayout && canManageBoardSettings && showChronoModeModal && (
               <ChronoModeSelectionModal
                 isOpen={showChronoModeModal}
                 onSelect={handleChronoModeChange}

@@ -254,6 +254,18 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     }
   }, [canvasId]);
 
+  /**
+   * PATCH-307. Merge a patch into the board's LOCAL `settings` without
+   * dropping other keys, so a later write that spreads `canvas.settings`
+   * (e.g. the board settings modal) cannot erase a value saved this visit.
+   * Immutable: the previous board object is never mutated.
+   */
+  const mergeCanvasSettings = useCallback((patch: Record<string, unknown>) => {
+    setCanvas((prev) =>
+      prev ? { ...prev, settings: { ...(prev.settings ?? {}), ...patch } } : prev,
+    );
+  }, []);
+
   // ── Realtime ────────────────────────────────────────────────────────────────
   const handleRealtimePadletChange = useCallback((payload: any) => {
     const { eventType, new: newRecord, old: oldRecord } = payload;
@@ -853,6 +865,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     error,
     // Core data operations
     fetchData,
+    mergeCanvasSettings,
     markPadletLocallyModified,
     markLineLocallyModified,
     // Line CRUD
