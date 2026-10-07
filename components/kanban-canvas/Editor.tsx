@@ -7,6 +7,7 @@ import { useKanbanData, useKanbanPersistence, useKanbanUI } from './store';
 import { supabase } from '@/lib/supabase';
 import { ConfirmModal } from './ConfirmModal';
 import { useKanbanI18n } from './useKanbanI18n';
+import { parseCardDate, toDateInputValue } from './cardDate';
 
 interface EditorProps {
   card: Card | null;
@@ -250,9 +251,8 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
   };
 
   const getDisplayDate = (iso?: string) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
+    const d = parseCardDate(iso);
+    if (!d) return iso || '';
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
@@ -353,8 +353,9 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
     if (readonly) return;
     if (!card || !linkTargetId || !linkRelation) return;
 
-    // Check for duplicates (same from+to+relation)
-    const currentLinks = formData.links || [];
+    // Check for duplicates (same from+to+relation). Links live in the store's
+    // data.links (masterId/slaveId), not on the card row.
+    const currentLinks = data.links.filter((link) => link.masterId === card.id);
     const isDuplicate = currentLinks.some(
       link => link.slaveId === linkTargetId && link.relation === linkRelation
     );
@@ -372,14 +373,13 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
     };
 
     // Persist to database first so DB-level uniqueness wins in race conditions.
+    // The store adds it to data.links on success, so the list re-renders.
     const result = await actions.addLink(newLink);
     if (!result?.ok) {
       setLinkError(result?.message || t('failedAddLink'));
       return;
     }
 
-    // Update local editor state after successful persistence.
-    handleChange('links', [...currentLinks, newLink]);
     setLinkError('');
     setLinkTargetId('');
     setLinkRelation('');
@@ -387,13 +387,6 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
 
   const removeLink = (id: string) => {
     if (readonly) return;
-    const currentLinks = formData.links || [];
-    handleChange(
-      'links',
-      currentLinks.filter((link) => link.id !== id)
-    );
-
-    // Persist deletion to database
     actions.deleteLink(id);
   };
 
@@ -402,7 +395,7 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
   const votes = formData.votes || card.votes || [];
   const voteCount = votes.reduce((sum, vote) => sum + vote.value, 0);
   const myVote = votes.find((vote) => vote.userId === currentUserId);
-  const links = formData.links || card.links || [];
+  const links = data.links.filter((link) => link.masterId === card.id);
 
   return (
     <>
@@ -629,7 +622,7 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
             <div className="kanban-date-wrap">
               <input
                 type="date"
-                value={formData.start_date || ''}
+                value={toDateInputValue(formData.start_date)}
                 onChange={(e) => handleChange('start_date', e.target.value)}
                 className="kanban-editor-input"
                 disabled={readonly}
@@ -645,7 +638,7 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
             <div className="kanban-date-wrap">
               <input
                 type="date"
-                value={formData.end_date || ''}
+                value={toDateInputValue(formData.end_date)}
                 onChange={(e) => handleChange('end_date', e.target.value)}
                 className="kanban-editor-input"
                 disabled={readonly}

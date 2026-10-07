@@ -5,6 +5,7 @@ import type { Card as CardType, CardAttachment } from '@/types/kanban-canvas';
 import { MoreVertical, Calendar, MessageCircle, ThumbsUp, Paperclip } from 'lucide-react';
 import { useKanbanUI } from './store';
 import { useKanbanI18n } from './useKanbanI18n';
+import { parseCardDate } from './cardDate';
 
 type CardRenderer = (props: {
   card: CardType;
@@ -91,20 +92,6 @@ export const Card = memo(function Card({
     if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) return trimmed;
     if (/^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) return `#${trimmed}`;
     return '';
-  };
-
-  const parseCardDate = (value?: string) => {
-    if (!value) return null;
-    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
-    const match = value.match(dateOnly);
-    if (match) {
-      const year = Number(match[1]);
-      const month = Number(match[2]) - 1;
-      const day = Number(match[3]);
-      return new Date(year, month, day);
-    }
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
   };
 
   const formatCardDate = (value?: string) => {

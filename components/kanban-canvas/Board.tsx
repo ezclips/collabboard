@@ -97,6 +97,9 @@ export const Board = memo(function Board({ cards, columns, rows, users = [], rea
   const [loadedColumns, setLoadedColumns] = useState<Set<string>>(new Set());
   const [loadingColumns, setLoadingColumns] = useState<Set<string>>(new Set());
   const hasRunInitialLoadRef = useRef(false);
+  // PATCH-319. The ids that existed when the initial server load ran; anything
+  // else is a locally-created column with no server cards to fetch.
+  const serverColumnIdsRef = useRef<Set<string>>(new Set());
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const prevRowIdsRef = useRef<string[]>([]);
 
@@ -282,6 +285,7 @@ export const Board = memo(function Board({ cards, columns, rows, users = [], rea
 
     const loadParallel = async () => {
       hasRunInitialLoadRef.current = true;
+      serverColumnIdsRef.current = new Set(visibleColumns.map((column) => column.id));
 
       // Load all columns in parallel now that store is race-safe
       await Promise.all(
@@ -291,6 +295,20 @@ export const Board = memo(function Board({ cards, columns, rows, users = [], rea
 
     void loadParallel();
   }, [visibleColumns, ensureColumnLoaded]); // Trigger when columns become available
+
+  // PATCH-319. A column created after the initial server load is new: it has no
+  // server cards, so mark it loaded immediately instead of showing "Load cards"
+  // until a reload. Server columns keep the lazy path.
+  useEffect(() => {
+    if (!hasRunInitialLoadRef.current) return;
+    const added = columns.filter((column) => !serverColumnIdsRef.current.has(column.id));
+    if (added.length === 0) return;
+    setLoadedColumns((prev) => {
+      const next = new Set(prev);
+      added.forEach((column) => next.add(column.id));
+      return next;
+    });
+  }, [columns]);
 
   const groupStats = useMemo(() => {
     const byGroup = new Map<string, number>();
