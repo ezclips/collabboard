@@ -32,6 +32,7 @@ type GanttLike = {
     scale_height?: number;
     min_column_width?: number;
     show_progress?: boolean;
+    show_unscheduled?: boolean;
     open_tree_initially?: boolean;
     details_on_create?: boolean;
     details_on_dblclick?: boolean;
@@ -54,6 +55,7 @@ type GanttLike = {
   locale?: { labels?: Record<string, string> };
   plugins: (features: Record<string, boolean>) => void;
   attachEvent: (name: string, callback: (...args: unknown[]) => unknown) => string;
+  constants?: { KEY_CODES?: Record<string, number> };
   ext?: {
     zoom?: {
       init: (config: unknown) => void;
@@ -61,9 +63,14 @@ type GanttLike = {
     };
     inlineEditors?: {
       setMapping: (map: {
-        init: (controller: unknown, grid: unknown) => void;
+        init: (controller: unknown, grid?: unknown) => void;
+        onShow?: (controller: unknown, placeholder: unknown, grid?: unknown) => void;
+        onHide?: (controller: unknown, placeholder?: unknown, grid?: unknown) => void;
         destroy?: () => void;
       }) => void;
+    };
+    keyboardNavigation?: {
+      attachEvent: (name: string, callback: (...args: unknown[]) => unknown) => string;
     };
   };
   form_blocks?: Record<
@@ -224,6 +231,9 @@ export function configureGantt(
   gantt.config.scale_height = 54;
   gantt.config.min_column_width = 44;
   gantt.config.show_progress = true;
+  // PATCH-320. A card with no dates is an unscheduled task: a row in the grid
+  // with no bar and an empty Start time, instead of a fake bar at "today".
+  gantt.config.show_unscheduled = true;
   gantt.config.open_tree_initially = true;
   gantt.config.details_on_create = true;
   gantt.config.details_on_dblclick = true;
@@ -324,6 +334,18 @@ export function configureGantt(
         save: () => void;
         hide: () => void;
       };
+
+      const isInsideEditorPlaceholder = (target: EventTarget | null | undefined): boolean =>
+        target instanceof Element && target.closest('.gantt_grid_editor_placeholder') !== null;
+
+      let editorListenersCleanup: {
+        placeholder: HTMLElement;
+        keydown: (event: KeyboardEvent) => void;
+        container: EventTarget;
+        pointerDown: (event: Event) => void;
+        focusIn: (event: Event) => void;
+      } | null = null;
+
       gantt.ext.inlineEditors.setMapping({
         init: (controller: unknown) => {
           const ctrl = controller as InlineCtrl & {
@@ -339,17 +361,49 @@ export function configureGantt(
             else ctrl.hide();
           };
 
-          // Preserve default "click-away" behavior so inline edits are applied.
+          // PATCH-320. Replacing the default mapping removed its keyboard
+          // handling, so with keyboard_navigation on, Enter only closed the
+          // editor without saving. Handle Enter (save) and Escape (cancel)
+          // ourselves while the editor is open; click-away still commits via
+          // commitOrHideEditor.
+          const keyboardNavigation = gantt.ext?.keyboardNavigation;
+          if (keyboardNavigation) {
+            const keyCodes = gantt.constants?.KEY_CODES || {};
+            const enterKey = keyCodes.ENTER ?? 13;
+            const escapeKey = keyCodes.ESC ?? 27;
+            keyboardNavigation.attachEvent('onKeyDown', (_event: unknown, keyEvent: unknown) => {
+              if (!ctrl.isVisible()) return true;
+              const domEvent = keyEvent as { keyCode?: number; preventDefault?: () => void } | undefined;
+              if (domEvent?.keyCode === enterKey) {
+                ctrl.save();
+                domEvent.preventDefault?.();
+                return false;
+              }
+              if (domEvent?.keyCode === escapeKey) {
+                ctrl.hide();
+                domEvent.preventDefault?.();
+                return false;
+              }
+              return true;
+            });
+          }
+
+          // Preserve default "click-away" behavior so inline edits are applied,
+          // but a click inside the editor's own placeholder is not a click-away
+          // (PATCH-320 Addendum 1): it must not close the editor.
           gantt.attachEvent('onTaskClick', (_id: unknown, e: unknown) => {
+            if (isInsideEditorPlaceholder((e as MouseEvent | undefined)?.target)) return true;
             if (maybeGanttInternal._is_icon_open_click?.(e)) return true;
             commitOrHideEditor();
             return true;
           });
-          gantt.attachEvent('onEmptyClick', () => {
+          gantt.attachEvent('onEmptyClick', (e: unknown) => {
+            if (isInsideEditorPlaceholder((e as MouseEvent | undefined)?.target)) return true;
             commitOrHideEditor();
             return true;
           });
-          gantt.attachEvent('onBeforeTaskDrag', () => {
+          gantt.attachEvent('onBeforeTaskDrag', (_id: unknown, _mode: unknown, e: unknown) => {
+            if (isInsideEditorPlaceholder((e as MouseEvent | undefined)?.target)) return true;
             commitOrHideEditor();
             return true;
           });
@@ -383,6 +437,90 @@ export function configureGantt(
               el.classList.remove('gantt-row-editing');
             });
           });
+        },
+        onShow: (controller: unknown, placeholder: unknown) => {
+          const ctrl = controller as InlineCtrl;
+          const el = placeholder as HTMLElement | null;
+          if (!el) return;
+
+          const focusField = () => {
+            const field = el.querySelector<HTMLElement>('input, select, textarea');
+            if (!field) return;
+            field.focus();
+            if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+              try {
+                field.select();
+              } catch {
+                // select() is best-effort
+              }
+            }
+          };
+
+          // PATCH-320 Addendum 1. keyboard_navigation keeps focus on the
+          // .gantt_row, so the editor input never received typing, and clicking
+          // into it closed the editor. Focus (and select) the real field after
+          // the current event, and take the keys off the placeholder itself.
+          setTimeout(focusField, 0);
+
+          const keyCodes = gantt.constants?.KEY_CODES || {};
+          const enterKey = keyCodes.ENTER ?? 13;
+          const escapeKey = keyCodes.ESC ?? 27;
+          const tabKey = keyCodes.TAB ?? 9;
+          const keydown = (event: KeyboardEvent) => {
+            // PATCH-320 Addendum 5. Every key inside the editor must stop before
+            // keyboard_navigation sees it: it otherwise handles Ctrl+A on the
+            // gantt container, so the input's text is never selected. Only
+            // Enter/Tab/Escape take over the default action; all other keys keep
+            // it (editing, Ctrl+A, copy, caret movement).
+            event.stopPropagation();
+            if (event.keyCode === enterKey || event.keyCode === tabKey) {
+              event.preventDefault();
+              ctrl.save();
+            } else if (event.keyCode === escapeKey) {
+              event.preventDefault();
+              ctrl.hide();
+            }
+          };
+
+          // PATCH-320 Addendum 2. keyboard_navigation re-focuses the .gantt_row
+          // a few ms after onShow, so typing goes to the row. While the editor
+          // is open, pull focus back to the field whenever focus lands on
+          // another gantt element -- unless the user really clicked outside the
+          // editor (then the click-away handlers are allowed to commit).
+          const container: EventTarget = el.closest('.gantt_layout_root') ?? el.ownerDocument;
+          let pointerDownOutside = false;
+          const pointerDown = (event: Event) => {
+            const target = event.target;
+            pointerDownOutside = !(
+              target instanceof Element && target.closest('.gantt_grid_editor_placeholder')
+            );
+          };
+          const focusIn = (event: Event) => {
+            const target = event.target;
+            if (target instanceof Element && target.closest('.gantt_grid_editor_placeholder')) return;
+            if (pointerDownOutside) return;
+            if (
+              target instanceof Element &&
+              !target.closest('.gantt_layout_root, .gantt_layout, .gantt_grid, .gantt_row')
+            ) {
+              return;
+            }
+            focusField();
+          };
+
+          el.addEventListener('keydown', keydown);
+          document.addEventListener('pointerdown', pointerDown, true);
+          container.addEventListener('focusin', focusIn);
+          editorListenersCleanup = { placeholder: el, keydown, container, pointerDown, focusIn };
+        },
+        onHide: () => {
+          if (editorListenersCleanup) {
+            const cleanup = editorListenersCleanup;
+            cleanup.placeholder.removeEventListener('keydown', cleanup.keydown);
+            document.removeEventListener('pointerdown', cleanup.pointerDown, true);
+            cleanup.container.removeEventListener('focusin', cleanup.focusIn);
+            editorListenersCleanup = null;
+          }
         },
         destroy: () => {},
       });

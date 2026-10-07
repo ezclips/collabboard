@@ -10,6 +10,7 @@ import {
   Columns,
   Rows,
   Layers,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useKanbanPersistence, useKanbanUI, useKanbanHistory, useKanbanReadonly } from './store.tsx';
 import type { CardGroupBy, Column, Row } from '@/types/kanban-canvas';
@@ -23,7 +24,7 @@ interface ToolbarProps {
 
 type FilterOption = { value: string; label: string };
 
-export const Toolbar = memo(function Toolbar({ onExport }: ToolbarProps) {
+export const Toolbar = memo(function Toolbar({ onExport, onAddGroup }: ToolbarProps) {
   const actions = useKanbanPersistence();
   const ui = useKanbanUI();
   const history = useKanbanHistory();
@@ -226,14 +227,23 @@ export const Toolbar = memo(function Toolbar({ onExport }: ToolbarProps) {
             <span>{t('addRow')}</span>
           </button>
 
+          <button
+            onClick={onAddGroup}
+            className="kanban-toolbar-btn"
+            title={t('addGroup')}
+          >
+            <Layers size={16} />
+            <span>{t('addGroup')}</span>
+          </button>
+
           <div className="relative" ref={groupMenuRef}>
             <button
               onClick={() => setShowGroupMenu((prev) => !prev)}
               className="kanban-toolbar-btn"
-              title={t('addGroup')}
+              title={t('groupByLabel')}
             >
-              <Layers size={16} />
-              <span>{t('addGroup')}</span>
+              <SlidersHorizontal size={16} />
+              <span>{t('groupByLabel')}</span>
             </button>
 
             {showGroupMenu && (

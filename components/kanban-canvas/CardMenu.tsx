@@ -106,19 +106,13 @@ export function useCardMenu({ card, modals }: CardMenuProps): ContextMenuItem[] 
     }
   }
 
-  // Add move to row options if rows exist (quick path)
+  // Add move to row options if there is somewhere to move (quick path).
   if (data.rows.length > 0) {
     const otherRows = data.rows.filter((row) => row.id !== card.rowId);
-
-    items.push({
-      id: 'move-row-label',
-      label: t('moveToRow'),
-      icon: <MenuIcons.ArrowRight size={16} />,
-      onClick: () => {},
-    });
+    const rowTargets: ContextMenuItem[] = [];
 
     if (card.rowId && data.rows.length > 1) {
-      items.push({
+      rowTargets.push({
         id: 'move-no-row',
         label: `-> ${t('noRow')}`,
         onClick: () => actions.moveCard(card.id, card.columnId, undefined),
@@ -126,19 +120,31 @@ export function useCardMenu({ card, modals }: CardMenuProps): ContextMenuItem[] 
     }
 
     otherRows.forEach((row) => {
-      items.push({
+      rowTargets.push({
         id: `move-row-${row.id}`,
         label: `-> ${normalizeRowLabel(row.label)}`,
         onClick: () => actions.moveCard(card.id, card.columnId, row.id),
       });
     });
 
-    items.push({
-      id: 'separator-3',
-      label: '',
-      separator: true,
-      onClick: () => {},
-    });
+    // Only show the label (and its separator) when at least one target exists.
+    if (rowTargets.length > 0) {
+      items.push({
+        id: 'move-row-label',
+        label: t('moveToRow'),
+        icon: <MenuIcons.ArrowRight size={16} />,
+        onClick: () => {},
+      });
+
+      items.push(...rowTargets);
+
+      items.push({
+        id: 'separator-3',
+        label: '',
+        separator: true,
+        onClick: () => {},
+      });
+    }
   }
 
   items.push({

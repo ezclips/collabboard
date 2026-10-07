@@ -75,6 +75,40 @@ export function bindGanttEvents(params: {
     }) as any)
   );
 
+  // PATCH-320 Addendum 3. An unscheduled task's lightbox opens with placeholder
+  // dates (today → tomorrow). Capture what it opened with so a save can tell a
+  // real date change (schedule the card) from an unrelated edit such as a
+  // description change (which must not give the card today's dates).
+  const toTime = (value: unknown): number | null => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value as string | number);
+    return Number.isNaN(date.getTime()) ? null : date.getTime();
+  };
+  let lightboxInitialRange: { start: number | null; end: number | null } | null = null;
+
+  eventIds.push(
+    gantt.attachEvent('onBeforeLightbox', ((id: string | number) => {
+      const task = gantt.getTask(String(id));
+      lightboxInitialRange = {
+        start: toTime(task?.start_date),
+        end: toTime(task?.end_date),
+      };
+      return true;
+    }) as any)
+  );
+
+  eventIds.push(
+    gantt.attachEvent('onLightboxSave', ((_id: string | number, task: GanttTaskLike) => {
+      if (!task || task.unscheduled !== true) return true;
+      const start = toTime(task.start_date);
+      const end = toTime(task.end_date);
+      const initial = lightboxInitialRange;
+      const datesChanged = !initial || initial.start !== start || initial.end !== end;
+      if (datesChanged) task.unscheduled = false;
+      return true;
+    }) as any)
+  );
+
   eventIds.push(
     gantt.attachEvent('onAfterTaskAdd', (async (rawId: string, task: GanttTaskLike) => {
       if (isApplyingExternalUpdateRef.current) return;

@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { ConfirmModal } from './ConfirmModal';
 import { useKanbanI18n } from './useKanbanI18n';
 import { parseCardDate, toDateInputValue } from './cardDate';
+import { removeKanbanAttachmentByUrl } from '@/lib/kanban/kanbanAttachmentStorage';
 
 interface EditorProps {
   card: Card | null;
@@ -107,10 +108,27 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
     setIsCustomStatusMode(false);
   };
 
+  const attachmentUrls = (file: string | CardAttachment): string[] => {
+    if (typeof file === 'string') return file.startsWith('http') ? [file] : [];
+    return [file.url, file.previewURL, file.coverURL].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    );
+  };
+
   const handleSave = async () => {
     if (readonly) return;
     if (card) {
       await actions.updateCard(card.id, formData);
+      // PATCH-320. A removed attachment's storage object is deleted on Save
+      // (never on Cancel). Only this card's own prefix is ever touched.
+      const original = card.attached || [];
+      const next = formData.attached || [];
+      const removed = original.filter((file) => !next.includes(file));
+      for (const file of removed) {
+        for (const url of attachmentUrls(file)) {
+          await removeKanbanAttachmentByUrl(supabase.storage as never, url, card.id);
+        }
+      }
       onClose();
     }
   };

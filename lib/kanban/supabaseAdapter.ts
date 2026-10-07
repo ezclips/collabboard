@@ -27,6 +27,8 @@ export type SaveEntityResult = {
     ok: boolean;
     conflict: boolean;
     message?: string;
+    /** PATCH-320. The `updated_at` the write stored, so the store can record it. */
+    updatedAt?: string;
 };
 
 export type SaveCommentResult = SaveEntityResult & {
@@ -160,13 +162,16 @@ async function insertCardWithFallback(payload: Partial<KanbanDBCard>) {
 async function updateCardWithFallback(card: { id: string; canvas_id: string; updated_at?: string }, payload: Partial<KanbanDBCard>) {
     const retryableOptionalColumns = new Set(['parent_id', 'project_id', 'status', 'task_type']);
     const updatePayload = { ...payload };
+    // PATCH-320. One stamp for this write; returned to the caller so the store
+    // can record what the server actually stored.
+    const writtenUpdatedAt = new Date().toISOString();
 
     while (true) {
         let query = supabase
             .from('kanban_cards')
             .update({
                 ...updatePayload,
-                updated_at: new Date().toISOString()
+                updated_at: writtenUpdatedAt
             })
             .eq('id', card.id)
             .eq('canvas_id', card.canvas_id);
@@ -175,8 +180,15 @@ async function updateCardWithFallback(card: { id: string; canvas_id: string; upd
             query = query.eq('updated_at', card.updated_at);
         }
 
-        const result = await query.select('id');
-        if (!result.error) return { ...result, attemptedPayload: { ...updatePayload } };
+        const result = await query.select('id, updated_at');
+        if (!result.error) {
+            const row = (Array.isArray(result.data) ? result.data[0] : null) as
+                | { updated_at?: string }
+                | null
+                | undefined;
+            const storedUpdatedAt = typeof row?.updated_at === 'string' ? row.updated_at : writtenUpdatedAt;
+            return { ...result, attemptedPayload: { ...updatePayload }, updatedAtWritten: storedUpdatedAt };
+        }
 
         const code = getSupabaseErrorCode(result.error);
         const missingColumn = getMissingColumnFromError(result.error, 'kanban_cards');
@@ -185,7 +197,7 @@ async function updateCardWithFallback(card: { id: string; canvas_id: string; upd
             continue;
         }
 
-        return { ...result, attemptedPayload: { ...updatePayload } };
+        return { ...result, attemptedPayload: { ...updatePayload }, updatedAtWritten: writtenUpdatedAt };
     }
 }
 
@@ -608,9 +620,10 @@ export async function saveCard(card: Partial<KanbanDBCard> & { id: string; canva
 
     // For new cards, use insert. For existing cards, use update to allow partial updates
     if (shouldInsert) {
+        const insertedUpdatedAt = new Date().toISOString();
         const { error } = await insertCardWithFallback({
             ...safePayload,
-            updated_at: new Date().toISOString()
+            updated_at: insertedUpdatedAt
         });
         if (error) {
             console.error(`Error creating kanban card: ${stringifyForConsole({
@@ -621,7 +634,7 @@ export async function saveCard(card: Partial<KanbanDBCard> & { id: string; canva
             })}`);
             return { ok: false, conflict: false, message: 'Failed to create card.' } as SaveEntityResult;
         }
-        return { ok: true, conflict: false } as SaveEntityResult;
+        return { ok: true, conflict: false, updatedAt: insertedUpdatedAt } as SaveEntityResult;
     } else {
         const updatePayload = { ...safePayload };
         delete (updatePayload as Partial<KanbanDBCard>).id;
@@ -629,7 +642,7 @@ export async function saveCard(card: Partial<KanbanDBCard> & { id: string; canva
         delete (updatePayload as Partial<KanbanDBCard>).created_at;
         delete (updatePayload as Partial<KanbanDBCard>).updated_at;
 
-        const { data, error, attemptedPayload } = await updateCardWithFallback(card, updatePayload);
+        const { data, error, attemptedPayload, updatedAtWritten } = await updateCardWithFallback(card, updatePayload);
         if (error) {
             console.error(`Error updating kanban card: ${stringifyForConsole({
                 error: formatSupabaseError(error),
@@ -645,7 +658,7 @@ export async function saveCard(card: Partial<KanbanDBCard> & { id: string; canva
             return { ok: false, conflict: true, message: 'Card was changed by another user.' } as SaveEntityResult;
         }
 
-        return { ok: true, conflict: false } as SaveEntityResult;
+        return { ok: true, conflict: false, updatedAt: updatedAtWritten } as SaveEntityResult;
     }
 }
 

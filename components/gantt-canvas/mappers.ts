@@ -17,6 +17,8 @@ export interface GanttTask {
   open?: boolean;
   type?: string;
   color?: string;
+  /** PATCH-320. A card with no dates: a grid row with no bar. */
+  unscheduled?: boolean;
 }
 
 export interface GanttLink {
@@ -140,6 +142,12 @@ export function mapCardToGanttTask(card: Card): GanttTask {
     color: normalizeHexColor(card.color),
   };
 
+  // PATCH-320. A card with no dates has no bar to draw: mark it unscheduled so
+  // the Gantt shows a grid row (empty Start time) instead of a fake bar at today.
+  if (!card.start_date && !card.end_date) {
+    task.unscheduled = true;
+  }
+
   // Milestones: DHTMLX requires duration=0 explicitly; end_date must equal start_date
   if (task.type === 'milestone') {
     task.duration = 0;
@@ -161,6 +169,9 @@ export function mapGanttTaskToCardPatch(task: Partial<GanttTask>): Partial<Card>
   const endDate = isMilestone
     ? startDate
     : (toDateOnly(task.end_date) || (startDate ? addDays(startDate, Math.max(1, task.duration || 1)) : null));
+  // PATCH-320. An unscheduled task (a card with no dates) must never gain dates
+  // from the Gantt — e.g. a rename on such a row writes only the label.
+  const isUnscheduled = task.unscheduled === true;
 
   const patch: Partial<Card> = {};
   if (task.text !== undefined) patch.label = task.text;
@@ -172,8 +183,10 @@ export function mapGanttTaskToCardPatch(task: Partial<GanttTask>): Partial<Card>
   }
   if (task.stage_id !== undefined) patch.columnId = task.stage_id;
   if (task.parent !== undefined) patch.parent = task.parent || undefined;
-  if (startDate !== null) patch.start_date = startDate;
-  if (endDate !== null) patch.end_date = endDate;
+  if (!isUnscheduled) {
+    if (startDate !== null) patch.start_date = startDate;
+    if (endDate !== null) patch.end_date = endDate;
+  }
   if (task.progress !== undefined) patch.progress = ganttProgressToCard(task.progress);
   if (task.color !== undefined) {
     const normalized = normalizeHexColor(task.color);

@@ -4,6 +4,7 @@ import { createContext, useContext, useReducer, useCallback, ReactNode, useEffec
 import { toast } from 'sonner';
 import { loadKanbanData, loadKanbanScaffoldData, loadKanbanCardsForColumn, saveCard, saveCardAssignees, deleteCard, saveColumn, deleteColumn, saveColumnGroup, deleteColumnGroup as deleteColumnGroupPersisted, saveSwimlane, deleteSwimlane, saveLink, deleteLink, saveComment, deleteComment as deleteCommentPersisted, saveVote, deleteVote as deleteVotePersisted, saveMemberSortPreference, saveMemberGroupByPreference, saveMemberDateFormatPreference } from '@/lib/kanban/supabaseAdapter';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import { removeKanbanCardAttachments, removeKanbanCardAttachmentsForCards } from '@/lib/kanban/kanbanAttachmentStorage';
 import type {
   KanbanState,
   KanbanAction,
@@ -342,6 +343,11 @@ function kanbanReducer(state: KanbanState, action: KanbanAction): KanbanState {
           card.id === action.payload.id ? { ...card, ...action.payload.updates } : card
         ),
       };
+      // PATCH-320. A background updated_at stamp sync is not a user edit, so it
+      // must not create an undo entry.
+      if ((action.payload as { skipHistory?: boolean }).skipHistory) {
+        return { ...state, data: newData };
+      }
       return saveHistory(newData);
     }
 
@@ -1095,6 +1101,16 @@ export function useKanbanActions() {
         dispatch({ type: 'UPDATE_CARD', payload: { id, updates } }),
       [dispatch]
     ),
+    // PATCH-320. Record the updated_at the server just wrote, without an undo
+    // entry, so the next save conditions on the right stamp.
+    syncCardUpdatedAt: useCallback(
+      (id: string, updatedAt: string) =>
+        dispatch({
+          type: 'UPDATE_CARD',
+          payload: { id, updates: { updated_at: updatedAt }, skipHistory: true },
+        } as unknown as KanbanAction),
+      [dispatch]
+    ),
     deleteCard: useCallback((id: string) => dispatch({ type: 'DELETE_CARD', payload: id }), [dispatch]),
     duplicateCard: useCallback(
       (id: string) => dispatch({ type: 'DUPLICATE_CARD', payload: id }),
@@ -1461,6 +1477,11 @@ export function useKanbanPersistence() {
         handleConflict('Card');
         return; // board will be refetched; skip stale assignee write
       }
+      // PATCH-320. Record the stamp the server wrote so the next save conditions
+      // on it, instead of the stale one (the Gantt path has no realtime echo).
+      if (result.ok && result.updatedAt) {
+        actions.syncCardUpdatedAt(id, result.updatedAt);
+      }
       if (result.ok && updates.assigned !== undefined) {
         await saveCardAssignees(canvasId, id, updates.assigned || []);
       }
@@ -1469,6 +1490,9 @@ export function useKanbanPersistence() {
       if (blockReadonlyMutation()) return;
       actions.deleteCard(id);
       await deleteCard(id);
+      // PATCH-320. Remove the card's own attachment objects. Storage failures
+      // are logged by the helper and never block the delete.
+      await removeKanbanCardAttachments(supabase.storage as never, id);
     },
     moveCard: async (id: string, columnId: string, rowId?: string, order?: number) => {
       if (blockReadonlyMutation()) return;
@@ -1484,6 +1508,8 @@ export function useKanbanPersistence() {
       } as any);
       if (!result.ok && result.conflict) {
         handleConflict('Card');
+      } else if (result.ok && result.updatedAt) {
+        actions.syncCardUpdatedAt(id, result.updatedAt);
       }
     },
     addColumn: async (column: Column) => {
@@ -1523,8 +1549,12 @@ export function useKanbanPersistence() {
     },
     deleteColumn: async (id: string) => {
       if (blockReadonlyMutation()) return;
+      // PATCH-320. Capture the column's cards before they are removed, then
+      // delete each card's attachment objects. Storage failures never block.
+      const cardIds = data.cards.filter((card) => card.columnId === id).map((card) => card.id);
       actions.deleteColumn(id);
       await deleteColumn(id);
+      await removeKanbanCardAttachmentsForCards(supabase.storage as never, cardIds);
     },
     addColumnGroup: async (group: ColumnGroup) => {
       if (blockReadonlyMutation()) return;

@@ -9,6 +9,7 @@ import {
 } from '@/lib/infra/knowledge/knowledgeDeletionAdapters';
 import { SupabaseKnowledgeStorageGateway } from '@/lib/infra/knowledge/knowledgeIngestionAdapters';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { removeKanbanCardAttachmentsForCards } from '@/lib/kanban/kanbanAttachmentStorage';
 
 export const runtime = 'nodejs';
 
@@ -52,6 +53,24 @@ export async function DELETE(
 
     const { id } = await context.params;
     const adminClient = getSupabaseAdmin();
+
+    // PATCH-320. Capture this board's kanban card ids before the delete (their
+    // rows are cascaded away with the board), so their attachment folders can
+    // be removed once the delete succeeds. Best-effort read only; skipped when
+    // there is no storage to clean, and never returned to the caller.
+    let kanbanCardIds: string[] = [];
+    if (adminClient?.storage) {
+      try {
+        const { data } = await adminClient
+          .from('kanban_cards')
+          .select('id')
+          .eq('canvas_id', id);
+        kanbanCardIds = ((data ?? []) as Array<{ id: unknown }>).map((row) => String(row.id));
+      } catch (error) {
+        console.error('Failed to read kanban cards for attachment cleanup:', error);
+      }
+    }
+
     const result = await deleteKnowledgeBoard(
       {
         authorizer: new SupabaseBoardDeletionAuthorizer(adminClient as never),
@@ -66,6 +85,12 @@ export async function DELETE(
         { error: result.error.code },
         { status: statusFor(result.error.code) },
       );
+    }
+
+    // PATCH-320. Only after the authorized delete succeeded do we touch storage.
+    // The helper logs failures and never changes the response.
+    if (kanbanCardIds.length > 0) {
+      await removeKanbanCardAttachmentsForCards(adminClient.storage as never, kanbanCardIds);
     }
 
     return NextResponse.json(result.value, { status: 200 });
