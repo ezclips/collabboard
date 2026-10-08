@@ -102,3 +102,68 @@
   background: #ffffff;
   padding: 0;
 }
+
+/* --------------------------------------------------------------------------
+   PATCH-324. The Kanban Scheduler matches the Gantt's font and sizes.
+
+   Scoped under `.scheduler-shell` on purpose: the standalone Scheduler board
+   is themed by `components/canvas/scheduler-theme.css` under
+   `.scheduler-wrapper`, and must not change -- that theme paints a gradient on
+   `.rbc-event`, while the Kanban Scheduler sets its own card colour through
+   `backgroundColor`, so the two must never meet. Event background/colour is
+   deliberately not touched here.
+   -------------------------------------------------------------------------- */
+
+.scheduler-shell .rbc-calendar {
+  font-family: Inter, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+}
+
+.scheduler-shell .rbc-toolbar {
+  font-size: 14px;
+  margin-bottom: 0;
+  padding: 6px 12px;
+}
+
+.scheduler-shell .rbc-toolbar .rbc-toolbar-label {
+  font-size: 14px;
+}
+
+.scheduler-shell .rbc-toolbar button {
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 4px 8px;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.scheduler-shell .rbc-toolbar button.rbc-active {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+  box-shadow: none;
+}
+
+.scheduler-shell .rbc-header {
+  font-size: 14px;
+  font-weight: 400;
+  color: #555d63;
+}
+
+.scheduler-shell .rbc-label {
+  font-size: 12px;
+}
+
+.scheduler-shell .rbc-event,
+.scheduler-shell .rbc-event-content {
+  font-size: 14px;
+}
+
+.scheduler-shell .rbc-date-cell,
+.scheduler-shell .rbc-show-more {
+  font-size: 12px;
+}
+
+.scheduler-shell .rbc-month-view .rbc-header {
+  font-size: 14px;
+}
