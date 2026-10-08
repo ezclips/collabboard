@@ -192,7 +192,7 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
   if (!body) {
     const text = await response.text();
     if (new TextEncoder().encode(text).byteLength > maxBytes) {
-      throw new PublicUrlError('too_large', 'That calendar is too large.');
+      throw new PublicUrlError('too_large', 'That file is too large.');
     }
     return text;
   }
@@ -207,37 +207,49 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
     total += value.byteLength;
     if (total > maxBytes) {
       try { await reader.cancel(); } catch { /* already failing; the refusal stands. */ }
-      throw new PublicUrlError('too_large', 'That calendar is too large.');
+      throw new PublicUrlError('too_large', 'That file is too large.');
     }
     chunks.push(value);
   }
   return new TextDecoder().decode(concatChunks(chunks, total));
 }
 
-export interface FetchIcsOptions {
-  readonly fetchImpl?: typeof fetch;
-  readonly lookup?: LookupAll;
+export interface FetchPublicTextOptions {
   readonly maxBytes?: number;
+  readonly accept?: string;
+  readonly userAgent?: string;
   readonly maxRedirects?: number;
   readonly timeoutMs?: number;
+  readonly fetchImpl?: typeof fetch;
+  readonly lookup?: LookupAll;
 }
 
+const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+
 /**
- * Fetches a calendar body safely.
+ * Fetches a text body from a public URL, safely, for any caller.
  *
  * Every hop -- the first URL and each redirect target -- is re-validated with
- * {@link assertPublicUrl}, so a public URL cannot redirect the server to a
- * private one. Redirects are followed manually and capped. The body is read
- * with a byte counter and the whole request is bounded by one timeout.
+ * {@link assertPublicUrl}, so a public page that answers `302 Location:
+ * http://169.254.169.254/…` cannot steer the server to an internal address.
+ * Redirects are followed manually and capped. The body is read with a byte
+ * counter and the whole request is bounded by one timeout.
  *
- * The URL is never included in an error message or logged.
+ * The URL is never included in an error message or logged. A non-2xx upstream
+ * is reported as {@link PublicUrlError} with reason `upstream_error` and its
+ * `status`, so a caller can tell "the site said 404" from "we refused".
  */
-export async function fetchIcsText(url: string, options: FetchIcsOptions = {}): Promise<string> {
+export async function fetchPublicText(
+  url: string,
+  options: FetchPublicTextOptions = {},
+): Promise<string> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const lookup = options.lookup;
-  const maxBytes = options.maxBytes ?? MAX_ICS_BYTES;
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxRedirects = options.maxRedirects ?? MAX_ICS_REDIRECTS;
   const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const accept = options.accept ?? 'text/plain, */*';
+  const userAgent = options.userAgent ?? 'Mozilla/5.0 (compatible; CollabBoardBot/1.0)';
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -255,27 +267,27 @@ export async function fetchIcsText(url: string, options: FetchIcsOptions = {}): 
         response = await fetchImpl(requestUrl, {
           redirect: 'manual',
           signal: controller.signal,
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CollabBoardCalendar/1.0)', Accept: 'text/calendar, text/plain, */*' },
+          headers: { 'User-Agent': userAgent, Accept: accept },
         });
       } catch (error) {
         if (error instanceof PublicUrlError) throw error;
-        throw new PublicUrlError('network_error', 'The calendar link could not be reached.');
+        throw new PublicUrlError('network_error', 'The link could not be reached.');
       }
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
         if (!location) {
-          throw new PublicUrlError('upstream_error', `The calendar link could not be read (HTTP ${response.status}).`, response.status);
+          throw new PublicUrlError('upstream_error', `The link could not be read (HTTP ${response.status}).`, response.status);
         }
         if (redirects >= maxRedirects) {
-          throw new PublicUrlError('too_many_redirects', 'The calendar link redirected too many times.');
+          throw new PublicUrlError('too_many_redirects', 'The link redirected too many times.');
         }
         current = new URL(location, requestUrl).toString();
         continue;
       }
 
       if (!response.ok) {
-        throw new PublicUrlError('upstream_error', `The calendar link could not be read (HTTP ${response.status}).`, response.status);
+        throw new PublicUrlError('upstream_error', `The link could not be read (HTTP ${response.status}).`, response.status);
       }
 
       return await readBounded(response, maxBytes);
@@ -283,4 +295,28 @@ export async function fetchIcsText(url: string, options: FetchIcsOptions = {}): 
   } finally {
     clearTimeout(timer);
   }
+}
+
+export interface FetchIcsOptions {
+  readonly fetchImpl?: typeof fetch;
+  readonly lookup?: LookupAll;
+  readonly maxBytes?: number;
+  readonly maxRedirects?: number;
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Fetches a calendar body safely -- the calendar-shaped wrapper around
+ * {@link fetchPublicText}, with the same values it has always used.
+ */
+export async function fetchIcsText(url: string, options: FetchIcsOptions = {}): Promise<string> {
+  return fetchPublicText(url, {
+    maxBytes: options.maxBytes ?? MAX_ICS_BYTES,
+    maxRedirects: options.maxRedirects ?? MAX_ICS_REDIRECTS,
+    timeoutMs: options.timeoutMs ?? FETCH_TIMEOUT_MS,
+    fetchImpl: options.fetchImpl,
+    lookup: options.lookup,
+    accept: 'text/calendar, text/plain, */*',
+    userAgent: 'Mozilla/5.0 (compatible; CollabBoardCalendar/1.0)',
+  });
 }

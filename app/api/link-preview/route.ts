@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import dns from 'node:dns/promises';
-import net from 'node:net';
-import type { LookupAddress } from 'node:dns';
+import { PublicUrlError, fetchPublicText } from '@/lib/server/net/publicUrlGuard';
 import { buildYouTubeThumbCandidates, extractYouTubeId } from '@/lib/media/youtubeThumb';
 
 export const runtime = 'nodejs';
@@ -72,7 +70,8 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'URL is required' }, { status: 400 });
         }
 
-        // SSRF guard: only allow http/https and block private address space
+        // Only http(s). This route does NOT accept webcal, so the scheme is
+        // checked on the RAW url before the guard (which would normalize it).
         let parsedUrl: URL;
         try {
             parsedUrl = new URL(url);
@@ -82,60 +81,50 @@ export async function POST(request: NextRequest) {
         if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
             return NextResponse.json({ error: 'Invalid URL scheme' }, { status: 400 });
         }
-        const hostname = parsedUrl.hostname.toLowerCase();
-        const blockedPatterns = [
-            /^localhost$/,
-            /^127\./,
-            /^10\./,
-            /^172\.(1[6-9]|2\d|3[01])\./,
-            /^192\.168\./,
-            /^169\.254\./,
-            /^0\./,
-            /^::1$/,
-            /^fc[0-9a-f]{2}:/i,
-            /^fe80:/i,
-            /^metadata\.google\.internal$/,
-            /^100\.100\.100\.200$/,
-        ];
-        if (blockedPatterns.some((re) => re.test(hostname))) {
-            return NextResponse.json({ error: 'URL host is not allowed' }, { status: 400 });
-        }
 
-        // DNS rebinding gap closure: if the hostname is not a literal IP, resolve it
-        // and re-check every returned address against the same private-range blocklist.
-        if (!net.isIP(hostname)) {
-            let resolved: LookupAddress[];
-            try {
-                resolved = await dns.lookup(hostname, { all: true });
-            } catch {
-                return NextResponse.json({ error: 'Could not resolve hostname' }, { status: 400 });
-            }
-            for (const { address } of resolved) {
-                if (blockedPatterns.some((re) => re.test(address))) {
-                    return NextResponse.json({ error: 'URL host is not allowed' }, { status: 400 });
-                }
-            }
-        }
-
-        // Fetch the page
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
-            },
+        /**
+         * A preview without metadata. Used for every failure that is not a
+         * refusal: an upstream error, an unreachable host, a body over the cap
+         * or too many redirects all mean "we could not read a preview", which
+         * is a 200 with empty fields rather than an error.
+         */
+        const emptyPreview = () => NextResponse.json({
+            url,
+            domain: extractDomain(url),
+            favicon: getFaviconUrl(url),
+            title: '',
+            description: '',
+            image: '',
         });
 
-        if (!response.ok) {
-            return NextResponse.json({
-                url,
-                domain: extractDomain(url),
-                favicon: getFaviconUrl(url),
-                title: '',
-                description: '',
-                image: '',
+        /**
+         * SSRF guard AND bounded fetch in one: `fetchPublicText` follows
+         * redirects MANUALLY and re-validates every hop, so a public page that
+         * answers `302 Location: http://169.254.169.254/…` is refused before
+         * the internal address is ever fetched.
+         */
+        let html: string;
+        try {
+            html = await fetchPublicText(url, {
+                maxBytes: 2 * 1024 * 1024,
+                accept: 'text/html,*/*',
+                userAgent: 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
+                timeoutMs: 10_000,
             });
+        } catch (error) {
+            if (error instanceof PublicUrlError) {
+                if (error.reason === 'invalid_url') {
+                    return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
+                }
+                if (error.reason === 'blocked_host') {
+                    return NextResponse.json({ error: 'URL host is not allowed' }, { status: 400 });
+                }
+                if (error.reason === 'dns_failed') {
+                    return NextResponse.json({ error: 'Could not resolve hostname' }, { status: 400 });
+                }
+            }
+            return emptyPreview();
         }
-
-        const html = await response.text();
 
         // Extract Open Graph and meta tags
         const getMetaContent = (property: string): string => {

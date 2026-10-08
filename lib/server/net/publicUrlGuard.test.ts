@@ -3,6 +3,7 @@ import {
   PublicUrlError,
   assertPublicUrl,
   fetchIcsText,
+  fetchPublicText,
   isBlockedAddress,
   normalizeCalendarUrl,
 } from './publicUrlGuard';
@@ -110,5 +111,41 @@ describe('PATCH-326 fetchIcsText follows redirects safely', () => {
     expect((error as PublicUrlError).reason).toBe('upstream_error');
     expect((error as PublicUrlError).status).toBe(500);
     expect((error as PublicUrlError).message).not.toContain('93.184.216.34');
+  });
+});
+
+describe('PATCH-327 fetchPublicText is the general form', () => {
+  const publicLiteral = 'http://93.184.216.34/page';
+
+  it('passes the accept and user-agent it was given', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok', { status: 200 })) as unknown as typeof fetch;
+    await fetchPublicText(publicLiteral, {
+      fetchImpl,
+      accept: 'text/html,*/*',
+      userAgent: 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(publicLiteral, expect.objectContaining({
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
+        Accept: 'text/html,*/*',
+      },
+    }));
+  });
+
+  it('refuses a redirect to a private host without fetching it', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'http://169.254.169.254/latest/meta-data/' },
+    })) as unknown as typeof fetch;
+    const error = await refusal(fetchPublicText(publicLiteral, { fetchImpl }));
+    expect((error as PublicUrlError).reason).toBe('blocked_host');
+    // Only the FIRST, public hop was ever fetched.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps the body at the given size', async () => {
+    const fetchImpl = (async () => new Response(new Uint8Array(200), { status: 200 })) as unknown as typeof fetch;
+    const error = await refusal(fetchPublicText(publicLiteral, { fetchImpl, maxBytes: 100 }));
+    expect((error as PublicUrlError).reason).toBe('too_large');
   });
 });
