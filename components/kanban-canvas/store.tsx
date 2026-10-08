@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useReducer, useCallback, ReactNode, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { loadKanbanData, loadKanbanScaffoldData, loadKanbanCardsForColumn, saveCard, saveCardAssignees, deleteCard, saveColumn, deleteColumn, saveColumnGroup, deleteColumnGroup as deleteColumnGroupPersisted, saveSwimlane, deleteSwimlane, saveLink, deleteLink, saveComment, deleteComment as deleteCommentPersisted, saveVote, deleteVote as deleteVotePersisted, saveMemberSortPreference, saveMemberGroupByPreference, saveMemberDateFormatPreference } from '@/lib/kanban/supabaseAdapter';
+import { loadKanbanData, loadKanbanScaffoldData, loadKanbanCardsForColumn, saveCard, saveCardAssignees, deleteCard, saveColumn, deleteColumn, saveColumnGroup, deleteColumnGroup as deleteColumnGroupPersisted, saveSwimlane, deleteSwimlane, saveLink, deleteLink, saveComment, deleteComment as deleteCommentPersisted, saveVote, deleteVote as deleteVotePersisted, saveMemberSortPreference, saveMemberGroupByPreference, saveMemberDateFormatPreference, toDbPriority, fromDbPriority } from '@/lib/kanban/supabaseAdapter';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { removeKanbanCardAttachments, removeKanbanCardAttachmentsForCards } from '@/lib/kanban/kanbanAttachmentStorage';
 import type {
@@ -159,9 +159,7 @@ function mapColumnCards(
   }, {});
 
   return chunk.cards.map((c) => {
-    let priority: Card['priority'] = 'medium';
-    if (c.priority === 1) priority = 'low';
-    else if (c.priority >= 3) priority = 'high';
+    const priority = fromDbPriority(c.priority);
 
     return {
       ...c,
@@ -232,9 +230,7 @@ function mapLoadedData(
 
   return {
     cards: data.cards.map((c) => {
-      let priority: Card['priority'] = 'medium';
-      if (c.priority === 1) priority = 'low';
-      else if (c.priority >= 3) priority = 'high';
+      const priority = fromDbPriority(c.priority);
 
       return {
         ...c,
@@ -1362,11 +1358,6 @@ export function useKanbanPersistence() {
       if (blockReadonlyMutation()) return;
       actions.addCard(card);
 
-      // Convert priority to numeric value
-      let priorityNum = 2; // default medium
-      if (card.priority === 'low') priorityNum = 1;
-      else if (card.priority === 'high') priorityNum = 3;
-
       const result = await saveCard({
         id: card.id,
         canvas_id: canvasId,
@@ -1379,7 +1370,8 @@ export function useKanbanPersistence() {
         parent_id: card.parent,
         assignee_id: card.assigned && card.assigned.length > 0 ? card.assigned[0] : undefined,
         order_index: card.order || 0,
-        priority: priorityNum,
+        // PATCH-321. None (undefined) is stored as 0, not Medium.
+        priority: toDbPriority(card.priority),
         score: card.progress || 0,
         project_id: card.projectId,
         status: card.status,
@@ -1407,10 +1399,6 @@ export function useKanbanPersistence() {
 
       actions.addCard(duplicated);
 
-      let priorityNum = 2;
-      if (duplicated.priority === 'low') priorityNum = 1;
-      else if (duplicated.priority === 'high') priorityNum = 3;
-
       const result = await saveCard({
         id: duplicated.id,
         canvas_id: canvasId,
@@ -1422,7 +1410,8 @@ export function useKanbanPersistence() {
         parent_id: duplicated.parent,
         assignee_id: duplicated.assigned && duplicated.assigned.length > 0 ? duplicated.assigned[0] : undefined,
         order_index: duplicated.order || 0,
-        priority: priorityNum,
+        // PATCH-321. A copy keeps the source's priority; None stays None (0).
+        priority: toDbPriority(duplicated.priority),
         score: duplicated.progress || 0,
         project_id: duplicated.projectId,
         status: duplicated.status,
@@ -1463,12 +1452,11 @@ export function useKanbanPersistence() {
       if (updates.progress !== undefined) dbUpdate.score = updates.progress;
       if (updates.task_type !== undefined) dbUpdate.task_type = updates.task_type;
 
-      // Convert priority to numeric value
-      if (updates.priority !== undefined) {
-        let priorityNum = 2; // default medium
-        if (updates.priority === 'low') priorityNum = 1;
-        else if (updates.priority === 'high') priorityNum = 3;
-        dbUpdate.priority = priorityNum;
+      // PATCH-321. A present `priority` key is an explicit choice, including
+      // None (undefined) which must be written as 0. An absent key leaves the
+      // stored priority untouched.
+      if ('priority' in updates) {
+        dbUpdate.priority = toDbPriority(updates.priority);
       }
 
       if (currentCard?.updated_at) dbUpdate.updated_at = currentCard.updated_at;

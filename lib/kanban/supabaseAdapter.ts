@@ -44,13 +44,26 @@ type SaveEntityOptions = {
     expectedUpdatedAt?: string;
 };
 
-function toDbPriority(value: unknown): number | undefined {
-    if (value === undefined || value === null) return undefined;
-    if (typeof value === 'number') return value;
+/**
+ * PATCH-321. One priority mapping, used by every path: `0`/`null`/absent is
+ * None (`undefined` on the Card), 1 low, 2 medium, >= 3 high.
+ */
+export function toDbPriority(value: unknown): number {
+    if (value === undefined || value === null) return 0; // None
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
     if (value === 'low') return 1;
-    if (value === 'high') return 3;
     if (value === 'medium') return 2;
-    return undefined;
+    if (value === 'high') return 3;
+    return 0;
+}
+
+export function fromDbPriority(value: unknown): 'low' | 'medium' | 'high' | undefined {
+    if (value === undefined || value === null) return undefined;
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(num) || num <= 0) return undefined; // 0 / null → None
+    if (num === 1) return 'low';
+    if (num === 2) return 'medium';
+    return 'high';
 }
 
 function formatSupabaseError(error: unknown) {
@@ -249,9 +262,8 @@ function sanitizeCardPayload(card: Record<string, any>): Partial<KanbanDBCard> {
     if (payload.date_due === undefined && card.end_date !== undefined) payload.date_due = card.end_date;
     if (payload.date_started === undefined && card.start_date !== undefined) payload.date_started = card.start_date;
     if (payload.score === undefined && card.progress !== undefined) payload.score = card.progress;
-    if (payload.priority === undefined) {
-        const mappedPriority = toDbPriority(card.priority);
-        if (mappedPriority !== undefined) payload.priority = mappedPriority;
+    if (payload.priority === undefined && card.priority !== undefined) {
+        payload.priority = toDbPriority(card.priority);
     }
 
     return payload;

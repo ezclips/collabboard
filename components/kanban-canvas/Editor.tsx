@@ -514,6 +514,18 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
                       <span className="kanban-priority-dot low"></span>
                       <span>{t('low')}</span>
                     </button>
+                    <button
+                      type="button"
+                      className="kanban-priority-item"
+                      onClick={() => {
+                        // PATCH-321. None is an explicit choice: the key is set
+                        // to undefined so Save writes 0, never Medium.
+                        handleChange('priority', undefined);
+                        setShowPriorityDropdown(false);
+                      }}
+                    >
+                      <span>{t('none')}</span>
+                    </button>
                   </div>
                 </>
               )}
