@@ -1,10 +1,10 @@
 'use client';
 
-import { memo, useEffect, useMemo } from 'react';
-import { useKanbanData, useKanbanUI, useKanbanPersistence, useKanbanReadonly } from './store.tsx';
+import { memo, useEffect } from 'react';
+import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from './store.tsx';
 import { Toolbar } from './Toolbar';
 import { Board } from './Board';
-import { Editor } from './Editor';
+import { KanbanCardEditorHost } from './KanbanCardEditorHost';
 import type { Card, User } from '@/types/kanban-canvas';
 import { useKanbanI18n } from './useKanbanI18n';
 import { useKanbanModals } from './useKanbanModals';
@@ -26,18 +26,13 @@ export const KanbanCanvas = memo(function KanbanCanvas({
 }) {
   const data = useKanbanData();
   const actions = useKanbanPersistence();
-  const ui = useKanbanUI();
   const readonly = useKanbanReadonly();
   const { t } = useKanbanI18n();
   const modals = useKanbanModals();
   void _canvasId;
 
-  const activeCard = useMemo(
-    () => data.cards.find((card) => card.id === ui.activeCardId) || null,
-    [data.cards, ui.activeCardId]
-  );
-
-  // Keyboard shortcuts
+  // Keyboard shortcuts. Escape-to-close now lives in KanbanCardEditorHost, so
+  // the same shortcut works when the Kanban view is hidden.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Undo/Redo
@@ -52,15 +47,11 @@ export const KanbanCanvas = memo(function KanbanCanvas({
         e.preventDefault();
         actions.redo();
       }
-      // Close editor with Escape
-      else if (e.key === 'Escape' && ui.activeCardId) {
-        actions.setActiveCard(null);
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [actions, readonly, ui.activeCardId]);
+  }, [actions, readonly]);
 
   const handleExport = () => {
     const exportData = {
@@ -124,13 +115,7 @@ export const KanbanCanvas = memo(function KanbanCanvas({
       </div>
 
       {/* Editor Modal */}
-      {ui.activeCardId && (
-        <Editor
-          card={activeCard}
-          onClose={() => actions.setActiveCard(null)}
-          readonly={readonly}
-        />
-      )}
+      <KanbanCardEditorHost />
 
       <InputModal
         isOpen={modals.inputModal.isOpen}

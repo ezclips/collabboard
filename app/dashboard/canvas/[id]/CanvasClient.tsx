@@ -183,6 +183,7 @@ import {
   type KanbanBoardAiBridgeApi,
   type KanbanBoardAiHost,
 } from '@/components/kanban-canvas/KanbanBoardAiBridge';
+import { readKanbanViews, writeKanbanViews } from '@/lib/kanban/kanbanViewPrefs';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
@@ -1540,8 +1541,46 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * this flag.
    */
   const enableBoardAiChat = process.env.NEXT_PUBLIC_ENABLE_BOARD_AI_CHAT === 'true';
-  const [isGanttVisible, setIsGanttVisible] = useState(true);
+  /**
+   * PATCH-325. K / G / S are three equal views. First render is Kanban only --
+   * the same on server and client -- and the stored per-browser choice is
+   * applied in an effect below, never during render.
+   */
+  const [isKanbanVisible, setIsKanbanVisible] = useState(true);
+  const [isGanttVisible, setIsGanttVisible] = useState(false);
   const [isSchedulerVisible, setIsSchedulerVisible] = useState(false);
+  const [kanbanViewsHydrated, setKanbanViewsHydrated] = useState(false);
+
+  /**
+   * PATCH-325. Read the remembered choice AFTER mount, so the first frame is
+   * identical on server and client. A disabled feature flag wins over storage:
+   * with `enableGantt` false the Gantt is never shown even if storage says so,
+   * and if that leaves nothing open the Kanban is shown instead.
+   */
+  useEffect(() => {
+    if (!canvasId) return;
+    const stored = readKanbanViews(canvasId);
+    const gantt = enableGantt && stored.gantt;
+    const scheduler = enableScheduler && stored.scheduler;
+    const kanban = stored.kanban || (!gantt && !scheduler);
+    setIsKanbanVisible(kanban);
+    setIsGanttVisible(gantt);
+    setIsSchedulerVisible(scheduler);
+    setKanbanViewsHydrated(true);
+    // enableGantt/enableScheduler are build-time flags: constant per load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId, enableGantt, enableScheduler]);
+
+  // Remember every change, but not the initial default before the read above
+  // has run -- otherwise the first render would overwrite the stored choice.
+  useEffect(() => {
+    if (!canvasId || !kanbanViewsHydrated) return;
+    writeKanbanViews(canvasId, {
+      kanban: isKanbanVisible,
+      gantt: isGanttVisible,
+      scheduler: isSchedulerVisible,
+    });
+  }, [canvasId, kanbanViewsHydrated, isKanbanVisible, isGanttVisible, isSchedulerVisible]);
   const isGridLayout = canvas?.layout === 'grid';
   const isDrawingLayout = canvas?.layout === 'drawing';
   const isTimelineLayout = canvas?.layout === 'timeline';
@@ -9163,8 +9202,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canvasTitle={canvas.title || 'Untitled canvas'}
           enableGantt={enableGantt}
           enableScheduler={enableScheduler}
+          isKanbanVisible={isKanbanVisible}
           isGanttVisible={isGanttVisible}
           isSchedulerVisible={isSchedulerVisible}
+          setIsKanbanVisible={setIsKanbanVisible}
           setIsGanttVisible={setIsGanttVisible}
           setIsSchedulerVisible={setIsSchedulerVisible}
           currentWorkspaceRole={currentWorkspaceRole}

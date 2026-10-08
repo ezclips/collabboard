@@ -1,41 +1,85 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { KanbanCanvas } from '@/components/kanban-canvas';
+import { KanbanCardEditorHost } from '@/components/kanban-canvas/KanbanCardEditorHost';
 import { GanttCanvas } from '@/components/gantt-canvas';
 import { SchedulerCanvas } from '@/components/scheduler-canvas';
 
 const MIN_HEIGHT = 200;
+/** One lower panel open on its own. */
+const SINGLE_LOWER_DEFAULT = 320;
+/** Two lower panels open together (Kanban + Gantt + Scheduler). */
+const DOUBLE_LOWER_DEFAULT = 250;
 
+type ViewId = 'kanban' | 'gantt' | 'scheduler';
+type LowerViewId = 'gantt' | 'scheduler';
+
+/**
+ * PATCH-325. K / G / S stacked top to bottom, in that order.
+ *
+ * The TOP-MOST open view takes the remaining height (`flex: 1`); every view
+ * below it has a height and a resize handle above it. One view open fills the
+ * whole area with no handle. The Gantt and Scheduler stay MOUNTED at height 0
+ * when hidden (dhtmlx and the calendar are costly to re-init); the Kanban may
+ * unmount, and its card editor is then rendered by the host below.
+ */
 export function KanbanGanttSchedulerSplit({
   canvasId,
+  showKanban,
   showGantt,
   showScheduler,
 }: {
   canvasId: string;
+  showKanban: boolean;
   showGantt: boolean;
   showScheduler: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // If only one (or none) of the bottom panels is visible, we can just use a single height state
-  const [bottomPanelHeight, setBottomPanelHeight] = useState(320);
+  // Lowest view(s) only. `null` means "not resized yet", so the default can
+  // depend on how many lower panels are open.
+  const [lowerHeights, setLowerHeights] = useState<Record<LowerViewId, number | null>>({
+    gantt: null,
+    scheduler: null,
+  });
 
-  // If BOTH are visible, we split the bottom area into two
-  const [ganttHeight, setGanttHeight] = useState(250);
-  const [schedulerHeight, setSchedulerHeight] = useState(250);
+  const visibleOrder: ViewId[] = [];
+  if (showKanban) visibleOrder.push('kanban');
+  if (showGantt) visibleOrder.push('gantt');
+  if (showScheduler) visibleOrder.push('scheduler');
+  // At least one view must stay open. If a caller ever passes none, show the
+  // Kanban rather than an empty page.
+  if (visibleOrder.length === 0) visibleOrder.push('kanban');
 
-  // --- SINGLE PANEL RESIZE PIPELINE (When only Gantt OR Scheduler is shown) ---
+  const firstVisible = visibleOrder[0];
+  const lowerPanels = visibleOrder.slice(1) as LowerViewId[];
+  const twoLower = lowerPanels.length === 2;
+  const lowerKey = lowerPanels.join(',');
+
+  const defaultLowerHeight = twoLower ? DOUBLE_LOWER_DEFAULT : SINGLE_LOWER_DEFAULT;
+  const resolvedHeights: Record<LowerViewId, number> = {
+    gantt: lowerHeights.gantt ?? defaultLowerHeight,
+    scheduler: lowerHeights.scheduler ?? defaultLowerHeight,
+  };
+  // The mouse handlers read heights from here, so their effects do not need to
+  // re-bind on every height change.
+  const resolvedRef = useRef(resolvedHeights);
+  resolvedRef.current = resolvedHeights;
+
+  // --- SINGLE LOWER PANEL RESIZE (K+G, K+S, G+S) ---
   useEffect(() => {
-    if (showGantt && showScheduler) return; // Skip if both are shown
-    if (!showGantt && !showScheduler) return; // Skip if neither are shown
+    if (lowerPanels.length !== 1) return;
+    const target = lowerPanels[0];
+    const handle = containerRef.current?.querySelector<HTMLDivElement>('[data-resize-handle="single-split"]');
+    if (!handle) return;
 
     const onMouseMove = (event: MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const nextHeight = rect.bottom - event.clientY;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
       const maxHeight = Math.max(MIN_HEIGHT, rect.height - MIN_HEIGHT);
-      setBottomPanelHeight(Math.max(MIN_HEIGHT, Math.min(maxHeight, nextHeight)));
+      const next = Math.max(MIN_HEIGHT, Math.min(maxHeight, rect.bottom - event.clientY));
+      setLowerHeights((current) => ({ ...current, [target]: next }));
     };
 
     const onMouseUp = () => {
@@ -52,167 +96,179 @@ export function KanbanGanttSchedulerSplit({
       window.addEventListener('mouseup', onMouseUp);
     };
 
-    const handle = containerRef.current?.querySelector<HTMLDivElement>('[data-resize-handle="single-split"]');
-    handle?.addEventListener('mousedown', startResize);
-
+    handle.addEventListener('mousedown', startResize);
     return () => {
-      handle?.removeEventListener('mousedown', startResize);
+      handle.removeEventListener('mousedown', startResize);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [showGantt, showScheduler]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lowerKey]);
 
-  // --- MULTI PANEL RESIZE PIPELINES (When BOTH Gantt AND Scheduler are shown) ---
-  // 1. Kanban / Gantt Split (Upper Handle)
+  // --- TWO LOWER PANELS (K+G+S): the middle panel ---
   useEffect(() => {
-    if (!showGantt || !showScheduler) return;
+    if (!twoLower) return;
+    const middle = lowerPanels[0];
+    const bottom = lowerPanels[1];
+    const handle = containerRef.current?.querySelector<HTMLDivElement>('[data-resize-handle="multi-top-split"]');
+    if (!handle) return;
 
-    const onMouseMoveTop = (event: MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      // Calculate how much space is left for Kanban
-      const remainingHeightForBottomPanels = rect.bottom - event.clientY;
-
-      // We are adjusting the Gantt height. Scheduler height remains fixed, Gantt absorbs the difference.
-      const newGanttHeight = remainingHeightForBottomPanels - schedulerHeight;
-
-      // Ensure min sizes
-      const maxGanttHeight = rect.height - MIN_HEIGHT - schedulerHeight;
-      setGanttHeight(Math.max(MIN_HEIGHT, Math.min(maxGanttHeight, newGanttHeight)));
+    const onMouseMove = (event: MouseEvent) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const bottomHeight = resolvedRef.current[bottom];
+      const maxHeight = Math.max(MIN_HEIGHT, rect.height - MIN_HEIGHT - bottomHeight);
+      const next = Math.max(MIN_HEIGHT, Math.min(maxHeight, rect.bottom - event.clientY - bottomHeight));
+      setLowerHeights((current) => ({ ...current, [middle]: next }));
     };
 
-    const onMouseUpTop = () => {
-      window.removeEventListener('mousemove', onMouseMoveTop);
-      window.removeEventListener('mouseup', onMouseUpTop);
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
 
-    const startResizeTop = () => {
+    const startResize = () => {
       document.body.style.cursor = 'row-resize';
       document.body.style.userSelect = 'none';
-      window.addEventListener('mousemove', onMouseMoveTop);
-      window.addEventListener('mouseup', onMouseUpTop);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
     };
 
-    const handleTop = containerRef.current?.querySelector<HTMLDivElement>('[data-resize-handle="multi-top-split"]');
-    handleTop?.addEventListener('mousedown', startResizeTop);
-
+    handle.addEventListener('mousedown', startResize);
     return () => {
-      handleTop?.removeEventListener('mousedown', startResizeTop);
-      window.removeEventListener('mousemove', onMouseMoveTop);
-      window.removeEventListener('mouseup', onMouseUpTop);
+      handle.removeEventListener('mousedown', startResize);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [showGantt, showScheduler, schedulerHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lowerKey]);
 
-  // 2. Gantt / Scheduler Split (Lower Handle)
+  // --- TWO LOWER PANELS (K+G+S): the bottom panel steals from the middle ---
   useEffect(() => {
-    if (!showGantt || !showScheduler) return;
+    if (!twoLower) return;
+    const middle = lowerPanels[0];
+    const bottom = lowerPanels[1];
+    const handle = containerRef.current?.querySelector<HTMLDivElement>('[data-resize-handle="multi-bottom-split"]');
+    if (!handle) return;
 
-    const onMouseMoveBottom = (event: MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const nextSchedulerHeight = rect.bottom - event.clientY;
-
-      // We want to steal height from Gantt to give to Scheduler, or vice versa.
-      // Maximum height for scheduler is the combined current height of Gantt + Scheduler minus MIN_HEIGHT
-      const combinedHeight = ganttHeight + schedulerHeight;
-      const maxSchedulerHeight = Math.max(MIN_HEIGHT, combinedHeight - MIN_HEIGHT);
-
-      const resolvedSchedulerHeight = Math.max(MIN_HEIGHT, Math.min(maxSchedulerHeight, nextSchedulerHeight));
-
-      setSchedulerHeight(resolvedSchedulerHeight);
-      setGanttHeight(combinedHeight - resolvedSchedulerHeight);
+    const onMouseMove = (event: MouseEvent) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const bottomHeight = resolvedRef.current[bottom];
+      const middleHeight = resolvedRef.current[middle];
+      const combined = middleHeight + bottomHeight;
+      const maxBottom = Math.max(MIN_HEIGHT, combined - MIN_HEIGHT);
+      const nextBottom = Math.max(MIN_HEIGHT, Math.min(maxBottom, rect.bottom - event.clientY));
+      setLowerHeights((current) => ({ ...current, [bottom]: nextBottom, [middle]: combined - nextBottom }));
     };
 
-    const onMouseUpBottom = () => {
-      window.removeEventListener('mousemove', onMouseMoveBottom);
-      window.removeEventListener('mouseup', onMouseUpBottom);
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
 
-    const startResizeBottom = () => {
+    const startResize = () => {
       document.body.style.cursor = 'row-resize';
       document.body.style.userSelect = 'none';
-      window.addEventListener('mousemove', onMouseMoveBottom);
-      window.addEventListener('mouseup', onMouseUpBottom);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
     };
 
-    const handleBottom = containerRef.current?.querySelector<HTMLDivElement>('[data-resize-handle="multi-bottom-split"]');
-    handleBottom?.addEventListener('mousedown', startResizeBottom);
-
+    handle.addEventListener('mousedown', startResize);
     return () => {
-      handleBottom?.removeEventListener('mousedown', startResizeBottom);
-      window.removeEventListener('mousemove', onMouseMoveBottom);
-      window.removeEventListener('mouseup', onMouseUpBottom);
+      handle.removeEventListener('mousedown', startResize);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [showGantt, showScheduler, ganttHeight, schedulerHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lowerKey]);
 
-
-  // Notify DHTMLX to redraw when visibility changes
+  // dhtmlx and the calendar must redraw at their new size after any toggle.
   useEffect(() => {
     const timer = setTimeout(() => {
       window.dispatchEvent(new Event('resize'));
     }, 100);
     return () => clearTimeout(timer);
-  }, [showGantt, showScheduler]);
+  }, [showKanban, showGantt, showScheduler]);
 
-  // --- RENDER LOGIC ---
+  const panelStyle = (id: ViewId): CSSProperties => {
+    if (!visibleOrder.includes(id)) {
+      return { height: 0, opacity: 0, pointerEvents: 'none' };
+    }
+    if (firstVisible === id) {
+      return { flex: '1 1 0%', minHeight: 0 };
+    }
+    return { height: `${resolvedHeights[id as LowerViewId]}px`, opacity: 1, pointerEvents: 'auto' };
+  };
+
+  const fill = (id: ViewId) => (firstVisible === id ? 'true' : undefined);
+
   return (
     <div ref={containerRef} className="h-full min-h-0 min-w-0 flex flex-col overflow-hidden bg-gray-100">
-      <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
-        <KanbanCanvas canvasId={canvasId} />
-      </div>
-
-      {/* Gantt Area */}
-      {showGantt && (
+      {/* Kanban. Unmounted when hidden; its editor host takes its place. */}
+      {showKanban ? (
         <div
-          data-resize-handle="multi-top-split"
+          data-split-panel="kanban"
+          data-split-fill={fill('kanban')}
+          style={panelStyle('kanban')}
+          className="min-h-0 min-w-0 overflow-hidden bg-white"
+        >
+          <div className="h-full">
+            <KanbanCanvas canvasId={canvasId} />
+          </div>
+        </div>
+      ) : (
+        <KanbanCardEditorHost />
+      )}
+
+      {/* Gantt. Kept mounted at height 0 when hidden. */}
+      {showGantt && firstVisible !== 'gantt' ? (
+        <div
+          data-resize-handle={twoLower ? 'multi-top-split' : 'single-split'}
           className="h-2 flex-shrink-0 cursor-row-resize bg-gray-300 hover:bg-gray-400 transition-colors"
-          aria-label="Resize Kanban/Gantt"
+          aria-label="Resize Gantt"
           role="separator"
           aria-orientation="horizontal"
         />
-      )}
+      ) : null}
       <div
-        style={{
-          height: showGantt ? `${showScheduler ? ganttHeight : bottomPanelHeight}px` : '0px',
-          opacity: showGantt ? 1 : 0,
-          pointerEvents: showGantt ? 'auto' : 'none',
-        }}
+        data-split-panel="gantt"
+        data-split-fill={fill('gantt')}
+        style={panelStyle('gantt')}
         className="min-h-0 min-w-0 overflow-hidden transition-opacity bg-white"
       >
-        <div className={showGantt ? "h-full border-t border-gray-300" : "h-full"}>
+        <div className={showGantt ? 'h-full border-t border-gray-300' : 'h-full'}>
           <GanttCanvas />
         </div>
       </div>
 
-      {/* Scheduler Area */}
-      {showScheduler && (
+      {/* Scheduler. Kept mounted at height 0 when hidden. */}
+      {showScheduler && firstVisible !== 'scheduler' ? (
         <div
-          data-resize-handle={showGantt ? "multi-bottom-split" : "single-split"}
+          data-resize-handle={twoLower ? 'multi-bottom-split' : 'single-split'}
           className="h-2 flex-shrink-0 cursor-row-resize bg-gray-300 hover:bg-gray-400 transition-colors"
           aria-label="Resize Scheduler"
           role="separator"
           aria-orientation="horizontal"
         />
-      )}
+      ) : null}
       <div
-        style={{
-          height: showScheduler ? `${showGantt ? schedulerHeight : bottomPanelHeight}px` : '0px',
-          opacity: showScheduler ? 1 : 0,
-          pointerEvents: showScheduler ? 'auto' : 'none',
-        }}
+        data-split-panel="scheduler"
+        data-split-fill={fill('scheduler')}
+        style={panelStyle('scheduler')}
         className="min-h-0 min-w-0 overflow-hidden transition-opacity bg-white"
       >
-        <div className={showScheduler ? "h-full border-t border-gray-300" : "h-full"}>
+        <div className={showScheduler ? 'h-full border-t border-gray-300' : 'h-full'}>
           <SchedulerCanvas />
         </div>
       </div>

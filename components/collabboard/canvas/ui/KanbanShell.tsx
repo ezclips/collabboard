@@ -19,8 +19,13 @@ interface KanbanShellProps {
   canvasTitle: string;
   enableGantt: boolean;
   enableScheduler: boolean;
+  /* PATCH-325. K / G / S are three equal toggles; at least one stays open.
+     Optional so an existing caller without the Kanban flag still compiles and
+     behaves as before (Kanban visible). */
+  isKanbanVisible?: boolean;
   isGanttVisible: boolean;
   isSchedulerVisible: boolean;
+  setIsKanbanVisible?: React.Dispatch<React.SetStateAction<boolean>>;
   setIsGanttVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setIsSchedulerVisible: React.Dispatch<React.SetStateAction<boolean>>;
   currentWorkspaceRole: WorkspaceRole | null;
@@ -37,13 +42,65 @@ interface KanbanShellProps {
 /** The Board AI drawer's own max width, so the Kanban area yields exactly it. */
 const BOARD_AI_PANEL_WIDTH = 420;
 
+type KanbanViewId = 'kanban' | 'gantt' | 'scheduler';
+
+const VIEW_LABELS: Record<KanbanViewId, { name: string; letter: string }> = {
+  kanban: { name: 'Kanban', letter: 'K' },
+  gantt: { name: 'Gantt', letter: 'G' },
+  scheduler: { name: 'Scheduler', letter: 'S' },
+};
+
+/**
+ * PATCH-325. One K/G/S toggle. The same look for all three, so the rail reads
+ * as one set. When it is the LAST open view the button is disabled and says why
+ * -- the board must never be left empty.
+ */
+function ViewToggleButton({
+  view,
+  visible,
+  disabled,
+  onClick,
+}: {
+  view: KanbanViewId;
+  visible: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const { name, letter } = VIEW_LABELS[view];
+  const action = visible ? `Hide ${name}` : `Show ${name}`;
+  const title = disabled ? 'At least one view stays open' : action;
+  return (
+    <button
+      type="button"
+      data-view-toggle={view}
+      className="relative flex flex-col items-center p-2 rounded-lg transition-all duration-200 cursor-pointer bg-transparent hover:bg-blue-100 hover:ring-2 hover:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:ring-0"
+      onClick={onClick}
+      disabled={disabled}
+      aria-disabled={disabled ? 'true' : undefined}
+      title={title}
+      aria-label={title}
+    >
+      <div className="group relative w-8 h-8 flex items-center justify-center">
+        <span className="flex w-8 h-8 items-center justify-center rounded-md border border-gray-300 bg-white text-[11px] font-semibold leading-none tabular-nums text-gray-700">
+          {visible ? `${letter}-` : `${letter}+`}
+        </span>
+        <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-50 pointer-events-none">
+          {title}
+        </span>
+      </div>
+    </button>
+  );
+}
+
 export default function KanbanShell({
   canvasId,
   canvasTitle,
   enableGantt,
   enableScheduler,
+  isKanbanVisible = true,
   isGanttVisible,
   isSchedulerVisible,
+  setIsKanbanVisible,
   setIsGanttVisible,
   setIsSchedulerVisible,
   currentWorkspaceRole,
@@ -56,6 +113,24 @@ export default function KanbanShell({
 }: KanbanShellProps) {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
+
+  // The views actually on screen. A disabled feature flag can never appear here,
+  // so a stored "Gantt on" cannot win against `enableGantt: false`.
+  const openViews: KanbanViewId[] = [];
+  if (isKanbanVisible) openViews.push('kanban');
+  if (enableGantt && isGanttVisible) openViews.push('gantt');
+  if (enableScheduler && isSchedulerVisible) openViews.push('scheduler');
+  const isOnlyOpenView = (view: KanbanViewId) => openViews.length === 1 && openViews[0] === view;
+
+  const toggleView = (
+    view: KanbanViewId,
+    setter: React.Dispatch<React.SetStateAction<boolean>> | undefined,
+  ) => {
+    // The last open view cannot be closed: clicking its button does nothing.
+    if (isOnlyOpenView(view) || !setter) return;
+    setter((current) => !current);
+  };
+  const viewsEnabled = enableGantt || enableScheduler;
 
   return (
     <div className="h-screen w-full flex overflow-hidden min-w-0">
@@ -92,41 +167,31 @@ export default function KanbanShell({
             </div>
           </button>
         ) : null}
+        {/* PATCH-325. K / G / S, in order. K appears only when there is another
+            view to share the page with; a plain Kanban board shows no toggles. */}
+        {viewsEnabled ? (
+          <ViewToggleButton
+            view="kanban"
+            visible={isKanbanVisible}
+            disabled={isOnlyOpenView('kanban')}
+            onClick={() => toggleView('kanban', setIsKanbanVisible)}
+          />
+        ) : null}
         {enableGantt ? (
-          <button
-            type="button"
-            className="relative flex flex-col items-center p-2 rounded-lg transition-all duration-200 cursor-pointer bg-transparent hover:bg-blue-100 hover:ring-2 hover:ring-blue-300"
-            onClick={() => setIsGanttVisible((current) => !current)}
-            title={isGanttVisible ? 'Hide Gantt' : 'Show Gantt'}
-            aria-label={isGanttVisible ? 'Hide Gantt' : 'Show Gantt'}
-          >
-            <div className="group relative w-8 h-8 flex items-center justify-center">
-              <span className="flex w-8 h-8 items-center justify-center rounded-md border border-gray-300 bg-white text-[11px] font-semibold leading-none tabular-nums text-gray-700">
-                {isGanttVisible ? 'G-' : 'G+'}
-              </span>
-              <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-50 pointer-events-none">
-                {isGanttVisible ? 'Hide Gantt' : 'Show Gantt'}
-              </span>
-            </div>
-          </button>
+          <ViewToggleButton
+            view="gantt"
+            visible={isGanttVisible}
+            disabled={isOnlyOpenView('gantt')}
+            onClick={() => toggleView('gantt', setIsGanttVisible)}
+          />
         ) : null}
         {enableScheduler ? (
-          <button
-            type="button"
-            className="relative flex flex-col items-center p-2 rounded-lg transition-all duration-200 cursor-pointer bg-transparent hover:bg-blue-100 hover:ring-2 hover:ring-blue-300"
-            onClick={() => setIsSchedulerVisible((current) => !current)}
-            title={isSchedulerVisible ? 'Hide Scheduler' : 'Show Scheduler'}
-            aria-label={isSchedulerVisible ? 'Hide Scheduler' : 'Show Scheduler'}
-          >
-            <div className="group relative w-8 h-8 flex items-center justify-center">
-              <span className="flex w-8 h-8 items-center justify-center rounded-md border border-gray-300 bg-white text-[11px] font-semibold leading-none tabular-nums text-gray-700">
-                {isSchedulerVisible ? 'S-' : 'S+'}
-              </span>
-              <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-50 pointer-events-none">
-                {isSchedulerVisible ? 'Hide Scheduler' : 'Show Scheduler'}
-              </span>
-            </div>
-          </button>
+          <ViewToggleButton
+            view="scheduler"
+            visible={isSchedulerVisible}
+            disabled={isOnlyOpenView('scheduler')}
+            onClick={() => toggleView('scheduler', setIsSchedulerVisible)}
+          />
         ) : null}
         {canManageCanvasShare ? (
           <div className="flex flex-col items-center w-full gap-1">
@@ -171,9 +236,10 @@ export default function KanbanShell({
               several components below. */}
           <KanbanBoardAiContext.Provider value={boardAiHost}>
             <KanbanBoardAiBridge onRegister={onBoardAiBridgeReady} />
-            {(enableGantt || enableScheduler) ? (
+            {viewsEnabled ? (
               <KanbanGanttSchedulerSplit
                 canvasId={canvasId}
+                showKanban={isKanbanVisible}
                 showGantt={enableGantt && isGanttVisible}
                 showScheduler={enableScheduler && isSchedulerVisible}
               />
