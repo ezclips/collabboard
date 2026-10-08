@@ -1478,12 +1478,14 @@ describe('PDF workspace document-scoped mode', () => {
     // and not in a second registry, a global, storage or a timestamp.
     expect(DRAWER).toContain('readonly pendingNoteSaveMessageIds?: readonly string[];');
     const save = DRAWER.slice(
-      DRAWER.indexOf('const saveAssistantAsNote = useCallback('),
+      // PATCH-323 renamed this callback to `saveAssistantAnswer`, because it now
+      // performs the card save on Kanban as well as the Note save on Freeform.
+      DRAWER.indexOf('const saveAssistantAnswer = useCallback('),
       DRAWER.indexOf('const setDraftContext = useCallback('),
     );
     expect(save).toContain("setAssistantNoteSaveOutcome(message.id, 'pending');");
     expect(save.indexOf("setAssistantNoteSaveOutcome(message.id, 'pending');"))
-      .toBeLessThan(save.indexOf('await onSaveAssistantAsNote('));
+      .toBeLessThan(save.indexOf('await saveHandler({'));
     expect(save).toContain("setAssistantNoteSaveOutcome(message.id, 'saved');");
     expect(save).toContain("setAssistantNoteSaveOutcome(message.id, 'idle');");
     for (const forbidden of ['localStorage', 'sessionStorage', 'Date.now', 'window.']) {

@@ -173,8 +173,16 @@ import { readKnowledgePdfPlacement } from '@/components/collabboard/KnowledgePdf
 import { isKnowledgePdfAreaCropPost } from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
 import {
   boardAiDraftFromBoardItem,
+  BOARD_AI_DRAFT_CONTEXT_MAX,
+  addBoardAiDraftContext,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
+import type { BoardAiContextRequestItem } from '@/lib/domain/ai/boardAiChatContext';
+import {
+  boardAiAnswerCardTitle,
+  type KanbanBoardAiBridgeApi,
+  type KanbanBoardAiHost,
+} from '@/components/kanban-canvas/KanbanBoardAiBridge';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
@@ -261,6 +269,13 @@ import {
 // === BEGIN TYPES + CONSTANTS REGION ===
 
 const PADLET_DRAG_START_DISTANCE = 8;
+
+/**
+ * PATCH-323. The context every Kanban Board AI turn carries: the whole board,
+ * as one overview block. A stable module constant so the drawer never sees a
+ * new array and re-renders for nothing.
+ */
+const KANBAN_BOARD_AI_AUTO_CONTEXT: readonly BoardAiContextRequestItem[] = [{ type: 'kanban-board' }];
 
 const BADGE_COLORS = [
   "#fef9c3", "#fef08a", "#fde047", "#facc15", "#eab308", "#ca8a04",
@@ -2307,6 +2322,60 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const closeBoardAiChat = useCallback(() => setIsBoardAiChatOpen(false), []);
 
   /**
+   * PATCH-323. The Kanban store's Board AI actions, registered upward by the
+   * bridge inside `KanbanProvider`. A ref rather than state: the drawer reads it
+   * at click time, and a registration change must not re-render the board.
+   */
+  const kanbanBoardAiBridgeRef = useRef<KanbanBoardAiBridgeApi | null>(null);
+  const registerKanbanBoardAiBridge = useCallback((api: KanbanBoardAiBridgeApi | null) => {
+    kanbanBoardAiBridgeRef.current = api;
+  }, []);
+
+  /**
+   * "Ask Board AI" on a card: attach it, then open the drawer through the ONE
+   * toggle, so the dock claim lives in exactly one place. The auto overview
+   * already reserves a slot, so the card cap is the same reduced limit the
+   * drawer shows.
+   */
+  const askBoardAiAboutCard = useCallback((card: { readonly id: string; readonly title: string }) => {
+    const item: BoardAiDraftContextItem = {
+      request: { type: 'kanban-card', cardId: card.id },
+      label: card.title || 'Card',
+      detail: 'Card',
+    };
+    const kanbanDraftLimit = BOARD_AI_DRAFT_CONTEXT_MAX - KANBAN_BOARD_AI_AUTO_CONTEXT.length;
+    const result = addBoardAiDraftContext(boardAiChatDraftContext, item);
+    if (result.outcome === 'full' || boardAiChatDraftContext.length >= kanbanDraftLimit) {
+      toast.error(`Maximum ${kanbanDraftLimit} context items.`);
+      return;
+    }
+    if (result.outcome === 'added') setBoardAiChatDraftContext(result.items);
+    if (!isBoardAiChatOpen) toggleBoardAiChat();
+  }, [boardAiChatDraftContext, isBoardAiChatOpen, toggleBoardAiChat]);
+
+  const kanbanBoardAiHost = useMemo<KanbanBoardAiHost>(
+    () => ({ askAboutCard: askBoardAiAboutCard }),
+    [askBoardAiAboutCard],
+  );
+
+  /**
+   * PATCH-323. Save an assistant answer as a Kanban card, through the bridge.
+   * Editors only: the drawer is given no handler for a viewer, so the action
+   * never renders. The title is the answer's first line, markdown stripped; the
+   * description is the whole answer.
+   */
+  const saveBoardAiAnswerAsCard = useCallback(async (request: BoardAiAssistantNoteSaveRequest) => {
+    const bridge = kanbanBoardAiBridgeRef.current;
+    if (!bridge || !canEditBoardContentRef.current) throw new Error('card_save_not_allowed');
+    const cardId = await bridge.createCardFromAnswer({
+      title: boardAiAnswerCardTitle(request.content),
+      description: request.content,
+    });
+    if (!cardId) throw new Error('card_save_failed');
+    toast.success('Saved as card');
+  }, []);
+
+  /**
    * The ONE reachable way the wiki opens, for the reason Chat's toggle states:
    * a surface that can be opened from two places acquires the dock rule in one
    * of them and not the other, which is this unit's entire defect.
@@ -2729,12 +2798,26 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     readonly knowledgeDocumentId?: string;
     /** PATCH-196. A cited wiki page, opened in the board wiki drawer. */
     readonly wikiPageId?: string;
+    /** PATCH-322/323. A cited Kanban card, opened through the Kanban bridge. */
+    readonly cardId?: string;
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
     readonly transcriptStartMs?: number;
     readonly videoIdentity?: string;
   }) => {
+    /**
+     * PATCH-323. A KANBAN CARD CITATION OPENS THE CARD.
+     *
+     * The board's Kanban store is the only thing that can open the card editor,
+     * and it lives below `KanbanProvider` -- so this goes through the bridge the
+     * store registered, and closes nothing else. A card that is gone is said so
+     * by the bridge, not guessed at here.
+     */
+    if (request.cardId !== undefined) {
+      kanbanBoardAiBridgeRef.current?.openCard(request.cardId);
+      return;
+    }
     /**
      * PATCH-196. A WIKI CITATION OPENS THE WIKI, ON ITS PAGE.
      *
@@ -9074,18 +9157,42 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // All hooks are declared above the early returns to preserve hook ordering.
   if (isKanbanLayout) {
     return (
-      <KanbanShell
-        canvasId={canvas.id}
-        canvasTitle={canvas.title || 'Untitled canvas'}
-        enableGantt={enableGantt}
-        enableScheduler={enableScheduler}
-        isGanttVisible={isGanttVisible}
-        isSchedulerVisible={isSchedulerVisible}
-        setIsGanttVisible={setIsGanttVisible}
-        setIsSchedulerVisible={setIsSchedulerVisible}
-        currentWorkspaceRole={currentWorkspaceRole}
-        onBack={() => router.push('/dashboard')}
-      />
+      <>
+        <KanbanShell
+          canvasId={canvas.id}
+          canvasTitle={canvas.title || 'Untitled canvas'}
+          enableGantt={enableGantt}
+          enableScheduler={enableScheduler}
+          isGanttVisible={isGanttVisible}
+          isSchedulerVisible={isSchedulerVisible}
+          setIsGanttVisible={setIsGanttVisible}
+          setIsSchedulerVisible={setIsSchedulerVisible}
+          currentWorkspaceRole={currentWorkspaceRole}
+          onBack={() => router.push('/dashboard')}
+          /* PATCH-323. The SAME drawer and handlers Freeform uses, on Kanban --
+             no forked surface. The overview rides on every turn. */
+          boardAiEnabled={enableBoardAiChat}
+          isBoardAiChatOpen={isBoardAiChatOpen}
+          onToggleBoardAiChat={toggleBoardAiChat}
+          boardAiHost={kanbanBoardAiHost}
+          onBoardAiBridgeReady={registerKanbanBoardAiBridge}
+        />
+        {enableBoardAiChat ? (
+          <BoardAiChatDrawer
+            boardId={canvas.id}
+            isOpen={isBoardAiChatOpen}
+            onClose={closeBoardAiChat}
+            blockingEditorOpen={isBlockingOverlayOpen}
+            draftContext={boardAiChatDraftContext}
+            onDraftContextChange={setBoardAiChatDraftContext}
+            autoContextRequests={KANBAN_BOARD_AI_AUTO_CONTEXT}
+            onOpenCitation={openBoardAiCitation}
+            /* Editors only, and only the card action -- no Note, no wiki. */
+            canSaveAssistantAsCard={canEditBoardContent}
+            onSaveAssistantAsCard={canEditBoardContent ? saveBoardAiAnswerAsCard : undefined}
+          />
+        ) : null}
+      </>
     );
   }
 

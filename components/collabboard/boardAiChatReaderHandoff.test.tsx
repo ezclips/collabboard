@@ -276,10 +276,11 @@ describe('the shell owns draft context, and owns it narrowly', () => {
   });
 
   it('the drawer is given draft state, not asked to fetch board content', () => {
-    const render = canvas.slice(
-      canvas.indexOf('<BoardAiChatDrawer'),
-      canvas.indexOf('<BoardAiChatDrawer') + 600,
-    );
+    // PATCH-323 added a SECOND BoardAiChatDrawer, in the Kanban branch, which
+    // comes before this one. The FREEFORM drawer is the last occurrence; the
+    // invariant pinned here is about it.
+    const start = canvas.lastIndexOf('<BoardAiChatDrawer');
+    const render = canvas.slice(start, start + 600);
     expect(render).toContain('draftContext={boardAiChatDraftContext}');
     expect(render).toContain('selectedBoardItem={boardAiChatSelectedItem}');
   });

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, Play, SendHorizontal, Upload, X } from 'lucide-react';
+import { BookOpen, Bot, Check, FilePlus2, FileText, Loader2, MessageSquarePlus, Paperclip, Play, SendHorizontal, Upload, X } from 'lucide-react';
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import BoardAiMarkdown from '@/components/collabboard/BoardAiMarkdown';
@@ -34,6 +34,7 @@ import type {
   BoardAiChatMessageView,
   BoardAiChatThreadSummary,
 } from '@/lib/domain/ai/boardAiChatClient';
+import type { BoardAiContextRequestItem } from '@/lib/domain/ai/boardAiChatContext';
 
 /**
  * The board's private AI conversation.
@@ -118,6 +119,16 @@ export interface BoardAiChatDrawerProps {
    */
   readonly draftContext?: readonly BoardAiDraftContextItem[];
   readonly onDraftContextChange?: (items: readonly BoardAiDraftContextItem[]) => void;
+  /**
+   * PATCH-323. Context every turn carries automatically, shown as fixed chips.
+   *
+   * On a Kanban board this is `[{ type: 'kanban-board' }]`: the whole board is
+   * always in front of the model, so the user does not have to attach it. These
+   * are REQUESTS, not drafts -- they have no label the browser invented and
+   * cannot be removed -- and they are appended to each send's context. Absent
+   * everywhere else, where nothing changes.
+   */
+  readonly autoContextRequests?: readonly BoardAiContextRequestItem[];
   readonly documentSessions?: Record<string, BoardAiDocumentScopedSession>;
   readonly onDocumentSessionsChange?: React.Dispatch<
     React.SetStateAction<Record<string, BoardAiDocumentScopedSession>>
@@ -139,6 +150,11 @@ export interface BoardAiChatDrawerProps {
     readonly knowledgeDocumentId?: string;
     /** PATCH-196. A cited wiki page, opened by the board's wiki drawer. */
     readonly wikiPageId?: string;
+    /**
+     * PATCH-322/323. A cited Kanban card, opened by the Kanban bridge. Identity
+     * only: the host asks the store to open the card editor at it.
+     */
+    readonly cardId?: string;
     readonly pageNumber?: number;
     /** A pageless source's locator: where in its text the citation points. */
     readonly charStart?: number;
@@ -155,6 +171,14 @@ export interface BoardAiChatDrawerProps {
   }) => void;
   readonly canSaveAssistantAsNote?: boolean;
   readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
+  /**
+   * PATCH-323. On a Kanban board the SAME save action creates a card instead of
+   * a Note. Only one of the two is ever offered, and a viewer gets neither:
+   * `canSaveAssistantAsCard` is the board edit authority on Kanban, exactly as
+   * `canSaveAssistantAsNote` is on Freeform.
+   */
+  readonly canSaveAssistantAsCard?: boolean;
+  readonly onSaveAssistantAsCard?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
   /**
    * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
    * capability the wiki drawer gates its Save on; false renders nothing at all,
@@ -217,6 +241,17 @@ type ActiveThread = string | null;
 
 /** A stable empty default, so an absent prop is not a new array each render. */
 const EMPTY_DRAFT_CONTEXT: readonly BoardAiDraftContextItem[] = [];
+
+/** A stable empty default for the auto-context list. */
+const EMPTY_AUTO_CONTEXT: readonly BoardAiContextRequestItem[] = [];
+
+/**
+ * What an auto-context chip is called. Only `kanban-board` exists today; the
+ * fallback keeps a future type legible rather than blank.
+ */
+function boardAiAutoContextLabel(request: BoardAiContextRequestItem): string {
+  return request.type === 'kanban-board' ? 'Kanban board' : request.type;
+}
 
 /** A stable empty default, so an uncited answer is not a new array each render. */
 const NO_CITATIONS: readonly BoardAiCitationItem[] = [];
@@ -401,11 +436,14 @@ export default function BoardAiChatDrawer({
   blockingEditorOpen = false,
   draftContext = EMPTY_DRAFT_CONTEXT,
   onDraftContextChange,
+  autoContextRequests = EMPTY_AUTO_CONTEXT,
   documentSessions: controlledDocumentSessions,
   onDocumentSessionsChange,
   onOpenCitation,
   canSaveAssistantAsNote = false,
   onSaveAssistantAsNote,
+  canSaveAssistantAsCard = false,
+  onSaveAssistantAsCard,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
   sendText,
@@ -525,6 +563,15 @@ export default function BoardAiChatDrawer({
       ? boardAiDraftFromPage(documentScope.knowledgeDocumentId, documentScope.originalFilename, pageNumber as number)
       : boardAiDraftFromDocument(documentScope.knowledgeDocumentId, documentScope.originalFilename);
   }, [documentScope]);
+
+  /**
+   * PATCH-323. Auto context reserves its slots BEFORE the composer's own cap, so
+   * the request never exceeds BOARD_AI_DRAFT_CONTEXT_MAX and no attachment is
+   * silently refused by the route. The user sees the reduced number in the count
+   * instead of discovering the ceiling on send.
+   */
+  const reservedContextCount = (mandatoryDocumentContext ? 1 : 0) + autoContextRequests.length;
+  const optionalDraftLimit = Math.max(0, BOARD_AI_DRAFT_CONTEXT_MAX - reservedContextCount);
 
   const setDocumentSessionValue = useCallback((
     documentId: string,
@@ -921,10 +968,18 @@ export default function BoardAiChatDrawer({
   const blockingContext = blockingBoardAiDraftContext(draftContext);
   const canSend = draft.trim().length > 0 && !sending && !uploading && blockingContext.length === 0;
 
-  const saveAssistantAsNote = useCallback(async (
+  /**
+   * PATCH-323. Which save the assistant-message action performs. On Kanban the
+   * same action creates a Card through the host; on Freeform it stays a Note.
+   * Only one is ever available, chosen by which props the host supplied.
+   */
+  const saveAnswerAsCard = canSaveAssistantAsCard && !!onSaveAssistantAsCard;
+
+  const saveAssistantAnswer = useCallback(async (
     message: BoardAiChatMessageView,
   ) => {
-    if (!onSaveAssistantAsNote) return;
+    const saveHandler = saveAnswerAsCard ? onSaveAssistantAsCard : onSaveAssistantAsNote;
+    if (!saveHandler) return;
     // Three guards, one rule: this message must not already be saved, must not
     // already be in flight, and must not be mid-attempt in this mount. The
     // first two read the SESSION, so they hold across an unmount; the third is
@@ -941,8 +996,9 @@ export default function BoardAiChatDrawer({
     setAssistantNoteSaveStateByMessageId(assistantNoteSaveStateRef.current);
     try {
       // The id and the visible text. No provenance: the server resolves that
-      // from the message it signed.
-      await onSaveAssistantAsNote({
+      // from the message it signed (the Note path) or the host turns the text
+      // into a card (the Kanban path).
+      await saveHandler({
         messageId: message.id,
         content: message.content,
       });
@@ -961,7 +1017,7 @@ export default function BoardAiChatDrawer({
       );
       setAssistantNoteSaveOutcome(message.id, 'idle');
     }
-  }, [setAssistantNoteSaveOutcome, onSaveAssistantAsNote]);
+  }, [setAssistantNoteSaveOutcome, onSaveAssistantAsNote, onSaveAssistantAsCard, saveAnswerAsCard]);
 
   /**
    * PATCH-197. "Save to wiki" -- the popover, its page list, and the create +
@@ -1074,9 +1130,13 @@ export default function BoardAiChatDrawer({
   }, [onDraftContextChange]);
 
   const attach = useCallback((item: BoardAiDraftContextItem) => {
-    if (mandatoryDocumentContext && draftContext.length >= BOARD_AI_DRAFT_CONTEXT_MAX - 1) {
+    // The reserved slots (the PDF scope, and any auto context) are already
+    // spoken for, so the composer's own ceiling is what remains.
+    if (draftContext.length >= optionalDraftLimit) {
       setContextMenuOpen(false);
-      setContextNotice(`Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX - 1} optional context items with this PDF.`);
+      setContextNotice(mandatoryDocumentContext
+        ? `Maximum ${optionalDraftLimit} optional context items with this PDF.`
+        : `Maximum ${optionalDraftLimit} context items.`);
       return;
     }
     const result = addBoardAiDraftContext(draftContext, item);
@@ -1090,8 +1150,8 @@ export default function BoardAiChatDrawer({
     // broken button, and silently replacing an item would discard a choice.
     setContextNotice(result.outcome === 'duplicate'
       ? 'That is already attached.'
-      : `Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
-  }, [draftContext, mandatoryDocumentContext, setDraftContext]);
+      : `Maximum ${optionalDraftLimit} context items.`);
+  }, [draftContext, mandatoryDocumentContext, optionalDraftLimit, setDraftContext]);
 
   /* ---------------------------------------------------------------- */
   /* Dropping a post from the board                                     */
@@ -1168,12 +1228,10 @@ export default function BoardAiChatDrawer({
    * says so and the server refuses anything else.
    */
   const uploadPdf = useCallback(async (file: File) => {
-    if (mandatoryDocumentContext && draftContext.length >= BOARD_AI_DRAFT_CONTEXT_MAX - 1) {
-      setContextNotice(`Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX - 1} optional context items with this PDF.`);
-      return;
-    }
-    if (draftContext.length >= BOARD_AI_DRAFT_CONTEXT_MAX) {
-      setContextNotice(`Maximum ${BOARD_AI_DRAFT_CONTEXT_MAX} context items.`);
+    if (draftContext.length >= optionalDraftLimit) {
+      setContextNotice(mandatoryDocumentContext
+        ? `Maximum ${optionalDraftLimit} optional context items with this PDF.`
+        : `Maximum ${optionalDraftLimit} context items.`);
       return;
     }
     setContextNotice(null);
@@ -1217,7 +1275,7 @@ export default function BoardAiChatDrawer({
     } finally {
       setUploading(false);
     }
-  }, [boardId, draftContext, mandatoryDocumentContext, setDraftContext]);
+  }, [boardId, draftContext, mandatoryDocumentContext, optionalDraftLimit, setDraftContext]);
 
   /**
    * Watches a pending attachment until ingestion settles.
@@ -1280,6 +1338,7 @@ export default function BoardAiChatDrawer({
   const openCitation = useCallback(async (request: {
     readonly knowledgeDocumentId?: string;
     readonly wikiPageId?: string;
+    readonly cardId?: string;
     readonly pageNumber?: number;
     readonly charStart?: number;
     readonly charEnd?: number;
@@ -1291,6 +1350,13 @@ export default function BoardAiChatDrawer({
     // which is entirely about Knowledge documents -- does not apply to it. It
     // is handed straight to the host, which opens the wiki drawer at the page.
     if (request.wikiPageId !== undefined) {
+      onOpenCitation(request);
+      return;
+    }
+    // PATCH-322/323. Nor is a KANBAN CARD a document: the host opens the card in
+    // the Kanban store, which is the only place that knows whether it still
+    // exists.
+    if (request.cardId !== undefined) {
       onOpenCitation(request);
       return;
     }
@@ -1337,7 +1403,15 @@ export default function BoardAiChatDrawer({
     // Captured for this ONE message. Attachments are not standing state: the
     // next question starts empty unless the user attaches again.
     const outgoingContext = mergeMandatoryDocumentContext(mandatoryDocumentContext, draftContext);
-    const contextPayload = boardAiDraftContextPayload(outgoingContext);
+    const draftPayload = boardAiDraftContextPayload(outgoingContext);
+    // PATCH-323. Auto context rides AFTER the user's own attachments and is
+    // capped together with them, so a turn never names more than the route
+    // accepts. Identity only, exactly like every other item here.
+    const combinedContextItems = [
+      ...(draftPayload?.items ?? []),
+      ...autoContextRequests,
+    ].slice(0, BOARD_AI_DRAFT_CONTEXT_MAX);
+    const contextPayload = combinedContextItems.length > 0 ? { items: combinedContextItems } : undefined;
     // NEVER IN A DOCUMENT-SCOPED SESSION. A PDF conversation is deliberately
     // about the one PDF in front of the user; pulling in passages from unrelated
     // notes would answer a question they did not ask, in a panel whose whole
@@ -1474,6 +1548,7 @@ export default function BoardAiChatDrawer({
     activeThreadId,
     draftContext,
     mandatoryDocumentContext,
+    autoContextRequests,
     documentScopeId,
     setActiveThreadId,
     setDraft,
@@ -1683,10 +1758,10 @@ export default function BoardAiChatDrawer({
             ? visibleCitations(message.citations?.items ?? NO_CITATIONS)
             : NO_CITATIONS;
           // Board edit authority and a handler -- nothing about provenance.
-          // An uncited answer saves as an ordinary unsourced Note.
-          const canShowSaveAsNote = message.role === 'assistant'
-            && canSaveAssistantAsNote
-            && !!onSaveAssistantAsNote;
+          // An uncited answer saves as an ordinary unsourced Note (Freeform) or
+          // card (Kanban), and exactly one of the two is offered.
+          const canShowSaveAnswer = message.role === 'assistant'
+            && (saveAnswerAsCard || (canSaveAssistantAsNote && !!onSaveAssistantAsNote));
           // PATCH-197. The preceding user turn, for the section heading and the
           // New-page title. Absent for the first message, and the server treats
           // that as "From Board AI".
@@ -1742,9 +1817,11 @@ export default function BoardAiChatDrawer({
                       const citationMoment = boardAiCitationMoment(item);
                       const citedDocumentId = item.knowledgeDocumentId;
                       const citedWikiPageId = item.type === 'wiki-page' ? item.wikiPageId : undefined;
-                      // A citation is openable if it names a document OR a wiki
-                      // page, and the surface was given an opener.
-                      const openable = Boolean(citedDocumentId || citedWikiPageId);
+                      // PATCH-322/323. A Kanban card citation opens the card.
+                      const citedCardId = item.type === 'kanban-card' ? item.cardId : undefined;
+                      // A citation is openable if it names a document, a wiki
+                      // page or a card, and the surface was given an opener.
+                      const openable = Boolean(citedDocumentId || citedWikiPageId || citedCardId);
                       const chipClass = 'inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] leading-none';
                       // THE SOURCE IS GONE. The citation itself is untouched --
                       // it says what the answer used, which is still true --
@@ -1785,6 +1862,7 @@ export default function BoardAiChatDrawer({
                           data-board-ai-chat-citation={citationKey}
                           data-board-ai-chat-citation-document={citedDocumentId ?? ''}
                           data-board-ai-chat-citation-wiki-page={citedWikiPageId ?? ''}
+                          data-board-ai-chat-citation-card={citedCardId ?? ''}
                           data-board-ai-chat-citation-page={item.pageNumber ?? ''}
                           data-board-ai-chat-citation-range={
                             item.charStart !== undefined && item.charEnd !== undefined
@@ -1807,6 +1885,9 @@ export default function BoardAiChatDrawer({
                             // PATCH-196. A wiki citation names a page, not a
                             // document; the host opens the wiki drawer at it.
                             ...(citedWikiPageId ? { wikiPageId: citedWikiPageId } : {}),
+                            // PATCH-322/323. A Kanban card citation names the
+                            // card; the host opens it in the board's Kanban store.
+                            ...(citedCardId ? { cardId: citedCardId } : {}),
                             ...(item.pageNumber === undefined ? {} : { pageNumber: item.pageNumber }),
                             // A text citation locates itself by range instead.
                             // Both halves or neither: the request builder
@@ -1843,15 +1924,15 @@ export default function BoardAiChatDrawer({
                   </div>
                 </div>
               ) : null}
-              {canShowSaveAsNote ? (
+              {canShowSaveAnswer ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">
                   <button
                     type="button"
-                    data-board-ai-chat-action="save-note"
+                    data-board-ai-chat-action={saveAnswerAsCard ? 'save-card' : 'save-note'}
                     data-board-ai-chat-save-message-id={message.id}
                     className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-default disabled:border-green-200 disabled:bg-green-50 disabled:text-green-700"
                     disabled={noteSaveState === 'saving' || noteSaveState === 'saved'}
-                    onClick={() => { void saveAssistantAsNote(message); }}
+                    onClick={() => { void saveAssistantAnswer(message); }}
                   >
                     {noteSaveState === 'saved' ? (
                       <Check className="h-3 w-3" aria-hidden="true" />
@@ -1860,11 +1941,11 @@ export default function BoardAiChatDrawer({
                     ) : (
                       <FilePlus2 className="h-3 w-3" aria-hidden="true" />
                     )}
-                    {noteSaveState === 'saved' ? 'Saved' : noteSaveState === 'saving' ? 'Savingâ€¦' : 'Save as Note'}
+                    {noteSaveState === 'saved' ? 'Saved' : noteSaveState === 'saving' ? 'Savingâ€¦' : (saveAnswerAsCard ? 'Save as card' : 'Save as Note')}
                   </button>
                   {noteSaveState === 'failed' ? (
                     <span data-board-ai-chat-save-note-error="true" className="text-[10px] text-red-600">
-                      Could not save note.
+                      {saveAnswerAsCard ? 'Could not save card.' : 'Could not save note.'}
                     </span>
                   ) : null}
                 </div>
@@ -1992,6 +2073,20 @@ export default function BoardAiChatDrawer({
             <span className="min-w-0 shrink truncate text-purple-500">· Using this PDF</span>
           </div>
         ) : null}
+        {/* PATCH-323. Auto context: always sent, never removable. A chip with no
+            control of its own says plainly that it is part of every turn. */}
+        {autoContextRequests.map((request) => (
+          <div
+            key={`auto:${request.type}`}
+            data-board-ai-auto-context={request.type}
+            data-board-ai-auto-context-fixed="true"
+            className="mb-1.5 flex max-w-full items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-900"
+          >
+            <Bot className="h-3 w-3 shrink-0 text-blue-500" aria-hidden="true" />
+            <span className="min-w-0 truncate">{boardAiAutoContextLabel(request)}</span>
+            <span className="min-w-0 shrink truncate text-blue-500">· always included</span>
+          </div>
+        ))}
         <BoardAiChatDraftChips
           items={draftContext}
           disabled={sending}
@@ -2066,7 +2161,7 @@ export default function BoardAiChatDrawer({
             Context
             {draftContext.length > 0 ? (
               <span className="text-gray-400">
-                {draftContext.length}/{mandatoryDocumentContext ? BOARD_AI_DRAFT_CONTEXT_MAX - 1 : BOARD_AI_DRAFT_CONTEXT_MAX}
+                {draftContext.length}/{optionalDraftLimit}
               </span>
             ) : null}
           </button>

@@ -424,7 +424,10 @@ describe('10-15. one right-side dock, two directions', () => {
 describe('the board-level entry point', () => {
   it('mounts Chat as a shell sibling of the reader, not inside the sidebar', () => {
     const readerMount = CLIENT.indexOf('<KnowledgeSourceReaderDrawer');
-    const chatMount = CLIENT.indexOf('<BoardAiChatDrawer');
+    // PATCH-323 added a SECOND BoardAiChatDrawer, in the Kanban branch, earlier
+    // in the file. This assertion is about the FREEFORM drawer -- the shell
+    // sibling of the reader -- so it uses the last occurrence.
+    const chatMount = CLIENT.lastIndexOf('<BoardAiChatDrawer');
     expect(chatMount).toBeGreaterThan(readerMount);
     expect(CLIENT.indexOf('</CanvasViewport>')).toBeLessThan(chatMount);
     // R6D: both docked drawers are handed isBlockingOverlayOpen -- the same

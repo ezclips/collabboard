@@ -3,9 +3,15 @@
 import { KanbanProvider } from '@/components/kanban-canvas/store';
 import { KanbanCanvas } from '@/components/kanban-canvas';
 import { KanbanGanttSchedulerSplit } from '@/components/scheduler-canvas/KanbanGanttSchedulerSplit';
+import {
+  KanbanBoardAiBridge,
+  KanbanBoardAiContext,
+  type KanbanBoardAiBridgeApi,
+  type KanbanBoardAiHost,
+} from '@/components/kanban-canvas/KanbanBoardAiBridge';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import { canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
-import { UserPlus } from 'lucide-react';
+import { Bot, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 
 interface KanbanShellProps {
@@ -19,7 +25,17 @@ interface KanbanShellProps {
   setIsSchedulerVisible: React.Dispatch<React.SetStateAction<boolean>>;
   currentWorkspaceRole: WorkspaceRole | null;
   onBack: () => void;
+  /* PATCH-323. Board AI on Kanban: the button toggles the drawer CanvasClient
+     renders; the bridge connects the drawer's card actions to this store. */
+  boardAiEnabled?: boolean;
+  isBoardAiChatOpen?: boolean;
+  onToggleBoardAiChat?: () => void;
+  boardAiHost?: KanbanBoardAiHost | null;
+  onBoardAiBridgeReady?: (api: KanbanBoardAiBridgeApi | null) => void;
 }
+
+/** The Board AI drawer's own max width, so the Kanban area yields exactly it. */
+const BOARD_AI_PANEL_WIDTH = 420;
 
 export default function KanbanShell({
   canvasId,
@@ -32,6 +48,11 @@ export default function KanbanShell({
   setIsSchedulerVisible,
   currentWorkspaceRole,
   onBack,
+  boardAiEnabled = false,
+  isBoardAiChatOpen = false,
+  onToggleBoardAiChat,
+  boardAiHost = null,
+  onBoardAiBridgeReady,
 }: KanbanShellProps) {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
@@ -50,6 +71,27 @@ export default function KanbanShell({
           </svg>
         </button>
         <div className="w-6 h-px bg-gray-200" />
+        {/* PATCH-323. The Board AI entry point, in the rail so it covers no
+            Kanban control. Available to every reader who can open the board,
+            exactly as on Freeform. */}
+        {boardAiEnabled ? (
+          <button
+            type="button"
+            data-board-ai-button="true"
+            aria-label="Board AI"
+            title="Board AI"
+            aria-pressed={isBoardAiChatOpen}
+            onClick={onToggleBoardAiChat}
+            className="relative flex items-center justify-center w-9 h-9 rounded-lg text-slate-700 transition-all duration-150 hover:bg-slate-100 hover:scale-105"
+          >
+            <div className="group relative flex items-center justify-center">
+              <Bot size={18} strokeWidth={1.5} />
+              <span className="absolute left-full ml-2 px-2 py-1 rounded bg-gray-700 text-white text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap z-50 pointer-events-none">
+                Board AI
+              </span>
+            </div>
+          </button>
+        ) : null}
         {enableGantt ? (
           <button
             type="button"
@@ -108,7 +150,14 @@ export default function KanbanShell({
         ) : null}
       </div>
 
-      <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
+      <div
+        data-kanban-board-area="true"
+        className="flex-1 min-w-0 min-h-0 overflow-hidden"
+        /* While the drawer is open, the board yields its width rather than
+           sitting under it -- the board scrolls horizontally anyway, so a
+           reserved strip costs nothing that a fixed overlay would not. */
+        style={{ paddingRight: isBoardAiChatOpen ? BOARD_AI_PANEL_WIDTH : undefined }}
+      >
         <CanvasShareModal
           isOpen={isShareModalOpen}
           onClose={() => setIsShareModalOpen(false)}
@@ -117,15 +166,21 @@ export default function KanbanShell({
           currentWorkspaceRole={currentWorkspaceRole}
         />
         <KanbanProvider canvasId={canvasId}>
-          {(enableGantt || enableScheduler) ? (
-            <KanbanGanttSchedulerSplit
-              canvasId={canvasId}
-              showGantt={enableGantt && isGanttVisible}
-              showScheduler={enableScheduler && isSchedulerVisible}
-            />
-          ) : (
-            <KanbanCanvas canvasId={canvasId} />
-          )}
+          {/* The bridge and the host context must both be INSIDE the provider:
+              the bridge uses the store, and the context reaches the card menu
+              several components below. */}
+          <KanbanBoardAiContext.Provider value={boardAiHost}>
+            <KanbanBoardAiBridge onRegister={onBoardAiBridgeReady} />
+            {(enableGantt || enableScheduler) ? (
+              <KanbanGanttSchedulerSplit
+                canvasId={canvasId}
+                showGantt={enableGantt && isGanttVisible}
+                showScheduler={enableScheduler && isSchedulerVisible}
+              />
+            ) : (
+              <KanbanCanvas canvasId={canvasId} />
+            )}
+          </KanbanBoardAiContext.Provider>
         </KanbanProvider>
       </div>
     </div>

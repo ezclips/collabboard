@@ -1,8 +1,10 @@
 'use client';
 
+import { Bot } from 'lucide-react';
 import type { Card } from '@/types/kanban-canvas';
 import { ContextMenuItem, MenuIcons } from './ContextMenu';
 import { useKanbanPersistence, useKanbanData, useKanbanReadonly } from './store.tsx';
+import { useKanbanBoardAi } from './KanbanBoardAiBridge';
 import type { useKanbanModals } from './useKanbanModals';
 import { useKanbanI18n } from './useKanbanI18n';
 import { normalizeRowLabel } from './labels';
@@ -16,9 +18,24 @@ export function useCardMenu({ card, modals }: CardMenuProps): ContextMenuItem[] 
   const actions = useKanbanPersistence();
   const data = useKanbanData();
   const readonly = useKanbanReadonly();
+  const boardAi = useKanbanBoardAi();
   const { t } = useKanbanI18n();
 
-  if (readonly) return [];
+  /**
+   * PATCH-323. "Ask Board AI" attaches this card and opens the drawer.
+   *
+   * It is not an edit: it adds an identity to a private question, which every
+   * board reader may do. So it is offered wherever Board AI is reachable, and it
+   * is the ONE item a read-only menu still shows.
+   */
+  const askBoardAiItem: ContextMenuItem | null = boardAi ? {
+    id: 'ask-board-ai',
+    label: 'Ask Board AI',
+    icon: <Bot size={16} />,
+    onClick: () => boardAi.askAboutCard({ id: card.id, title: card.label }),
+  } : null;
+
+  if (readonly) return askBoardAiItem ? [askBoardAiItem] : [];
 
   const items: ContextMenuItem[] = [
     {
@@ -27,6 +44,7 @@ export function useCardMenu({ card, modals }: CardMenuProps): ContextMenuItem[] 
       icon: <MenuIcons.Edit size={16} />,
       onClick: () => actions.setActiveCard(card.id),
     },
+    ...(askBoardAiItem ? [askBoardAiItem] : []),
     {
       id: 'duplicate',
       label: t('duplicate'),
