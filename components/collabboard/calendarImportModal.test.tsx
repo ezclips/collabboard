@@ -227,3 +227,28 @@ describe('PATCH-326 the import loop reports progress and failures', () => {
     expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('importedSomeFailed'));
   });
 });
+
+describe('PATCH-329 tab switching and the storage wording', () => {
+  it('file → link → file renders without the controlled/uncontrolled warning', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await mount(<CalendarImportModal isOpen onClose={vi.fn()} />);
+      await act(async () => { q('[data-calendar-import-tab="link"]')!.click(); });
+      await act(async () => { q('[data-calendar-import-tab="file"]')!.click(); });
+      await act(async () => { q('[data-calendar-import-tab="link"]')!.click(); });
+      const logged = errorSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(logged).not.toContain('uncontrolled input');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('says the link is saved encrypted when keep-updated is on, and not saved when off', async () => {
+    await mount(<CalendarImportModal isOpen onClose={vi.fn()} />);
+    await act(async () => { q('[data-calendar-import-tab="link"]')!.click(); });
+    const note = () => q('[data-calendar-link-storage-note="true"]')?.textContent ?? '';
+    expect(note()).toContain('calendarLinkSavedEncrypted');
+    await act(async () => { (q('[data-calendar-keep-updated="true"]') as HTMLInputElement).click(); });
+    expect(note()).toContain('calendarLinkNotSaved');
+  });
+});

@@ -456,7 +456,10 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
         </div>
 
         {mode === 'file' ? (
-          <div className="mb-3">
+          // Distinct keys: without them React reuses ONE element for both
+          // branches and swaps the uncontrolled file input with the controlled
+          // URL input, which logs "uncontrolled input to be controlled".
+          <div key="file-tab" className="mb-3">
             <input
               ref={fileInputRef}
               type="file"
@@ -478,7 +481,7 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
             </button>
           </div>
         ) : (
-          <div className="mb-3 space-y-2">
+          <div key="link-tab" className="mb-3 space-y-2">
             <input
               type="url"
               data-calendar-import-url="true"
@@ -490,7 +493,9 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
             <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkHelpGoogle')}</p>
             <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkHelpOutlook')}</p>
             <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkHelpApple')}</p>
-            <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkNotSaved')}</p>
+            <p data-calendar-link-storage-note="true" className="text-[11px] leading-snug text-gray-500">
+              {keepUpdated ? t('calendarLinkSavedEncrypted') : t('calendarLinkNotSaved')}
+            </p>
             <label className="flex items-center gap-2 text-[12px] text-slate-700">
               <input
                 type="checkbox"

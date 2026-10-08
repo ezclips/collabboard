@@ -166,4 +166,50 @@ END:VEVENT`),
     expect(events[0].title).toHaveLength(200);
     expect(events[0].description).toHaveLength(4000);
   });
+
+  it('emits no sourceKey unless asked', () => {
+    const { events } = parseIcsEvents(event('SUMMARY:S\nDTSTART:20260610T090000Z'), { now: NOW });
+    expect(events[0].sourceKey).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH-328 Addendum 2: the source key must survive a MOVED event
+// ---------------------------------------------------------------------------
+describe('PATCH-328 Addendum 2 source keys', () => {
+  const single = (start: string) => wrap(
+    `BEGIN:VEVENT\nUID:single@x\nSUMMARY:S\nDTSTART:${start}\nDTEND:20260610T100000Z\nEND:VEVENT`,
+  );
+
+  it('a single event whose DTSTART changes keeps its key', () => {
+    const a = parseIcsEvents(single('20260610T090000Z'), { now: NOW, includeSourceKey: true });
+    const b = parseIcsEvents(single('20260620T090000Z'), { now: NOW, includeSourceKey: true });
+    expect(a.events[0].sourceKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(a.events[0].sourceKey).toBe(b.events[0].sourceKey);
+  });
+
+  it('a weekly series keeps distinct keys per occurrence', () => {
+    const { events } = parseIcsEvents(
+      wrap('BEGIN:VEVENT\nUID:series@x\nSUMMARY:W\nDTSTART:20260601T090000Z\nDTEND:20260601T100000Z\nRRULE:FREQ=WEEKLY;COUNT=4\nEND:VEVENT'),
+      { now: NOW, includeSourceKey: true },
+    );
+    const keys = events.map((entry) => entry.sourceKey);
+    expect(keys).toHaveLength(4);
+    expect(new Set(keys).size).toBe(4);
+    expect(keys.every((key) => /^[0-9a-f]{64}$/.test(key as string))).toBe(true);
+  });
+
+  it('a moved override keeps its key, and it differs from the series', () => {
+    const withOverride = (start: string) => wrap(
+      `BEGIN:VEVENT\nUID:series@x\nSUMMARY:W\nDTSTART:20260601T090000Z\nDTEND:20260601T100000Z\nRRULE:FREQ=WEEKLY;COUNT=3\nEND:VEVENT\n` +
+      `BEGIN:VEVENT\nUID:series@x\nRECURRENCE-ID:20260608T090000Z\nSUMMARY:Override\nDTSTART:${start}\nDTEND:20260608T130000Z\nEND:VEVENT`,
+    );
+    const a = parseIcsEvents(withOverride('20260608T120000Z'), { now: NOW, includeSourceKey: true });
+    const b = parseIcsEvents(withOverride('20260608T150000Z'), { now: NOW, includeSourceKey: true });
+    const overrideA = a.events.find((entry) => entry.title === 'Override')?.sourceKey;
+    const overrideB = b.events.find((entry) => entry.title === 'Override')?.sourceKey;
+    expect(overrideA).toMatch(/^[0-9a-f]{64}$/);
+    expect(overrideA).toBe(overrideB);
+    expect(a.events.filter((entry) => entry.title === 'W').some((entry) => entry.sourceKey === overrideA)).toBe(false);
+  });
 });

@@ -161,6 +161,7 @@ type I18nKey =
   | 'calendarLinkHelpOutlook'
   | 'calendarLinkHelpApple'
   | 'calendarLinkNotSaved'
+  | 'calendarLinkSavedEncrypted'
   | 'preview'
   | 'eventsRange'
   | 'alreadyOnBoard'
@@ -343,6 +344,7 @@ const en: Dict = {
   calendarLinkHelpOutlook: 'Outlook.com: Settings → Calendar → Shared calendars → Publish a calendar → ICS link.',
   calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
   calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
+  calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
   preview: 'Preview',
   eventsRange: '{count} events from {from} to {to}',
   alreadyOnBoard: '{count} are already on this board and will be skipped',
@@ -523,6 +525,7 @@ const es: Dict = {
   calendarLinkHelpOutlook: 'Outlook.com: Settings → Calendar → Shared calendars → Publish a calendar → ICS link.',
   calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
   calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
+  calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
   preview: 'Preview',
   eventsRange: '{count} events from {from} to {to}',
   alreadyOnBoard: '{count} are already on this board and will be skipped',
@@ -703,6 +706,7 @@ const fr: Dict = {
   calendarLinkHelpOutlook: 'Outlook.com: Settings → Calendar → Shared calendars → Publish a calendar → ICS link.',
   calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
   calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
+  calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
   preview: 'Preview',
   eventsRange: '{count} events from {from} to {to}',
   alreadyOnBoard: '{count} are already on this board and will be skipped',
