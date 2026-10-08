@@ -376,3 +376,89 @@ describe('the token grammar widened without breaking what was written before it'
     expect(BOARD_AI_CITATION_INSTRUCTIONS.join(' ')).toContain('S3.2');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PATCH-322: a Kanban card is a place; an overview is only its passages
+// ---------------------------------------------------------------------------
+describe('PATCH-322 Kanban citations', () => {
+  const CARD_A = '11111111-1111-4111-8111-111111111111';
+  const CARD_B = '22222222-2222-4222-8222-222222222222';
+
+  const overview = (
+    passages: readonly { source: 'kanban-card'; cardId?: string; label: string }[],
+  ): ResolvedBoardAiContextBlock => ({
+    type: 'kanban-board',
+    label: 'Kanban board',
+    passages,
+    text: '[S1.1] Write docs · To do\n[S1.2] Ship the release · Done',
+  });
+
+  const cardBlock = (cardId: string): ResolvedBoardAiContextBlock => ({
+    type: 'kanban-card', cardId, label: 'Ship the release', text: 'card body text',
+  });
+
+  it('an attached kanban-card block cites ITSELF', () => {
+    const envelope = buildBoardAiCitationEnvelope(['S1'], [cardBlock(CARD_A)]);
+    expect(envelope?.items).toEqual([{ type: 'kanban-card', cardId: CARD_A, label: 'Ship the release' }]);
+  });
+
+  it('a sub-token on an overview cites that card', () => {
+    const block = overview([
+      { source: 'kanban-card', cardId: CARD_A, label: 'Write docs' },
+      { source: 'kanban-card', cardId: CARD_B, label: 'Ship the release' },
+    ]);
+    expect(buildBoardAiCitationEnvelope(['S1.2'], [block])?.items)
+      .toEqual([{ type: 'kanban-card', cardId: CARD_B, label: 'Ship the release' }]);
+  });
+
+  it('NARROWED, NOT LIFTED: a bare token on an overview still cites nothing', () => {
+    expect(buildBoardAiCitationEnvelope(['S1'], [overview([{ source: 'kanban-card', cardId: CARD_A, label: 'x' }])]))
+      .toBeNull();
+  });
+
+  it('an out-of-range passage index cites nothing', () => {
+    expect(buildBoardAiCitationEnvelope(['S1.9'], [overview([{ source: 'kanban-card', cardId: CARD_A, label: 'x' }])]))
+      .toBeNull();
+  });
+
+  it('a kanban passage with no cardId names nowhere and cites nothing', () => {
+    expect(buildBoardAiCitationEnvelope(['S1.1'], [overview([{ source: 'kanban-card', label: 'x' }])])).toBeNull();
+  });
+
+  it('a citation carries identity and label only -- never the card text', () => {
+    const envelope = buildBoardAiCitationEnvelope(['S1'], [cardBlock(CARD_A)]);
+    const serialized = JSON.stringify(envelope);
+    expect(serialized).not.toContain('card body text');
+    expect(Object.keys(envelope!.items[0]).sort()).toEqual(['cardId', 'label', 'type']);
+  });
+
+  it('the identity key is kanban-card:{cardId}', () => {
+    expect(boardAiCitationIdentityKey({ type: 'kanban-card', cardId: CARD_A, label: 'x' }))
+      .toBe(`kanban-card:${CARD_A}`);
+  });
+
+  it('round-trips a stored kanban-card citation', () => {
+    const stored = {
+      version: BOARD_AI_CITATION_VERSION,
+      items: [{ type: 'kanban-card', cardId: CARD_A, label: 'Ship the release' }],
+    };
+    expect(boardAiCitationsFromStored(stored)?.items)
+      .toEqual([{ type: 'kanban-card', cardId: CARD_A, label: 'Ship the release' }]);
+  });
+
+  it('rejects a malformed kanban-card citation (no id, empty id, no label)', () => {
+    for (const item of [
+      { type: 'kanban-card', label: 'Ship the release' },
+      { type: 'kanban-card', cardId: '', label: 'Ship the release' },
+      { type: 'kanban-card', cardId: '   ', label: 'Ship the release' },
+      { type: 'kanban-card', cardId: CARD_A },
+    ]) {
+      expect(boardAiCitationsFromStored({ version: BOARD_AI_CITATION_VERSION, items: [item] }), JSON.stringify(item))
+        .toBeNull();
+    }
+  });
+
+  it('the instructions tell the model the overview line form exists', () => {
+    expect(BOARD_AI_CITATION_INSTRUCTIONS.join(' ')).toContain('S2.5');
+  });
+});

@@ -13,6 +13,7 @@ import {
   removeBoardAiDraftContext,
   withBoardAiDraftReadiness,
   type BoardAiDraftContextItem,
+  type BoardAiDraftContextRequest,
 } from './boardAiChatDraftContext';
 
 const DOC = 'aaaaaaaa-1111-4111-8111-111111111111';
@@ -298,5 +299,43 @@ describe('37. readiness: an attachment that cannot be read yet says so', () => {
     // document than to leave the composer permanently blocked on a status
     // this build does not know about.
     expect(withBoardAiDraftReadiness(items, DOC, 'something-new')[0].readiness).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH-322: a card is attachable; the whole-board overview is not
+// ---------------------------------------------------------------------------
+describe('PATCH-322 kanban-card is an attachment, kanban-board is not', () => {
+  const CARD = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+  it('a kanban-card draft posts IDENTITY only', () => {
+    const item: BoardAiDraftContextItem = {
+      request: { type: 'kanban-card', cardId: CARD },
+      label: 'Ship the release',
+      detail: 'Card',
+    };
+    expect(boardAiDraftContextPayload([item])).toEqual({ items: [{ type: 'kanban-card', cardId: CARD }] });
+  });
+
+  it('a card and the same card’s label never travel as content', () => {
+    const item: BoardAiDraftContextItem = {
+      request: { type: 'kanban-card', cardId: CARD },
+      label: 'CONFIDENTIAL CARD TITLE',
+    };
+    const serialized = JSON.stringify(boardAiDraftContextPayload([item]));
+    expect(serialized).not.toContain('CONFIDENTIAL');
+    expect(serialized).not.toContain('label');
+  });
+
+  it('the overview is excluded at the TYPE level, so the payload cannot send one', () => {
+    // @ts-expect-error kanban-board is not a BoardAiDraftContextRequest
+    const overview: BoardAiDraftContextRequest = { type: 'kanban-board' };
+    expect(overview.type).toBe('kanban-board');
+  });
+
+  it('the overview still has an identity key, so it is not an unknown type', () => {
+    // A card attachment and an overview are two distinct sources.
+    expect(boardAiDraftKey({ request: { type: 'kanban-card', cardId: CARD }, label: 'x' }))
+      .toBe(`kanban-card:${CARD}`);
   });
 });

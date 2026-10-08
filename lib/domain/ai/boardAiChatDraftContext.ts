@@ -29,12 +29,17 @@ export const BOARD_AI_DRAFT_PREVIEW_MAX = 60;
  * search.
  *
  * A search is not an attachment: the user does not pick a source, they turn on
- * a toggle, and the server decides what it finds. Excluding it here is what
- * keeps the composer's four slots meaning "things you chose", and it makes the
- * payload switch below exhaustive by construction rather than by a default case
- * that would silently accept a shape this path cannot send.
+ * a toggle, and the server decides what it finds. A Kanban board OVERVIEW is
+ * the same shape of thing (PATCH-322): the client adds it per turn, not the
+ * composer. Excluding both here is what keeps the composer's four slots meaning
+ * "things you chose", and it makes the payload switch below exhaustive by
+ * construction rather than by a default case that would silently accept a shape
+ * this path cannot send.
  */
-export type BoardAiDraftContextRequest = Exclude<BoardAiContextRequestItem, { type: 'board-search' }>;
+export type BoardAiDraftContextRequest = Exclude<
+  BoardAiContextRequestItem,
+  { type: 'board-search' } | { type: 'kanban-board' }
+>;
 
 /**
  * Why an attachment cannot be used YET, or ever.
@@ -212,6 +217,9 @@ export function boardAiDraftContextPayload(
           return { type: request.type, padletId: request.padletId };
         case 'padlet-image':
           return { type: request.type, padletId: request.padletId };
+        case 'kanban-card':
+          // PATCH-322. Identity only: the server reads the card itself.
+          return { type: request.type, cardId: request.cardId };
       }
     }),
   };

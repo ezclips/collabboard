@@ -167,6 +167,18 @@ const contextItemSchema = z.discriminatedUnion('type', [
     type: z.literal('padlet-image'),
     padletId: z.string().uuid(),
   }).strict(),
+  // PATCH-322. A Kanban card, by identity. The server reads the card, its
+  // column, row, links and comments itself, through this caller's client.
+  z.object({
+    type: z.literal('kanban-card'),
+    cardId: z.string().uuid(),
+  }).strict(),
+  // PATCH-322. The whole-board overview: no fields at all, and `.strict()`
+  // makes that a fact. The client adds it per turn (not the composer), exactly
+  // as it turns board search on, and the server reads every card itself.
+  z.object({
+    type: z.literal('kanban-board'),
+  }).strict(),
 ]);
 
 const chatRequestSchema = z.object({

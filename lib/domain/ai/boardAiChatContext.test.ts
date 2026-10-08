@@ -273,3 +273,46 @@ describe('38-42. one budget, current context first', () => {
     expect(bounded[0].label).toBe('CURRENT');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PATCH-322: Kanban cards and the whole-board overview, additively
+// ---------------------------------------------------------------------------
+describe('PATCH-322 Kanban context is identity plus a server-authored chip', () => {
+  const CARD = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+  it('a kanban-card envelope carries cardId, label and excerpt only', () => {
+    const envelope = buildBoardAiContextEnvelope([{
+      type: 'kanban-card', cardId: CARD, label: 'Ship the release', text: 'card body text',
+    }])!;
+    expect(envelope.items[0]).toMatchObject({
+      type: 'kanban-card', cardId: CARD, label: 'Ship the release', excerpt: 'card body text',
+    });
+  });
+
+  it('reads a stored kanban-card back as IDENTITY only', () => {
+    const requests = boardAiContextRequestsFromStored({
+      version: 1,
+      items: [{ type: 'kanban-card', cardId: CARD, label: 'forged', excerpt: 'forged body' }],
+    });
+    expect(requests).toEqual([{ type: 'kanban-card', cardId: CARD }]);
+    expect(JSON.stringify(requests)).not.toContain('forged');
+  });
+
+  it('a kanban-card with no cardId is dropped whole', () => {
+    expect(boardAiContextRequestsFromStored({ version: 1, items: [{ type: 'kanban-card' }] })).toEqual([]);
+  });
+
+  it('a kanban-board item has no fields and keeps its chip in the view', () => {
+    const view = boardAiContextViewFromStored({
+      version: 1,
+      items: [{ type: 'kanban-board', label: 'Kanban board', excerpt: '[S1.1] Write docs' }],
+    })!;
+    expect(view.items[0]).toMatchObject({ type: 'kanban-board', label: 'Kanban board' });
+    expect('cardId' in view.items[0]).toBe(false);
+  });
+
+  it('the two identity keys are distinct: a card, and the overview', () => {
+    expect(boardAiContextIdentityKey({ type: 'kanban-card', cardId: CARD })).toBe(`kanban-card:${CARD}`);
+    expect(boardAiContextIdentityKey({ type: 'kanban-board' })).toBe('kanban-board');
+  });
+});

@@ -35,6 +35,14 @@ import {
   type KnowledgeStoredTextChunk,
 } from '../../domain/knowledge/knowledgeTextChunking';
 import { KNOWLEDGE_TEXT_KIND } from '../../domain/knowledge/knowledgeTextIngestion';
+// PATCH-322. The Kanban reader. It takes the SAME caller's client, widened here
+// to the `kanban_*` tables; the cast is structural, because the two query
+// interfaces describe one object and this module holds the narrower type.
+import {
+  readKanbanBoardBlock,
+  readKanbanCardBlock,
+  type BoardAiKanbanSupabaseClient,
+} from './boardAiKanbanContext';
 
 /**
  * The reads this resolver performs, and nothing more. Supplied as the CALLER'S
@@ -46,7 +54,21 @@ import { KNOWLEDGE_TEXT_KIND } from '../../domain/knowledge/knowledgeTextIngesti
  * would make the answer meaningless.
  */
 export interface BoardAiContextSupabaseClient {
-  from(table: 'knowledge_documents' | 'knowledge_pages' | 'knowledge_chunks' | 'padlets'): {
+  from(table:
+    | 'knowledge_documents'
+    | 'knowledge_pages'
+    | 'knowledge_chunks'
+    | 'padlets'
+    // PATCH-322. Kanban reads go through this SAME client, so RLS is the
+    // boundary for them exactly as it is for the sources above.
+    | 'boards'
+    | 'kanban_cards'
+    | 'kanban_columns'
+    | 'kanban_swimlanes'
+    | 'kanban_links'
+    | 'kanban_comments'
+    | 'kanban_card_assignees'
+    | 'kanban_board_members'): {
     select(columns: string): ContextQuery;
   };
 }
@@ -233,7 +255,34 @@ async function resolveOne(
   boardId: string,
   item: BoardAiContextRequestItem,
   byteReader: BoardAiContextByteReader,
-): Promise<Result<ResolvedBoardAiContextBlock, DomainError>> {
+  // WHERE THIS BLOCK WILL LAND in the array the model is given, needed only by
+  // `kanban-board` so its per-card sub-tokens (`S2.5`) are positions the
+  // citation layer can read back. Every other arm ignores it.
+  blockIndex: number,
+): Promise<Result<ResolvedBoardAiContextBlock | null, DomainError>> {
+  if (item.type === 'kanban-card') {
+    // PATCH-322. A card, proven to sit on THIS board. Unlike a padlet, an
+    // unresolvable card -- a non-Kanban board, or a card on another board --
+    // DROPS rather than refusing: the type is a best-effort enrichment of an
+    // answer that still runs, and dropping discloses nothing either way.
+    return readKanbanCardBlock(
+      client as unknown as BoardAiKanbanSupabaseClient,
+      boardId,
+      item.cardId,
+    );
+  }
+
+  if (item.type === 'kanban-board') {
+    // PATCH-322. The whole board as one overview block. CURRENT-TURN ONLY; the
+    // historical path filters it out before this point. A non-Kanban board
+    // resolves to nothing, exactly as an unreadable one does.
+    return readKanbanBoardBlock(
+      client as unknown as BoardAiKanbanSupabaseClient,
+      boardId,
+      blockIndex,
+    );
+  }
+
   if (item.type === 'padlet-image') {
     // Step 1. The CALLER'S client, board-scoped. Nothing privileged has run
     // yet: if this row is not visible to this user on this board, the answer is
@@ -507,9 +556,13 @@ export async function resolveBoardAiChatContext(
 ): Promise<Result<readonly ResolvedBoardAiContextBlock[], DomainError>> {
   const blocks: ResolvedBoardAiContextBlock[] = [];
   for (const item of items) {
-    const resolved = await resolveOne(client, boardId, item, byteReader);
+    // `blocks.length` is the position this block will occupy, which is what a
+    // `kanban-board` overview's sub-tokens are built from.
+    const resolved = await resolveOne(client, boardId, item, byteReader, blocks.length);
     if (!resolved.ok) return err(resolved.error);
-    blocks.push(resolved.value);
+    // A Kanban item that resolves to nothing is DROPPED, not refused, and it
+    // costs no slot -- so the block that follows takes the index it would have.
+    if (resolved.value !== null) blocks.push(resolved.value);
   }
   return ok(blocks);
 }
@@ -556,8 +609,14 @@ export async function resolveHistoricalBoardAiChatContext(
     // work grow with thread length -- the very thing the identity cap prevents.
     // The stored item survives for its chip, which is all it was ever for.
     if (item.type === 'board-search') continue;
-    const resolved = await resolveOne(client, boardId, item, NEVER_READS_BYTES);
-    if (resolved.ok) blocks.push(resolved.value);
+    // A Kanban OVERVIEW is current-turn only, for the same reason a search is:
+    // its text was authored against the board as it stood when the user asked,
+    // and re-reading every card on a later turn would put a stale board in front
+    // of an unrelated question. The stored item survives for its chip alone.
+    // A `kanban-card` DOES re-resolve -- it is an attachment, like a padlet.
+    if (item.type === 'kanban-board') continue;
+    const resolved = await resolveOne(client, boardId, item, NEVER_READS_BYTES, blocks.length);
+    if (resolved.ok && resolved.value !== null) blocks.push(resolved.value);
   }
   return blocks;
 }

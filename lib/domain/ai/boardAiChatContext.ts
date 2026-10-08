@@ -27,6 +27,10 @@ export const BOARD_AI_CONTEXT_TYPES = [
   // drops it, exactly as it already drops anything malformed. Nothing about the
   // five existing shapes changes.
   'board-search',
+  // PATCH-322. Kanban boards: the whole overview, and one attached card.
+  // Additive in the same sense as `board-search`, so the version still holds.
+  'kanban-card',
+  'kanban-board',
 ] as const;
 
 export type BoardAiContextType = (typeof BOARD_AI_CONTEXT_TYPES)[number];
@@ -144,13 +148,39 @@ export interface BoardSearchContextRequest {
   readonly query: string;
 }
 
+/**
+ * PATCH-322. One Kanban card the user attached by id.
+ *
+ * Identity only, like every other request: the server reads the card, its
+ * column, row, links and comments through the caller's own client, scoped to
+ * the route board. Attachable from the UI, and persisted like `padlet` --
+ * re-read from identity on later turns.
+ */
+export interface KanbanCardContextRequest {
+  readonly type: 'kanban-card';
+  readonly cardId: string;
+}
+
+/**
+ * PATCH-322. The whole Kanban board as one overview block.
+ *
+ * No fields: the server reads every card. CURRENT-TURN ONLY, exactly like
+ * `board-search` -- the client adds it per turn (not the composer), it is not
+ * re-run on later turns, and it survives only for its chip. Uses ONE slot.
+ */
+export interface KanbanBoardContextRequest {
+  readonly type: 'kanban-board';
+}
+
 export type BoardAiContextRequestItem =
   | KnowledgeDocumentContextRequest
   | KnowledgePageContextRequest
   | KnowledgeSelectionContextRequest
   | PadletContextRequest
   | PadletImageContextRequest
-  | BoardSearchContextRequest;
+  | BoardSearchContextRequest
+  | KanbanCardContextRequest
+  | KanbanBoardContextRequest;
 
 /* ------------------------------------------------------------------ */
 /* Persisted: identity + server-authored display metadata             */
@@ -174,6 +204,8 @@ export interface BoardAiContextItem {
   readonly selectedText?: string;
   /** The tsquery-source terms for a board-search item; absent otherwise. */
   readonly query?: string;
+  /** PATCH-322. The attached Kanban card's id; absent on every other type. */
+  readonly cardId?: string;
   readonly label?: string;
   readonly excerpt?: string;
 }
@@ -234,11 +266,16 @@ export interface BoardAiCitablePassage {
    * passage is cited, never attached -- it has no context-envelope type of its
    * own, only a citation item (see boardAiChatCitation).
    */
-  readonly source: 'post' | 'knowledge' | 'wiki';
+  readonly source: 'post' | 'knowledge' | 'wiki' | 'kanban-card';
   readonly label: string;
   readonly padletId?: string;
   readonly knowledgeDocumentId?: string;
   readonly pageStart?: number;
+  /**
+   * PATCH-322. The Kanban card a passage came from, so a citation can open it.
+   * Identity only, like every field here.
+   */
+  readonly cardId?: string;
   /**
    * PATCH-196. The wiki page this passage came from, so a citation can open the
    * wiki at it. Identity only, like every field here.
@@ -266,6 +303,8 @@ export interface ResolvedBoardAiContextBlock {
   readonly knowledgeDocumentId?: string;
   readonly pageNumber?: number;
   readonly padletId?: string;
+  /** PATCH-322. Present on a kanban-card block (and its passages): the card. */
+  readonly cardId?: string;
   readonly charStart?: number;
   readonly charEnd?: number;
   /** Present only on a board-search block: the terms that were searched for. */
@@ -333,6 +372,7 @@ export function buildBoardAiContextEnvelope(
       ...(block.knowledgeDocumentId ? { knowledgeDocumentId: block.knowledgeDocumentId } : {}),
       ...(block.pageNumber !== undefined ? { pageNumber: block.pageNumber } : {}),
       ...(block.padletId ? { padletId: block.padletId } : {}),
+      ...(block.cardId ? { cardId: block.cardId } : {}),
       ...(block.charStart !== undefined ? { charStart: block.charStart } : {}),
       ...(block.charEnd !== undefined ? { charEnd: block.charEnd } : {}),
       ...(block.type === 'knowledge-selection' ? { selectedText: block.text } : {}),
@@ -382,6 +422,7 @@ export function boardAiContextItemsFromStored(value: unknown): readonly ParsedBo
     if (!isBoardAiContextType(item.type)) continue;
     const documentId = typeof item.knowledgeDocumentId === 'string' ? item.knowledgeDocumentId : null;
     const padletId = typeof item.padletId === 'string' ? item.padletId : null;
+    const cardId = typeof item.cardId === 'string' && item.cardId.length > 0 ? item.cardId : null;
     const page = item.pageNumber;
     const isPage = typeof page === 'number' && Number.isInteger(page) && page >= 1;
 
@@ -419,6 +460,14 @@ export function boardAiContextItemsFromStored(value: unknown): readonly ParsedBo
       // round trip: the stored item carries a label and the marker excerpt, and
       // the bytes are re-derived or -- for history -- deliberately not.
       request = { type: 'padlet-image', padletId };
+    } else if (item.type === 'kanban-card' && cardId) {
+      // PATCH-322. Identity only. The card's text is re-read from the board on
+      // every turn; the stored label/excerpt only redraw a chip.
+      request = { type: 'kanban-card', cardId };
+    } else if (item.type === 'kanban-board') {
+      // PATCH-322. No fields. Current-turn only -- resolveHistorical drops it --
+      // so this is a display record, not a standing instruction.
+      request = { type: 'kanban-board' };
     }
     if (request === null) continue;
 
@@ -464,6 +513,13 @@ export function boardAiContextIdentityKey(item: BoardAiContextRequestItem): stri
       return `padlet-image:${item.padletId}`;
     case 'board-search':
       return `board-search:${item.query}`;
+    // PATCH-322. Keyed by the card alone, matching the citation identity key.
+    case 'kanban-card':
+      return `kanban-card:${item.cardId}`;
+    // PATCH-322. No identity finer than the type: two overviews in one request
+    // are one non-attachable source.
+    case 'kanban-board':
+      return 'kanban-board';
   }
 }
 
@@ -561,6 +617,7 @@ export function boardAiContextViewFromStored(value: unknown): BoardAiContextView
       ...('knowledgeDocumentId' in request ? { knowledgeDocumentId: request.knowledgeDocumentId } : {}),
       ...('pageNumber' in request ? { pageNumber: request.pageNumber } : {}),
       ...('padletId' in request ? { padletId: request.padletId } : {}),
+      ...('cardId' in request ? { cardId: request.cardId } : {}),
       ...('charStart' in request ? { charStart: request.charStart } : {}),
       ...('charEnd' in request ? { charEnd: request.charEnd } : {}),
       ...('selectedText' in request ? { selectedText: boardAiContextExcerpt(request.selectedText) } : {}),

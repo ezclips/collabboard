@@ -272,3 +272,36 @@ describe('PATCH-196 existing proofs verify unchanged', () => {
     expect(verifyBoardAiProvenanceProof(other, proof)).toBe(false);
   });
 });
+
+// ============================================================================
+// PATCH-322: a proof over a Kanban-card citation verifies, and does not move
+// ============================================================================
+describe('PATCH-322 Kanban-card citations are covered by the proof', () => {
+  const CARD_A = '11111111-1111-4111-8111-111111111111';
+  const CARD_B = '22222222-2222-4222-8222-222222222222';
+
+  it('a kanban-card citation signs and verifies', () => {
+    const kanbanSubject = subject({
+      citationItems: [{ type: 'kanban-card', cardId: CARD_A, label: 'Ship the release' }],
+    });
+    const proof = createBoardAiProvenanceProof(kanbanSubject);
+    expect(verifyBoardAiProvenanceProof(kanbanSubject, proof)).toBe(true);
+  });
+
+  it('the proof does not transplant onto a different card', () => {
+    const proof = createBoardAiProvenanceProof(subject({
+      citationItems: [{ type: 'kanban-card', cardId: CARD_A, label: 'Ship the release' }],
+    }));
+    const other = subject({
+      citationItems: [{ type: 'kanban-card', cardId: CARD_B, label: 'Ship the release' }],
+    });
+    expect(verifyBoardAiProvenanceProof(other, proof)).toBe(false);
+  });
+
+  it('the pre-patch byte-pinned signature is unchanged by the new field', () => {
+    // The same constant PATCH-196 pins, restated here so the guarantee is
+    // visible in this suite too: adding an optional `cardId` to a citation item
+    // changes the bytes of no subject that does not use it.
+    expect(signBoardAiProvenance(subject())).toBe('kQnnkNGhmJ11MlW9qfPzqjxwzHcJziVoBULp644aNt8');
+  });
+});

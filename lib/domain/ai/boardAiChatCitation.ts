@@ -77,6 +77,9 @@ export const BOARD_AI_CITATION_INSTRUCTIONS: readonly string[] = [
   'Each entry in `explicitContext` carries a `sourceId` such as "S1". Those ids exist only so you can say which of the sources you were given you actually used.',
   `When your answer relies on one or more of them, end your reply with exactly one final line of the form ${BOARD_AI_CITATION_FOOTER_PREFIX}S1,S3]] naming those ids, newest first is not required.`,
   'A board search result contains several passages, and each is introduced by an id of the form "S3.2". When your answer relies on a search, name the passages you actually used rather than the search as a whole.',
+  // PATCH-322. A Kanban overview is the same shape: one block, one line per
+  // card, each line carrying a sub-token. The model cites the card line it used.
+  'On a Kanban board, the board overview lists one line per card, each carrying an id of the form "S2.5". When your answer relies on a card, cite that card\'s line.',
   // PATCH-196, D2: the chain-of-custody sentence. A wiki page is a compiled
   // summary, not evidence; where a raw passage supports a statement, that
   // passage is what gets cited, and a STALE page must be treated as possibly
@@ -152,6 +155,8 @@ export interface BoardAiCitationItem {
   readonly padletId?: string;
   /** PATCH-196. A cited wiki page, so the reader can open the wiki at it. */
   readonly wikiPageId?: string;
+  /** PATCH-322. A cited Kanban card, so the reader can open the card. */
+  readonly cardId?: string;
   readonly charStart?: number;
   readonly charEnd?: number;
   /**
@@ -215,6 +220,14 @@ export function boardAiCitationIdentityKey(item: BoardAiCitationItem): string {
     // page are one citation however they are labelled.
     case 'wiki-page':
       return `wiki-page:${item.wikiPageId}`;
+    // PATCH-322. Keyed by the card, matching the context identity key.
+    case 'kanban-card':
+      return `kanban-card:${item.cardId}`;
+    // Unreachable in practice -- citationItemFromBlock refuses an overview
+    // block, because an overview is not a place a reader can be taken to.
+    // Present so the switch stays exhaustive over BoardAiCitationItemType.
+    case 'kanban-board':
+      return 'kanban-board';
     // Unreachable in practice -- citationItemFromBlock refuses a search block,
     // because a search is not a place a reader can be taken to. Present so the
     // switch stays exhaustive over BoardAiContextType, and keyed by nothing
@@ -269,6 +282,13 @@ function citationItemFromBlock(block: ResolvedBoardAiContextBlock): BoardAiCitat
           label,
         }
         : null;
+    case 'kanban-card':
+      // PATCH-322. An attached card cites itself, like a padlet.
+      return block.cardId ? { type: 'kanban-card', cardId: block.cardId, label } : null;
+    case 'kanban-board':
+      // PATCH-322. An overview is not a place: a bare S-token on it cites
+      // nothing, and only its per-card passages (`S2.5`) resolve.
+      return null;
     case 'board-search':
       // A SEARCH IS STILL NOT A PLACE, and this refusal is NARROWED, not
       // lifted. The block holds passages from several posts and pages, so
@@ -302,9 +322,9 @@ function citationItemFromPassage(
   block: ResolvedBoardAiContextBlock,
   passageIndex: number,
 ): BoardAiCitationItem | null {
-  // Only a search block has passages, so a sub-token on anything else is
-  // refused here rather than being quietly read as its parent.
-  if (block.type !== 'board-search') return null;
+  // Only a search block or a Kanban overview has passages, so a sub-token on
+  // anything else is refused here rather than being quietly read as its parent.
+  if (block.type !== 'board-search' && block.type !== 'kanban-board') return null;
   const passage = block.passages?.[passageIndex];
   if (!passage) return null;
   return boardAiCitationItemFromPassage(passage);
@@ -335,6 +355,14 @@ export function boardAiCitationItemFromPassage(
   if (passage.source === 'wiki') {
     return passage.wikiPageId
       ? { type: 'wiki-page', wikiPageId: passage.wikiPageId, label }
+      : null;
+  }
+  // PATCH-322. A KANBAN OVERVIEW PASSAGE CITES THE CARD. Without a card id
+  // there is no destination to open, so it emits null rather than a kanban-card
+  // item that names nowhere -- the same standard every other arm applies.
+  if (passage.source === 'kanban-card') {
+    return passage.cardId
+      ? { type: 'kanban-card', cardId: passage.cardId, label }
       : null;
   }
   if (!passage.knowledgeDocumentId) return null;
@@ -445,6 +473,10 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
     const wikiPageId = typeof stored.wikiPageId === 'string' && stored.wikiPageId.trim().length > 0
       ? stored.wikiPageId
       : undefined;
+    // PATCH-322. Non-empty, like every other identity field read back.
+    const cardId = typeof stored.cardId === 'string' && stored.cardId.trim().length > 0
+      ? stored.cardId
+      : undefined;
     const page = typeof stored.pageNumber === 'number' && Number.isInteger(stored.pageNumber) && stored.pageNumber >= 1
       ? stored.pageNumber
       : undefined;
@@ -515,6 +547,9 @@ export function boardAiCitationsFromStored(value: unknown): BoardAiCitationEnvel
       // PATCH-196. Non-empty string id and a label (already required above).
       // A wiki-page citation with no page names nowhere and is dropped.
       item = { type: 'wiki-page', wikiPageId, label };
+    } else if (stored.type === 'kanban-card' && cardId !== undefined) {
+      // PATCH-322. Non-empty string id and a label (already required above).
+      item = { type: 'kanban-card', cardId, label };
     }
     if (item === null) continue;
 
