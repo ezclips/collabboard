@@ -25,7 +25,7 @@ vi.mock('@/components/kanban-canvas/store', () => ({
     searchQuery: '', sortBy: null, sortOrder: 'asc', groupBy: 'none', groupFilter: null, locale: 'en',
   }),
   useKanbanHistory: () => ({ past: [], future: [] }),
-  useKanbanPersistence: () => ({ addCard: hoisted.addCard, canvasId: 'board-1' }),
+  useKanbanPersistence: () => ({ addCard: hoisted.addCard, refetchFromServer: vi.fn(), canvasId: 'board-1' }),
   useKanbanReadonly: () => hoisted.readonly,
 }));
 vi.mock('@/components/kanban-canvas/useKanbanI18n', () => ({
@@ -185,6 +185,9 @@ describe('PATCH-326 the import loop reports progress and failures', () => {
     await mount(<CalendarImportModal isOpen onClose={vi.fn()} />);
 
     await act(async () => { q('[data-calendar-import-tab="link"]')!.click(); });
+    // PATCH-328: the link tab now defaults to "keep updated"; this test covers
+    // the one-time import, so turn it off.
+    await act(async () => { (q('[data-calendar-keep-updated="true"]') as HTMLInputElement).click(); });
     const urlInput = q('[data-calendar-import-url="true"]') as HTMLInputElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
@@ -209,6 +212,7 @@ describe('PATCH-326 the import loop reports progress and failures', () => {
     await mount(<CalendarImportModal isOpen onClose={onClose} />);
 
     await act(async () => { q('[data-calendar-import-tab="link"]')!.click(); });
+    await act(async () => { (q('[data-calendar-keep-updated="true"]') as HTMLInputElement).click(); });
     const urlInput = q('[data-calendar-import-url="true"]') as HTMLInputElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;

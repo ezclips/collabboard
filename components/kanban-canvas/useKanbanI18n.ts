@@ -172,7 +172,19 @@ type I18nKey =
   | 'noEventsFound'
   | 'calendarReadFailed'
   | 'calendarTooLarge'
-  | 'chooseColumn';
+  | 'chooseColumn'
+  // PATCH-328. Connected calendars.
+  | 'fromConnectedCalendar'
+  | 'fromConnectedCalendarNote'
+  | 'keepCalendarUpdated'
+  | 'connectedCalendars'
+  | 'updateNow'
+  | 'disconnect'
+  | 'disconnectCalendarMessage'
+  | 'calendarConnectedToast'
+  | 'calendarUpdatedToast'
+  | 'calendarUpToDate'
+  | 'updatedAgo';
 
 type Dict = Record<I18nKey, string>;
 
@@ -343,6 +355,17 @@ const en: Dict = {
   calendarReadFailed: 'Could not read the calendar.',
   calendarTooLarge: 'This calendar is too large.',
   chooseColumn: 'Column',
+  fromConnectedCalendar: 'From a connected calendar',
+  fromConnectedCalendarNote: 'From a connected calendar — title, dates and description are updated from the calendar.',
+  keepCalendarUpdated: 'Keep this calendar updated',
+  connectedCalendars: 'Connected calendars',
+  updateNow: 'Update now',
+  disconnect: 'Disconnect',
+  disconnectCalendarMessage: 'Disconnect {host}? Its {count} cards will be removed from this board.',
+  calendarConnectedToast: 'Calendar connected · {count} events added',
+  calendarUpdatedToast: 'Calendar updated · {added} added, {updated} changed, {removed} removed',
+  calendarUpToDate: 'Calendar is up to date',
+  updatedAgo: 'Updated {time}',
 };
 
 const es: Dict = {
@@ -512,6 +535,17 @@ const es: Dict = {
   calendarReadFailed: 'Could not read the calendar.',
   calendarTooLarge: 'This calendar is too large.',
   chooseColumn: 'Column',
+  fromConnectedCalendar: 'From a connected calendar',
+  fromConnectedCalendarNote: 'From a connected calendar — title, dates and description are updated from the calendar.',
+  keepCalendarUpdated: 'Keep this calendar updated',
+  connectedCalendars: 'Connected calendars',
+  updateNow: 'Update now',
+  disconnect: 'Disconnect',
+  disconnectCalendarMessage: 'Disconnect {host}? Its {count} cards will be removed from this board.',
+  calendarConnectedToast: 'Calendar connected · {count} events added',
+  calendarUpdatedToast: 'Calendar updated · {added} added, {updated} changed, {removed} removed',
+  calendarUpToDate: 'Calendar is up to date',
+  updatedAgo: 'Updated {time}',
 };
 
 const fr: Dict = {
@@ -681,6 +715,17 @@ const fr: Dict = {
   calendarReadFailed: 'Could not read the calendar.',
   calendarTooLarge: 'This calendar is too large.',
   chooseColumn: 'Column',
+  fromConnectedCalendar: 'From a connected calendar',
+  fromConnectedCalendarNote: 'From a connected calendar — title, dates and description are updated from the calendar.',
+  keepCalendarUpdated: 'Keep this calendar updated',
+  connectedCalendars: 'Connected calendars',
+  updateNow: 'Update now',
+  disconnect: 'Disconnect',
+  disconnectCalendarMessage: 'Disconnect {host}? Its {count} cards will be removed from this board.',
+  calendarConnectedToast: 'Calendar connected · {count} events added',
+  calendarUpdatedToast: 'Calendar updated · {added} added, {updated} changed, {removed} removed',
+  calendarUpToDate: 'Calendar is up to date',
+  updatedAgo: 'Updated {time}',
 };
 
 const dictionaries: Record<KanbanLocale, Dict> = { en, es, fr };

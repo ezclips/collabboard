@@ -128,6 +128,16 @@ export const Card = memo(function Card({
 
       <div className="kanban-card-header">
         <div className="kanban-card-title">{card.label}</div>
+        {card.calendarSubscriptionId ? (
+          <span
+            data-kanban-calendar-badge="true"
+            className="kanban-card-calendar-badge"
+            title={t('fromConnectedCalendar')}
+            aria-label={t('fromConnectedCalendar')}
+          >
+            <Calendar size={12} />
+          </span>
+        ) : null}
         {card.priority && (
           <span className={`kanban-card-priority ${card.priority}`}>
             {card.priority}

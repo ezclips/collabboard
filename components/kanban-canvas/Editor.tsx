@@ -442,6 +442,14 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
             />
           </div>
 
+          {/* PATCH-328. A calendar-mirrored card says so, and says what a sync
+              will overwrite. */}
+          {card?.calendarSubscriptionId ? (
+            <p data-kanban-calendar-note="true" className="kanban-editor-calendar-note">
+              {t('fromConnectedCalendarNote')}
+            </p>
+          ) : null}
+
           <div className="kanban-editor-field">
             <label>{t('description')}</label>
             <textarea

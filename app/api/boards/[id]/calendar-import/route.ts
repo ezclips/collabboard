@@ -7,6 +7,9 @@ import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardRead
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { IcsParseError, parseIcsEvents } from '@/lib/kanban/icsImport';
 import { MAX_ICS_BYTES, PublicUrlError, fetchIcsText } from '@/lib/server/net/publicUrlGuard';
+// PATCH-328. The limiter now lives in the shared calendar module, so the
+// one-off import and every subscription route spend ONE budget.
+import { checkCalendarRateLimit } from '@/lib/server/kanban/calendarSync';
 
 /**
  * PATCH-326. Read an .ics calendar (uploaded or linked) into events.
@@ -30,27 +33,6 @@ function createRouteClient(cookieStore: ResolvedNextCookieStore) {
   });
 }
 
-/**
- * The same per-instance fixed-window limiter the Knowledge and AI routes use.
- * No shared reusable limiter exists in the repo, so this follows the established
- * per-route shape: 10 imports per minute per user.
- */
-const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
-const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_MS = 60_000;
-
-function checkRateLimit(userId: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(userId);
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitMap.set(userId, { count: 1, windowStart: now });
-    return true;
-  }
-  if (entry.count >= RATE_LIMIT_MAX) return false;
-  entry.count += 1;
-  return true;
-}
-
 const requestSchema = z
   .object({
     url: z.string().min(1).optional(),
@@ -72,7 +54,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
-    if (!checkRateLimit(user.id)) {
+    if (!checkCalendarRateLimit(user.id)) {
       return NextResponse.json({ error: 'Too many imports. Try again in a minute.' }, { status: 429 });
     }
 

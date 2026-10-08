@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import ICAL from 'ical.js';
 
 // PATCH-326. Parse an .ics calendar into the events a Kanban board can hold.
@@ -31,6 +32,12 @@ export interface ImportedEvent {
   /** Timed only: UTC ISO instants. */
   readonly startIso?: string;
   readonly endIso?: string;
+  /**
+   * PATCH-328, only when `includeSourceKey` is set: the stable identity of this
+   * occurrence -- SHA-256 hex of `<UID>|<occurrence start>` -- used to match a
+   * card back to its event across syncs. The UID itself never leaves here.
+   */
+  readonly sourceKey?: string;
 }
 
 /** The window kept around `now`: 30 days back, 365 days forward. */
@@ -128,13 +135,44 @@ function isCancelled(component: ICAL.Component): boolean {
  * without DTEND ends the same day, even though ical.js reports a default
  * one-day duration for it.
  */
+/**
+ * How an event's identity is built.
+ *
+ * - `single`: a one-off event. The key is the UID ALONE, so moving the event
+ *   (changing DTSTART) keeps the card instead of deleting and re-creating it.
+ * - `occurrence`: one occurrence of a series, or a RECURRENCE-ID override. The
+ *   key adds the ORIGINAL occurrence slot (the RECURRENCE-ID), so each
+ *   occurrence is distinct and moving an override keeps its card.
+ */
+type SourceKeyMode = 'single' | 'occurrence';
+
+/**
+ * The identity of one event: SHA-256 hex.
+ *
+ * Only the hash is produced -- the UID is never returned or stored.
+ */
+function sourceKeyOf(item: ICAL.Event, keyStart: ICAL.Time, mode: SourceKeyMode): string {
+  if (mode === 'single') {
+    return crypto.createHash('sha256').update(item.uid).digest('hex');
+  }
+  const occurrenceStart = keyStart.isDate === true
+    ? dateOnly(keyStart)
+    : instantOf(keyStart).toISOString();
+  return crypto.createHash('sha256').update(`${item.uid}|${occurrenceStart}`).digest('hex');
+}
+
 function candidateFor(
   item: ICAL.Event,
   startTime: ICAL.Time,
   endTime: ICAL.Time,
+  keyStart: ICAL.Time,
+  includeSourceKey: boolean,
+  keyMode: SourceKeyMode,
 ): Candidate {
   const component = item.component;
   const allDay = startTime.isDate === true;
+  const sourceKey = includeSourceKey ? sourceKeyOf(item, keyStart, keyMode) : undefined;
+  const keyFields = sourceKey === undefined ? {} : { sourceKey };
 
   if (allDay) {
     const startDate = dateOnly(startTime);
@@ -154,6 +192,7 @@ function candidateFor(
         allDay: true,
         startDate,
         endDate,
+        ...keyFields,
       },
     };
   }
@@ -171,6 +210,7 @@ function candidateFor(
       allDay: false,
       startIso: new Date(startMs).toISOString(),
       endIso: new Date(endMs).toISOString(),
+      ...keyFields,
     },
   };
 }
@@ -207,12 +247,15 @@ function collectGroup(
   out: Candidate[],
   windowStart: number,
   windowEnd: number,
+  includeSourceKey: boolean,
 ): void {
   if (group.master === null) {
-    // No master: each override is a standalone occurrence.
+    // No master: each override is a standalone occurrence. Its key uses the
+    // RECURRENCE-ID slot, so moving it keeps its card.
     for (const override of group.overrides) {
       const event = new ICAL.Event(override);
-      const candidate = candidateFor(event, event.startDate, event.endDate);
+      const keyStart = event.recurrenceId ?? event.startDate;
+      const candidate = candidateFor(event, event.startDate, event.endDate, keyStart, includeSourceKey, 'occurrence');
       if (inWindow(candidate, windowStart, windowEnd)) out.push(candidate);
     }
     return;
@@ -229,7 +272,8 @@ function collectGroup(
 
   if (!master.isRecurring()) {
     if (isCancelled(master.component)) return;
-    const candidate = candidateFor(master, master.startDate, master.endDate);
+    // A ONE-OFF event: keyed by UID alone, so moving its date keeps the card.
+    const candidate = candidateFor(master, master.startDate, master.endDate, master.startDate, includeSourceKey, 'single');
     if (inWindow(candidate, windowStart, windowEnd)) out.push(candidate);
     return;
   }
@@ -250,7 +294,9 @@ function collectGroup(
     const details = master.getOccurrenceDetails(occurrence);
     const item = details.item;
     if (isCancelled(item.component)) continue;
-    const candidate = candidateFor(item, details.startDate, details.endDate);
+    // The key uses the recurrence slot, so each occurrence is distinct and
+    // moving an override keeps its key.
+    const candidate = candidateFor(item, details.startDate, details.endDate, details.recurrenceId, includeSourceKey, 'occurrence');
     if (inWindow(candidate, windowStart, windowEnd)) out.push(candidate);
     // The iterator is ordered, so once we are past the window there is nothing
     // later to keep.
@@ -266,7 +312,7 @@ function collectGroup(
  */
 export function parseIcsEvents(
   text: string,
-  options: { now?: Date } = {},
+  options: { now?: Date; includeSourceKey?: boolean } = {},
 ): { events: ImportedEvent[]; truncated: boolean } {
   let root: ICAL.Component;
   try {
@@ -285,9 +331,10 @@ export function parseIcsEvents(
   const windowStart = now.getTime() - WINDOW_PAST_MS;
   const windowEnd = now.getTime() + WINDOW_FUTURE_MS;
 
+  const includeSourceKey = options.includeSourceKey === true;
   const collected: Candidate[] = [];
   for (const group of groupVevents(root)) {
-    collectGroup(group, collected, windowStart, windowEnd);
+    collectGroup(group, collected, windowStart, windowEnd, includeSourceKey);
   }
 
   collected.sort((a, b) => a.startMs - b.startMs);

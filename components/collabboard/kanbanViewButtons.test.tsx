@@ -9,6 +9,9 @@ vi.mock('@/components/kanban-canvas/store', () => ({
   KanbanProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useKanbanData: () => ({ cards: [], columns: [], rows: [] }),
   useKanbanPersistence: () => ({}),
+  // PATCH-328 mounted KanbanCalendarAutoSync inside the provider.
+  useKanban: () => ({ canvasId: 'board-1', state: {}, dispatch: vi.fn() }),
+  useKanbanReadonly: () => false,
 }));
 vi.mock('@/components/kanban-canvas', () => ({
   KanbanCanvas: () => <div data-testid="kanban-canvas" />,

@@ -9,6 +9,7 @@ import {
   type KanbanBoardAiBridgeApi,
   type KanbanBoardAiHost,
 } from '@/components/kanban-canvas/KanbanBoardAiBridge';
+import { KanbanCalendarAutoSync } from '@/components/kanban-canvas/KanbanCalendarAutoSync';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import { canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { Bot, UserPlus } from 'lucide-react';
@@ -236,6 +237,8 @@ export default function KanbanShell({
               several components below. */}
           <KanbanBoardAiContext.Provider value={boardAiHost}>
             <KanbanBoardAiBridge onRegister={onBoardAiBridgeReady} />
+            {/* PATCH-328. Runs once per mount, whichever views are open. */}
+            <KanbanCalendarAutoSync />
             {viewsEnabled ? (
               <KanbanGanttSchedulerSplit
                 canvasId={canvasId}

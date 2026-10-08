@@ -181,6 +181,8 @@ function mapColumnCards(
       parent: (c as any).parent_id || undefined,
       order: Number(c.order_index),
       priority,
+      // PATCH-328. Read-only mirror of the DB column; never written back.
+      calendarSubscriptionId: (c as any).calendar_subscription_id || undefined,
     } as Card;
   });
 }
@@ -252,6 +254,8 @@ function mapLoadedData(
         parent: (c as any).parent_id || undefined,
         order: Number(c.order_index),
         priority,
+        // PATCH-328. Read-only mirror of the DB column; never written back.
+        calendarSubscriptionId: (c as any).calendar_subscription_id || undefined,
       } as Card;
     }),
     columns: data.columns.map((c) => ({
@@ -1321,6 +1325,12 @@ export function useKanbanPersistence() {
 
   return {
     ...actions,
+    /**
+     * PATCH-328. Re-read the board from the server. Used after a calendar sync
+     * so its inserts/updates/deletes appear at once rather than on the next
+     * realtime event.
+     */
+    refetchFromServer: refetchAndReset,
     loadCardsForColumn: async (columnId: string) => {
       const chunk = await loadKanbanCardsForColumn(canvasId, columnId);
       if (!chunk) {
@@ -1390,8 +1400,11 @@ export function useKanbanPersistence() {
       const source = data.cards.find((card) => card.id === id);
       if (!source) return;
 
+      // PATCH-328. A duplicate is the user's own card, not a calendar mirror:
+      // drop the subscription link so the copy is not moved/deleted by a sync.
+      const { calendarSubscriptionId: _calendarLink, ...plainSource } = source;
       const duplicated: Card = {
-        ...source,
+        ...plainSource,
         id: crypto.randomUUID(),
         label: `${source.label} (Copy)`,
         order: (source.order || 0) + 1,

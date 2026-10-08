@@ -41,6 +41,12 @@ export interface Card {
   rowId?: string;
   parent?: string;
   order?: number;
+  /**
+   * PATCH-328. Read-only: set when this card mirrors a connected calendar.
+   * Never written back to the database by the client -- the sync engine owns it
+   * (sanitizeCardPayload drops it, and Duplicate never copies it).
+   */
+  calendarSubscriptionId?: string;
   votes?: Vote[];
   comments?: Comment[];
   links?: Link[];

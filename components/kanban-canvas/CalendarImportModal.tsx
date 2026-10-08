@@ -1,88 +1,72 @@
 'use client';
 
-// PATCH-326. Import a calendar (.ics) into the board.
+// PATCH-326/328. Import a calendar (.ics) into the board, or CONNECT it so the
+// board keeps itself in step.
 //
 // The parser runs on the SERVER (a link must never be fetched from the browser
 // and .ics handling belongs in one place). This modal asks the route for the
 // events, then turns them into cards in the BROWSER, so all-day stays all-day
-// and a timed event is written in the user's own time zone.
+// and a timed event is written in the user's own time zone. A CONNECTED
+// calendar is synced by the server instead, and only its host is ever shown.
 //
 // THE LINK IS A SECRET. It is held in this component's state only, sent once to
 // the route, and never written anywhere else.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Calendar, Link2, Upload, X } from 'lucide-react';
+import { Calendar, Link2, RefreshCw, Upload, X } from 'lucide-react';
 import type { Card, Column, Row } from '@/types/kanban-canvas';
 import type { ImportedEvent } from '@/lib/kanban/icsImport';
+import { eventToCardFields } from '@/lib/kanban/calendarEventMapping';
 import { useKanban, useKanbanData, useKanbanPersistence, useKanbanReadonly } from './store';
 import { useKanbanI18n } from './useKanbanI18n';
+import { ConfirmModal } from './ConfirmModal';
 
 /** The largest .ics body the server accepts. Refused before reading here too. */
 const MAX_ICS_BYTES = 2 * 1024 * 1024;
 const PREVIEW_LIST_MAX = 50;
 
-function localDateOf(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-function localTimeOf(date: Date): string {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
 }
 
 export function eventStartLabel(event: ImportedEvent): string {
   if (event.allDay) return event.startDate ?? '';
-  return event.startIso ? localDateOf(new Date(event.startIso)) : '';
+  if (!event.startIso) return '';
+  return eventToCardFields(event, browserTimeZone()).startDate;
 }
 
 export function eventEndLabel(event: ImportedEvent): string {
   if (event.allDay) return event.endDate ?? event.startDate ?? '';
-  return event.endIso ? localDateOf(new Date(event.endIso)) : (event.startIso ? localDateOf(new Date(event.startIso)) : '');
+  if (!event.startIso) return '';
+  return eventToCardFields(event, browserTimeZone()).endDate;
 }
 
 /**
- * One imported event as a Card.
- *
- * Timed events: the card's dates are LOCAL days, and the day of the end is the
- * day of `end - 1 ms` so an event that ends at midnight does not spill into the
- * next day. The description keeps the real `HH:MM–HH:MM` in local time.
+ * One imported event as a Card. The field mapping is the SHARED one, so the
+ * browser and the server's sync cannot drift.
  */
 export function mapEventToCard(
   event: ImportedEvent,
   context: { readonly columnId: string; readonly rowId?: string; readonly order: number },
 ): Card {
-  const card: Card = {
+  const fields = eventToCardFields(event, browserTimeZone());
+  return {
     id: crypto.randomUUID(),
-    label: event.title,
+    label: fields.label,
+    ...(fields.description ? { description: fields.description } : {}),
     columnId: context.columnId,
     rowId: context.rowId,
     order: context.order,
     priority: undefined,
     progress: 0,
+    start_date: fields.startDate,
+    end_date: fields.endDate,
   };
-
-  const parts: string[] = [];
-
-  if (event.allDay) {
-    card.start_date = event.startDate;
-    card.end_date = event.endDate ?? event.startDate;
-  } else if (event.startIso && event.endIso) {
-    const start = new Date(event.startIso);
-    const end = new Date(event.endIso);
-    const endForDay = new Date(Math.max(start.getTime(), end.getTime() - 1));
-    card.start_date = localDateOf(start);
-    card.end_date = localDateOf(endForDay);
-    if ((card.end_date as string) < (card.start_date as string)) card.end_date = card.start_date;
-    parts.push(`${localTimeOf(start)}\u2013${localTimeOf(end)}`);
-  }
-
-  if (event.location) parts.push(`Location: ${event.location}`);
-  if (event.description) parts.push(event.description);
-  if (parts.length > 0) card.description = parts.join('\n\n');
-
-  return card;
 }
 
 export interface CalendarCardBuild {
@@ -133,6 +117,29 @@ export function buildCalendarCards(
   return { cards, skipped };
 }
 
+interface ConnectedCalendar {
+  readonly id: string;
+  readonly urlHost: string;
+  readonly targetColumnId: string | null;
+  readonly lastSyncedAt: string | null;
+  readonly lastError: string | null;
+  readonly cardCount: number;
+}
+
+/** "5 min ago" / "2 hours ago" / "3 days ago" from an ISO instant. */
+export function formatUpdatedAgo(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const seconds = Math.max(0, Math.floor((now.getTime() - then) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 export interface CalendarImportModalProps {
   readonly isOpen: boolean;
   readonly onClose: () => void;
@@ -157,12 +164,18 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
 
   const [mode, setMode] = useState<'file' | 'link'>('file');
   const [url, setUrl] = useState('');
+  const [keepUpdated, setKeepUpdated] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<{ events: ImportedEvent[]; truncated: boolean } | null>(null);
   const [columnId, setColumnId] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [subscriptions, setSubscriptions] = useState<readonly ConnectedCalendar[]>([]);
+  const [busySubscriptionId, setBusySubscriptionId] = useState<string | null>(null);
+  const [pendingDisconnect, setPendingDisconnect] = useState<ConnectedCalendar | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const apiBase = canvasId ? `/api/boards/${encodeURIComponent(canvasId)}` : '';
 
   const sortedColumns = useMemo(
     () => [...data.columns].sort((a, b) => (a.order || 0) - (b.order || 0)),
@@ -175,12 +188,29 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
     setProgress(null);
     setUrl('');
     setMode('file');
+    setKeepUpdated(true);
   }, []);
 
   useEffect(() => {
     if (columnId.length > 0 && sortedColumns.some((column) => column.id === columnId)) return;
     setColumnId(sortedColumns[0]?.id ?? '');
   }, [columnId, sortedColumns]);
+
+  const loadSubscriptions = useCallback(async () => {
+    if (!apiBase) return;
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions`, { method: 'GET' });
+      if (!response.ok) return;
+      const body = await response.json().catch(() => null);
+      if (Array.isArray(body)) setSubscriptions(body as ConnectedCalendar[]);
+    } catch {
+      // A list that cannot be read simply stays as it was.
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    void loadSubscriptions();
+  }, [loadSubscriptions]);
 
   const build = useMemo<CalendarCardBuild | null>(() => {
     if (!preview || columnId.length === 0) return null;
@@ -205,19 +235,16 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
   if (readonly) return null;
 
   const loadPreview = async (payload: { icsText?: string; url?: string }): Promise<void> => {
-    if (!canvasId || loading) return;
+    if (!apiBase || loading) return;
     setLoading(true);
     setError(null);
     setPreview(null);
     try {
-      const response = await fetch(
-        `/api/boards/${encodeURIComponent(canvasId)}/calendar-import`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        },
-      );
+      const response = await fetch(`${apiBase}/calendar-import`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       const body = await response.json().catch(() => null) as
         | { events?: ImportedEvent[]; truncated?: boolean; error?: string }
         | null;
@@ -269,6 +296,87 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
     }
   };
 
+  const connectSubscription = async (): Promise<void> => {
+    if (!apiBase || !columnId || url.trim().length === 0 || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: url.trim(), columnId, timeZone: browserTimeZone() }),
+      });
+      const body = await response.json().catch(() => null) as { added?: number; error?: string } | null;
+      if (!response.ok) {
+        setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        return;
+      }
+      toast.success(t('calendarConnectedToast', { count: body?.added ?? 0 }));
+      await actions.refetchFromServer();
+      onClose();
+    } catch {
+      setError(t('calendarReadFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateNow = async (subscription: ConnectedCalendar): Promise<void> => {
+    if (!apiBase || busySubscriptionId) return;
+    setBusySubscriptionId(subscription.id);
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions/${subscription.id}/sync`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ timeZone: browserTimeZone() }),
+      });
+      const body = await response.json().catch(() => null) as
+        | { added?: number; updated?: number; removed?: number; error?: string }
+        | null;
+      if (!response.ok) {
+        setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        return;
+      }
+      const added = body?.added ?? 0;
+      const updated = body?.updated ?? 0;
+      const removed = body?.removed ?? 0;
+      if (added === 0 && updated === 0 && removed === 0) {
+        toast.success(t('calendarUpToDate'));
+      } else {
+        toast.success(t('calendarUpdatedToast', { added, updated, removed }));
+      }
+      await actions.refetchFromServer();
+      await loadSubscriptions();
+    } catch {
+      setError(t('calendarReadFailed'));
+    } finally {
+      setBusySubscriptionId(null);
+    }
+  };
+
+  const disconnect = async (subscription: ConnectedCalendar): Promise<void> => {
+    if (!apiBase) return;
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions/${subscription.id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        setError(t('calendarReadFailed'));
+        return;
+      }
+      await actions.refetchFromServer();
+      await loadSubscriptions();
+    } catch {
+      setError(t('calendarReadFailed'));
+    }
+  };
+
+  const confirmAction = (): void => {
+    if (preview && mode === 'link' && keepUpdated) {
+      void connectSubscription();
+      return;
+    }
+    void handleImport();
+  };
+
   return (
     <div
       data-calendar-import-modal="true"
@@ -290,6 +398,43 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
             <X size={16} />
           </button>
         </div>
+
+        {subscriptions.length > 0 ? (
+          <div data-calendar-connected-list="true" className="mb-3 rounded-lg border border-gray-200 p-2">
+            <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">
+              {t('connectedCalendars')}
+            </p>
+            {subscriptions.map((subscription) => (
+              <div key={subscription.id} data-calendar-connected={subscription.id} className="flex items-center gap-2 py-1 text-[12px]">
+                <span className="min-w-0 flex-1 truncate text-slate-700">{subscription.urlHost}</span>
+                <span className="shrink-0 text-gray-500">
+                  {subscription.lastError
+                    ? subscription.lastError
+                    : subscription.lastSyncedAt
+                      ? t('updatedAgo', { time: formatUpdatedAgo(subscription.lastSyncedAt) })
+                      : ''}
+                </span>
+                <button
+                  type="button"
+                  data-calendar-update-now={subscription.id}
+                  disabled={busySubscriptionId === subscription.id}
+                  className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:bg-gray-50 disabled:opacity-50"
+                  onClick={() => { void updateNow(subscription); }}
+                >
+                  <RefreshCw size={11} className="mr-0.5 inline" />{t('updateNow')}
+                </button>
+                <button
+                  type="button"
+                  data-calendar-disconnect={subscription.id}
+                  className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-red-600 hover:bg-red-50"
+                  onClick={() => setPendingDisconnect(subscription)}
+                >
+                  {t('disconnect')}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div className="mb-3 flex gap-1 rounded-lg bg-gray-100 p-1 text-[12px]">
           <button
@@ -346,6 +491,15 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
             <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkHelpOutlook')}</p>
             <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkHelpApple')}</p>
             <p className="text-[11px] leading-snug text-gray-500">{t('calendarLinkNotSaved')}</p>
+            <label className="flex items-center gap-2 text-[12px] text-slate-700">
+              <input
+                type="checkbox"
+                data-calendar-keep-updated="true"
+                checked={keepUpdated}
+                onChange={(event) => setKeepUpdated(event.target.checked)}
+              />
+              {t('keepCalendarUpdated')}
+            </label>
           </div>
         )}
 
@@ -428,13 +582,25 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
               data-calendar-import-confirm="true"
               disabled={loading || progress !== null || build.cards.length === 0}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-              onClick={() => { void handleImport(); }}
+              onClick={confirmAction}
             >
               {t('importCount', { count: build.cards.length })}
             </button>
           ) : null}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={pendingDisconnect !== null}
+        onClose={() => setPendingDisconnect(null)}
+        onConfirm={() => { if (pendingDisconnect) void disconnect(pendingDisconnect); }}
+        title={t('disconnect')}
+        message={t('disconnectCalendarMessage', {
+          host: pendingDisconnect?.urlHost ?? '',
+          count: pendingDisconnect?.cardCount ?? 0,
+        })}
+        confirmText={t('disconnect')}
+      />
     </div>
   );
 }
