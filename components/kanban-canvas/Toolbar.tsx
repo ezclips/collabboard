@@ -7,6 +7,7 @@ import {
   Undo,
   Redo,
   Download,
+  Calendar,
   Columns,
   Rows,
   Layers,
@@ -16,6 +17,7 @@ import { useKanbanPersistence, useKanbanUI, useKanbanHistory, useKanbanReadonly 
 import type { CardGroupBy, Column, Row } from '@/types/kanban-canvas';
 import { useKanbanData } from './store.tsx';
 import { useKanbanI18n } from './useKanbanI18n';
+import { CalendarImportModal } from './CalendarImportModal';
 
 interface ToolbarProps {
   onExport?: () => void;
@@ -32,6 +34,7 @@ export const Toolbar = memo(function Toolbar({ onExport, onAddGroup }: ToolbarPr
   const data = useKanbanData();
   const { t } = useKanbanI18n();
   const [showGroupMenu, setShowGroupMenu] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const groupMenuRef = useRef<HTMLDivElement>(null);
 
   const canUndo = history.past.length > 0;
@@ -290,6 +293,19 @@ export const Toolbar = memo(function Toolbar({ onExport, onAddGroup }: ToolbarPr
         </>
       )}
 
+      {!readonly && (
+        <button
+          type="button"
+          data-calendar-import-open="true"
+          onClick={() => setShowImportModal(true)}
+          className="kanban-toolbar-btn"
+          title={t('importCalendar')}
+        >
+          <Calendar size={16} />
+          <span>{t('import')}</span>
+        </button>
+      )}
+
       {onExport && (
         <>
           <div className="kanban-toolbar-divider" />
@@ -303,6 +319,8 @@ export const Toolbar = memo(function Toolbar({ onExport, onAddGroup }: ToolbarPr
           </button>
         </>
       )}
+
+      <CalendarImportModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} />
     </div>
   );
 });

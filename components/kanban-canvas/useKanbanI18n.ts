@@ -151,7 +151,28 @@ type I18nKey =
   | 'deleteGroup'
   | 'deleteGroupMessage'
   | 'groupNamePlaceholder'
-  | 'enterGroupName';
+  | 'enterGroupName'
+  // PATCH-326. Calendar import.
+  | 'import'
+  | 'importCalendar'
+  | 'uploadIcsFile'
+  | 'calendarLink'
+  | 'calendarLinkHelpGoogle'
+  | 'calendarLinkHelpOutlook'
+  | 'calendarLinkHelpApple'
+  | 'calendarLinkNotSaved'
+  | 'preview'
+  | 'eventsRange'
+  | 'alreadyOnBoard'
+  | 'calendarTruncated'
+  | 'importingProgress'
+  | 'importCount'
+  | 'importedCount'
+  | 'importedSomeFailed'
+  | 'noEventsFound'
+  | 'calendarReadFailed'
+  | 'calendarTooLarge'
+  | 'chooseColumn';
 
 type Dict = Record<I18nKey, string>;
 
@@ -302,6 +323,26 @@ const en: Dict = {
   deleteGroupMessage: 'Delete "{label}"? Columns will become ungrouped.',
   groupNamePlaceholder: 'Group name...',
   enterGroupName: 'Enter group name',
+  import: 'Import',
+  importCalendar: 'Import calendar',
+  uploadIcsFile: 'Upload .ics file',
+  calendarLink: 'Calendar link',
+  calendarLinkHelpGoogle: 'Google Calendar: Settings → your calendar → "Secret address in iCal format".',
+  calendarLinkHelpOutlook: 'Outlook.com: Settings → Calendar → Shared calendars → Publish a calendar → ICS link.',
+  calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
+  calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
+  preview: 'Preview',
+  eventsRange: '{count} events from {from} to {to}',
+  alreadyOnBoard: '{count} are already on this board and will be skipped',
+  calendarTruncated: 'Only the first 500 events were read',
+  importingProgress: 'Importing {done} / {total}',
+  importCount: 'Import {count} events',
+  importedCount: 'Imported {count} events',
+  importedSomeFailed: 'Imported {imported}, {failed} failed',
+  noEventsFound: 'No events found in this calendar.',
+  calendarReadFailed: 'Could not read the calendar.',
+  calendarTooLarge: 'This calendar is too large.',
+  chooseColumn: 'Column',
 };
 
 const es: Dict = {
@@ -451,6 +492,26 @@ const es: Dict = {
   deleteGroupMessage: '¿Eliminar "{label}"? Las columnas quedarán sin grupo.',
   groupNamePlaceholder: 'Nombre del grupo...',
   enterGroupName: 'Ingrese nombre del grupo',
+  import: 'Import',
+  importCalendar: 'Import calendar',
+  uploadIcsFile: 'Upload .ics file',
+  calendarLink: 'Calendar link',
+  calendarLinkHelpGoogle: 'Google Calendar: Settings → your calendar → "Secret address in iCal format".',
+  calendarLinkHelpOutlook: 'Outlook.com: Settings → Calendar → Shared calendars → Publish a calendar → ICS link.',
+  calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
+  calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
+  preview: 'Preview',
+  eventsRange: '{count} events from {from} to {to}',
+  alreadyOnBoard: '{count} are already on this board and will be skipped',
+  calendarTruncated: 'Only the first 500 events were read',
+  importingProgress: 'Importing {done} / {total}',
+  importCount: 'Import {count} events',
+  importedCount: 'Imported {count} events',
+  importedSomeFailed: 'Imported {imported}, {failed} failed',
+  noEventsFound: 'No events found in this calendar.',
+  calendarReadFailed: 'Could not read the calendar.',
+  calendarTooLarge: 'This calendar is too large.',
+  chooseColumn: 'Column',
 };
 
 const fr: Dict = {
@@ -600,6 +661,26 @@ const fr: Dict = {
   deleteGroupMessage: 'Supprimer "{label}" ? Les colonnes seront dissociées.',
   groupNamePlaceholder: 'Nom du groupe...',
   enterGroupName: 'Entrez le nom du groupe',
+  import: 'Import',
+  importCalendar: 'Import calendar',
+  uploadIcsFile: 'Upload .ics file',
+  calendarLink: 'Calendar link',
+  calendarLinkHelpGoogle: 'Google Calendar: Settings → your calendar → "Secret address in iCal format".',
+  calendarLinkHelpOutlook: 'Outlook.com: Settings → Calendar → Shared calendars → Publish a calendar → ICS link.',
+  calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
+  calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
+  preview: 'Preview',
+  eventsRange: '{count} events from {from} to {to}',
+  alreadyOnBoard: '{count} are already on this board and will be skipped',
+  calendarTruncated: 'Only the first 500 events were read',
+  importingProgress: 'Importing {done} / {total}',
+  importCount: 'Import {count} events',
+  importedCount: 'Imported {count} events',
+  importedSomeFailed: 'Imported {imported}, {failed} failed',
+  noEventsFound: 'No events found in this calendar.',
+  calendarReadFailed: 'Could not read the calendar.',
+  calendarTooLarge: 'This calendar is too large.',
+  chooseColumn: 'Column',
 };
 
 const dictionaries: Record<KanbanLocale, Dict> = { en, es, fr };
