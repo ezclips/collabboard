@@ -593,6 +593,17 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
             </button>
           ) : null}
         </div>
+
+        {/* PATCH-332. A real link to where connected calendars are managed. */}
+        <div className="mt-3 text-center">
+          <a
+            href="/dashboard/settings/integrations"
+            data-calendar-settings-link="true"
+            className="text-[11px] text-blue-600 hover:underline"
+          >
+            {t('allConnectedCalendars')}
+          </a>
+        </div>
       </div>
 
       <ConfirmModal

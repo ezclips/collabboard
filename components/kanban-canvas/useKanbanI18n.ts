@@ -164,6 +164,7 @@ type I18nKey =
   | 'calendarLinkSavedEncrypted'
   | 'calendarButton'
   | 'calendarButtonTitle'
+  | 'allConnectedCalendars'
   | 'preview'
   | 'eventsRange'
   | 'alreadyOnBoard'
@@ -349,6 +350,7 @@ const en: Dict = {
   calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
   calendarButton: 'Calendar',
   calendarButtonTitle: 'Import or connect a calendar',
+  allConnectedCalendars: 'All connected calendars',
   preview: 'Preview',
   eventsRange: '{count} events from {from} to {to}',
   alreadyOnBoard: '{count} are already on this board and will be skipped',
@@ -532,6 +534,7 @@ const es: Dict = {
   calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
   calendarButton: 'Calendar',
   calendarButtonTitle: 'Import or connect a calendar',
+  allConnectedCalendars: 'All connected calendars',
   preview: 'Preview',
   eventsRange: '{count} events from {from} to {to}',
   alreadyOnBoard: '{count} are already on this board and will be skipped',
@@ -715,6 +718,7 @@ const fr: Dict = {
   calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
   calendarButton: 'Calendar',
   calendarButtonTitle: 'Import or connect a calendar',
+  allConnectedCalendars: 'All connected calendars',
   preview: 'Preview',
   eventsRange: '{count} events from {from} to {to}',
   alreadyOnBoard: '{count} are already on this board and will be skipped',

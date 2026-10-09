@@ -251,4 +251,11 @@ describe('PATCH-329 tab switching and the storage wording', () => {
     await act(async () => { (q('[data-calendar-keep-updated="true"]') as HTMLInputElement).click(); });
     expect(note()).toContain('calendarLinkNotSaved');
   });
+
+  it('PATCH-332 links to the connected calendars in Settings', async () => {
+    await mount(<CalendarImportModal isOpen onClose={vi.fn()} />);
+    const link = q('[data-calendar-settings-link="true"]') as HTMLAnchorElement | null;
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute('href')).toBe('/dashboard/settings/integrations');
+  });
 });

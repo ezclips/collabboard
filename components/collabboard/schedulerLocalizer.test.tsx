@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import moment from 'moment';
-import { schedulerLocalizer } from '@/lib/scheduler/schedulerLocalizer';
+import { schedulerLocalizer, SCHEDULER_FORMATS } from '@/lib/scheduler/schedulerLocalizer';
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -34,6 +34,21 @@ describe('PATCH-331 Addendum 1 schedulerLocalizer', () => {
       .toBe('Mon 28 Sep 2026');
   });
 
+  it('formats clock times as 24-hour HH:mm', () => {
+    expect(moment('2026-10-09T06:00').format(SCHEDULER_FORMATS.timeGutterFormat)).toBe('06:00');
+    expect(moment('2026-10-09T18:30').format(SCHEDULER_FORMATS.agendaTimeFormat)).toBe('18:30');
+  });
+
+  it('formats an event time range as "06:00 – 18:30"', () => {
+    const start = new Date(2026, 9, 9, 6, 0);
+    const end = new Date(2026, 9, 9, 18, 30);
+    expect(SCHEDULER_FORMATS.eventTimeRangeFormat({ start, end })).toBe('06:00 – 18:30');
+    expect(SCHEDULER_FORMATS.eventTimeRangeStartFormat({ start, end })).toBe('06:00 –');
+    expect(SCHEDULER_FORMATS.eventTimeRangeEndFormat({ start, end })).toBe('– 18:30');
+    expect(SCHEDULER_FORMATS.selectRangeFormat({ start, end })).toBe('06:00 – 18:30');
+    expect(SCHEDULER_FORMATS.agendaTimeRangeFormat({ start, end })).toBe('06:00 – 18:30');
+  });
+
   it('moment is imported ONLY by the scheduler files', () => {
     const root = process.cwd();
     const importers = ['app', 'components', 'lib', 'workers', 'scripts']
@@ -47,9 +62,9 @@ describe('PATCH-331 Addendum 1 schedulerLocalizer', () => {
       'moment is imported only by the scheduler files: lib/scheduler/schedulerLocalizer sets the '
       + 'GLOBAL Monday-first week, so a new importer anywhere would silently change week starts.',
     ).toEqual([
-      'components/canvas/StandaloneSchedulerCanvas.tsx',
       'components/scheduler-canvas/SchedulerToolbar.tsx',
       'lib/scheduler/schedulerLocalizer.ts',
     ]);
-  });
+    // The synchronous source walk reads every file; give it room under load.
+  }, 30_000);
 });

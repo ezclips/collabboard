@@ -10539,7 +10539,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 <StandaloneSchedulerCanvas
                   padlets={padlets}
                   canvasId={canvas.id}
-                  title={canvas.title || 'Untitled canvas'}
                   readOnly={!canUseFreeformEditButton}
                   selectedContainerId={selectedSchedulerContainerId}
                   onUpdatePadletMetadata={updatePadletMetadata}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, Suspense } from 'react';
-import { Check, Loader2 } from 'lucide-react';
+import { Calendar, Check, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 import { toast } from 'sonner';
@@ -33,6 +33,57 @@ const OneDriveIcon = () => (
   </svg>
 );
 
+// PATCH-332. A calendar connected to a board. The link itself never reaches
+// the browser; only its host is shown.
+interface ConnectedCalendar {
+  id: string;
+  boardId: string | null;
+  boardTitle: string;
+  urlHost: string;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+}
+
+/** A short reason code from the sync engine, in plain words. */
+function calendarErrorWords(code: string): string {
+  switch (code) {
+    case 'upstream_error':
+    case 'network_error':
+      return 'Could not reach the calendar';
+    case 'not_a_calendar':
+      return 'That link is not a calendar';
+    case 'blocked_host':
+    case 'invalid_url':
+    case 'dns_failed':
+      return 'That link is not allowed';
+    case 'missing_key':
+      return 'Calendar links are not configured on this server';
+    case 'too_large':
+      return 'That calendar is too large';
+    case 'too_many_redirects':
+      return 'That link redirects too many times';
+    case 'no_column':
+      return 'The board has no column to import into';
+    case 'unavailable':
+      return 'Could not update right now';
+    default:
+      return 'Could not update this calendar';
+  }
+}
+
+function relativeTime(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'just now';
+  const seconds = Math.max(0, Math.floor((now.getTime() - then) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 const BASE_INTEGRATIONS: Integration[] = [
   {
     id: 'google-drive',
@@ -55,6 +106,7 @@ function IntegrationsContent() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>(BASE_INTEGRATIONS);
+  const [calendars, setCalendars] = useState<ConnectedCalendar[]>([]);
 
   useEffect(() => {
     void loadIntegrations();
@@ -108,6 +160,19 @@ function IntegrationsContent() {
           };
         })
       );
+
+      // PATCH-332. The connected calendars. A failure here must not fail the
+      // integrations list, so it is read separately.
+      try {
+        const calendarsRes = await fetch('/api/settings/calendar-subscriptions', {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const calendarsJson = await calendarsRes.json().catch(() => null);
+        setCalendars(Array.isArray(calendarsJson?.calendars) ? calendarsJson.calendars : []);
+      } catch {
+        setCalendars([]);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load integrations';
       console.error('Error loading integrations:', { err, message });
@@ -177,6 +242,28 @@ function IntegrationsContent() {
     }
   };
 
+  const handleDisconnectCalendar = async (calendar: ConnectedCalendar) => {
+    const boardLabel = calendar.boardTitle || 'this board';
+    if (!window.confirm(`Disconnect ${calendar.urlHost}? Its cards will be removed from ${boardLabel}.`)) {
+      return;
+    }
+    if (!calendar.boardId) return;
+    try {
+      // The DELETE route authorises with the session cookie, so no Bearer token
+      // is needed here.
+      const res = await fetch(
+        `/api/boards/${encodeURIComponent(calendar.boardId)}/calendar-subscriptions/${encodeURIComponent(calendar.id)}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) throw new Error('Failed to disconnect calendar');
+      setCalendars((prev) => prev.filter((entry) => entry.id !== calendar.id));
+      toast.success('Calendar disconnected');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to disconnect calendar';
+      toast.error(message);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -224,6 +311,62 @@ function IntegrationsContent() {
             </button>
           </div>
         ))}
+      </div>
+
+      {/* PATCH-332. Connected calendars, next to the file integrations. */}
+      <div className="mt-8">
+        <h2 className="mb-3 text-lg font-semibold text-gray-900">Calendars</h2>
+        <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+          {calendars.length === 0 ? (
+            <div data-calendars-empty="true" className="px-6 py-5 text-sm text-gray-500">
+              No calendars connected. Connect one on a board: Import in the Kanban toolbar, or the Calendar button in the Gantt or Scheduler.
+            </div>
+          ) : (
+            calendars.map((calendar) => (
+              <div
+                key={calendar.id}
+                data-calendar-row={calendar.id}
+                className="flex items-center justify-between px-6 py-5"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 text-gray-500"><Calendar className="h-8 w-8" /></div>
+                  <div>
+                    <div className="font-medium text-gray-900">{calendar.urlHost}</div>
+                    <div className="mt-1 text-sm text-gray-500">
+                      on{' '}
+                      {calendar.boardId ? (
+                        <a
+                          href={`/dashboard/canvas/${calendar.boardId}`}
+                          data-calendar-board-link={calendar.id}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {calendar.boardTitle || 'a board'}
+                        </a>
+                      ) : (
+                        calendar.boardTitle || 'a board'
+                      )}
+                    </div>
+                    <div className="mt-1 text-sm text-gray-500">
+                      {calendar.lastError
+                        ? calendarErrorWords(calendar.lastError)
+                        : calendar.lastSyncedAt
+                          ? `Updated ${relativeTime(calendar.lastSyncedAt)}`
+                          : ''}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-calendar-disconnect={calendar.id}
+                  onClick={() => void handleDisconnectCalendar(calendar)}
+                  className="flex items-center gap-2 rounded-full bg-gray-100 px-6 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-200"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

@@ -19,3 +19,24 @@ moment.updateLocale('en', { week: { dow: 1, doy: 4 } });
 
 /** The one localizer both calendars use. */
 export const schedulerLocalizer = momentLocalizer(moment);
+
+interface TimeRange {
+  readonly start: Date;
+  readonly end: Date;
+}
+
+const hm = (date: Date) => moment(date).format('HH:mm');
+
+/**
+ * PATCH-332. 24-hour times for both calendars. The day headings stay as they
+ * are ("05 Mon"); only clock times change.
+ */
+export const SCHEDULER_FORMATS = {
+  timeGutterFormat: 'HH:mm',
+  eventTimeRangeFormat: ({ start, end }: TimeRange) => `${hm(start)} – ${hm(end)}`,
+  eventTimeRangeStartFormat: ({ start }: TimeRange) => `${hm(start)} –`,
+  eventTimeRangeEndFormat: ({ end }: TimeRange) => `– ${hm(end)}`,
+  selectRangeFormat: ({ start, end }: TimeRange) => `${hm(start)} – ${hm(end)}`,
+  agendaTimeFormat: 'HH:mm',
+  agendaTimeRangeFormat: ({ start, end }: TimeRange) => `${hm(start)} – ${hm(end)}`,
+} as const;

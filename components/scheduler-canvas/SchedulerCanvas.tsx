@@ -7,7 +7,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import '@/components/canvas/scheduler-theme.css';
 import './scheduler.css';
-import { schedulerLocalizer } from '@/lib/scheduler/schedulerLocalizer';
+import { schedulerLocalizer, SCHEDULER_FORMATS } from '@/lib/scheduler/schedulerLocalizer';
 import { SchedulerToolbar } from './SchedulerToolbar';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from '@/components/kanban-canvas/store';
@@ -249,6 +249,7 @@ export function SchedulerCanvas() {
       <div className="scheduler-container">
         <DndCalendar
           localizer={schedulerLocalizer}
+          formats={SCHEDULER_FORMATS}
           events={events}
           date={currentDate}
           view={currentView}

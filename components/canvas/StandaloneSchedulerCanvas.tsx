@@ -3,13 +3,12 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type ComponentType } from 'react';
 import { Calendar, type View } from 'react-big-calendar';
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
-import moment from 'moment';
 import type { Padlet } from '@/types/collabboard';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './scheduler-theme.css';
 import SchedulerEventContextMenu from '@/components/canvas/SchedulerEventContextMenu';
-import { schedulerLocalizer } from '@/lib/scheduler/schedulerLocalizer';
+import { schedulerLocalizer, SCHEDULER_FORMATS } from '@/lib/scheduler/schedulerLocalizer';
 import { SchedulerToolbar } from '@/components/scheduler-canvas/SchedulerToolbar';
 import { containerBadgeColors } from '@/lib/domain/canvas/containerBadgeColors';
 import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
@@ -31,8 +30,6 @@ type SchedulerEvent = {
 type StandaloneSchedulerCanvasProps = {
   padlets: Padlet[];
   canvasId: string;
-  /** PATCH-331. The board title, shown in a bar above the calendar. */
-  title?: string;
   readOnly?: boolean;
   selectedContainerId?: string | null;
   onUpdatePadletMetadata: (padletId: string, metadataUpdates: Record<string, unknown>) => Promise<void> | void;
@@ -96,7 +93,6 @@ function floorToQuarter(minutes: number): number {
 export default function StandaloneSchedulerCanvas({
   padlets,
   canvasId,
-  title,
   readOnly = false,
   selectedContainerId = null,
   onUpdatePadletMetadata,
@@ -882,13 +878,11 @@ export default function StandaloneSchedulerCanvas({
     [CustomEvent, CustomEventWrapper, TimeSlotWrapper],
   );
 
-  // PATCH-331. Readable agenda dates/times instead of US numeric dates.
-  const calendarFormats = useMemo(() => ({
-    agendaDateFormat: 'ddd D MMM',
-    agendaTimeFormat: 'HH:mm',
-    agendaTimeRangeFormat: ({ start, end }: { start: Date; end: Date }) =>
-      `${moment(start).format('HH:mm')} – ${moment(end).format('HH:mm')}`,
-  }), []);
+  // PATCH-331/332. Readable agenda dates plus the shared 24-hour times.
+  const calendarFormats = useMemo(
+    () => ({ ...SCHEDULER_FORMATS, agendaDateFormat: 'ddd D MMM' }),
+    [],
+  );
 
   const clearExternalDragState = useCallback(() => {
     externalDragItemRef.current = null;
@@ -945,12 +939,14 @@ export default function StandaloneSchedulerCanvas({
         clearExternalDragState();
       }}
     >
-      {/* PATCH-331. The board title, above the calendar. */}
-      {title ? (
-        <div className="scheduler-title-bar" data-scheduler-title="true">
-          <span className="scheduler-title-bar-text">{title}</span>
+      {/* PATCH-331/332. A "Scheduler" title bar, like the Gantt/Scheduler
+          panels in Kanban. The right side is left open for PATCH-333's
+          Calendar button. */}
+      <div className="scheduler-title-bar" data-scheduler-title="true">
+        <div className="scheduler-title-bar-left">
+          <span className="scheduler-title-bar-text">Scheduler</span>
         </div>
-      ) : null}
+      </div>
       {/* The calendar is measured BELOW the title bar, so its height accounts
           for the bar and the last row is never clipped. */}
       <div className="scheduler-calendar-host" ref={wrapperRef}>
