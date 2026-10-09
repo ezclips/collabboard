@@ -5,9 +5,12 @@ import { z } from 'zod';
 
 import {
   checkCalendarRateLimit,
+  resolveCalendarBoardKind,
   syncCalendarSubscription,
+  type CalendarBoardKind,
   type CalendarSyncClient,
 } from '@/lib/server/kanban/calendarSync';
+import { syncSchedulerCalendarSubscription } from '@/lib/server/scheduler/calendarSchedulerSync';
 import { CalendarLinkCipherError, encryptCalendarLink } from '@/lib/server/kanban/calendarLinkCipher';
 import { IcsParseError, parseIcsEvents } from '@/lib/kanban/icsImport';
 import { PublicUrlError, fetchIcsText } from '@/lib/server/net/publicUrlGuard';
@@ -45,19 +48,11 @@ function isValidTimeZone(timeZone: unknown): timeZone is string {
 
 const createSchema = z.object({
   url: z.string().min(1),
-  columnId: z.string().uuid(),
+  // Required on a Kanban board; ignored on a Scheduler board.
+  columnId: z.string().uuid().optional(),
   swimlaneId: z.string().uuid().optional(),
   timeZone: z.string().min(1),
 }).strict();
-
-async function isKanbanBoard(client: CalendarSyncClient, boardId: string): Promise<boolean> {
-  const { data, error } = await client
-    .from('boards')
-    .select('id, layout')
-    .eq('id', boardId)
-    .maybeSingle();
-  return !error && !!data && data.layout === 'kanban';
-}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -70,7 +65,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
     const { id: boardId } = await context.params;
     const client = sessionClient as unknown as CalendarSyncClient;
-    if (!(await isKanbanBoard(client, boardId))) {
+    const kind = await resolveCalendarBoardKind(client, boardId);
+    if (kind === null) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
     }
 
@@ -81,16 +77,32 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (error) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
 
     const rows = Array.isArray(subscriptions) ? (subscriptions as Record<string, unknown>[]) : [];
-
-    const { data: cardRows } = await client
-      .from('kanban_cards')
-      .select('calendar_subscription_id')
-      .eq('canvas_id', boardId);
     const counts = new Map<string, number>();
-    if (Array.isArray(cardRows)) {
-      for (const row of cardRows as Record<string, unknown>[]) {
-        const id = typeof row.calendar_subscription_id === 'string' ? row.calendar_subscription_id : null;
-        if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+
+    if (kind === 'kanban') {
+      const { data: cardRows } = await client
+        .from('kanban_cards')
+        .select('calendar_subscription_id')
+        .eq('canvas_id', boardId);
+      if (Array.isArray(cardRows)) {
+        for (const row of cardRows as Record<string, unknown>[]) {
+          const id = typeof row.calendar_subscription_id === 'string' ? row.calendar_subscription_id : null;
+          if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+        }
+      }
+    } else {
+      const { data: entryRows } = await client
+        .from('padlets')
+        .select('metadata')
+        .eq('board_id', boardId);
+      if (Array.isArray(entryRows)) {
+        for (const row of entryRows as Record<string, unknown>[]) {
+          const metadata = row.metadata;
+          const id = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+            ? (metadata as Record<string, unknown>).calendarSubscriptionId
+            : undefined;
+          if (typeof id === 'string') counts.set(id, (counts.get(id) ?? 0) + 1);
+        }
       }
     }
 
@@ -136,8 +148,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const { id: boardId } = await context.params;
     const client = sessionClient as unknown as CalendarSyncClient;
-    if (!(await isKanbanBoard(client, boardId))) {
+    const kind = await resolveCalendarBoardKind(client, boardId);
+    if (kind === null) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+    }
+    // A Kanban board needs a target column; a Scheduler board takes none.
+    if (kind === 'kanban' && !parsed.data.columnId) {
+      return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
     }
 
     const { data: existing, error: existingError } = await client
@@ -188,6 +205,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const urlHost = new URL(parsed.data.url.replace(/^webcal:\/\//i, 'https://')).hostname;
+    const targetColumnId = kind === 'kanban' ? (parsed.data.columnId as string) : null;
+    const targetSwimlaneId = kind === 'kanban' ? (parsed.data.swimlaneId ?? null) : null;
     const { data: inserted, error: insertError } = await client
       .from('kanban_calendar_subscriptions')
       .insert({
@@ -195,8 +214,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         created_by: user.id,
         url_ciphertext: urlCiphertext,
         url_host: urlHost,
-        target_column_id: parsed.data.columnId,
-        target_swimlane_id: parsed.data.swimlaneId ?? null,
+        target_column_id: targetColumnId,
+        target_swimlane_id: targetSwimlaneId,
       })
       .select('id')
       .maybeSingle();
@@ -205,13 +224,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     const subscriptionId = String((inserted as Record<string, unknown>).id);
 
-    const result = await syncCalendarSubscription(client, {
-      id: subscriptionId,
-      canvasId: boardId,
-      urlCiphertext,
-      targetColumnId: parsed.data.columnId,
-      targetSwimlaneId: parsed.data.swimlaneId ?? null,
-    }, { timeZone: parsed.data.timeZone });
+    const result = kind === 'scheduler'
+      ? await syncSchedulerCalendarSubscription(client, {
+        id: subscriptionId,
+        canvasId: boardId,
+        urlCiphertext,
+        targetColumnId: null,
+        targetSwimlaneId: null,
+      }, { timeZone: parsed.data.timeZone })
+      : await syncCalendarSubscription(client, {
+        id: subscriptionId,
+        canvasId: boardId,
+        urlCiphertext,
+        targetColumnId: targetColumnId as string,
+        targetSwimlaneId,
+      }, { timeZone: parsed.data.timeZone });
 
     return NextResponse.json({
       id: subscriptionId,

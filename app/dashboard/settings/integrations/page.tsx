@@ -39,6 +39,7 @@ interface ConnectedCalendar {
   id: string;
   boardId: string | null;
   boardTitle: string;
+  boardLayout: string | null;
   urlHost: string;
   lastSyncedAt: string | null;
   lastError: string | null;
@@ -244,7 +245,12 @@ function IntegrationsContent() {
 
   const handleDisconnectCalendar = async (calendar: ConnectedCalendar) => {
     const boardLabel = calendar.boardTitle || 'this board';
-    if (!window.confirm(`Disconnect ${calendar.urlHost}? Its cards will be removed from ${boardLabel}.`)) {
+    // PATCH-333. A Scheduler board's entries may hold the user's posts, which
+    // are kept; the wording says so.
+    const message = calendar.boardLayout === 'scheduler'
+      ? `Disconnect ${calendar.urlHost}? Its entries will be removed from ${boardLabel}; entries with posts inside are kept.`
+      : `Disconnect ${calendar.urlHost}? Its cards will be removed from ${boardLabel}.`;
+    if (!window.confirm(message)) {
       return;
     }
     if (!calendar.boardId) return;

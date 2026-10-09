@@ -112,6 +112,15 @@ describe('PATCH-326 fetchIcsText follows redirects safely', () => {
     expect((error as PublicUrlError).status).toBe(500);
     expect((error as PublicUrlError).message).not.toContain('93.184.216.34');
   });
+
+  it('PATCH-333 Addendum 1 asks intermediaries for a fresh copy', async () => {
+    const fetchImpl = vi.fn(async () => new Response('BEGIN:VCALENDAR', { status: 200 })) as unknown as typeof fetch;
+    await fetchIcsText(publicLiteral, { fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledWith(publicLiteral, expect.objectContaining({
+      cache: 'no-store',
+      headers: expect.objectContaining({ 'Cache-Control': 'no-cache' }),
+    }));
+  });
 });
 
 describe('PATCH-327 fetchPublicText is the general form', () => {
@@ -125,10 +134,10 @@ describe('PATCH-327 fetchPublicText is the general form', () => {
       userAgent: 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
     });
     expect(fetchImpl).toHaveBeenCalledWith(publicLiteral, expect.objectContaining({
-      headers: {
+      headers: expect.objectContaining({
         'User-Agent': 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
         Accept: 'text/html,*/*',
-      },
+      }),
     }));
   });
 

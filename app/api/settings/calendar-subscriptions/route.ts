@@ -57,28 +57,35 @@ export async function GET(req: NextRequest) {
         .filter((id): id is string => typeof id === 'string'),
     )];
 
-    const boardTitles = new Map<string, string>();
+    const boards = new Map<string, { title: string; layout: string | null }>();
     if (boardIds.length > 0) {
-      const { data: boards } = await supabase
+      const { data: boardRows } = await supabase
         .from('boards')
-        .select('id, title')
+        .select('id, title, layout')
         .in('id', boardIds);
-      for (const board of boards ?? []) {
+      for (const board of boardRows ?? []) {
         if (typeof board.id === 'string') {
-          boardTitles.set(board.id, typeof board.title === 'string' ? board.title : '');
+          boards.set(board.id, {
+            title: typeof board.title === 'string' ? board.title : '',
+            layout: typeof board.layout === 'string' ? board.layout : null,
+          });
         }
       }
     }
 
     return NextResponse.json({
-      calendars: rows.map((row) => ({
-        id: String(row.id),
-        boardId: typeof row.canvas_id === 'string' ? row.canvas_id : null,
-        boardTitle: typeof row.canvas_id === 'string' ? (boardTitles.get(row.canvas_id) ?? '') : '',
-        urlHost: typeof row.url_host === 'string' ? row.url_host : '',
-        lastSyncedAt: typeof row.last_synced_at === 'string' ? row.last_synced_at : null,
-        lastError: typeof row.last_error === 'string' ? row.last_error : null,
-      })),
+      calendars: rows.map((row) => {
+        const board = typeof row.canvas_id === 'string' ? boards.get(row.canvas_id) : undefined;
+        return {
+          id: String(row.id),
+          boardId: typeof row.canvas_id === 'string' ? row.canvas_id : null,
+          boardTitle: board?.title ?? '',
+          boardLayout: board?.layout ?? null,
+          urlHost: typeof row.url_host === 'string' ? row.url_host : '',
+          lastSyncedAt: typeof row.last_synced_at === 'string' ? row.last_synced_at : null,
+          lastError: typeof row.last_error === 'string' ? row.last_error : null,
+        };
+      }),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Internal server error';

@@ -29,6 +29,22 @@
   gap: 8px;
 }
 
+/* PATCH-333. The Calendar button in the title bar; same look as the Kanban
+   panels' button (scheduler.css). Both files are loaded by their calendars. */
+.scheduler-calendar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
 .scheduler-title-bar-text {
   font-size: 13px;
   font-weight: 600;

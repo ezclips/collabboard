@@ -5,11 +5,13 @@ import { z } from 'zod';
 
 import {
   checkCalendarRateLimit,
+  resolveCalendarBoardKind,
   syncCalendarSubscription,
   type CalendarSyncClient,
 } from '@/lib/server/kanban/calendarSync';
+import { syncSchedulerCalendarSubscription } from '@/lib/server/scheduler/calendarSchedulerSync';
 
-/** PATCH-328. Update one connected calendar now, or when it is stale enough. */
+/** PATCH-328/333. Update one connected calendar now, or when it is stale enough. */
 
 export const runtime = 'nodejs';
 
@@ -38,6 +40,38 @@ interface ClaimClient {
   from(table: string): { update(values: Record<string, unknown>): ClaimQuery };
 }
 
+/**
+ * PATCH-333 Addendum 1. A sync that failed must not answer 200 -- otherwise the
+ * modal's "Update now" reads the zero counts as "up to date". The reason code
+ * becomes an error status and a plain-words message (never the link).
+ */
+function syncFailureResponse(reason: string): { status: number; error: string } {
+  switch (reason) {
+    case 'not_a_calendar':
+      return { status: 422, error: 'This link did not return a calendar' };
+    case 'missing_key':
+      return { status: 503, error: 'Calendar links are not configured on this server.' };
+    case 'unavailable':
+      return { status: 503, error: 'Could not update this calendar right now.' };
+    case 'invalid_ciphertext':
+      return { status: 503, error: 'This calendar link could not be read.' };
+    case 'invalid_url':
+    case 'blocked_host':
+    case 'dns_failed':
+      return { status: 502, error: 'That calendar link is not allowed.' };
+    case 'too_many_redirects':
+      return { status: 502, error: 'The calendar link redirected too many times.' };
+    case 'too_large':
+      return { status: 502, error: 'This calendar is too large.' };
+    case 'upstream_error':
+      return { status: 502, error: 'The calendar link could not be read.' };
+    case 'network_error':
+      return { status: 502, error: 'The calendar link could not be reached.' };
+    default:
+      return { status: 502, error: 'The calendar could not be updated.' };
+  }
+}
+
 function isValidTimeZone(timeZone: unknown): timeZone is string {
   if (typeof timeZone !== 'string' || timeZone.length === 0) return false;
   try {
@@ -52,15 +86,6 @@ const bodySchema = z.object({
   timeZone: z.string().min(1),
   ifOlderThanSeconds: z.number().int().positive().optional(),
 }).strict();
-
-async function isKanbanBoard(client: CalendarSyncClient, boardId: string): Promise<boolean> {
-  const { data, error } = await client
-    .from('boards')
-    .select('id, layout')
-    .eq('id', boardId)
-    .maybeSingle();
-  return !error && !!data && data.layout === 'kanban';
-}
 
 export async function POST(
   request: Request,
@@ -90,7 +115,8 @@ export async function POST(
 
     const { id: boardId, subId } = await context.params;
     const client = sessionClient as unknown as CalendarSyncClient;
-    if (!(await isKanbanBoard(client, boardId))) {
+    const kind = await resolveCalendarBoardKind(client, boardId);
+    if (kind === null) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
     }
 
@@ -145,19 +171,29 @@ export async function POST(
       if (!claimed) return NextResponse.json({ skipped: true });
     }
 
-    const result = await syncCalendarSubscription(client, {
+    const subscriptionInput = {
       id: String(subscription.id),
       canvasId: boardId,
       urlCiphertext: String(subscription.url_ciphertext),
       targetColumnId: typeof subscription.target_column_id === 'string' ? subscription.target_column_id : null,
       targetSwimlaneId: typeof subscription.target_swimlane_id === 'string' ? subscription.target_swimlane_id : null,
-    }, { timeZone: parsed.data.timeZone });
+    };
+    const result = kind === 'scheduler'
+      ? await syncSchedulerCalendarSubscription(client, subscriptionInput, { timeZone: parsed.data.timeZone })
+      : await syncCalendarSubscription(client, subscriptionInput, { timeZone: parsed.data.timeZone });
+
+    if (result.reason) {
+      const failure = syncFailureResponse(result.reason);
+      return NextResponse.json(
+        { error: failure.error, reason: result.reason },
+        { status: failure.status },
+      );
+    }
 
     return NextResponse.json({
       added: result.added,
       updated: result.updated,
       removed: result.removed,
-      ...(result.reason ? { reason: result.reason } : {}),
     });
   } catch {
     return NextResponse.json({ error: 'Unexpected error.' }, { status: 500 });

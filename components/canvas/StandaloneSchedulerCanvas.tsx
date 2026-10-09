@@ -8,8 +8,10 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './scheduler-theme.css';
 import SchedulerEventContextMenu from '@/components/canvas/SchedulerEventContextMenu';
+import { Calendar as CalendarIcon } from 'lucide-react';
 import { schedulerLocalizer, SCHEDULER_FORMATS } from '@/lib/scheduler/schedulerLocalizer';
 import { SchedulerToolbar } from '@/components/scheduler-canvas/SchedulerToolbar';
+import { CalendarImportModal } from '@/components/kanban-canvas/CalendarImportModal';
 import { containerBadgeColors } from '@/lib/domain/canvas/containerBadgeColors';
 import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 
@@ -31,6 +33,8 @@ type StandaloneSchedulerCanvasProps = {
   padlets: Padlet[];
   canvasId: string;
   readOnly?: boolean;
+  /** PATCH-333. Reload the board's posts after a calendar import/sync. */
+  onRefresh?: () => void;
   selectedContainerId?: string | null;
   onUpdatePadletMetadata: (padletId: string, metadataUpdates: Record<string, unknown>) => Promise<void> | void;
   onCreatePadlet: (
@@ -94,6 +98,7 @@ export default function StandaloneSchedulerCanvas({
   padlets,
   canvasId,
   readOnly = false,
+  onRefresh,
   selectedContainerId = null,
   onUpdatePadletMetadata,
   onCreatePadlet,
@@ -106,6 +111,7 @@ export default function StandaloneSchedulerCanvas({
 }: StandaloneSchedulerCanvasProps) {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>('week');
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const suppressNextSelectRef = useRef(false);
   const eventMutationInFlightRef = useRef<Set<string>>(new Set());
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -201,6 +207,48 @@ export default function StandaloneSchedulerCanvas({
     };
   }, [readOnly]); // stable — all mutable state accessed through refs
 
+  // PATCH-333. Update the board's connected calendars once per mount, silently.
+  // Same logic as KanbanCalendarAutoSync, but the board is this Scheduler board.
+  const calendarAutoSyncRanRef = useRef(false);
+  useEffect(() => {
+    if (!canvasId || readOnly || calendarAutoSyncRanRef.current) return;
+    calendarAutoSyncRanRef.current = true;
+
+    const timeZone = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+    })();
+    const base = `/api/boards/${encodeURIComponent(canvasId)}/calendar-subscriptions`;
+
+    void (async () => {
+      let changed = false;
+      try {
+        const response = await fetch(base, { method: 'GET' });
+        if (!response.ok) return;
+        const subscriptions = await response.json().catch(() => null);
+        if (!Array.isArray(subscriptions)) return;
+        // One after another, so a slow calendar does not hold up the rest.
+        for (const subscription of subscriptions as { id?: unknown }[]) {
+          if (typeof subscription?.id !== 'string') continue;
+          try {
+            const sync = await fetch(`${base}/${subscription.id}/sync`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ timeZone, ifOlderThanSeconds: 3600 }),
+            });
+            if (!sync.ok) continue;
+            const body = await sync.json().catch(() => null) as { skipped?: boolean } | null;
+            if (body && body.skipped !== true) changed = true;
+          } catch {
+            // Silent: failures surface in the modal's connected-calendars list.
+          }
+        }
+      } catch {
+        // Silent.
+      }
+      if (changed) onRefresh?.();
+    })();
+  }, [canvasId, readOnly, onRefresh]);
+
   const events = useMemo<SchedulerEvent[]>(() => {
     const result: SchedulerEvent[] = [];
     padlets
@@ -244,6 +292,19 @@ export default function StandaloneSchedulerCanvas({
       });
     return result;
   }, [padlets]);
+
+  // PATCH-333. Existing entries, for the modal's duplicate preview.
+  const schedulerEntrySummaries = useMemo(
+    () => padlets
+      .filter((padlet) => !padlet.metadata?.parentId)
+      .map((padlet) => ({
+        title: padlet.title?.trim() || '',
+        startDate: typeof padlet.metadata?.start_date === 'string' ? padlet.metadata.start_date : '',
+        endDate: typeof padlet.metadata?.end_date === 'string' ? padlet.metadata.end_date : '',
+      }))
+      .filter((entry) => entry.startDate.length > 0),
+    [padlets],
+  );
 
   const handleEventMoveOrResize = async ({
     event,
@@ -772,6 +833,18 @@ export default function StandaloneSchedulerCanvas({
     const cardColor = typeof metadata?.cardColor === 'string' ? metadata.cardColor : null;
     const eventBackground = cardColor && cardColor !== '#ffffff' ? cardColor : DEFAULT_EVENT_BACKGROUND;
     const { textColor: badgeTextColor, badgeBg } = containerBadgeColors(eventBackground);
+    // PATCH-333. An entry created from a connected calendar says so.
+    const fromCalendar = typeof metadata?.calendarSubscriptionId === 'string';
+    const calendarIcon = fromCalendar ? (
+      <span
+        data-scheduler-calendar-badge="true"
+        className="shrink-0"
+        title="From a connected calendar"
+        aria-label="From a connected calendar"
+      >
+        <CalendarIcon size={12} />
+      </span>
+    ) : null;
 
     // PATCH-318. The event title is the container's title; show the style set in
     // its Text style panel, except the block's own size/line-height/background.
@@ -811,6 +884,7 @@ export default function StandaloneSchedulerCanvas({
       >
         {isShort ? (
           <span className="flex items-center gap-1 min-w-0">
+            {calendarIcon}
             {showPostBadge && (
               <span
                 data-scheduler-post-count
@@ -824,6 +898,7 @@ export default function StandaloneSchedulerCanvas({
           </span>
         ) : (
           <>
+            {calendarIcon}
             <span className="block whitespace-normal break-words" style={eventTitleStyle}>{title}</span>
             {showPostBadge && (
               <span
@@ -945,6 +1020,19 @@ export default function StandaloneSchedulerCanvas({
       <div className="scheduler-title-bar" data-scheduler-title="true">
         <div className="scheduler-title-bar-left">
           <span className="scheduler-title-bar-text">Scheduler</span>
+          {/* PATCH-333. The calendar import / connect button, editors only. */}
+          {!readOnly ? (
+            <button
+              type="button"
+              data-calendar-import-open="standalone"
+              className="scheduler-calendar-btn"
+              title="Import or connect a calendar"
+              onClick={() => setIsCalendarModalOpen(true)}
+            >
+              <CalendarIcon size={14} />
+              <span>Calendar</span>
+            </button>
+          ) : null}
         </div>
       </div>
       {/* The calendar is measured BELOW the title bar, so its height accounts
@@ -987,6 +1075,12 @@ export default function StandaloneSchedulerCanvas({
         />
       )}
       </div>
+
+      <CalendarImportModal
+        isOpen={isCalendarModalOpen}
+        onClose={() => setIsCalendarModalOpen(false)}
+        target={{ kind: 'scheduler', boardId: canvasId, existingEntries: schedulerEntrySummaries, onChanged: onRefresh }}
+      />
     </div>
   );
 }

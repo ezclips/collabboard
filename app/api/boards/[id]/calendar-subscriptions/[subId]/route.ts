@@ -2,9 +2,14 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
-import { checkCalendarRateLimit, type CalendarSyncClient } from '@/lib/server/kanban/calendarSync';
+import {
+  checkCalendarRateLimit,
+  resolveCalendarBoardKind,
+  type CalendarSyncClient,
+} from '@/lib/server/kanban/calendarSync';
+import { removeSchedulerSubscriptionEntries } from '@/lib/server/scheduler/calendarSchedulerSync';
 
-/** PATCH-328. Disconnect a calendar. The FK cascade removes the cards it made. */
+/** PATCH-328/333. Disconnect a calendar and the entries it created. */
 
 export const runtime = 'nodejs';
 
@@ -14,15 +19,6 @@ function createRouteClient(cookieStore: ResolvedNextCookieStore) {
   return createRouteHandlerClient({
     cookies: () => cookieStore as unknown as ReturnType<typeof cookies>,
   });
-}
-
-async function isKanbanBoard(client: CalendarSyncClient, boardId: string): Promise<boolean> {
-  const { data, error } = await client
-    .from('boards')
-    .select('id, layout')
-    .eq('id', boardId)
-    .maybeSingle();
-  return !error && !!data && data.layout === 'kanban';
 }
 
 export async function DELETE(
@@ -42,8 +38,21 @@ export async function DELETE(
 
     const { id: boardId, subId } = await context.params;
     const client = sessionClient as unknown as CalendarSyncClient;
-    if (!(await isKanbanBoard(client, boardId))) {
+    const kind = await resolveCalendarBoardKind(client, boardId);
+    if (kind === null) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+    }
+
+    if (kind === 'scheduler') {
+      // Remove (or unlink) the entries BEFORE deleting the row, then report.
+      const { removedEntries, keptEntries } = await removeSchedulerSubscriptionEntries(client, boardId, subId);
+      const { error: deleteError } = await client
+        .from('kanban_calendar_subscriptions')
+        .delete()
+        .eq('id', subId)
+        .eq('canvas_id', boardId);
+      if (deleteError) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      return NextResponse.json({ removedEntries, keptEntries });
     }
 
     // Count BEFORE deleting: the cascade removes the cards, so afterwards there

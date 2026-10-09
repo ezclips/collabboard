@@ -185,6 +185,7 @@ type I18nKey =
   | 'updateNow'
   | 'disconnect'
   | 'disconnectCalendarMessage'
+  | 'disconnectCalendarEntriesMessage'
   | 'calendarConnectedToast'
   | 'calendarUpdatedToast'
   | 'calendarUpToDate'
@@ -369,7 +370,8 @@ const en: Dict = {
   connectedCalendars: 'Connected calendars',
   updateNow: 'Update now',
   disconnect: 'Disconnect',
-  disconnectCalendarMessage: 'Disconnect {host}? Its {count} cards will be removed from this board.',
+  disconnectCalendarMessage: 'Disconnect {host}? Its {count} {noun} will be removed from this board.',
+  disconnectCalendarEntriesMessage: 'Disconnect {host}? Its {count} {noun} will be removed from this board. Entries with posts inside are kept.',
   calendarConnectedToast: 'Calendar connected · {count} events added',
   calendarUpdatedToast: 'Calendar updated · {added} added, {updated} changed, {removed} removed',
   calendarUpToDate: 'Calendar is up to date',
@@ -553,7 +555,8 @@ const es: Dict = {
   connectedCalendars: 'Connected calendars',
   updateNow: 'Update now',
   disconnect: 'Disconnect',
-  disconnectCalendarMessage: 'Disconnect {host}? Its {count} cards will be removed from this board.',
+  disconnectCalendarMessage: 'Disconnect {host}? Its {count} {noun} will be removed from this board.',
+  disconnectCalendarEntriesMessage: 'Disconnect {host}? Its {count} {noun} will be removed from this board. Entries with posts inside are kept.',
   calendarConnectedToast: 'Calendar connected · {count} events added',
   calendarUpdatedToast: 'Calendar updated · {added} added, {updated} changed, {removed} removed',
   calendarUpToDate: 'Calendar is up to date',
@@ -737,7 +740,8 @@ const fr: Dict = {
   connectedCalendars: 'Connected calendars',
   updateNow: 'Update now',
   disconnect: 'Disconnect',
-  disconnectCalendarMessage: 'Disconnect {host}? Its {count} cards will be removed from this board.',
+  disconnectCalendarMessage: 'Disconnect {host}? Its {count} {noun} will be removed from this board.',
+  disconnectCalendarEntriesMessage: 'Disconnect {host}? Its {count} {noun} will be removed from this board. Entries with posts inside are kept.',
   calendarConnectedToast: 'Calendar connected · {count} events added',
   calendarUpdatedToast: 'Calendar updated · {added} added, {updated} changed, {removed} removed',
   calendarUpToDate: 'Calendar is up to date',
@@ -755,8 +759,15 @@ function format(template: string, vars?: Record<string, string | number>): strin
 }
 
 export function useKanbanI18n() {
-  const ui = useKanbanUI();
-  const locale = (ui.locale === 'es' || ui.locale === 'fr' ? ui.locale : 'en') as KanbanLocale;
+  // PATCH-333. Provider-free: the calendar modal also renders on the standalone
+  // Scheduler board, outside the Kanban provider, where English is the default.
+  let locale: KanbanLocale = 'en';
+  try {
+    const ui = useKanbanUI();
+    if (ui.locale === 'es' || ui.locale === 'fr') locale = ui.locale;
+  } catch {
+    locale = 'en';
+  }
 
   return useMemo(() => {
     const dict = dictionaries[locale] || dictionaries.en;

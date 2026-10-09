@@ -266,8 +266,12 @@ export async function fetchPublicText(
       try {
         response = await fetchImpl(requestUrl, {
           redirect: 'manual',
+          // PATCH-333 Addendum 1. Always ask for a FRESH copy: a CDN in front of
+          // a calendar served a 46-second-old one. Intermediaries revalidating
+          // costs nothing here.
+          cache: 'no-store',
           signal: controller.signal,
-          headers: { 'User-Agent': userAgent, Accept: accept },
+          headers: { 'User-Agent': userAgent, Accept: accept, 'Cache-Control': 'no-cache' },
         });
       } catch (error) {
         if (error instanceof PublicUrlError) throw error;

@@ -126,6 +126,38 @@ interface ConnectedCalendar {
   readonly cardCount: number;
 }
 
+/**
+ * PATCH-333 Addendum 2. A sync reason code, in plain words, for the connected
+ * row -- the raw code ("upstream_error") is not something to show a person.
+ */
+export function calendarErrorWords(code: string): string {
+  switch (code) {
+    case 'upstream_error':
+    case 'network_error':
+      return 'Could not reach the calendar';
+    case 'not_a_calendar':
+      return 'That link is not a calendar';
+    case 'blocked_host':
+    case 'invalid_url':
+    case 'dns_failed':
+      return 'That link is not allowed';
+    case 'missing_key':
+      return 'Calendar links are not configured on this server';
+    case 'too_large':
+      return 'That calendar is too large';
+    case 'too_many_redirects':
+      return 'That link redirects too many times';
+    case 'no_column':
+      return 'The board has no column to import into';
+    case 'unavailable':
+      return 'Could not update right now';
+    case 'invalid_ciphertext':
+      return 'This calendar link could not be read';
+    default:
+      return 'Could not update this calendar';
+  }
+}
+
 /** "5 min ago" / "2 hours ago" / "3 days ago" from an ISO instant. */
 export function formatUpdatedAgo(iso: string, now: Date = new Date()): string {
   const then = new Date(iso).getTime();
@@ -140,9 +172,35 @@ export function formatUpdatedAgo(iso: string, now: Date = new Date()): string {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
+/** PATCH-333. One existing Scheduler entry, for the duplicate preview. */
+export interface SchedulerEntrySummary {
+  readonly title: string;
+  readonly startDate: string;
+  readonly endDate: string;
+}
+
+/**
+ * PATCH-333. Where the modal is being used.
+ *
+ * `kanban` is the original behaviour (inside the Kanban provider, with a column
+ * picker and card creation). `scheduler` is a standalone Scheduler board: the
+ * board id is passed in, there is no column picker, and the modal must NOT read
+ * the Kanban store (it is not under the provider).
+ */
+export type CalendarImportTarget =
+  | { readonly kind: 'kanban' }
+  | {
+      readonly kind: 'scheduler';
+      readonly boardId: string;
+      readonly existingEntries?: readonly SchedulerEntrySummary[];
+      readonly onChanged?: () => void;
+    };
+
 export interface CalendarImportModalProps {
   readonly isOpen: boolean;
   readonly onClose: () => void;
+  /** Absent means `{ kind: 'kanban' }` -- today's behaviour. */
+  readonly target?: CalendarImportTarget;
 }
 
 /**
@@ -150,8 +208,18 @@ export interface CalendarImportModalProps {
  * modal reads nothing from the board (and a host that renders it beside other
  * controls is not forced to provide the store while it is shut).
  */
-export function CalendarImportModal({ isOpen, onClose }: CalendarImportModalProps) {
+export function CalendarImportModal({ isOpen, onClose, target }: CalendarImportModalProps) {
   if (!isOpen) return null;
+  if (target?.kind === 'scheduler') {
+    return (
+      <SchedulerCalendarImportModal
+        boardId={target.boardId}
+        existingEntries={target.existingEntries ?? []}
+        onChanged={target.onChanged}
+        onClose={onClose}
+      />
+    );
+  }
   return <CalendarImportModalBody onClose={onClose} />;
 }
 
@@ -334,7 +402,9 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
         | { added?: number; updated?: number; removed?: number; error?: string }
         | null;
       if (!response.ok) {
+        // PATCH-333 Addendum 1. A failed update is an ERROR, not "up to date".
         setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        await loadSubscriptions();
         return;
       }
       const added = body?.added ?? 0;
@@ -409,7 +479,7 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
                 <span className="min-w-0 flex-1 truncate text-slate-700">{subscription.urlHost}</span>
                 <span className="shrink-0 text-gray-500">
                   {subscription.lastError
-                    ? subscription.lastError
+                    ? calendarErrorWords(subscription.lastError)
                     : subscription.lastSyncedAt
                       ? t('updatedAgo', { time: formatUpdatedAgo(subscription.lastSyncedAt) })
                       : ''}
@@ -614,6 +684,420 @@ function CalendarImportModalBody({ onClose }: { readonly onClose: () => void }) 
         message={t('disconnectCalendarMessage', {
           host: pendingDisconnect?.urlHost ?? '',
           count: pendingDisconnect?.cardCount ?? 0,
+          noun: (pendingDisconnect?.cardCount ?? 0) === 1 ? 'card' : 'cards',
+        })}
+        confirmText={t('disconnect')}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PATCH-333. The standalone Scheduler board's variant                 */
+/* ------------------------------------------------------------------ */
+
+function zoneOffsetMs(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? '0');
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return asUtc - date.getTime();
+}
+
+function zonedMidnightUtc(dateStr: string, timeZone: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const utcMidnight = Date.UTC(year, month - 1, day);
+  return new Date(utcMidnight - zoneOffsetMs(new Date(utcMidnight), timeZone)).toISOString();
+}
+
+function nextDay(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** The dates a Scheduler entry will store -- the server's own convention. */
+export function schedulerEntryDates(event: ImportedEvent, timeZone: string): { startDate: string; endDate: string } {
+  if (event.allDay) {
+    const start = event.startDate ?? '';
+    const end = event.endDate ?? start;
+    return { startDate: zonedMidnightUtc(start, timeZone), endDate: zonedMidnightUtc(nextDay(end), timeZone) };
+  }
+  return { startDate: event.startIso ?? '', endDate: event.endIso ?? '' };
+}
+
+function SchedulerCalendarImportModal({
+  boardId,
+  existingEntries,
+  onChanged,
+  onClose,
+}: {
+  readonly boardId: string;
+  readonly existingEntries: readonly SchedulerEntrySummary[];
+  readonly onChanged?: () => void;
+  readonly onClose: () => void;
+}) {
+  const { t } = useKanbanI18n();
+  const [mode, setMode] = useState<'file' | 'link'>('file');
+  const [url, setUrl] = useState('');
+  const [keepUpdated, setKeepUpdated] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<{ events: ImportedEvent[]; truncated: boolean } | null>(null);
+  const [previewSource, setPreviewSource] = useState<{ icsText?: string; url?: string } | null>(null);
+  const [subscriptions, setSubscriptions] = useState<readonly ConnectedCalendar[]>([]);
+  const [busySubscriptionId, setBusySubscriptionId] = useState<string | null>(null);
+  const [pendingDisconnect, setPendingDisconnect] = useState<ConnectedCalendar | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const apiBase = `/api/boards/${encodeURIComponent(boardId)}`;
+
+  const loadSubscriptions = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions`, { method: 'GET' });
+      if (!response.ok) return;
+      const body = await response.json().catch(() => null);
+      if (Array.isArray(body)) setSubscriptions(body as ConnectedCalendar[]);
+    } catch {
+      // A list that cannot be read simply stays as it was.
+    }
+  }, [apiBase]);
+
+  useEffect(() => { void loadSubscriptions(); }, [loadSubscriptions]);
+  useEffect(() => {
+    setError(null); setPreview(null); setPreviewSource(null); setUrl(''); setMode('file'); setKeepUpdated(true);
+  }, []);
+
+  const duplicates = useMemo(() => {
+    if (!preview) return 0;
+    const timeZone = browserTimeZone();
+    const existing = new Set(existingEntries.map((entry) => `${entry.title}\u0000${entry.startDate}\u0000${entry.endDate}`));
+    return preview.events.filter((event) => {
+      const dates = schedulerEntryDates(event, timeZone);
+      return existing.has(`${event.title}\u0000${dates.startDate}\u0000${dates.endDate}`);
+    }).length;
+  }, [preview, existingEntries]);
+
+  const loadPreview = async (payload: { icsText?: string; url?: string }): Promise<void> => {
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+    setPreview(null);
+    try {
+      const response = await fetch(`${apiBase}/calendar-import`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => null) as
+        | { events?: ImportedEvent[]; truncated?: boolean; error?: string }
+        | null;
+      if (!response.ok) {
+        setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        return;
+      }
+      const events = Array.isArray(body?.events) ? body.events : [];
+      setPreview({ events, truncated: body?.truncated === true });
+      setPreviewSource(payload);
+      if (events.length === 0) setError(t('noEventsFound'));
+    } catch {
+      setError(t('calendarReadFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFile = async (file: File | undefined): Promise<void> => {
+    if (!file) return;
+    if (file.size > MAX_ICS_BYTES) { setError(t('calendarTooLarge')); return; }
+    const text = await file.text();
+    await loadPreview({ icsText: text });
+  };
+
+  const connectSubscription = async (): Promise<void> => {
+    if (!url.trim() || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: url.trim(), timeZone: browserTimeZone() }),
+      });
+      const body = await response.json().catch(() => null) as { added?: number; error?: string } | null;
+      if (!response.ok) {
+        setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        return;
+      }
+      toast.success(t('calendarConnectedToast', { count: body?.added ?? 0 }));
+      onChanged?.();
+      onClose();
+    } catch {
+      setError(t('calendarReadFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const applyImport = async (): Promise<void> => {
+    if (!previewSource || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/calendar-import/apply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...previewSource, timeZone: browserTimeZone() }),
+      });
+      const body = await response.json().catch(() => null) as { added?: number; error?: string } | null;
+      if (!response.ok) {
+        setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        return;
+      }
+      toast.success(t('importedCount', { count: body?.added ?? 0 }));
+      onChanged?.();
+      onClose();
+    } catch {
+      setError(t('calendarReadFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateNow = async (subscription: ConnectedCalendar): Promise<void> => {
+    if (busySubscriptionId) return;
+    setBusySubscriptionId(subscription.id);
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions/${subscription.id}/sync`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ timeZone: browserTimeZone() }),
+      });
+      const body = await response.json().catch(() => null) as
+        | { added?: number; updated?: number; removed?: number; error?: string } | null;
+      if (!response.ok) {
+        // PATCH-333 Addendum 1. A failed update is an ERROR, not "up to date".
+        setError(typeof body?.error === 'string' ? body.error : t('calendarReadFailed'));
+        await loadSubscriptions();
+        return;
+      }
+      const added = body?.added ?? 0;
+      const updated = body?.updated ?? 0;
+      const removed = body?.removed ?? 0;
+      if (added === 0 && updated === 0 && removed === 0) toast.success(t('calendarUpToDate'));
+      else toast.success(t('calendarUpdatedToast', { added, updated, removed }));
+      onChanged?.();
+      await loadSubscriptions();
+    } catch {
+      setError(t('calendarReadFailed'));
+    } finally {
+      setBusySubscriptionId(null);
+    }
+  };
+
+  const disconnect = async (subscription: ConnectedCalendar): Promise<void> => {
+    try {
+      const response = await fetch(`${apiBase}/calendar-subscriptions/${subscription.id}`, { method: 'DELETE' });
+      if (!response.ok) { setError(t('calendarReadFailed')); return; }
+      onChanged?.();
+      await loadSubscriptions();
+    } catch {
+      setError(t('calendarReadFailed'));
+    }
+  };
+
+  const confirmAction = (): void => {
+    if (preview && mode === 'link' && keepUpdated) void connectSubscription();
+    else void applyImport();
+  };
+
+  return (
+    <div
+      data-calendar-import-modal="true"
+      data-calendar-import-target="scheduler"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-label={t('importCalendar')}
+    >
+      <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl">
+        <div className="mb-3 flex items-center gap-2">
+          <Calendar size={18} className="text-slate-600" />
+          <h2 className="text-base font-semibold text-slate-800">{t('importCalendar')}</h2>
+          <button
+            type="button"
+            data-calendar-import-close="true"
+            className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-100"
+            aria-label={t('close')}
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {subscriptions.length > 0 ? (
+          <div data-calendar-connected-list="true" className="mb-3 rounded-lg border border-gray-200 p-2">
+            <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">{t('connectedCalendars')}</p>
+            {subscriptions.map((subscription) => (
+              <div key={subscription.id} data-calendar-connected={subscription.id} className="flex items-center gap-2 py-1 text-[12px]">
+                <span className="min-w-0 flex-1 truncate text-slate-700">{subscription.urlHost}</span>
+                <span className="shrink-0 text-gray-500">
+                  {subscription.lastError
+                    ? calendarErrorWords(subscription.lastError)
+                    : subscription.lastSyncedAt ? t('updatedAgo', { time: formatUpdatedAgo(subscription.lastSyncedAt) }) : ''}
+                </span>
+                <button
+                  type="button"
+                  data-calendar-update-now={subscription.id}
+                  disabled={busySubscriptionId === subscription.id}
+                  className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:bg-gray-50 disabled:opacity-50"
+                  onClick={() => { void updateNow(subscription); }}
+                >
+                  <RefreshCw size={11} className="mr-0.5 inline" />{t('updateNow')}
+                </button>
+                <button
+                  type="button"
+                  data-calendar-disconnect={subscription.id}
+                  className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-red-600 hover:bg-red-50"
+                  onClick={() => setPendingDisconnect(subscription)}
+                >
+                  {t('disconnect')}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mb-3 flex gap-1 rounded-lg bg-gray-100 p-1 text-[12px]">
+          <button
+            type="button"
+            data-calendar-import-tab="file"
+            className={`flex-1 rounded-md px-2 py-1 ${mode === 'file' ? 'bg-white shadow-sm' : 'text-gray-600'}`}
+            onClick={() => setMode('file')}
+          >
+            <Upload size={13} className="mr-1 inline" />{t('uploadIcsFile')}
+          </button>
+          <button
+            type="button"
+            data-calendar-import-tab="link"
+            className={`flex-1 rounded-md px-2 py-1 ${mode === 'link' ? 'bg-white shadow-sm' : 'text-gray-600'}`}
+            onClick={() => setMode('link')}
+          >
+            <Link2 size={13} className="mr-1 inline" />{t('calendarLink')}
+          </button>
+        </div>
+
+        {mode === 'file' ? (
+          <div key="file-tab" className="mb-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".ics,text/calendar"
+              data-calendar-import-file="true"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                void handleFile(file);
+              }}
+            />
+            <button
+              type="button"
+              className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-4 text-[12px] text-gray-600 hover:bg-gray-50"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {t('uploadIcsFile')}
+            </button>
+          </div>
+        ) : (
+          <div key="link-tab" className="mb-3 space-y-2">
+            <input
+              type="url"
+              data-calendar-import-url="true"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://…"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-[12px]"
+            />
+            <p className="text-[11px] leading-snug text-gray-500">
+              {keepUpdated ? t('calendarLinkSavedEncrypted') : t('calendarLinkNotSaved')}
+            </p>
+            <label className="flex items-center gap-2 text-[12px] text-slate-700">
+              <input
+                type="checkbox"
+                data-calendar-keep-updated="true"
+                checked={keepUpdated}
+                onChange={(event) => setKeepUpdated(event.target.checked)}
+              />
+              {t('keepCalendarUpdated')}
+            </label>
+          </div>
+        )}
+
+        {error ? (
+          <p data-calendar-import-error="true" role="alert" className="mb-2 text-[12px] text-red-600">{error}</p>
+        ) : null}
+
+        {preview ? (
+          <div className="mb-3 space-y-2">
+            <p data-calendar-import-range="true" className="text-[12px] text-slate-700">
+              {t('eventsRange', { count: preview.events.length, from: eventStartLabel(preview.events[0]), to: eventEndLabel(preview.events[preview.events.length - 1]) })}
+            </p>
+            {duplicates > 0 ? (
+              <p data-calendar-import-skipped="true" className="text-[12px] text-amber-700">
+                {t('alreadyOnBoard', { count: duplicates })}
+              </p>
+            ) : null}
+            {preview.truncated ? (
+              <p data-calendar-import-truncated="true" className="text-[12px] text-amber-700">{t('calendarTruncated')}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-[12px] text-gray-700 hover:bg-gray-50"
+            onClick={onClose}
+          >
+            {t('cancel')}
+          </button>
+          {!preview && mode === 'link' ? (
+            <button
+              type="button"
+              data-calendar-import-preview="true"
+              disabled={loading || url.trim().length === 0}
+              className="rounded-lg bg-slate-800 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+              onClick={() => { void loadPreview({ url: url.trim() }); }}
+            >
+              {t('preview')}
+            </button>
+          ) : null}
+          {preview ? (
+            <button
+              type="button"
+              data-calendar-import-confirm="true"
+              disabled={loading}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              onClick={confirmAction}
+            >
+              {t('importCount', { count: preview.events.length - duplicates })}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <ConfirmModal
+        isOpen={pendingDisconnect !== null}
+        onClose={() => setPendingDisconnect(null)}
+        onConfirm={() => { if (pendingDisconnect) void disconnect(pendingDisconnect); }}
+        title={t('disconnect')}
+        // PATCH-333 Addendum 1. A Scheduler board has entries, not cards, and
+        // entries with posts inside are kept.
+        message={t('disconnectCalendarEntriesMessage', {
+          host: pendingDisconnect?.urlHost ?? '',
+          count: pendingDisconnect?.cardCount ?? 0,
+          noun: (pendingDisconnect?.cardCount ?? 0) === 1 ? 'entry' : 'entries',
         })}
         confirmText={t('disconnect')}
       />

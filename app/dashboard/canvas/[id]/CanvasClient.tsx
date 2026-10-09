@@ -10540,6 +10540,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   padlets={padlets}
                   canvasId={canvas.id}
                   readOnly={!canUseFreeformEditButton}
+                  onRefresh={() => { void fetchData(); }}
                   selectedContainerId={selectedSchedulerContainerId}
                   onUpdatePadletMetadata={updatePadletMetadata}
                   onCreatePadlet={handleCreateSchedulerPadlet}

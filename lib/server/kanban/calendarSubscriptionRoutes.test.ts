@@ -291,3 +291,23 @@ describe('PATCH-328 subscription routes', () => {
     expect(mocks.sync).not.toHaveBeenCalled();
   });
 });
+
+// PATCH-333 Addendum 1. A sync that FAILED must not answer 200 with zero
+// counts -- the modal reads that as "Calendar is up to date".
+describe('PATCH-333 Addendum 1 a failed sync is an error, not "up to date"', () => {
+  it.each([
+    ['upstream_error', 502, /could not be read/i],
+    ['network_error', 502, /could not be reached/i],
+    ['blocked_host', 502, /not allowed/i],
+    ['not_a_calendar', 422, /did not return a calendar/i],
+    ['missing_key', 503, /not configured/i],
+  ] as const)('%s -> %i', async (reason, status, pattern) => {
+    wire({ subscriptions: [{ id: 'sub-1', canvas_id: BOARD_ID, url_ciphertext: 'v1.a.b.c' }] });
+    mocks.sync.mockResolvedValue({ added: 0, updated: 0, removed: 0, unchanged: 0, reason });
+    const response = await jsonPost(syncRoute, { timeZone: 'UTC' }, 'sub-1');
+    expect(response.status).toBe(status);
+    const body = await response.json();
+    expect(body.reason).toBe(reason);
+    expect(body.error).toMatch(pattern);
+  });
+});

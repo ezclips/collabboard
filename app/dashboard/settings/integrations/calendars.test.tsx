@@ -100,6 +100,14 @@ describe('PATCH-332 calendars in Settings → Integrations', () => {
     expect(q('[data-calendar-row="sub-1"]')).toBeNull();
   });
 
+  it('PATCH-333 says "entries" for a Scheduler board', async () => {
+    stubFetch([{ ...CALENDAR, boardLayout: 'scheduler' }]);
+    await mount();
+    await act(async () => { q('[data-calendar-disconnect="sub-1"]')!.click(); });
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('entries will be removed'));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('posts inside are kept'));
+  });
+
   it('a declined confirm does not call DELETE', async () => {
     vi.stubGlobal('confirm', vi.fn(() => false));
     stubFetch([CALENDAR]);

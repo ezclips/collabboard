@@ -258,4 +258,22 @@ describe('PATCH-329 tab switching and the storage wording', () => {
     expect(link).not.toBeNull();
     expect(link!.getAttribute('href')).toBe('/dashboard/settings/integrations');
   });
+
+  it('PATCH-333 Addendum 2 says "1 card" for a single-card disconnect', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (method === 'GET' && url.endsWith('/calendar-subscriptions')) {
+        return new Response(JSON.stringify([{ id: 'sub-1', urlHost: 'calendar.google.com', lastSyncedAt: null, lastError: null, cardCount: 1 }]), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await mount(<CalendarImportModal isOpen onClose={vi.fn()} />);
+    await act(async () => { q('[data-calendar-disconnect="sub-1"]')!.click(); });
+    // This suite mocks the i18n hook, so the message carries its vars.
+    const message = document.querySelector('.kanban-dialog-message')?.textContent ?? '';
+    expect(message).toContain('disconnectCalendarMessage');
+    expect(message).toContain('"count":1');
+    expect(message).toContain('"noun":"card"');
+  });
 });

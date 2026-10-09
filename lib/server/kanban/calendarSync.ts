@@ -84,7 +84,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /** The store's own date normalisation, so server-written dates match its own. */
-function normalizeDateInput(value: unknown): string | undefined {
+export function normalizeDateInput(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
   const trimmed = String(value).trim();
   if (!trimmed) return undefined;
@@ -95,7 +95,7 @@ function normalizeDateInput(value: unknown): string | undefined {
 }
 
 /** A short reason code for `last_error`; never the link or an upstream body. */
-function reasonFor(error: unknown): string {
+export function reasonFor(error: unknown): string {
   if (error instanceof CalendarLinkCipherError) return error.code;
   if (error instanceof IcsParseError) return 'not_a_calendar';
   if (error instanceof PublicUrlError) {
@@ -293,3 +293,26 @@ export async function syncCalendarSubscription(
 
   return { added, updated, removed, unchanged };
 }
+
+export type CalendarBoardKind = 'kanban' | 'scheduler';
+
+/**
+ * PATCH-333. Which board this is, for dispatching to the right sync engine.
+ * Null for a board the caller cannot read, or one that is neither.
+ */
+export async function resolveCalendarBoardKind(
+  client: CalendarSyncClient,
+  boardId: string,
+): Promise<CalendarBoardKind | null> {
+  const { data, error } = await client
+    .from('boards')
+    .select('id, layout')
+    .eq('id', boardId)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (data.layout === 'kanban') return 'kanban';
+  if (data.layout === 'scheduler') return 'scheduler';
+  return null;
+}
+
+export { DAY_MS };

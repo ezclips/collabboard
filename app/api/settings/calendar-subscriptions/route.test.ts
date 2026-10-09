@@ -96,6 +96,8 @@ describe('PATCH-332 GET /api/settings/calendar-subscriptions', () => {
       id: 'sub-1',
       boardId: 'board-1',
       boardTitle: 'Roadmap',
+      // PATCH-333. The board's layout, for the Disconnect wording.
+      boardLayout: null,
       urlHost: 'calendar.google.com',
       lastSyncedAt: '2026-06-01T00:00:00Z',
       lastError: null,

@@ -42,6 +42,11 @@ vi.mock('react-big-calendar/lib/addons/dragAndDrop', () => ({ default: (Componen
 vi.mock('react-big-calendar/lib/css/react-big-calendar.css', () => ({}));
 vi.mock('react-big-calendar/lib/addons/dragAndDrop/styles.css', () => ({}));
 vi.mock('./scheduler-theme.css', () => ({}));
+// The calendar modal (PATCH-333) imports the Kanban store; it is not used on
+// the scheduler target, and loading it here would reach Supabase at import.
+vi.mock('@/components/kanban-canvas/store', () => ({
+  useKanbanUI: () => { throw new Error('useKanban must be used within KanbanProvider'); },
+}));
 
 import StandaloneSchedulerCanvas from './StandaloneSchedulerCanvas';
 
@@ -272,6 +277,57 @@ describe('PATCH-331/332: the standalone board shows a "Scheduler" title bar', ()
     expect(bar?.textContent).toContain('Scheduler');
     // The calendar host sits BELOW the bar, so its measured height excludes it.
     expect(container.querySelector('.scheduler-calendar-host')).not.toBeNull();
+  });
+});
+
+describe('PATCH-333: the standalone Scheduler calendar button and auto-sync', () => {
+  async function renderCanvas(props: { readOnly?: boolean } = {}) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <StandaloneSchedulerCanvas
+          padlets={[PADLET]}
+          canvasId="b1"
+          readOnly={props.readOnly}
+          onUpdatePadletMetadata={vi.fn()}
+          onCreatePadlet={vi.fn()}
+        />,
+      );
+    });
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  it('shows the Calendar button for an editor, not for a read-only board', async () => {
+    await renderCanvas();
+    expect(container.querySelector('[data-calendar-import-open="standalone"]')).not.toBeNull();
+    act(() => root!.unmount());
+    root = null;
+    container.remove();
+    await renderCanvas({ readOnly: true });
+    expect(container.querySelector('[data-calendar-import-open="standalone"]')).toBeNull();
+  });
+
+  it('auto-syncs connected calendars only when editable', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await renderCanvas();
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith('/calendar-subscriptions'))).toBe(true);
+
+      fetchMock.mockClear();
+      act(() => root!.unmount());
+      root = null;
+      container.remove();
+      await renderCanvas({ readOnly: true });
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
