@@ -22,6 +22,27 @@
   color: #334155;
 }
 
+.gantt-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* PATCH-330. Same look as the zoom buttons. */
+.gantt-calendar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
 .gantt-zoom-controls {
   display: inline-flex;
   gap: 6px;
@@ -169,7 +190,8 @@
   align-items: center;
   justify-content: center;
   min-width: 100%;
-  cursor: context-menu;
+  /* PATCH-330. A left click opens the range too, so a normal pointer. */
+  cursor: pointer;
   text-decoration: underline dotted transparent;
   text-underline-offset: 3px;
   transition: text-decoration-color 0.15s ease;

@@ -55,7 +55,9 @@ export function formatWeekHeaderLabel(date: Date): string {
 
 export function formatWeekRangeLabel(date: Date): string {
   const startDate = getStartOfLocalDay(date);
-  const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 7);
+  // +6 is the LAST day of the week (Sun); +7 is the first day of the next week
+  // and made a "week" read as eight days (PATCH-330 Addendum 1).
+  const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6);
 
   const startDay = startDate.getDate();
   const endDay = endDate.getDate();

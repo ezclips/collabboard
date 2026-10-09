@@ -8,7 +8,10 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import '@/components/canvas/scheduler-theme.css';
 import './scheduler.css';
+import { Calendar as CalendarIcon } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from '@/components/kanban-canvas/store';
+import { useKanbanI18n } from '@/components/kanban-canvas/useKanbanI18n';
+import { CalendarImportModal } from '@/components/kanban-canvas/CalendarImportModal';
 import type { Card, Column } from '@/types/kanban-canvas';
 import { SchedulerEventMenu } from './SchedulerEventMenu';
 
@@ -90,10 +93,12 @@ export function SchedulerCanvas() {
   const data = useKanbanData();
   const actions = useKanbanPersistence();
   const readonly = useKanbanReadonly();
+  const { t } = useKanbanI18n();
 
   const dataRef = useRef(data);
   const originalRangesRef = useRef(new Map<string, { start: string; end: string }>());
   const [eventMenu, setEventMenu] = useState<EventMenuState | null>(null);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>('week');
 
@@ -221,7 +226,22 @@ export function SchedulerCanvas() {
   return (
     <div className="scheduler-shell">
       <div className="scheduler-toolbar">
-        <span className="scheduler-toolbar-title">Scheduler</span>
+        <div className="scheduler-toolbar-left">
+          <span className="scheduler-toolbar-title">Scheduler</span>
+          {/* PATCH-330. Reach the calendar connection from the Scheduler-only view. */}
+          {!readonly ? (
+            <button
+              type="button"
+              data-calendar-import-open="scheduler"
+              className="scheduler-calendar-btn"
+              title={t('calendarButtonTitle')}
+              onClick={() => setIsCalendarModalOpen(true)}
+            >
+              <CalendarIcon size={14} />
+              <span>{t('calendarButton')}</span>
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="scheduler-container">
         <DndCalendar
@@ -328,6 +348,10 @@ export function SchedulerCanvas() {
           }}
         />
       ) : null}
+      <CalendarImportModal
+        isOpen={isCalendarModalOpen}
+        onClose={() => setIsCalendarModalOpen(false)}
+      />
     </div>
   );
 }

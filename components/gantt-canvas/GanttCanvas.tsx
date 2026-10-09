@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import 'dhtmlx-gantt/codebase/dhtmlxgantt.css';
 import './gantt.css';
-import { CalendarDays } from 'lucide-react';
+import { Calendar, CalendarDays } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from '@/components/kanban-canvas/store';
+import { useKanbanI18n } from '@/components/kanban-canvas/useKanbanI18n';
+import { CalendarImportModal } from '@/components/kanban-canvas/CalendarImportModal';
 import { configureGantt } from './GanttConfig';
 import { bindGanttEvents } from './ganttEvents';
 import { mapCardToGanttTask, mapLinkToGantt } from './mappers';
@@ -35,6 +37,7 @@ export function GanttCanvas() {
   const data = useKanbanData();
   const actions = useKanbanPersistence();
   const readonly = useKanbanReadonly();
+  const { t } = useKanbanI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const ganttRef = useRef<GanttLike | null>(null);
   const detachEventsRef = useRef<(() => void) | null>(null);
@@ -43,6 +46,7 @@ export function GanttCanvas() {
   const dataRef = useRef(data);
   const [zoom, setZoom] = useState<'day' | 'week' | 'month'>('week');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [parentTaskId, setParentTaskId] = useState<string | undefined>(undefined);
   const [weekRangePopover, setWeekRangePopover] = useState<{
     label: string;
@@ -177,25 +181,43 @@ export function GanttCanvas() {
     const container = containerRef.current;
     if (!container) return;
 
-    const handleContextMenu = (event: MouseEvent) => {
-      const target = event.target instanceof Element
+    const weekTarget = (event: Event) =>
+      event.target instanceof Element
         ? event.target.closest<HTMLElement>('[data-gantt-week-range]')
         : null;
 
-      if (!target) return;
-
-      event.preventDefault();
-      setWeekRangePopover({
-        label: target.dataset.ganttWeekLabel || 'Week',
-        range: target.dataset.ganttWeekRange || '',
-        x: event.clientX,
-        y: event.clientY,
+    const openFromTarget = (target: HTMLElement, x: number, y: number) => {
+      setWeekRangePopover((current) => {
+        const label = target.dataset.ganttWeekLabel || 'Week';
+        const range = target.dataset.ganttWeekRange || '';
+        // A SECOND click on the SAME week closes the popover.
+        if (current && current.label === label && current.range === range) return null;
+        return { label, range, x, y };
       });
     };
 
+    const handleContextMenu = (event: MouseEvent) => {
+      const target = weekTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      openFromTarget(target, event.clientX, event.clientY);
+    };
+
+    // PATCH-330. A LEFT click opens the same popover. Capture phase and
+    // stopPropagation so dhtmlx does nothing else (no sort, no selection).
+    const handleClick = (event: MouseEvent) => {
+      const target = weekTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openFromTarget(target, event.clientX, event.clientY);
+    };
+
     container.addEventListener('contextmenu', handleContextMenu);
+    container.addEventListener('click', handleClick, true);
     return () => {
       container.removeEventListener('contextmenu', handleContextMenu);
+      container.removeEventListener('click', handleClick, true);
     };
   }, []);
 
@@ -203,17 +225,24 @@ export function GanttCanvas() {
     if (!weekRangePopover) return;
 
     const dismiss = () => setWeekRangePopover(null);
+    // A pointerdown on a WEEK LABEL must not dismiss: the `click` that follows
+    // is what toggles it, and dismissing first would turn a second click into a
+    // re-open instead of a close.
+    const handlePointerDown = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('[data-gantt-week-range]')) return;
+      dismiss();
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') dismiss();
     };
 
-    window.addEventListener('pointerdown', dismiss);
+    window.addEventListener('pointerdown', handlePointerDown);
     window.addEventListener('scroll', dismiss, true);
     window.addEventListener('resize', dismiss);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.removeEventListener('pointerdown', dismiss);
+      window.removeEventListener('pointerdown', handlePointerDown);
       window.removeEventListener('scroll', dismiss, true);
       window.removeEventListener('resize', dismiss);
       window.removeEventListener('keydown', handleKeyDown);
@@ -223,7 +252,22 @@ export function GanttCanvas() {
   return (
     <div className="gantt-shell">
       <div className="gantt-toolbar">
-        <span className="gantt-toolbar-title">Gantt</span>
+        <div className="gantt-toolbar-left">
+          <span className="gantt-toolbar-title">Gantt</span>
+          {/* PATCH-330. Reach the calendar connection from the Gantt-only view. */}
+          {!readonly ? (
+            <button
+              type="button"
+              data-calendar-import-open="gantt"
+              className="gantt-calendar-btn"
+              title={t('calendarButtonTitle')}
+              onClick={() => setIsCalendarModalOpen(true)}
+            >
+              <Calendar size={14} />
+              <span>{t('calendarButton')}</span>
+            </button>
+          ) : null}
+        </div>
         <div className="gantt-zoom-controls" role="group" aria-label="Gantt zoom controls">
           <button
             type="button"
@@ -273,6 +317,10 @@ export function GanttCanvas() {
           setParentTaskId(undefined);
         }}
         parentTaskId={parentTaskId}
+      />
+      <CalendarImportModal
+        isOpen={isCalendarModalOpen}
+        onClose={() => setIsCalendarModalOpen(false)}
       />
     </div>
   );

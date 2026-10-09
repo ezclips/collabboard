@@ -19,6 +19,8 @@ vi.mock('@/components/kanban-canvas/store', () => ({
   useKanbanData: () => hoisted.data,
   useKanbanReadonly: () => hoisted.readonly,
   useKanbanPersistence: () => hoisted.actions,
+  // PATCH-330: SchedulerCanvas now reads the shared i18n (which reads UI).
+  useKanbanUI: () => ({ locale: 'en' }),
 }));
 
 vi.mock('react-big-calendar', async () => {

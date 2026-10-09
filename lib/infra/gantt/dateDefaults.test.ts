@@ -51,7 +51,8 @@ describe('gantt date defaults', () => {
     const weekStart = new Date(2026, 5, 10, 9, 0, 0, 0);
 
     expect(formatWeekHeaderLabel(weekStart)).toBe('Week #24');
-    expect(formatWeekRangeLabel(weekStart)).toBe('10-17 June 2026');
+    // A week is seven days: PATCH-330 Addendum 1 fixed the +7 end.
+    expect(formatWeekRangeLabel(weekStart)).toBe('10-16 June 2026');
   });
 
   it('initializes an existing gantt item from persisted dates exactly', () => {

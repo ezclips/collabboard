@@ -548,7 +548,10 @@ export function configureGantt(
                 template: (date: Date) => {
                   const label = formatWeekHeaderLabel(date);
                   const range = formatWeekRangeLabel(date);
-                  return `<span class="gantt-week-scale-label" data-gantt-week-label="${escapeHtmlAttribute(label)}" data-gantt-week-range="${escapeHtmlAttribute(range)}">${label}</span>`;
+                  // PATCH-330. The native tooltip names the range, so the week
+                  // number is discoverable on hover without knowing to click.
+                  const title = `${label}: ${range}`;
+                  return `<span class="gantt-week-scale-label" data-gantt-week-label="${escapeHtmlAttribute(label)}" data-gantt-week-range="${escapeHtmlAttribute(range)}" title="${escapeHtmlAttribute(title)}">${label}</span>`;
                 },
               },
               { unit: 'day', step: 1, format: '%D' },
@@ -564,9 +567,11 @@ export function configureGantt(
                 unit: 'week',
                 step: 1,
                 template: (date: Date) => {
-                  const label = `W${String(formatWeekHeaderLabel(date)).replace('Week #', '')}`;
+                  const fullLabel = formatWeekHeaderLabel(date);
+                  const label = `W${String(fullLabel).replace('Week #', '')}`;
                   const range = formatWeekRangeLabel(date);
-                  return `<span class="gantt-week-scale-label" data-gantt-week-label="${escapeHtmlAttribute(formatWeekHeaderLabel(date))}" data-gantt-week-range="${escapeHtmlAttribute(range)}">${label}</span>`;
+                  const title = `${fullLabel}: ${range}`;
+                  return `<span class="gantt-week-scale-label" data-gantt-week-label="${escapeHtmlAttribute(fullLabel)}" data-gantt-week-range="${escapeHtmlAttribute(range)}" title="${escapeHtmlAttribute(title)}">${label}</span>`;
                 },
               },
             ],
