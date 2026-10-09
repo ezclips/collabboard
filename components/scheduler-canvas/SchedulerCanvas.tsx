@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
-import { Calendar, momentLocalizer, type View } from 'react-big-calendar';
+import { Calendar, type View } from 'react-big-calendar';
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
-import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import '@/components/canvas/scheduler-theme.css';
 import './scheduler.css';
+import { schedulerLocalizer } from '@/lib/scheduler/schedulerLocalizer';
+import { SchedulerToolbar } from './SchedulerToolbar';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from '@/components/kanban-canvas/store';
 import { useKanbanI18n } from '@/components/kanban-canvas/useKanbanI18n';
@@ -15,7 +16,6 @@ import { CalendarImportModal } from '@/components/kanban-canvas/CalendarImportMo
 import type { Card, Column } from '@/types/kanban-canvas';
 import { SchedulerEventMenu } from './SchedulerEventMenu';
 
-const localizer = momentLocalizer(moment);
 const DndCalendar = withDragAndDrop(Calendar) as unknown as ComponentType<Record<string, unknown>>;
 
 // react-big-calendar only reads the time-of-day from min/max.
@@ -221,7 +221,10 @@ export function SchedulerCanvas() {
     </div>
   ), [readonly]);
 
-  const calendarComponents = useMemo(() => ({ eventWrapper: EventWrapper }), [EventWrapper]);
+  const calendarComponents = useMemo(
+    () => ({ eventWrapper: EventWrapper, toolbar: SchedulerToolbar }),
+    [EventWrapper],
+  );
 
   return (
     <div className="scheduler-shell">
@@ -245,7 +248,7 @@ export function SchedulerCanvas() {
       </div>
       <div className="scheduler-container">
         <DndCalendar
-          localizer={localizer}
+          localizer={schedulerLocalizer}
           events={events}
           date={currentDate}
           view={currentView}

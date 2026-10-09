@@ -253,6 +253,29 @@ describe('PATCH-314 Addendum 1: short events keep the badge and title on one lin
   });
 });
 
+describe('PATCH-331: the standalone board shows its title', () => {
+  it('renders the board title in a bar above the calendar', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <StandaloneSchedulerCanvas
+          padlets={[PADLET]}
+          canvasId="b1"
+          title="My scheduler board"
+          onUpdatePadletMetadata={vi.fn()}
+          onCreatePadlet={vi.fn()}
+        />,
+      );
+    });
+    const bar = container.querySelector('[data-scheduler-title="true"]');
+    expect(bar?.textContent).toContain('My scheduler board');
+    // The calendar host sits BELOW the bar, so its measured height excludes it.
+    expect(container.querySelector('.scheduler-calendar-host')).not.toBeNull();
+  });
+});
+
 describe('PATCH-318: a Scheduler event title shows the container title style', () => {
   it('applies italic and colour but never the block font-size or background', async () => {
     const styled = {
