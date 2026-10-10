@@ -5,10 +5,10 @@ export default async function Page({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ openPadlet?: string }>;
+  searchParams: Promise<{ openPadlet?: string; openCard?: string }>;
 }) {
   const { id } = await params;
-  const { openPadlet } = await searchParams;
+  const { openPadlet, openCard } = await searchParams;
 
-  return <CanvasClient canvasId={id} openPadletId={openPadlet} />;
+  return <CanvasClient canvasId={id} openPadletId={openPadlet} openCardId={openCard} />;
 }

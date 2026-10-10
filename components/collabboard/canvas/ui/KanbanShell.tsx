@@ -1,6 +1,6 @@
 "use client";
 
-import { KanbanProvider } from '@/components/kanban-canvas/store';
+import { KanbanProvider, useKanbanData, useKanbanPersistence } from '@/components/kanban-canvas/store';
 import { KanbanCanvas } from '@/components/kanban-canvas';
 import { KanbanGanttSchedulerSplit } from '@/components/scheduler-canvas/KanbanGanttSchedulerSplit';
 import {
@@ -13,7 +13,7 @@ import { KanbanCalendarAutoSync } from '@/components/kanban-canvas/KanbanCalenda
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import { canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { Bot, UserPlus } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface KanbanShellProps {
   canvasId: string;
@@ -38,6 +38,36 @@ interface KanbanShellProps {
   onToggleBoardAiChat?: () => void;
   boardAiHost?: KanbanBoardAiHost | null;
   onBoardAiBridgeReady?: (api: KanbanBoardAiBridgeApi | null) => void;
+  /* PATCH-340. ?openCard=<id> -- open that card's editor once it is loaded.
+     An unknown id is ignored silently. */
+  openCardId?: string;
+}
+
+/**
+ * PATCH-340. Opens a card named in the URL once the board has it. Cards load
+ * lazily per column, so if the target is not present yet the whole board is
+ * read once; the effect re-runs when cards arrive and opens it then.
+ */
+function KanbanOpenCard({ cardId }: { cardId?: string | null }) {
+  const actions = useKanbanPersistence();
+  const data = useKanbanData();
+  const openedRef = useRef(false);
+  const requestedRef = useRef(false);
+
+  useEffect(() => {
+    if (!cardId || openedRef.current) return;
+    if (data.cards.some((card) => card.id === cardId)) {
+      openedRef.current = true;
+      actions.setActiveCard(cardId);
+      return;
+    }
+    if (!requestedRef.current) {
+      requestedRef.current = true;
+      void actions.refetchFromServer();
+    }
+  }, [cardId, data.cards, actions]);
+
+  return null;
 }
 
 /** The Board AI drawer's own max width, so the Kanban area yields exactly it. */
@@ -111,6 +141,7 @@ export default function KanbanShell({
   onToggleBoardAiChat,
   boardAiHost = null,
   onBoardAiBridgeReady,
+  openCardId,
 }: KanbanShellProps) {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
@@ -237,6 +268,8 @@ export default function KanbanShell({
               several components below. */}
           <KanbanBoardAiContext.Provider value={boardAiHost}>
             <KanbanBoardAiBridge onRegister={onBoardAiBridgeReady} />
+            {/* PATCH-340. ?openCard=<id> -- opens the card once it is loaded. */}
+            <KanbanOpenCard cardId={openCardId} />
             {/* PATCH-328. Runs once per mount, whichever views are open. */}
             <KanbanCalendarAutoSync />
             {viewsEnabled ? (

@@ -111,9 +111,15 @@ describe('PATCH 9F: readonly uses the existing Group into Column permission gate
     expect(documentBranch).toContain('disabled={!canUseFreeformEditButton}');
   });
 
-  it('NotePostContextMenu itself short-circuits its ENTIRE menu (including Group into Column) when disabled -- untouched by this patch', () => {
+  it('NotePostContextMenu itself short-circuits its menu (including Group into Column) when disabled -- untouched by this patch', () => {
     const menuSrc = read('components/collabboard/menus/NotePostContextMenu.tsx');
-    expect(menuSrc).toContain('if (disabled) {\n        return <>{children}</>;\n    }');
+    // PATCH-340 added ONE scoped viewer exception to the disabled branch: a
+    // linked note keeps a one-row "Open card" menu. The unlinked viewer still
+    // gets no menu at all, so Group into Column stays unreachable for them.
+    expect(menuSrc).toContain('if (disabled) {');
+    expect(menuSrc).toContain('return <>{children}</>;');
+    const disabledBranch = menuSrc.slice(menuSrc.indexOf('if (disabled) {'), menuSrc.indexOf('const handleAction'));
+    expect(disabledBranch).not.toContain('<GroupIntoColumnMenuItem');
     // GroupIntoColumnMenuItem is rendered unconditionally inside the menu
     // body -- it is the `disabled` early return above (not a second,
     // Document-specific gate) that keeps it out of a readonly viewer's tree.

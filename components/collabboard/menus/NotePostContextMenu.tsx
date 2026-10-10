@@ -11,7 +11,8 @@ import {
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
-import { Lock, LockOpen } from 'lucide-react';
+import { Lock, LockOpen, SquareKanban } from 'lucide-react';
+import { readKanbanLink, type KanbanLink } from '@/lib/domain/canvas/noteToKanbanCard';
 import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
 interface NotePostContextMenuProps {
@@ -42,6 +43,14 @@ interface NotePostContextMenuProps {
     // PATCH-223. Only Drawings pass this (their zoom moved off the canvas
     // click and into this menu). Undefined for every other type.
     onViewFullSize?: () => void;
+    // PATCH-340. "Send to Kanban" (unlinked) / "Open card" + "Unlink card"
+    // (linked). The link is read from the note's metadata unless the host
+    // passes it. "Open card" is shown to viewers too; sending and unlinking
+    // stay editors-only (the whole menu is editor-only except that one row).
+    kanbanLink?: KanbanLink | null;
+    onSendToKanban?: () => void;
+    onOpenKanbanCard?: (link: KanbanLink) => void;
+    onUnlinkKanban?: () => void;
     disabled?: boolean;
 }
 
@@ -65,9 +74,30 @@ export function NotePostContextMenu({
     onAddToLibrary,
     onToggleFullView,
     onViewFullSize,
+    kanbanLink,
+    onSendToKanban,
+    onOpenKanbanCard,
+    onUnlinkKanban,
     disabled = false,
 }: NotePostContextMenuProps) {
+    const link = kanbanLink ?? readKanbanLink(padlet);
+
     if (disabled) {
+        // PATCH-340. A viewer still gets to open a linked card, so a linked note
+        // keeps a one-row menu even without edit rights. Everything else is
+        // editor-only, exactly as before.
+        if (link && onOpenKanbanCard) {
+            return (
+                <ContextMenu>
+                    <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+                    <ContextMenuContent className="min-w-[220px]" style={{ zIndex: 9999 }}>
+                        <ContextMenuItem onClick={() => onOpenKanbanCard(link)}>
+                            Open card
+                        </ContextMenuItem>
+                    </ContextMenuContent>
+                </ContextMenu>
+            );
+        }
         return <>{children}</>;
     }
 
@@ -145,6 +175,31 @@ export function NotePostContextMenu({
                         handleAction('post.groupIntoColumn');
                     }}
                 />
+
+                {((link && (onOpenKanbanCard || onUnlinkKanban)) || (!link && onSendToKanban)) && (
+                    <ContextMenuSeparator />
+                )}
+
+                {link ? (
+                    <>
+                        {onOpenKanbanCard && (
+                            <ContextMenuItem onClick={() => onOpenKanbanCard(link)} icon={<SquareKanban />}>
+                                Open card
+                            </ContextMenuItem>
+                        )}
+                        {onUnlinkKanban && (
+                            <ContextMenuItem onClick={onUnlinkKanban}>
+                                Unlink card
+                            </ContextMenuItem>
+                        )}
+                    </>
+                ) : (
+                    onSendToKanban && (
+                        <ContextMenuItem onClick={onSendToKanban} icon={<SquareKanban />}>
+                            Send to Kanban
+                        </ContextMenuItem>
+                    )
+                )}
 
                 {onToggleFullView && (
                     <>

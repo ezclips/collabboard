@@ -106,6 +106,20 @@ import {
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
 import { createKeyedDebounce } from '@/lib/infra/keyedDebounce';
 import {
+  loadBoardFirstSwimlane,
+  loadKanbanLinkStatuses,
+  sendNotesToKanban,
+  type KanbanLinkRef,
+  type KanbanLinkStatus,
+} from '@/lib/kanban/sendNotesToKanban';
+import {
+  partitionSendableNotes,
+  readKanbanLink,
+  sendSummaryMessage,
+  type KanbanLink,
+} from '@/lib/domain/canvas/noteToKanbanCard';
+import { SendToKanbanDialog, type SendToKanbanSelection } from '@/components/collabboard/SendToKanbanDialog';
+import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
 } from '@/lib/infra/knowledge/knowledgePdfAreaLibraryReuseClient';
@@ -339,7 +353,7 @@ function getFreeformSpacingGuidesStorageKey(boardId?: string) {
 
 // === END TYPES + CONSTANTS REGION ===
 
-export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
+export default function CanvasClient({ canvasId, openPadletId, openCardId }: { canvasId?: string; openPadletId?: string; openCardId?: string }) {
   useExcalidrawLibraryReturn();
   // Canvas store (PR4) — declared first so useCanvasData can receive dispatch
   const [canvasState, dispatch] = useReducer(canvasReducer, initialCanvasState);
@@ -6987,6 +7001,121 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!saved) await fetchData();
   };
 
+  // === BEGIN PATCH-340: Send to Kanban ========================================
+  const [sendToKanban, setSendToKanban] = useState<{
+    notes: Padlet[];
+    preselectedIds: string[];
+    skippedNotNote: number;
+    skippedLinked: number;
+  } | null>(null);
+  const [kanbanLinkStatus, setKanbanLinkStatus] = useState<Map<string, KanbanLinkStatus>>(new Map());
+
+  const openKanbanCard = useCallback((link: KanbanLink) => {
+    router.push(`/dashboard/canvas/${link.boardId}?openCard=${encodeURIComponent(link.cardId)}`);
+  }, [router]);
+
+  const openSendToKanban = useCallback((padletId: string) => {
+    if (!canEditBoardContentRef.current) return;
+    // PATCH-340 Addendum 2. Candidates are ALL unlinked note posts on this
+    // board, not just the selection (Freeform has no multi-select gesture, so
+    // the choice is made in the dialog). The clicked note -- or, for a
+    // "Select all", every selected note -- is pre-ticked; linked notes are
+    // counted, never listed.
+    const { sendable, skippedNotNote, skippedLinked } = partitionSendableNotes(padlets);
+    if (sendable.length === 0) {
+      toast.info(sendSummaryMessage(0, skippedNotNote, skippedLinked));
+      return;
+    }
+    const multi = selectedPadletIds.length > 1 && selectedPadletIds.includes(padletId);
+    const preselectedIds = multi
+      ? sendable.filter((note) => selectedPadletIds.includes(note.id)).map((note) => note.id)
+      : sendable.filter((note) => note.id === padletId).map((note) => note.id);
+    setSendToKanban({ notes: sendable, preselectedIds, skippedNotNote, skippedLinked });
+  }, [padlets, selectedPadletIds]);
+
+  const confirmSendToKanban = useCallback(async (selection: SendToKanbanSelection) => {
+    const batch = sendToKanban;
+    if (!batch || batch.notes.length === 0) return;
+    if (!canEditBoardContentRef.current) return;
+    const chosen = batch.notes.filter((note) => selection.noteIds.includes(note.id));
+    if (chosen.length === 0) return;
+    const userId = user?.id ?? null;
+    if (!userId) {
+      toast.error('Sign in to send notes to a board.');
+      return;
+    }
+    const swimlaneId = selection.swimlaneId ?? await loadBoardFirstSwimlane(selection.boardId);
+    const result = await sendNotesToKanban({
+      boardId: selection.boardId,
+      columnId: selection.columnId,
+      swimlaneId,
+      notes: chosen,
+      userId,
+    });
+
+    // PATCH-337 immediate save: link ONLY the notes whose card actually exists.
+    for (const { noteId, cardId } of result.created) {
+      await updatePadletMetadataNow(noteId, { kanbanLink: { boardId: selection.boardId, cardId } });
+    }
+
+    setSendToKanban(null);
+
+    if (result.created.length === 0) {
+      toast.error('No cards could be created.');
+      return;
+    }
+    toast.success(
+      `${result.created.length} ${result.created.length === 1 ? 'card' : 'cards'} added to ${selection.boardTitle}`,
+      { action: { label: 'Open board', onClick: () => router.push(`/dashboard/canvas/${selection.boardId}`) } },
+    );
+    if (result.failed > 0) {
+      toast.error(`${result.created.length} of ${result.total} cards created`);
+    }
+  }, [sendToKanban, user, updatePadletMetadataNow, router]);
+
+  const unlinkKanban = useCallback(async (padletId: string) => {
+    await updatePadletMetadataNow(padletId, { kanbanLink: null });
+  }, [updatePadletMetadataNow]);
+
+  // Live chip data: one read per board load, refreshed on focus and every 60 s.
+  const kanbanLinks = useMemo<KanbanLinkRef[]>(() => {
+    const links: KanbanLinkRef[] = [];
+    for (const p of padlets) {
+      const link = readKanbanLink(p);
+      if (link) links.push({ noteId: p.id, boardId: link.boardId, cardId: link.cardId });
+    }
+    return links;
+  }, [padlets]);
+  const kanbanLinkKey = useMemo(
+    () => kanbanLinks.map((l) => `${l.boardId}:${l.cardId}`).sort().join('|'),
+    [kanbanLinks],
+  );
+  useEffect(() => {
+    if (kanbanLinks.length === 0) {
+      setKanbanLinkStatus(new Map());
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      loadKanbanLinkStatuses(kanbanLinks)
+        .then((map) => { if (!cancelled) setKanbanLinkStatus(map); })
+        .catch(() => {});
+    };
+    load();
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, 60_000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kanbanLinkKey]);
+  // === END PATCH-340: Send to Kanban ==========================================
+
   // Handle chrono mode change (persist to DB)
   const handleChronoModeChange = useCallback(async (mode: ChronoMode) => {
     // PATCH-307: only the board's owner may change its saved layout.
@@ -9323,6 +9452,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           onToggleBoardAiChat={toggleBoardAiChat}
           boardAiHost={kanbanBoardAiHost}
           onBoardAiBridgeReady={registerKanbanBoardAiBridge}
+          /* PATCH-340. ?openCard=<id> opens that card's editor once loaded. */
+          openCardId={openCardId}
         />
         {enableBoardAiChat ? (
           <BoardAiChatDrawer
@@ -10922,9 +11053,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     commentModeMutations={commentModeMutations}
                     onKnowledgeSourceClipDropOnNote={handleKnowledgeSourceClipDropOnExistingNote}
                     onResetImageCrop={resetImageCrop}
+                    kanbanLinkStatus={kanbanLinkStatus}
+                    onSendToKanban={openSendToKanban}
+                    onOpenKanbanCard={openKanbanCard}
+                    onUnlinkKanban={unlinkKanban}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
+            )}
+
+            {sendToKanban && (
+              <SendToKanbanDialog
+                isOpen
+                onClose={() => setSendToKanban(null)}
+                notes={sendToKanban.notes}
+                preselectedIds={sendToKanban.preselectedIds}
+                linkedCount={sendToKanban.skippedLinked}
+                userId={user?.id ?? null}
+                onConfirm={confirmSendToKanban}
+              />
             )}
 
             {isFreeformLayout && (

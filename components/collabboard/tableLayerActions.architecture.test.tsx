@@ -118,9 +118,15 @@ describe('PATCH 9H: readonly uses the existing permission gate -- no Table-speci
     expect(tableBranch).toContain('disabled={!canUseFreeformEditButton}');
   });
 
-  it('NotePostContextMenu short-circuits its entire menu (including the layer actions) when disabled -- untouched by this patch', () => {
+  it('NotePostContextMenu short-circuits its menu (including the layer actions) when disabled -- untouched by this patch', () => {
     const menuSrc = read('components/collabboard/menus/NotePostContextMenu.tsx');
-    expect(menuSrc).toContain('if (disabled) {\n        return <>{children}</>;\n    }');
+    // PATCH-340 added ONE scoped viewer exception: a linked note keeps a
+    // one-row "Open card" menu. The unlinked viewer still gets no menu, so the
+    // layer actions stay unreachable for them.
+    expect(menuSrc).toContain('if (disabled) {');
+    expect(menuSrc).toContain('return <>{children}</>;');
+    const disabledBranch = menuSrc.slice(menuSrc.indexOf('if (disabled) {'), menuSrc.indexOf('const handleAction'));
+    expect(disabledBranch).not.toContain('Send to Back');
   });
 });
 

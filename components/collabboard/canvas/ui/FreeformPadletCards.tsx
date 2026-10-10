@@ -77,8 +77,9 @@ import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX, FREEFORM_WORLD_MIN_X
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
-  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus, Sparkles,
+  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus, Sparkles, SquareKanban,
 } from 'lucide-react';
+import { isNotePost, readKanbanLink } from '@/lib/domain/canvas/noteToKanbanCard';
 import { BOARD_AI_POST_CLIP_MIME, boardAiPostClipPayload } from '@/lib/domain/ai/boardAiPostClipPayload';
 import { toast } from 'sonner';
 import {
@@ -329,6 +330,12 @@ export interface FreeformPadletCardsProps {
   onKnowledgeSourceClipDropOnNote?: (event: React.DragEvent, targetPadlet: Padlet) => boolean;
   // CROP_ORIGINAL_PRESERVATION_CORRECTION_1: CanvasClient's one shared Reset Crop operation.
   onResetImageCrop?: (padlet: Padlet) => void;
+  // PATCH-340. "Send to Kanban" and the live status chip on a linked note.
+  // The status map is keyed by card id (one read per board load in CanvasClient).
+  kanbanLinkStatus?: Map<string, { boardId: string; boardTitle: string; columnTitle: string; available: boolean }>;
+  onSendToKanban?: (padletId: string) => void;
+  onOpenKanbanCard?: (link: { boardId: string; cardId: string }) => void;
+  onUnlinkKanban?: (padletId: string) => void;
 }
 
 // PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
@@ -601,6 +608,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     commentAccessMode = 'manage',
     commentModeMutations,
     onKnowledgeSourceClipDropOnNote, onResetImageCrop,
+    kanbanLinkStatus, onSendToKanban, onOpenKanbanCard, onUnlinkKanban,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -5421,6 +5429,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
             onToggleFullView={padlet.type === 'drawing' || padlet.type === 'ai-component' ? () => toggleFullView(padlet.id) : undefined}
             onViewFullSize={padlet.type === 'drawing' ? () => setViewDrawingPadlet(padlet) : undefined}
+            kanbanLink={isNotePost(padlet) ? readKanbanLink(padlet) : null}
+            onSendToKanban={isNotePost(padlet) && onSendToKanban ? () => onSendToKanban(padlet.id) : undefined}
+            onOpenKanbanCard={onOpenKanbanCard}
+            onUnlinkKanban={isNotePost(padlet) && onUnlinkKanban ? () => onUnlinkKanban(padlet.id) : undefined}
           >
             {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table, scoped to
                 Note/AI-component/PDF ONLY -- this wrapper is also the
@@ -5442,6 +5454,47 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               {content}
               {framelessActions}
               {resizeHandle}
+
+              {/* PATCH-340. A note sent to Kanban shows the card's current
+                  column, live, at its bottom-left; clicking opens the card. */}
+              {(() => {
+                if (!isNotePost(padlet)) return null;
+                const link = readKanbanLink(padlet);
+                if (!link) return null;
+                const status = kanbanLinkStatus?.get(link.cardId);
+                const available = status?.available ?? true;
+                const label = available ? (status?.columnTitle || 'Kanban') : 'Card not available';
+                return (
+                  <button
+                    type="button"
+                    data-kanban-link-chip="true"
+                    // PATCH-340 Addendum 2. The card's drag handler runs in the
+                    // CAPTURE phase (the outer wrapper's onMouseDownCapture), so
+                    // the chip's bubble-phase stopPropagation cannot stop it:
+                    // without this marker, mousedown selects the post and arms a
+                    // drag, and the first click never reaches onClick. The canvas
+                    // already ignores `[data-no-drag="true"]` (useCanvasInteractions
+                    // handlePadletMouseDown), the same escape hatch other in-post
+                    // buttons use.
+                    data-no-drag="true"
+                    className="absolute left-1 bottom-1 z-[110] flex max-w-[90%] items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium shadow-sm"
+                    style={{
+                      backgroundColor: available ? '#eef2ff' : '#f1f5f9',
+                      color: available ? '#3730a3' : '#64748b',
+                    }}
+                    title={available ? `Open the card in ${status?.boardTitle ?? 'the board'}` : 'Card not available'}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (available) onOpenKanbanCard?.(link);
+                    }}
+                  >
+                    <SquareKanban className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{label}</span>
+                  </button>
+                );
+              })()}
 
               {/* Comment Badge - yellow indicator with count */}
               {(() => {
