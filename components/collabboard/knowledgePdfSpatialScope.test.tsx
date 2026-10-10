@@ -25,18 +25,24 @@ class NoopResizeObserver {
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = NoopResizeObserver;
 
 /**
- * PDF-C1 final release scope. Direct PDF canvas objects ship on Freeform ONLY.
- * Structured layouts keep their semantic placement structures and will
- * reference a Knowledge PDF from an ordinary Note/Post/Container instead.
- * Drawing is excluded too: its PDF placement works on insert, but
- * container-hosted posts vanish from its rendering after a board reload -- a
- * defect generic to the Drawing host (an ordinary Note reproduces it), tracked
- * as DRAWING_CONTAINER_HOST_RELOAD_DEFECT and deliberately not fixed here.
+ * AI/Wiki-document release scope. The tool ships on Freeform and Scheduler.
+ * On Freeform the document is a direct canvas object; on the Scheduler it always
+ * lives INSIDE a time-slot entry (never loose), placed through the same flow a
+ * Note uses. Every other structured layout keeps its semantic placement
+ * structures and references a Knowledge document from an ordinary
+ * Note/Post/Container instead.
+ * Drawing is excluded: its placement works on insert, but container-hosted
+ * posts vanish from its rendering after a board reload -- a defect generic to
+ * the Drawing host (an ordinary Note reproduces it), tracked as
+ * DRAWING_CONTAINER_HOST_RELOAD_DEFECT and deliberately not fixed here.
  *
  * This suite pins BOTH layers of the scope: the rendered toolbar (the primary,
  * pre-upload prevention) and the defensive guard at the placement owner
  * (source-level, because CanvasClient is the whole board shell and cannot be
  * mounted here).
+ *
+ * PATCH-338 deliberately moves `scheduler` from UNSUPPORTED to SUPPORTED; the
+ * rows below are the release-scope decision itself, updated on purpose.
  */
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -75,6 +81,8 @@ type LayoutCase = { layout: string; flags: Partial<CanvasToolbarFlags> };
 
 const SUPPORTED: LayoutCase[] = [
   { layout: 'freeform', flags: { isFreeformLayout: true } },
+  // PATCH-338: the Scheduler adds AI/Wiki documents, always inside an entry.
+  { layout: 'scheduler', flags: {} },
 ];
 
 const UNSUPPORTED: LayoutCase[] = [
@@ -91,7 +99,6 @@ const UNSUPPORTED: LayoutCase[] = [
   { layout: 'table', flags: { isFreeformLayout: true } },
   { layout: 'stream', flags: { isFreeformLayout: true } },
   { layout: 'timeline', flags: { isTimelineLayout: true } },
-  { layout: 'scheduler', flags: {} },
   { layout: 'map', flags: { isMapLayout: true } },
   { layout: 'kanban', flags: {} },
   { layout: 'gantt', flags: {} },
@@ -119,7 +126,7 @@ function toolbarFor({ layout, flags }: LayoutCase) {
 const hasAddPdf = (layoutCase: LayoutCase) =>
   toolbarFor(layoutCase).some((group) => group.tools.some((tool) => tool.type === 'knowledge-pdf'));
 
-describe('1, 4. the rendered toolbar offers Add PDF on Freeform', () => {
+describe('1, 4. the rendered toolbar offers Add PDF on Freeform and Scheduler', () => {
   it.each(SUPPORTED)('$layout renders Add PDF', (layoutCase) => {
     expect(hasAddPdf(layoutCase)).toBe(true);
   });
@@ -143,8 +150,9 @@ describe('2-3, 5. every unsupported layout renders no Add PDF at all', () => {
     expect(hasAddPdf(layoutCase)).toBe(false);
   });
 
-  it('5. the predicate itself is the release scope: freeform in, drawing out', () => {
+  it('5. the predicate itself is the release scope: freeform + scheduler in, drawing out', () => {
     expect(isDirectPdfCanvasLayout('freeform')).toBe(true);
+    expect(isDirectPdfCanvasLayout('scheduler')).toBe(true);
     expect(isDirectPdfCanvasLayout('drawing')).toBe(false);
   });
 
@@ -199,7 +207,7 @@ describe('6-7. the placement owner defends the same allowlist', () => {
     // Exactly one definition of the allowlist exists, and it is a predicate --
     // not a per-layout switch duplicated at the toolbar and at the guard.
     expect((REGISTRY.match(/export function isDirectPdfCanvasLayout/g) || []).length).toBe(1);
-    expect(executable(REGISTRY)).toContain("return layout === 'freeform';");
+    expect(executable(REGISTRY)).toContain("return layout === 'freeform' || layout === 'scheduler';");
     // The withheld layout must not survive anywhere in the executable gate.
     expect(executable(REGISTRY)).not.toContain("layout === 'drawing'");
     for (const layoutFlag of [
@@ -433,10 +441,14 @@ describe('11. the result contract, executed', () => {
   });
 
   it('a taken placement reports FALSE -- ownership is not confirmation', async () => {
+    // PATCH-338: this is exactly the Scheduler path -- the layout (Scheduler)
+    // takes the draft and inserts nothing itself; the same branch keeps
+    // Freeform unchanged. The draft must carry the document identity.
     const run = await runPlacement({ placementTaken: true });
     // The gate was consulted, and it short-circuited the insert as designed.
     expect(run.gateCalls).toHaveLength(1);
     expect(run.gateCalls[0].kind).toBe('file');
+    expect(run.gateCalls[0].metadata.knowledgeDocumentId).toBe('doc-1');
     expect(run.inserted).toHaveLength(0);
     expect(run.onBoard).toHaveLength(0);
     // Nothing reached the board, so nothing may be reported as placed. This is

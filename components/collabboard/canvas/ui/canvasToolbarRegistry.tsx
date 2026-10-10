@@ -52,8 +52,8 @@ export type CanvasToolbarFlags = {
   /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
   isDrawingLayout: boolean;
   /**
-   * True only on the one layout that ships direct PDF canvas objects; gates the
-   * pinned PDF entry in the Media group. Derive it with
+   * True on the layouts that may add AI/Wiki documents (Freeform and Scheduler);
+   * gates the pinned entry in the Media group. Derive it with
    * {@link isDirectPdfCanvasLayout} -- never from `isFreeformLayout`, which is
    * a catch-all that also swallows Table/Stream and any unrecognised layout.
    * Outside the allowlist the tool is absent from the registry entirely rather
@@ -64,26 +64,30 @@ export type CanvasToolbarFlags = {
 };
 
 /**
- * PDF-C1 release scope. THE allowlist for direct PDF canvas objects, and the
- * only gate: both the toolbar and the defensive placement guard read this one
- * predicate, so no per-layout PDF switch exists anywhere.
+ * Release scope for the "AI/Wiki Documents" (PDF, Word, Text) tool. THE
+ * allowlist, and the only gate: both the toolbar and the defensive placement
+ * guard read this one predicate, so no per-layout document switch exists
+ * anywhere. (The name is historical -- it began as "direct PDF canvas objects";
+ * it now means "this layout can add AI/Wiki documents".)
  *
- * Freeform alone ships in C1. Every structured layout (Wall, Columns, Grid,
- * Table, Timeline, Scheduler, Map, Stream, Kanban, Gantt, ...) has semantic
- * placement structures instead, and will eventually reference a Knowledge PDF
- * from an ordinary Note/Post/Container rather than hold a raw PDF object.
+ * Freeform ships the document as a direct canvas object. PATCH-338 adds the
+ * Scheduler, where the document post always lives INSIDE a time-slot entry
+ * (never loose on the board), placed through the same flow a Note uses. Every
+ * other structured layout (Wall, Columns, Grid, Table, Timeline, Map, Stream,
+ * Kanban, Gantt, ...) stays without the tool and references a Knowledge
+ * document from an ordinary post instead.
  *
- * Drawing is a spatial object canvas and its PDF placement path works on
- * insert, but it is deliberately EXCLUDED here: container-hosted posts vanish
- * from Drawing's rendering after a board reload. That defect is generic to the
+ * Drawing is a spatial object canvas and its placement path works on insert,
+ * but it is deliberately EXCLUDED here: container-hosted posts vanish from
+ * Drawing's rendering after a board reload. That defect is generic to the
  * Drawing host -- an ordinary Note reproduces it -- so it is not fixed by this
  * predicate and is tracked as DRAWING_CONTAINER_HOST_RELOAD_DEFECT. Enabling
- * toolbar PDF insertion there would expose a known-broken experience. Re-add
- * 'drawing' here, and nowhere else, once that host defect is fixed and
+ * toolbar document insertion there would expose a known-broken experience.
+ * Re-add 'drawing' here, and nowhere else, once that host defect is fixed and
  * independently verified.
  */
 export function isDirectPdfCanvasLayout(layout: string | null | undefined): boolean {
-  return layout === 'freeform';
+  return layout === 'freeform' || layout === 'scheduler';
 }
 
 function GraphLineToolIcon({ size = 18, className, ...rest }: { size?: number; className?: string; [key: string]: unknown }) {

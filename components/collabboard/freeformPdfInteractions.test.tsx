@@ -229,8 +229,8 @@ describe('5-6. unsupported layouts stay closed', () => {
     expect(visibleAddPdfControl(sidebar('drawing'))).toBeNull();
   });
 
-  it('5b. no structured layout renders one either', () => {
-    for (const layout of ['wall', 'columns', 'grid', 'timeline', 'scheduler', 'map', 'kanban', 'gantt']) {
+  it('5b. no structured layout renders one either (PATCH-338 moves scheduler out of this list)', () => {
+    for (const layout of ['wall', 'columns', 'grid', 'timeline', 'map', 'kanban', 'gantt']) {
       expect(visibleAddPdfControl(sidebar(layout)), `${layout} must not offer Add PDF`).toBeNull();
     }
   });

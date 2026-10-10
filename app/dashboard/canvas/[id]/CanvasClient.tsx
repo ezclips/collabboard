@@ -1682,10 +1682,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
   const showBoardAssistantButtons = !!canvas && isFreeformLayout;
-  // PDF-C1 release scope. Deliberately NOT isFreeformLayout: that flag is the
-  // catch-all for Table/Stream and any unrecognised layout, none of which ship
-  // direct PDF objects. One allowlist, shared by the toolbar gate below and by
-  // the defensive guard in the PDF placement owner.
+  // AI/Wiki-document release scope. Deliberately NOT isFreeformLayout: that
+  // flag is the catch-all for Table/Stream and any unrecognised layout, none of
+  // which add documents. One allowlist (Freeform + Scheduler), shared by the
+  // toolbar gate below and by the defensive guard in the document placement
+  // owner.
   const canPlaceDirectPdf = isDirectPdfCanvasLayout(canvas?.layout);
 
   /**
@@ -3026,7 +3027,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }) => {
     if (!canEditBoardContentRef.current) return;
     if (!canPlaceDirectPdf || !knowledgeUploaderRef.current) {
-      toast.error('Documents can be added on Freeform canvases only');
+      toast.error('Documents can be added on Freeform and Scheduler boards only');
       return;
     }
     const providerLabel = importData.provider === 'google-drive' ? 'Google Drive' : 'OneDrive';
@@ -3076,7 +3077,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // acquire a raw PDF canvas object. The Knowledge document itself stays --
     // it is durable board-independent authority, not this board's to delete.
     if (!canPlaceDirectPdf) {
-      toast.error('PDFs can be added directly on Freeform canvases only');
+      toast.error('Documents can be added on Freeform and Scheduler boards only');
       return false;
     }
     // Still authoritative for the chooser: its list is a snapshot, so a

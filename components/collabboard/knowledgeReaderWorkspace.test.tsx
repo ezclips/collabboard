@@ -313,8 +313,8 @@ describe('30-37. everything outside the reader is untouched', () => {
     expect(POST_CARD).toContain('openSource(openTarget)');
   });
 
-  it('34. direct PDFs remain Freeform-only', () => {
-    expect(REGISTRY).toContain("return layout === 'freeform';");
+  it('34. documents stay on the layout allowlist only (PATCH-338: Freeform + Scheduler)', () => {
+    expect(REGISTRY).toContain("return layout === 'freeform' || layout === 'scheduler';");
   });
 
   it('35-37. Knowledge authority, AI and the backend are unchanged', () => {
