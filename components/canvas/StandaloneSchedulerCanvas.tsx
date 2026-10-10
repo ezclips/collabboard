@@ -22,6 +22,14 @@ const DEFAULT_EVENT_BACKGROUND = '#2563eb';
 // entry is 38–40 px, a 2 h entry is 78 px): below this the tab centres its row.
 const SHORT_EVENT_MAX_HEIGHT = 44;
 
+// PATCH-339. Tall-layout title clamp. The title is `text-sm` (14px / 20px
+// line-height); the badge row is its ~16px pill plus a 2px gap, and the tab
+// keeps PATCH-335's 4px top inset. The title is clamped to whole lines that fit
+// above the badge, so it never runs under it and is never cut mid-line.
+const EVENT_TITLE_LINE_HEIGHT_PX = 20;
+const EVENT_BADGE_ROW_PX = 18;
+const EVENT_TAB_TOP_INSET_PX = 4;
+
 type SchedulerEvent = {
   id: string;
   title: string;
@@ -866,11 +874,18 @@ export default function StandaloneSchedulerCanvas({
 
     const tabRef = useRef<HTMLDivElement | null>(null);
     const [isShort, setIsShort] = useState(true);
+    // PATCH-339. The measured tab height, so the tall layout can clamp the title
+    // to the whole lines that fit above the badge.
+    const [tabHeight, setTabHeight] = useState(0);
 
     useLayoutEffect(() => {
       const element = tabRef.current;
       if (!element) return;
-      const measure = () => setIsShort(element.getBoundingClientRect().height < SHORT_EVENT_MAX_HEIGHT);
+      const measure = () => {
+        const height = element.getBoundingClientRect().height;
+        setTabHeight(height);
+        setIsShort(height < SHORT_EVENT_MAX_HEIGHT);
+      };
       measure();
       if (typeof ResizeObserver === 'undefined') return;
       const observer = new ResizeObserver(measure);
@@ -879,6 +894,15 @@ export default function StandaloneSchedulerCanvas({
     }, []);
 
     const badgeStyle = { backgroundColor: badgeBg, color: badgeTextColor };
+
+    // PATCH-339. Whole lines that fit above the badge (never cut mid-line).
+    const titleLineClamp = Math.max(
+      1,
+      Math.floor(
+        (tabHeight - EVENT_TAB_TOP_INSET_PX - (showPostBadge ? EVENT_BADGE_ROW_PX : 0))
+          / EVENT_TITLE_LINE_HEIGHT_PX,
+      ),
+    );
 
     return (
       <div
@@ -893,7 +917,10 @@ export default function StandaloneSchedulerCanvas({
           // 4px inset the box padding used to give it.
           isShort
             ? 'relative flex w-full h-full items-center px-1 overflow-hidden font-medium text-sm text-left'
-            : 'relative block w-full h-full px-1 pt-1 overflow-hidden font-medium text-sm text-left'
+            // PATCH-339. Tall layout is a column: title (flex-1, clamped) then
+            // the badge in normal flow -- never absolutely positioned over the
+            // title. Keeps PATCH-335's 4px top inset.
+            : 'relative flex flex-col w-full h-full px-1 pt-1 overflow-hidden font-medium text-sm text-left'
         }
       >
         {isShort ? (
@@ -913,11 +940,21 @@ export default function StandaloneSchedulerCanvas({
         ) : (
           <>
             {calendarIcon}
-            <span className="block whitespace-normal break-words" style={eventTitleStyle}>{title}</span>
+            <span
+              className="block min-h-0 flex-1 overflow-hidden whitespace-normal break-words"
+              style={{
+                ...eventTitleStyle,
+                display: '-webkit-box',
+                WebkitBoxOrient: 'vertical',
+                WebkitLineClamp: titleLineClamp,
+              }}
+            >
+              {title}
+            </span>
             {showPostBadge && (
               <span
                 data-scheduler-post-count
-                className="pointer-events-none absolute left-1 bottom-1 rounded px-1.5 py-0.5 text-[9px] font-medium"
+                className="pointer-events-none mt-0.5 flex-none self-start rounded px-1.5 py-0.5 text-[9px] font-medium"
                 style={badgeStyle}
               >
                 {itemLabel}

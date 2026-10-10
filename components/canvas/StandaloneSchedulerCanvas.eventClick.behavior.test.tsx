@@ -237,7 +237,7 @@ describe('PATCH-314 Addendum 1: short events keep the badge and title on one lin
     expect(el.className).toContain('flex-none');
   });
 
-  it('positions the badge absolutely in a tall event', async () => {
+  it('keeps the badge in flow (never over the title) in a tall event', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const isTab = this.getAttribute?.('data-scheduler-event-tab') === 'true';
       return {
@@ -255,8 +255,9 @@ describe('PATCH-314 Addendum 1: short events keep the badge and title on one lin
 
     await mount([PADLET, childPost('c1')]);
     const el = badge()!;
-    expect(el.className).toContain('absolute');
-    expect(el.className).toContain('bottom-1');
+    // PATCH-339: the tall-layout badge is in normal flow, never absolute.
+    expect(el.className).not.toContain('absolute');
+    expect(el.className).toContain('flex-none');
   });
 });
 
@@ -378,17 +379,17 @@ describe('PATCH-335: short entries centre their text, tall entries keep it at th
     expect(tab.className).not.toContain('pt-1');
   });
 
-  it('tall layout: title first, badge absolutely bottom-left', async () => {
+  it('tall layout: title first, badge in flow below it (never over it)', async () => {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(tallRect);
     await mount([PADLET, childPost('c1')]);
     const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
     expect(tab.className).toContain('pt-1');
+    expect(tab.className).toContain('flex-col');
     expect(tab.querySelector('span.truncate')).toBeNull();
     expect(tab.textContent!.startsWith('Kickoff')).toBe(true);
     const badge = tab.querySelector<HTMLElement>('[data-scheduler-post-count]')!;
-    expect(badge.className).toContain('absolute');
-    expect(badge.className).toContain('bottom-1');
-    expect(badge.className).toContain('left-1');
+    expect(badge.className).not.toContain('absolute');
+    expect(badge.className).toContain('flex-none');
   });
 
   it('source: time-grid events have no vertical padding, month/all-day unchanged', () => {
@@ -409,6 +410,41 @@ describe('PATCH-336: the top "=" handle resizes the start time', () => {
     expect(rule).not.toBeNull();
     expect(rule![1]).toMatch(/z-index:\s*6/);
     expect(rule![1]).toMatch(/cursor:\s*ns-resize/);
+  });
+});
+
+describe('PATCH-339: the tall-layout badge never covers the title', () => {
+  const tallRect = { height: 78, width: 200, top: 0, left: 0, right: 200, bottom: 78, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+
+  it('puts the badge in normal flow after the title, inside a flex-column tab', async () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(tallRect);
+    await mount([PADLET, childPost('c1')]);
+    const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
+    expect(tab.className).toContain('flex');
+    expect(tab.className).toContain('flex-col');
+    const badge = tab.querySelector<HTMLElement>('[data-scheduler-post-count]')!;
+    expect(badge).not.toBeNull();
+    expect(badge.className).not.toContain('absolute');
+    expect(badge.className).toContain('flex-none');
+    const title = Array.from(tab.querySelectorAll<HTMLElement>('span')).find((el) => el.textContent === 'Kickoff')!;
+    expect(title).toBeTruthy();
+    expect(title.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('clamps the title to whole lines with overflow hidden', async () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(tallRect);
+    await mount([PADLET, childPost('c1')]);
+    const title = container.querySelector<HTMLElement>('[data-scheduler-event-tab] span.break-words')!;
+    expect(title.className).toContain('overflow-hidden');
+    expect(title.className).toContain('min-h-0');
+    expect(title.className).toContain('flex-1');
+    expect(Number(title.style.webkitLineClamp)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows no badge when the entry holds no posts', async () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(tallRect);
+    await mount([PADLET]);
+    expect(container.querySelector('[data-scheduler-post-count]')).toBeNull();
   });
 });
 
