@@ -401,3 +401,13 @@ describe('PATCH-335: short entries centre their text, tall entries keep it at th
     expect(base![1]).toMatch(/padding:\s*4px 8px/);
   });
 });
+
+describe('PATCH-336: the top "=" handle resizes the start time', () => {
+  it('source: the ns resize anchor sits above the content and grabs with ns-resize', () => {
+    const css = fs.readFileSync(path.join(process.cwd(), 'components/canvas/scheduler-theme.css'), 'utf8');
+    const rule = css.match(/\.scheduler-wrapper \.rbc-addons-dnd-resize-ns-anchor\s*\{([^}]*)\}/);
+    expect(rule).not.toBeNull();
+    expect(rule![1]).toMatch(/z-index:\s*6/);
+    expect(rule![1]).toMatch(/cursor:\s*ns-resize/);
+  });
+});

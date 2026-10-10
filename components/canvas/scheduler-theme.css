@@ -183,6 +183,20 @@
   padding: 0 8px;
 }
 
+/* PATCH-336. The DnD addon renders a 3px resize anchor at the top (start time)
+   and bottom (end time) of each time-grid event. The event tab is positioned,
+   so it painted over the TOP anchor and the start handle was dead. Lift both
+   anchors above the content (the day-span handles are z-index 5) and give each
+   a 6px grab strip; the "=" icon still appears on hover, centred in the strip. */
+.scheduler-wrapper .rbc-addons-dnd-resize-ns-anchor {
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 6px;
+  cursor: ns-resize;
+}
+
 /* Multi-day events render as one block per day column (see the `events`
    useMemo in StandaloneSchedulerCanvas.tsx). The base .rbc-event gradient
    restarts on every block, so a chain of them shows a repeating diagonal
