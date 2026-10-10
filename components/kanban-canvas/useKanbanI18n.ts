@@ -179,6 +179,10 @@ type I18nKey =
   // PATCH-328. Connected calendars.
   | 'fromConnectedCalendar'
   | 'fromConnectedCalendarNote'
+  | 'fromBrainstormOn'
+  | 'fromBrainstorm'
+  | 'openNote'
+  | 'moreLinks'
   | 'keepCalendarUpdated'
   | 'connectedCalendars'
   | 'updateNow'
@@ -364,6 +368,10 @@ const en: Dict = {
   chooseColumn: 'Column',
   fromConnectedCalendar: 'From a connected calendar',
   fromConnectedCalendarNote: 'From a connected calendar — title, dates and description are updated from the calendar.',
+  fromBrainstormOn: 'From a brainstorm on {board}',
+  fromBrainstorm: 'From brainstorm: {board}',
+  openNote: 'Open note: {note}',
+  moreLinks: '+{count} more',
   keepCalendarUpdated: 'Keep this calendar updated',
   connectedCalendars: 'Connected calendars',
   updateNow: 'Update now',
@@ -548,6 +556,10 @@ const es: Dict = {
   chooseColumn: 'Column',
   fromConnectedCalendar: 'From a connected calendar',
   fromConnectedCalendarNote: 'From a connected calendar — title, dates and description are updated from the calendar.',
+  fromBrainstormOn: 'From a brainstorm on {board}',
+  fromBrainstorm: 'From brainstorm: {board}',
+  openNote: 'Open note: {note}',
+  moreLinks: '+{count} more',
   keepCalendarUpdated: 'Keep this calendar updated',
   connectedCalendars: 'Connected calendars',
   updateNow: 'Update now',
@@ -732,6 +744,10 @@ const fr: Dict = {
   chooseColumn: 'Column',
   fromConnectedCalendar: 'From a connected calendar',
   fromConnectedCalendarNote: 'From a connected calendar — title, dates and description are updated from the calendar.',
+  fromBrainstormOn: 'From a brainstorm on {board}',
+  fromBrainstorm: 'From brainstorm: {board}',
+  openNote: 'Open note: {note}',
+  moreLinks: '+{count} more',
   keepCalendarUpdated: 'Keep this calendar updated',
   connectedCalendars: 'Connected calendars',
   updateNow: 'Update now',

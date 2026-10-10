@@ -1,10 +1,11 @@
 'use client';
 
-import { createContext, useContext, useReducer, useCallback, ReactNode, useEffect, useRef } from 'react';
+import { createContext, useContext, useReducer, useCallback, useState, ReactNode, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { loadKanbanData, loadKanbanScaffoldData, loadKanbanCardsForColumn, saveCard, saveCardAssignees, deleteCard, saveColumn, deleteColumn, saveColumnGroup, deleteColumnGroup as deleteColumnGroupPersisted, saveSwimlane, deleteSwimlane, saveLink, deleteLink, saveComment, deleteComment as deleteCommentPersisted, saveVote, deleteVote as deleteVotePersisted, saveMemberSortPreference, saveMemberGroupByPreference, saveMemberDateFormatPreference, toDbPriority, fromDbPriority } from '@/lib/kanban/supabaseAdapter';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { removeKanbanCardAttachments, removeKanbanCardAttachmentsForCards } from '@/lib/kanban/kanbanAttachmentStorage';
+import { loadBrainstormLinks, type BrainstormLink } from '@/lib/kanban/brainstormLinks';
 import type {
   KanbanState,
   KanbanAction,
@@ -834,6 +835,8 @@ interface KanbanContextValue {
   state: KanbanState;
   dispatch: React.Dispatch<KanbanAction>;
   canvasId: string;
+  /** PATCH-341. cardId -> the notes it was sent from (reverse lookup). */
+  brainstormLinks: Map<string, BrainstormLink[]>;
 }
 
 const KanbanContext = createContext<KanbanContextValue | undefined>(undefined);
@@ -859,6 +862,29 @@ export function KanbanProvider({
     },
   });
   const activeCardIdRef = useRef<string | null>(null);
+  // PATCH-341. The reverse "From brainstorm" lookup: one read per board load,
+  // then on focus at most once per 60 s. Never part of `state.data`, so RESET
+  // (realtime, refetch) never wipes it.
+  const [brainstormLinks, setBrainstormLinks] = useState<Map<string, BrainstormLink[]>>(new Map());
+  const lastBrainstormLoadRef = useRef(0);
+  useEffect(() => {
+    let cancelled = false;
+    const load = (force: boolean) => {
+      const now = Date.now();
+      if (!force && now - lastBrainstormLoadRef.current < 60_000) return;
+      lastBrainstormLoadRef.current = now;
+      loadBrainstormLinks(canvasId)
+        .then((map) => { if (!cancelled) setBrainstormLinks(map); })
+        .catch(() => {});
+    };
+    load(true);
+    const onFocus = () => load(false);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [canvasId]);
   const realtimeRefetchingRef = useRef(false);
   const realtimeReconcileQueuedRef = useRef(false);
   const realtimeReconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1048,7 +1074,7 @@ export function KanbanProvider({
   }, [canvasId, scheduleReconcileFromServer]);
 
   return (
-    <KanbanContext.Provider value={{ state, dispatch, canvasId }}>
+    <KanbanContext.Provider value={{ state, dispatch, canvasId, brainstormLinks }}>
       {children}
     </KanbanContext.Provider>
   );
@@ -1078,6 +1104,12 @@ export function useKanbanData() {
 export function useKanbanUI() {
   const { state } = useKanban();
   return state.ui;
+}
+
+/** PATCH-341. cardId -> the Freeform notes this card was sent from. */
+export function useKanbanBrainstormLinks(): Map<string, BrainstormLink[]> {
+  const { brainstormLinks } = useKanban();
+  return brainstormLinks;
 }
 
 export function useKanbanHistory() {
@@ -1331,6 +1363,22 @@ export function useKanbanPersistence() {
      * realtime event.
      */
     refetchFromServer: refetchAndReset,
+    /**
+     * PATCH-341 Addendum 1. The column a card lives in, read with ONE small
+     * query so `?openCard` can load just that column instead of resetting the
+     * whole board (which races the lazy per-column load). RLS applies; a card
+     * the user cannot read -- or an unknown id -- resolves to null.
+     */
+    loadCardColumnId: async (cardId: string): Promise<string | null> => {
+      const { data, error } = await supabase
+        .from('kanban_cards')
+        .select('column_id')
+        .eq('id', cardId)
+        .eq('canvas_id', canvasId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return (data as { column_id?: string | null }).column_id ?? null;
+    },
     loadCardsForColumn: async (columnId: string) => {
       const chunk = await loadKanbanCardsForColumn(canvasId, columnId);
       if (!chunk) {

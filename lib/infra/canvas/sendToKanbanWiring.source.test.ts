@@ -60,8 +60,11 @@ describe('PATCH-340 openCard path', () => {
     expect(SHELL).toContain('function KanbanOpenCard');
     expect(SHELL).toContain('data.cards.some((card) => card.id === cardId)');
     expect(SHELL).toContain('actions.setActiveCard(cardId)');
-    // Cards load lazily per column, so it reads the board once when needed.
-    expect(SHELL).toContain('actions.refetchFromServer()');
+    // PATCH-341 Addendum 1: it loads JUST the card's column, never a board
+    // reset (which races the lazy per-column load and drops cards).
+    expect(SHELL).toContain('actions.loadCardColumnId(cardId)');
+    expect(SHELL).toContain('actions.loadCardsForColumn(columnId)');
+    expect(SHELL).not.toContain('actions.refetchFromServer()');
     // An unknown id never opens anything and never reports an error.
     expect(SHELL).not.toContain("toast.error('This card no longer exists')");
   });

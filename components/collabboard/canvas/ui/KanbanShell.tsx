@@ -45,10 +45,13 @@ interface KanbanShellProps {
 
 /**
  * PATCH-340. Opens a card named in the URL once the board has it. Cards load
- * lazily per column, so if the target is not present yet the whole board is
- * read once; the effect re-runs when cards arrive and opens it then.
+ * lazily per column, so if the target is not present yet we must NOT reset the
+ * whole board (PATCH-341 Addendum 1: a full `refetchFromServer` races the
+ * in-flight per-column loads and drops a column's cards). Instead, read the
+ * card's column with one small query, load just that column, and open it when
+ * it appears. An unknown id is ignored silently. Opens at most once.
  */
-function KanbanOpenCard({ cardId }: { cardId?: string | null }) {
+export function KanbanOpenCard({ cardId }: { cardId?: string | null }) {
   const actions = useKanbanPersistence();
   const data = useKanbanData();
   const openedRef = useRef(false);
@@ -61,10 +64,14 @@ function KanbanOpenCard({ cardId }: { cardId?: string | null }) {
       actions.setActiveCard(cardId);
       return;
     }
-    if (!requestedRef.current) {
-      requestedRef.current = true;
-      void actions.refetchFromServer();
-    }
+    if (requestedRef.current) return;
+    requestedRef.current = true;
+    void (async () => {
+      const columnId = await actions.loadCardColumnId(cardId);
+      if (!columnId) return; // unknown id (or RLS) -> give up silently
+      // Atomic setColumnCards -- never a board reset.
+      await actions.loadCardsForColumn(columnId);
+    })();
   }, [cardId, data.cards, actions]);
 
   return null;

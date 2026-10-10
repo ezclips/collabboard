@@ -16,12 +16,14 @@ const hoisted = vi.hoisted(() => ({
     addLink: vi.fn(async () => ({ ok: true })),
     deleteLink: vi.fn(async () => {}),
   },
+  brainstormLinks: new Map() as Map<string, Array<{ noteId: string; boardId: string; boardTitle: string; noteLabel: string }>>,
 }));
 
 vi.mock('@/components/kanban-canvas/store', () => ({
   useKanbanData: () => hoisted.data,
   useKanbanUI: () => hoisted.ui,
   useKanbanPersistence: () => hoisted.actions,
+  useKanbanBrainstormLinks: () => hoisted.brainstormLinks,
 }));
 vi.mock('@/components/kanban-canvas/useKanbanI18n', () => ({
   useKanbanI18n: () => ({ t: (key: string) => key }),

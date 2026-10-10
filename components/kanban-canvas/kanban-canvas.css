@@ -1904,6 +1904,56 @@
   color: #2b2b2b;
 }
 
+/* PATCH-341. "From brainstorm" block: the title matches the field-label look,
+   the list is a plain column of note links, and the calendar note (PATCH-328)
+   is the same quiet 13px line. */
+.kanban-editor-brainstorm-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2b2b2b;
+}
+
+.kanban-editor-brainstorm-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kanban-editor-brainstorm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: hsl(var(--accent));
+  text-decoration: none;
+}
+
+.kanban-editor-brainstorm-link:hover,
+.kanban-editor-brainstorm-link:focus-visible {
+  text-decoration: underline;
+}
+
+.kanban-editor-brainstorm-link:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.kanban-editor-brainstorm-more {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.kanban-editor-calendar-note {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
 .kanban-field-label-row {
   display: flex;
   align-items: center;

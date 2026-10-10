@@ -2,8 +2,8 @@
 
 import { memo, useState, useEffect, useMemo, type CSSProperties } from 'react';
 import type { Card, CardAttachment, Comment, Link, Vote } from '@/types/kanban-canvas';
-import { X, Trash2, ChevronDown, Plus, ThumbsUp, ThumbsDown, Calendar } from 'lucide-react';
-import { useKanbanData, useKanbanPersistence, useKanbanUI } from './store';
+import { X, Trash2, ChevronDown, Plus, ThumbsUp, ThumbsDown, Calendar, Lightbulb } from 'lucide-react';
+import { useKanbanData, useKanbanPersistence, useKanbanUI, useKanbanBrainstormLinks } from './store';
 import { supabase } from '@/lib/supabase';
 import { ConfirmModal } from './ConfirmModal';
 import { useKanbanI18n } from './useKanbanI18n';
@@ -22,6 +22,7 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
   const actions = useKanbanPersistence();
   const data = useKanbanData();
   const ui = useKanbanUI();
+  const brainstormLinks = useKanbanBrainstormLinks();
   const { t } = useKanbanI18n();
   const [formData, setFormData] = useState<Partial<Card>>({});
   const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
@@ -449,6 +450,39 @@ export const Editor = memo(function Editor({ card, onClose, readonly = false }: 
               {t('fromConnectedCalendarNote')}
             </p>
           ) : null}
+
+          {/* PATCH-341. Where this card came from: the Freeform note(s) that
+              were sent to this board. Read-only; the note is the source. */}
+          {(() => {
+            const sourceLinks = card ? (brainstormLinks.get(card.id) ?? []) : [];
+            if (sourceLinks.length === 0) return null;
+            const visible = sourceLinks.slice(0, 5);
+            const hidden = sourceLinks.length - visible.length;
+            return (
+              <div data-kanban-brainstorm="true" className="kanban-editor-field">
+                <p className="kanban-editor-brainstorm-title">
+                  {t('fromBrainstorm', { board: sourceLinks[0].boardTitle })}
+                </p>
+                <ul className="kanban-editor-brainstorm-links">
+                  {visible.map((link) => (
+                    <li key={`${link.boardId}:${link.noteId}`}>
+                      <a
+                        data-kanban-brainstorm-link="true"
+                        href={`/dashboard/canvas/${link.boardId}?openPadlet=${link.noteId}`}
+                        className="kanban-editor-brainstorm-link"
+                      >
+                        <Lightbulb size={14} aria-hidden="true" />
+                        {t('openNote', { note: link.noteLabel })}
+                      </a>
+                    </li>
+                  ))}
+                  {hidden > 0 ? (
+                    <li className="kanban-editor-brainstorm-more">{t('moreLinks', { count: hidden })}</li>
+                  ) : null}
+                </ul>
+              </div>
+            );
+          })()}
 
           <div className="kanban-editor-field">
             <label>{t('description')}</label>

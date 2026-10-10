@@ -36,6 +36,8 @@ vi.mock('@/components/kanban-canvas/store', () => ({
   useKanbanUI: () => hoisted.ui,
   useKanbanPersistence: () => hoisted.actions,
   useKanbanReadonly: () => false,
+  // PATCH-341: Card reads the brainstorm-link map.
+  useKanbanBrainstormLinks: () => new Map(),
 }));
 vi.mock('@/components/kanban-canvas/useKanbanI18n', () => ({
   useKanbanI18n: () => ({ t: (key: string) => key }),

@@ -2,8 +2,8 @@
 
 import { memo } from 'react';
 import type { Card as CardType, CardAttachment } from '@/types/kanban-canvas';
-import { MoreVertical, Calendar, MessageCircle, ThumbsUp, Paperclip } from 'lucide-react';
-import { useKanbanUI } from './store';
+import { MoreVertical, Calendar, MessageCircle, ThumbsUp, Paperclip, Lightbulb } from 'lucide-react';
+import { useKanbanUI, useKanbanBrainstormLinks } from './store';
 import { useKanbanI18n } from './useKanbanI18n';
 import { parseCardDate } from './cardDate';
 
@@ -36,6 +36,7 @@ export const Card = memo(function Card({
   cardRenderer,
 }: CardProps) {
   const ui = useKanbanUI();
+  const brainstormLinks = useKanbanBrainstormLinks();
   const { t } = useKanbanI18n();
 
   if (cardRenderer) {
@@ -136,6 +137,17 @@ export const Card = memo(function Card({
             aria-label={t('fromConnectedCalendar')}
           >
             <Calendar size={12} />
+          </span>
+        ) : null}
+        {/* PATCH-341. This card was sent from a Freeform note ("brainstorm"). */}
+        {(brainstormLinks.get(card.id)?.length ?? 0) > 0 ? (
+          <span
+            data-kanban-brainstorm-badge="true"
+            className="inline-flex shrink-0 items-center text-amber-600"
+            title={t('fromBrainstormOn', { board: brainstormLinks.get(card.id)![0].boardTitle })}
+            aria-label={t('fromBrainstormOn', { board: brainstormLinks.get(card.id)![0].boardTitle })}
+          >
+            <Lightbulb size={12} />
           </span>
         ) : null}
         {card.priority && (
