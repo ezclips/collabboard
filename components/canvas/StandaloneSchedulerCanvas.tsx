@@ -18,6 +18,10 @@ import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 
 const DEFAULT_EVENT_BACKGROUND = '#2563eb';
 
+// PATCH-335 Addendum 1. One line of text plus the badge fits in ~40px (a 1 h
+// entry is 38–40 px, a 2 h entry is 78 px): below this the tab centres its row.
+const SHORT_EVENT_MAX_HEIGHT = 44;
+
 type SchedulerEvent = {
   id: string;
   title: string;
@@ -866,7 +870,7 @@ export default function StandaloneSchedulerCanvas({
     useLayoutEffect(() => {
       const element = tabRef.current;
       if (!element) return;
-      const measure = () => setIsShort(element.getBoundingClientRect().height < 36);
+      const measure = () => setIsShort(element.getBoundingClientRect().height < SHORT_EVENT_MAX_HEIGHT);
       measure();
       if (typeof ResizeObserver === 'undefined') return;
       const observer = new ResizeObserver(measure);
@@ -882,10 +886,18 @@ export default function StandaloneSchedulerCanvas({
         data-scheduler-event-tab="true"
         data-scheduler-container-id={event.resource.id}
         aria-label={event.segment ? `${itemLabel} · drag the edge to extend across days` : itemLabel}
-        className="relative block w-full h-full min-h-[20px] px-1 overflow-hidden font-medium text-sm text-left"
+        className={
+          // PATCH-335. The time-grid box has no vertical padding (scheduler-theme
+          // .css), so the tab owns the inset. A short (one-line) entry centres its
+          // row vertically; a tall entry keeps the title at the top with the same
+          // 4px inset the box padding used to give it.
+          isShort
+            ? 'relative flex w-full h-full items-center px-1 overflow-hidden font-medium text-sm text-left'
+            : 'relative block w-full h-full px-1 pt-1 overflow-hidden font-medium text-sm text-left'
+        }
       >
         {isShort ? (
-          <span className="flex items-center gap-1 min-w-0">
+          <span className="flex w-full items-center gap-1 min-w-0">
             {calendarIcon}
             {showPostBadge && (
               <span

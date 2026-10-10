@@ -174,6 +174,15 @@
   margin-right: 1px;
 }
 
+/* PATCH-335. Time-grid entries: a 20px (30 min) box cannot fit 4px vertical
+   padding, so the text was pushed to and past the bottom edge. The event tab
+   owns the inset now (see CustomEvent in StandaloneSchedulerCanvas.tsx), so the
+   box keeps only the horizontal padding. Month view / all-day row events keep
+   the base padding above. */
+.scheduler-wrapper .rbc-day-slot .rbc-event {
+  padding: 0 8px;
+}
+
 /* Multi-day events render as one block per day column (see the `events`
    useMemo in StandaloneSchedulerCanvas.tsx). The base .rbc-event gradient
    restarts on every block, so a chain of them shows a repeating diagonal

@@ -6,6 +6,8 @@
 // click on the event.
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Padlet } from '@/types/collabboard';
 
@@ -353,5 +355,49 @@ describe('PATCH-318: a Scheduler event title shows the container title style', (
     expect(span.style.color).toBe('rgb(250, 82, 82)');
     expect(span.style.fontSize).toBe('');
     expect(span.style.backgroundColor).toBe('');
+  });
+});
+
+describe('PATCH-335: short entries centre their text, tall entries keep it at the top', () => {
+  const tallRect = { height: 78, width: 200, top: 0, left: 0, right: 200, bottom: 78, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+
+  it('short layout: the tab centres its row and no longer overflows', async () => {
+    await mount([PADLET, childPost('c1')]);
+    const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
+    expect(tab.className).toContain('flex');
+    expect(tab.className).toContain('items-center');
+    expect(tab.className).not.toContain('min-h-[20px]');
+    expect(tab.querySelector<HTMLElement>('span.flex')?.className).toContain('items-center');
+  });
+
+  it('a 40 px tab (a 1 h entry) still takes the centred short layout', async () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ ...tallRect, height: 40, bottom: 40 } as DOMRect);
+    await mount([PADLET, childPost('c1')]);
+    const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
+    expect(tab.className).toContain('items-center');
+    expect(tab.className).not.toContain('pt-1');
+  });
+
+  it('tall layout: title first, badge absolutely bottom-left', async () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(tallRect);
+    await mount([PADLET, childPost('c1')]);
+    const tab = container.querySelector<HTMLElement>('[data-scheduler-event-tab]')!;
+    expect(tab.className).toContain('pt-1');
+    expect(tab.querySelector('span.truncate')).toBeNull();
+    expect(tab.textContent!.startsWith('Kickoff')).toBe(true);
+    const badge = tab.querySelector<HTMLElement>('[data-scheduler-post-count]')!;
+    expect(badge.className).toContain('absolute');
+    expect(badge.className).toContain('bottom-1');
+    expect(badge.className).toContain('left-1');
+  });
+
+  it('source: time-grid events have no vertical padding, month/all-day unchanged', () => {
+    const css = fs.readFileSync(path.join(process.cwd(), 'components/canvas/scheduler-theme.css'), 'utf8');
+    const timeGrid = css.match(/\.scheduler-wrapper \.rbc-day-slot \.rbc-event\s*\{([^}]*)\}/);
+    expect(timeGrid).not.toBeNull();
+    expect(timeGrid![1]).toMatch(/padding:\s*0 8px/);
+    const base = css.match(/\.scheduler-wrapper \.rbc-event\s*\{([^}]*)\}/);
+    expect(base).not.toBeNull();
+    expect(base![1]).toMatch(/padding:\s*4px 8px/);
   });
 });
