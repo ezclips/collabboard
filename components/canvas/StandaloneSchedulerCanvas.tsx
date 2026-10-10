@@ -12,6 +12,7 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { schedulerLocalizer, SCHEDULER_FORMATS } from '@/lib/scheduler/schedulerLocalizer';
 import { SchedulerToolbar } from '@/components/scheduler-canvas/SchedulerToolbar';
 import { CalendarImportModal } from '@/components/kanban-canvas/CalendarImportModal';
+import { useKanbanI18n } from '@/components/kanban-canvas/useKanbanI18n';
 import { containerBadgeColors } from '@/lib/domain/canvas/containerBadgeColors';
 import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 
@@ -112,6 +113,7 @@ export default function StandaloneSchedulerCanvas({
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>('week');
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const { t } = useKanbanI18n();
   const suppressNextSelectRef = useRef(false);
   const eventMutationInFlightRef = useRef<Set<string>>(new Set());
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -1026,11 +1028,11 @@ export default function StandaloneSchedulerCanvas({
               type="button"
               data-calendar-import-open="standalone"
               className="scheduler-calendar-btn"
-              title="Import or connect a calendar"
+              title={t('calendarButtonTitle')}
               onClick={() => setIsCalendarModalOpen(true)}
             >
-              <CalendarIcon size={14} />
-              <span>Calendar</span>
+              <CalendarIcon size={16} />
+              <span>{t('import')}</span>
             </button>
           ) : null}
         </div>

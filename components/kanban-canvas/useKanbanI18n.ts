@@ -162,7 +162,6 @@ type I18nKey =
   | 'calendarLinkHelpApple'
   | 'calendarLinkNotSaved'
   | 'calendarLinkSavedEncrypted'
-  | 'calendarButton'
   | 'calendarButtonTitle'
   | 'allConnectedCalendars'
   | 'preview'
@@ -349,7 +348,6 @@ const en: Dict = {
   calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
   calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
   calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
-  calendarButton: 'Calendar',
   calendarButtonTitle: 'Import or connect a calendar',
   allConnectedCalendars: 'All connected calendars',
   preview: 'Preview',
@@ -534,7 +532,6 @@ const es: Dict = {
   calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
   calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
   calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
-  calendarButton: 'Calendar',
   calendarButtonTitle: 'Import or connect a calendar',
   allConnectedCalendars: 'All connected calendars',
   preview: 'Preview',
@@ -719,7 +716,6 @@ const fr: Dict = {
   calendarLinkHelpApple: 'Apple Calendar: File → Export, then upload the file.',
   calendarLinkNotSaved: 'The link is used once to read the events and is not saved.',
   calendarLinkSavedEncrypted: 'The link is saved encrypted so the board can update. Editors can disconnect it at any time.',
-  calendarButton: 'Calendar',
   calendarButtonTitle: 'Import or connect a calendar',
   allConnectedCalendars: 'All connected calendars',
   preview: 'Preview',

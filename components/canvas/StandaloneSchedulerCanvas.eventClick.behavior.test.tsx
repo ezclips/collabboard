@@ -301,7 +301,10 @@ describe('PATCH-333: the standalone Scheduler calendar button and auto-sync', ()
 
   it('shows the Calendar button for an editor, not for a read-only board', async () => {
     await renderCanvas();
-    expect(container.querySelector('[data-calendar-import-open="standalone"]')).not.toBeNull();
+    const button = container.querySelector('[data-calendar-import-open="standalone"]');
+    expect(button).not.toBeNull();
+    // PATCH-334: same "Import" label as the Kanban button.
+    expect(button!.textContent).toContain('Import');
     act(() => root!.unmount());
     root = null;
     container.remove();

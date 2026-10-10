@@ -263,8 +263,8 @@ export function GanttCanvas() {
               title={t('calendarButtonTitle')}
               onClick={() => setIsCalendarModalOpen(true)}
             >
-              <Calendar size={14} />
-              <span>{t('calendarButton')}</span>
+              <Calendar size={16} />
+              <span>{t('import')}</span>
             </button>
           ) : null}
         </div>

@@ -240,8 +240,8 @@ export function SchedulerCanvas() {
               title={t('calendarButtonTitle')}
               onClick={() => setIsCalendarModalOpen(true)}
             >
-              <CalendarIcon size={14} />
-              <span>{t('calendarButton')}</span>
+              <CalendarIcon size={16} />
+              <span>{t('import')}</span>
             </button>
           ) : null}
         </div>

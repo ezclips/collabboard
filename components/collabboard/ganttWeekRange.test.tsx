@@ -127,6 +127,9 @@ describe('PATCH-330 Gantt week range opens on click', () => {
     await mountGantt();
     const button = container.querySelector('[data-calendar-import-open="gantt"]') as HTMLButtonElement | null;
     expect(button).not.toBeNull();
+    // PATCH-334: same "Import" label as the Kanban button (this suite's i18n
+    // mock returns the key).
+    expect(button!.textContent).toContain('import');
     await act(async () => { button!.click(); });
     expect(container.querySelector('[data-calendar-import-modal="true"]')).not.toBeNull();
   });
