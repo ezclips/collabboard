@@ -411,3 +411,68 @@ describe('PATCH-336: the top "=" handle resizes the start time', () => {
     expect(rule![1]).toMatch(/cursor:\s*ns-resize/);
   });
 });
+
+describe('PATCH-337: a split saves block A before it creates block B', () => {
+  function installMenuShims() {
+    Element.prototype.scrollIntoView ??= () => {};
+    (Element.prototype as unknown as { hasPointerCapture?: () => boolean }).hasPointerCapture ??= () => false;
+    (Element.prototype as unknown as { setPointerCapture?: () => void }).setPointerCapture ??= () => {};
+    (Element.prototype as unknown as { releasePointerCapture?: () => void }).releasePointerCapture ??= () => {};
+  }
+
+  it('awaits onUpdatePadletMetadata before calling onCreatePadlet', async () => {
+    installMenuShims();
+    let releaseSave: () => void = () => {};
+    const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const onUpdate = vi.fn(() => saveGate);
+    const onCreate = vi.fn(async () => {});
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <StandaloneSchedulerCanvas
+          padlets={[PADLET]}
+          canvasId="b1"
+          onUpdatePadletMetadata={onUpdate}
+          onCreatePadlet={onCreate}
+        />,
+      );
+    });
+    const wrapper = container.querySelector<HTMLElement>('[data-scheduler-container-id="p1"]')!;
+
+    await act(async () => {
+      wrapper.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+    const subTrigger = Array.from(document.querySelectorAll<HTMLElement>('[aria-haspopup="menu"]')).find((el) =>
+      el.textContent?.includes('Split'),
+    );
+    expect(subTrigger).toBeTruthy();
+    await act(async () => {
+      subTrigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    const item = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((el) =>
+      el.textContent?.includes('Into 2 blocks'),
+    );
+    expect(item).toBeTruthy();
+    await act(async () => {
+      item!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      item!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    // Block A's save is still pending, so block B must not exist yet.
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onCreate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseSave();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+});

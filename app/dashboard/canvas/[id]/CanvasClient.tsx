@@ -104,6 +104,7 @@ import {
   parseKnowledgeSourceTextClipPayload,
 } from '@/lib/domain/knowledge/knowledgeSourceClipPayload';
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
+import { createKeyedDebounce } from '@/lib/infra/keyedDebounce';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
@@ -205,7 +206,7 @@ import { usePadletSave } from '@/hooks/canvas';
 import { useStableCanvasActions } from '@/hooks/canvas/useStableCanvasActions';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { collectDrawingOverlayDeletionIds } from '@/lib/infra/drawing/importScene';
-import { debounce, sanitizeLibraryMetadata } from '@/components/collabboard/canvas/engine/utils';
+import { sanitizeLibraryMetadata } from '@/components/collabboard/canvas/engine/utils';
 import { segmentsIntersect } from '@/components/collabboard/canvas/engine/geometry';
 import { computeClickedSide } from '@/components/collabboard/canvas/engine/hitTest';
 import { computeNormalizedZIndexes, nextZIndex } from '@/components/collabboard/canvas/engine/zIndex';
@@ -542,7 +543,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Data layer — canvas/padlets/lines/sections state + CRUD (PR5)
   const {
     canvas, padlets, setPadlets, lines, setLines, sections, setSections,
-    loading, error, fetchData, mergeCanvasSettings,
+    loading, error, fetchData: fetchDataRaw, mergeCanvasSettings,
     markPadletLocallyModified,
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
@@ -591,6 +592,100 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
    * dependency churn.
    */
   const canEditBoardContentProbe = useCallback(() => canEditBoardContentRef.current, []);
+
+  // === BEGIN PATCH-337: post-metadata saves ===================================
+  /**
+   * PATCH-337. One save-failure toast at most every 10 s: a burst of failed
+   * writes (offline) must not stack a toast per post.
+   */
+  const lastSaveFailureToastRef = useRef(0);
+  const showSaveFailureToast = useCallback(() => {
+    const now = Date.now();
+    if (now - lastSaveFailureToastRef.current < 10_000) return;
+    lastSaveFailureToastRef.current = now;
+    toast.error("Couldn't save your change. Check your connection and try again.");
+  }, []);
+
+  /**
+   * PATCH-337. The single post-metadata write. Reports its own failure (the
+   * post id only -- never the metadata) and never throws, so a caller can
+   * decide whether to re-read the board.
+   */
+  const savePadletMetaNow = useCallback(async (padletId: string, fullMetadata: any): Promise<boolean> => {
+    markPadletLocallyModified(padletId);
+    try {
+      const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+      const result = await updatePostMetadata({ postId: padletId, metadata: fullMetadata }, { userId: null });
+      // PATCH-337 Addendum 1. `defineCommand` (lib/domain/core/command.ts)
+      // catches and RETURNS `err(...)` -- it never throws. A failed save is
+      // only visible in the result, so checking `ok` is what makes the failure
+      // non-silent (and lets the Scheduler re-read).
+      if (!result.ok) {
+        console.error('Failed to save post metadata:', padletId);
+        showSaveFailureToast();
+        return false;
+      }
+      return true;
+    } catch {
+      // A truly unexpected throw (the command itself should never throw).
+      console.error('Failed to save post metadata:', padletId);
+      showSaveFailureToast();
+      return false;
+    }
+  }, [markPadletLocallyModified, showSaveFailureToast]);
+
+  /**
+   * PATCH-337. One pending metadata save PER POST: a save for post B no longer
+   * cancels a pending save for post A (the shared single-timer `debounce` did,
+   * silently losing A). `flushPendingPadletMeta` writes them all now.
+   */
+  const padletMetaSaver = useMemo(
+    () => createKeyedDebounce<any>(
+      (padletId, fullMetadata) => { void savePadletMetaNow(padletId, fullMetadata); },
+      500,
+    ),
+    [savePadletMetaNow],
+  );
+
+  /**
+   * The callable form the canvas action map and the caption-style controls use:
+   * schedule the write (per post). Same contract as the old debounced function,
+   * but keyed per post.
+   */
+  const commitPadletMeta = useCallback(
+    (padletId: string, fullMetadata: any) => padletMetaSaver.schedule(padletId, fullMetadata),
+    [padletMetaSaver],
+  );
+
+  const flushPendingPadletMeta = useCallback(() => padletMetaSaver.flush(), [padletMetaSaver]);
+
+  /**
+   * PATCH-337. A read must never overtake our own pending writes: flush first,
+   * then fetch. This is the form used everywhere below (the raw hook read is
+   * `fetchDataRaw`).
+   */
+  const fetchData = useCallback(async (showLoading = false) => {
+    await flushPendingPadletMeta();
+    return fetchDataRaw(showLoading);
+  }, [fetchDataRaw, flushPendingPadletMeta]);
+
+  // PATCH-337. Nothing may drop a pending save on the way out: flush on the
+  // canvas unmount, on `pagehide`, and when the tab is hidden.
+  useEffect(() => {
+    const flush = () => { void flushPendingPadletMeta(); };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+      flush();
+    };
+  }, [flushPendingPadletMeta]);
+  // === END PATCH-337: post-metadata saves =====================================
+
   // CROP_ORIGINAL_PRESERVATION_CORRECTION_1: the ONE reset operation both toolbars call.
   const resetImageCrop = useCallback(async (padlet: Padlet) => {
     if (!canEditBoardContentRef.current) return;
@@ -5049,19 +5144,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return () => { cancelled = true; };
   }, [isFreeformGraphMode, isGraphConnectMode, canvasId, graphConnectSelection, graphConnectSource, padlets]);
 
-  const commitPadletMeta = useMemo(() => {
-    return debounce(async (padletId: string, fullMetadata: any) => {
-      markPadletLocallyModified(padletId);
-      try {
-        // Result deliberately ignored - the legacy write swallowed BOTH
-        // resolved and thrown errors (empty catch); the command preserves that.
-        const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
-        await updatePostMetadata({ postId: padletId, metadata: fullMetadata }, { userId: null });
-      } catch {
-      }
-    }, 500);
-  }, [supabase, markPadletLocallyModified]);
-
   // Direct delete by ID (for context menu)
   const deletePadletById = async (id: string) => {
     debugCanvasLogger('saveStart', { op: 'deletePadletById', id });
@@ -6879,6 +6961,29 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     // 2. Debounced commit to Supabase to prevent flood (especially during slider drags)
     commitPadletMeta(padletId, newMetadata);
+  };
+
+  /**
+   * PATCH-337. Scheduler actions (move, resize, split, duration, day-span,
+   * revert, add container) are single, deliberate changes -- not slider
+   * streams. Save immediately and await, cancelling any pending debounced save
+   * for the same post so it cannot later overwrite this newer value. On failure
+   * re-read the board so the screen shows what is actually saved, never a
+   * pretend-optimistic state.
+   */
+  const updatePadletMetadataNow = async (padletId: string, metadataUpdates: any) => {
+    if (!canEditBoardContentRef.current) return;
+    const padlet = padlets.find(p => p.id === padletId);
+    if (!padlet) return;
+
+    const newMetadata = { ...(padlet.metadata || {}), ...(metadataUpdates || {}) };
+    setPadlets(prev => prev.map(p =>
+      p.id === padletId ? { ...p, metadata: newMetadata } : p
+    ));
+
+    padletMetaSaver.cancel(padletId);
+    const saved = await savePadletMetaNow(padletId, newMetadata);
+    if (!saved) await fetchData();
   };
 
   // Handle chrono mode change (persist to DB)
@@ -10542,7 +10647,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   readOnly={!canUseFreeformEditButton}
                   onRefresh={() => { void fetchData(); }}
                   selectedContainerId={selectedSchedulerContainerId}
-                  onUpdatePadletMetadata={updatePadletMetadata}
+                  onUpdatePadletMetadata={updatePadletMetadataNow}
                   onCreatePadlet={handleCreateSchedulerPadlet}
                   onTargetItem={handleTargetSchedulerPadlet}
                   onEditItem={handleOpenSchedulerPadlet}
